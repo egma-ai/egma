@@ -218,7 +218,7 @@ export function createIdentity(options: IdentityOptions): Identity {
            */
           before: async (user) => {
             await refusalsBecomeAnswers(() =>
-              options.hooks.admitIdentity(user.email),
+              options.hooks.admitIdentity(user.email, currentIntent()),
             );
             return undefined;
           },

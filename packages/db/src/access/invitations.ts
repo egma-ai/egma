@@ -190,13 +190,39 @@ export type Acceptance =
       readonly organizationId: string;
       readonly organizationName: string;
       readonly projectId: string;
+      readonly projectName: string;
       readonly role: Role;
     }
   | { readonly outcome: "unknown" }
   | { readonly outcome: "expired" }
   | { readonly outcome: "already_accepted" }
   /** The link names a different address than the account following it. */
-  | { readonly outcome: "for_somebody_else"; readonly email: string };
+  | { readonly outcome: "for_somebody_else"; readonly email: string }
+  /** One person belongs to one organization in this version. */
+  | { readonly outcome: "already_in_an_organization" };
+
+/**
+ * The constraint a write broke, if it broke one.
+ *
+ * Read rather than guessed at from the message, and read here rather than by
+ * the caller: the constraint is this module's, its name is this module's, and a
+ * route that recognised it by substring would be a route that breaks silently
+ * the day it is renamed. Drizzle may hand the driver's error back wrapped, so
+ * both depths are looked at.
+ */
+function constraintViolated(error: unknown): string | undefined {
+  for (
+    let at: unknown = error, depth = 0;
+    at !== undefined && at !== null && depth < 4;
+    depth += 1
+  ) {
+    if (typeof at !== "object") break;
+    const carrier = at as { constraint?: unknown; cause?: unknown };
+    if (typeof carrier.constraint === "string") return carrier.constraint;
+    at = carrier.cause;
+  }
+  return undefined;
+}
 
 /**
  * A link followed, and the person now in the organization it named.
@@ -212,81 +238,97 @@ export type Acceptance =
  * rather than a bearer token for anybody who is handed the URL.
  *
  * Somebody who already belongs to an organization is refused by the unique
- * constraint on the membership, which the caller reads and reports. The check
- * cannot be made only when the invitation is written: an account can be created
- * in between.
+ * constraint on the membership, and the whole transaction goes with it. The
+ * check cannot be made only when the invitation is written: an account can be
+ * created in between, so the database is what has to say so.
  */
 export async function acceptInvitation(
   tokenHash: string,
   userId: string,
 ): Promise<Acceptance> {
-  const accepted = await db().transaction(async (tx) => {
-    const [row] = await tx
-      .select({
-        id: invitation.id,
-        organizationId: invitation.organizationId,
-        organizationName: organization.name,
-        email: invitation.email,
-        role: invitation.role,
-        acceptedAt: invitation.acceptedAt,
-        expiresAt: invitation.expiresAt,
-        createdBy: invitation.createdBy,
-      })
-      .from(invitation)
-      .innerJoin(organization, eq(organization.id, invitation.organizationId))
-      .where(eq(invitation.tokenHash, tokenHash))
-      .limit(1)
-      .for("update", { of: invitation });
+  let accepted;
+  try {
+    accepted = await db().transaction(async (tx) => {
+      const [row] = await tx
+        .select({
+          id: invitation.id,
+          organizationId: invitation.organizationId,
+          organizationName: organization.name,
+          email: invitation.email,
+          role: invitation.role,
+          acceptedAt: invitation.acceptedAt,
+          expiresAt: invitation.expiresAt,
+          createdBy: invitation.createdBy,
+        })
+        .from(invitation)
+        .innerJoin(organization, eq(organization.id, invitation.organizationId))
+        .where(eq(invitation.tokenHash, tokenHash))
+        .limit(1)
+        .for("update", { of: invitation });
 
-    if (row === undefined) return { outcome: "unknown" } as const;
+      if (row === undefined) return { outcome: "unknown" } as const;
 
-    const state = stateOf(row);
-    if (state === "accepted") return { outcome: "already_accepted" } as const;
-    if (state === "expired") return { outcome: "expired" } as const;
+      const state = stateOf(row);
+      if (state === "accepted") return { outcome: "already_accepted" } as const;
+      if (state === "expired") return { outcome: "expired" } as const;
 
-    const [account] = await tx
-      .select({ email: user.email })
-      .from(user)
-      .where(eq(user.id, userId))
-      .limit(1);
+      const [account] = await tx
+        .select({ email: user.email })
+        .from(user)
+        .where(eq(user.id, userId))
+        .limit(1);
 
-    if (account === undefined || account.email !== row.email) {
-      return { outcome: "for_somebody_else", email: row.email } as const;
-    }
+      // Both columns are `citext` and Postgres would compare them without
+      // regard to case; this comparison happens in application code, so it has
+      // to be told. An address that differs only in case is the same address.
+      if (
+        account === undefined ||
+        account.email.toLowerCase() !== row.email.toLowerCase()
+      ) {
+        return { outcome: "for_somebody_else", email: row.email } as const;
+      }
 
-    // Attributed to whoever sent the invitation, so "who let this person in"
-    // is answered by the membership row without any audit machinery.
-    await insertMembership(tx, {
-      organizationId: row.organizationId,
-      userId,
-      role: row.role,
-      createdBy: row.createdBy,
+      // Attributed to whoever sent the invitation, so "who let this person in"
+      // is answered by the membership row without any audit machinery.
+      await insertMembership(tx, {
+        organizationId: row.organizationId,
+        userId,
+        role: row.role,
+        createdBy: row.createdBy,
+      });
+
+      await tx
+        .update(invitation)
+        .set({ acceptedAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(invitation.id, row.id), isNull(invitation.acceptedAt)));
+
+      return {
+        outcome: "accepted",
+        organizationId: row.organizationId,
+        organizationName: row.organizationName,
+        role: row.role,
+      } as const;
     });
-
-    await tx
-      .update(invitation)
-      .set({ acceptedAt: new Date(), updatedAt: new Date() })
-      .where(and(eq(invitation.id, row.id), isNull(invitation.acceptedAt)));
-
-    return {
-      outcome: "accepted",
-      organizationId: row.organizationId,
-      organizationName: row.organizationName,
-      role: row.role,
-    } as const;
-  });
+  } catch (cause) {
+    // Caught out here rather than inside, so the transaction rolls back rather
+    // than being committed around a statement Postgres has already refused.
+    if (constraintViolated(cause) === "membership_user_id_unique") {
+      return { outcome: "already_in_an_organization" };
+    }
+    throw cause;
+  }
 
   if (accepted.outcome !== "accepted") return accepted;
 
   // The project the invited person lands in is the organization's oldest — the
   // one provisioning made — for the same reason a session with no project named
   // lands there. Identifiers sort by mint time, so that is the first row.
-  const projectId = (await projectsOf(accepted.organizationId))[0]?.id;
-  if (projectId === undefined) {
+  const project = (await projectsOf(accepted.organizationId))[0];
+  if (project === undefined) {
     throw new Error(
       `organization ${accepted.organizationId} has no project, which provisioning makes impossible`,
     );
   }
 
-  return { ...accepted, projectId };
+  return { ...accepted, projectId: project.id, projectName: project.name };
 }

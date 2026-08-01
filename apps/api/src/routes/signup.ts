@@ -19,6 +19,12 @@ import { DEFAULT_PROJECT_NAME } from "../auth/naming.ts";
  * depends on stays the provider's HTTP surface plus four seam calls, so a
  * different provider is a different implementation of the seam rather than an
  * audit of every route.
+ *
+ * **The same route serves an invited person**, carrying a token instead of an
+ * organization name. It is one route rather than two because the provider half
+ * is identical — an identity, a password hash, a session cookie — and only where
+ * the person lands differs. Splitting it would mean two relays to keep in step,
+ * and a second place for the refusals to be forgotten.
  */
 
 export type SignupRoutesOptions = {
@@ -36,6 +42,8 @@ type SignupBody = {
   readonly name?: unknown;
   readonly organizationName?: unknown;
   readonly projectName?: unknown;
+  /** Present when this signup is completing an invitation. */
+  readonly invitationToken?: unknown;
 };
 
 function text(value: unknown): string {
@@ -71,6 +79,7 @@ export async function signupRoutes(
 
     const email = text(body.email);
     const password = typeof body.password === "string" ? body.password : "";
+    const invitationToken = text(body.invitationToken);
     const organizationName = text(body.organizationName);
     const projectName = text(body.projectName) || DEFAULT_PROJECT_NAME;
 
@@ -79,7 +88,10 @@ export async function signupRoutes(
         .code(400)
         .send({ error: "invalid_request", message: "email and password are required" });
     }
-    if (organizationName === "") {
+    // An invited person names no organization, because the invitation already
+    // did. Asking them for one would be asking them to make a thing they are
+    // about to be told they cannot have.
+    if (invitationToken === "" && organizationName === "") {
       return reply.code(400).send({
         error: "invalid_request",
         message: "an organization needs a name",
@@ -92,7 +104,9 @@ export async function signupRoutes(
     const name = text(body.name) || email.slice(0, email.lastIndexOf("@"));
 
     const relayed = await withProvisioningIntent(
-      { organizationName, projectName },
+      invitationToken === ""
+        ? { kind: "new_organization", organizationName, projectName }
+        : { kind: "invitation", token: invitationToken },
       () =>
         options.identity.handler(
           new Request(`${options.baseUrl}${options.authBasePath}/sign-up/email`, {
@@ -141,10 +155,13 @@ export async function signupRoutes(
       throw new Error("an identity was created without landing anywhere");
     }
 
+    // Where they actually landed, rather than what they asked for. The two
+    // differ for somebody who followed an invitation: they named neither, and
+    // the organization that invited them named both.
     return reply.code(201).send({
       userId: landing.userId,
-      organization: { id: landing.organizationId, name: organizationName },
-      project: { id: landing.projectId, name: projectName },
+      organization: { id: landing.organizationId, name: landing.organizationName },
+      project: { id: landing.projectId, name: landing.projectName },
       role: landing.role,
     });
   });

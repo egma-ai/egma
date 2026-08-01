@@ -1,3 +1,5 @@
+import type { SmtpSettings } from "./auth/email.ts";
+
 export type Config = {
   readonly databaseUrl: string;
   readonly host: string;
@@ -40,6 +42,16 @@ export type Config = {
    * stops being everybody else's problem.
    */
   readonly rateLimitPerMinute: number;
+  /**
+   * Where to post mail, if anywhere. **Absent is the ordinary case and is never
+   * an error**: with no transport configured, signup asks for no verification
+   * and an invitation hands its link back to the person who created it. Setting
+   * it is one step in the self-hosting documentation and never a prerequisite.
+   *
+   * There is no second setting saying "and now require verification" or "and
+   * now send invitations", because two settings can disagree and one cannot.
+   */
+  readonly smtp: SmtpSettings | undefined;
 };
 
 function flag(
@@ -52,6 +64,43 @@ function flag(
   if (["1", "true", "yes", "on"].includes(raw)) return true;
   if (["0", "false", "no", "off"].includes(raw)) return false;
   throw new Error(`${name} is not a yes or a no: ${environment[name]}`);
+}
+
+/**
+ * Mail, if it was configured. Unset is the ordinary case and returns nothing;
+ * set-but-unusable refuses to start, because a transport egma believes in and
+ * cannot reach is worse than no transport at all — it turns verification on and
+ * stops handing invitation links back, and then delivers neither.
+ *
+ * The from address defaults to something derived from the instance's own
+ * origin, so configuring mail is genuinely one variable.
+ */
+function smtpSettings(
+  environment: NodeJS.ProcessEnv,
+  baseUrl: string,
+): SmtpSettings | undefined {
+  const url = environment.EGMA_SMTP_URL?.trim();
+  if (!url) return undefined;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(
+      `EGMA_SMTP_URL is not a URL: ${url}. It looks like smtp://user:password@host:587`,
+    );
+  }
+  if (!["smtp:", "smtps:"].includes(parsed.protocol)) {
+    throw new Error(
+      `EGMA_SMTP_URL speaks ${parsed.protocol} and egma posts mail over smtp: or smtps:`,
+    );
+  }
+
+  return {
+    url,
+    from:
+      environment.EGMA_MAIL_FROM?.trim() || `egma <egma@${new URL(baseUrl).hostname}>`,
+  };
 }
 
 /**
@@ -97,6 +146,7 @@ export function loadConfig(
   }
 
   return {
+    smtp: smtpSettings(environment, baseUrl),
     databaseUrl,
     host: environment.HOST?.trim() || "0.0.0.0",
     port,

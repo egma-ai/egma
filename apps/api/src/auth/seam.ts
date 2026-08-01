@@ -93,20 +93,37 @@ export type SessionIdentityProvider = Pick<
 >;
 
 /**
- * What a new identity should land in, when egma's own signup page asked for
- * particular names. Absent when the identity was created some other way, in
- * which case provisioning falls back to its own defaults.
+ * What a new identity should land in.
+ *
+ * Two shapes, because there are exactly two ways to arrive: somebody who came
+ * to egma on their own gets an organization of their own, and somebody who was
+ * asked to join gets the one that asked them. A union rather than an optional
+ * field, so that the second case cannot be read as the first with some values
+ * missing — an invited person names no organization and no project, and there is
+ * nothing for a default to fill in.
+ *
+ * Absent altogether when the identity was created some other way, in which case
+ * provisioning falls back to names derived from the email address.
  */
-export type ProvisioningIntent = {
-  readonly organizationName: string;
-  readonly projectName: string;
-};
+export type ProvisioningIntent =
+  | {
+      readonly kind: "new_organization";
+      readonly organizationName: string;
+      readonly projectName: string;
+    }
+  | {
+      readonly kind: "invitation";
+      /** The string from the link. Only its hash is ever stored. */
+      readonly token: string;
+    };
 
 /** Where a new person ended up: an organization, a first project, a role. */
 export type Landing = {
   readonly userId: string;
   readonly organizationId: string;
+  readonly organizationName: string;
   readonly projectId: string;
+  readonly projectName: string;
   readonly role: Role;
 };
 
@@ -127,8 +144,15 @@ export type IdentityHooks = {
   /**
    * May this person exist here at all? Runs before the identity is written and
    * refuses by throwing, so a refusal leaves nothing behind.
+   *
+   * It is handed the intent as well as the address, because an invitation is
+   * exactly what gets somebody through a door that is otherwise closed, and the
+   * decision has to be made here rather than after the row exists.
    */
-  admitIdentity(email: string): Promise<void>;
+  admitIdentity(
+    email: string,
+    intent: ProvisioningIntent | undefined,
+  ): Promise<void>;
 
   /** A person now exists. Give them an organization and a first project. */
   onIdentityCreated(
@@ -151,8 +175,12 @@ export type IdentityHooks = {
  * The answers a refusal is allowed to be. A subset of the HTTP statuses, so
  * that egma's own vocabulary decides what a refusal means and the provider's
  * transport only carries it.
+ *
+ * 404 joined the list with invitations: a link that names nothing is genuinely
+ * not found, and flattening it into "your request was bad" would tell somebody
+ * who mis-copied a URL to go and look at their own request body.
  */
-export const REFUSAL_STATUSES = [400, 403, 409] as const;
+export const REFUSAL_STATUSES = [400, 403, 404, 409] as const;
 export type RefusalStatus = (typeof REFUSAL_STATUSES)[number];
 
 /**

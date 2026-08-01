@@ -61,7 +61,11 @@ describe("an identity created without egma's signup page", () => {
 
     await onIdentityCreated()(
       { externalIdentityId: userId, email: "ada@acme.example" },
-      { organizationName: "Acme Robotics", projectName: "Outbound" },
+      {
+        kind: "new_organization",
+        organizationName: "Acme Robotics",
+        projectName: "Outbound",
+      },
     );
 
     const { rows } = await api.database.sql<{ name: string; slug: string }>(
@@ -107,7 +111,7 @@ describe("who may sign up", () => {
     );
 
     await expect(
-      admitIdentity(false)("grace@globex.example"),
+      admitIdentity(false)("grace@globex.example", undefined),
     ).resolves.toBeUndefined();
   });
 
@@ -115,7 +119,7 @@ describe("who may sign up", () => {
     api = await createApi("hook_claimed");
 
     await expect(
-      admitIdentity(true)("ada@acme.example"),
+      admitIdentity(true)("ada@acme.example", undefined),
     ).resolves.toBeUndefined();
 
     const userId = await anIdentity("ada@acme.example");
@@ -125,7 +129,7 @@ describe("who may sign up", () => {
     );
 
     await expect(
-      admitIdentity(true)("grace@globex.example"),
+      admitIdentity(true)("grace@globex.example", undefined),
     ).rejects.toBeInstanceOf(SignupClosedError);
   });
 });

@@ -12,6 +12,10 @@
     "@egma/db": "workspace:*",
     "@egma/ids": "workspace:*",
     "better-auth": "^1.6.25",
-    "fastify": "^5.6.1"
+    "fastify": "^5.6.1",
+    "nodemailer": "^9.0.3"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.1"
   }
 }

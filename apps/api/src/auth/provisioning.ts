@@ -1,5 +1,15 @@
-import { instanceIsClaimed, provisionOrganization } from "@egma/db";
+import {
+  acceptInvitation,
+  instanceIsClaimed,
+  provisionOrganization,
+  readInvitation,
+  type Acceptance,
+} from "@egma/db";
 
+import {
+  hashInvitationToken,
+  INVITATION_LIFETIME_DAYS,
+} from "./invitation.ts";
 import { recordLanding } from "./intent.ts";
 import {
   DEFAULT_PROJECT_NAME,
@@ -16,13 +26,21 @@ import {
 } from "./seam.ts";
 
 /**
- * What happens the moment a person exists: they get an organization and its
- * first project, together, and they are its admin.
+ * What happens the moment a person exists: they land somewhere, and there are
+ * two somewheres.
  *
- * There is no state in which somebody has an organization and no project.
- * `provisionOrganization` writes the organization, the project and the
- * membership in one transaction, so a failure part-way leaves none of the
- * three, and this file never reaches around it.
+ * Somebody who came on their own gets an organization and its first project,
+ * together, and they are its admin. Somebody following an invitation gets the
+ * organization that invited them, at the role it invited them at. Both are one
+ * transaction: there is no state in which somebody has an organization and no
+ * project, and none in which an invitation is spent without a membership coming
+ * out of it.
+ *
+ * Both refusals are thrown from hooks that run inside the provider's own request
+ * handling, which is why they are `SignupRefusedError`s carrying the answer they
+ * should become. Put in egma's signup route instead, they would be bypassed by
+ * posting straight at the provider's signup endpoint — and on a claimed
+ * self-hosted instance that bypass is the whole attack.
  */
 
 /**
@@ -34,11 +52,37 @@ import {
  */
 const SLUG_ATTEMPTS = 5;
 
-/** Nobody may sign up here any more; they need an invitation. */
+/**
+ * Whether this person may exist here.
+ *
+ * An invitation is the thing that gets somebody through a closed door, so it is
+ * checked here rather than only where the membership is written — otherwise a
+ * claimed instance would refuse an invited person before their identity existed
+ * and there would be no way in at all.
+ *
+ * The link is checked twice: once here, before the identity is written, and
+ * again when it is accepted. That is not belt and braces, it is the two
+ * questions being different. This one asks *may an account be created for this
+ * address*; the other asks *is this link still live at the moment it is spent*,
+ * under a lock, which is what makes it single-use.
+ */
 export function admitIdentity(
   singleOrganization: boolean,
 ): IdentityHooks["admitIdentity"] {
-  return async () => {
+  return async (email, intent) => {
+    if (intent?.kind === "invitation") {
+      const invitation = await readInvitation(hashInvitationToken(intent.token));
+      if (invitation === undefined) throw new NoSuchInvitationError();
+      if (invitation.state === "expired") throw new InvitationExpiredError();
+      if (invitation.state === "accepted") {
+        throw new InvitationAlreadyAcceptedError();
+      }
+      if (invitation.email !== email) {
+        throw new InvitationForSomebodyElseError(invitation.email);
+      }
+      return;
+    }
+
     if (!singleOrganization) return;
     if (!(await instanceIsClaimed())) return;
     throw new SignupClosedError(
@@ -46,6 +90,61 @@ export function admitIdentity(
         "was claimed. Ask an admin for an invitation.",
     );
   };
+}
+
+/** No invitation was ever issued for that link. */
+export class NoSuchInvitationError extends SignupRefusedError {
+  constructor() {
+    super(
+      404,
+      "no_such_invitation",
+      "that invitation link does not name anything. Check it was copied whole, or ask for another.",
+    );
+    this.name = "NoSuchInvitationError";
+  }
+}
+
+/**
+ * Ran out of time, and said so — rather than sharing one refusal with the link
+ * that was already used. They mean opposite things to the person holding one:
+ * ask for another, versus you are already in, sign in.
+ */
+export class InvitationExpiredError extends SignupRefusedError {
+  constructor() {
+    super(
+      409,
+      "invitation_expired",
+      `that invitation has expired. Ask an admin to send another; they last ${INVITATION_LIFETIME_DAYS} days.`,
+    );
+    this.name = "InvitationExpiredError";
+  }
+}
+
+/** Already used. A link is single-use, and this is what that feels like. */
+export class InvitationAlreadyAcceptedError extends SignupRefusedError {
+  constructor() {
+    super(
+      409,
+      "invitation_already_accepted",
+      "that invitation has already been accepted. If it was you, sign in instead.",
+    );
+    this.name = "InvitationAlreadyAcceptedError";
+  }
+}
+
+/** The link names one address and the account being made names another. */
+export class InvitationForSomebodyElseError extends SignupRefusedError {
+  readonly invitedEmail: string;
+
+  constructor(invitedEmail: string) {
+    super(
+      403,
+      "invitation_for_somebody_else",
+      `that invitation was sent to ${invitedEmail}, so it is that address it lets in.`,
+    );
+    this.name = "InvitationForSomebodyElseError";
+    this.invitedEmail = invitedEmail;
+  }
 }
 
 /** Somebody already holds the one organization a person may be in. */
@@ -95,18 +194,68 @@ function constraintViolated(error: unknown): string | undefined {
 
 export function onIdentityCreated(): IdentityHooks["onIdentityCreated"] {
   return async (identity, intent) => {
-    recordLanding(await provision(identity, intent));
+    recordLanding(
+      intent?.kind === "invitation"
+        ? await join(identity, intent.token)
+        : await provision(identity, intent),
+    );
   };
+}
+
+/**
+ * An invited person, put in the organization that invited them.
+ *
+ * Nothing is created here: the organization, its projects and its first admin
+ * already exist, and what this adds is one membership at the role the
+ * invitation named. The default is `admin`, because that is the default for
+ * everybody in this version — an organization whose second person cannot invite
+ * a third is a two-person product.
+ *
+ * The refusals below are the same four the door check makes, and they are made
+ * again because the door check and the write are not the same moment. Between
+ * them a link can be spent by somebody else, which is exactly the race the
+ * lock inside `acceptInvitation` exists for.
+ */
+async function join(
+  identity: ExternalIdentity,
+  token: string,
+): Promise<Landing> {
+  const accepted: Acceptance = await acceptInvitation(
+    hashInvitationToken(token),
+    identity.externalIdentityId,
+  );
+
+  switch (accepted.outcome) {
+    case "unknown":
+      throw new NoSuchInvitationError();
+    case "expired":
+      throw new InvitationExpiredError();
+    case "already_accepted":
+      throw new InvitationAlreadyAcceptedError();
+    case "for_somebody_else":
+      throw new InvitationForSomebodyElseError(accepted.email);
+    case "already_in_an_organization":
+      throw new AlreadyInAnOrganizationError();
+    case "accepted":
+      return {
+        userId: identity.externalIdentityId,
+        organizationId: accepted.organizationId,
+        organizationName: accepted.organizationName,
+        projectId: accepted.projectId,
+        projectName: accepted.projectName,
+        role: accepted.role,
+      };
+  }
 }
 
 async function provision(
   identity: ExternalIdentity,
   intent: ProvisioningIntent | undefined,
 ): Promise<Landing> {
+  const named = intent?.kind === "new_organization" ? intent : undefined;
   const organizationName =
-    intent?.organizationName.trim() ||
-    organizationNameFromEmail(identity.email);
-  const projectName = intent?.projectName.trim() || DEFAULT_PROJECT_NAME;
+    named?.organizationName.trim() || organizationNameFromEmail(identity.email);
+  const projectName = named?.projectName.trim() || DEFAULT_PROJECT_NAME;
   const base = slugify(organizationName);
 
   for (let attempt = 1; attempt <= SLUG_ATTEMPTS; attempt += 1) {
@@ -122,7 +271,9 @@ async function provision(
       return {
         userId: identity.externalIdentityId,
         organizationId: provisioned.organizationId,
+        organizationName,
         projectId: provisioned.projectId,
+        projectName,
         role: provisioned.membership.role,
       };
     } catch (cause) {
