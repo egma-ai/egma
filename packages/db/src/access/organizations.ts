@@ -1,6 +1,7 @@
 import { db } from "../client.ts";
 import { organization, organizationSettings } from "../schema/tenancy.ts";
 import type { AuthContext } from "./context.ts";
+import { authorize, here } from "./permissions.ts";
 import { theOrganization, within } from "./within.ts";
 
 /** The customer. The only tenancy boundary there is. */
@@ -26,6 +27,8 @@ export type OrganizationSettings = {
 export async function readOrganization(
   auth: AuthContext,
 ): Promise<Organization | undefined> {
+  authorize(auth, "read", here(auth));
+
   const [row] = await db()
     .select({
       id: organization.id,
@@ -42,6 +45,8 @@ export async function readOrganization(
 export async function readOrganizationSettings(
   auth: AuthContext,
 ): Promise<OrganizationSettings | undefined> {
+  authorize(auth, "read", here(auth));
+
   const [row] = await db()
     .select()
     .from(organizationSettings)
@@ -59,11 +64,19 @@ export type OrganizationSettingsChanges = {
  * Settings are one row per customer, so writing them is an upsert keyed on the
  * organization from the context. There is no organization to name and therefore
  * none to name wrongly.
+ *
+ * **Only an `admin` writes them.** Retention is on this row, and retention
+ * decides how long a customer's trace data survives — so this is the one
+ * setting in the product that can destroy data without deleting anything. The
+ * check is here rather than at a route because there is no route yet, and a row
+ * of the permission table with no call site refuses nobody.
  */
 export async function updateOrganizationSettings(
   auth: AuthContext,
   changes: OrganizationSettingsChanges,
 ): Promise<OrganizationSettings> {
+  authorize(auth, "manage_organization", here(auth));
+
   const now = new Date();
   const [row] = await db()
     .insert(organizationSettings)

@@ -7,6 +7,7 @@ import { invitation, organization } from "../schema/tenancy.ts";
 import type { AuthContext, Role } from "./context.ts";
 import { AlreadyBelongsToAnOrganizationError } from "./errors.ts";
 import { insertMembership, organizationOfEmail } from "./memberships.ts";
+import { authorize, here } from "./permissions.ts";
 import { projectsOf } from "./projects.ts";
 import { within } from "./within.ts";
 
@@ -105,6 +106,8 @@ export async function createInvitation(
 export async function listPendingInvitations(
   auth: AuthContext,
 ): Promise<readonly Invitation[]> {
+  authorize(auth, "read", here(auth));
+
   return db()
     .select(COLUMNS)
     .from(invitation)

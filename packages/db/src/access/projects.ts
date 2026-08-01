@@ -4,6 +4,7 @@ import { and, eq, isNull, type SQL } from "drizzle-orm";
 import { db } from "../client.ts";
 import { project } from "../schema/tenancy.ts";
 import type { AuthContext } from "./context.ts";
+import { authorize, here } from "./permissions.ts";
 import { theProject, within } from "./within.ts";
 
 /**
@@ -66,6 +67,8 @@ export async function projectsOf(
 export async function listProjects(
   auth: AuthContext,
 ): Promise<readonly Project[]> {
+  authorize(auth, "read", here(auth));
+
   return db()
     .select(COLUMNS)
     .from(project)
@@ -87,6 +90,8 @@ export async function listProjects(
 export async function readProject(
   auth: AuthContext,
 ): Promise<Project | undefined> {
+  authorize(auth, "read", here(auth));
+
   const { projectId } = auth;
   if (projectId === undefined) return undefined;
 
@@ -103,11 +108,21 @@ export type NewProject = {
   readonly slug: string;
 };
 
-/** The new project belongs to the caller's customer. There is no other option. */
+/**
+ * The new project belongs to the caller's customer. There is no other option.
+ *
+ * **Only an `admin` creates one.** The check is here rather than at a route
+ * because there is no route: nothing in the product creates a project except
+ * signup, which provisions one before anybody has a context at all. A row of
+ * the permission table with no call site is a row that reads as coverage and
+ * refuses nobody, which is worse than not having written it.
+ */
 export async function createProject(
   auth: AuthContext,
   input: NewProject,
 ): Promise<Project> {
+  authorize(auth, "manage_projects", here(auth));
+
   const [row] = await db()
     .insert(project)
     .values({

@@ -105,6 +105,19 @@ export type ActionScope = {
 };
 
 /**
+ * Where the caller already is: their own organization, and the project they are
+ * acting in if they are acting in one.
+ *
+ * Internal to this module, and it is what every check inside it names, because
+ * nothing here can act anywhere else — an exported function reaches only the
+ * rows the context already names. A route may legitimately name somewhere else
+ * and writes the scope out in full; a data-access function never can.
+ */
+export function here(auth: AuthContext): ActionScope {
+  return { organizationId: auth.organizationId, projectId: auth.projectId };
+}
+
+/**
  * Whether the caller may take this action. For deciding what to show — which
  * buttons a page renders, which rows a list offers to revoke.
  *
@@ -132,6 +145,14 @@ export function permits(
  * It answers by refusing: a call that returns is a call that was allowed, so
  * there is no result to forget to look at. The decision itself is still made in
  * exactly one place — `permits`, above — and this adds only the refusal.
+ *
+ * **Called from the route that takes the action, and from this module when
+ * there is no route.** Creating a project and writing an organization's
+ * settings are reachable only through the data-access module today, so that is
+ * where they are refused; a row of the table with nothing calling it refuses
+ * nobody while reading like coverage, which is worse than not having written
+ * it. A test reads the source and fails on a row that is neither enforced nor
+ * declared unreachable.
  */
 export function authorize(
   auth: AuthContext,

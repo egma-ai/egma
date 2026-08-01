@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
 
 import { newId } from "@egma/ids";
 import * as dataAccess from "@egma/db";
@@ -6,12 +8,16 @@ import {
   ACTIONS,
   authorize,
   createApiKey,
+  createProject,
+  listProjects,
   membershipsOf,
   NotPermittedError,
   permits,
   permitsApiKeyMintedBy,
   provisionOrganization,
+  readOrganizationSettings,
   ROLES,
+  updateOrganizationSettings,
   type Action,
   type ActionScope,
   type ApiKey,
@@ -93,6 +99,81 @@ function inside(customer: Customer): ActionScope {
 describe("the action list", () => {
   it("is one name per row of the permission table, and no other", () => {
     expect([...ACTIONS].sort()).toEqual(Object.keys(THE_TABLE).sort());
+  });
+});
+
+/**
+ * A row of the table that nothing calls refuses nobody, and reads like coverage
+ * while doing it — which is worse than an absent row, because absence is
+ * visible. So the source is read, and every row has to be one of two things:
+ * enforced at a real call site, or named below as a row whose feature does not
+ * exist yet. Never both, and never neither.
+ */
+const NOT_YET_REACHABLE: Readonly<Record<string, string>> = {
+  author_definitions:
+    "nothing can write a test, a digital human, a grader or a suite yet",
+  configure_agents: "nothing can register an agent or a connection yet",
+  start_and_cancel_runs: "nothing can start a run yet",
+  delete_run_data: "there is no run data to delete yet",
+  delete_organization: "deleting an organization is designed and not built",
+};
+
+/** Everywhere a permission can be decided: the API, the pages, the module. */
+const THE_PRODUCT = [
+  "apps/api/src",
+  "apps/web/app",
+  "apps/web/lib",
+  "packages/db/src",
+];
+
+const REPOSITORY = path.join(import.meta.dirname, "../../..");
+
+/**
+ * Which actions the product actually passes to the permission function, read
+ * off the source rather than taken on trust. Written as a scan rather than a
+ * list because a list is the thing that goes stale.
+ */
+async function actionsEnforcedInSource(): Promise<ReadonlySet<string>> {
+  const enforced = new Set<string>();
+  const asked = /\b(?:authorize|permits)\s*\(\s*[^,()]+,\s*"([a-z_]+)"/gu;
+
+  async function walk(directory: string): Promise<void> {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (["node_modules", "dist", ".next"].includes(entry.name)) continue;
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await walk(full);
+      } else if ([".ts", ".tsx"].includes(path.extname(entry.name))) {
+        for (const [, action] of (await readFile(full, "utf8")).matchAll(asked)) {
+          if (action !== undefined) enforced.add(action);
+        }
+      }
+    }
+  }
+
+  for (const root of THE_PRODUCT) await walk(path.join(REPOSITORY, root));
+  return enforced;
+}
+
+describe("every row of the permission table", () => {
+  it("is enforced somewhere, or is named as one nothing can reach yet", async () => {
+    const enforced = await actionsEnforcedInSource();
+
+    for (const action of ACTIONS) {
+      const reachable = !(action in NOT_YET_REACHABLE);
+      expect(
+        enforced.has(action),
+        reachable
+          ? `${action} is a row of the table that nothing passes to authorize or permits`
+          : `${action} is enforced now, so it is no longer true that ${NOT_YET_REACHABLE[action]} — take it off the list`,
+      ).toBe(reachable);
+    }
+  });
+
+  it("accounts for every name on that list, so the list cannot outlive the table", () => {
+    for (const action of Object.keys(NOT_YET_REACHABLE)) {
+      expect(ACTIONS as readonly string[], action).toContain(action);
+    }
   });
 });
 
@@ -579,6 +660,74 @@ describe("an API key", () => {
     expect(
       permitsApiKeyMintedBy(owner, grace.userId, inside(grace)),
     ).toBe(false);
+  });
+});
+
+/**
+ * The role is read off the context rather than the row, which is what makes the
+ * three cases below writable without three fixtures — and is exactly how a
+ * request reaches a permission, since the context is built from the membership
+ * at the moment the credential is resolved.
+ */
+function actingAs(person: Person, role: Role): AuthContext {
+  return {
+    userId: person.userId,
+    organizationId: person.organizationId,
+    projectId: person.projectId,
+    role,
+    via: "session",
+  };
+}
+
+/**
+ * Two rows of the table with no route to enforce them, and therefore two rows
+ * that were declared and refused nobody. They are refused in the data-access
+ * module instead, which is the only place a caller can reach them from.
+ */
+describe("creating a project", () => {
+  it("is an admin's, and is refused to a member and to a viewer", async () => {
+    const before = (await listProjects(actingAs(ada, "admin"))).length;
+
+    for (const role of ["member", "viewer"] as const) {
+      await expect(
+        createProject(actingAs(ada, role), {
+          name: "Outbound",
+          slug: `outbound-${role}`,
+        }),
+      ).rejects.toThrow(NotPermittedError);
+    }
+
+    // Refused before the write, so there is nothing left behind by either.
+    expect((await listProjects(actingAs(ada, "admin"))).length).toBe(before);
+
+    const made = await createProject(actingAs(ada, "admin"), {
+      name: "Outbound",
+      slug: "outbound",
+    });
+    expect(made.organizationId).toBe(ada.organizationId);
+  });
+});
+
+describe("an organization's settings", () => {
+  it("are written by an admin, and by nobody else", async () => {
+    for (const role of ["member", "viewer"] as const) {
+      await expect(
+        updateOrganizationSettings(actingAs(ada, role), { retentionDays: 7 }),
+      ).rejects.toThrow(NotPermittedError);
+    }
+
+    expect(await readOrganizationSettings(actingAs(ada, "viewer"))).toBeUndefined();
+
+    const written = await updateOrganizationSettings(actingAs(ada, "admin"), {
+      retentionDays: 30,
+    });
+    expect(written.retentionDays).toBe(30);
+
+    // Reading them is not what the row is about: everybody in the organization
+    // reads anything in it, and only an admin changes this.
+    expect(
+      (await readOrganizationSettings(actingAs(ada, "viewer")))?.retentionDays,
+    ).toBe(30);
   });
 });
 

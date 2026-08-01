@@ -7,7 +7,7 @@ import type { ApiKeyScope } from "../schema/columns.ts";
 import type { AuthContext } from "./context.ts";
 import { ProjectOutsideOrganizationError } from "./errors.ts";
 import { membershipsOf } from "./memberships.ts";
-import { permitsApiKeyMintedBy, type ActionScope } from "./permissions.ts";
+import { authorize, here, permitsApiKeyMintedBy } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
 import { within } from "./within.ts";
 
@@ -43,11 +43,6 @@ const COLUMNS = {
   createdAt: apiKey.createdAt,
 } as const;
 
-/** Where the caller is acting, for the per-key predicate below. */
-function here(auth: AuthContext): ActionScope {
-  return { organizationId: auth.organizationId, projectId: auth.projectId };
-}
-
 /**
  * The keys in the caller's organization that the caller may see.
  *
@@ -65,6 +60,8 @@ function here(auth: AuthContext): ActionScope {
  * be able to see every key, not only the ones for the project they are in.
  */
 export async function listApiKeys(auth: AuthContext): Promise<readonly ApiKey[]> {
+  authorize(auth, "read", here(auth));
+
   const rows = await db()
     .select(COLUMNS)
     .from(apiKey)

@@ -7,6 +7,7 @@ import { membership } from "../schema/tenancy.ts";
 import { revokeApiKeysMintedBy } from "./api-keys.ts";
 import type { AuthContext, Role } from "./context.ts";
 import { LastAdminError } from "./errors.ts";
+import { authorize, here } from "./permissions.ts";
 import { within } from "./within.ts";
 
 /**
@@ -127,6 +128,8 @@ export async function membershipsOf(
 export async function listMembers(
   auth: AuthContext,
 ): Promise<readonly Member[]> {
+  authorize(auth, "read", here(auth));
+
   return db()
     .select(MEMBER_COLUMNS)
     .from(membership)
