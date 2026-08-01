@@ -1,6 +1,11 @@
 import { connect, disconnect, runMigrations } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import {
+  loggingEmailSender,
+  smtpEmailSender,
+  type Email,
+} from "../src/auth/email.ts";
 import { loadConfig } from "../src/config.ts";
 import { buildApi } from "../src/server.ts";
 import { testConfig } from "./support/api.ts";
@@ -71,6 +76,71 @@ describe("configuration", () => {
     expect(() =>
       loadConfig({ ...enough, EGMA_SINGLE_ORGANIZATION: "perhaps" }),
     ).toThrow(/not a yes or a no/);
+  });
+
+  /**
+   * Mail is the one setting whose *absence* is a supported way to run egma
+   * rather than a mistake, so it is asserted as one. A self-hoster who never
+   * sets it can still add a second person.
+   */
+  it("starts perfectly well with no mail transport, which is the ordinary case", () => {
+    expect(loadConfig(enough).smtp).toBeUndefined();
+  });
+
+  it("takes a transport as one variable, with a from address it can derive", () => {
+    expect(
+      loadConfig({
+        ...enough,
+        EGMA_BASE_URL: "https://egma.acme.example",
+        EGMA_SMTP_URL: "smtp://postmaster:secret@smtp.acme.example:587",
+      }).smtp,
+    ).toEqual({
+      url: "smtp://postmaster:secret@smtp.acme.example:587",
+      from: "egma <egma@egma.acme.example>",
+    });
+  });
+
+  /**
+   * Set-but-unusable refuses to start, and unset does not. A transport egma
+   * believes in and cannot reach is worse than none: it turns verification on
+   * and stops handing invitation links back, and then delivers neither.
+   */
+  it("refuses a transport it could never reach, rather than quietly delivering nothing", () => {
+    expect(() => loadConfig({ ...enough, EGMA_SMTP_URL: "not a url" })).toThrow(
+      /EGMA_SMTP_URL is not a URL/,
+    );
+    expect(() =>
+      loadConfig({ ...enough, EGMA_SMTP_URL: "https://mail.acme.example" }),
+    ).toThrow(/smtp/);
+  });
+});
+
+/**
+ * Which transport is configured decides two other things by itself — whether
+ * signup waits for a verification click, and whether an invitation hands its
+ * link back. There is deliberately no second setting for either to disagree
+ * with, and `delivers` is the whole of how they are told apart.
+ */
+describe("the email seam", () => {
+  it("says nothing was delivered when there is nowhere to deliver it", async () => {
+    const sent: Email[] = [];
+    const sender = loggingEmailSender((email) => sent.push(email));
+
+    expect(sender.delivers).toBe(false);
+    await sender.send({ to: "bob@acme.example", subject: "hi", body: "there" });
+
+    // Written down rather than dropped: a self-hoster with no transport still
+    // sees every message egma would have sent, where they are already looking.
+    expect(sent.map((email) => email.to)).toEqual(["bob@acme.example"]);
+  });
+
+  it("says messages are delivered the moment SMTP is configured, with no second switch", () => {
+    expect(
+      smtpEmailSender({
+        url: "smtp://postmaster:secret@smtp.acme.example:587",
+        from: "egma <egma@acme.example>",
+      }).delivers,
+    ).toBe(true);
   });
 });
 

@@ -36,6 +36,12 @@ services:
       # The budget belongs to the organization rather than to a key, so
       # rotating a key does not reset it.
       EGMA_RATE_LIMIT_PER_MINUTE: ${EGMA_RATE_LIMIT_PER_MINUTE:-600}
+      # Mail is optional and unset by default. With none, invitations hand
+      # their link back to whoever sent them and signup asks for no
+      # verification; setting this turns both around at once. It is never a
+      # prerequisite for anything, including adding a second person.
+      EGMA_SMTP_URL: ${EGMA_SMTP_URL:-}
+      EGMA_MAIL_FROM: ${EGMA_MAIL_FROM:-}
     ports:
       - "3100:3100"
     depends_on:

@@ -36,9 +36,8 @@ see `.env.example` for the names and their defaults.
 one.** Compose supplies a development default so that `docker compose up` works
 out of the box. Change it before anybody else can reach your instance.
 
-Email is optional. With no transport configured, signup completes and
-verification is not a step — every message egma would have sent is written to
-the API's log instead.
+Email is optional, and this is load-bearing rather than a convenience. See
+[Adding a second person](#adding-a-second-person).
 
 ## Working on it
 
@@ -58,18 +57,21 @@ and drops it afterwards, so `pnpm test` needs a Postgres it may create databases
 on. `pnpm db:up` starts one; point `TEST_DATABASE_URL` somewhere else if you
 would rather use your own.
 
-One test drives a real browser: `apps/web/test/login.browser.test.ts` starts the
-API and the web application on ports of their own and clicks through logging in
-from a terminal, once, end to end. It uses the Chrome already on your machine
-and falls back to a Playwright-managed one, so `npx playwright install chromium`
-is what to run if you have neither. Every branch of that flow other than the
-happy one is covered against the API instead, where it costs milliseconds.
+One test drives a real browser: `apps/api/test/login.browser.test.ts` starts the
+API and the web application on ports of their own and clicks through the two
+paths a person actually walks — logging in from a terminal, and inviting a
+colleague on an instance with no mail configured. It uses the Chrome already on
+your machine and falls back to a Playwright-managed one, so
+`npx playwright install chromium` is what to run if you have neither. Every
+branch of both flows other than the happy one is covered against the API
+instead, where it costs milliseconds.
 
 ## Layout
 
 ```
 apps/api        Fastify API. Applies migrations on boot, then serves.
-apps/web        Next.js web application: signup, sign-in, and where you are.
+apps/web        Next.js web application: signup, sign-in, invitations, and
+                where you are.
 packages/db     The data-access module: schema, migrations, and every read
                 and write there is.
 packages/ids    The identifier generator.
@@ -141,6 +143,48 @@ An `admin` sees every key in their organization; everybody else sees the ones
 they minted. Every role may mint a key for themselves, including `viewer` —
 logging in mints one as its last step, so an admin-only rule would close the
 product to most of an instance.
+
+## Adding a second person
+
+Open `/members`, type an address, pick a role, and send. **If no mail transport
+is configured, the link comes straight back to you** and you pass it on however
+you like — Slack, a text message, reading it out. The colleague follows it,
+chooses a password, and lands in your organization at the role you picked.
+
+Nothing about this needs SMTP. That is deliberate: the pleasant part of a local
+install is solo, and requiring a mail server before a second person can join is
+where every comparable product stops being pleasant.
+
+- The link works **once**, expires after seven days, and is stored as a single
+  SHA-256 — so a copy of the database is not a pile of working invitations.
+- It lets in **the address it was sent to** and no other.
+- An expired invitation and an already-accepted one say **which of the two** they
+  are, because one means ask for another and the other means you are already in.
+- One person belongs to one organization in this version, so inviting somebody
+  who already belongs to one is refused with a reason rather than silently.
+- On a self-hosted instance, an invitation is what gets somebody past the door
+  that closed when the first person claimed it.
+
+Only an `admin` may invite, change a role, remove somebody, or deactivate an
+account. **Removing somebody revokes every key they minted and leaves everything
+they authored exactly where it is, with their name still on it** — a
+deprovisioning script must not be able to delete a team's work. An organization
+always keeps at least one admin: the last one cannot be demoted, removed or
+deactivated, because nobody could put one back.
+
+### Sending it by email instead
+
+Optional, and one variable:
+
+```bash
+EGMA_SMTP_URL=smtp://user:password@smtp.example.com:587
+EGMA_MAIL_FROM='egma <egma@example.com>'   # optional
+```
+
+Setting it changes two things at once, by itself: invitations are emailed rather
+than handed back, and signup asks for email verification. There is no second
+setting to keep in step, because there is no configuration in which egma should
+wait for a message it never sent.
 
 ## Reading and writing data
 

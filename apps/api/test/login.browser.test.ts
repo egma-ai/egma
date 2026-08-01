@@ -14,15 +14,18 @@ import {
 } from "../../../packages/db/test/support/database.ts";
 
 /**
- * The whole of `egma login`, once, in a real browser.
+ * The two paths a person actually clicks through, once each, in a real browser:
+ * logging in from a terminal, and adding a colleague.
  *
- * **Exactly one path, and resist growing it.** Every error branch of the device
- * flow — a mistyped code, a stale one, a denial, a client polling too fast, a
- * project belonging to somebody else — is proved in `device-flow.test.ts`,
- * beside this file, where it costs milliseconds. What a browser proves and
- * nothing else can is that the pages exist, that they are served from this
- * instance's own origin, that the code arrives already in the field, and that
- * clicking through them in order ends with a terminal holding a key that works.
+ * **The happy path of each, and resist growing it further.** Every error branch
+ * — a mistyped code, a stale one, a denial, a client polling too fast, an
+ * expired invitation, a link for somebody else — is proved in
+ * `device-flow.test.ts` and `invitations.test.ts` beside this file, where each
+ * costs milliseconds. What a browser proves and nothing else can is that the
+ * pages exist, that they are served from this instance's own origin, that this
+ * process forwards the API paths they use, that the code arrives already in the
+ * field, and that clicking through them in order ends with a terminal holding a
+ * key that works and a second person inside the organization.
  *
  * Everything in here is real: a real Postgres, the real API, the real Next
  * process with its real rewrites, and a real Chrome. A stub anywhere in that
@@ -264,6 +267,71 @@ describe("logging in from a terminal", () => {
         "select o.name from organization o join api_key k on k.organization_id = o.id",
       );
       expect(rows).toEqual([{ name: "Acme" }]);
+    },
+    SETTLE,
+  );
+});
+
+/**
+ * The second person, on an instance where nobody configured email.
+ *
+ * This runs after the one above and on purpose: Ada is already signed up and
+ * already signed in, which is exactly the state somebody is in when they think
+ * to add a colleague. Nothing here is stubbed, and the transport is the one a
+ * bare `docker compose up` runs — it delivers nothing.
+ */
+describe("adding a colleague, with no mail configured", () => {
+  it(
+    "hands the link to the inviter, and following it lands the colleague inside",
+    async () => {
+      await page.goto(`${origin}/members`);
+      await page.waitForSelector("text=Invite somebody");
+
+      await page.fill("#invite-email", "bob@acme.example");
+      await page.selectOption("#invite-role", "viewer");
+      await page.getByRole("button", { name: "Send invitation" }).click();
+
+      // Nothing was emailed, and the flow completed anyway. The link is on the
+      // page, which is the whole promise: a self-hoster is never stopped here.
+      await page.waitForSelector("text=Here is the link");
+      const shown = await page.innerText("main");
+      const link = /http:\/\/[^\s]*\/invite\?token=[^\s]+/.exec(shown)?.[0];
+      expect(link, shown).toBeDefined();
+
+      // Bob opens it in his own browser, knowing nothing but the URL.
+      const his = await browser.newContext();
+      const bob = await his.newPage();
+      bob.setDefaultTimeout(30_000);
+      await bob.goto(link ?? "");
+
+      // It says what he is joining and at what, and asks for the one thing it
+      // needs. The address is the invitation's, so there is nothing to mistype.
+      await bob.waitForSelector("text=Join Acme on egma");
+      await expect
+        .poll(() => bob.inputValue("#email"))
+        .toBe("bob@acme.example");
+      expect(await bob.innerText("main")).toContain("viewer");
+
+      await bob.fill("#password", "a-long-enough-password");
+      await bob.getByRole("button", { name: "Join Acme" }).click();
+
+      // And he is in Acme, at the role he was invited at, without ever having
+      // been asked to name an organization.
+      await bob.waitForURL(new RegExp(`^${origin}/$`));
+      await expect.poll(() => bob.innerText("main")).toContain("viewer");
+      expect(await bob.innerText("main")).toContain("Acme");
+
+      const { rows } = await database.sql<{ email: string; role: string }>(
+        `select u.email, m.role from membership m
+           join "user" u on u.id = m.user_id
+          order by u.email`,
+      );
+      expect(rows).toEqual([
+        { email: "ada@acme.example", role: "admin" },
+        { email: "bob@acme.example", role: "viewer" },
+      ]);
+
+      await his.close();
     },
     SETTLE,
   );
