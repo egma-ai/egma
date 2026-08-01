@@ -12,7 +12,7 @@ import {
   DEFAULT_PROJECT_NAME,
   organizationNameFromEmail,
 } from "../lib/signup-defaults.ts";
-import { pickers } from "../lib/workspace.ts";
+import { pickers } from "../lib/me.ts";
 
 /**
  * The two things the pages decide for themselves, and one thing about where
@@ -132,6 +132,24 @@ describe("the pages", () => {
         (url) => !url.startsWith("http://127.0.0.1:"),
       );
       expect(offSite, `${file} reaches ${offSite.join(", ")}`).toEqual([]);
+    }
+  });
+
+  /**
+   * The tenancy the pages show has exactly two levels and they are called
+   * `organization` and `project` — the same two words the API and the database
+   * use for the same two things.
+   *
+   * A container word invented above them is how `project` comes to mean the
+   * tenancy container in one place and something inside one in another, and a
+   * word that means two things is a word nobody can read a permission with.
+   * This costs nothing today and is written down now because the dashboard is
+   * what would grow on top of it.
+   */
+  it("name the two levels of tenancy, and invent no word above them", async () => {
+    for (const [file, source] of await pageSources()) {
+      expect(source.toLowerCase(), `${file} names a level above organization`)
+        .not.toContain("workspace");
     }
   });
 

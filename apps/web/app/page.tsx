@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { pickers, type Workspace } from "../lib/workspace.ts";
+import { pickers, type Me } from "../lib/me.ts";
 import { Card, styles } from "./ui.tsx";
 
 /**
@@ -22,7 +22,7 @@ import { Card, styles } from "./ui.tsx";
 type State =
   | { status: "loading" }
   | { status: "signed-out" }
-  | { status: "signed-in"; workspace: Workspace };
+  | { status: "signed-in"; me: Me };
 
 export default function Home() {
   const [state, setState] = useState<State>({ status: "loading" });
@@ -38,7 +38,7 @@ export default function Home() {
         }
         setState({
           status: "signed-in",
-          workspace: (await response.json()) as Workspace,
+          me: (await response.json()) as Me,
         });
       })
       .catch(() => {
@@ -61,21 +61,21 @@ export default function Home() {
     );
   }
 
-  const { workspace } = state;
-  const visible = pickers(workspace);
-  const organization = workspace.organizations[0];
-  const project = workspace.projects[0];
+  const { me } = state;
+  const visible = pickers(me);
+  const organization = me.organizations[0];
+  const project = me.projects[0];
 
   return (
-    <Card title="You are set up" lead={workspace.user.email}>
+    <Card title="You are set up" lead={me.user.email}>
       {visible.organization ? (
-        <Choice label="Organization" of={workspace.organizations} />
+        <Choice label="Organization" of={me.organizations} />
       ) : (
         <Fact label="Organization" value={organization?.name ?? "—"} />
       )}
 
       {visible.project ? (
-        <Choice label="Project" of={workspace.projects} />
+        <Choice label="Project" of={me.projects} />
       ) : (
         <Fact label="Project" value={project?.name ?? "—"} />
       )}

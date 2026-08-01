@@ -47,7 +47,9 @@ const SLUG_LIMIT = 48;
  * A name made entirely of characters that do not survive this — an organization
  * called `!!!` — still needs somewhere to live, so it falls back to a word
  * rather than to the empty string, and the caller's collision handling makes it
- * unique from there.
+ * unique from there. The word says what happened rather than naming a level of
+ * the hierarchy: this is used for organizations and for projects alike, and a
+ * word borrowed from either would mean the wrong thing half the time.
  */
 export function slugify(value: string): string {
   const slug = value
@@ -58,5 +60,5 @@ export function slugify(value: string): string {
     .replaceAll(/^-+|-+$/gu, "")
     .slice(0, SLUG_LIMIT)
     .replaceAll(/-+$/gu, "");
-  return slug === "" ? "workspace" : slug;
+  return slug === "" ? "unnamed" : slug;
 }
