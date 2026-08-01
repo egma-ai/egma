@@ -16,17 +16,19 @@
  * none can be widened and none can be omitted.
  *
  * **Context-establishing.** `membershipsOf`, `projectsOf`,
- * `provisionOrganization`, `resolveApiKey` and `resolveDeviceAuthorization`,
- * and only those five. The first two are the two halves of what an
- * `AuthContext` is made of — which organization a person is in, and which
- * projects are in it — and the third brings a new organization into existence.
- * The last two each take a credential and answer what it resolves to: an API
- * key's hash becomes the whole context a programmatic request acts in, and a
- * device code becomes the organization and project a terminal was let into.
- * None of the five can return, or reach, a row belonging to anybody else —
- * each is handed the thing the credential already names and can see nothing
- * outside it. Anything added to this category is a deliberate act: a test names
- * them all and fails when a sixth appears.
+ * `provisionOrganization`, `resolveApiKey`, `resolveDeviceAuthorization`,
+ * `readInvitation` and `acceptInvitation`, and only those seven. The first two
+ * are the two halves of what an `AuthContext` is made of — which organization a
+ * person is in, and which projects are in it — and the third brings a new
+ * organization into existence. The rest each take a credential and answer what
+ * it resolves to: an API key's hash becomes the whole context a programmatic
+ * request acts in, a device code becomes the organization and project a terminal
+ * was let into, and an invitation's token hash becomes the organization somebody
+ * with no account yet is being asked to join. None of the seven can return, or
+ * reach, a row belonging to anybody else — each is handed the thing the
+ * credential already names and can see nothing outside it. Anything added to
+ * this category is a deliberate act: a test names them all and fails when an
+ * eighth appears.
  *
  * **Instance-scoped.** `instanceIsClaimed`, and only it. It takes nothing and
  * returns a boolean, so it can neither name a customer nor carry a row out. It
@@ -48,6 +50,8 @@
 export type { AuthContext, Role, Via } from "./context.ts";
 export { ROLES, VIA } from "./context.ts";
 export {
+  AlreadyBelongsToAnOrganizationError,
+  LastAdminError,
   NotPermittedError,
   ProjectOutsideOrganizationError,
 } from "./errors.ts";
@@ -61,7 +65,28 @@ export {
   type ActionScope,
 } from "./permissions.ts";
 
-export { membershipsOf, listMemberships, type Membership } from "./memberships.ts";
+export {
+  changeRole,
+  deactivateUser,
+  listMembers,
+  membershipsOf,
+  removeMember,
+  type Member,
+  type Membership,
+  type RemovedMember,
+} from "./memberships.ts";
+
+export {
+  acceptInvitation,
+  createInvitation,
+  listPendingInvitations,
+  readInvitation,
+  type Acceptance,
+  type Invitation,
+  type InvitationState,
+  type NewInvitation,
+  type ResolvedInvitation,
+} from "./invitations.ts";
 export {
   provisionOrganization,
   type NewOrganization,

@@ -6,7 +6,7 @@ import {
   createProject,
   instanceIsClaimed,
   listApiKeys,
-  listMemberships,
+  listMembers,
   listProjects,
   membershipsOf,
   ProjectOutsideOrganizationError,
@@ -130,7 +130,7 @@ describe("every exported read, called as one customer", () => {
     ["readOrganizationSettings", readOrganizationSettings],
     ["readProject", readProject],
     ["listProjects", listProjects],
-    ["listMemberships", listMemberships],
+    ["listMembers", listMembers],
     ["listApiKeys", listApiKeys],
   ];
 
@@ -259,14 +259,26 @@ describe("projects", () => {
 
 describe("who is in the organization", () => {
   it("is answered for the caller's organization only", async () => {
-    expect(await listMemberships(acme.auth)).toEqual([
-      { organizationId: acme.organizationId, userId: acme.userId, role: "admin" },
+    expect(await listMembers(acme.auth)).toEqual([
+      {
+        organizationId: acme.organizationId,
+        userId: acme.userId,
+        email: "ada@acme.example",
+        name: null,
+        role: "admin",
+        deactivatedAt: null,
+        joinedAt: expect.any(Date),
+      },
     ]);
-    expect(await listMemberships(globex.auth)).toEqual([
+    expect(await listMembers(globex.auth)).toEqual([
       {
         organizationId: globex.organizationId,
         userId: globex.userId,
+        email: "grace@globex.example",
+        name: null,
         role: "admin",
+        deactivatedAt: null,
+        joinedAt: expect.any(Date),
       },
     ]);
   });

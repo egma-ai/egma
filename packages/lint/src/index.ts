@@ -60,6 +60,15 @@ const AUTH_CONTEXT = "AuthContext";
  * answers what it resolves to — a whole `AuthContext` for the first, an
  * organization and a project for the second. Neither can be asked about
  * somebody else's, because there is no argument other than the secret itself.
+ *
+ * `readInvitation` and `acceptInvitation` were added on 2026-08-01 with
+ * invitations, on the same terms and after the rule stopped the build again.
+ * The person following an invitation link has no account at the moment they
+ * read it and no membership at the moment they accept it, so there is no context
+ * for either to take; the token's hash is the only argument, and an invitation
+ * nobody was given cannot be named. `acceptInvitation` takes a second argument
+ * naming the person accepting, which is the same shape as `membershipsOf` —
+ * whoever calls it has already resolved that identity from a credential.
  */
 const CONTEXT_ESTABLISHING = [
   "membershipsOf",
@@ -67,6 +76,8 @@ const CONTEXT_ESTABLISHING = [
   "provisionOrganization",
   "resolveApiKey",
   "resolveDeviceAuthorization",
+  "readInvitation",
+  "acceptInvitation",
 ];
 
 /**

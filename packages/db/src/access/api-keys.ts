@@ -1,7 +1,7 @@
 import { newId } from "@egma/ids";
 import { and, eq, isNull } from "drizzle-orm";
 
-import { db } from "../client.ts";
+import { db, type Queryable } from "../client.ts";
 import { user } from "../schema/identity.ts";
 import { apiKey } from "../schema/tenancy.ts";
 import type { ApiKeyScope } from "../schema/columns.ts";
@@ -163,6 +163,37 @@ export async function revokeApiKey(
     )
     .returning(COLUMNS);
   return row;
+}
+
+/**
+ * Every live key somebody minted in one organization, revoked at once.
+ *
+ * Internal, and it takes wherever the statement should run so that removing
+ * somebody from an organization can revoke their keys and delete their
+ * membership in a single transaction. The predicates are the organization and
+ * the creator rather than an `AuthContext`, because the caller already resolved
+ * both from one — this is the same write, inside the same transaction, and
+ * splitting it across two exported calls is what would let one half happen
+ * without the other.
+ */
+export async function revokeApiKeysMintedBy(
+  on: Queryable,
+  organizationId: string,
+  userId: string,
+): Promise<number> {
+  const revoked = await on
+    .update(apiKey)
+    .set({ revokedAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(apiKey.organizationId, organizationId),
+        eq(apiKey.createdByUserId, userId),
+        isNull(apiKey.revokedAt),
+      ),
+    )
+    .returning({ id: apiKey.id });
+
+  return revoked.length;
 }
 
 /** A key, and the context a request carrying it acts in. */

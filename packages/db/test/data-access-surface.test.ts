@@ -27,8 +27,12 @@ const IDENTITY = ["IDENTITY_MODELS", "identityId", "identityStore"];
 
 /**
  * What produces an `AuthContext`: which organization a person is in, which
- * projects are in it, and what a credential resolves to. A sixth name here is a
- * decision somebody makes on purpose, and the build rule makes them make it.
+ * projects are in it, and what a credential resolves to. An eighth name here is
+ * a decision somebody makes on purpose, and the build rule makes them make it.
+ *
+ * The last two are an invitation's, and they are here rather than above because
+ * the person following a link has no account when they read it and no
+ * membership when they accept it. The token's hash is the whole argument.
  */
 const CONTEXT_ESTABLISHING = [
   "membershipsOf",
@@ -36,6 +40,8 @@ const CONTEXT_ESTABLISHING = [
   "provisionOrganization",
   "resolveApiKey",
   "resolveDeviceAuthorization",
+  "readInvitation",
+  "acceptInvitation",
 ];
 
 /**
@@ -47,15 +53,20 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
 
 /** Everything that touches a customer's data. All of it needs the context. */
 const CONTEXT_REQUIRING = [
+  "changeRole",
   "createApiKey",
+  "createInvitation",
   "createProject",
+  "deactivateUser",
   "listApiKeys",
-  "listMemberships",
+  "listMembers",
+  "listPendingInvitations",
   "listProjects",
   "readOrganization",
   "readOrganizationSettings",
   "readProject",
   "recordDeviceAuthorization",
+  "removeMember",
   "revokeApiKey",
   "updateOrganizationSettings",
 ];
@@ -75,6 +86,8 @@ const PERMISSION = [
 
 /** Vocabulary: the table definitions, how a caller proved who they are, and the refusals. */
 const VALUES = [
+  "AlreadyBelongsToAnOrganizationError",
+  "LastAdminError",
   "NotPermittedError",
   "ProjectOutsideOrganizationError",
   "VIA",
