@@ -29,7 +29,7 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   api_key: "key",
 };
 
-const declaredTables = Object.values(schema)
+const declaredTables = (Object.values(schema) as unknown[])
   .filter((value): value is PgTable => is(value, PgTable))
   .map((table) => getTableConfig(table));
 

@@ -55,15 +55,27 @@ describe("sorting identifiers as plain strings", () => {
     expect(first < second).toBe(true);
   });
 
-  it("holds for a burst minted inside a single millisecond", () => {
-    const burst: string[] = [];
-    const start = Date.now();
-    while (Date.now() === start && burst.length < 50_000) {
-      burst.push(newId("run"));
+  it("holds for identifiers minted inside a single millisecond", () => {
+    const minted: string[] = [];
+    for (let i = 0; i < 50_000; i += 1) minted.push(newId("run"));
+
+    const byMillisecond = new Map<number, string[]>();
+    for (const id of minted) {
+      const millisecond = mintedAt(id).getTime();
+      const group = byMillisecond.get(millisecond) ?? [];
+      group.push(id);
+      byMillisecond.set(millisecond, group);
     }
-    // The burst has to actually be a burst for this test to mean anything.
-    expect(burst.length).toBeGreaterThan(100);
-    expect([...burst].sort()).toEqual(burst);
+
+    const largest = [...byMillisecond.values()].sort(
+      (a, b) => b.length - a.length,
+    )[0];
+    // The group has to be a real crowd for this test to mean anything: within
+    // one millisecond the timestamp bits are identical, so only the tail keeps
+    // the order.
+    expect(largest?.length ?? 0).toBeGreaterThan(100);
+    expect([...largest!].sort()).toEqual(largest);
+    expect([...minted].sort()).toEqual(minted);
   });
 
   it("holds across a millisecond boundary", async () => {
