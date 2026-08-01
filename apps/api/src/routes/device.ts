@@ -235,7 +235,18 @@ export async function deviceRoutes(
       projectId: auth.projectId,
     });
 
+    // The page names one, and a session falls back to the project it is acting
+    // in. A credential that is acting in none has nothing to fall back to, and
+    // a terminal is authorized for a project rather than for a customer, so it
+    // is asked for rather than guessed at.
     const projectId = text(body.project_id) || auth.projectId;
+    if (projectId === undefined) {
+      return reply.code(400).send({
+        error: "no_project_named",
+        message:
+          "a terminal is authorized for one project, and this request named none",
+      });
+    }
 
     const cookie = request.headers.cookie ?? "";
     const status = await claim(userCode, cookie);

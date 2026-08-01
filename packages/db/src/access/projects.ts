@@ -78,14 +78,22 @@ export async function listProjects(
  * the project comes from the credential too, so there is no call that reaches
  * another project — not another customer's, and not another one of the
  * caller's.
+ *
+ * A credential that names no project is acting in none, so there is none to
+ * read and the answer is nothing. `listProjects` is what that caller wants, and
+ * it is scoped by the organization rather than by the project for exactly this
+ * reason.
  */
 export async function readProject(
   auth: AuthContext,
 ): Promise<Project | undefined> {
+  const { projectId } = auth;
+  if (projectId === undefined) return undefined;
+
   const [row] = await db()
     .select(COLUMNS)
     .from(project)
-    .where(and(theProject(auth), notDeleted))
+    .where(and(theProject(auth, projectId), notDeleted))
     .limit(1);
   return row;
 }

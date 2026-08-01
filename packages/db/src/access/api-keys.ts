@@ -7,8 +7,8 @@ import type { ApiKeyScope } from "../schema/columns.ts";
 import type { AuthContext } from "./context.ts";
 import { ProjectOutsideOrganizationError } from "./errors.ts";
 import { membershipsOf } from "./memberships.ts";
-import { permitsApiKeyMintedBy } from "./permissions.ts";
-import { isProjectOfOrganization, projectsOf } from "./projects.ts";
+import { permitsApiKeyMintedBy, type ActionScope } from "./permissions.ts";
+import { isProjectOfOrganization } from "./projects.ts";
 import { within } from "./within.ts";
 
 /**
@@ -44,10 +44,7 @@ const COLUMNS = {
 } as const;
 
 /** Where the caller is acting, for the per-key predicate below. */
-function here(auth: AuthContext): {
-  readonly organizationId: string;
-  readonly projectId: string;
-} {
+function here(auth: AuthContext): ActionScope {
   return { organizationId: auth.organizationId, projectId: auth.projectId };
 }
 
@@ -252,13 +249,6 @@ export async function resolveApiKey(
   if (membership === undefined) return undefined;
   if (membership.deactivatedAt !== null) return undefined;
 
-  // An organization-scoped key names no project, so it acts in the
-  // organization's oldest one — the project provisioning made — until something
-  // names another. Identifiers sort by mint time, so that is the first row.
-  const projectId =
-    key.projectId ?? (await projectsOf(key.organizationId))[0]?.id;
-  if (projectId === undefined) return undefined;
-
   await noteApiKeyUsed(key.id);
 
   return {
@@ -266,7 +256,10 @@ export async function resolveApiKey(
     auth: {
       userId: key.createdByUserId,
       organizationId: key.organizationId,
-      projectId,
+      // Exactly what the key row says, and nothing filled in for it. An
+      // organization-scoped key names no project because it is for the whole
+      // customer, so the context it produces names none either.
+      projectId: key.projectId ?? undefined,
       role: membership.role,
       via: "api_key",
     },

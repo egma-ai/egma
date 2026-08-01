@@ -39,9 +39,14 @@ function all(...conditions: readonly SQL[]): SQL {
  * organization-scoped key names no project and an owner must be able to see
  * every key in the organization. A table that is genuinely scoped to one
  * project — all of the product and execution tables, when they arrive with
- * their first caller — adds `eq(table.projectId, auth.projectId)` to the
- * conjunction below, taken from the context on the same terms as the
- * organization is.
+ * their first caller — narrows by the project too, taken from the context on
+ * the same terms as the organization is.
+ *
+ * **When that arrives, a context with no project is the whole organization and
+ * not a project.** An organization-scoped credential names none, so the project
+ * predicate is simply absent for it and the organization one still holds. The
+ * shape of `AuthContext.projectId` is what forces that decision to be made out
+ * loud rather than by whatever a missing value happens to do.
  */
 export function within(
   auth: AuthContext,
@@ -58,12 +63,17 @@ export function theOrganization(auth: AuthContext): SQL {
 }
 
 /**
- * The project the caller is acting in. Both predicates, both taken from the
- * context, so naming a different project is not a call anyone can make.
+ * The project the caller is acting in. Both predicates, and the organization is
+ * the context's, so naming a project of another customer's matches nothing.
+ *
+ * The project is passed rather than read off the context because a context can
+ * name none, and there is no project predicate for a credential that is for a
+ * whole customer. Taking it as an argument makes the caller narrow first, which
+ * is the point of `projectId` being able to be absent at all.
  */
-export function theProject(auth: AuthContext): SQL {
+export function theProject(auth: AuthContext, projectId: string): SQL {
   return all(
-    eq(project.id, auth.projectId),
+    eq(project.id, projectId),
     eq(project.organizationId, auth.organizationId),
   );
 }

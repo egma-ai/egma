@@ -91,10 +91,17 @@ export const ACTIONS = Object.keys(PERMISSIONS) as readonly Action[];
  * overrides on top of the organization role, and having the argument already
  * there makes that a change to one function body rather than an audit of every
  * call site in the product.
+ *
+ * **It can be absent**, because an organization-scoped credential names no
+ * project and an action taken for a whole customer is not taken in one. When
+ * project-level grants arrive, that is the case that falls back to the
+ * organization role rather than to any project's override — which is the
+ * answer, not a gap, and stating the absence here is what will make it
+ * answerable then.
  */
 export type ActionScope = {
   readonly organizationId: string;
-  readonly projectId: string;
+  readonly projectId: string | undefined;
 };
 
 /**

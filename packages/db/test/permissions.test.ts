@@ -397,10 +397,7 @@ async function join(host: Person, email: string, role: Role): Promise<Person> {
  * that read happens here, on this request, rather than at the moment the key
  * was minted.
  */
-async function contextForKey(
-  key: ApiKey,
-  fallbackProjectId: string,
-): Promise<AuthContext> {
+async function contextForKey(key: ApiKey): Promise<AuthContext> {
   const holding = (await membershipsOf(key.createdByUserId)).find(
     (membership) => membership.organizationId === key.organizationId,
   );
@@ -411,7 +408,9 @@ async function contextForKey(
   return {
     userId: key.createdByUserId,
     organizationId: key.organizationId,
-    projectId: key.projectId ?? fallbackProjectId,
+    // Whatever the key row says, and nothing filled in for it: a key for the
+    // whole organization is acting in no project.
+    projectId: key.projectId ?? undefined,
     role: holding.role,
     via: "api_key",
   };
@@ -490,7 +489,7 @@ describe("an API key", () => {
       { ...secret(), name: "mia's terminal" },
     );
 
-    const asMinted = await contextForKey(mine, mia.projectId);
+    const asMinted = await contextForKey(mine);
     expect(asMinted.role).toBe("member");
     expect(permits(asMinted, "author_definitions", inside(mia))).toBe(true);
     expect(permits(asMinted, "start_and_cancel_runs", inside(mia))).toBe(true);
@@ -504,7 +503,7 @@ describe("an API key", () => {
       mia.userId,
     ]);
 
-    const onTheNextRequest = await contextForKey(mine, mia.projectId);
+    const onTheNextRequest = await contextForKey(mine);
     expect(onTheNextRequest.role).toBe("viewer");
     expect(permits(onTheNextRequest, "author_definitions", inside(mia))).toBe(
       false,

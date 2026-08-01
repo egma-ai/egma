@@ -89,7 +89,8 @@ export class NotPermittedError extends Error {
   readonly role: Role;
   readonly action: Action;
   readonly organizationId: string;
-  readonly projectId: string;
+  /** Absent when the action was taken for a whole customer rather than in one. */
+  readonly projectId: string | undefined;
 
   constructor(auth: AuthContext, action: Action, scope: ActionScope) {
     super(

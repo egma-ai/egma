@@ -19,7 +19,23 @@ export type AuthContext = {
   /** egma's own user id. */
   readonly userId: string;
   readonly organizationId: string;
-  readonly projectId: string;
+  /**
+   * The project the caller is acting in, or **absent** — which is what an
+   * organization-scoped credential means and is not the same as a default.
+   *
+   * A key is organization-scoped unless it names a project, and one that names
+   * none is for the whole customer. Pointing it at *some* project instead —
+   * the oldest, say — reads as harmless while every table is scoped by the
+   * organization, and stops being harmless the moment a table is scoped by the
+   * project: the key would then see one product area rather than the customer
+   * it was minted for, silently, with nothing in the request to say so.
+   *
+   * It is `string | undefined` rather than optional so that the absence is a
+   * case every construction site states and every reader has to answer. A
+   * missing property would let a caller not think about it, which is the bug
+   * this shape exists to prevent.
+   */
+  readonly projectId: string | undefined;
   readonly role: Role;
   readonly via: Via;
 };

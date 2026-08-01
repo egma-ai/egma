@@ -1,7 +1,9 @@
 import {
   changeRole,
   createApiKey,
+  createProject,
   deactivateUser,
+  resolveApiKey,
   type AuthContext,
   type Role,
 } from "@egma/db";
@@ -433,6 +435,47 @@ describe("a request carrying a key", () => {
       ...before.rows[0],
       last_used_at: null,
     });
+  });
+});
+
+describe("the project a key acts in", () => {
+  /**
+   * A key is for one project or for the whole customer, and those are two
+   * different things rather than one thing with a default.
+   *
+   * Filling the second in with *some* project reads as harmless while every
+   * table is scoped by the organization, and stops being harmless the day a
+   * table is scoped by the project: a key minted for the whole customer would
+   * quietly read one product area, and nothing in the request would say so.
+   */
+  it("is none at all when the key was minted for the whole organization", async () => {
+    api = await createApi("keys_organization_scope");
+    const ada = await signUp("ada@acme.example", "Acme");
+
+    // A second project, so that "the organization's oldest" and "no project"
+    // are two different answers rather than the same one.
+    const outbound = await createProject(contextFor(ada, "admin"), {
+      name: "Outbound",
+      slug: "outbound",
+    });
+
+    const forEverything = await mint(ada, { name: "for everything" });
+    expect(forEverything.status).toBe(201);
+
+    const resolved = await resolveApiKey(hashApiKeySecret(forEverything.secret));
+    expect(resolved?.auth.organizationId).toBe(ada.organizationId);
+    expect(resolved?.auth.projectId).toBeUndefined();
+
+    // And a key that does name one acts in that one, which is the whole reason
+    // the other answer has to be distinguishable from it.
+    const forOutbound = await mint(ada, {
+      name: "outbound only",
+      project_id: outbound.id,
+    });
+    expect(forOutbound.status).toBe(201);
+
+    const scoped = await resolveApiKey(hashApiKeySecret(forOutbound.secret));
+    expect(scoped?.auth.projectId).toBe(outbound.id);
   });
 });
 
