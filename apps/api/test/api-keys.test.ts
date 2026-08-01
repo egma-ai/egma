@@ -1,4 +1,10 @@
-import { createApiKey, type AuthContext, type Role } from "@egma/db";
+import {
+  changeRole,
+  createApiKey,
+  deactivateUser,
+  type AuthContext,
+  type Role,
+} from "@egma/db";
 import { newId } from "@egma/ids";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -55,31 +61,46 @@ async function signUp(
 }
 
 /**
- * A colleague inside somebody's organization. There is no invitation yet, so
- * this writes the two rows an invitation will one day write, and everything
- * about roles is then exercised through the ordinary paths.
+ * A colleague inside somebody's organization, added the way the product adds
+ * one: an admin invites them, and they follow the link.
+ *
+ * It went through the invitation path on 2026-08-01, having previously written
+ * the two rows by hand with a note that an invitation would one day write them.
+ * Everything in this file about roles, demotion and deactivation is therefore
+ * now standing on the real thing rather than on a fixture that agreed with it.
  */
 async function colleagueOf(
   host: Person,
   email: string,
   role: Role,
 ): Promise<Person> {
-  const userId = newId("usr");
-  await api.database.sql(
-    "insert into \"user\" (id, email, name) values ($1, $2, $3)",
-    [userId, email, email],
-  );
-  await api.database.sql(
-    `insert into membership (id, organization_id, user_id, role, created_by)
-     values ($1, $2, $3, $4, $5)`,
-    [newId("mbr"), host.organizationId, userId, role, host.userId],
-  );
+  const invited = await api.app.inject({
+    method: "POST",
+    url: "/api/invitations",
+    headers: { cookie: host.cookie },
+    payload: { email, role },
+  });
+  expect(invited.statusCode, invited.body).toBe(201);
+
+  const link = (invited.json() as { accept_url: string }).accept_url;
+  const joined = await api.app.inject({
+    method: "POST",
+    url: "/api/signup",
+    payload: {
+      email,
+      password: "a-long-enough-password",
+      invitationToken: new URL(link).searchParams.get("token"),
+    },
+  });
+  expect(joined.statusCode, joined.body).toBe(201);
+  const landed = joined.json() as { userId: string; role: Role };
+  expect(landed.role).toBe(role);
 
   return {
-    userId,
+    userId: landed.userId,
     organizationId: host.organizationId,
     projectId: host.projectId,
-    cookie: "",
+    cookie: cookiesFrom(joined.headers["set-cookie"]),
   };
 }
 
@@ -339,11 +360,11 @@ describe("a request carrying a key", () => {
     api = await createApi("keys_deactivated");
     const ada = await signUp("ada@acme.example", "Acme");
     const minted = await mint(ada);
+    // An organization keeps at least one admin, so somebody has to be able to
+    // do the deactivating. This is also the shape a real deprovisioning has.
+    const noor = await colleagueOf(ada, "noor@acme.example", "admin");
 
-    await api.database.sql(
-      'update "user" set deactivated_at = now() where id = $1',
-      [ada.userId],
-    );
+    await deactivateUser(contextFor(noor, "admin"), ada.userId);
 
     expect(
       (
@@ -380,10 +401,7 @@ describe("a request carrying a key", () => {
 
     // The demotion, and nothing else. No key row is touched, and nobody goes
     // looking for one.
-    await api.database.sql(
-      "update membership set role = 'viewer' where user_id = $1",
-      [mia.userId],
-    );
+    await changeRole(contextFor(ada, "admin"), mia.userId, "viewer");
 
     const listed = await api.app.inject({
       method: "GET",
