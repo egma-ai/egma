@@ -25,6 +25,14 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-egma}:${POSTGRES_PASSWORD:-egma}@postgres:5432/${POSTGRES_DB:-egma}
       HOST: 0.0.0.0
       PORT: "3100"
+      # Signs session cookies. The default is a development one and every
+      # instance that anybody else can reach needs its own; see .env.example.
+      EGMA_AUTH_SECRET: ${EGMA_AUTH_SECRET:-development-only-change-this-before-anybody-else-can-reach-it}
+      # Where a browser reaches this instance. The pages and the API answer on
+      # one origin, and that origin is the self-hoster's own.
+      EGMA_BASE_URL: ${EGMA_BASE_URL:-http://localhost:3101}
+      EGMA_SINGLE_ORGANIZATION: ${EGMA_SINGLE_ORGANIZATION:-true}
+      EGMA_TRUST_PROXY: ${EGMA_TRUST_PROXY:-false}
     ports:
       - "3100:3100"
     depends_on:
@@ -45,6 +53,11 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        # The web application proxies the API's paths so that both answer on one
+        # origin. Next resolves this into the build, so it is an argument rather
+        # than an environment variable.
+        EGMA_API_ORIGIN: ${EGMA_API_ORIGIN:-http://api:3100}
     environment:
       HOSTNAME: 0.0.0.0
       PORT: "3101"

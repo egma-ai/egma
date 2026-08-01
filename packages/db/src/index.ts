@@ -6,5 +6,11 @@ export {
   type Migration,
   type MigrationResult,
 } from "./migrate.ts";
+export {
+  identityId,
+  identityStore,
+  IDENTITY_MODELS,
+  type IdentityModel,
+} from "./identity-store.ts";
 export * from "./access/index.ts";
 export * as schema from "./schema/index.ts";

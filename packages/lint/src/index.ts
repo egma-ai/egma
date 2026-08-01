@@ -25,6 +25,7 @@ export const RULE_NAMES = [
   "no-reaching-into-the-data-access-module",
   "one-place-reads-a-membership",
   "every-exported-call-carries-an-auth-context",
+  "only-the-seam-knows-the-auth-provider",
 ] as const;
 
 export type RuleName = (typeof RULE_NAMES)[number];
@@ -45,12 +46,55 @@ const ACCESS_SURFACE = "packages/db/src/access/index.ts";
 const AUTH_CONTEXT = "AuthContext";
 
 /**
- * The two exports that cannot take an `AuthContext`, because between them they
- * are what produces one: which organizations a person is in, and bringing a new
- * organization into existence. Neither can reach a row belonging to anybody
- * else. A third name in this list is a decision somebody has to make on purpose.
+ * The exports that cannot take an `AuthContext`, because between them they are
+ * what produces one: which organization a person is in, which projects are in
+ * it, and bringing a new organization into existence. None of them can reach a
+ * row belonging to anybody else — each takes the thing the credential already
+ * resolved to and can return nothing outside it. Another name in this list is a
+ * decision somebody has to make on purpose.
  */
-const CONTEXT_ESTABLISHING = ["membershipsOf", "provisionOrganization"];
+const CONTEXT_ESTABLISHING = [
+  "membershipsOf",
+  "projectsOf",
+  "provisionOrganization",
+];
+
+/**
+ * The exports that answer a question about the deployment rather than about a
+ * customer. `instanceIsClaimed` is asked by somebody looking at a signup form,
+ * who has no credential to build a context from and never will until they have
+ * signed up.
+ *
+ * This category is narrower than the one above and the rule enforces the reason
+ * it is safe: a function here **takes no arguments at all**. With nothing to
+ * name, there is no customer to name wrongly, and a boolean carries no row out.
+ * A function here that grew a parameter would be an ordinary read wearing an
+ * exemption, so the rule refuses it.
+ */
+const INSTANCE_SCOPED = ["instanceIsClaimed"];
+
+/**
+ * The auth provider, as the package names it import. The provider answers one
+ * question — who is this person, and are they logged in — and the whole reason
+ * a swap stays cheap is that the answer arrives through egma's own types rather
+ * than the vendor's.
+ */
+const AUTH_PROVIDER_PACKAGES = ["better-auth", "@better-auth/core"];
+
+/**
+ * The only files that may name the auth provider.
+ *
+ * One binds it to the five identity tables, because the pool is private and
+ * something has to hand it a way in. One implements the seam — resolve an
+ * identity, the two device-flow calls, revoke a session — and everything else
+ * in the codebase talks to that. A third file here is porting cost: it is the
+ * vendor spreading past the seam, which is the failure this whole arrangement
+ * exists to prevent.
+ */
+const AUTH_PROVIDER_SEAM = [
+  "packages/db/src/identity-store.ts",
+  "apps/api/src/auth/better-auth.ts",
+];
 
 /**
  * A driver for a store egma keeps customer data in. ClickHouse is named before
@@ -255,6 +299,12 @@ function isDatastoreDriver(specifier: string): boolean {
   );
 }
 
+function isAuthProvider(specifier: string): boolean {
+  return AUTH_PROVIDER_PACKAGES.some(
+    (name) => specifier === name || specifier.startsWith(`${name}/`),
+  );
+}
+
 function resolvedInsideModule(file: string, specifier: string): boolean {
   if (specifier.startsWith("@egma/db/")) return true;
   if (!specifier.startsWith(".")) return false;
@@ -354,10 +404,9 @@ async function checkExportedCallShapes(root: string): Promise<Violation[]> {
 
       const first = declaration.parameters[0];
       const firstType = first?.type?.getText(declaring);
-      if (
-        !CONTEXT_ESTABLISHING.includes(name) &&
-        firstType !== AUTH_CONTEXT
-      ) {
+      const exempt =
+        CONTEXT_ESTABLISHING.includes(name) || INSTANCE_SCOPED.includes(name);
+      if (!exempt && firstType !== AUTH_CONTEXT) {
         violations.push({
           file,
           line: line(declaration),
@@ -366,6 +415,19 @@ async function checkExportedCallShapes(root: string): Promise<Violation[]> {
             `${name} is exported but does not take an ${AUTH_CONTEXT} first. ` +
             `A caller cannot be allowed to forget the tenancy filter, so a ` +
             `caller cannot be allowed to call without the context.`,
+        });
+      }
+
+      if (INSTANCE_SCOPED.includes(name) && declaration.parameters.length > 0) {
+        violations.push({
+          file,
+          line: line(declaration),
+          rule: "every-exported-call-carries-an-auth-context",
+          detail:
+            `${name} skips the ${AUTH_CONTEXT} because it asks about the ` +
+            `deployment rather than about a customer, and that only holds ` +
+            `while it takes nothing. A parameter would give it a customer to ` +
+            `name, and it would be an ordinary read wearing an exemption.`,
         });
       }
 
@@ -416,6 +478,23 @@ export async function check(root: string): Promise<Violation[]> {
             `Only ${DATA_ACCESS_MODULE} may hold one: every read and write ` +
             `goes through a function there that takes an AuthContext and ` +
             `injects the tenancy predicates itself.`,
+        });
+      }
+
+      if (
+        isAuthProvider(record.specifier) &&
+        !AUTH_PROVIDER_SEAM.includes(file)
+      ) {
+        violations.push({
+          file,
+          line: record.line,
+          rule: "only-the-seam-knows-the-auth-provider",
+          detail:
+            `imports the auth provider "${record.specifier}". Only ` +
+            `${AUTH_PROVIDER_SEAM.join(" and ")} may: the provider answers ` +
+            `who this person is and whether they are logged in, and the rest ` +
+            `of the codebase sees that answer as egma's own type. Every ` +
+            `import past the seam is what a provider swap would have to undo.`,
         });
       }
 

@@ -17,8 +17,31 @@ const CONNECTION = ["connect", "disconnect", "ping"];
 /** Applying the schema, which happens on boot before any context exists. */
 const MIGRATIONS = ["MIGRATIONS_DIRECTORY", "readMigrations", "runMigrations"];
 
-/** What produces an `AuthContext`. Two, and a third is a decision. */
-const CONTEXT_ESTABLISHING = ["membershipsOf", "provisionOrganization"];
+/**
+ * How the auth provider reaches the five identity tables. It is handed a
+ * binding rather than a connection, so the pool is still never given out, and
+ * this is the only place in the codebase that knows both the provider and the
+ * tables.
+ */
+const IDENTITY = ["IDENTITY_MODELS", "identityId", "identityStore"];
+
+/**
+ * What produces an `AuthContext`: which organization a person is in, and which
+ * projects are in it. A third name here is a decision somebody makes on
+ * purpose.
+ */
+const CONTEXT_ESTABLISHING = [
+  "membershipsOf",
+  "projectsOf",
+  "provisionOrganization",
+];
+
+/**
+ * What answers a question about the deployment rather than about a customer.
+ * It takes nothing and returns a boolean, which is what makes it safe without a
+ * context; a build rule refuses it the moment it grows an argument.
+ */
+const INSTANCE_SCOPED = ["instanceIsClaimed"];
 
 /** Everything that touches a customer's data. All of it needs the context. */
 const CONTEXT_REQUIRING = [
@@ -61,7 +84,9 @@ describe("the data-access module's surface", () => {
       [
         ...CONNECTION,
         ...MIGRATIONS,
+        ...IDENTITY,
         ...CONTEXT_ESTABLISHING,
+        ...INSTANCE_SCOPED,
         ...CONTEXT_REQUIRING,
         ...PERMISSION,
         ...VALUES,

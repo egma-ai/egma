@@ -15,12 +15,18 @@
  * and project predicates from it. No exported function accepts a filter, so
  * none can be widened and none can be omitted.
  *
- * **Context-establishing.** `membershipsOf` and `provisionOrganization`, and
- * only those two. One answers which organizations a person is in — the fact an
- * `AuthContext` is built from — and the other brings a new organization into
- * existence. Neither can return, or reach, a row belonging to anybody else.
- * Anything added to this category is a deliberate act: a test names both and
- * fails when a third appears.
+ * **Context-establishing.** `membershipsOf`, `projectsOf` and
+ * `provisionOrganization`, and only those three. The first two are the two
+ * halves of what an `AuthContext` is made of — which organization a person is
+ * in, and which projects are in it — and the third brings a new organization
+ * into existence. None of them can return, or reach, a row belonging to
+ * anybody else. Anything added to this category is a deliberate act: a test
+ * names them all and fails when a fourth appears.
+ *
+ * **Instance-scoped.** `instanceIsClaimed`, and only it. It takes nothing and
+ * returns a boolean, so it can neither name a customer nor carry a row out. It
+ * is asked by the one caller with no credential at all — somebody looking at a
+ * signup form — and the same test names it.
  *
  * **Deciding.** The role list, the action list, and the one function every
  * action in the product passes through. They take an `AuthContext` like
@@ -56,6 +62,7 @@ export {
   type NewOrganization,
   type ProvisionedOrganization,
 } from "./provisioning.ts";
+export { instanceIsClaimed } from "./instance.ts";
 
 export {
   readOrganization,
@@ -68,6 +75,7 @@ export {
 
 export {
   listProjects,
+  projectsOf,
   readProject,
   createProject,
   type NewProject,

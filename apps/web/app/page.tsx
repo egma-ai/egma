@@ -1,11 +1,124 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+import { pickers, type Workspace } from "../lib/workspace.ts";
+import { Card, styles } from "./ui.tsx";
+
+/**
+ * Where you are.
+ *
+ * This is the whole of the interface after signing up, and it exists to show
+ * one thing: that somebody landed in an organization and a project without
+ * being asked to make either. The dashboard is a separate effort — it reads run
+ * data out of a store that does not exist yet.
+ *
+ * The pickers follow the cardinality rule: a level with one thing in it is not
+ * a choice, so it is not shown. Somebody running egma for themselves therefore
+ * sees no organization picker and no project picker, and never learns there
+ * could have been either.
+ */
+
+type State =
+  | { status: "loading" }
+  | { status: "signed-out" }
+  | { status: "signed-in"; workspace: Workspace };
+
 export default function Home() {
+  const [state, setState] = useState<State>({ status: "loading" });
+
+  useEffect(() => {
+    let current = true;
+    void fetch("/api/me")
+      .then(async (response) => {
+        if (!current) return;
+        if (!response.ok) {
+          setState({ status: "signed-out" });
+          return;
+        }
+        setState({
+          status: "signed-in",
+          workspace: (await response.json()) as Workspace,
+        });
+      })
+      .catch(() => {
+        if (current) setState({ status: "signed-out" });
+      });
+    return () => {
+      current = false;
+    };
+  }, []);
+
+  if (state.status === "loading") return <Card title="egma">Loading…</Card>;
+
+  if (state.status === "signed-out") {
+    return (
+      <Card title="egma" lead="Trust the voice agent you ship to production.">
+        <p style={styles.aside}>
+          <a href="/signup">Set up egma</a> · <a href="/sign-in">Sign in</a>
+        </p>
+      </Card>
+    );
+  }
+
+  const { workspace } = state;
+  const visible = pickers(workspace);
+  const organization = workspace.organizations[0];
+  const project = workspace.projects[0];
+
   return (
-    <main style={{ padding: "3rem", maxWidth: "40rem" }}>
-      <h1 style={{ fontSize: "1.5rem", margin: 0 }}>egma</h1>
-      <p style={{ color: "#555" }}>
-        The web application is running. The pages it will serve are not built
-        yet.
+    <Card title="You are set up" lead={workspace.user.email}>
+      {visible.organization ? (
+        <Choice label="Organization" of={workspace.organizations} />
+      ) : (
+        <Fact label="Organization" value={organization?.name ?? "—"} />
+      )}
+
+      {visible.project ? (
+        <Choice label="Project" of={workspace.projects} />
+      ) : (
+        <Fact label="Project" value={project?.name ?? "—"} />
+      )}
+
+      <Fact label="Your role" value={organization?.role ?? "—"} />
+
+      <p style={styles.aside}>
+        Nothing else is built yet. Everything a test needs — agents,
+        connections, digital humans, graders — arrives with the effort that can
+        run one.
       </p>
-    </main>
+    </Card>
+  );
+}
+
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={styles.definition}>
+      <span style={{ color: "#666" }}>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function Choice({
+  label,
+  of,
+}: {
+  label: string;
+  of: readonly { id: string; name: string }[];
+}) {
+  return (
+    <div style={{ ...styles.definition, alignItems: "center" }}>
+      <label style={{ color: "#666" }} htmlFor={`pick-${label}`}>
+        {label}
+      </label>
+      <select id={`pick-${label}`} style={{ fontFamily: "inherit" }}>
+        {of.map((one) => (
+          <option key={one.id} value={one.id}>
+            {one.name}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }

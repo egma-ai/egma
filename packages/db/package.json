@@ -9,18 +9,22 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist", "migrations"],
+  "files": [
+    "dist",
+    "migrations"
+  ],
   "scripts": {
     "build": "tsc -b",
     "generate": "drizzle-kit generate"
   },
   "dependencies": {
     "@egma/ids": "workspace:*",
-    "drizzle-orm": "^0.44.7",
+    "better-auth": "^1.6.25",
+    "drizzle-orm": "^0.45.2",
     "pg": "^8.16.3"
   },
   "devDependencies": {
     "@types/pg": "^8.15.6",
-    "drizzle-kit": "^0.31.6"
+    "drizzle-kit": "^0.31.10"
   }
 }

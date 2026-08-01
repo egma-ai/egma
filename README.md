@@ -21,11 +21,24 @@ it boots.
 | API | http://localhost:3100 |
 | Postgres | `postgres://egma:egma@localhost:5433/egma` |
 
+Open http://localhost:3101 and sign up. Your organization and your first project
+are created together, and you become their admin. On a fresh instance the first
+person to sign up claims it, and open signup closes behind them — everybody
+after that arrives by invitation.
+
 `GET /health` on the API and `GET /api/health` on the web application are what
 the container health checks poll.
 
-Ports and Postgres credentials come from the environment; see `.env.example` for
-the names and their defaults.
+Ports, Postgres credentials and the settings below come from the environment;
+see `.env.example` for the names and their defaults.
+
+**`EGMA_AUTH_SECRET` signs session cookies and the API refuses to start without
+one.** Compose supplies a development default so that `docker compose up` works
+out of the box. Change it before anybody else can reach your instance.
+
+Email is optional. With no transport configured, signup completes and
+verification is not a step — every message egma would have sent is written to
+the API's log instead.
 
 ## Working on it
 
@@ -49,12 +62,39 @@ would rather use your own.
 
 ```
 apps/api        Fastify API. Applies migrations on boot, then serves.
-apps/web        Next.js web application.
+apps/web        Next.js web application: signup, sign-in, and where you are.
 packages/db     The data-access module: schema, migrations, and every read
                 and write there is.
 packages/ids    The identifier generator.
-packages/lint   Build-time rules that hold the data-access boundary in place.
+packages/lint   Build-time rules that hold the boundaries in place.
 ```
+
+The two processes answer on **one origin**. The web application proxies the
+API's paths to it, so the session cookie is valid for both and there is no
+cross-origin cookie handling anywhere. Everything the browser talks to is the
+instance it loaded the page from, which is what makes logging in depend on
+nothing a self-hoster does not run.
+
+## Authentication
+
+An auth provider answers one question: who is this person, and are they logged
+in. Everything past the front door is egma's — organizations, projects,
+membership, invitations, API keys and every permission check are egma's own
+tables with egma's own foreign keys.
+
+That line is held by two build rules on top of the ones above:
+
+- **Only `apps/api/src/auth/better-auth.ts` and `packages/db/src/identity-store.ts`
+  may import the provider's package.** Everything else sees the four-call seam
+  in `apps/api/src/auth/seam.ts`. A third file naming the provider is porting
+  cost paid later by somebody who did not choose it.
+- **egma writes the DDL for the provider's tables** and its migrator is not
+  wired up. It reads and writes `user`, `session`, `account`, `verification` and
+  `device_code`; it cannot alter them.
+
+The provider is on the request path for browser sessions, because turning a
+session cookie into an identity is exactly what it is for. It is absent from the
+API-key path entirely.
 
 ## Reading and writing data
 

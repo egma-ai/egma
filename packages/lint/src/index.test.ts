@@ -257,10 +257,10 @@ describe("an exported call that could reach the database without a customer", ()
     expect(await check(root)).toEqual([]);
   });
 
-  it("allows exactly the two exports that produce a context, and no third", async () => {
+  it("allows exactly the exports that produce a context, and no other", async () => {
     await withSurface(
-      'export { membershipsOf, provisionOrganization, resolveApiKey } from "./things.ts";\n',
-      "export async function membershipsOf(userId: string): Promise<string[]> {\n  return [userId];\n}\nexport async function provisionOrganization(name: string): Promise<string> {\n  return name;\n}\nexport async function resolveApiKey(hash: string): Promise<string> {\n  return hash;\n}\n",
+      'export { membershipsOf, projectsOf, provisionOrganization, resolveApiKey } from "./things.ts";\n',
+      "export async function membershipsOf(userId: string): Promise<string[]> {\n  return [userId];\n}\nexport async function projectsOf(organizationId: string): Promise<string[]> {\n  return [organizationId];\n}\nexport async function provisionOrganization(name: string): Promise<string> {\n  return name;\n}\nexport async function resolveApiKey(hash: string): Promise<string> {\n  return hash;\n}\n",
     );
 
     const violations = await check(root);
@@ -270,11 +270,75 @@ describe("an exported call that could reach the database without a customer", ()
     expect(violations[0]?.detail).toContain("resolveApiKey");
   });
 
+  it("allows a question about the deployment, which has no customer to name", async () => {
+    await withSurface(
+      'export { instanceIsClaimed } from "./things.ts";\n',
+      "export async function instanceIsClaimed(): Promise<boolean> {\n  return true;\n}\n",
+    );
+
+    expect(await check(root)).toEqual([]);
+  });
+
+  it("refuses that exemption the moment it grows an argument", async () => {
+    await withSurface(
+      'export { instanceIsClaimed } from "./things.ts";\n',
+      "export async function instanceIsClaimed(organizationId: string): Promise<boolean> {\n  return organizationId !== '';\n}\n",
+    );
+
+    const violations = await check(root);
+    expect(rules(violations)).toEqual([
+      "every-exported-call-carries-an-auth-context",
+    ]);
+    expect(violations[0]?.detail).toContain("wearing an exemption");
+  });
+
   it("says nothing about what the module keeps to itself", async () => {
     await write("packages/db/src/access/index.ts", "export {} from './things.ts';\n");
     await write(
       "packages/db/src/access/things.ts",
       "export function insertThing(on: unknown): unknown {\n  return on;\n}\n",
+    );
+
+    expect(await check(root)).toEqual([]);
+  });
+});
+
+describe("a file naming the auth provider", () => {
+  it("fails the build, because a swap must not have to reach past the seam", async () => {
+    await write(
+      "apps/api/src/routes/things.ts",
+      'import { betterAuth } from "better-auth";\nexport { betterAuth };\n',
+    );
+
+    const violations = await check(root);
+    expect(rules(violations)).toEqual(["only-the-seam-knows-the-auth-provider"]);
+    expect(violations[0]?.detail).toContain("better-auth");
+  });
+
+  it("fails on a deep import of it, and on its core package", async () => {
+    await write(
+      "apps/web/app/page.tsx",
+      'import { APIError } from "better-auth/api";\nexport { APIError };\n',
+    );
+    await write(
+      "apps/api/src/auth/session.ts",
+      'import type { Session } from "@better-auth/core";\nexport type S = Session;\n',
+    );
+
+    expect(rules(await check(root))).toEqual([
+      "only-the-seam-knows-the-auth-provider",
+      "only-the-seam-knows-the-auth-provider",
+    ]);
+  });
+
+  it("allows the file that implements the seam, and the one that binds the tables", async () => {
+    await write(
+      "apps/api/src/auth/better-auth.ts",
+      'import { betterAuth } from "better-auth";\nexport { betterAuth };\n',
+    );
+    await write(
+      "packages/db/src/identity-store.ts",
+      'import { drizzleAdapter } from "better-auth/adapters/drizzle";\nexport { drizzleAdapter };\n',
     );
 
     expect(await check(root)).toEqual([]);

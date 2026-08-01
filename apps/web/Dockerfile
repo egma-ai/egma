@@ -13,6 +13,11 @@ COPY packages/lint/package.json packages/lint/
 RUN pnpm install --frozen-lockfile --filter "@egma/web..."
 
 COPY apps/web apps/web
+
+# Where this process proxies the API's paths to. Next resolves rewrites into
+# the build, so this is fixed here rather than at start-up.
+ARG EGMA_API_ORIGIN=http://api:3100
+ENV EGMA_API_ORIGIN=${EGMA_API_ORIGIN}
 RUN pnpm --filter @egma/web build
 
 FROM node:24-alpine AS runtime

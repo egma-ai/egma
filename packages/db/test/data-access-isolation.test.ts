@@ -4,11 +4,13 @@ import { newId } from "@egma/ids";
 import {
   createApiKey,
   createProject,
+  instanceIsClaimed,
   listApiKeys,
   listMemberships,
   listProjects,
   membershipsOf,
   ProjectOutsideOrganizationError,
+  projectsOf,
   provisionOrganization,
   readOrganization,
   readOrganizationSettings,
@@ -267,6 +269,33 @@ describe("who is in the organization", () => {
         role: "admin",
       },
     ]);
+  });
+});
+
+describe("which projects an organization has", () => {
+  it("is answered for that organization only, so a context can be built from it", async () => {
+    expect((await projectsOf(globex.organizationId)).map((row) => row.slug)).toEqual(
+      ["default", "support"],
+    );
+
+    for (const row of await projectsOf(acme.organizationId)) {
+      expect(row.organizationId).toBe(acme.organizationId);
+    }
+  });
+
+  it("puts the project provisioning made first, because identifiers sort by mint time", async () => {
+    const [first] = await projectsOf(acme.organizationId);
+    expect(first?.id).toBe(acme.projectId);
+  });
+
+  it("returns nothing for an organization that is not there", async () => {
+    expect(await projectsOf(newId("org"))).toEqual([]);
+  });
+});
+
+describe("whether anybody has signed up here yet", () => {
+  it("is true once a customer exists, which is what closes open signup", async () => {
+    expect(await instanceIsClaimed()).toBe(true);
   });
 });
 

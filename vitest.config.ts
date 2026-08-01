@@ -12,7 +12,14 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["packages/*/src/**/*.test.ts", "packages/*/test/**/*.test.ts", "apps/api/test/**/*.test.ts"],
+    include: [
+      "packages/*/src/**/*.test.ts",
+      "packages/*/test/**/*.test.ts",
+      "apps/api/test/**/*.test.ts",
+      "apps/web/test/**/*.test.ts",
+    ],
+    // The API logs a line per request, and a test run is thousands of them.
+    env: { LOG_LEVEL: "silent" },
     // Every database test owns a freshly created database, so files can run in
     // parallel; within a file the order matters.
     fileParallelism: true,

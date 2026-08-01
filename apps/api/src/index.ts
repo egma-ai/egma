@@ -1,7 +1,7 @@
 import { connect, disconnect, runMigrations } from "@egma/db";
 
 import { loadConfig } from "./config.ts";
-import { buildServer } from "./server.ts";
+import { buildApi } from "./server.ts";
 
 const config = loadConfig();
 
@@ -11,7 +11,7 @@ const migrations = await runMigrations(config.databaseUrl);
 
 connect({ databaseUrl: config.databaseUrl });
 
-const app = buildServer();
+const { app } = buildApi({ config });
 app.log.info(
   { applied: migrations.applied },
   migrations.applied.length === 0

@@ -32,6 +32,37 @@ const COLUMNS = {
 
 const notDeleted: SQL = isNull(project.deletedAt);
 
+/**
+ * Which projects belong to an organization? The second half of what an
+ * `AuthContext` is built from, and the counterpart to `membershipsOf`.
+ *
+ * Resolving a browser session is otherwise circular: the context names a
+ * project, and finding the project needs a context. `membershipsOf` answers
+ * which organization the person is in, this answers which projects are in it,
+ * and only then is there a context to hand to anything else. Every other read
+ * of a project goes through `listProjects` below, which takes the context like
+ * everything else.
+ *
+ * It is safe on the same terms as `membershipsOf`: the organization it is given
+ * is the one the credential already resolved to, it names no project, and it
+ * can return nothing outside the organization it was asked about. A caller with
+ * somebody else's organization id has already gone wrong somewhere no read
+ * could have saved them.
+ *
+ * The order is by identifier, which sorts by mint time, so the first row is the
+ * organization's oldest project — the one provisioning created — and a session
+ * that has named no project lands there.
+ */
+export async function projectsOf(
+  organizationId: string,
+): Promise<readonly Project[]> {
+  return db()
+    .select(COLUMNS)
+    .from(project)
+    .where(and(eq(project.organizationId, organizationId), notDeleted))
+    .orderBy(project.id);
+}
+
 export async function listProjects(
   auth: AuthContext,
 ): Promise<readonly Project[]> {
