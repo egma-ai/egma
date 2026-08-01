@@ -34,8 +34,26 @@ const CONTEXT_REQUIRING = [
   "updateOrganizationSettings",
 ];
 
-/** Vocabulary: the table definitions, the role list, and one refusal. */
-const VALUES = ["ProjectOutsideOrganizationError", "VIA", "schema"];
+/**
+ * Deciding what a role may do. These take the context like everything else and
+ * then read nothing: a permission is answered from the role the context already
+ * carries, which is how a key comes to act at its creator's current role.
+ */
+const PERMISSION = [
+  "ACTIONS",
+  "ROLES",
+  "authorize",
+  "permits",
+  "permitsApiKeyMintedBy",
+];
+
+/** Vocabulary: the table definitions, how a caller proved who they are, and the refusals. */
+const VALUES = [
+  "NotPermittedError",
+  "ProjectOutsideOrganizationError",
+  "VIA",
+  "schema",
+];
 
 describe("the data-access module's surface", () => {
   it("is exactly this, so widening it cannot happen by accident", () => {
@@ -45,6 +63,7 @@ describe("the data-access module's surface", () => {
         ...MIGRATIONS,
         ...CONTEXT_ESTABLISHING,
         ...CONTEXT_REQUIRING,
+        ...PERMISSION,
         ...VALUES,
       ].sort(),
     );

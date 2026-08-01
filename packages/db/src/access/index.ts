@@ -8,7 +8,7 @@
  * therefore takes adding a new export here, rather than forgetting a `WHERE`
  * clause somewhere nobody is looking.
  *
- * Two categories of export, and there is no third:
+ * Three categories of export, and the third reaches no store at all:
  *
  * **Context-requiring.** Everything that touches a customer's data takes an
  * `AuthContext` as its first argument and the module builds the organization
@@ -22,14 +22,33 @@
  * Anything added to this category is a deliberate act: a test names both and
  * fails when a third appears.
  *
+ * **Deciding.** The role list, the action list, and the one function every
+ * action in the product passes through. They take an `AuthContext` like
+ * everything else and then read nothing: a permission is decided from the role
+ * the context already carries, which is what keeps the answer current rather
+ * than remembered. They are here, beside the context they read, because the
+ * context is the only input they have.
+ *
  * The ClickHouse client arrives behind this same boundary on these same terms:
  * a file beside these, taking the same `AuthContext`, injecting the same
  * predicates, with its driver already named in the lint rule's list.
  */
 
 export type { AuthContext, Role, Via } from "./context.ts";
-export { VIA } from "./context.ts";
-export { ProjectOutsideOrganizationError } from "./errors.ts";
+export { ROLES, VIA } from "./context.ts";
+export {
+  NotPermittedError,
+  ProjectOutsideOrganizationError,
+} from "./errors.ts";
+
+export {
+  ACTIONS,
+  authorize,
+  permits,
+  permitsApiKeyMintedBy,
+  type Action,
+  type ActionScope,
+} from "./permissions.ts";
 
 export { membershipsOf, listMemberships, type Membership } from "./memberships.ts";
 export {

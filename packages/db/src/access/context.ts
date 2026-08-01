@@ -1,4 +1,4 @@
-import type { Role } from "../schema/columns.ts";
+import { ROLES, type Role } from "../schema/columns.ts";
 
 /**
  * Who is asking, which customer, which project, what role.
@@ -28,4 +28,13 @@ export type AuthContext = {
 export const VIA = ["session", "api_key"] as const;
 export type Via = (typeof VIA)[number];
 
+/**
+ * The three roles, and the whole list. Every new person is an `admin`, so v1
+ * behaves as though roles do not exist; what each one may do is `permissions.ts`.
+ *
+ * A role is never resolved from a credential. It is read from the person's
+ * membership at the moment the context is built, which is what makes a demotion
+ * reach every key that person ever minted on their next request.
+ */
+export { ROLES };
 export type { Role };
