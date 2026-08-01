@@ -8,9 +8,10 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "tsc -b packages/ids packages/db apps/api",
+    "lint": "node packages/lint/src/cli.ts",
+    "build": "pnpm lint && tsc -b packages/ids packages/db packages/lint apps/api",
     "typecheck": "pnpm build && tsc -p tsconfig.tests.json && pnpm --filter @egma/web typecheck",
-    "clean": "tsc -b --clean packages/ids packages/db apps/api",
+    "clean": "tsc -b --clean packages/ids packages/db packages/lint apps/api",
     "db:up": "docker compose up -d --wait postgres",
     "db:down": "docker compose down",
     "db:generate": "pnpm --filter @egma/db generate",

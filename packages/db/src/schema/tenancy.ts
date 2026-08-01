@@ -19,6 +19,8 @@ import {
   prefixCheck,
   ROLES,
   updatedAt,
+  type ApiKeyScope,
+  type Role,
 } from "./columns.ts";
 import { check } from "drizzle-orm/pg-core";
 
@@ -113,7 +115,7 @@ export const membership = pgTable(
     userId: idText("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    role: text("role").notNull(),
+    role: text("role").notNull().$type<Role>(),
     createdBy: idText("created_by").references(() => user.id, {
       onDelete: "set null",
     }),
@@ -143,7 +145,7 @@ export const invitation = pgTable(
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
     email: citext("email").notNull(),
-    role: text("role").notNull(),
+    role: text("role").notNull().$type<Role>(),
     tokenHash: text("token_hash").notNull(),
     expiresAt: moment("expires_at").notNull(),
     acceptedAt: moment("accepted_at"),
@@ -170,7 +172,7 @@ export const apiKey = pgTable(
       .references(() => organization.id, { onDelete: "cascade" }),
     /** Null means the key is organization-scoped. */
     projectId: idText("project_id"),
-    scope: text("scope").notNull(),
+    scope: text("scope").notNull().$type<ApiKeyScope>(),
     /** A single SHA-256 over a high-entropy random secret. */
     hash: text("hash").notNull(),
     prefix: text("prefix").notNull(),

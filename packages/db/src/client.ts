@@ -32,12 +32,31 @@ export async function disconnect(): Promise<void> {
   await open?.end();
 }
 
-function connected(): NonNullable<typeof database> {
+/**
+ * The query interface every function in `access/` is built on. The pool behind
+ * it is never handed out, and this is deliberately not re-exported from the
+ * package entry point: the package's `exports` map offers `.` and nothing else,
+ * so no file outside `packages/db/src` can reach it. A lint rule fails the build
+ * if one tries.
+ */
+export function db(): Database {
   if (database === undefined) throw new Error("not connected to Postgres");
   return database;
 }
 
+export type Database = NonNullable<typeof database>;
+export type Transaction = Parameters<
+  Parameters<Database["transaction"]>[0]
+>[0];
+
+/**
+ * Somewhere a statement can run: the connection, or a transaction on it. A
+ * write that has to be all-or-nothing opens a transaction and hands this to the
+ * functions that own each table, so a table still has exactly one owner.
+ */
+export type Queryable = Database | Transaction;
+
 /** Answers whether the database is reachable, and nothing else. */
 export async function ping(): Promise<void> {
-  await connected().execute(sql`select 1`);
+  await db().execute(sql`select 1`);
 }

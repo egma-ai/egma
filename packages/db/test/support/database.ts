@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 
 import pg from "pg";
 
+import { connect, disconnect } from "../../src/client.ts";
 import { runMigrations } from "../../src/migrate.ts";
 
 /**
@@ -82,6 +83,26 @@ export async function createMigratedDatabase(
     },
     async drop() {
       await pool.end().catch(() => undefined);
+      await database.drop();
+    },
+  };
+}
+
+/**
+ * A migrated database that the data-access module is connected to, for the
+ * tests that go through it. The raw `sql` handle stays available so a test can
+ * check what actually landed in the table without asking the module to tell it.
+ */
+export async function createConnectedDatabase(
+  label: string,
+): Promise<MigratedDatabase> {
+  const database = await createMigratedDatabase(label);
+  connect({ databaseUrl: database.url });
+
+  return {
+    ...database,
+    async drop() {
+      await disconnect();
       await database.drop();
     },
   };

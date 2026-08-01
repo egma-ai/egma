@@ -35,6 +35,7 @@ Node 24 and pnpm 10.
 pnpm install
 pnpm db:up        # Postgres on 5433, which the tests need
 pnpm test
+pnpm lint
 pnpm typecheck
 pnpm build
 ```
@@ -49,9 +50,32 @@ would rather use your own.
 ```
 apps/api        Fastify API. Applies migrations on boot, then serves.
 apps/web        Next.js web application.
-packages/db     Drizzle schema, the migration files, and the Postgres client.
+packages/db     The data-access module: schema, migrations, and every read
+                and write there is.
 packages/ids    The identifier generator.
+packages/lint   Build-time rules that hold the data-access boundary in place.
 ```
+
+## Reading and writing data
+
+`packages/db` owns the Postgres connection, and it is the only way anything
+reads or writes. Two rules follow from that, and both fail the build rather than
+a review:
+
+- **No file outside `packages/db/src` imports a database driver.** If you have
+  just written `import pg from "pg"` somewhere and the build is refusing it,
+  this is why. Add what you need to `packages/db/src/access` instead.
+- **Every exported function that touches a customer's data takes an
+  `AuthContext` first**, and builds the organization and project filters from
+  it. Nothing exported accepts a filter of its own, so there is no way to widen
+  one and no way to leave one out.
+
+Both processes hold a connection — the API and the web application — and both go
+through the same functions. The point is not which process talks to Postgres, it
+is that nobody hand-writes the tenancy filter.
+
+Every test that touches this uses **two** organizations. A test with one
+organization passes whether or not the filter is there.
 
 ## Changing the schema
 

@@ -1,0 +1,94 @@
+import { db } from "../client.ts";
+import { organization, organizationSettings } from "../schema/tenancy.ts";
+import type { AuthContext } from "./context.ts";
+import { theOrganization, within } from "./within.ts";
+
+/** The customer. The only tenancy boundary there is. */
+export type Organization = {
+  readonly id: string;
+  readonly name: string;
+  readonly slug: string;
+  readonly createdAt: Date;
+};
+
+export type OrganizationSettings = {
+  readonly organizationId: string;
+  /** Null means keep forever. */
+  readonly retentionDays: number | null;
+  readonly dataResidency: string | null;
+  readonly updatedAt: Date;
+};
+
+/**
+ * The caller's own customer row. It takes no id: which organization is a fact
+ * about the credential, not a thing a caller gets to ask for.
+ */
+export async function readOrganization(
+  auth: AuthContext,
+): Promise<Organization | undefined> {
+  const [row] = await db()
+    .select({
+      id: organization.id,
+      name: organization.name,
+      slug: organization.slug,
+      createdAt: organization.createdAt,
+    })
+    .from(organization)
+    .where(theOrganization(auth))
+    .limit(1);
+  return row;
+}
+
+export async function readOrganizationSettings(
+  auth: AuthContext,
+): Promise<OrganizationSettings | undefined> {
+  const [row] = await db()
+    .select()
+    .from(organizationSettings)
+    .where(within(auth, organizationSettings))
+    .limit(1);
+  return row;
+}
+
+export type OrganizationSettingsChanges = {
+  readonly retentionDays?: number | null;
+  readonly dataResidency?: string | null;
+};
+
+/**
+ * Settings are one row per customer, so writing them is an upsert keyed on the
+ * organization from the context. There is no organization to name and therefore
+ * none to name wrongly.
+ */
+export async function updateOrganizationSettings(
+  auth: AuthContext,
+  changes: OrganizationSettingsChanges,
+): Promise<OrganizationSettings> {
+  const now = new Date();
+  const [row] = await db()
+    .insert(organizationSettings)
+    .values({
+      organizationId: auth.organizationId,
+      retentionDays: changes.retentionDays ?? null,
+      dataResidency: changes.dataResidency ?? null,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: organizationSettings.organizationId,
+      set: {
+        ...(changes.retentionDays === undefined
+          ? {}
+          : { retentionDays: changes.retentionDays }),
+        ...(changes.dataResidency === undefined
+          ? {}
+          : { dataResidency: changes.dataResidency }),
+        updatedAt: now,
+      },
+    })
+    .returning();
+
+  if (row === undefined) {
+    throw new Error("settings for the caller's organization were not written");
+  }
+  return row;
+}

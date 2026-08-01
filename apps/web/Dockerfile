@@ -9,6 +9,7 @@ COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY packages/db/package.json packages/db/
 COPY packages/ids/package.json packages/ids/
+COPY packages/lint/package.json packages/lint/
 RUN pnpm install --frozen-lockfile --filter "@egma/web..."
 
 COPY apps/web apps/web

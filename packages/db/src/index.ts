@@ -6,4 +6,5 @@ export {
   type Migration,
   type MigrationResult,
 } from "./migrate.ts";
+export * from "./access/index.ts";
 export * as schema from "./schema/index.ts";
