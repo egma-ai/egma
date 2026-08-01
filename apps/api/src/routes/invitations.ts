@@ -18,6 +18,13 @@ import { toWebRequest } from "../http/web-handler.ts";
  * bits of randomness, it names exactly one invitation, and it cannot be asked
  * about a second: there is no argument to widen.
  *
+ * **These two therefore carry no request budget**, which is stated rather than
+ * left to be discovered. What a budget would protect against is guessing, and
+ * guessing one of 2^256 tokens is not a thing a machine does — the same
+ * reasoning that makes a single SHA-256 the right hash for one. What is left is
+ * ordinary flooding, which is a job for whatever sits in front of the instance,
+ * and is not made better by a limiter with nothing to key on.
+ *
  * The token travels in a body rather than a query string. It is in the browser's
  * address bar either way — a link has to be pasteable — but there is no reason
  * to put it in the API's access log as well.
