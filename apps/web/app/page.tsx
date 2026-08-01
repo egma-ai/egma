@@ -83,6 +83,11 @@ export default function Home() {
       <Fact label="Your role" value={organization?.role ?? "—"} />
 
       <p style={styles.aside}>
+        <a href="/members">People</a> — invite a colleague, or change what
+        somebody may do.
+      </p>
+
+      <p style={styles.aside}>
         Nothing else is built yet. Everything a test needs — agents,
         connections, digital humans, graders — arrives with the effort that can
         run one.

@@ -91,12 +91,12 @@ async function mintKey(person: Person, name: string): Promise<string> {
   return (minted.json() as { secret: string }).secret;
 }
 
-function act(
+async function act(
   person: Person,
   userId: string,
   what: string,
   body: Record<string, unknown> = {},
-): ReturnType<TestApi["app"]["inject"]> {
+): Promise<Awaited<ReturnType<TestApi["app"]["inject"]>>> {
   return api.app.inject({
     method: "POST",
     url: `/api/members/${userId}/${what}`,

@@ -185,6 +185,61 @@ describe("the pages", () => {
     expect(expired).toMatch(/egma login/);
   });
 
+  /**
+   * The dashboard is deliberately not built, so this is the page that decides
+   * whether adding a second person is something a person can do or something an
+   * API can do. Without it, inviting a colleague would be a curl command.
+   */
+  it("include the two an invitation needs: somewhere to send one, and somewhere to land", async () => {
+    const files = (await pageSources()).map(([file]) => file);
+    expect(files).toContain("app/members/page.tsx");
+    expect(files).toContain("app/invite/page.tsx");
+  });
+
+  /**
+   * The link that comes back when nothing was emailed is the whole ticket. A
+   * page that quietly dropped it would leave a self-hoster with an invitation
+   * that exists and cannot be delivered, which is worse than a refusal.
+   */
+  it("hand the invitation link back when there was nowhere to post it", async () => {
+    const members = await readFile(
+      path.join(WEB, "app/members/page.tsx"),
+      "utf8",
+    );
+
+    expect(members).toContain("accept_url");
+    expect(members).toContain("delivered");
+    expect(members).toMatch(/no mail transport is configured/i);
+  });
+
+  /**
+   * Expired and already-accepted mean opposite things to whoever is holding the
+   * link — ask for another, versus you are already in — so the page says which.
+   */
+  it("say which of the two a dead invitation is", async () => {
+    const invite = await readFile(path.join(WEB, "app/invite/page.tsx"), "utf8");
+
+    expect(invite).toContain("has expired");
+    expect(invite).toContain("already been accepted");
+  });
+
+  it("reach the API for invitations at paths this instance rewrites", async () => {
+    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
+    const invite = await readFile(path.join(WEB, "app/invite/page.tsx"), "utf8");
+    const members = await readFile(
+      path.join(WEB, "app/members/page.tsx"),
+      "utf8",
+    );
+
+    // A path a page fetches and the config does not forward would be served by
+    // this process, which has no such route, and the flow would 404.
+    expect(rewrites).toContain("/api/invitations/:path*");
+    expect(rewrites).toContain("/api/members/:path*");
+    expect(invite).toContain("/api/invitations/lookup");
+    expect(invite).toContain("/api/invitations/accept");
+    expect(members).toContain('fetch("/api/members")');
+  });
+
   it("reach the API for the device flow at paths this instance rewrites", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
     const approve = await readFile(

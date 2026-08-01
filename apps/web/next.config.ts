@@ -38,6 +38,16 @@ const config: NextConfig = {
         },
         { source: "/api/keys", destination: `${api}/api/keys` },
         { source: "/api/keys/:path*", destination: `${api}/api/keys/:path*` },
+        { source: "/api/members", destination: `${api}/api/members` },
+        {
+          source: "/api/members/:path*",
+          destination: `${api}/api/members/:path*`,
+        },
+        { source: "/api/invitations", destination: `${api}/api/invitations` },
+        {
+          source: "/api/invitations/:path*",
+          destination: `${api}/api/invitations/:path*`,
+        },
       ],
       afterFiles: [],
       fallback: [],
