@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "tsc -b packages/ids packages/db apps/api",
-    "typecheck": "tsc -b --noEmit packages/ids packages/db apps/api && tsc -p tsconfig.tests.json && pnpm --filter @egma/web typecheck",
+    "typecheck": "pnpm build && tsc -p tsconfig.tests.json && pnpm --filter @egma/web typecheck",
     "clean": "tsc -b --clean packages/ids packages/db apps/api",
     "db:up": "docker compose up -d --wait postgres",
     "db:down": "docker compose down",
