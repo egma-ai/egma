@@ -12,3 +12,6 @@ coverage/
 !.env.example
 
 .DS_Store
+
+# Agent worktrees — full checkouts, never part of the repo
+.claude/worktrees/
