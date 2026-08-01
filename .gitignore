@@ -1,0 +1,14 @@
+egma-planning/
+.claude/settings.local.json
+node_modules/
+
+dist/
+.next/
+*.tsbuildinfo
+coverage/
+
+.env
+.env.*
+!.env.example
+
+.DS_Store

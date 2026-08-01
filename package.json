@@ -1,0 +1,25 @@
+{
+  "name": "egma",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.24.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -b packages/ids packages/db apps/api",
+    "typecheck": "tsc -b --noEmit packages/ids packages/db apps/api && pnpm --filter @egma/web typecheck",
+    "clean": "tsc -b --clean packages/ids packages/db apps/api",
+    "db:up": "docker compose up -d --wait postgres",
+    "db:down": "docker compose down",
+    "db:generate": "pnpm --filter @egma/db generate",
+    "test": "pnpm db:up && vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

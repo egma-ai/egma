@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "baseUrl": ".",
+    "paths": {
+      "@egma/ids": ["./packages/ids/src/index.ts"],
+      "@egma/db": ["./packages/db/src/index.ts"]
+    }
+  },
+  "include": [
+    "vitest.config.ts",
+    "packages/*/src/**/*.test.ts",
+    "packages/*/test/**/*.ts",
+    "apps/api/test/**/*.ts"
+  ]
+}

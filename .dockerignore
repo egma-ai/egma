@@ -1,0 +1,12 @@
+.git
+.github
+egma-planning
+node_modules
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/*.tsbuildinfo
+.env
+.env.*
+!.env.example
