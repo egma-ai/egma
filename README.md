@@ -58,6 +58,13 @@ and drops it afterwards, so `pnpm test` needs a Postgres it may create databases
 on. `pnpm db:up` starts one; point `TEST_DATABASE_URL` somewhere else if you
 would rather use your own.
 
+One test drives a real browser: `apps/web/test/login.browser.test.ts` starts the
+API and the web application on ports of their own and clicks through logging in
+from a terminal, once, end to end. It uses the Chrome already on your machine
+and falls back to a Playwright-managed one, so `npx playwright install chromium`
+is what to run if you have neither. Every branch of that flow other than the
+happy one is covered against the API instead, where it costs milliseconds.
+
 ## Layout
 
 ```
@@ -95,6 +102,45 @@ That line is held by two build rules on top of the ones above:
 The provider is on the request path for browser sessions, because turning a
 session cookie into an identity is exactly what it is for. It is absent from the
 API-key path entirely.
+
+## Logging in from a terminal
+
+A terminal asks for a pair of codes, shows the short one, and opens a browser on
+this instance with that code already in the field. The person approves it, says
+which project the terminal is for, and the terminal exchanges its code for an
+API key. The key is handed over once and never stored anywhere it could be read
+again.
+
+```bash
+# 1. the terminal asks to be let in
+curl -sX POST http://localhost:3101/api/device/code \
+  -H 'content-type: application/json' -d '{"client_id":"egma-cli"}'
+
+# 2. open verification_uri_complete in a browser and approve it
+
+# 3. the terminal collects its key
+curl -sX POST http://localhost:3101/api/device/token \
+  -d grant_type=urn:ietf:params:oauth:grant-type:device_code \
+  -d device_code=... -d client_id=egma-cli
+```
+
+The key that comes back is `egma_sk_` and 32 random bytes, stored as a single
+SHA-256 alongside a prefix and the last four characters. It carries no role of
+its own: every request re-reads the membership of whoever minted it, so demoting
+somebody reaches every key they ever made on their next request, and revoking a
+key stops it on the very next one. Keys never expire; rotation is mint, deploy,
+revoke.
+
+Both credentials work on the same routes:
+
+```bash
+curl -H "authorization: Bearer egma_sk_..." http://localhost:3101/api/keys
+```
+
+An `admin` sees every key in their organization; everybody else sees the ones
+they minted. Every role may mint a key for themselves, including `viewer` —
+logging in mints one as its last step, so an admin-only rule would close the
+product to most of an instance.
 
 ## Reading and writing data
 

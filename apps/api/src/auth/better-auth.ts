@@ -1,14 +1,18 @@
 import { identityId, identityStore } from "@egma/db";
 import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
+import { bearer, deviceAuthorization } from "better-auth/plugins";
 
+import { DEVICE_CLIENT_ID } from "./device.ts";
 import type { EmailSender } from "./email.ts";
 import { currentIntent } from "./intent.ts";
 import {
   SignupRefusedError,
+  type DeviceGrant,
+  type DevicePollOutcome,
   type ExternalIdentity,
   type IdentityHooks,
-  type SessionIdentityProvider,
+  type IdentityProvider,
 } from "./seam.ts";
 import type { WebHandler } from "../http/web-handler.ts";
 
@@ -39,6 +43,13 @@ import type { WebHandler } from "../http/web-handler.ts";
  * all. That asymmetry is deliberate: the programmatic path is the high-volume
  * one and the one a migration would hurt on, and it is provider-free.
  *
+ * **Two plugins are enabled.** `deviceAuthorization` is RFC 8628, and it is the
+ * only reason a terminal can log in without a secret travelling through a
+ * coding agent's chat window. `bearer` is what lets the session the device
+ * grant issues be presented as a header — which egma uses once, to ask who
+ * approved, before throwing that session away and handing the terminal a key of
+ * its own instead.
+ *
  * **Its migrator is not wired up.** egma writes the DDL for all five identity
  * tables in its own numbered `.sql` files. The provider reads and writes those
  * tables and cannot alter them.
@@ -67,7 +78,7 @@ export type IdentityOptions = {
 export type Identity = {
   /** The provider's HTTP surface, for the Fastify adapter to mount. */
   readonly handler: WebHandler;
-  readonly provider: SessionIdentityProvider;
+  readonly provider: IdentityProvider;
 };
 
 /**
@@ -93,6 +104,40 @@ async function refusalsBecomeAnswers<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * What a failed token exchange means, said in egma's four words.
+ *
+ * RFC 8628 gives the transport six error codes and egma's seam has four
+ * answers, because two of the six describe the same thing to a terminal that is
+ * waiting. `invalid_grant` is a device code the server does not know, and the
+ * row is deleted the moment a code expires, is denied, or is collected — so by
+ * far the likeliest reason a code is unknown is that its authorization is over,
+ * and `expired` is both the truthful answer and the one a person can act on.
+ *
+ * Anything else is a fault rather than an outcome, and is left to surface as
+ * one rather than being flattened into "keep waiting".
+ */
+function devicePollOutcome(cause: unknown): DevicePollOutcome {
+  const said =
+    cause instanceof APIError
+      ? (cause.body as { error?: unknown } | undefined)?.error
+      : undefined;
+
+  switch (said) {
+    case "authorization_pending":
+      return "pending";
+    case "slow_down":
+      return "slow_down";
+    case "access_denied":
+      return "denied";
+    case "expired_token":
+    case "invalid_grant":
+      return "expired";
+    default:
+      throw cause;
+  }
+}
+
 export function createIdentity(options: IdentityOptions): Identity {
   const auth = betterAuth({
     appName: "egma",
@@ -112,6 +157,22 @@ export function createIdentity(options: IdentityOptions): Identity {
     },
 
     database: identityStore(),
+
+    plugins: [
+      deviceAuthorization({
+        // Relative, so it resolves against the origin this instance is served
+        // on. A self-hoster's terminal sends them to their own machine, never
+        // to a domain egma runs.
+        verificationUri: "/device",
+        // egma serves one client, so an unknown one is refused at the door
+        // rather than producing an authorization the token exchange would then
+        // have to disown.
+        validateClient: async (clientId) => clientId === DEVICE_CLIENT_ID,
+      }),
+      // Only so the session the device grant issues can be presented back as a
+      // header, for the one question egma asks it.
+      bearer(),
+    ],
 
     advanced: {
       // The cookie a person can see in their own browser says egma, not the
@@ -221,6 +282,68 @@ export function createIdentity(options: IdentityOptions): Identity {
       async revokeSession(token): Promise<void> {
         const context = await auth.$context;
         await context.internalAdapter.deleteSession(token);
+      },
+
+      async startDeviceAuthorization(clientId): Promise<DeviceGrant> {
+        const grant = await auth.api.deviceCode({
+          body: { client_id: clientId },
+        });
+
+        return {
+          deviceCode: grant.device_code,
+          userCode: grant.user_code,
+          verificationUri: grant.verification_uri,
+          verificationUriComplete: grant.verification_uri_complete,
+          expiresInSeconds: grant.expires_in,
+          intervalSeconds: grant.interval,
+        };
+      },
+
+      /**
+       * Who approved this device code, or why nobody has yet.
+       *
+       * The provider answers by issuing a session, because a session is what it
+       * has to give. egma wants none: the terminal is about to be handed an
+       * API key, which is egma's own credential against egma's own table, and
+       * leaving a live session behind for every login would be a row nobody
+       * ever uses and nobody ever cleans up. So the session is created, read
+       * once for the name on it, and deleted again — all inside this file, so
+       * that the rest of egma never learns one existed.
+       */
+      async pollDeviceAuthorization(
+        deviceCode,
+      ): Promise<ExternalIdentity | DevicePollOutcome> {
+        let granted: { access_token: string };
+        try {
+          granted = await auth.api.deviceToken({
+            body: {
+              grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+              device_code: deviceCode,
+              client_id: DEVICE_CLIENT_ID,
+            },
+          });
+        } catch (cause) {
+          return devicePollOutcome(cause);
+        }
+
+        const token = granted.access_token;
+        try {
+          const session = await auth.api.getSession({
+            headers: new Headers({ authorization: `Bearer ${token}` }),
+          });
+          if (session === null) {
+            throw new Error(
+              "the device grant issued a session that resolves to nobody",
+            );
+          }
+          return {
+            externalIdentityId: session.user.id,
+            email: session.user.email,
+          };
+        } finally {
+          const context = await auth.$context;
+          await context.internalAdapter.deleteSession(token);
+        }
       },
     },
   };

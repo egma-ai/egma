@@ -257,17 +257,24 @@ describe("an exported call that could reach the database without a customer", ()
     expect(await check(root)).toEqual([]);
   });
 
+  /**
+   * The list is closed, and the counter-example is a name that could never
+   * belong on it: reading *any* organization is the one thing the whole
+   * boundary exists to make unreachable. `resolveApiKey` stood here until the
+   * device flow needed it, at which point the rule did its job — it stopped the
+   * build, somebody decided, and the name moved into the list on purpose.
+   */
   it("allows exactly the exports that produce a context, and no other", async () => {
     await withSurface(
-      'export { membershipsOf, projectsOf, provisionOrganization, resolveApiKey } from "./things.ts";\n',
-      "export async function membershipsOf(userId: string): Promise<string[]> {\n  return [userId];\n}\nexport async function projectsOf(organizationId: string): Promise<string[]> {\n  return [organizationId];\n}\nexport async function provisionOrganization(name: string): Promise<string> {\n  return name;\n}\nexport async function resolveApiKey(hash: string): Promise<string> {\n  return hash;\n}\n",
+      'export { membershipsOf, projectsOf, provisionOrganization, resolveApiKey, resolveDeviceAuthorization, readAnyOrganization } from "./things.ts";\n',
+      "export async function membershipsOf(userId: string): Promise<string[]> {\n  return [userId];\n}\nexport async function projectsOf(organizationId: string): Promise<string[]> {\n  return [organizationId];\n}\nexport async function provisionOrganization(name: string): Promise<string> {\n  return name;\n}\nexport async function resolveApiKey(hash: string): Promise<string> {\n  return hash;\n}\nexport async function resolveDeviceAuthorization(deviceCode: string): Promise<string> {\n  return deviceCode;\n}\nexport async function readAnyOrganization(organizationId: string): Promise<string> {\n  return organizationId;\n}\n",
     );
 
     const violations = await check(root);
     expect(rules(violations)).toEqual([
       "every-exported-call-carries-an-auth-context",
     ]);
-    expect(violations[0]?.detail).toContain("resolveApiKey");
+    expect(violations[0]?.detail).toContain("readAnyOrganization");
   });
 
   it("allows a question about the deployment, which has no customer to name", async () => {

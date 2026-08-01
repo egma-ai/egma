@@ -32,6 +32,12 @@ const config: NextConfig = {
           destination: `${api}/api/signup/:path*`,
         },
         { source: "/api/me", destination: `${api}/api/me` },
+        {
+          source: "/api/device/:path*",
+          destination: `${api}/api/device/:path*`,
+        },
+        { source: "/api/keys", destination: `${api}/api/keys` },
+        { source: "/api/keys/:path*", destination: `${api}/api/keys/:path*` },
       ],
       afterFiles: [],
       fallback: [],

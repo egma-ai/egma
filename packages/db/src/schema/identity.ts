@@ -1,12 +1,10 @@
-import { boolean, index, integer, pgTable, text, unique } from "drizzle-orm/pg-core";
+import { boolean, index, pgTable, text, unique } from "drizzle-orm/pg-core";
 
 import {
   citext,
   createdAt,
-  DEVICE_CODE_STATUSES,
   idText,
   moment,
-  oneOf,
   prefixCheck,
   updatedAt,
 } from "./columns.ts";
@@ -15,6 +13,10 @@ import {
  * Identity. egma writes this DDL and owns the one user table; the auth provider
  * reads and writes these rows with its own migrator disabled, so it can use the
  * tables but cannot alter them.
+ *
+ * The fifth table the provider reads, `device_code`, is in `device.ts`: it is
+ * the one that also carries tenancy, so it names both this file and the
+ * tenancy tables and cannot sit inside either.
  */
 
 export const user = pgTable(
@@ -102,33 +104,5 @@ export const verification = pgTable(
   (table) => [
     prefixCheck("verification_id_prefix", table.id, "vrf"),
     index("verification_identifier_idx").on(table.identifier),
-  ],
-);
-
-export const deviceCode = pgTable(
-  "device_code",
-  {
-    id: idText("id").primaryKey(),
-    deviceCode: text("device_code").notNull(),
-    userCode: text("user_code").notNull(),
-    userId: idText("user_id").references(() => user.id, {
-      onDelete: "cascade",
-    }),
-    clientId: text("client_id"),
-    scope: text("scope"),
-    status: text("status").notNull(),
-    expiresAt: moment("expires_at").notNull(),
-    lastPolledAt: moment("last_polled_at"),
-    pollingInterval: integer("polling_interval"),
-    createdAt: createdAt(),
-    updatedAt: updatedAt(),
-  },
-  (table) => [
-    prefixCheck("device_code_id_prefix", table.id, "dvc"),
-    oneOf("device_code_status_allowed", table.status, [
-      ...DEVICE_CODE_STATUSES,
-    ]),
-    unique("device_code_device_code_unique").on(table.deviceCode),
-    unique("device_code_user_code_unique").on(table.userCode),
   ],
 );

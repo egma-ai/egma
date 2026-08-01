@@ -26,14 +26,16 @@ const MIGRATIONS = ["MIGRATIONS_DIRECTORY", "readMigrations", "runMigrations"];
 const IDENTITY = ["IDENTITY_MODELS", "identityId", "identityStore"];
 
 /**
- * What produces an `AuthContext`: which organization a person is in, and which
- * projects are in it. A third name here is a decision somebody makes on
- * purpose.
+ * What produces an `AuthContext`: which organization a person is in, which
+ * projects are in it, and what a credential resolves to. A sixth name here is a
+ * decision somebody makes on purpose, and the build rule makes them make it.
  */
 const CONTEXT_ESTABLISHING = [
   "membershipsOf",
   "projectsOf",
   "provisionOrganization",
+  "resolveApiKey",
+  "resolveDeviceAuthorization",
 ];
 
 /**
@@ -53,6 +55,7 @@ const CONTEXT_REQUIRING = [
   "readOrganization",
   "readOrganizationSettings",
   "readProject",
+  "recordDeviceAuthorization",
   "revokeApiKey",
   "updateOrganizationSettings",
 ];

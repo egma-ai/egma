@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import { returnPathIn, withReturnTo } from "../../lib/return-to.ts";
 import { Card, styles } from "../ui.tsx";
 
 /**
@@ -15,6 +16,12 @@ export default function SignInPage() {
   const [password, setPassword] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  /** Somebody sent here by a terminal's approval page goes back to it. */
+  const [returnTo, setReturnTo] = useState<string | null>(null);
+
+  useEffect(() => {
+    setReturnTo(returnPathIn(window.location.search));
+  }, []);
 
   async function submit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
@@ -27,7 +34,7 @@ export default function SignInPage() {
         body: JSON.stringify({ email, password }),
       });
       if (response.ok) {
-        window.location.assign("/");
+        window.location.assign(returnTo ?? "/");
         return;
       }
       const body = (await response.json().catch(() => ({}))) as {
@@ -84,7 +91,11 @@ export default function SignInPage() {
       </form>
 
       <p style={styles.aside}>
-        No account yet? <a href="/signup">Set up egma</a>.
+        No account yet?{" "}
+        <a href={returnTo === null ? "/signup" : withReturnTo("/signup", returnTo)}>
+          Set up egma
+        </a>
+        .
       </p>
     </Card>
   );

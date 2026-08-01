@@ -30,6 +30,16 @@ export type Config = {
    * claim any origin.
    */
   readonly trustProxy: boolean;
+  /**
+   * How many credentialed requests one **organization** may make per minute.
+   *
+   * The organization rather than the key, so that rotating a key — mint,
+   * deploy, revoke — cannot reset a budget, and so that ten deployments sharing
+   * one account do not get ten budgets. The default is generous enough that
+   * nobody using the product notices it and low enough that a runaway loop
+   * stops being everybody else's problem.
+   */
+  readonly rateLimitPerMinute: number;
 };
 
 function flag(
@@ -70,6 +80,15 @@ export function loadConfig(
     throw new Error(`PORT is not a usable port number: ${environment.PORT}`);
   }
 
+  const rateLimitPerMinute = Number(
+    environment.EGMA_RATE_LIMIT_PER_MINUTE ?? 600,
+  );
+  if (!Number.isInteger(rateLimitPerMinute) || rateLimitPerMinute <= 0) {
+    throw new Error(
+      `EGMA_RATE_LIMIT_PER_MINUTE is not a number of requests: ${environment.EGMA_RATE_LIMIT_PER_MINUTE}`,
+    );
+  }
+
   const baseUrl = environment.EGMA_BASE_URL?.trim() || "http://localhost:3101";
   try {
     new URL(baseUrl);
@@ -85,5 +104,6 @@ export function loadConfig(
     authSecret,
     singleOrganization: flag(environment, "EGMA_SINGLE_ORGANIZATION", true),
     trustProxy: flag(environment, "EGMA_TRUST_PROXY", false),
+    rateLimitPerMinute,
   };
 }

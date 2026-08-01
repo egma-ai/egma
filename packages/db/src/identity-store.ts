@@ -2,13 +2,8 @@ import { newId, type IdPrefix } from "@egma/ids";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 
 import { db } from "./client.ts";
-import {
-  account,
-  deviceCode,
-  session,
-  user,
-  verification,
-} from "./schema/identity.ts";
+import { deviceCode } from "./schema/device.ts";
+import { account, session, user, verification } from "./schema/identity.ts";
 
 /**
  * How the auth provider reaches the five tables it reads and writes.

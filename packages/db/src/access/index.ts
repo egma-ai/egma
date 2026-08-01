@@ -15,13 +15,18 @@
  * and project predicates from it. No exported function accepts a filter, so
  * none can be widened and none can be omitted.
  *
- * **Context-establishing.** `membershipsOf`, `projectsOf` and
- * `provisionOrganization`, and only those three. The first two are the two
- * halves of what an `AuthContext` is made of — which organization a person is
- * in, and which projects are in it — and the third brings a new organization
- * into existence. None of them can return, or reach, a row belonging to
- * anybody else. Anything added to this category is a deliberate act: a test
- * names them all and fails when a fourth appears.
+ * **Context-establishing.** `membershipsOf`, `projectsOf`,
+ * `provisionOrganization`, `resolveApiKey` and `resolveDeviceAuthorization`,
+ * and only those five. The first two are the two halves of what an
+ * `AuthContext` is made of — which organization a person is in, and which
+ * projects are in it — and the third brings a new organization into existence.
+ * The last two each take a credential and answer what it resolves to: an API
+ * key's hash becomes the whole context a programmatic request acts in, and a
+ * device code becomes the organization and project a terminal was let into.
+ * None of the five can return, or reach, a row belonging to anybody else —
+ * each is handed the thing the credential already names and can see nothing
+ * outside it. Anything added to this category is a deliberate act: a test names
+ * them all and fails when a sixth appears.
  *
  * **Instance-scoped.** `instanceIsClaimed`, and only it. It takes nothing and
  * returns a boolean, so it can neither name a customer nor carry a row out. It
@@ -86,6 +91,15 @@ export {
   listApiKeys,
   createApiKey,
   revokeApiKey,
+  resolveApiKey,
   type ApiKey,
   type NewApiKey,
+  type ResolvedApiKey,
 } from "./api-keys.ts";
+
+export {
+  recordDeviceAuthorization,
+  resolveDeviceAuthorization,
+  type DeviceAuthorization,
+  type DeviceAuthorizationTarget,
+} from "./device-authorizations.ts";

@@ -83,10 +83,9 @@ export const IDENTITY_PROVIDER_SEAM = [
 /**
  * The half of the seam a browser needs: who is this, and stop being them.
  *
- * The device-flow pair is what a terminal needs, and it arrives with the
- * terminal. Splitting the type rather than stubbing the two calls out means
- * nothing in the codebase can call something that does not work yet, and the
- * seam above is still the whole statement of what the provider is for.
+ * The device-flow pair is what a terminal needs, and nothing on the browser
+ * path has any business calling it. Asking for the narrow type where the narrow
+ * type is enough keeps that true by construction rather than by convention.
  */
 export type SessionIdentityProvider = Pick<
   IdentityProvider,

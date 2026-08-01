@@ -48,15 +48,25 @@ const AUTH_CONTEXT = "AuthContext";
 /**
  * The exports that cannot take an `AuthContext`, because between them they are
  * what produces one: which organization a person is in, which projects are in
- * it, and bringing a new organization into existence. None of them can reach a
- * row belonging to anybody else — each takes the thing the credential already
- * resolved to and can return nothing outside it. Another name in this list is a
- * decision somebody has to make on purpose.
+ * it, bringing a new organization into existence, and turning a credential into
+ * the context a request carrying it acts in. None of them can reach a row
+ * belonging to anybody else — each takes the thing the credential already names
+ * and can return nothing outside it. Another name in this list is a decision
+ * somebody has to make on purpose.
+ *
+ * `resolveApiKey` and `resolveDeviceAuthorization` were added on 2026-08-01
+ * with the device flow, deliberately and after the rule stopped the build.
+ * Each takes a high-entropy secret that egma issued to exactly one holder and
+ * answers what it resolves to — a whole `AuthContext` for the first, an
+ * organization and a project for the second. Neither can be asked about
+ * somebody else's, because there is no argument other than the secret itself.
  */
 const CONTEXT_ESTABLISHING = [
   "membershipsOf",
   "projectsOf",
   "provisionOrganization",
+  "resolveApiKey",
+  "resolveDeviceAuthorization",
 ];
 
 /**

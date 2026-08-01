@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
+    "playwright-core": "^1.62.1",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   }

@@ -7,6 +7,7 @@ import {
   DEFAULT_PROJECT_NAME as API_DEFAULT_PROJECT_NAME,
   organizationNameFromEmail as apiOrganizationNameFromEmail,
 } from "../../api/src/auth/naming.ts";
+import { returnPathIn, safeReturnPath } from "../lib/return-to.ts";
 import {
   DEFAULT_PROJECT_NAME,
   organizationNameFromEmail,
@@ -141,5 +142,89 @@ describe("the pages", () => {
     );
     expect(signup).toContain('fetch("/api/signup"');
     expect(signup).toContain('fetch("/api/signup/availability")');
+  });
+
+  /**
+   * The provider ships the five device-flow endpoints and no interface at all,
+   * so without these `egma login` opens a browser on nothing. Each is a page a
+   * person actually reaches, and each says a different thing — which is the
+   * point of there being five rather than one with a status on it.
+   */
+  it("include the five the device flow needs, all of them on this instance", async () => {
+    const files = (await pageSources()).map(([file]) => file);
+
+    for (const page of [
+      "app/device/page.tsx",
+      "app/device/approve/page.tsx",
+      "app/device/denied/page.tsx",
+      "app/device/expired/page.tsx",
+      "app/device/success/page.tsx",
+    ]) {
+      expect(files, page).toContain(page);
+    }
+  });
+
+  /**
+   * A denied code and an expired code are different things and reach different
+   * pages, because "check what you typed" and "that timed out, nothing is
+   * broken" are different instructions.
+   */
+  it("say which of the two happened, on the two pages that mean different things", async () => {
+    const denied = await readFile(
+      path.join(WEB, "app/device/denied/page.tsx"),
+      "utf8",
+    );
+    const expired = await readFile(
+      path.join(WEB, "app/device/expired/page.tsx"),
+      "utf8",
+    );
+
+    expect(denied).toContain("not authorized");
+    expect(denied).toContain("/device");
+    expect(expired).toContain("expired");
+    expect(expired).toMatch(/egma login/);
+  });
+
+  it("reach the API for the device flow at paths this instance rewrites", async () => {
+    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
+    const approve = await readFile(
+      path.join(WEB, "app/device/approve/page.tsx"),
+      "utf8",
+    );
+
+    // A path the page fetches and the config does not forward would be served
+    // by this process, which has no such route, and the flow would 404.
+    expect(rewrites).toContain("/api/device/:path*");
+    expect(approve).toContain("/api/device/authorization");
+    expect(approve).toContain("/api/device/approve");
+    expect(approve).toContain("/api/device/deny");
+  });
+});
+
+describe("coming back after signing in", () => {
+  it("goes where the page was asked to go", () => {
+    expect(returnPathIn("?next=%2Fdevice%2Fapprove%3Fuser_code%3DABCD1234")).toBe(
+      "/device/approve?user_code=ABCD1234",
+    );
+    expect(returnPathIn("")).toBeNull();
+  });
+
+  /**
+   * A redirect decided by a query parameter is the shape of every open-redirect
+   * bug there has ever been, and this one is handed to somebody in the middle
+   * of authorizing a terminal — which is exactly when a page that looks like
+   * egma but is not would be worth the most to somebody.
+   */
+  it("refuses anywhere that is not this instance", () => {
+    for (const elsewhere of [
+      "https://elsewhere.example/steal",
+      "//elsewhere.example/steal",
+      "/\\elsewhere.example/steal",
+      "javascript:alert(1)",
+      "device/approve",
+      "",
+    ]) {
+      expect(safeReturnPath(elsewhere), elsewhere).toBeNull();
+    }
   });
 });

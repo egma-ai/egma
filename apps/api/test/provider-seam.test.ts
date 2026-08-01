@@ -69,6 +69,19 @@ describe("the seam", () => {
     expect(complete).toBe(true);
   });
 
+  /**
+   * Written down and also true. The list above states what egma depends on;
+   * this says the provider egma actually runs answers all of it, so a call that
+   * exists only on paper cannot sit there unnoticed until a terminal needs it.
+   */
+  it("is implemented in full by the provider this instance runs", async () => {
+    api = await createApi("seam_complete");
+
+    for (const call of IDENTITY_PROVIDER_SEAM) {
+      expect(api.identity.provider[call], call).toBeTypeOf("function");
+    }
+  });
+
   it("names every answer a device poll can give other than a person", () => {
     expect([...DEVICE_POLL_OUTCOMES]).toEqual([
       "pending",

@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 
 import { loadConfig, type Config } from "../../src/config.ts";
 import type { Email, EmailSender } from "../../src/auth/email.ts";
+import type { RateLimit } from "../../src/http/rate-limit.ts";
 import { buildApi } from "../../src/server.ts";
 import type { Identity } from "../../src/auth/better-auth.ts";
 import {
@@ -36,6 +37,8 @@ export type TestApiOptions = {
   readonly trustProxy?: boolean;
   /** Whether the transport claims a message actually reaches anybody. */
   readonly emailDelivers?: boolean;
+  /** A budget small enough to reach, for the tests about reaching it. */
+  readonly rateLimit?: RateLimit;
 };
 
 export function testConfig(overrides: Partial<Config> = {}): Config {
@@ -70,7 +73,11 @@ export async function createApi(
     trustProxy: options.trustProxy ?? false,
   });
 
-  const { app, identity } = buildApi({ config, emailSender });
+  const { app, identity } = buildApi({
+    config,
+    emailSender,
+    ...(options.rateLimit === undefined ? {} : { rateLimit: options.rateLimit }),
+  });
   await app.ready();
 
   return {

@@ -4,8 +4,11 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { createIdentity, type Identity } from "./auth/better-auth.ts";
 import { loggingEmailSender, type EmailSender } from "./auth/email.ts";
 import { admitIdentity, onIdentityCreated } from "./auth/provisioning.ts";
+import { apiKeyRoutes } from "./routes/api-keys.ts";
+import { deviceRoutes } from "./routes/device.ts";
 import { meRoutes } from "./routes/me.ts";
 import { signupRoutes } from "./routes/signup.ts";
+import { fixedWindowRateLimit, type RateLimit } from "./http/rate-limit.ts";
 import { webHandler } from "./http/web-handler.ts";
 import type { Config } from "./config.ts";
 
@@ -20,6 +23,12 @@ export type ServerOptions = {
    * that reports delivery to see the other branch.
    */
   readonly emailSender?: EmailSender;
+  /**
+   * Defaults to a fixed window over the configured per-minute budget. A test
+   * hands in one with a tiny budget, or its own clock, rather than making the
+   * suite wait out a window.
+   */
+  readonly rateLimit?: RateLimit;
 };
 
 export type Api = {
@@ -94,6 +103,22 @@ export function buildApi(options: ServerOptions): Api {
   });
 
   void app.register(meRoutes, { provider: identity.provider });
+
+  void app.register(deviceRoutes, {
+    identity,
+    authBasePath: AUTH_BASE_PATH,
+    baseUrl: config.baseUrl,
+  });
+
+  void app.register(apiKeyRoutes, {
+    provider: identity.provider,
+    rateLimit:
+      options.rateLimit ??
+      fixedWindowRateLimit({
+        limit: config.rateLimitPerMinute,
+        windowMilliseconds: 60_000,
+      }),
+  });
 
   return { app, identity };
 }

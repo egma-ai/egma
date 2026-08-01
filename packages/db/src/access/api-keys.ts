@@ -2,11 +2,14 @@ import { newId } from "@egma/ids";
 import { and, eq, isNull } from "drizzle-orm";
 
 import { db } from "../client.ts";
+import { user } from "../schema/identity.ts";
 import { apiKey } from "../schema/tenancy.ts";
 import type { ApiKeyScope } from "../schema/columns.ts";
 import type { AuthContext } from "./context.ts";
 import { ProjectOutsideOrganizationError } from "./errors.ts";
-import { isProjectOfOrganization } from "./projects.ts";
+import { membershipsOf } from "./memberships.ts";
+import { permitsApiKeyMintedBy } from "./permissions.ts";
+import { isProjectOfOrganization, projectsOf } from "./projects.ts";
 import { within } from "./within.ts";
 
 /**
@@ -41,17 +44,40 @@ const COLUMNS = {
   createdAt: apiKey.createdAt,
 } as const;
 
+/** Where the caller is acting, for the per-key predicate below. */
+function here(auth: AuthContext): {
+  readonly organizationId: string;
+  readonly projectId: string;
+} {
+  return { organizationId: auth.organizationId, projectId: auth.projectId };
+}
+
 /**
- * Every key in the caller's organization, including the organization-scoped
- * ones that name no project: an owner responding to a leak has to be able to
- * see and revoke every key, not only the ones for the project they are in.
+ * The keys in the caller's organization that the caller may see.
+ *
+ * **Filtered by role, never gated by it.** An `admin` sees every key in the
+ * organization, so responding to a leak does not depend on the person who
+ * created one; everybody else sees the keys they minted themselves. Refusing
+ * the whole call to anyone but an admin would leave a `viewer` holding a key
+ * they could never list and therefore never rotate — and login mints a key for
+ * every role, so that is not an edge case, it is most of the instance.
+ *
+ * The predicate is applied per row rather than as one decision about the whole
+ * call, and it is `permitsApiKeyMintedBy` rather than a comparison written out
+ * here, because a rule spread across call sites is a rule nobody audits.
+ * Organization-scoped keys that name no project are included: an owner has to
+ * be able to see every key, not only the ones for the project they are in.
  */
 export async function listApiKeys(auth: AuthContext): Promise<readonly ApiKey[]> {
-  return db()
+  const rows = await db()
     .select(COLUMNS)
     .from(apiKey)
     .where(within(auth, apiKey))
     .orderBy(apiKey.id);
+
+  return rows.filter((row) =>
+    permitsApiKeyMintedBy(auth, row.createdByUserId, here(auth)),
+  );
 }
 
 export type NewApiKey = {
@@ -107,11 +133,28 @@ export async function createApiKey(
  * `revoked_at` rather than a cache. Naming a key in another customer's account
  * changes nothing and returns nothing — the predicate is the caller's own
  * organization, so the row is not there to update.
+ *
+ * The same per-key rule as the list applies: your own key at any role, and
+ * anybody's key as an `admin`. Keys never expire, so a key is only ever retired
+ * by somebody who decided to.
  */
 export async function revokeApiKey(
   auth: AuthContext,
   apiKeyId: string,
 ): Promise<ApiKey | undefined> {
+  const [existing] = await db()
+    .select({ createdByUserId: apiKey.createdByUserId })
+    .from(apiKey)
+    .where(within(auth, apiKey, eq(apiKey.id, apiKeyId)))
+    .limit(1);
+
+  if (
+    existing === undefined ||
+    !permitsApiKeyMintedBy(auth, existing.createdByUserId, here(auth))
+  ) {
+    return undefined;
+  }
+
   const [row] = await db()
     .update(apiKey)
     .set({ revokedAt: new Date(), updatedAt: new Date() })
@@ -120,4 +163,95 @@ export async function revokeApiKey(
     )
     .returning(COLUMNS);
   return row;
+}
+
+/** A key, and the context a request carrying it acts in. */
+export type ResolvedApiKey = {
+  readonly apiKeyId: string;
+  readonly auth: AuthContext;
+};
+
+/**
+ * A key's secret hash turned into who is asking, which customer, which project
+ * and what role. The sibling of resolving a browser session, and the reason the
+ * auth provider is absent from the programmatic path entirely: egma minted this
+ * key, egma hashed it, and egma verifies it against its own table.
+ *
+ * Every link in the chain is re-read on this request rather than remembered:
+ *
+ *     the key row → who minted it → their membership now → their role now
+ *
+ * **A key carries no role of its own.** Demote somebody and every key they ever
+ * minted acts at the new role on their next request, with no key row edited and
+ * nothing to hunt down. The membership is read through the one resolver, so the
+ * same rule holds here as everywhere else.
+ *
+ * Three ways this answers nobody, and each is a promise the product makes. The
+ * key was revoked, so revocation takes effect on the very next request with no
+ * cache to wait out. The person who minted it was deactivated, so an IT
+ * deprovisioning script stops their credentials working without touching a line
+ * of what they authored. Or they are no longer in that organization, so a key
+ * cannot outlive the membership it borrows its powers from.
+ *
+ * The organization is the key row's. Nothing the client sent is consulted, so a
+ * copied key cannot reach across a boundary by asking nicely.
+ */
+export async function resolveApiKey(
+  hash: string,
+): Promise<ResolvedApiKey | undefined> {
+  const [key] = await db()
+    .select({
+      id: apiKey.id,
+      organizationId: apiKey.organizationId,
+      projectId: apiKey.projectId,
+      createdByUserId: apiKey.createdByUserId,
+      deactivatedAt: user.deactivatedAt,
+    })
+    .from(apiKey)
+    .innerJoin(user, eq(user.id, apiKey.createdByUserId))
+    .where(and(eq(apiKey.hash, hash), isNull(apiKey.revokedAt)))
+    .limit(1);
+
+  if (key === undefined) return undefined;
+  if (key.deactivatedAt !== null) return undefined;
+
+  const membership = (await membershipsOf(key.createdByUserId)).find(
+    (held) => held.organizationId === key.organizationId,
+  );
+  if (membership === undefined) return undefined;
+
+  // An organization-scoped key names no project, so it acts in the
+  // organization's oldest one — the project provisioning made — until something
+  // names another. Identifiers sort by mint time, so that is the first row.
+  const projectId =
+    key.projectId ?? (await projectsOf(key.organizationId))[0]?.id;
+  if (projectId === undefined) return undefined;
+
+  await noteApiKeyUsed(key.id);
+
+  return {
+    apiKeyId: key.id,
+    auth: {
+      userId: key.createdByUserId,
+      organizationId: key.organizationId,
+      projectId,
+      role: membership.role,
+      via: "api_key",
+    },
+  };
+}
+
+/**
+ * When a key was last used, so a key nobody needs is visible as one and gets
+ * revoked deliberately rather than left running.
+ *
+ * Internal, and written on the request it describes: a separate call would be a
+ * thing to forget, and the whole value of the column is that it is never stale
+ * in the direction that matters.
+ */
+async function noteApiKeyUsed(apiKeyId: string): Promise<void> {
+  await db()
+    .update(apiKey)
+    .set({ lastUsedAt: new Date() })
+    .where(eq(apiKey.id, apiKeyId));
 }

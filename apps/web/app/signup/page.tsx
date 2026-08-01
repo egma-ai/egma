@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { returnPathIn, withReturnTo } from "../../lib/return-to.ts";
 import {
   DEFAULT_PROJECT_NAME,
   organizationNameFromEmail,
@@ -32,6 +33,16 @@ export default function SignUpPage() {
   const [projectName, setProjectName] = useState(DEFAULT_PROJECT_NAME);
   const [problem, setProblem] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  /**
+   * Where to go afterwards. Somebody who arrived here from a terminal's
+   * approval page goes back to it with their code intact, rather than landing
+   * at the front door having lost what they came for.
+   */
+  const [returnTo, setReturnTo] = useState<string | null>(null);
+
+  useEffect(() => {
+    setReturnTo(returnPathIn(window.location.search));
+  }, []);
 
   useEffect(() => {
     let current = true;
@@ -69,7 +80,7 @@ export default function SignUpPage() {
         body: JSON.stringify({ email, password, organizationName, projectName }),
       });
       if (response.ok) {
-        window.location.assign("/");
+        window.location.assign(returnTo ?? "/");
         return;
       }
       const body = (await response.json().catch(() => ({}))) as {
@@ -97,7 +108,15 @@ export default function SignUpPage() {
         }
       >
         <p style={styles.aside}>
-          Already have an account? <a href="/sign-in">Sign in</a>.
+          Already have an account?{" "}
+          <a
+            href={
+              returnTo === null ? "/sign-in" : withReturnTo("/sign-in", returnTo)
+            }
+          >
+            Sign in
+          </a>
+          .
         </p>
       </Card>
     );
@@ -182,7 +201,13 @@ export default function SignUpPage() {
       </form>
 
       <p style={styles.aside}>
-        Already have an account? <a href="/sign-in">Sign in</a>.
+        Already have an account?{" "}
+        <a
+          href={returnTo === null ? "/sign-in" : withReturnTo("/sign-in", returnTo)}
+        >
+          Sign in
+        </a>
+        .
       </p>
     </Card>
   );
