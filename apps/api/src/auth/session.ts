@@ -25,6 +25,12 @@ import type { SessionIdentityProvider } from "./seam.ts";
  * caller is written as though *the* person's organization is a fact rather than
  * a lookup. Which projects goes through `projectsOf`. Only then is there enough
  * to build a context, and everything downstream takes the context.
+ *
+ * **A switched-off account is nobody here.** Records of what somebody did are
+ * preserved; powers that act on their behalf are revoked — and a live cookie is
+ * a power, exactly as a live key is. Deprovisioning is the case this is for: an
+ * IT script switches somebody off, and the browser they left open stops being
+ * an admin on its very next request rather than whenever the cookie expires.
  */
 
 export type SessionOrganization = {
@@ -71,6 +77,12 @@ export async function resolveSession(
   const userId = identity.externalIdentityId;
 
   const memberships = await membershipsOf(userId);
+
+  // Whatever they are a member of, and at whatever role. The flag is the
+  // account's rather than any one membership's, so one row saying so is the
+  // account saying so.
+  if (memberships.some((held) => held.deactivatedAt !== null)) return null;
+
   const membership = memberships[0];
   if (membership === undefined) {
     return {

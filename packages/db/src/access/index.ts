@@ -74,6 +74,7 @@ export {
   type Member,
   type Membership,
   type RemovedMember,
+  type ResolvedMembership,
 } from "./memberships.ts";
 
 export {

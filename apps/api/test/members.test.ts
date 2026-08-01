@@ -411,6 +411,64 @@ describe("deactivating an account", () => {
     expect(after.rows).toEqual(before.rows);
   });
 
+  /**
+   * The other half of the same sentence, and the half a browser is on.
+   *
+   * A live session is a power exactly as a live key is, so switching an account
+   * off has to take both. This is the deprovisioning case the design is for: an
+   * IT script disables somebody, and the tab they left open must not still be
+   * administering the organization.
+   */
+  it("stops the browser session that person left open, and leaves what they authored", async () => {
+    api = await createApi("members_deactivate_session");
+    const ada = await signUp("ada@acme.example", "Acme");
+    const noor = await colleagueOf(ada, "noor@acme.example", "admin");
+
+    const asAda = { cookie: ada.cookie };
+    expect(
+      (await api.app.inject({ method: "GET", url: "/api/me", headers: asAda }))
+        .statusCode,
+    ).toBe(200);
+
+    // An organization keeps at least one admin, so somebody else does the
+    // switching off. This is the shape a real deprovisioning has.
+    expect((await act(noor, ada.userId, "deactivate")).statusCode).toBe(200);
+
+    // The same cookie, on the very next request, at every surface it reached.
+    for (const url of ["/api/me", "/api/members", "/api/keys"]) {
+      const after = await api.app.inject({ method: "GET", url, headers: asAda });
+      expect(after.statusCode, url).toBe(401);
+    }
+
+    // Including the admin action they held a moment ago.
+    expect((await act(ada, noor.userId, "deactivate")).statusCode).toBe(401);
+
+    // Records of what somebody did are preserved. Their membership, their role
+    // and their name on what they authored are all exactly where they were.
+    const { rows } = await api.database.sql<{
+      name: string;
+      created_by: string;
+    }>("select name, created_by from project where organization_id = $1", [
+      ada.organizationId,
+    ]);
+    expect(rows).toEqual([{ name: "Default", created_by: ada.userId }]);
+
+    const listed = await api.app.inject({
+      method: "GET",
+      url: "/api/members",
+      headers: { cookie: noor.cookie },
+    });
+    expect(
+      (listed.json() as { members: Record<string, unknown>[] }).members,
+    ).toContainEqual(
+      expect.objectContaining({
+        user_id: ada.userId,
+        role: "admin",
+        deactivated_at: expect.any(String),
+      }),
+    );
+  });
+
   it("is not something a viewer may do", async () => {
     api = await createApi("members_deactivate_refused");
     const ada = await signUp("ada@acme.example", "Acme");

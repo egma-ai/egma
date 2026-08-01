@@ -361,6 +361,19 @@ export async function deviceRoutes(
       );
     }
 
+    // Approving and collecting are two moments, and an account can be switched
+    // off in between. Minting the key is the power, so it is refused here for
+    // the same reason a switched-off account resolves neither a session nor a
+    // key it already holds.
+    if (membership.deactivatedAt !== null) {
+      return oauthError(
+        reply,
+        400,
+        "invalid_grant",
+        "the account that approved this has been deactivated",
+      );
+    }
+
     const auth: AuthContext = {
       userId,
       organizationId: membership.organizationId,

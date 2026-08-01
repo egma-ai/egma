@@ -2,7 +2,6 @@ import { newId } from "@egma/ids";
 import { and, eq, isNull } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
-import { user } from "../schema/identity.ts";
 import { apiKey } from "../schema/tenancy.ts";
 import type { ApiKeyScope } from "../schema/columns.ts";
 import type { AuthContext } from "./context.ts";
@@ -224,6 +223,10 @@ export type ResolvedApiKey = {
  * of what they authored. Or they are no longer in that organization, so a key
  * cannot outlive the membership it borrows its powers from.
  *
+ * The second of those is read off the membership rather than looked up here, so
+ * that the browser path and this one are answering it from the same place
+ * rather than each remembering to ask.
+ *
  * The organization is the key row's. Nothing the client sent is consulted, so a
  * copied key cannot reach across a boundary by asking nicely.
  */
@@ -236,20 +239,18 @@ export async function resolveApiKey(
       organizationId: apiKey.organizationId,
       projectId: apiKey.projectId,
       createdByUserId: apiKey.createdByUserId,
-      deactivatedAt: user.deactivatedAt,
     })
     .from(apiKey)
-    .innerJoin(user, eq(user.id, apiKey.createdByUserId))
     .where(and(eq(apiKey.hash, hash), isNull(apiKey.revokedAt)))
     .limit(1);
 
   if (key === undefined) return undefined;
-  if (key.deactivatedAt !== null) return undefined;
 
   const membership = (await membershipsOf(key.createdByUserId)).find(
     (held) => held.organizationId === key.organizationId,
   );
   if (membership === undefined) return undefined;
+  if (membership.deactivatedAt !== null) return undefined;
 
   // An organization-scoped key names no project, so it acts in the
   // organization's oldest one — the project provisioning made — until something

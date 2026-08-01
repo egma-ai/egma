@@ -28,6 +28,31 @@ export type Membership = {
 };
 
 /**
+ * The same place as the resolver below answers it: the role, and whether the
+ * account behind it has been switched off.
+ *
+ * **The second fact is the account's rather than the membership's**, and it is
+ * carried here because this resolver is the only way a credential reaches a
+ * role. A role is a power and a switched-off account holds none, so the fact
+ * that says whether the powers exist arrives with the fact that says what they
+ * are — and a credential path cannot read the second without being handed the
+ * first. That is the difference between a rule every path remembers and a rule
+ * every path is given, which is the whole reason the browser path was able to
+ * miss it.
+ *
+ * `Membership` itself stays exactly what the glossary says it is, because
+ * provisioning writes one and reads nothing about the account when it does.
+ */
+export type ResolvedMembership = Membership & {
+  /**
+   * Set when the account has been switched off. Deactivating leaves the
+   * membership exactly where it is — everything they authored keeps their name
+   * on it — and takes away every credential that acts on their behalf.
+   */
+  readonly deactivatedAt: Date | null;
+};
+
+/**
  * The same place, as a list of people rather than a list of rows: enough to
  * show somebody a colleague and act on them.
  *
@@ -76,17 +101,24 @@ const MEMBER_COLUMNS = {
  * produces the organization an `AuthContext` is later built from. It takes a
  * person and returns their memberships and nothing else, so there is no
  * argument that would make it return somebody else's.
+ *
+ * It joins the identity table for exactly one column — whether the account is
+ * switched off — because every credential that becomes a role becomes it here,
+ * and a resolver that hands out a role without saying whether the account still
+ * holds it is a resolver each caller has to remember to second-guess.
  */
 export async function membershipsOf(
   userId: string,
-): Promise<readonly Membership[]> {
+): Promise<readonly ResolvedMembership[]> {
   return db()
     .select({
       organizationId: membership.organizationId,
       userId: membership.userId,
       role: membership.role,
+      deactivatedAt: user.deactivatedAt,
     })
     .from(membership)
+    .innerJoin(user, eq(user.id, membership.userId))
     .where(eq(membership.userId, userId))
     .orderBy(membership.organizationId);
 }

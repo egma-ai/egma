@@ -314,13 +314,19 @@ describe("whether anybody has signed up here yet", () => {
 describe("which organization a person is in", () => {
   it("is answered by one resolver that takes the person and returns their memberships", async () => {
     expect(await membershipsOf(acme.userId)).toEqual([
-      { organizationId: acme.organizationId, userId: acme.userId, role: "admin" },
+      {
+        organizationId: acme.organizationId,
+        userId: acme.userId,
+        role: "admin",
+        deactivatedAt: null,
+      },
     ]);
     expect(await membershipsOf(globex.userId)).toEqual([
       {
         organizationId: globex.organizationId,
         userId: globex.userId,
         role: "admin",
+        deactivatedAt: null,
       },
     ]);
   });
