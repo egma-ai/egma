@@ -32,6 +32,7 @@ const config: NextConfig = {
           destination: `${api}/api/signup/:path*`,
         },
         { source: "/api/me", destination: `${api}/api/me` },
+        { source: "/api/sign-out", destination: `${api}/api/sign-out` },
         {
           source: "/api/device/:path*",
           destination: `${api}/api/device/:path*`,

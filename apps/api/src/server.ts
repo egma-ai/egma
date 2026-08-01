@@ -13,6 +13,7 @@ import { deviceRoutes } from "./routes/device.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
+import { signOutRoutes } from "./routes/sign-out.ts";
 import { signupRoutes } from "./routes/signup.ts";
 import { fixedWindowRateLimit, type RateLimit } from "./http/rate-limit.ts";
 import { webHandler } from "./http/web-handler.ts";
@@ -114,6 +115,8 @@ export function buildApi(options: ServerOptions): Api {
   });
 
   void app.register(meRoutes, { provider: identity.provider });
+
+  void app.register(signOutRoutes, { provider: identity.provider });
 
   void app.register(deviceRoutes, {
     identity,

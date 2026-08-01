@@ -49,6 +49,22 @@ export default function Home() {
     };
   }, []);
 
+  /**
+   * The one control a signed-in person needs that is not a link. The API ends
+   * the session where it is kept; reloading is what makes this page stop showing
+   * somebody as signed in, and it happens whether or not the call was answered
+   * — a person who clicked sign out is not left looking at their own email
+   * address because the API was unreachable.
+   */
+  async function signOut(): Promise<void> {
+    try {
+      await fetch("/api/sign-out", { method: "POST" });
+    } catch {
+      // Nothing to say. The reload below is the whole of what this page can do.
+    }
+    window.location.assign("/");
+  }
+
   if (state.status === "loading") return <Card title="egma">Loading…</Card>;
 
   if (state.status === "signed-out") {
@@ -81,6 +97,18 @@ export default function Home() {
       )}
 
       <Fact label="Your role" value={organization?.role ?? "—"} />
+
+      <p style={styles.aside}>
+        <button
+          type="button"
+          style={{ fontFamily: "inherit" }}
+          onClick={() => {
+            void signOut();
+          }}
+        >
+          Sign out
+        </button>
+      </p>
 
       <p style={styles.aside}>
         <a href="/members">People</a> — invite a colleague, or change what
