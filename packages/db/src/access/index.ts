@@ -131,13 +131,18 @@ export {
 } from "./device-authorizations.ts";
 
 export {
+  cloneDigitalHuman,
   createDigitalHuman,
+  deleteDigitalHuman,
   editDigitalHuman,
   getDigitalHuman,
   getDigitalHumanVersion,
+  listDigitalHumans,
   VOICE_PROVIDERS,
+  type DeletedDigitalHuman,
   type DigitalHuman,
   type DigitalHumanChanges,
+  type DigitalHumanPage,
   type DigitalHumanTraits,
   type DigitalHumanVersion,
   type NewDigitalHuman,

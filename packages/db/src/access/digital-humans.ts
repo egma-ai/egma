@@ -1,5 +1,5 @@
-import { newId } from "@egma/ids";
-import { and, eq, isNull, type SQL } from "drizzle-orm";
+import { isId, newId } from "@egma/ids";
+import { and, desc, eq, isNull, lt, type SQL } from "drizzle-orm";
 
 import { db } from "../client.ts";
 import {
@@ -22,7 +22,9 @@ import { within } from "./within.ts";
  * credential — reads the whole customer and creates nothing, because a
  * digital human belongs to a project and a credential for the whole customer
  * is acting in none. What already exists it may edit: the row names its own
- * project, so that write has somewhere to land.
+ * project, so that write has somewhere to land. Deleting it refuses like
+ * creating, because taking a digital human out of a project is an act taken
+ * inside one — `deleteDigitalHuman` says why.
  */
 
 /** The mouths egma knows how to ask for. Grows one entry at a time. */
@@ -282,13 +284,12 @@ export async function createDigitalHuman(
   return { ...inserted, version: 1, versionId, traits: input.traits };
 }
 
-export async function getDigitalHuman(
-  auth: AuthContext,
-  id: string,
-): Promise<DigitalHuman | undefined> {
-  authorize(auth, "read", here(auth));
-
-  const [row] = await db()
+/**
+ * The identity row joined to its current version — the shape `get` and `list`
+ * both answer with, written once so the two can never drift.
+ */
+function selectWithCurrentVersion() {
+  return db()
     .select({
       ...COLUMNS,
       version: digitalHumanVersion.version,
@@ -299,7 +300,16 @@ export async function getDigitalHuman(
     .innerJoin(
       digitalHumanVersion,
       eq(digitalHuman.currentVersionId, digitalHumanVersion.id),
-    )
+    );
+}
+
+export async function getDigitalHuman(
+  auth: AuthContext,
+  id: string,
+): Promise<DigitalHuman | undefined> {
+  authorize(auth, "read", here(auth));
+
+  const [row] = await selectWithCurrentVersion()
     .where(theDigitalHuman(auth, id))
     .limit(1);
 
@@ -450,4 +460,161 @@ export async function getDigitalHumanVersion(
 
   if (row === undefined) return undefined;
   return { ...row, traits: traitsFromRow(row.traits, row.id) };
+}
+
+/**
+ * One page of the digital humans the caller can reach — the acting project's,
+ * or the whole customer's for a credential acting in none — and where the
+ * next page starts.
+ *
+ * The ids are Crockford base32 of UUIDv7 under `COLLATE "C"`, so ordering by
+ * id *is* ordering by mint time and the last id of a page is the whole cursor
+ * — no second sort column, no offset to drift when rows arrive mid-scroll.
+ * Newest first, because the digital human somebody is looking for is usually
+ * the one they just made.
+ */
+export type DigitalHumanPage = {
+  readonly items: readonly DigitalHuman[];
+  /** Hand back as `cursor` to continue; absent on the last page. */
+  readonly nextCursor: string | undefined;
+};
+
+const DEFAULT_PAGE_SIZE = 50;
+const LARGEST_PAGE_SIZE = 200;
+
+export async function listDigitalHumans(
+  auth: AuthContext,
+  page?: {
+    readonly limit?: number | undefined;
+    readonly cursor?: string | undefined;
+  },
+): Promise<DigitalHumanPage> {
+  authorize(auth, "read", here(auth));
+
+  const limit = page?.limit ?? DEFAULT_PAGE_SIZE;
+  if (!Number.isInteger(limit) || limit < 1 || limit > LARGEST_PAGE_SIZE) {
+    throw new Error(
+      `a page holds between 1 and ${LARGEST_PAGE_SIZE} digital humans`,
+    );
+  }
+  const cursor = page?.cursor;
+  if (cursor !== undefined && !isId("dh", cursor)) {
+    throw new Error(
+      `"${cursor}" is not a digital-human id, so it cannot be a cursor`,
+    );
+  }
+
+  const olderThanCursor =
+    cursor === undefined ? undefined : lt(digitalHuman.id, cursor);
+
+  // One row beyond the page answers "is there more?" without a second query.
+  const rows = await selectWithCurrentVersion()
+    .where(
+      within(
+        auth,
+        digitalHuman,
+        and(notDeleted, inActingProject(auth), olderThanCursor),
+      ),
+    )
+    .orderBy(desc(digitalHuman.id))
+    .limit(limit + 1);
+
+  const items = rows
+    .slice(0, limit)
+    .map((row) => ({ ...row, traits: traitsFromRow(row.traits, row.versionId) }));
+
+  return {
+    items,
+    nextCursor: rows.length > limit ? items[items.length - 1]?.id : undefined,
+  };
+}
+
+/**
+ * A new digital human whose version 1 carries the source's current traits.
+ *
+ * A clone is a create with the retyping saved: fresh `dh_` and `dhv_` ids,
+ * version numbering starting over at 1, and no link back — the source's
+ * history is the source's, and nothing of it comes along. The source is read
+ * through the same seam as `getDigitalHuman`, so a clone can only be taken of
+ * what the caller could have fetched: same customer, same acting project,
+ * not deleted.
+ *
+ * Authorization is layered on purpose, not by accident of delegation. The
+ * leading check refuses a viewer before anything is read, and a credential
+ * acting in no project is refused right after it, still before the read —
+ * the same stance as create and delete, and it keeps `undefined` meaning
+ * invisible rather than refused. `getDigitalHuman`'s `read` applies because
+ * the clone hands the source's traits back, which is a read;
+ * `createDigitalHuman`'s check applies because a clone is a create. If
+ * reading ever gains a gate of its own, a caller who may not read the source
+ * must be refused out loud here — never handed an `undefined` that pretends
+ * the source does not exist, which would make clone the one path that reads
+ * without the read permission.
+ */
+export async function cloneDigitalHuman(
+  auth: AuthContext,
+  id: string,
+): Promise<DigitalHuman | undefined> {
+  authorize(auth, "author_definitions", here(auth));
+
+  if (auth.projectId === undefined) {
+    throw new Error(
+      "a clone lands in the acting project, and this credential is for the whole organization and acting in none",
+    );
+  }
+
+  const source = await getDigitalHuman(auth, id);
+  if (source === undefined) return undefined;
+
+  return createDigitalHuman(auth, {
+    name: source.name,
+    description: source.description ?? undefined,
+    traits: source.traits,
+  });
+}
+
+export type DeletedDigitalHuman = {
+  readonly id: string;
+  readonly projectId: string;
+  readonly name: string;
+  readonly deletedAt: Date;
+};
+
+/**
+ * The soft-delete marker, and only the marker. The digital human vanishes
+ * from lists and fetches at once; the version rows stay exactly where they
+ * are, because a run that pinned one must stay interpretable for as long as
+ * the run itself is kept. Sweeping orphaned versions is the deletion worker's
+ * job, not this function's.
+ *
+ * Like create, this refuses a credential acting in no project. An edit lands
+ * on a row that already names its own project; a delete decides the digital
+ * human should stop appearing in one, and emptying a project is an act taken
+ * from inside it — a credential for the whole customer is acting in none.
+ */
+export async function deleteDigitalHuman(
+  auth: AuthContext,
+  id: string,
+): Promise<DeletedDigitalHuman | undefined> {
+  authorize(auth, "author_definitions", here(auth));
+
+  if (auth.projectId === undefined) {
+    throw new Error(
+      "deleting a digital human happens inside their project, and this credential is for the whole organization and acting in none",
+    );
+  }
+
+  const deletedAt = new Date();
+  const [row] = await db()
+    .update(digitalHuman)
+    .set({ deletedAt, updatedAt: deletedAt })
+    .where(theDigitalHuman(auth, id))
+    .returning({
+      id: digitalHuman.id,
+      projectId: digitalHuman.projectId,
+      name: digitalHuman.name,
+    });
+
+  if (row === undefined) return undefined;
+  return { ...row, deletedAt };
 }

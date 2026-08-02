@@ -5,10 +5,13 @@ import { eq } from "drizzle-orm";
 
 import { connect, disconnect, db } from "../client.ts";
 import {
+  cloneDigitalHuman,
   createDigitalHuman,
+  deleteDigitalHuman,
   editDigitalHuman,
   getDigitalHuman,
   getDigitalHumanVersion,
+  listDigitalHumans,
   VOICE_PROVIDERS,
   type VoiceProvider,
 } from "../access/digital-humans.ts";
@@ -30,6 +33,9 @@ import { organization, user } from "../schema/index.ts";
  *     --voice-id EXAVITQu4vr4xnSDxMaL
  *
  *   node packages/db/dist/scripts/digital-human.js get dh_…
+ *   node packages/db/dist/scripts/digital-human.js list [--limit 50] [--cursor dh_…]
+ *   node packages/db/dist/scripts/digital-human.js clone dh_…
+ *   node packages/db/dist/scripts/digital-human.js delete dh_…
  */
 
 const DATABASE_URL =
@@ -92,9 +98,28 @@ function usage(): never {
       "    [--personality <text>] [--language <tag>]",
       `    [--voice-provider ${VOICE_PROVIDERS.join("|")}] [--voice-id <id>] [--speed 1.0]`,
       "  digital-human.js get-version <dhv_id>",
+      "  digital-human.js list [--limit <n>] [--cursor <dh_id>]",
+      "  digital-human.js clone <dh_id>",
+      "  digital-human.js delete <dh_id>",
     ].join("\n"),
   );
   process.exit(1);
+}
+
+/** The one positional argument most commands take. */
+function requiredId(rest: readonly string[]): string {
+  const [id] = rest;
+  if (id === undefined) usage();
+  return id;
+}
+
+/** Print what the factory answered, or say the id reached nothing and exit. */
+function printDigitalHuman(id: string, found: unknown): void {
+  if (found === undefined) {
+    console.error(`no digital human ${id} in the development project`);
+    process.exit(1);
+  }
+  console.log(JSON.stringify(found, null, 2));
 }
 
 async function main(): Promise<void> {
@@ -135,14 +160,8 @@ async function main(): Promise<void> {
     });
     console.log(JSON.stringify(created, null, 2));
   } else if (command === "get") {
-    const [id] = rest;
-    if (id === undefined) usage();
-    const found = await getDigitalHuman(auth, id);
-    if (found === undefined) {
-      console.error(`no digital human ${id} in the development project`);
-      process.exit(1);
-    }
-    console.log(JSON.stringify(found, null, 2));
+    const id = requiredId(rest);
+    printDigitalHuman(id, await getDigitalHuman(auth, id));
   } else if (command === "edit") {
     const [id, ...flags] = rest;
     if (id === undefined) usage();
@@ -197,20 +216,34 @@ async function main(): Promise<void> {
         : { description: values.description }),
       ...(traits === undefined ? {} : { traits }),
     });
-    if (edited === undefined) {
-      console.error(`no digital human ${id} in the development project`);
-      process.exit(1);
-    }
-    console.log(JSON.stringify(edited, null, 2));
+    printDigitalHuman(id, edited);
   } else if (command === "get-version") {
-    const [versionId] = rest;
-    if (versionId === undefined) usage();
+    const versionId = requiredId(rest);
     const found = await getDigitalHumanVersion(auth, versionId);
     if (found === undefined) {
       console.error(`no version ${versionId} in the development project`);
       process.exit(1);
     }
     console.log(JSON.stringify(found, null, 2));
+  } else if (command === "list") {
+    const { values } = parseArgs({
+      args: rest,
+      options: {
+        limit: { type: "string" },
+        cursor: { type: "string" },
+      },
+    });
+    const page = await listDigitalHumans(auth, {
+      limit: values.limit === undefined ? undefined : Number(values.limit),
+      cursor: values.cursor,
+    });
+    console.log(JSON.stringify(page, null, 2));
+  } else if (command === "clone") {
+    const id = requiredId(rest);
+    printDigitalHuman(id, await cloneDigitalHuman(auth, id));
+  } else if (command === "delete") {
+    const id = requiredId(rest);
+    printDigitalHuman(id, await deleteDigitalHuman(auth, id));
   } else {
     usage();
   }

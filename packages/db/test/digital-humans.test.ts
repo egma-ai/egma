@@ -20,6 +20,7 @@ import {
   POSTGRES_ERROR,
   type MigratedDatabase,
 } from "./support/database.ts";
+import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
  * The factory functions are the seam: every assertion goes through create and
@@ -60,19 +61,11 @@ beforeAll(async () => {
   database = await createConnectedDatabase("digital_humans");
 
   for (const tenant of [acme, globex]) {
-    await database.sql(
-      "insert into organization (id, name, slug) values ($1, $2, $2)",
-      [tenant.organization, tenant.organization.slice(-8)],
-    );
-    await database.sql(
-      "insert into project (id, organization_id, name, slug) values ($1, $2, 'Default', 'default')",
-      [tenant.project, tenant.organization],
-    );
+    await seedOrganization(database, tenant.organization, [
+      { id: tenant.project, slug: "default" },
+    ]);
   }
-  await database.sql('insert into "user" (id, email) values ($1, $2)', [
-    ada,
-    "ada@acme.example",
-  ]);
+  await seedUser(database, ada, "ada@acme.example");
 });
 
 afterAll(async () => {
