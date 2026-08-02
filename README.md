@@ -72,6 +72,8 @@ instead, where it costs milliseconds.
 apps/api        Fastify API. Applies migrations on boot, then serves.
 apps/web        Next.js web application: signup, sign-in, invitations, and
                 where you are.
+fixtures        Checked-in captures used as test inputs. Inert until something
+                consumes them.
 packages/db     The data-access module: schema, migrations, and every read
                 and write there is.
 packages/ids    The identifier generator.
