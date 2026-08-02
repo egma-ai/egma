@@ -108,11 +108,44 @@ export async function createConnectedDatabase(
   };
 }
 
-/** The Postgres error code a failed constraint arrived as. */
+export type SingleConnection = {
+  /** Raw SQL on one connection, so `begin` and `commit` mean something. */
+  sql<Row extends pg.QueryResultRow = pg.QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<pg.QueryResult<Row>>;
+  close(): Promise<void>;
+};
+
+/**
+ * One connection, held open, for the tests that need a transaction of their
+ * own — a pool routes each statement wherever it likes, which makes `begin`
+ * and `commit` land on different sessions.
+ */
+export async function openSingleConnection(
+  url: string,
+): Promise<SingleConnection> {
+  const client = new pg.Client({ connectionString: url });
+  await client.connect();
+  return {
+    sql: (text, values) => client.query(text, values as unknown[] | undefined),
+    close: () => client.end(),
+  };
+}
+
+/**
+ * The Postgres error code a failed constraint arrived as. Walks the `cause`
+ * chain, because a query layer may wrap the driver's error in its own.
+ */
 export function errorCodeOf(error: unknown): string | undefined {
-  return typeof error === "object" && error !== null && "code" in error
-    ? String((error as { code: unknown }).code)
-    : undefined;
+  for (
+    let current = error;
+    typeof current === "object" && current !== null;
+    current = (current as { cause?: unknown }).cause
+  ) {
+    if ("code" in current) return String((current as { code: unknown }).code);
+  }
+  return undefined;
 }
 
 export const POSTGRES_ERROR = {

@@ -14,7 +14,11 @@ import { createMigratedDatabase, type MigratedDatabase } from "./support/databas
 
 const IDENTIFIER_SQL_TYPE = 'text COLLATE "C"';
 
-/** The identity and tenancy tables. The product and execution tables arrive with their first caller. */
+/**
+ * The tables built so far: identity and tenancy from the control-plane pass,
+ * then each product table as its first caller arrives — digital humans came
+ * with the factory.
+ */
 const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   user: "usr",
   session: "ses",
@@ -27,6 +31,8 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   membership: "mbr",
   invitation: "inv",
   api_key: "key",
+  digital_human: "dh",
+  digital_human_version: "dhv",
 };
 
 const declaredTables = (Object.values(schema) as unknown[])
