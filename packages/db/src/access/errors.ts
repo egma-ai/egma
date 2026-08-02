@@ -112,6 +112,31 @@ export class TraceStoreRefusedError extends Error {
 }
 
 /**
+ * A trace query egma will not run, because of how it was asked rather than
+ * because of who asked it.
+ *
+ * There are exactly two ways to get one, and both are refusals the read surface
+ * exists to make: a window that is missing, backwards, or wider than one request
+ * may name; and a page token that is not one egma issued. Neither is a fault and
+ * neither is a permission problem — they are a caller being told what a bounded
+ * read requires, which is why they carry a sentence a person can act on rather
+ * than a code they have to look up.
+ *
+ * It is one error with a `reason` rather than two classes, because the two are
+ * answered identically at every layer above: a 400, and the message. Splitting
+ * them would multiply the handling without changing any of it.
+ */
+export class UnreadableTraceQueryError extends Error {
+  readonly reason: "time_window" | "cursor";
+
+  constructor(reason: "time_window" | "cursor", message: string) {
+    super(message);
+    this.name = "UnreadableTraceQueryError";
+    this.reason = reason;
+  }
+}
+
+/**
  * The caller's role does not permit the action, or the action named a customer
  * that is not theirs.
  *

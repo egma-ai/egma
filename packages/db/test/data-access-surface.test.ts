@@ -71,10 +71,12 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
 /**
  * Everything that touches a customer's data. All of it needs the context.
  *
- * `appendSpans` is the trace store's whole surface today and it is a write.
- * Reading spans arrives with the endpoints that need it: an exported read with
- * no caller would be a hole in the boundary that nothing is watching, which is
- * the same objection as a permission row nothing enforces.
+ * The trace store's three are `appendSpans`, which writes, and `listTraces` and
+ * `readTrace`, which arrived with the two v1 endpoints that call them — an
+ * exported read with no caller would be a hole in the boundary that nothing is
+ * watching, which is the same objection as a permission row nothing enforces.
+ * Both reads take a required time window on top of the context, so neither can
+ * be called in a way that scans the whole table.
  */
 const CONTEXT_REQUIRING = [
   "appendSpans",
@@ -87,9 +89,11 @@ const CONTEXT_REQUIRING = [
   "listMembers",
   "listPendingInvitations",
   "listProjects",
+  "listTraces",
   "readOrganization",
   "readOrganizationSettings",
   "readProject",
+  "readTrace",
   "recordDeviceAuthorization",
   "removeMember",
   "revokeApiKey",
@@ -119,8 +123,23 @@ const VALUES = [
   // that is merely unreachable — a door has to answer those two differently,
   // and only the module that owns the client can tell them apart.
   "TraceStoreRefusedError",
+  // And the read surface's own refusal: a window that cannot be served, or a
+  // page token that was not issued here. Both are 400s, and neither is a fault.
+  "UnreadableTraceQueryError",
   "VIA",
   "schema",
+];
+
+/**
+ * The read surface's own limits, exported because the endpoints that enforce
+ * them have to say what they are in a refusal, and a cap named in two places is
+ * a cap that will one day disagree with itself. Each is a number; none of them
+ * reaches a store or names a customer.
+ */
+const READ_LIMITS = [
+  "MAXIMUM_LIST_LIMIT",
+  "MAXIMUM_SPANS_PER_TRACE",
+  "MAXIMUM_WINDOW_MILLISECONDS",
 ];
 
 describe("the data-access module's surface", () => {
@@ -135,6 +154,7 @@ describe("the data-access module's surface", () => {
         ...CONTEXT_REQUIRING,
         ...PERMISSION,
         ...VALUES,
+        ...READ_LIMITS,
       ].sort(),
     );
   });
