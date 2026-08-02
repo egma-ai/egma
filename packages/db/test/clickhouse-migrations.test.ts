@@ -10,6 +10,8 @@ import {
 import {
   createEmptyTraceStore,
   createMigratedTraceStore,
+  rowsIn,
+  tablesIn,
   type EmptyTraceStore,
   type MigratedTraceStore,
 } from "./support/clickhouse.ts";
@@ -29,6 +31,26 @@ type Table = {
 function fixture(name: string): string {
   return fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
 }
+
+/**
+ * The statements of one file, split on the marker the runner splits on, with
+ * the comments off and the whitespace collapsed. The guards below judge each
+ * statement whole, because judged line by line a `CREATE MATERIALIZED VIEW`
+ * with its `IF NOT EXISTS` on the next line reads as a bare `CREATE`, and the
+ * word `insert` inside a comment reads as a backfill.
+ */
+function statementsOf(sql: string): string[] {
+  return sql
+    .split("--> statement-breakpoint")
+    .map((statement) =>
+      statement
+        .replace(/--[^\n]*/g, "")
+        .replace(/\s+/g, " ")
+        .trim(),
+    )
+    .filter((statement) => statement !== "");
+}
+
 
 describe("the trace store's migration files", () => {
   it("are numbered plain SQL, applied in that order", async () => {
@@ -53,8 +75,31 @@ describe("the trace store's migration files", () => {
     for (const migration of await readMigrations(
       CLICKHOUSE_MIGRATIONS_DIRECTORY,
     )) {
-      for (const statement of migration.sql.matchAll(/^\s*CREATE\s+(.+)$/gim)) {
-        expect(statement[0]).toMatch(/IF NOT EXISTS/i);
+      for (const statement of statementsOf(migration.sql)) {
+        if (/^CREATE\b/i.test(statement)) {
+          expect(statement).toMatch(
+            /^CREATE (?:TABLE|VIEW|MATERIALIZED VIEW|DICTIONARY|FUNCTION) IF NOT EXISTS /i,
+          );
+        }
+        // A column added later has to survive the re-run on the same terms.
+        expect(statement).not.toMatch(/\bADD COLUMN\b(?! IF NOT EXISTS)/i);
+      }
+    }
+  });
+
+  /**
+   * A backfill is not re-runnable — the boot after a halfway failure would move
+   * the same rows again, and two instances racing would both move them — so a
+   * migration file may create shape and never touch data. Moving rows belongs
+   * to ingest, or to a tool a person runs once on purpose.
+   */
+  it("move no rows, ever", async () => {
+    for (const migration of await readMigrations(
+      CLICKHOUSE_MIGRATIONS_DIRECTORY,
+    )) {
+      for (const statement of statementsOf(migration.sql)) {
+        expect(statement).not.toMatch(/^INSERT\b/i);
+        expect(statement).not.toMatch(/^ALTER TABLE .*\b(?:UPDATE|DELETE)\b/i);
       }
     }
   });
@@ -96,6 +141,58 @@ describe("booting against an empty ClickHouse", () => {
   });
 });
 
+describe("four instances booting at the same moment", () => {
+  let store: EmptyTraceStore;
+
+  beforeAll(async () => {
+    store = await createEmptyTraceStore("concurrent");
+  });
+
+  afterAll(async () => {
+    await store.drop();
+  });
+
+  /**
+   * The Postgres side takes an advisory lock; this side has none to take, so
+   * nothing stops several instances applying at once. Idempotent statements and
+   * a ledger that collapses a repeated record are the whole defence, and this
+   * is where it is proved rather than promised in a comment.
+   */
+  it("all finish, and leave one schema behind", async () => {
+    const expected = await readMigrations(CLICKHOUSE_MIGRATIONS_DIRECTORY);
+
+    // `Promise.all`, not `allSettled`: one rejection anywhere fails the test.
+    await Promise.all([
+      runClickHouseMigrations(store.url),
+      runClickHouseMigrations(store.url),
+      runClickHouseMigrations(store.url),
+      runClickHouseMigrations(store.url),
+    ]);
+
+    expect(await tablesIn(store)).toEqual([
+      "egma_meta_migration",
+      "spans",
+      "turns",
+      "turns_mv",
+    ]);
+
+    const ledger = await rowsIn<{ name: string }>(
+      store,
+      "select distinct name from egma_meta_migration order by name",
+    );
+    expect(ledger.map((row) => row.name)).toEqual(
+      expected.map((migration) => migration.name),
+    );
+
+    // And a boot after the storm finds nothing left to do.
+    const late = await runClickHouseMigrations(store.url);
+    expect(late.applied).toEqual([]);
+    expect(late.alreadyApplied).toEqual(
+      expect.arrayContaining(expected.map((migration) => migration.name)),
+    );
+  });
+});
+
 describe("a migration that cannot apply", () => {
   let store: EmptyTraceStore;
 
@@ -119,9 +216,33 @@ describe("a migration that cannot apply", () => {
     ).rejects.toThrow(/migration 0000_broken\.sql failed/);
   });
 
-  it("records nothing, so the next boot tries it again", async () => {
-    const result = await runClickHouseMigrations(store.url);
-    expect(result.alreadyApplied).toEqual([]);
+  /**
+   * The broken file's first statement landed before its second failed, and
+   * there was no transaction to take it back. That half-applied state is
+   * exactly what the next boot walks into, so this runs the same directory
+   * again: the table that already exists causes no error — the IF NOT EXISTS
+   * discipline doing its work — and the file fails on the statement that broke
+   * it before, not a line earlier.
+   */
+  it("records nothing, so the next boot tries the whole file again", async () => {
+    expect(await tablesIn(store)).toEqual(["egma_meta_migration", "lands_first"]);
+    expect(await rowsIn(store, "select name from egma_meta_migration")).toEqual(
+      [],
+    );
+
+    const failure = await runClickHouseMigrations(
+      store.url,
+      fixture("clickhouse-broken"),
+    ).then(
+      () => undefined,
+      (thrown: unknown) => thrown as Error,
+    );
+
+    expect(failure?.message).toMatch(/migration 0000_broken\.sql failed/);
+    // The second statement's engine, never the first statement's table: the
+    // re-run got past what already exists and broke where it broke before.
+    expect(String(failure?.cause)).toMatch(/NoSuchEngine/);
+    expect(String(failure?.cause)).not.toMatch(/lands_first/);
   });
 });
 
@@ -230,7 +351,7 @@ describe("a span arriving twice", () => {
    * its keep on the production path egma does not own, where an exporter's retry
    * is byte-identical by design. The view is checked as well as the table: a
    * materialised view runs on the block that arrived, so a repeat the table drops
-   * would otherwise still show the caller saying the same thing twice.
+   * would otherwise still show the human saying the same thing twice.
    */
   it("lands once, in the table and in the view", async () => {
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -241,7 +362,7 @@ describe("a span arriving twice", () => {
     expect(await store.rows("select 1 from turns")).toHaveLength(1);
   });
 
-  it("reaches the view with its text truncated and its sentinels filled in", async () => {
+  it("reaches the view with its sentinels filled in", async () => {
     const [turn] = await store.rows<{
       trace_id: string;
       kind: string;
@@ -255,5 +376,33 @@ describe("a span arriving twice", () => {
     expect(turn?.project_id).toBe("default");
     expect(turn?.environment).toBe("default");
     expect(turn?.text_preview).toBe(span.text);
+  });
+
+  /**
+   * The preview really is a preview. The span above is far shorter than the
+   * cut, so this one is not: a turn past 1024 characters proves the view
+   * truncates, and that the wide table keeps every character for the detail
+   * page to go and get.
+   */
+  it("cuts the preview at 1024 characters, and keeps the whole text on `spans`", async () => {
+    const said =
+      "I need to move my Tuesday appointment, and it is a long story. ".repeat(
+        20,
+      );
+    expect(said.length).toBeGreaterThan(1024);
+    const long = { ...span, span_id: "00f067aa0ba902b8", text: said };
+
+    await store.append("spans", [long]);
+
+    const [turn] = await store.rows<{ text_preview: string }>(
+      `select text_preview from turns where span_id = '${long.span_id}'`,
+    );
+    expect(turn?.text_preview).toHaveLength(1024);
+    expect(turn?.text_preview).toBe(said.slice(0, 1024));
+
+    const [kept] = await store.rows<{ text: string }>(
+      `select text from spans where span_id = '${long.span_id}'`,
+    );
+    expect(kept?.text).toBe(said);
   });
 });

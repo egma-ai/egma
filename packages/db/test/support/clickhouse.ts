@@ -61,6 +61,36 @@ export async function createEmptyTraceStore(
   };
 }
 
+/**
+ * Raw rows from a store left empty on purpose, for the migration tests that ask
+ * what a run left behind — before it ran, or after it failed. A client is
+ * opened and closed per question, because the store under inspection has no
+ * settled shape to keep a connection against.
+ */
+export async function rowsIn<Row>(
+  store: EmptyTraceStore,
+  query: string,
+): Promise<Row[]> {
+  const client = createClient({ url: store.url });
+  try {
+    const result = await client.query({ query, format: "JSONEachRow" });
+    // Awaited here, not returned: the finally below closes the client, and an
+    // unconsumed body does not survive that.
+    return await result.json<Row>();
+  } finally {
+    await client.close();
+  }
+}
+
+/** Every table the database holds, ledger included, in name order. */
+export async function tablesIn(store: EmptyTraceStore): Promise<string[]> {
+  const tables = await rowsIn<{ name: string }>(
+    store,
+    `select name from system.tables where database = '${store.name}' order by name`,
+  );
+  return tables.map((table) => table.name);
+}
+
 export type MigratedTraceStore = EmptyTraceStore & {
   /** Deliberately raw SQL: these tests bypass every application code path. */
   rows<Row>(query: string): Promise<Row[]>;

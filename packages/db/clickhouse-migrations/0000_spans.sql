@@ -1,6 +1,6 @@
 -- The trace store's one wide table, and the turn-grain view over it.
 --
--- A row is a span: any timed thing inside one conversation — a turn, a tool
+-- A row is a span: any timed thing inside one trace — a turn, a tool
 -- call, a model call, a speech-to-text step, a text-to-speech step. Trace-level
 -- facts are repeated on every row rather than joined from a second table, so a
 -- simulation and a production trace are one shape and every query, grader and
@@ -41,8 +41,11 @@ CREATE TABLE IF NOT EXISTS spans
 
     -- Timing. `started_at` is stamped by the writer when the span opened and is
     -- replayed byte-identically on a retry; nothing downstream re-derives it.
-    -- Nanoseconds because that is the unit OTLP arrives in, so ingest converts
-    -- nothing and loses nothing.
+    -- Microsecond precision: OTLP arrives as `start_time_unix_nano` and ingest
+    -- divides by 1000. The sub-microsecond digits are dropped here on purpose —
+    -- full-nanosecond latency lives in `duration_ns`, and the exact precision of
+    -- `started_at` decides nothing about where a row lands: the settled sort key
+    -- buckets it to the minute.
     started_at               DateTime64(6, 'UTC'),
     duration_ns              UInt64,
 
@@ -93,6 +96,12 @@ ORDER BY (organization_id, project_id, toStartOfMinute(started_at), xxHash32(tra
 -- writer. This is the backstop under it — a repeat of a byte-identical insert
 -- block is dropped — and it earns its keep on the production path, which egma
 -- does not own and where an exporter's retry is byte-identical by design.
+-- The window is a count of recent insert blocks, not a span of time, and 1000
+-- sits generously above any plausible number of in-flight insert batches for
+-- one deployment, so a delayed retry still lands inside it. On a
+-- ReplicatedMergeTree this setting is a no-op; a replicated deployment gets the
+-- same backstop from `replicated_deduplication_window`, which is on by default
+-- with a window of 100 — recorded here so that deployment does not rediscover it.
 SETTINGS non_replicated_deduplication_window = 1000;
 
 --> statement-breakpoint
@@ -126,8 +135,10 @@ ORDER BY (organization_id, project_id, toStartOfMinute(started_at), xxHash32(tra
 -- The same backstop, and it is needed separately: a materialised view runs on
 -- the block that arrived, before the base table has decided whether to keep it,
 -- so a retry `spans` drops would otherwise still reach `turns` and show the
--- caller saying the same thing twice. The derived block is a function of the
+-- human saying the same thing twice. The derived block is a function of the
 -- arriving one, so a byte-identical repeat produces a byte-identical repeat here.
+-- Sized and caveated exactly as on `spans`: a count of blocks, not a time
+-- window, and a no-op under a replicated engine.
 SETTINGS non_replicated_deduplication_window = 1000;
 
 --> statement-breakpoint

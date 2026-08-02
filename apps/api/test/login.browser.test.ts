@@ -18,8 +18,8 @@ import {
   type MigratedDatabase,
 } from "../../../packages/db/test/support/database.ts";
 import {
-  createMigratedTraceStore,
-  type MigratedTraceStore,
+  createEmptyTraceStore,
+  type EmptyTraceStore,
 } from "../../../packages/db/test/support/clickhouse.ts";
 
 /**
@@ -51,7 +51,7 @@ const WEB = path.join(import.meta.dirname, "../../web");
 const SETTLE = 120_000;
 
 let database: MigratedDatabase;
-let traceStore: MigratedTraceStore;
+let traceStore: EmptyTraceStore;
 let api: Awaited<ReturnType<typeof startApi>>;
 let web: ChildProcess;
 let browser: Browser;
@@ -131,7 +131,10 @@ async function openBrowser(): Promise<Browser> {
 
 beforeAll(async () => {
   database = await createMigratedDatabase("login_browser");
-  traceStore = await createMigratedTraceStore("login_browser");
+  // Empty on purpose: neither flow reads a trace, and the health check the
+  // boot waits on only asks the store to answer. Migrating it here would spend
+  // time proving what `clickhouse-migrations.test.ts` already proves.
+  traceStore = await createEmptyTraceStore("login_browser");
   connect({ databaseUrl: database.url, maxConnections: 4 });
   connectClickHouse({ clickhouseUrl: traceStore.url, maxOpenConnections: 4 });
 
