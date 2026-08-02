@@ -74,8 +74,8 @@ instead, where it costs milliseconds.
 apps/api        Fastify API. Applies migrations on boot, then serves.
 apps/web        Next.js web application: signup, sign-in, invitations, and
                 where you are.
-fixtures        Checked-in captures used as test inputs. Inert until something
-                consumes them.
+fixtures        Checked-in captures used as test inputs. The LiveKit one is
+                replayed at the ingest door on every test run.
 packages/db     The data-access module: schema, migrations, and every read
                 and write there is.
 packages/ids    The identifier generator.
@@ -147,6 +147,49 @@ An `admin` sees every key in their organization; everybody else sees the ones
 they minted. Every role may mint a key for themselves, including `viewer` —
 logging in mints one as its last step, so an admin-only rule would close the
 product to most of an instance.
+
+## Sending an agent's traces
+
+egma listens on the OpenTelemetry endpoint your agent already knows how to
+export to. Point it at this instance with an egma key and write no integration
+code:
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3100
+export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer egma_sk_..."
+```
+
+That is the API directly rather than the web application: the one-origin rule
+above exists so a browser's session cookie is valid for both, and telemetry
+carries no cookie. An exporter has no reason to be routed through a page server.
+
+`POST /v1/traces` accepts OTLP/HTTP in both encodings the specification defines
+— `application/x-protobuf` and `application/json`, gzipped or not — and answers
+with the specification's own `ExportTraceServiceResponse`. There is no gRPC
+endpoint.
+
+A few things worth knowing about what happens next:
+
+- **Which organization and project the spans land in comes from the key**, never
+  from the payload. An attribute naming an account is stored with everything
+  else and consulted by nothing, so a leaked key cannot be pointed somewhere
+  else. A key minted for a whole organization files its spans under no project.
+- **The ids are yours.** egma stores the trace and span ids that arrived and
+  mints neither; a span carrying no usable id is reported back as rejected
+  rather than given one.
+- **Nothing is invented and nothing is dropped.** One span in is one row; what
+  the columns have no place for — every attribute, event and resource field —
+  is kept verbatim on the row it came on.
+- **A retry is free.** An exporter re-sending a batch it never heard back about
+  sends identical bytes, and identical bytes are stored once.
+- **Which environment a span belongs to is discovered**, from
+  `deployment.environment.name` if your telemetry sets it and `default` if it
+  does not. There is nothing to declare first. Names beginning `egma` are
+  reserved and are refused with a reason.
+
+Spans egma will not store are reported in the response's partial-success field
+rather than as a failure, because the specification is explicit that rejected
+data must not be retried — the rest of the batch is stored.
 
 ## Adding a second person
 

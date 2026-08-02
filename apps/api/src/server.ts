@@ -14,6 +14,7 @@ import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
 import { signupRoutes } from "./routes/signup.ts";
+import { traceRoutes } from "./routes/traces.ts";
 import { fixedWindowRateLimit, type RateLimit } from "./http/rate-limit.ts";
 import { webHandler } from "./http/web-handler.ts";
 import type { Config } from "./config.ts";
@@ -158,6 +159,12 @@ export function buildApi(options: ServerOptions): Api {
     emailSender,
     baseUrl: config.baseUrl,
   });
+
+  // The OTLP door, registered without `fastify-plugin` for the same reason the
+  // provider's adapter is: it replaces every body parser inside its own scope
+  // so that telemetry arrives as the bytes that were sent, and encapsulation is
+  // what stops that reaching the JSON routes above.
+  void app.register(traceRoutes, { provider: identity.provider, rateLimit });
 
   // Outside the credentialed scope on purpose: somebody following an
   // invitation has no membership, so there is no context to resolve them into
