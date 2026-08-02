@@ -55,6 +55,7 @@ export {
   LastAdminError,
   NotPermittedError,
   ProjectOutsideOrganizationError,
+  TraceStoreRefusedError,
 } from "./errors.ts";
 
 export {

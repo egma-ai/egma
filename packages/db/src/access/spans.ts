@@ -1,5 +1,10 @@
+import { Readable } from "node:stream";
+
+import { ClickHouseError } from "@clickhouse/client";
+
 import { traceStore } from "../clickhouse/client.ts";
 import type { AuthContext } from "./context.ts";
+import { TraceStoreRefusedError } from "./errors.ts";
 
 /**
  * Writing spans, and the only way anything ever does.
@@ -125,11 +130,21 @@ const MAXIMUM_ROWS_PER_INSERT = 5_000;
 /**
  * And how many bytes, because rows are not the same size. A trace full of long
  * transcripts reaches a size limit long before a row count.
+ *
+ * Bytes of the UTF-8 the store is actually sent, counted on the serialised row
+ * rather than on its JavaScript string length: a transcript of CJK or emoji is
+ * three or four bytes a character, and a budget kept in UTF-16 code units would
+ * be three or four times the one it claimed to be.
  */
 const MAXIMUM_BYTES_PER_INSERT = 16 * 1024 * 1024;
 
+/** The one table this module writes. */
+const SPANS_TABLE = "spans";
+
 /**
- * Where a single field stops.
+ * Where a single field stops, in **bytes of UTF-8**, because that is what
+ * ClickHouse stores and what a `String` column is measured in. The cut itself
+ * still lands on a character boundary; see `truncated`.
  *
  * Only the normalised columns are capped, and never the verbatim payload — the
  * whole arrangement is that a cap costs presentation rather than data, because
@@ -151,15 +166,40 @@ const FIELD_LIMITS = {
   environment: 128,
 } as const satisfies Readonly<Record<string, number>>;
 
+/** How many bytes of UTF-8 one code point becomes. */
+function utf8Bytes(codePoint: number): number {
+  if (codePoint < 0x80) return 1;
+  if (codePoint < 0x800) return 2;
+  if (codePoint < 0x10000) return 3;
+  return 4;
+}
+
 /**
- * Cut at a limit without splitting a character in half. A lone surrogate is not
- * text in any encoding, and ClickHouse stores what it is given.
+ * Cut at a limit of **bytes** without splitting a character in half.
+ *
+ * The two units in play are not the same one: ClickHouse measures a `String`
+ * column in bytes of UTF-8, and JavaScript measures a string in UTF-16 code
+ * units, so a transcript of emoji is four bytes and two code units a character.
+ * The budget is the store's, and the boundary is JavaScript's — iterating by
+ * code point is what keeps a surrogate pair whole, because a lone surrogate is
+ * not text in any encoding and ClickHouse stores what it is given.
  */
 function truncated(value: string, limit: number): string {
-  if (value.length <= limit) return value;
-  const cut = value.slice(0, limit);
-  const last = cut.charCodeAt(cut.length - 1);
-  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+  // The common case by far, and the only one that touches every row: a native
+  // byte count and nothing else.
+  if (Buffer.byteLength(value) <= limit) return value;
+
+  let bytes = 0;
+  let kept = 0;
+  for (const character of value) {
+    const size = utf8Bytes(character.codePointAt(0) ?? 0);
+    if (bytes + size > limit) break;
+    bytes += size;
+    // Two code units for anything above the basic plane, and the pair is kept
+    // or dropped together.
+    kept += character.length;
+  }
+  return value.slice(0, kept);
 }
 
 /**
@@ -222,36 +262,135 @@ function rowFor(auth: AuthContext, span: NewSpan): Record<string, unknown> {
 }
 
 /**
- * Rows in, insert-sized groups out, in the order they arrived.
+ * One row, serialised exactly once.
+ *
+ * The line is what is sent, its byte count is what the batch budget is spent
+ * from, and its month is which partition it lands in — three questions off one
+ * `JSON.stringify` instead of one throwaway serialisation per row for the
+ * sizing and a second one inside the client for the wire.
+ */
+type SerialisedRow = {
+  readonly line: string;
+  readonly bytes: number;
+  /** `YYYY-MM`, which is `toYYYYMM(started_at)` written the way the literal is. */
+  readonly month: string;
+};
+
+function serialised(auth: AuthContext, span: NewSpan): SerialisedRow {
+  const row = rowFor(auth, span);
+  const line = JSON.stringify(row);
+  return {
+    line,
+    bytes: Buffer.byteLength(line),
+    month: String(row["started_at"]).slice(0, "YYYY-MM".length),
+  };
+}
+
+/**
+ * Rows in, insert-sized blocks out, in the order they arrived.
+ *
+ * **One month per block, first**, because the partition key is
+ * `toYYYYMM(started_at)` and `max_partitions_per_insert_block` defaults to 100:
+ * a client's clock decides how many months a batch spans, and a batch of spans
+ * across more than a hundred of them would otherwise be refused whole by the
+ * engine. Splitting by month is a pure function of the rows, so it costs
+ * nothing on ordinary traffic — a trace lives inside one month — and it takes
+ * the engine's limit out of a client's hands.
  *
  * A single row larger than the byte cap still goes, alone: splitting is how a
  * big batch gets written, never a reason to refuse one. Deterministic, because
  * an exporter's retry only dedups if it produces the identical blocks.
  */
-function inserts(
-  rows: readonly Record<string, unknown>[],
-): Record<string, unknown>[][] {
-  const batches: Record<string, unknown>[][] = [];
-  let batch: Record<string, unknown>[] = [];
-  let bytes = 0;
-
+function inserts(rows: readonly SerialisedRow[]): string[][] {
+  // Insertion-ordered, so the first month to arrive is the first block written
+  // and a retry of the same batch produces the same blocks in the same order.
+  const months = new Map<string, SerialisedRow[]>();
   for (const row of rows) {
-    const size = JSON.stringify(row).length;
-    if (
-      batch.length > 0 &&
-      (batch.length >= MAXIMUM_ROWS_PER_INSERT ||
-        bytes + size > MAXIMUM_BYTES_PER_INSERT)
-    ) {
-      batches.push(batch);
-      batch = [];
-      bytes = 0;
-    }
-    batch.push(row);
-    bytes += size;
+    const month = months.get(row.month);
+    if (month === undefined) months.set(row.month, [row]);
+    else month.push(row);
   }
 
-  if (batch.length > 0) batches.push(batch);
-  return batches;
+  const blocks: string[][] = [];
+  for (const month of months.values()) {
+    let block: string[] = [];
+    let bytes = 0;
+
+    for (const row of month) {
+      if (
+        block.length > 0 &&
+        (block.length >= MAXIMUM_ROWS_PER_INSERT ||
+          bytes + row.bytes > MAXIMUM_BYTES_PER_INSERT)
+      ) {
+        blocks.push(block);
+        block = [];
+        bytes = 0;
+      }
+      block.push(row.line);
+      bytes += row.bytes;
+    }
+
+    if (block.length > 0) blocks.push(block);
+  }
+
+  return blocks;
+}
+
+/**
+ * The refusals that are about the rows rather than about the moment.
+ *
+ * Named symbolically, because ClickHouse's names are stable and its numbers are
+ * the thing nobody can read. Everything absent from this list — a connection
+ * that failed, a memory limit, a table behind on its merges — is a *later*
+ * problem, stays an ordinary error, and reaches an exporter as a status it will
+ * retry. `TOO_MANY_PARTS` is deliberately not here: it is both "this block
+ * touches too many partitions" and "this table is behind on its merges", and
+ * the second is the retryable case. The first is prevented above instead, by
+ * splitting a batch by month before it is sent.
+ */
+const REFUSED_BY_THE_DATA: ReadonlySet<string> = new Set([
+  "ARGUMENT_OUT_OF_BOUND",
+  "CANNOT_PARSE_DATE",
+  "CANNOT_PARSE_DATETIME",
+  "CANNOT_PARSE_ESCAPE_SEQUENCE",
+  "CANNOT_PARSE_INPUT_ASSERTION_FAILED",
+  "CANNOT_PARSE_NUMBER",
+  "CANNOT_PARSE_QUOTED_STRING",
+  "CANNOT_PARSE_TEXT",
+  "CANNOT_PARSE_UUID",
+  "DUPLICATE_COLUMN",
+  "INCORRECT_DATA",
+  "NO_SUCH_COLUMN_IN_TABLE",
+  "TOO_LARGE_STRING_SIZE",
+  "TYPE_MISMATCH",
+  "VALUE_IS_OUT_OF_RANGE_OF_DATA_TYPE",
+  "VIOLATED_CONSTRAINT",
+]);
+
+/**
+ * The store's answer to a batch, in egma's own vocabulary — or the original
+ * error, when what went wrong was not about the batch.
+ */
+function refusal(cause: unknown): unknown {
+  if (!(cause instanceof ClickHouseError)) return cause;
+  if (cause.type === undefined || !REFUSED_BY_THE_DATA.has(cause.type)) {
+    return cause;
+  }
+  return new TraceStoreRefusedError(cause.code, cause.type, cause.message, {
+    cause,
+  });
+}
+
+/**
+ * A block as the newline-delimited body ClickHouse reads, one row at a time.
+ *
+ * A generator rather than a joined string, so the whole block is never held
+ * twice: each line is terminated as it goes out and collected behind the
+ * stream, which on a batch of large payloads is the difference between one copy
+ * of sixteen mebibytes and two.
+ */
+function* lines(block: readonly string[]): Generator<string> {
+  for (const line of block) yield `${line}\n`;
 }
 
 /**
@@ -269,9 +408,26 @@ export async function appendSpans(
 ): Promise<AppendedSpans> {
   if (spans.length === 0) return { appended: 0, batches: 0 };
 
-  const batches = inserts(spans.map((span) => rowFor(auth, span)));
-  for (const values of batches) {
-    await traceStore().insert({ table: "spans", values, format: "JSONEachRow" });
+  const batches = inserts(spans.map((span) => serialised(auth, span)));
+  for (const block of batches) {
+    // The rows go out as the lines they were already serialised into. The
+    // client's own `insert` would take the objects and stringify each one
+    // again, which on a batch of fat payloads is the whole batch materialised
+    // twice for no gain — so the pre-serialised body is handed to the raw
+    // path instead. The bytes ClickHouse sees are the same either way, which
+    // is what the dedup backstop is computed over.
+    try {
+      const { stream } = await traceStore().exec({
+        query: `INSERT INTO ${SPANS_TABLE} FORMAT JSONEachRow`,
+        values: Readable.from(lines(block), { objectMode: false }),
+      });
+      // An insert answers with an empty body, and the empty body still has to
+      // be read: a response left undrained keeps its socket out of the pool
+      // and eventually arrives as a connection reset on somebody else's query.
+      for await (const chunk of stream) void chunk;
+    } catch (cause) {
+      throw refusal(cause);
+    }
   }
 
   return { appended: spans.length, batches: batches.length };

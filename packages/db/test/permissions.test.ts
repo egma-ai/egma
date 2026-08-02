@@ -46,6 +46,12 @@ const THE_TABLE: Readonly<Record<string, readonly Role[]>> = {
   "author_definitions": ["member", "admin"],
   "configure_agents": ["member", "admin"],
   "start_and_cancel_runs": ["member", "admin"],
+  // Sending an agent's traces through the ingest door is a write, so a
+  // read-only credential does not get to do it. The door is the only route
+  // where the credential is ordinarily a key rather than a browser, which is
+  // exactly why the row exists: a key acts at its creator's current role, and
+  // demoting somebody has to stop their exporters too.
+  "ingest_traces": ["member", "admin"],
   "delete_run_data": ["member", "admin"],
   "mint_own_api_key": ["viewer", "member", "admin"],
   "manage_any_api_key": ["admin"],
@@ -243,6 +249,9 @@ describe("a viewer", () => {
       "author_definitions",
       "configure_agents",
       "delete_run_data",
+      // Including the one a key would take on their behalf: an exporter
+      // holding a viewer's key writes nothing.
+      "ingest_traces",
     ] as const) {
       expect(permits(viewer, action, inside(acme))).toBe(false);
     }
@@ -258,6 +267,7 @@ describe("a member", () => {
       "author_definitions",
       "configure_agents",
       "start_and_cancel_runs",
+      "ingest_traces",
       "delete_run_data",
       "mint_own_api_key",
     ] as const) {

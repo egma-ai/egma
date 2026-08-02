@@ -46,6 +46,13 @@ const PERMISSIONS = {
   /** Start a run, cancel a run. */
   start_and_cancel_runs:  [          "member", "admin"],
 
+  /**
+   * Send an agent's traces through the ingest door. A write like any other,
+   * and the row a `viewer` is refused: a read-only credential that could still
+   * file spans into the organization would be read-only in name only.
+   */
+  ingest_traces:          [          "member", "admin"],
+
   /** Delete runs and trace data. */
   delete_run_data:        [          "member", "admin"],
 

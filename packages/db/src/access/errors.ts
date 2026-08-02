@@ -76,6 +76,42 @@ export class LastAdminError extends Error {
 }
 
 /**
+ * The trace store read a batch of spans and refused it, and would refuse the
+ * identical bytes again.
+ *
+ * The distinction this exists to make is between *these rows* and *right now*.
+ * A store that cannot be reached, or that is out of memory, or that is behind on
+ * its merges, will take the same batch happily in a minute — and a door that
+ * told an exporter "rejected" for one of those would have thrown a customer's
+ * telemetry away, because OTLP is explicit that rejected data must not be
+ * retried. So only a refusal that is about the data itself is turned into this;
+ * everything else stays an error and is answered as one, and an exporter
+ * retries.
+ *
+ * It carries the store's own code and name rather than a rewritten message,
+ * because the person who has to fix a batch the store will not take needs the
+ * words the store used.
+ */
+export class TraceStoreRefusedError extends Error {
+  /** ClickHouse's numeric error code, as it reported it. */
+  readonly code: string;
+  /** Its symbolic name — `INCORRECT_DATA`, `TYPE_MISMATCH` — when it gave one. */
+  readonly type: string | undefined;
+
+  constructor(
+    code: string,
+    type: string | undefined,
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = "TraceStoreRefusedError";
+    this.code = code;
+    this.type = type;
+  }
+}
+
+/**
  * The caller's role does not permit the action, or the action named a customer
  * that is not theirs.
  *

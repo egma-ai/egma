@@ -96,6 +96,8 @@ export type MigratedTraceStore = EmptyTraceStore & {
   rows<Row>(query: string): Promise<Row[]>;
   /** Deliberately raw too, and the only way to see what a retry does. */
   append(table: string, values: readonly Record<string, unknown>[]): Promise<void>;
+  /** DDL, for a test that needs the store to start refusing what it is sent. */
+  command(query: string): Promise<void>;
   close(): Promise<void>;
 };
 
@@ -115,6 +117,9 @@ export async function createMigratedTraceStore(
     },
     async append(table, values) {
       await client.insert({ table, values, format: "JSONEachRow" });
+    },
+    async command(query) {
+      await client.command({ query });
     },
     async close() {
       await client.close();

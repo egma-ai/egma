@@ -115,6 +115,10 @@ const VALUES = [
   "LastAdminError",
   "NotPermittedError",
   "ProjectOutsideOrganizationError",
+  // The store's answer to a batch it will never take, told apart from a store
+  // that is merely unreachable — a door has to answer those two differently,
+  // and only the module that owns the client can tell them apart.
+  "TraceStoreRefusedError",
   "VIA",
   "schema",
 ];

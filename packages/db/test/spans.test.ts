@@ -173,6 +173,46 @@ describe("a batch too big for one insert", () => {
     ).toBe(spans.length);
   });
 
+  /**
+   * The partition key is `toYYYYMM(started_at)` and `started_at` came off the
+   * wire, so how many partitions an insert touches is a client's decision:
+   * `max_partitions_per_insert_block` is a hundred, and a batch over it is
+   * refused whole by the engine rather than trimmed. An agent backfilling a
+   * year of history, or one with a broken clock, is not a client egma may lose
+   * a trace over.
+   */
+  it("is split by month as well as by size, because an insert may touch a hundred partitions", async () => {
+    const traceId = "aaaa1111222233334444555566667777";
+    const months = 130;
+    const spans = Array.from({ length: months }, (_, index) =>
+      span({
+        traceId,
+        spanId: index.toString(16).padStart(16, "0"),
+        startedAtMicroseconds:
+          BigInt(Date.UTC(2015 + Math.floor(index / 12), index % 12, 1)) *
+          1000n,
+      }),
+    );
+
+    const written = await appendSpans(at(acme), spans);
+
+    expect(written.appended).toBe(months);
+    // One block per month: every one of them is inside the engine's limit,
+    // which a single block of all of them would not have been.
+    expect(written.batches).toBe(months);
+    expect(
+      await countOf(
+        `select count() as n from spans where trace_id = '${traceId}'`,
+      ),
+    ).toBe(months);
+    expect(
+      await countOf(
+        `select uniqExact(toYYYYMM(started_at)) as n from spans ` +
+          `where trace_id = '${traceId}'`,
+      ),
+    ).toBe(months);
+  });
+
   it("is written in one when it fits, so ordinary traffic pays nothing", async () => {
     const written = await appendSpans(at(acme), [
       span({ traceId: "3333333333333333333333333333dddd" }),
@@ -234,14 +274,29 @@ describe("a field too big for its column", () => {
 
   it("is never cut through the middle of a character", async () => {
     const traceId = "5555555555555555555555555555ffff";
-    // An emoji is a surrogate pair, and a cap that lands between its halves
-    // would store something that is not text in any encoding.
-    await appendSpans(at(acme), [span({ traceId, text: "🙂".repeat(40_000) })]);
+    // One byte in front of the emoji, so that the cap cannot land on a
+    // character boundary by luck: an emoji is four bytes of UTF-8 and a
+    // surrogate pair of UTF-16, and a cut between its halves would store
+    // something that is not text in any encoding.
+    await appendSpans(at(acme), [
+      span({ traceId, text: `a${"🙂".repeat(40_000)}` }),
+    ]);
 
-    const [row] = await store.rows<{ text: string }>(
-      `select text from spans where trace_id = '${traceId}'`,
+    const [row] = await store.rows<{ text: string; bytes: number }>(
+      `select text, length(text) as bytes from spans where trace_id = '${traceId}'`,
     );
-    expect(row?.text).toMatch(/^🙂+$/u);
+
+    const text = row?.text ?? "";
+    expect(text).toMatch(/^a🙂+$/u);
+    // A lone high surrogate is what a naive cut leaves behind, and it is
+    // exactly what the column must never hold.
+    const last = text.charCodeAt(text.length - 1);
+    expect(last >= 0xd800 && last <= 0xdbff).toBe(false);
+    // The limit is the store's, so it is counted in the store's unit. Kept in
+    // UTF-16 code units this string would have been 64 KiB of characters and
+    // 256 KiB of column.
+    expect(row?.bytes).toBeLessThanOrEqual(65_536);
+    expect(row?.bytes).toBeGreaterThan(65_000);
   });
 });
 
