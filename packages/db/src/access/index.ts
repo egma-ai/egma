@@ -132,10 +132,14 @@ export {
 
 export {
   createDigitalHuman,
+  editDigitalHuman,
   getDigitalHuman,
+  getDigitalHumanVersion,
   VOICE_PROVIDERS,
   type DigitalHuman,
+  type DigitalHumanChanges,
   type DigitalHumanTraits,
+  type DigitalHumanVersion,
   type NewDigitalHuman,
   type VoiceProvider,
 } from "./digital-humans.ts";
