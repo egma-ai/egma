@@ -179,7 +179,10 @@ A few things worth knowing about what happens next:
 - **Which organization and project the spans land in comes from the key**, never
   from the payload. An attribute naming an account is stored with everything
   else and consulted by nothing, so a leaked key cannot be pointed somewhere
-  else. A key minted for a whole organization files its spans under no project.
+  else. A key minted for a whole organization files its spans under no project —
+  and **those spans do not appear in the dashboard**, because a browser session
+  reads the project it is acting in. Mint the exporter's key against a project
+  and the two agree.
 - **The ids are yours.** egma stores the trace and span ids that arrived and
   mints neither; a span carrying no usable id is reported back as rejected
   rather than given one.
@@ -269,6 +272,38 @@ Five things about the contract are worth knowing before you build on it:
 Times come back as RFC 3339 to the microsecond, and durations as decimal strings
 of nanoseconds — a nanosecond count passes what a JSON number holds exactly
 within a few months, and a silently rounded latency is worse than no latency.
+
+## Reading one in the dashboard
+
+Sign in and open **Transcripts**. You get your organization's recent
+transcripts, newest first, defaulting to the last twenty-four hours — when each
+one started, how long it ran, how many turns each speaker took, how many steps
+and tools and failures are in it, and the first thing the human said. Pick a
+different window from the control beside the heading; **Show more** walks the
+pages.
+
+Open one and you read it as a transcript: alternating `human:` and `agent:`
+turns in the order they were taken, each with how far into the exchange it
+happened and how long it took. **Expand a turn** for the timed steps inside it —
+the model, the speech synthesis, the tool, the turn detection, the speaking —
+and expand a step again for exactly what was recorded about it. Anything that
+failed is marked on the turn before you open it.
+
+Two things about this are worth knowing:
+
+- **The window rides in the address.** A transcript's link carries the window
+  the exchange happened in, because the endpoint under it needs one; that is why
+  the link works when you send it to somebody, and why opening
+  `/traces/<id>` with no window asks you to come in from the list.
+- **The dashboard reads what a browser session can read, which is the project
+  the session is acting in.** A key minted for a whole organization files its
+  spans under no project at all (see above), and those do not appear here.
+  **Mint the exporter's key against a project** and its telemetry lands where
+  the dashboard looks.
+
+The pages are drawn from the two v1 endpoints above and nothing else — the same
+contract you would integrate against, on the same origin, authenticated by the
+same session that signed you in.
 
 ## Adding a second person
 
