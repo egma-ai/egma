@@ -341,10 +341,10 @@ export async function editDigitalHuman(
     if (locked === undefined) return undefined;
     const { currentVersionId, ...current } = locked;
 
-    // The one `where` in this file that starts from a bare `eq` rather than
-    // `within`: the id it names just came off the tenancy-checked row locked
-    // above, in this same transaction, so the predicate cannot reach further
-    // than that check already did.
+    // This select and the update below are the two `where`s in this file that
+    // start from a bare `eq` rather than `within`: each names an id that just
+    // came off the tenancy-checked row locked above, in this same transaction,
+    // so neither predicate can reach further than that check already did.
     const [currentVersion] = await tx
       .select({
         id: digitalHumanVersion.id,
@@ -418,7 +418,7 @@ export async function editDigitalHuman(
  * One frozen version, by its own `dhv_` id — the read a run uses to stay
  * interpretable after the digital human moves on. Deliberately no deleted
  * filter: versions outlive their digital human's deletion, so a run that
- * pinned one can always say exactly who called.
+ * pinned one can always say exactly who the digital human was.
  */
 export async function getDigitalHumanVersion(
   auth: AuthContext,
