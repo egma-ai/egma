@@ -19,12 +19,13 @@ import {
   createConnectedDatabase,
   type MigratedDatabase,
 } from "./support/database.ts";
+import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
  * List, clone, delete — through the factory functions only, like the create
- * and fetch tests before them. Raw SQL appears in fixtures and in row counts
- * proving what a refused clone left behind and how many versions a clone
- * carries; every id an assertion needs comes off the seam itself.
+ * and fetch tests before them. Raw SQL appears in fixtures and in the one
+ * count proving how many version rows a clone carries, which no seam lists
+ * yet; every id an assertion needs comes off the seam itself.
  *
  * Each concern acts in a project of its own, so no assertion here depends on
  * what another describe block created.
@@ -64,7 +65,7 @@ function actingAsGlobex(): AuthContext {
   };
 }
 
-function human(name: string): NewDigitalHuman {
+function digitalHumanNamed(name: string): NewDigitalHuman {
   return {
     name,
     description: `${name}, of the list-clone-delete tests`,
@@ -83,30 +84,15 @@ function human(name: string): NewDigitalHuman {
 beforeAll(async () => {
   database = await createConnectedDatabase("digital_humans_list_clone_delete");
 
-  await database.sql(
-    "insert into organization (id, name, slug) values ($1, $2, $2), ($3, $4, $4)",
-    [
-      acme.organization,
-      acme.organization.slice(-8),
-      globex.organization,
-      globex.organization.slice(-8),
-    ],
-  );
-  for (const [projectId, organizationId, slug] of [
-    [acme.listing, acme.organization, "listing"],
-    [acme.cloning, acme.organization, "cloning"],
-    [acme.deleting, acme.organization, "deleting"],
-    [globex.project, globex.organization, "default"],
-  ]) {
-    await database.sql(
-      "insert into project (id, organization_id, name, slug) values ($1, $2, $3, $3)",
-      [projectId, organizationId, slug],
-    );
-  }
-  await database.sql('insert into "user" (id, email) values ($1, $2)', [
-    ada,
-    "ada@acme.example",
+  await seedOrganization(database, acme.organization, [
+    { id: acme.listing, slug: "listing" },
+    { id: acme.cloning, slug: "cloning" },
+    { id: acme.deleting, slug: "deleting" },
   ]);
+  await seedOrganization(database, globex.organization, [
+    { id: globex.project, slug: "default" },
+  ]);
+  await seedUser(database, ada, "ada@acme.example");
 });
 
 afterAll(async () => {
@@ -128,15 +114,15 @@ describe("listing digital humans", () => {
 
   beforeAll(async () => {
     for (const name of ["One", "Two", "Three", "Four", "Five"]) {
-      created.push(await createDigitalHuman(actingIn(acme.listing), human(name)));
+      created.push(await createDigitalHuman(actingIn(acme.listing), digitalHumanNamed(name)));
     }
     // One in a sibling project and one at another customer, so "only the
     // acting project's" is a claim the assertions can actually falsify.
     neighbour = await createDigitalHuman(
       actingIn(acme.cloning),
-      human("Neighbour"),
+      digitalHumanNamed("Neighbour"),
     );
-    stranger = await createDigitalHuman(actingAsGlobex(), human("Stranger"));
+    stranger = await createDigitalHuman(actingAsGlobex(), digitalHumanNamed("Stranger"));
   });
 
   it("returns only the acting project's digital humans, newest first", async () => {
@@ -238,7 +224,7 @@ describe("cloning a digital human", () => {
   let source: DigitalHuman;
 
   beforeAll(async () => {
-    source = await createDigitalHuman(actingIn(acme.cloning), human("Original"));
+    source = await createDigitalHuman(actingIn(acme.cloning), digitalHumanNamed("Original"));
   });
 
   it("copies the current traits into a fresh digital human at version 1, with its own ids", async () => {
@@ -273,11 +259,12 @@ describe("cloning a digital human", () => {
       await cloneDigitalHuman(actingIn(acme.deleting), source.id),
     ).toBeUndefined();
 
-    const { rows } = await database.sql(
-      "select count(*) as count from digital_human where organization_id = $1",
-      [globex.organization],
-    );
-    expect(Number(rows[0]?.count)).toBe(1); // Stranger, and nobody else
+    // Neither refused clone created anything: globex still holds only the
+    // Stranger, and the project the second attempt acted in is still empty.
+    const globexPage = await listDigitalHumans(actingAsGlobex());
+    expect(globexPage.items.map((item) => item.name)).toEqual(["Stranger"]);
+    const deletingPage = await listDigitalHumans(actingIn(acme.deleting));
+    expect(deletingPage.items).toEqual([]);
   });
 
   it("is refused to a viewer", async () => {
@@ -290,6 +277,12 @@ describe("cloning a digital human", () => {
     await expect(
       cloneDigitalHuman(actingIn(undefined), source.id),
     ).rejects.toThrow(/project/);
+
+    // The refusal comes before the read, so an id that names nothing gets
+    // the same loud answer — never an `undefined` that reads as invisible.
+    await expect(
+      cloneDigitalHuman(actingIn(undefined), newId("dh")),
+    ).rejects.toThrow(/project/);
   });
 });
 
@@ -297,7 +290,7 @@ describe("deleting a digital human", () => {
   let doomed: DigitalHuman;
 
   beforeAll(async () => {
-    doomed = await createDigitalHuman(actingIn(acme.deleting), human("Doomed"));
+    doomed = await createDigitalHuman(actingIn(acme.deleting), digitalHumanNamed("Doomed"));
   });
 
   it("is refused to a credential acting in no project, like create", async () => {
@@ -344,7 +337,7 @@ describe("deleting a digital human", () => {
   it("returns nothing for another customer's digital human, and leaves it live", async () => {
     const bystander = await createDigitalHuman(
       actingIn(acme.deleting),
-      human("Bystander"),
+      digitalHumanNamed("Bystander"),
     );
 
     expect(

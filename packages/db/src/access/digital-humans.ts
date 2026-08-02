@@ -284,13 +284,12 @@ export async function createDigitalHuman(
   return { ...inserted, version: 1, versionId, traits: input.traits };
 }
 
-export async function getDigitalHuman(
-  auth: AuthContext,
-  id: string,
-): Promise<DigitalHuman | undefined> {
-  authorize(auth, "read", here(auth));
-
-  const [row] = await db()
+/**
+ * The identity row joined to its current version — the shape `get` and `list`
+ * both answer with, written once so the two can never drift.
+ */
+function selectWithCurrentVersion() {
+  return db()
     .select({
       ...COLUMNS,
       version: digitalHumanVersion.version,
@@ -301,7 +300,16 @@ export async function getDigitalHuman(
     .innerJoin(
       digitalHumanVersion,
       eq(digitalHuman.currentVersionId, digitalHumanVersion.id),
-    )
+    );
+}
+
+export async function getDigitalHuman(
+  auth: AuthContext,
+  id: string,
+): Promise<DigitalHuman | undefined> {
+  authorize(auth, "read", here(auth));
+
+  const [row] = await selectWithCurrentVersion()
     .where(theDigitalHuman(auth, id))
     .limit(1);
 
@@ -455,7 +463,9 @@ export async function getDigitalHumanVersion(
 }
 
 /**
- * One page of a project's digital humans, and where the next page starts.
+ * One page of the digital humans the caller can reach — the acting project's,
+ * or the whole customer's for a credential acting in none — and where the
+ * next page starts.
  *
  * The ids are Crockford base32 of UUIDv7 under `COLLATE "C"`, so ordering by
  * id *is* ordering by mint time and the last id of a page is the whole cursor
@@ -498,18 +508,7 @@ export async function listDigitalHumans(
     cursor === undefined ? undefined : lt(digitalHuman.id, cursor);
 
   // One row beyond the page answers "is there more?" without a second query.
-  const rows = await db()
-    .select({
-      ...COLUMNS,
-      version: digitalHumanVersion.version,
-      versionId: digitalHumanVersion.id,
-      traits: digitalHumanVersion.traits,
-    })
-    .from(digitalHuman)
-    .innerJoin(
-      digitalHumanVersion,
-      eq(digitalHuman.currentVersionId, digitalHumanVersion.id),
-    )
+  const rows = await selectWithCurrentVersion()
     .where(
       within(
         auth,
@@ -541,9 +540,12 @@ export async function listDigitalHumans(
  * not deleted.
  *
  * Authorization is layered on purpose, not by accident of delegation. The
- * leading check refuses a viewer before anything is read; `getDigitalHuman`'s
- * `read` applies because the clone hands the source's traits back, which is a
- * read; `createDigitalHuman`'s check applies because a clone is a create. If
+ * leading check refuses a viewer before anything is read, and a credential
+ * acting in no project is refused right after it, still before the read —
+ * the same stance as create and delete, and it keeps `undefined` meaning
+ * invisible rather than refused. `getDigitalHuman`'s `read` applies because
+ * the clone hands the source's traits back, which is a read;
+ * `createDigitalHuman`'s check applies because a clone is a create. If
  * reading ever gains a gate of its own, a caller who may not read the source
  * must be refused out loud here — never handed an `undefined` that pretends
  * the source does not exist, which would make clone the one path that reads
@@ -554,6 +556,12 @@ export async function cloneDigitalHuman(
   id: string,
 ): Promise<DigitalHuman | undefined> {
   authorize(auth, "author_definitions", here(auth));
+
+  if (auth.projectId === undefined) {
+    throw new Error(
+      "a clone lands in the acting project, and this credential is for the whole organization and acting in none",
+    );
+  }
 
   const source = await getDigitalHuman(auth, id);
   if (source === undefined) return undefined;

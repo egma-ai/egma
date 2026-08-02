@@ -106,6 +106,22 @@ function usage(): never {
   process.exit(1);
 }
 
+/** The one positional argument most commands take. */
+function requiredId(rest: readonly string[]): string {
+  const [id] = rest;
+  if (id === undefined) usage();
+  return id;
+}
+
+/** Print what the factory answered, or say the id reached nothing and exit. */
+function printDigitalHuman(id: string, found: unknown): void {
+  if (found === undefined) {
+    console.error(`no digital human ${id} in the development project`);
+    process.exit(1);
+  }
+  console.log(JSON.stringify(found, null, 2));
+}
+
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
 
@@ -144,14 +160,8 @@ async function main(): Promise<void> {
     });
     console.log(JSON.stringify(created, null, 2));
   } else if (command === "get") {
-    const [id] = rest;
-    if (id === undefined) usage();
-    const found = await getDigitalHuman(auth, id);
-    if (found === undefined) {
-      console.error(`no digital human ${id} in the development project`);
-      process.exit(1);
-    }
-    console.log(JSON.stringify(found, null, 2));
+    const id = requiredId(rest);
+    printDigitalHuman(id, await getDigitalHuman(auth, id));
   } else if (command === "edit") {
     const [id, ...flags] = rest;
     if (id === undefined) usage();
@@ -206,14 +216,9 @@ async function main(): Promise<void> {
         : { description: values.description }),
       ...(traits === undefined ? {} : { traits }),
     });
-    if (edited === undefined) {
-      console.error(`no digital human ${id} in the development project`);
-      process.exit(1);
-    }
-    console.log(JSON.stringify(edited, null, 2));
+    printDigitalHuman(id, edited);
   } else if (command === "get-version") {
-    const [versionId] = rest;
-    if (versionId === undefined) usage();
+    const versionId = requiredId(rest);
     const found = await getDigitalHumanVersion(auth, versionId);
     if (found === undefined) {
       console.error(`no version ${versionId} in the development project`);
@@ -234,23 +239,11 @@ async function main(): Promise<void> {
     });
     console.log(JSON.stringify(page, null, 2));
   } else if (command === "clone") {
-    const [id] = rest;
-    if (id === undefined) usage();
-    const cloned = await cloneDigitalHuman(auth, id);
-    if (cloned === undefined) {
-      console.error(`no digital human ${id} in the development project`);
-      process.exit(1);
-    }
-    console.log(JSON.stringify(cloned, null, 2));
+    const id = requiredId(rest);
+    printDigitalHuman(id, await cloneDigitalHuman(auth, id));
   } else if (command === "delete") {
-    const [id] = rest;
-    if (id === undefined) usage();
-    const deleted = await deleteDigitalHuman(auth, id);
-    if (deleted === undefined) {
-      console.error(`no digital human ${id} in the development project`);
-      process.exit(1);
-    }
-    console.log(JSON.stringify(deleted, null, 2));
+    const id = requiredId(rest);
+    printDigitalHuman(id, await deleteDigitalHuman(auth, id));
   } else {
     usage();
   }
