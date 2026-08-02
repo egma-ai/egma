@@ -224,9 +224,9 @@ curl -H "authorization: Bearer egma_sk_..." \
 
 | Parameter | | |
 |---|---|---|
-| `from`, `to` | **required** | RFC 3339. The window is closed at `from` and open at `to`. |
-| `project_id` | optional | Narrows to one project. Absent means the whole organization. |
-| `limit` | optional | At most 200, 50 by default. A maximum, so it is clamped rather than refused. |
+| `from`, `to` | **required** | RFC 3339, honoured to the microsecond. The window is closed at `from` and open at `to`. |
+| `project_id` | optional | Narrows to one project. Absent — or empty — means the whole organization. |
+| `limit` | optional | 50 by default. Above the maximum of 200 it is clamped; zero, negative or not a count at all is refused. Empty is absent. |
 | `cursor` | optional | `next_cursor` from the previous page. |
 
 **`GET /v1/traces/:traceId`** returns one trace as a transcript: `turns` in the
@@ -234,7 +234,7 @@ order they were taken, each carrying the spans that happened inside it, and
 `spans` for everything top-level that is not a turn — the root span above all.
 It takes `from`, `to` and `project_id` on the same terms.
 
-Four things about the contract are worth knowing before you build on it:
+Five things about the contract are worth knowing before you build on it:
 
 - **The window is required, and wider than 31 days is refused rather than
   narrowed.** There is no default, on either endpoint, including the one that
@@ -242,17 +242,29 @@ Four things about the contract are worth knowing before you build on it:
   would be a query for everything. A window that was silently narrowed for you
   would answer a different question than the one you asked while saying nothing
   about having done so, so it is refused with the cap in the message.
+- **Both bounds mean what they say, to the microsecond.** Fractional seconds are
+  read to six digits, which is the precision the store keeps, so you can paste a
+  trace's own `started_at` or `ended_at` straight back in as a bound. A seventh
+  digit is refused rather than rounded: `to` is exclusive, so rounding it would
+  move the edge of your window and take spans out of the answer without
+  mentioning it.
 - **Paging is by token, and a token is a position rather than an offset.** It
   encodes where the last page stopped — when that trace started, and its id to
-  break the tie — so a trace arriving mid-walk cannot shift the rows you have not
-  read yet, and page fifty costs what page one did. Treat it as opaque; nothing
-  is promised about its contents.
+  break the tie — so no trace is skipped and none is repeated however much
+  telemetry arrives while you walk. Treat it as opaque; nothing is promised about
+  its contents.
 - **The organization comes from the credential.** There is no parameter that
   could name another one, and a trace id belonging to somebody else answers
   exactly as an id nobody ever minted does.
 - **The verbatim payload is not in either response.** It is by a wide margin the
   largest thing on a span, and a transcript carrying it would be megabytes of
   JSON nobody asked to render. It is still stored in full on the row.
+- **A transcript of more than 10,000 spans is a prefix, and says so.**
+  `spans_truncated` is then `true`, and it means exactly one thing: `turns` and
+  `spans` hold the first 10,000 spans in time order, while `span_count` and every
+  count beside it are still the whole trace inside your window. So the two
+  together tell you how much of the trace you are looking at, rather than leaving
+  you to guess.
 
 Times come back as RFC 3339 to the microsecond, and durations as decimal strings
 of nanoseconds — a nanosecond count passes what a JSON number holds exactly

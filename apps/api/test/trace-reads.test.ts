@@ -78,9 +78,11 @@ describe("the captured trace, found in a list", () => {
     const page = await listed();
     expect(page.traces).toHaveLength(1);
     expect(page.next_cursor).toBeNull();
+    // Echoed to the microsecond, which is the precision the window was read at
+    // and the precision every other instant in the answer comes back at.
     expect(page.window).toEqual({
-      from: "2026-08-02T18:00:00.000Z",
-      to: "2026-08-02T19:00:00.000Z",
+      from: "2026-08-02T18:00:00.000000Z",
+      to: "2026-08-02T19:00:00.000000Z",
     });
   });
 
@@ -121,10 +123,51 @@ describe("the captured trace, found in a list", () => {
     expect(trace?.agent_id).toBe("");
   });
 
-  /** From the turn-grain view, which is what its truncated text column is for. */
-  it("opens with the line the human opened with", async () => {
+  /**
+   * From the turn-grain view, which is what its truncated text column is for.
+   * The first thing the *human* said, and not the transcript's opening line —
+   * this agent greets first, so the opening line is the agent's, and a list
+   * previewing it would show the same greeting on every row.
+   */
+  it("previews the first thing the human said", async () => {
     const [trace] = (await listed()).traces;
     expect(trace?.preview).toBe("Hi Kelly, my name is Sam.");
+    // The line the trace actually opens with, which is the agent's.
+    expect(trace?.preview).not.toBe("Hello! How can I assist you today?");
+  });
+
+  /**
+   * The window is read to the microsecond it named, and the exclusive end is
+   * exclusive to the microsecond too.
+   *
+   * This capture is where that can be asked sharply: its first span opens at
+   * `…40.281989Z`, so a `to` one microsecond later holds exactly that span and a
+   * `to` at the instant itself holds none of it. A bound rounded down to the
+   * millisecond a `Date` carries would land at `…40.281000Z` on both, before
+   * anything of the trace, and the customer would be told a trace they were
+   * looking straight at was not there.
+   */
+  it("reads a window to the microsecond, at an exclusive end", async () => {
+    const opened = "2026-08-02T18:04:40.281989Z";
+
+    const barely = await listTracesOverHttp(api.app, acme.secret, {
+      from: WINDOW.from,
+      to: "2026-08-02T18:04:40.281990Z",
+    });
+    expect(barely.statusCode, barely.body).toBe(200);
+    const inside = (barely.json() as ListedPage).traces;
+    expect(inside).toHaveLength(1);
+    expect(inside[0]?.started_at).toBe(opened);
+    // One microsecond of window, and one span of the trace in it.
+    expect(inside[0]?.span_count).toBe(1);
+
+    // And at the instant itself, nothing: the end of a window is open.
+    const excluded = await listTracesOverHttp(api.app, acme.secret, {
+      from: WINDOW.from,
+      to: opened,
+    });
+    expect(excluded.statusCode, excluded.body).toBe(200);
+    expect((excluded.json() as ListedPage).traces).toEqual([]);
   });
 });
 

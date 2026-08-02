@@ -268,6 +268,23 @@ export function listTracesOverHttp(
   });
 }
 
+/**
+ * The same list, asked for by somebody signed in to a browser rather than by a
+ * key. The credential is the only difference, which is the thing being asked
+ * about.
+ */
+export function listTracesAsSignedIn(
+  app: FastifyInstance,
+  cookie: string,
+  query: ReadQuery,
+) {
+  return app.inject({
+    method: "GET",
+    url: `/v1/traces${queryString(query)}`,
+    headers: { cookie },
+  });
+}
+
 export function readTraceOverHttp(
   app: FastifyInstance,
   secret: string,

@@ -4,6 +4,7 @@ import {
   NotPermittedError,
   readTrace,
   UnreadableTraceQueryError,
+  type TimeWindow,
   type TraceDetail,
   type TraceFacts,
   type TraceSpan,
@@ -66,6 +67,51 @@ function invalid(reply: FastifyReply, message: string): FastifyReply {
   return reply.code(400).send({ error: "invalid_request", message });
 }
 
+/** What a caller actually said, as against a parameter that arrived empty. */
+function given(value: string | undefined): string | undefined {
+  return value === undefined || value === "" ? undefined : value;
+}
+
+/**
+ * How many digits of a second the store has room for, and therefore how many a
+ * bound may name.
+ */
+const MICROSECOND_DIGITS = 6;
+
+/** The fractional second, which is the one part `Date` cannot be trusted with. */
+const FRACTIONAL_SECOND = /^(.*\d{2}:\d{2}:\d{2})\.(\d+)(.*)$/u;
+
+/**
+ * An RFC 3339 instant as microseconds since the epoch, or `undefined` for
+ * anything that is not one.
+ *
+ * `Date` still does the calendar and the offset; only the fraction is read here,
+ * because a `Date` holds milliseconds and this store holds microseconds. `to` is
+ * exclusive, so a bound rounded down to the millisecond silently drops the 999
+ * microseconds after it — paste a trace's own `ended_at` of `…776865Z` in as
+ * `to` and the span that ended at it would be missing, with nothing in the
+ * answer to say why.
+ *
+ * More than six digits is refused rather than rounded, for the same reason a
+ * too-wide window is: there is no seventh digit in the column to put it in, so
+ * honouring it would mean moving somebody's bound and not mentioning it.
+ */
+function instantOf(text: string): bigint | undefined {
+  const fraction = FRACTIONAL_SECOND.exec(text);
+  const [, whole = "", digits = "", zone = ""] = fraction ?? [];
+  if (digits.length > MICROSECOND_DIGITS) return undefined;
+
+  const milliseconds = new Date(
+    fraction === null ? text : `${whole}${zone}`,
+  ).getTime();
+  if (Number.isNaN(milliseconds)) return undefined;
+
+  return (
+    BigInt(milliseconds) * 1000n +
+    BigInt(digits.padEnd(MICROSECOND_DIGITS, "0"))
+  );
+}
+
 /**
  * The window, as the two parameters that carry it.
  *
@@ -75,12 +121,15 @@ function invalid(reply: FastifyReply, message: string): FastifyReply {
  * think about the window is exactly the caller whose query would scan
  * everything.
  */
-type ParsedWindow = { readonly from: Date; readonly to: Date } | { readonly refusal: string };
+type ParsedWindow = TimeWindow | { readonly refusal: string };
 
 function windowOf(query: Query): ParsedWindow {
+  const from = given(query.from);
+  const to = given(query.to);
+
   const missing = [
-    ...(query.from === undefined || query.from === "" ? ["from"] : []),
-    ...(query.to === undefined || query.to === "" ? ["to"] : []),
+    ...(from === undefined ? ["from"] : []),
+    ...(to === undefined ? ["to"] : []),
   ];
   if (missing.length > 0) {
     return {
@@ -93,17 +142,48 @@ function windowOf(query: Query): ParsedWindow {
     };
   }
 
-  const from = new Date(query.from ?? "");
-  const to = new Date(query.to ?? "");
-  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+  const opened = instantOf(from ?? "");
+  const closed = instantOf(to ?? "");
+  if (opened === undefined || closed === undefined) {
     return {
       refusal:
         "from and to are RFC 3339 timestamps, and one of these is not a time " +
-        "egma can read. An example of the shape: 2026-08-02T18:04:40Z.",
+        "egma can read. An example of the shape: 2026-08-02T18:04:40.281989Z. " +
+        "Fractional seconds are honoured to six digits, which is what the " +
+        "store holds; a finer one is refused rather than rounded, because " +
+        "rounding an exclusive bound moves the edge of your window.",
     };
   }
 
-  return { from, to };
+  return { from: opened, to: closed };
+}
+
+/**
+ * The window as it was read, to the microsecond it was read at.
+ *
+ * The same precision every other instant in these responses comes back at, so a
+ * caller can paste one straight back in. The division is written out here rather
+ * than borrowed from the store: the data-access module formats its own return
+ * values this way, and ten lines are not a reason to widen a boundary that
+ * exists to be narrow.
+ *
+ * Only ever reached on a window the store has already accepted, which is what
+ * makes the four-digit year `toISOString` writes a safe thing to assume.
+ */
+function describedWindow(window: TimeWindow): Record<string, string> {
+  const MILLION = 1_000_000n;
+  const format = (microseconds: bigint): string => {
+    let seconds = microseconds / MILLION;
+    let remainder = microseconds % MILLION;
+    if (remainder < 0n) {
+      seconds -= 1n;
+      remainder += MILLION;
+    }
+    const whole = new Date(Number(seconds) * 1000).toISOString().slice(0, 19);
+    return `${whole}.${remainder.toString().padStart(MICROSECOND_DIGITS, "0")}Z`;
+  };
+
+  return { from: format(window.from), to: format(window.to) };
 }
 
 /** A trace, as the list describes one. Snake case, as the rest of the API is. */
@@ -179,11 +259,19 @@ export async function traceReadRoutes(
   /**
    * The customer's traces inside a window, newest first.
    *
-   * `limit` is a maximum and is clamped rather than refused, which is the
+   * `limit` above the maximum is clamped rather than refused, which is the
    * ordinary reading of the word: a caller asking for a thousand gets the page
    * size back in the page they were given, and nothing they asked for is
-   * missing. The window is the opposite case and is refused, because a narrowed
-   * window silently answers a different question.
+   * missing. A `limit` that is not a count at all — zero, negative, or a word —
+   * is refused, because there is no page that answers it. The window is a third
+   * case and is always refused, because a narrowed window silently answers a
+   * different question.
+   *
+   * **A parameter that arrived empty is a parameter nobody set.** `?project_id=`
+   * is what a form submits for a field left blank, and reading it as a name
+   * would answer with the traces of a project that cannot exist; `?limit=` is
+   * the same case, and `Number("")` is zero, which would be refused as a page
+   * size nobody could want. Both read as absence, which is what they mean.
    */
   app.get(TRACES_LIST_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -192,23 +280,25 @@ export async function traceReadRoutes(
     const window = windowOf(query);
     if ("refusal" in window) return invalid(reply, window.refusal);
 
-    const project = projectRefusal(auth.projectId, query.project_id);
+    const projectId = given(query.project_id);
+    const project = projectRefusal(auth.projectId, projectId);
     if (project !== undefined) return invalid(reply, project);
 
-    const limit = query.limit === undefined ? undefined : Number(query.limit);
+    const asked = given(query.limit);
+    const limit = asked === undefined ? undefined : Number(asked);
     if (limit !== undefined && (!Number.isFinite(limit) || limit < 1)) {
       return invalid(
         reply,
         `limit is how many traces one page may carry, at most ` +
-          `${MAXIMUM_LIST_LIMIT}, and "${query.limit}" is not a count.`,
+          `${MAXIMUM_LIST_LIMIT}, and "${asked}" is not a count.`,
       );
     }
 
     const list = await listTraces(auth, {
       window,
-      projectId: query.project_id,
+      projectId,
       limit,
-      cursor: query.cursor,
+      cursor: given(query.cursor),
     });
 
     return reply.send({
@@ -216,7 +306,7 @@ export async function traceReadRoutes(
       // Null rather than absent, so a client can tell "there is no next page"
       // from "this response is an older shape that never had one".
       next_cursor: list.nextCursor ?? null,
-      window: { from: window.from.toISOString(), to: window.to.toISOString() },
+      window: describedWindow(window),
     });
   });
 
@@ -237,13 +327,11 @@ export async function traceReadRoutes(
     const window = windowOf(query);
     if ("refusal" in window) return invalid(reply, window.refusal);
 
-    const project = projectRefusal(auth.projectId, query.project_id);
+    const projectId = given(query.project_id);
+    const project = projectRefusal(auth.projectId, projectId);
     if (project !== undefined) return invalid(reply, project);
 
-    const detail = await readTrace(auth, traceId, {
-      window,
-      projectId: query.project_id,
-    });
+    const detail = await readTrace(auth, traceId, { window, projectId });
 
     // A trace this customer has no span of is a trace that is not there, and it
     // reads identically whether it belongs to somebody else or to nobody. That

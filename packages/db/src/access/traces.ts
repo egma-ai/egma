@@ -61,6 +61,11 @@ const DEFAULT_LIST_LIMIT = 50;
  * read that has to be bounded by egma's. What is over the line is reported rather
  * than dropped in silence, so a caller is never handed a transcript with a hole
  * in it and no way to know.
+ *
+ * The cap bounds the **tree** and nothing else. Every count beside it is the
+ * whole trace inside the window, taken from an aggregate rather than from the
+ * rows that fitted, so `spanCount` is the number a caller compares against to
+ * learn how much of the trace they are holding.
  */
 export const MAXIMUM_SPANS_PER_TRACE = 10_000;
 
@@ -68,15 +73,23 @@ const SPANS_TABLE = "spans";
 const TURNS_TABLE = "turns";
 
 /**
- * A window of time, closed at the start and open at the end.
+ * A window of time, closed at the start and open at the end, counted in
+ * **microseconds since the epoch**.
  *
  * Required on both calls, with no default. A default window is a question
  * somebody did not ask, and the one thing this store must never do is answer one
  * nobody bounded.
+ *
+ * Microseconds rather than `Date`s, because a `Date` holds milliseconds and this
+ * store holds microseconds. The end is exclusive, so a bound that had been
+ * rounded down to the millisecond would quietly exclude the 999 microseconds
+ * after it: a caller pasting a trace's own `ended_at` back in as `to` would not
+ * be given the span that ended at it, and nothing in the answer would say why.
+ * The unit here is the column's own, so a window means exactly what it says.
  */
 export type TimeWindow = {
-  readonly from: Date;
-  readonly to: Date;
+  readonly from: bigint;
+  readonly to: bigint;
 };
 
 export type ListTracesOptions = {
@@ -117,6 +130,14 @@ export type TraceFacts = {
   readonly endedAt: string;
   /** Wall-clock extent in nanoseconds, as a decimal string. */
   readonly durationNanoseconds: string;
+  /**
+   * How many spans of this trace the window holds — **rows, not nodes of a
+   * tree**. The two are the same number except in two cases, and both of them
+   * are ones a caller has to be told about rather than have hidden: a trace over
+   * `MAXIMUM_SPANS_PER_TRACE`, where the transcript is a prefix and this is
+   * still the whole trace; and telemetry that sent one span id twice, which is
+   * one node in the transcript and two rows here.
+   */
   readonly spanCount: number;
   readonly humanTurnCount: number;
   readonly agentTurnCount: number;
@@ -133,9 +154,15 @@ export type TraceFacts = {
 
 export type TraceSummary = TraceFacts & {
   /**
-   * The opening line of the transcript, truncated — read from the turn-grain
-   * view, which is exactly what its truncated text column is for. Empty when
-   * nothing was said, or when the provider emits no turn spans at all.
+   * **The first thing the human said**, truncated — read from the turn-grain
+   * view, which is exactly what its truncated text column is for.
+   *
+   * Not the transcript's opening line, and the difference is not an accident:
+   * an agent that greets first opens most traces it is in, so a preview of the
+   * opening line would be the same sentence on every row of the list. What
+   * somebody scanning a list is looking for is what the caller wanted, so that
+   * is what this is. Empty when the human said nothing, or when the provider
+   * emits no turn spans at all.
    */
   readonly preview: string;
 };
@@ -174,13 +201,22 @@ export type TraceDetail = TraceFacts & {
    */
   readonly turns: readonly TraceSpan[];
   /**
-   * Everything top-level that is not a turn — the root span above all, and any
-   * span whose parent never arrived. Available, and deliberately not interleaved
-   * with the turns: a transcript is what somebody said, and the framework's own
-   * bookkeeping is not part of it.
+   * Everything top-level that is not a turn — the root span above all, any span
+   * whose parent never arrived, and any span the parent chain never reached at
+   * all. Available, and deliberately not interleaved with the turns: a
+   * transcript is what somebody said, and the framework's own bookkeeping is not
+   * part of it.
    */
   readonly spans: readonly TraceSpan[];
-  /** True when the trace holds more spans than one read returns. */
+  /**
+   * True when the trace holds more spans than one read returns — and then the
+   * two halves of this answer mean different things, deliberately. **The tree is
+   * a prefix; the counts are the trace.** `turns` and `spans` hold the first
+   * `MAXIMUM_SPANS_PER_TRACE` spans in time order, while `spanCount` and every
+   * count beside it are the whole trace inside the window. So the flag is not
+   * only a warning: with it, the two numbers say exactly how much of the trace
+   * the transcript is.
+   */
   readonly truncated: boolean;
 };
 
@@ -188,17 +224,30 @@ export type TraceDetail = TraceFacts & {
  * The window and the cursor — the two things a caller can get wrong.
  * ------------------------------------------------------------------- */
 
-function checkedWindow(window: TimeWindow): TimeWindow {
-  const from = window.from.getTime();
-  const to = window.to.getTime();
+/**
+ * The instants a window may name, which are the ones the store can hold and do
+ * arithmetic over.
+ *
+ * `DateTime64` begins in 1900, and the far end is where a trace's *end* stops
+ * fitting: the list adds a duration in nanoseconds to a start in nanoseconds,
+ * and nanoseconds since the epoch pass what signed 64 bits hold on 2262-04-11.
+ * Outside these two a window is refused rather than clamped, on the same terms
+ * as one that is too wide.
+ *
+ * It has to be refused *here*, before a literal is built from it. A `Date` will
+ * hold the year 275760 quite happily, and `toISOString` writes that year with a
+ * sign and six digits — so a window nobody bounded would reach ClickHouse as a
+ * timestamp literal that is not a timestamp, and the customer would be told
+ * their query was a server fault rather than a window they cannot have.
+ */
+const EARLIEST_READABLE_MICROSECONDS = BigInt(Date.UTC(1900, 0, 1)) * 1000n;
+const LATEST_READABLE_MICROSECONDS = BigInt(Date.UTC(2262, 3, 11)) * 1000n;
 
-  if (!Number.isFinite(from) || !Number.isFinite(to)) {
-    throw new UnreadableTraceQueryError(
-      "time_window",
-      "a trace query is bounded by a window of time, and one of these two " +
-        "instants is not a time at all.",
-    );
-  }
+const MAXIMUM_WINDOW_MICROSECONDS = BigInt(MAXIMUM_WINDOW_MILLISECONDS) * 1000n;
+
+function checkedWindow(window: TimeWindow): TimeWindow {
+  const { from, to } = window;
+
   if (to <= from) {
     throw new UnreadableTraceQueryError(
       "time_window",
@@ -206,7 +255,20 @@ function checkedWindow(window: TimeWindow): TimeWindow {
         "look at.",
     );
   }
-  if (to - from > MAXIMUM_WINDOW_MILLISECONDS) {
+  if (
+    from < EARLIEST_READABLE_MICROSECONDS ||
+    to > LATEST_READABLE_MICROSECONDS
+  ) {
+    throw new UnreadableTraceQueryError(
+      "time_window",
+      "this window names an instant outside the range the trace store can " +
+        "hold, which is 1900-01-01 to 2262-04-11 — the second is where a " +
+        "nanosecond count since the epoch stops fitting in the sixty-four bits " +
+        "a trace's end is measured in. Ask about a time a trace could have " +
+        "happened at.",
+    );
+  }
+  if (to - from > MAXIMUM_WINDOW_MICROSECONDS) {
     throw new UnreadableTraceQueryError(
       "time_window",
       `this window is wider than the ${
@@ -225,12 +287,21 @@ function checkedWindow(window: TimeWindow): TimeWindow {
  * Where a page stopped, as a position in the sort order rather than a count of
  * rows skipped.
  *
- * An offset re-reads and re-sorts everything before it, so page fifty costs fifty
- * pages, and a trace ingested mid-walk shifts every later row by one — which is
- * precisely how a paginated list comes to skip and to repeat. A position cannot:
- * the next page asks for what sorts strictly after this point, so a row arriving
- * anywhere else changes nothing about where the walk resumes, and each page costs
- * what the first one did.
+ * **The justification is correctness, and it is not cost.** The usual argument
+ * for a token — an offset re-reads everything before it, so page fifty costs
+ * fifty pages — does not apply to this query and should not be claimed for it:
+ * the list groups a whole window by `trace_id` and then orders the groups, so
+ * the aggregation is the cost, an offset and a token pay it identically, and
+ * page fifty is exactly as expensive either way.
+ *
+ * What a position buys is a walk that is stable while spans are still arriving.
+ * `offset 100` means *skip whatever sorts first at the moment you ask*, so a
+ * trace ingested mid-walk shifts every later row by one and the next page hands
+ * back a trace the last page already showed — while the one that fell off the
+ * boundary is never shown at all. A position cannot do either: the next page
+ * asks for what sorts strictly after the row the caller last saw, so a row
+ * arriving anywhere else changes nothing about where the walk resumes. Nothing
+ * is skipped and nothing is repeated, whatever ingest does meanwhile.
  *
  * The two parts are the two the list orders by, in that order: when the trace
  * started, and its id to break the tie. Ties are real and not rare — the sort key
@@ -301,6 +372,11 @@ function decodeCursor(cursor: string): CursorPosition {
  * type is the form ClickHouse's key analysis reads without hesitating. It is
  * built from an integer count of microseconds and never from anything a caller
  * typed, so there is nothing in it for a quote to escape out of.
+ *
+ * The four-digit year it slices out is guaranteed by `checkedWindow`, which
+ * refuses anything outside the range `DateTime64` holds before a literal is ever
+ * built. `toISOString` writes a year outside 0000–9999 with a sign and six
+ * digits, and the slice would take the timestamp apart in the middle.
  */
 function asDateTime64(microseconds: bigint): string {
   const MILLION = 1_000_000n;
@@ -314,10 +390,6 @@ function asDateTime64(microseconds: bigint): string {
   return `toDateTime64('${whole.replace("T", " ")}.${remainder
     .toString()
     .padStart(6, "0")}', 6, 'UTC')`;
-}
-
-function microsecondsOf(when: Date): bigint {
-  return BigInt(when.getTime()) * 1000n;
 }
 
 /** RFC 3339 to the microsecond, which is what the column actually holds. */
@@ -345,9 +417,15 @@ type Tenancy = {
  * area reads that product area, and the argument can only narrow an
  * organization-wide credential. Both travel as parameters — they are ids, and an
  * id is the one thing in these statements that ever came from outside.
+ *
+ * An **empty** project id is nobody's project and is read as absence, on both
+ * halves. `?project_id=` is what a form submits for a field left blank, and
+ * `??` does not catch it: taken as a name it would put `project_id = ''` in the
+ * predicate, which no row has ever been written under, and the customer would be
+ * handed an empty list indistinguishable from having no traces.
  */
 function tenancyOf(auth: AuthContext, asked: string | undefined): Tenancy {
-  const projectId = auth.projectId ?? asked;
+  const projectId = named(auth.projectId) ?? named(asked);
   return {
     clause:
       "organization_id = {organization_id:String}" +
@@ -357,6 +435,11 @@ function tenancyOf(auth: AuthContext, asked: string | undefined): Tenancy {
       ...(projectId === undefined ? {} : { project_id: projectId }),
     },
   };
+}
+
+/** A name somebody gave, as against a parameter that arrived carrying nothing. */
+function named(value: string | undefined): string | undefined {
+  return value === undefined || value === "" ? undefined : value;
 }
 
 async function rowsOf<Row>(
@@ -379,6 +462,48 @@ function counted(value: string | number | undefined): number {
 /* ------------------------------------------------------------------- *
  * The list.
  * ------------------------------------------------------------------- */
+
+/**
+ * Where a trace sits in the list's ordering, written out rather than aliased: an
+ * alias called `started_at` would shadow the column of that name, and which of
+ * the two a later expression meant would depend on where it sat.
+ */
+const TRACE_POSITION = "min(toUnixTimestamp64Micro(started_at))";
+
+/**
+ * Every trace-level fact, as one pass of `countIf`s over the spans a window
+ * holds for a trace.
+ *
+ * One string, read by both endpoints. The list groups it by `trace_id` across
+ * the whole window; the transcript runs the identical aggregate scoped to the
+ * one trace it is returning. So the numbers printed beside a transcript and the
+ * numbers in the list that found it are the same numbers arrived at the same
+ * way, rather than two implementations that agree until the day they do not —
+ * and the transcript's counts are the trace's own even when its tree had to stop
+ * at the cap.
+ *
+ * `duration_ns` is a `UInt64` and this arithmetic is signed, so a row carrying a
+ * duration near 2^64 would come through `toInt64` negative and end the trace
+ * before it began. Ingest clamps what it writes at Int64's ceiling; `greatest`
+ * is the same floor under rows that were written before it did.
+ */
+const TRACE_FACTS = `toString(${TRACE_POSITION}) as started_at_micros,
+       toString(max(
+         toUnixTimestamp64Micro(started_at) * 1000
+           + greatest(toInt64(duration_ns), 0)
+       )) as ended_at_nanos,
+       count() as span_count,
+       countIf(kind = 'turn:human') as human_turn_count,
+       countIf(kind = 'turn:agent') as agent_turn_count,
+       countIf(kind = 'tool') as tool_span_count,
+       countIf(status = 'error') as errored_span_count,
+       any(source) as source,
+       any(emitter) as emitter,
+       any(environment) as environment,
+       any(connection_type) as connection_type,
+       any(provider_call_id) as provider_call_id,
+       any(run_id) as run_id,
+       any(agent_id) as agent_id`;
 
 type SummaryRow = {
   readonly trace_id: string;
@@ -432,11 +557,6 @@ export async function listTraces(
     MAXIMUM_LIST_LIMIT,
   );
 
-  // The trace's position in the ordering, written out rather than aliased: an
-  // alias called `started_at` would shadow the column of that name, and which of
-  // the two a later expression meant would depend on where it sat.
-  const position = "min(toUnixTimestamp64Micro(started_at))";
-
   // Strictly after the last row of the previous page, in the list's own
   // ordering. Written against the aggregate rather than against the column,
   // because what is ordered is when the *trace* started and not when any one of
@@ -444,7 +564,7 @@ export async function listTraces(
   const after =
     cursor === undefined
       ? ""
-      : `having (${position}, trace_id) < ` +
+      : `having (${TRACE_POSITION}, trace_id) < ` +
         `({cursor_started_at:Int64}, {cursor_trace_id:String}) `;
 
   // One row more than the page, so that whether there is a next page is a fact
@@ -453,27 +573,13 @@ export async function listTraces(
   const rows = await rowsOf<SummaryRow>(
     `select
        trace_id,
-       toString(${position}) as started_at_micros,
-       toString(max(toUnixTimestamp64Micro(started_at) * 1000 + toInt64(duration_ns)))
-         as ended_at_nanos,
-       count() as span_count,
-       countIf(kind = 'turn:human') as human_turn_count,
-       countIf(kind = 'turn:agent') as agent_turn_count,
-       countIf(kind = 'tool') as tool_span_count,
-       countIf(status = 'error') as errored_span_count,
-       any(source) as source,
-       any(emitter) as emitter,
-       any(environment) as environment,
-       any(connection_type) as connection_type,
-       any(provider_call_id) as provider_call_id,
-       any(run_id) as run_id,
-       any(agent_id) as agent_id
+       ${TRACE_FACTS}
      from ${SPANS_TABLE}
      where ${tenancy.clause}
-       and started_at >= ${asDateTime64(microsecondsOf(window.from))}
-       and started_at < ${asDateTime64(microsecondsOf(window.to))}
+       and started_at >= ${asDateTime64(window.from)}
+       and started_at < ${asDateTime64(window.to)}
      group by trace_id
-     ${after}order by ${position} desc, trace_id desc
+     ${after}order by ${TRACE_POSITION} desc, trace_id desc
      limit ${limit + 1}`,
     {
       ...tenancy.parameters,
@@ -501,42 +607,53 @@ export async function listTraces(
     page.map((row) => row.trace_id),
     // The page is newest first, so its last row is the earliest any span of any
     // trace on it can be.
-    last === undefined
-      ? microsecondsOf(window.from)
-      : BigInt(last.started_at_micros),
-    microsecondsOf(window.to),
+    last === undefined ? window.from : BigInt(last.started_at_micros),
+    window.to,
   );
 
   return {
-    traces: page.map((row) => {
-      const startedAt = BigInt(row.started_at_micros);
-      const endedAtNanoseconds = BigInt(row.ended_at_nanos);
-      return {
-        traceId: row.trace_id,
-        startedAt: rfc3339(startedAt),
-        endedAt: rfc3339(endedAtNanoseconds / 1000n),
-        durationNanoseconds: (endedAtNanoseconds - startedAt * 1000n).toString(),
-        spanCount: counted(row.span_count),
-        humanTurnCount: counted(row.human_turn_count),
-        agentTurnCount: counted(row.agent_turn_count),
-        toolSpanCount: counted(row.tool_span_count),
-        erroredSpanCount: counted(row.errored_span_count),
-        source: row.source,
-        emitter: row.emitter,
-        environment: row.environment,
-        connectionType: row.connection_type,
-        providerCallId: row.provider_call_id,
-        runId: row.run_id,
-        agentId: row.agent_id,
-        preview: previews.get(row.trace_id) ?? "",
-      };
-    }),
+    traces: page.map((row) => ({
+      ...factsOf(row.trace_id, row),
+      preview: previews.get(row.trace_id) ?? "",
+    })),
     nextCursor,
   };
 }
 
 /**
- * The opening line of each trace on the page, from the turn-grain view.
+ * One aggregate row as the facts both endpoints report.
+ *
+ * The trace-level columns are denormalised onto every span precisely so that
+ * reading one of them is reading the trace, which is what makes `any()` the
+ * right aggregate for them rather than a guess.
+ */
+function factsOf(traceId: string, row: SummaryRow): TraceFacts {
+  const startedAt = BigInt(row.started_at_micros);
+  const endedAtNanoseconds = BigInt(row.ended_at_nanos);
+
+  return {
+    traceId,
+    startedAt: rfc3339(startedAt),
+    endedAt: rfc3339(endedAtNanoseconds / 1000n),
+    durationNanoseconds: (endedAtNanoseconds - startedAt * 1000n).toString(),
+    spanCount: counted(row.span_count),
+    humanTurnCount: counted(row.human_turn_count),
+    agentTurnCount: counted(row.agent_turn_count),
+    toolSpanCount: counted(row.tool_span_count),
+    erroredSpanCount: counted(row.errored_span_count),
+    source: row.source,
+    emitter: row.emitter,
+    environment: row.environment,
+    connectionType: row.connection_type,
+    providerCallId: row.provider_call_id,
+    runId: row.run_id,
+    agentId: row.agent_id,
+  };
+}
+
+/**
+ * The first thing the human said in each trace on the page, from the turn-grain
+ * view.
  *
  * Bounded to the traces the page actually holds and to the slice of the window
  * they start in — the earliest of them is the earliest any of their turns can be,
@@ -584,13 +701,6 @@ type SpanRow = {
   readonly tool_name: string;
   readonly tool_arguments: string;
   readonly tool_result: string;
-  readonly source: string;
-  readonly emitter: string;
-  readonly environment: string;
-  readonly connection_type: string;
-  readonly provider_call_id: string;
-  readonly run_id: string;
-  readonly agent_id: string;
 };
 
 /** A turn is a span whose kind says somebody was speaking. */
@@ -632,8 +742,31 @@ export async function readTrace(
   const window = checkedWindow(options.window);
   const tenancy = tenancyOf(auth, options.projectId);
 
-  const rows = await rowsOf<SpanRow>(
-    `select
+  const where = `${tenancy.clause}
+       and started_at >= ${asDateTime64(window.from)}
+       and started_at < ${asDateTime64(window.to)}
+       and trace_id = {trace_id:String}`;
+  const parameters = { ...tenancy.parameters, trace_id: traceId };
+
+  // Two reads of the same window, and the second is not the first's leftovers.
+  // The rows build the tree and stop at the cap; the aggregate counts the whole
+  // trace, so that a transcript which had to stop somewhere still reports what
+  // it stopped short of. It is the list's own aggregate, scoped to one trace,
+  // over a window the sort key has already pruned to this organization, this
+  // project and these minutes — one cheap pass, and asked in parallel with the
+  // rows because neither answer is the other's input.
+  const [summaries, rows] = await Promise.all([
+    rowsOf<SummaryRow>(
+      `select
+       trace_id,
+       ${TRACE_FACTS}
+     from ${SPANS_TABLE}
+     where ${where}
+     group by trace_id`,
+      parameters,
+    ),
+    rowsOf<SpanRow>(
+      `select
        span_id,
        parent_span_id,
        name,
@@ -645,83 +778,34 @@ export async function readTrace(
        audio_url,
        tool_name,
        tool_arguments,
-       tool_result,
-       source,
-       emitter,
-       environment,
-       connection_type,
-       provider_call_id,
-       run_id,
-       agent_id
+       tool_result
      from ${SPANS_TABLE}
-     where ${tenancy.clause}
-       and started_at >= ${asDateTime64(microsecondsOf(window.from))}
-       and started_at < ${asDateTime64(microsecondsOf(window.to))}
-       and trace_id = {trace_id:String}
+     where ${where}
      order by started_at asc, span_id asc
      limit ${MAXIMUM_SPANS_PER_TRACE + 1}`,
-    { ...tenancy.parameters, trace_id: traceId },
-  );
+      parameters,
+    ),
+  ]);
 
-  if (rows.length === 0) return undefined;
+  const facts = summaries[0];
+  if (facts === undefined || rows.length === 0) return undefined;
 
   const truncated = rows.length > MAXIMUM_SPANS_PER_TRACE;
   const kept = truncated ? rows.slice(0, MAXIMUM_SPANS_PER_TRACE) : rows;
 
-  return { ...factsOf(traceId, kept), ...transcriptOf(kept), truncated };
-}
-
-function factsOf(traceId: string, rows: readonly SpanRow[]): TraceFacts {
-  // The rows arrive in time order, so the first is the earliest; the latest
-  // ending is not the last row, because a long span can start before a short one
-  // and outlive it.
-  let startedAt = BigInt(rows[0]?.started_at_micros ?? "0");
-  let endedAtNanoseconds = startedAt * 1000n;
-  let humanTurnCount = 0;
-  let agentTurnCount = 0;
-  let toolSpanCount = 0;
-  let erroredSpanCount = 0;
-
-  for (const row of rows) {
-    const started = BigInt(row.started_at_micros);
-    if (started < startedAt) startedAt = started;
-    const ended = started * 1000n + BigInt(row.duration_ns);
-    if (ended > endedAtNanoseconds) endedAtNanoseconds = ended;
-    if (row.kind === "turn:human") humanTurnCount += 1;
-    if (row.kind === "turn:agent") agentTurnCount += 1;
-    if (row.kind === "tool") toolSpanCount += 1;
-    if (row.status === "error") erroredSpanCount += 1;
-  }
-
-  // Trace-level facts are denormalised onto every span precisely so that reading
-  // one of them is reading the trace, so the first row answers for all of them.
-  const first = rows[0];
-
-  return {
-    traceId,
-    startedAt: rfc3339(startedAt),
-    endedAt: rfc3339(endedAtNanoseconds / 1000n),
-    durationNanoseconds: (endedAtNanoseconds - startedAt * 1000n).toString(),
-    spanCount: rows.length,
-    humanTurnCount,
-    agentTurnCount,
-    toolSpanCount,
-    erroredSpanCount,
-    source: first?.source ?? "",
-    emitter: first?.emitter ?? "",
-    environment: first?.environment ?? "",
-    connectionType: first?.connection_type ?? "",
-    providerCallId: first?.provider_call_id ?? "",
-    runId: first?.run_id ?? "",
-    agentId: first?.agent_id ?? "",
-  };
+  return { ...factsOf(traceId, facts), ...transcriptOf(kept), truncated };
 }
 
 /**
  * The rows as a transcript: the turns in the order they happened, each holding
  * what happened inside it, and the root span kept to one side.
  *
- * Three rules, each of them somebody else's decision honoured here.
+ * **Every row that was read comes back, exactly once**, and that is the property
+ * the rest of this is arranged around. A transcript that quietly dropped a span
+ * would disagree with the count printed beside it, and a caller comparing the
+ * two would be told the store had lost something.
+ *
+ * Four rules, each of them somebody else's decision honoured here.
  *
  * **A span whose parent is not in this trace is top-level.** A malformed parent
  * id normalises to `''` at the door with the original kept in the payload, so a
@@ -735,10 +819,28 @@ function factsOf(traceId: string, rows: readonly SpanRow[]): TraceFacts {
  * `turns`, and never inside another span's children — including inside another
  * turn's, on the day some framework nests them.
  *
+ * **A span the parent chain never reaches is top-level too.** Two spans naming
+ * each other as parent are a cycle, and every span in one has a parent that is
+ * present, so none of them files under the root; none is a turn, so none is
+ * lifted. Walking down from the top would therefore never arrive at them and
+ * they would vanish out of a response that still counted them. So the walk runs
+ * a second time over whatever it did not visit: the first span of a cycle
+ * reached that way becomes the top of it and the rest hang beneath, because the
+ * visited set closes the loop. Nothing sends this on purpose; it is what a
+ * truncated exporter buffer or a hand-written client produces, and the answer to
+ * it is to show the spans rather than to be clever about the shape.
+ *
  * **Everything else keeps its shape.** LiveKit's model calls nest four adapters
  * deep and only the innermost names the real model, so flattening would throw
  * away the one structure that says which of several `llm_request_run` spans was
  * the retry. The tree is returned as it arrived.
+ *
+ * In one case "exactly once" is per **id** rather than per row, and it is worth
+ * saying out loud: two rows sharing a span id are one node here, because a tree
+ * built from a repeat walks forever. They are two in `spanCount`, which counts
+ * the rows the window holds. Telemetry that sent a span twice is the only way to
+ * see the two numbers disagree, and reporting the disagreement is more use than
+ * hiding it behind either one.
  */
 function transcriptOf(rows: readonly SpanRow[]): {
   readonly turns: readonly TraceSpan[];
@@ -779,9 +881,22 @@ function transcriptOf(rows: readonly SpanRow[]): {
     .map((row) => (visited.has(row.span_id) ? undefined : build(row)))
     .filter((turn): turn is TraceSpan => turn !== undefined);
 
-  const spans = (childrenOf.get("") ?? [])
-    .filter((row) => !isTurn(row.kind) && !visited.has(row.span_id))
-    .map(build);
+  const spans: TraceSpan[] = [];
+
+  // Asked one row at a time rather than filtered first, because building one of
+  // these visits everything under it: a candidate that was still unvisited when
+  // the list was drawn up can have been reached by the time its turn comes.
+  const appendUnvisited = (candidates: readonly SpanRow[]): void => {
+    for (const row of candidates) {
+      if (isTurn(row.kind) || visited.has(row.span_id)) continue;
+      spans.push(build(row));
+    }
+  };
+
+  // The root span and anything else that filed at the top, in the order the rows
+  // arrived, and then whatever the walk never reached at all.
+  appendUnvisited(childrenOf.get("") ?? []);
+  appendUnvisited(rows);
 
   return { turns, spans };
 }

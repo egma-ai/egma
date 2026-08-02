@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApi, type TestApi } from "./support/api.ts";
 import {
   ingest,
+  listTracesAsSignedIn,
   listTracesOverHttp,
   mintKey,
   readTraceOverHttp,
@@ -118,6 +119,55 @@ describe("a list request that does not say when", () => {
     expect((response.json() as { message: string }).message).toContain(
       "not a time",
     );
+  });
+
+  /**
+   * A year a `Date` will hold and the store will not.
+   *
+   * `new Date('+275760-09-12T00:00:00Z')` is a perfectly good JavaScript date,
+   * and `toISOString` writes its year with a sign and six digits — so a window
+   * naming one used to reach ClickHouse as a timestamp literal that was not a
+   * timestamp, and the caller was told their query was a fault of egma's. It is
+   * a window, it is refused, and it is refused with the reason.
+   */
+  it("is refused when it names a year the trace store cannot hold", async () => {
+    const outside = [
+      { from: "+275760-09-11T00:00:00Z", to: "+275760-09-12T00:00:00Z" },
+      { from: "-000001-01-01T00:00:00Z", to: "-000001-01-02T00:00:00Z" },
+    ];
+
+    for (const window of outside) {
+      const response = await listTracesOverHttp(api.app, acme.secret, window);
+      expect(response.statusCode, window.from).toBe(400);
+
+      const body = response.json() as { error: string; message: string };
+      expect(body.error).toBe("invalid_request");
+      expect(body.message).toContain("outside the range");
+
+      const detail = await readTraceOverHttp(
+        api.app,
+        acme.secret,
+        PAGING_TRACES[0].traceId,
+        window,
+      );
+      expect(detail.statusCode, window.from).toBe(400);
+    }
+  });
+
+  /**
+   * A bound finer than the store's own precision is refused rather than
+   * rounded, which is the same rule as the too-wide window: the seventh digit
+   * has nowhere to go, and honouring it would mean moving somebody's bound
+   * without saying so. `to` is exclusive, so where it lands decides whether a
+   * span is in the answer.
+   */
+  it("refuses a bound finer than the microsecond the store holds", async () => {
+    const finer = await listTracesOverHttp(api.app, acme.secret, {
+      from: "2026-06-01T00:00:00.0000001Z",
+      to: DAY.to,
+    });
+    expect(finer.statusCode).toBe(400);
+    expect((finer.json() as { message: string }).message).toContain("six");
   });
 
   /** The detail endpoint is bounded on the same terms, and for the same reason. */
@@ -280,11 +330,52 @@ describe("walking every page of a list", () => {
     const enormous = await page(acme.secret, { ...DAY, limit: 100_000 });
     expect(enormous.traces).toHaveLength(PAGING_TRACES.length);
 
-    const nonsense = await listTracesOverHttp(api.app, acme.secret, {
+    for (const limit of ["lots", "0", "-1"]) {
+      const nonsense = await listTracesOverHttp(api.app, acme.secret, {
+        ...DAY,
+        limit,
+      });
+      expect(nonsense.statusCode, limit).toBe(400);
+      expect((nonsense.json() as { message: string }).message).toContain(
+        "not a count",
+      );
+    }
+  });
+});
+
+/**
+ * A query parameter that arrived carrying nothing.
+ *
+ * `?project_id=&limit=` is what a form submits for fields left blank, and it is
+ * a request a client sends without meaning anything by it. Both used to be read
+ * as though somebody had said something: `project_id` became a predicate on a
+ * project no row is filed under and answered with an empty list, and `limit`
+ * became `Number("")`, which is zero, which is refused. Neither is what the
+ * caller asked, and neither said so.
+ */
+describe("a parameter that arrived empty", () => {
+  it("is the whole organization, when it is the project", async () => {
+    const answered = await page(acme.secret, {
       ...DAY,
-      limit: "lots",
+      project_id: "",
+      limit: 200,
     });
-    expect(nonsense.statusCode).toBe(400);
+    expect(answered.traces).toHaveLength(PAGING_TRACES.length);
+  });
+
+  it("is the default page size, when it is the limit", async () => {
+    const answered = await page(acme.secret, { ...DAY, limit: "" });
+    expect(answered.traces).toHaveLength(PAGING_TRACES.length);
+  });
+
+  it("is the same on the detail endpoint, which takes the project too", async () => {
+    const response = await readTraceOverHttp(
+      api.app,
+      acme.secret,
+      PAGING_TRACES[0].traceId,
+      { ...DAY, project_id: "" },
+    );
+    expect(response.statusCode, response.body).toBe(200);
   });
 });
 
@@ -470,6 +561,64 @@ describe("filtering a list to one project", () => {
     expect((response.json() as { message: string }).message).toContain(
       "scoped to project",
     );
+  });
+});
+
+/**
+ * The other credential these endpoints take.
+ *
+ * The README says both of them read traces, and the plumbing is shared — the
+ * same hook resolves a key or a cookie into the same context before either
+ * route runs — but "shared" is a claim about code that only a request can
+ * settle. A signed-in browser is how egma's own dashboard will read this, so it
+ * is the path a regression would be found in last.
+ *
+ * A session acts in the project signup made, which is why this ingests through
+ * a key scoped to that project rather than reusing the organization-wide one:
+ * the question is whether the cookie reads, not which project it reads.
+ */
+describe("a browser session rather than a key", () => {
+  const SESSION_WINDOW = {
+    from: "2026-09-01T00:00:00Z",
+    to: "2026-09-02T00:00:00Z",
+  } as const;
+  const SESSION_TRACE = "dd000000000000000000000000000001";
+
+  beforeAll(async () => {
+    const homeSecret = await mintKey(
+      api.app,
+      acme.cookie,
+      "The project signup made",
+      acme.projectId,
+    );
+    await ingest(
+      api.app,
+      homeSecret,
+      syntheticExport({
+        traceId: SESSION_TRACE,
+        startedAt: new Date("2026-09-01T09:00:00Z"),
+        humanSaid: "Reading this from a browser.",
+      }),
+    );
+  });
+
+  it("reads the same list, with no key anywhere in the request", async () => {
+    const response = await listTracesAsSignedIn(api.app, acme.cookie, {
+      ...SESSION_WINDOW,
+      limit: 200,
+    });
+    expect(response.statusCode, response.body).toBe(200);
+
+    const answered = response.json() as ListedPage;
+    expect(answered.traces.map((trace) => trace.trace_id)).toEqual([
+      SESSION_TRACE,
+    ]);
+    expect(answered.traces[0]?.preview).toBe("Reading this from a browser.");
+  });
+
+  it("is refused the same way when the window is missing", async () => {
+    const response = await listTracesAsSignedIn(api.app, acme.cookie, {});
+    expect(response.statusCode).toBe(400);
   });
 });
 

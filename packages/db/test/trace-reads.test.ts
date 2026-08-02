@@ -3,6 +3,7 @@ import {
   connectClickHouse,
   disconnectClickHouse,
   listTraces,
+  MAXIMUM_SPANS_PER_TRACE,
   MAXIMUM_WINDOW_MILLISECONDS,
   permits,
   readTrace,
@@ -11,6 +12,8 @@ import {
   type AuthContext,
   type NewSpan,
   type Role,
+  type TraceDetail,
+  type TraceSpan,
 } from "@egma/db";
 import { newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -41,11 +44,16 @@ const globex = { organizationId: newId("org"), userId: newId("usr") };
 const OUTBOUND = newId("prj");
 const SUPPORT = newId("prj");
 
+/** An instant as the microseconds since the epoch a window is counted in. */
+function microseconds(instant: string): bigint {
+  return BigInt(Date.parse(instant)) * 1000n;
+}
+
 /** The minute everything in this file happened in, and a window around it. */
 const WHEN = new Date("2026-05-04T12:00:00Z");
 const WINDOW = {
-  from: new Date("2026-05-04T00:00:00Z"),
-  to: new Date("2026-05-05T00:00:00Z"),
+  from: microseconds("2026-05-04T00:00:00Z"),
+  to: microseconds("2026-05-05T00:00:00Z"),
 };
 
 function at(
@@ -100,8 +108,21 @@ function span(overrides: Partial<NewSpan> = {}): NewSpan {
   };
 }
 
+/**
+ * Every span a transcript holds — inside a turn, under the root, or beside
+ * both — which is what "the response holds every span exactly once" is asked
+ * with.
+ */
+function everySpanOf(detail: TraceDetail | undefined): TraceSpan[] {
+  const walk = (spans: readonly TraceSpan[]): TraceSpan[] =>
+    spans.flatMap((each) => [each, ...walk(each.spans)]);
+  return detail === undefined
+    ? []
+    : [...walk(detail.turns), ...walk(detail.spans)];
+}
+
 /** A root, one human turn under it, and one step under the turn. */
-function aConversation(traceId: string): NewSpan[] {
+function aTrace(traceId: string): NewSpan[] {
   const root = spanId();
   const turn = spanId();
   return [
@@ -134,9 +155,9 @@ beforeAll(async () => {
   store = await createMigratedTraceStore("trace_reads");
   connectClickHouse({ clickhouseUrl: store.url, maxOpenConnections: 4 });
 
-  await appendSpans(at(acme, SUPPORT), aConversation(ACME_TRACE));
-  await appendSpans(at(acme, OUTBOUND), aConversation(OUTBOUND_TRACE));
-  await appendSpans(at(globex, SUPPORT), aConversation(GLOBEX_TRACE));
+  await appendSpans(at(acme, SUPPORT), aTrace(ACME_TRACE));
+  await appendSpans(at(acme, OUTBOUND), aTrace(OUTBOUND_TRACE));
+  await appendSpans(at(globex, SUPPORT), aTrace(GLOBEX_TRACE));
 });
 
 afterAll(async () => {
@@ -207,6 +228,28 @@ describe("the project on a read", () => {
     );
   });
 
+  /**
+   * `?project_id=` is what a form submits for a field left blank, and `??` does
+   * not catch it. Read as a name it would put `project_id = ''` in the
+   * predicate — which no row has ever been written under — and the customer
+   * would be handed an empty list they could not tell from having no traces.
+   */
+  it("is the whole customer when the parameter arrived empty", async () => {
+    const list = await listTraces(at(acme, undefined), {
+      window: WINDOW,
+      projectId: "",
+    });
+    expect(list.traces.map((trace) => trace.traceId).sort()).toEqual(
+      [ACME_TRACE, OUTBOUND_TRACE].sort(),
+    );
+
+    const detail = await readTrace(at(acme, undefined), ACME_TRACE, {
+      window: WINDOW,
+      projectId: "",
+    });
+    expect(detail?.traceId).toBe(ACME_TRACE);
+  });
+
   it("narrows when a caller asks it to", async () => {
     const list = await listTraces(at(acme, undefined), {
       window: WINDOW,
@@ -239,8 +282,8 @@ describe("the project on a read", () => {
 describe("the window a read is bounded by", () => {
   it("is refused here too, not only at the route that parsed it", async () => {
     const tooWide = {
-      from: new Date(WHEN.getTime() - MAXIMUM_WINDOW_MILLISECONDS - 1),
-      to: new Date(WHEN.getTime()),
+      from: BigInt(WHEN.getTime() - MAXIMUM_WINDOW_MILLISECONDS - 1) * 1000n,
+      to: BigInt(WHEN.getTime()) * 1000n,
     };
     await expect(
       listTraces(at(acme, SUPPORT), { window: tooWide }),
@@ -250,25 +293,50 @@ describe("the window a read is bounded by", () => {
     ).rejects.toThrow(UnreadableTraceQueryError);
   });
 
-  it("is refused when it ends before it starts, or is not a time at all", async () => {
+  it("is refused when it ends before it starts", async () => {
     await expect(
       listTraces(at(acme, SUPPORT), {
         window: { from: WINDOW.to, to: WINDOW.from },
       }),
     ).rejects.toThrow(UnreadableTraceQueryError);
+  });
 
-    await expect(
-      listTraces(at(acme, SUPPORT), {
-        window: { from: new Date("not a time"), to: WINDOW.to },
-      }),
-    ).rejects.toThrow(UnreadableTraceQueryError);
+  /**
+   * An instant a `DateTime64` cannot hold is refused here rather than written
+   * into a statement, and the reason is that the literal built from one is not a
+   * timestamp: `toISOString` writes a year outside 0000–9999 with a sign and six
+   * digits, and the store answers a mangled literal with a parse error the
+   * customer would read as a fault of egma's rather than as a window they
+   * cannot have.
+   */
+  it("is refused when it names an instant the store cannot hold", async () => {
+    const beyond = [
+      // A year the store has no room for at either end, and both bounds moved
+      // together so that the width is not what refuses them.
+      { from: microseconds("+275760-09-11T00:00:00Z"), to: microseconds("+275760-09-12T00:00:00Z") },
+      { from: microseconds("-000001-01-01T00:00:00Z"), to: microseconds("-000001-01-02T00:00:00Z") },
+      // And the far edge itself, which is where a nanosecond count since the
+      // epoch stops fitting in sixty-four signed bits.
+      { from: microseconds("2262-04-11T00:00:00Z"), to: microseconds("2262-04-12T00:00:00Z") },
+    ];
+
+    for (const window of beyond) {
+      await expect(
+        listTraces(at(acme, SUPPORT), { window }),
+        String(window.from),
+      ).rejects.toThrow(UnreadableTraceQueryError);
+      await expect(
+        readTrace(at(acme, SUPPORT), ACME_TRACE, { window }),
+        String(window.from),
+      ).rejects.toThrow(UnreadableTraceQueryError);
+    }
   });
 
   /** A trace outside the window is not there, which is the same as not existing. */
   it("decides whether a trace is there at all", async () => {
     const elsewhere = {
-      from: new Date("2026-05-06T00:00:00Z"),
-      to: new Date("2026-05-07T00:00:00Z"),
+      from: microseconds("2026-05-06T00:00:00Z"),
+      to: microseconds("2026-05-07T00:00:00Z"),
     };
     expect(
       (await listTraces(at(acme, SUPPORT), { window: elsewhere })).traces,
@@ -331,6 +399,217 @@ describe("a span whose parent never arrived", () => {
     // The parent it named is still on the row, exactly as it arrived — the
     // reader treats it as top-level without rewriting what was sent.
     expect(detail?.spans[1]?.parentSpanId).toBe("cccccccccccccccc");
+  });
+});
+
+/**
+ * Spans that point at each other, which is what a truncated exporter buffer and
+ * a hand-written client both eventually produce.
+ *
+ * Nobody sends this on purpose, and that is exactly why it is written down: the
+ * walk down from the top never arrives at a span whose parent is present, is not
+ * a turn, and is not under the root — so a cycle of two would leave the store
+ * counting spans the transcript did not show. A response that disagrees with the
+ * number printed beside it reads as egma having lost something.
+ */
+describe("a parent cycle longer than one span", () => {
+  const CYCLED = "eeee1111111111111111111111111111";
+  const DESCENDED = "ffff1111111111111111111111111111";
+
+  beforeAll(async () => {
+    // Two spans, each naming the other as its parent.
+    const first = spanId();
+    const second = spanId();
+    await appendSpans(at(acme, SUPPORT), [
+      span({
+        traceId: CYCLED,
+        spanId: first,
+        parentSpanId: second,
+        name: "llm_node",
+        kind: "model",
+      }),
+      span({
+        traceId: CYCLED,
+        spanId: second,
+        parentSpanId: first,
+        name: "llm_request",
+        kind: "model",
+        startedAtMicroseconds: BigInt(WHEN.getTime() + 500) * 1000n,
+      }),
+    ]);
+
+    // And a root whose parent is one of its own descendants, which is the same
+    // knot with a longer loop and a turn hanging off it.
+    const root = spanId();
+    const turn = spanId();
+    const leaf = spanId();
+    await appendSpans(at(acme, SUPPORT), [
+      span({ traceId: DESCENDED, spanId: root, parentSpanId: leaf }),
+      span({
+        traceId: DESCENDED,
+        spanId: turn,
+        parentSpanId: root,
+        name: "user_turn",
+        kind: "turn:human",
+        text: "Anybody there?",
+        startedAtMicroseconds: BigInt(WHEN.getTime() + 1000) * 1000n,
+      }),
+      span({
+        traceId: DESCENDED,
+        spanId: leaf,
+        parentSpanId: root,
+        name: "tts_request",
+        kind: "tts",
+        startedAtMicroseconds: BigInt(WHEN.getTime() + 2000) * 1000n,
+      }),
+    ]);
+  });
+
+  it("is read back whole rather than vanishing out of the transcript", async () => {
+    const detail = await readTrace(at(acme, SUPPORT), CYCLED, {
+      window: WINDOW,
+    });
+
+    expect(detail?.spanCount).toBe(2);
+    expect(everySpanOf(detail).map((each) => each.name).sort()).toEqual([
+      "llm_node",
+      "llm_request",
+    ]);
+    // Once each, and not twice: the span reached first is the top of the loop
+    // and the other hangs beneath it.
+    expect(everySpanOf(detail)).toHaveLength(2);
+  });
+
+  it("is read back whole when the loop runs through a descendant too", async () => {
+    const detail = await readTrace(at(acme, SUPPORT), DESCENDED, {
+      window: WINDOW,
+    });
+
+    expect(detail?.spanCount).toBe(3);
+    expect(detail?.turns.map((turn) => turn.name)).toEqual(["user_turn"]);
+    expect(everySpanOf(detail)).toHaveLength(3);
+    expect(everySpanOf(detail).map((each) => each.name).sort()).toEqual([
+      "agent_session",
+      "tts_request",
+      "user_turn",
+    ]);
+  });
+});
+
+/**
+ * A trace larger than one read returns, which is where the counts and the tree
+ * stop being the same thing.
+ *
+ * The door caps one export at 10,000 spans, so this cannot be reached through
+ * it — but a trace is however many exports an agent sent, and nothing stops
+ * fifteen of them sharing a trace id. The promise is that the transcript says so
+ * and that its numbers stay the trace's own: `spans_truncated` means the tree is
+ * a prefix, and `span_count` is still every span the window holds.
+ */
+describe("a trace with more spans than one read returns", () => {
+  const ENORMOUS = "9999111111111111111111111111aaaa";
+  const TOTAL = MAXIMUM_SPANS_PER_TRACE + 1;
+
+  beforeAll(async () => {
+    const half = Math.ceil(TOTAL / 2);
+    const minimal = (index: number): NewSpan =>
+      span({
+        traceId: ENORMOUS,
+        spanId: (0x100000 + index).toString(16).padStart(16, "0"),
+        name: "tts_request",
+        kind: "tts",
+        // Spread across the minute, so time order is a real order.
+        startedAtMicroseconds: BigInt(WHEN.getTime() + index) * 1000n,
+      });
+
+    const all = Array.from({ length: TOTAL }, (_, index) => minimal(index));
+    await appendSpans(at(acme, SUPPORT), all.slice(0, half));
+    await appendSpans(at(acme, SUPPORT), all.slice(half));
+  });
+
+  it("says the transcript is a prefix, and counts the whole trace anyway", async () => {
+    const detail = await readTrace(at(acme, SUPPORT), ENORMOUS, {
+      window: WINDOW,
+    });
+
+    expect(detail?.truncated).toBe(true);
+    // The tree stops at the cap.
+    expect(everySpanOf(detail)).toHaveLength(MAXIMUM_SPANS_PER_TRACE);
+    // And the counts do not: they are the trace, which is what makes the flag
+    // worth reading rather than a warning with nothing behind it.
+    expect(detail?.spanCount).toBe(TOTAL);
+    // Down to the last span, whose start is what the trace's extent is measured
+    // to — and it is past the cap, so a count taken from the rows that fitted
+    // would have been short by a second.
+    expect(detail?.endedAt).toBe(
+      new Date(WHEN.getTime() + TOTAL - 1 + 1000).toISOString().replace("Z", "000Z"),
+    );
+  });
+
+  it("is the same trace in the list, counted the same way", async () => {
+    const list = await listTraces(at(acme, SUPPORT), {
+      window: WINDOW,
+      limit: 200,
+    });
+    const listed = list.traces.find((trace) => trace.traceId === ENORMOUS);
+
+    const detail = await readTrace(at(acme, SUPPORT), ENORMOUS, {
+      window: WINDOW,
+    });
+    expect(listed?.spanCount).toBe(detail?.spanCount);
+    expect(listed?.startedAt).toBe(detail?.startedAt);
+    expect(listed?.endedAt).toBe(detail?.endedAt);
+    expect(listed?.durationNanoseconds).toBe(detail?.durationNanoseconds);
+  });
+});
+
+/**
+ * A stored duration larger than the signed arithmetic that reads it.
+ *
+ * `duration_ns` is a `UInt64` and the aggregate that works out when a trace
+ * ended is signed, so a count near 2^64 comes back through `toInt64` negative
+ * and the trace ends before it began. The door clamps what it writes at Int64's
+ * ceiling; this is the floor under the rows that were written before it did,
+ * which is why the row goes in past the door — the door will not produce one any
+ * more, and the rows that already exist do not go back through it.
+ */
+describe("a duration that the reading arithmetic cannot hold", () => {
+  const WRAPPED = "7777111111111111111111111111bbbb";
+  const LATER = {
+    from: microseconds("2026-05-08T00:00:00Z"),
+    to: microseconds("2026-05-09T00:00:00Z"),
+  };
+
+  beforeAll(async () => {
+    await store.append("spans", [
+      {
+        trace_id: WRAPPED,
+        span_id: "00000000000000ff",
+        parent_span_id: "",
+        organization_id: acme.organizationId,
+        project_id: SUPPORT,
+        source: "production",
+        emitter: "agent",
+        environment: "default",
+        started_at: "2026-05-08 12:00:00.000000",
+        // Everything a UInt64 holds, which is what a wrapped clock writes.
+        duration_ns: "18446744073709551615",
+        name: "agent_session",
+        kind: "root",
+        status: "unset",
+      },
+    ]);
+  });
+
+  it("never reads back as a trace that ended before it started", async () => {
+    const [trace] = (await listTraces(at(acme, SUPPORT), { window: LATER }))
+      .traces;
+
+    expect(trace?.traceId).toBe(WRAPPED);
+    expect(BigInt(trace?.durationNanoseconds ?? "-1")).toBeGreaterThanOrEqual(
+      0n,
+    );
+    expect(trace?.endedAt).toBe(trace?.startedAt);
   });
 });
 

@@ -313,6 +313,47 @@ describe("a span that named itself nothing", () => {
   });
 });
 
+/**
+ * A duration that cannot be added to anything.
+ *
+ * `duration_ns` is a `UInt64`, but every read that works out when a trace ended
+ * adds it to a start time in signed 64-bit arithmetic — so a count past Int64's
+ * ceiling comes back negative and the trace ends before it begins. Nearly three
+ * centuries of nanoseconds is a broken clock rather than a long call, and an
+ * exporter sending `0` for a start and a real timestamp for an end reaches it,
+ * so it is clamped at the door where the number is still explainable. Nothing is
+ * lost: the two timestamps it was measured from are in the payload as they
+ * arrived.
+ */
+describe("a span that says it ran for longer than Int64 holds", () => {
+  it("is stored with its duration clamped rather than wrapped", async () => {
+    const traceId = "13131313131313131313131313131313";
+    const response = await post(
+      jsonExport([
+        jsonSpan({
+          traceId,
+          spanId: "1313131313131313",
+          startTimeUnixNano: "0",
+          // The largest thing a UInt64 holds, which is what an exporter with a
+          // zeroed clock at one end produces.
+          endTimeUnixNano: "18446744073709551615",
+        }),
+      ]),
+    );
+    expect(response.statusCode, response.body).toBe(200);
+
+    const [row] = await store().rows<{ duration_ns: string; ends: string }>(
+      `select toString(duration_ns) as duration_ns,
+              toString(toInt64(duration_ns)) as ends
+       from spans where trace_id = '${traceId}'`,
+    );
+    expect(row?.duration_ns).toBe("9223372036854775807");
+    // And the signed reading of it is the same number, rather than a negative
+    // one, which is the whole point of clamping where it is clamped.
+    expect(row?.ends).toBe("9223372036854775807");
+  });
+});
+
 describe("a body the door cannot read", () => {
   it("is refused with a reason, rather than accepted and lost", async () => {
     const notProtobuf = await post(Buffer.from([0xff, 0xff, 0xff, 0xff]), {

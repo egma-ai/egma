@@ -241,6 +241,19 @@ function nanoseconds(value: string | number | undefined): bigint | null {
 }
 
 /**
+ * Where a duration stops, which is Int64's ceiling and not `UInt64`'s.
+ *
+ * The column is a `UInt64`, but every read that adds a duration to a start time
+ * does so in signed 64-bit arithmetic, so a count past this comes back negative
+ * and the trace ends before it began. Nearly three centuries in nanoseconds is a
+ * broken clock rather than a long call — an exporter sending `0` for a start and
+ * `now` for an end reaches it — so it is clamped here, where the number is still
+ * explainable, and the pair of timestamps it was measured from stays untouched
+ * in the payload.
+ */
+const MAXIMUM_DURATION_NANOSECONDS = 2n ** 63n - 1n;
+
+/**
  * The two id widths OpenTelemetry defines, as the hex they are written in.
  * Compiled once: an export is tens of thousands of spans and building a regular
  * expression per id is work nobody asked for.
@@ -409,8 +422,13 @@ export function normaliseOtlpExport(request: OtlpExport): NormalisedExport {
         }
 
         const endedAt = nanoseconds(span.endTimeUnixNano);
-        const duration =
+        const measured =
           endedAt === null || endedAt < startedAt ? 0n : endedAt - startedAt;
+        // Clamped, so that no read has to add a negative one to a start time.
+        const duration =
+          measured > MAXIMUM_DURATION_NANOSECONDS
+            ? MAXIMUM_DURATION_NANOSECONDS
+            : measured;
 
         const attributes = span.attributes;
         const kind = kindOf(scope, span);
