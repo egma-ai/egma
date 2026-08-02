@@ -3,6 +3,7 @@ import path from "node:path";
 import { createClient, type ClickHouseClient } from "@clickhouse/client";
 
 import {
+  pendingMigrations,
   readMigrations,
   type Migration,
   type MigrationResult,
@@ -101,19 +102,7 @@ async function apply(
 
   const applied: string[] = [];
 
-  for (const migration of migrations) {
-    const knownHash = alreadyApplied.get(migration.name);
-
-    if (knownHash !== undefined) {
-      if (knownHash !== migration.hash) {
-        throw new Error(
-          `migration ${migration.name} has changed since it was applied; ` +
-            `applied migrations are immutable, add a new file instead`,
-        );
-      }
-      continue;
-    }
-
+  for (const migration of pendingMigrations(migrations, alreadyApplied)) {
     for (const statement of statementsOf(migration)) {
       try {
         await client.command({ query: statement });

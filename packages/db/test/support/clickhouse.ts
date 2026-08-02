@@ -2,10 +2,6 @@ import { randomBytes } from "node:crypto";
 
 import { createClient, type ClickHouseClient } from "@clickhouse/client";
 
-import {
-  connectClickHouse,
-  disconnectClickHouse,
-} from "../../src/clickhouse/client.ts";
 import { runClickHouseMigrations } from "../../src/clickhouse/migrate.ts";
 
 /**
@@ -95,26 +91,6 @@ export async function createMigratedTraceStore(
     },
     async drop() {
       await client.close().catch(() => undefined);
-      await store.drop();
-    },
-  };
-}
-
-/**
- * A migrated trace store that the data-access module is connected to, for the
- * tests that go through it. The raw handle stays available so a test can check
- * what actually landed without asking the module to tell it.
- */
-export async function createConnectedTraceStore(
-  label: string,
-): Promise<MigratedTraceStore> {
-  const store = await createMigratedTraceStore(label);
-  connectClickHouse({ clickhouseUrl: store.url });
-
-  return {
-    ...store,
-    async drop() {
-      await disconnectClickHouse();
       await store.drop();
     },
   };
