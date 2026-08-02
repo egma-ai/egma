@@ -55,9 +55,11 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
 const CONTEXT_REQUIRING = [
   "changeRole",
   "createApiKey",
+  "createDigitalHuman",
   "createInvitation",
   "createProject",
   "deactivateUser",
+  "getDigitalHuman",
   "listApiKeys",
   "listMembers",
   "listPendingInvitations",
@@ -91,6 +93,7 @@ const VALUES = [
   "NotPermittedError",
   "ProjectOutsideOrganizationError",
   "VIA",
+  "VOICE_PROVIDERS",
   "schema",
 ];
 

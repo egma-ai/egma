@@ -98,6 +98,8 @@ describe("the provider's footprint on the schema", () => {
     "account",
     "api_key",
     "device_code",
+    "digital_human",
+    "digital_human_version",
     "invitation",
     "membership",
     "organization",

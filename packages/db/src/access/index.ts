@@ -129,3 +129,13 @@ export {
   type DeviceAuthorization,
   type DeviceAuthorizationTarget,
 } from "./device-authorizations.ts";
+
+export {
+  createDigitalHuman,
+  getDigitalHuman,
+  VOICE_PROVIDERS,
+  type DigitalHuman,
+  type DigitalHumanTraits,
+  type NewDigitalHuman,
+  type VoiceProvider,
+} from "./digital-humans.ts";

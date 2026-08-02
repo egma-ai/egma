@@ -22,6 +22,13 @@
       "when": 1785615109589,
       "tag": "0002_device_authorization_target",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785680979881,
+      "tag": "0003_digital_humans",
+      "breakpoints": true
     }
   ]
 }
