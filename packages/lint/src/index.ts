@@ -118,9 +118,9 @@ const AUTH_PROVIDER_SEAM = [
 ];
 
 /**
- * A driver for a store egma keeps customer data in. ClickHouse is named before
- * it exists, because it arrives behind this same boundary and the rule should be
- * waiting for it rather than added after the first import.
+ * A driver for a store egma keeps customer data in. ClickHouse was named here
+ * before it existed, so the rule was already waiting when the trace store
+ * arrived rather than being added after the first import.
  */
 const DATASTORE_DRIVERS = [
   "pg",
@@ -144,6 +144,7 @@ const DATASTORE_DRIVERS = [
  */
 const DELIBERATE_BYPASSES = [
   "packages/db/test/support/database.ts",
+  "packages/db/test/support/clickhouse.ts",
   "packages/db/test/migrations.test.ts",
 ];
 

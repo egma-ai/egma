@@ -11,11 +11,28 @@ import { describe, expect, it } from "vitest";
  * context-establishing group.
  */
 
-/** Opening and closing the connection, and asking whether it is there. */
-const CONNECTION = ["connect", "disconnect", "ping"];
+/**
+ * Opening and closing the connections, and asking whether they are there. Two
+ * stores, one module: the ClickHouse client is as private as the pool, and what
+ * is exported for it is the same three verbs and no more.
+ */
+const CONNECTION = [
+  "connect",
+  "disconnect",
+  "ping",
+  "connectClickHouse",
+  "disconnectClickHouse",
+  "pingClickHouse",
+];
 
 /** Applying the schema, which happens on boot before any context exists. */
-const MIGRATIONS = ["MIGRATIONS_DIRECTORY", "readMigrations", "runMigrations"];
+const MIGRATIONS = [
+  "MIGRATIONS_DIRECTORY",
+  "readMigrations",
+  "runMigrations",
+  "CLICKHOUSE_MIGRATIONS_DIRECTORY",
+  "runClickHouseMigrations",
+];
 
 /**
  * How the auth provider reaches the five identity tables. It is handed a
@@ -110,13 +127,17 @@ describe("the data-access module's surface", () => {
     );
   });
 
-  it("hands out no pool, and no way to run a statement of your own", () => {
+  it("hands out no pool and no client, and no way to run a statement of your own", () => {
     const escapeHatches = [
       "pool",
       "db",
       "database",
       "client",
+      "clickhouse",
+      "traceStore",
       "query",
+      "command",
+      "insert",
       "execute",
       "sql",
       "transaction",

@@ -1,4 +1,4 @@
-import { ping } from "@egma/db";
+import { ping, pingClickHouse } from "@egma/db";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import { createIdentity, type Identity } from "./auth/better-auth.ts";
@@ -88,14 +88,36 @@ export function buildApi(options: ServerOptions): Api {
 
   // The container health check polls this every few seconds; logging each poll
   // would bury everything else in `docker compose logs`.
-  app.get("/health", { logLevel: "warn" }, async (_request, reply) => {
+  /**
+   * Both stores are answered for, and neither is optional: there is no second
+   * analytical path behind ClickHouse, so an instance that cannot reach it is
+   * not a degraded egma — it is one that would accept a trace and lose it. Both
+   * are asked every time rather than stopping at the first failure, so a health
+   * response says what is wrong rather than only that something is.
+   */
+  const reachability = async (
+    store: string,
+    reach: () => Promise<void>,
+  ): Promise<"reachable" | "unreachable"> => {
     try {
-      await ping();
+      await reach();
+      return "reachable";
     } catch (cause) {
-      app.log.error({ err: cause }, "health check could not reach Postgres");
-      return reply.code(503).send({ status: "unavailable", postgres: "unreachable" });
+      app.log.error({ err: cause }, `health check could not reach ${store}`);
+      return "unreachable";
     }
-    return reply.send({ status: "ok", postgres: "reachable" });
+  };
+
+  app.get("/health", { logLevel: "warn" }, async (_request, reply) => {
+    const [postgres, clickhouse] = await Promise.all([
+      reachability("Postgres", ping),
+      reachability("ClickHouse", pingClickHouse),
+    ]);
+
+    const healthy = postgres === "reachable" && clickhouse === "reachable";
+    return reply
+      .code(healthy ? 200 : 503)
+      .send({ status: healthy ? "ok" : "unavailable", postgres, clickhouse });
   });
 
   // Registered without `fastify-plugin` on purpose: the adapter replaces every
