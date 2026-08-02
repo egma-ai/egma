@@ -14,6 +14,7 @@ import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
 import { signupRoutes } from "./routes/signup.ts";
+import { traceReadRoutes } from "./routes/trace-reads.ts";
 import { traceRoutes } from "./routes/traces.ts";
 import { fixedWindowRateLimit, type RateLimit } from "./http/rate-limit.ts";
 import { webHandler } from "./http/web-handler.ts";
@@ -165,6 +166,15 @@ export function buildApi(options: ServerOptions): Api {
   // so that telemetry arrives as the bytes that were sent, and encapsulation is
   // what stops that reaching the JSON routes above.
   void app.register(traceRoutes, { provider: identity.provider, rateLimit });
+
+  // The v1 read surface, in its own scope beside the door rather than inside
+  // it. It shares the `/v1/traces` path and none of the door's arrangements: a
+  // list and a transcript are ordinary JSON responses, and the parser the door
+  // replaces is one they want back.
+  void app.register(traceReadRoutes, {
+    provider: identity.provider,
+    rateLimit,
+  });
 
   // Outside the credentialed scope on purpose: somebody following an
   // invitation has no membership, so there is no context to resolve them into

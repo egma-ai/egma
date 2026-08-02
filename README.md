@@ -206,6 +206,58 @@ export becomes at most 10,000 spans and 64 MiB of rows. What did not fit comes
 back as a count and a reason, so the fix is a smaller batch rather than a
 mystery.
 
+## Reading traces back
+
+Two endpoints, and both take either credential — a browser session or a key.
+Reading is permitted to every role, a `viewer` included: seeing what an agent did
+is the point of the product.
+
+```bash
+curl -H "authorization: Bearer egma_sk_..." \
+  "http://localhost:3100/v1/traces?from=2026-08-02T00:00:00Z&to=2026-08-03T00:00:00Z"
+
+curl -H "authorization: Bearer egma_sk_..." \
+  "http://localhost:3100/v1/traces/<trace_id>?from=2026-08-02T00:00:00Z&to=2026-08-03T00:00:00Z"
+```
+
+**`GET /v1/traces`** lists a customer's traces, newest first.
+
+| Parameter | | |
+|---|---|---|
+| `from`, `to` | **required** | RFC 3339. The window is closed at `from` and open at `to`. |
+| `project_id` | optional | Narrows to one project. Absent means the whole organization. |
+| `limit` | optional | At most 200, 50 by default. A maximum, so it is clamped rather than refused. |
+| `cursor` | optional | `next_cursor` from the previous page. |
+
+**`GET /v1/traces/:traceId`** returns one trace as a transcript: `turns` in the
+order they were taken, each carrying the spans that happened inside it, and
+`spans` for everything top-level that is not a turn — the root span above all.
+It takes `from`, `to` and `project_id` on the same terms.
+
+Four things about the contract are worth knowing before you build on it:
+
+- **The window is required, and wider than 31 days is refused rather than
+  narrowed.** There is no default, on either endpoint, including the one that
+  names a trace by id: this store is filed by time, so a query that named none
+  would be a query for everything. A window that was silently narrowed for you
+  would answer a different question than the one you asked while saying nothing
+  about having done so, so it is refused with the cap in the message.
+- **Paging is by token, and a token is a position rather than an offset.** It
+  encodes where the last page stopped — when that trace started, and its id to
+  break the tie — so a trace arriving mid-walk cannot shift the rows you have not
+  read yet, and page fifty costs what page one did. Treat it as opaque; nothing
+  is promised about its contents.
+- **The organization comes from the credential.** There is no parameter that
+  could name another one, and a trace id belonging to somebody else answers
+  exactly as an id nobody ever minted does.
+- **The verbatim payload is not in either response.** It is by a wide margin the
+  largest thing on a span, and a transcript carrying it would be megabytes of
+  JSON nobody asked to render. It is still stored in full on the row.
+
+Times come back as RFC 3339 to the microsecond, and durations as decimal strings
+of nanoseconds — a nanosecond count passes what a JSON number holds exactly
+within a few months, and a silently rounded latency is worse than no latency.
+
 ## Adding a second person
 
 Open `/members`, type an address, pick a role, and send. **If no mail transport
