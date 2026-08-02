@@ -54,15 +54,18 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
 /** Everything that touches a customer's data. All of it needs the context. */
 const CONTEXT_REQUIRING = [
   "changeRole",
+  "cloneDigitalHuman",
   "createApiKey",
   "createDigitalHuman",
   "createInvitation",
   "createProject",
   "deactivateUser",
+  "deleteDigitalHuman",
   "editDigitalHuman",
   "getDigitalHuman",
   "getDigitalHumanVersion",
   "listApiKeys",
+  "listDigitalHumans",
   "listMembers",
   "listPendingInvitations",
   "listProjects",
