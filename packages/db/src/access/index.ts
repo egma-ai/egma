@@ -42,9 +42,10 @@
  * than remembered. They are here, beside the context they read, because the
  * context is the only input they have.
  *
- * The ClickHouse client arrives behind this same boundary on these same terms:
- * a file beside these, taking the same `AuthContext`, injecting the same
- * predicates, with its driver already named in the lint rule's list.
+ * The ClickHouse client sits behind this same boundary on these same terms:
+ * `appendSpans` is a file beside these, takes the same `AuthContext`, stamps
+ * the same tenancy, and its driver was already named in the lint rule's list
+ * before it existed.
  */
 
 export type { AuthContext, Role, Via } from "./context.ts";
@@ -129,3 +130,11 @@ export {
   type DeviceAuthorization,
   type DeviceAuthorizationTarget,
 } from "./device-authorizations.ts";
+
+export {
+  appendSpans,
+  type AppendedSpans,
+  type NewSpan,
+  type SpanEmitter,
+  type SpanSource,
+} from "./spans.ts";

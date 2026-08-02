@@ -68,8 +68,16 @@ const CONTEXT_ESTABLISHING = [
  */
 const INSTANCE_SCOPED = ["instanceIsClaimed"];
 
-/** Everything that touches a customer's data. All of it needs the context. */
+/**
+ * Everything that touches a customer's data. All of it needs the context.
+ *
+ * `appendSpans` is the trace store's whole surface today and it is a write.
+ * Reading spans arrives with the endpoints that need it: an exported read with
+ * no caller would be a hole in the boundary that nothing is watching, which is
+ * the same objection as a permission row nothing enforces.
+ */
 const CONTEXT_REQUIRING = [
+  "appendSpans",
   "changeRole",
   "createApiKey",
   "createInvitation",
