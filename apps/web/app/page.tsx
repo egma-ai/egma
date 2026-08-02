@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { pickers, type Me } from "../lib/me.ts";
+import { LIST } from "../lib/transcript-copy.ts";
 import { Card, styles } from "./ui.tsx";
 
 /**
@@ -81,6 +82,11 @@ export default function Home() {
       )}
 
       <Fact label="Your role" value={organization?.role ?? "—"} />
+
+      <p style={styles.aside}>
+        <a href="/traces">{LIST.navigation}</a> — read what your agents did,
+        turn by turn.
+      </p>
 
       <p style={styles.aside}>
         <a href="/members">People</a> — invite a colleague, or change what
