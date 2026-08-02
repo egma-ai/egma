@@ -173,18 +173,41 @@ function traitsFromRow(value: unknown, versionId: string): DigitalHumanTraits {
 }
 
 /**
- * Byte-identical or not, decided field by field. The traits shape is closed,
- * so this is the same answer canonical serialization would give, without
- * trusting any serializer to order keys the way jsonb re-ordered them.
+ * Byte-identical or not, decided field by field — the same answer canonical
+ * serialization would give, without trusting any serializer to order keys the
+ * way jsonb re-ordered them.
+ *
+ * One comparator per field, in tables the compiler holds exhaustive: a field
+ * added to the traits (or to the voice inside them) refuses to build until it
+ * is also told how to compare. A hand-maintained comparator that missed a
+ * field would call two different traits identical, and an edit would vanish
+ * without a version — the one loss this whole file exists to rule out.
  */
+const sameVoiceField: {
+  readonly [K in keyof DigitalHumanTraits["voice"]]: (
+    a: DigitalHumanTraits["voice"],
+    b: DigitalHumanTraits["voice"],
+  ) => boolean;
+} = {
+  provider: (a, b) => a.provider === b.provider,
+  voiceId: (a, b) => a.voiceId === b.voiceId,
+  speed: (a, b) => a.speed === b.speed,
+};
+
+const sameTraitsField: {
+  readonly [K in keyof DigitalHumanTraits]: (
+    a: DigitalHumanTraits,
+    b: DigitalHumanTraits,
+  ) => boolean;
+} = {
+  personality: (a, b) => a.personality === b.personality,
+  language: (a, b) => a.language === b.language,
+  voice: (a, b) =>
+    Object.values(sameVoiceField).every((same) => same(a.voice, b.voice)),
+};
+
 function sameTraits(a: DigitalHumanTraits, b: DigitalHumanTraits): boolean {
-  return (
-    a.personality === b.personality &&
-    a.language === b.language &&
-    a.voice.provider === b.voice.provider &&
-    a.voice.voiceId === b.voice.voiceId &&
-    a.voice.speed === b.voice.speed
-  );
+  return Object.values(sameTraitsField).every((same) => same(a, b));
 }
 
 /** Acting in a project narrows to it; acting in none reaches the customer. */
