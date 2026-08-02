@@ -156,8 +156,14 @@ code:
 
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3100
-export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer egma_sk_..."
+export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20egma_sk_..."
 ```
+
+The `%20` is not a typo: the OpenTelemetry specification says this variable is a
+list of `key=value` pairs whose values are percent-encoded, and a literal space
+is not one of the characters a value may contain. Several SDKs pass an
+unencoded space straight through and the header arrives fine; others refuse the
+whole variable, and the failure looks like an agent that exports nothing.
 
 That is the API directly rather than the web application: the one-origin rule
 above exists so a browser's session cookie is valid for both, and telemetry
@@ -182,6 +188,10 @@ A few things worth knowing about what happens next:
   is kept verbatim on the row it came on.
 - **A retry is free.** An exporter re-sending a batch it never heard back about
   sends identical bytes, and identical bytes are stored once.
+- **Sending traces is a write**, so a key acts at the role of whoever minted it:
+  a `member` or an `admin` exports, and a key held by a `viewer` is refused.
+  Demoting somebody stops their exporters on the next request, with no key
+  touched.
 - **Which environment a span belongs to is discovered**, from
   `deployment.environment.name` if your telemetry sets it and `default` if it
   does not. There is nothing to declare first. Names beginning `egma` are
@@ -189,7 +199,12 @@ A few things worth knowing about what happens next:
 
 Spans egma will not store are reported in the response's partial-success field
 rather than as a failure, because the specification is explicit that rejected
-data must not be retried — the rest of the batch is stored.
+data must not be retried — the rest of the batch is stored. That is also the
+answer when an export asks for more than one request stores: a body stops at
+20 MiB, which is what the OpenTelemetry Collector accepts by default, and one
+export becomes at most 10,000 spans and 64 MiB of rows. What did not fit comes
+back as a count and a reason, so the fix is a smaller batch rather than a
+mystery.
 
 ## Adding a second person
 

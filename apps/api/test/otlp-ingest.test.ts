@@ -405,7 +405,16 @@ describe("two organizations sending the very same trace", () => {
     );
   });
 
-  it("cannot reach the other's rows by knowing the trace id, because the id is not the filter", async () => {
+  /**
+   * Read with raw SQL, so what this shows is that the rows are *separable* —
+   * one shared trace id names a different trace in each account, because the
+   * organization leads the filing order and the id does not. It is not a claim
+   * that a customer cannot reach the other's rows: nothing reads spans through
+   * the data-access module yet, and enforcing tenancy at read is ticket 04's,
+   * where the read functions inject the predicate the way every Postgres one
+   * already does.
+   */
+  it("keeps each organization's copy separable by the organization, not by the trace id", async () => {
     const [row] = await store().rows<{ trace_id: string }>(
       "select distinct trace_id from spans limit 1",
     );

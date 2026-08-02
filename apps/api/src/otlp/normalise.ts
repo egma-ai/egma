@@ -5,6 +5,7 @@ import type {
   OtlpExport,
   OtlpResourceSpans,
   OtlpScope,
+  OtlpScopeSpans,
   OtlpSpan,
   OtlpValue,
 } from "./decode.ts";
@@ -142,6 +143,25 @@ const CONNECTION_TYPE_BY_SCOPE: Readonly<Record<string, string>> = {
   [LIVEKIT_SCOPE]: "livekit",
 };
 
+/**
+ * How much of one export egma will turn into rows.
+ *
+ * Neither of these is a limit on how much telemetry a customer may send — an
+ * exporter flushes as often as it likes — and neither drops anything silently:
+ * what does not fit is reported in the partial-success field the specification
+ * has for exactly this, so the client is told how much was refused and knows
+ * not to retry it.
+ *
+ * Both caps are needed because they answer different requests. A body inside
+ * the wire limit can still carry a hundred thousand tiny spans, which is what
+ * the count is for; and it can carry two thousand spans sharing one enormous
+ * resource, where every row repeats that resource verbatim and a 1.3 MiB
+ * request becomes gigabytes of rows. The byte budget is measured on what the
+ * rows actually weigh, which is the only number that predicts the memory.
+ */
+const MAXIMUM_SPANS_PER_REQUEST = 10_000;
+const MAXIMUM_NORMALISED_BYTES = 64 * 1024 * 1024;
+
 /** A span egma refused, and why, so a partial success can say what happened. */
 export type RejectedSpan = {
   readonly reason: string;
@@ -201,22 +221,48 @@ function statusOf(span: OtlpSpan): string {
   }
 }
 
+const DECIMAL_DIGITS = /^\d+$/;
+
 /**
  * A decimal count of nanoseconds, however the encoding wrote it. The JSON
  * mapping says string and every exporter obeys, but a number is what a
- * hand-written client sends, and both are read exactly rather than through a
- * float.
+ * hand-written client sends.
+ *
+ * A string is read exactly, digit for digit, into a `bigint`. A number cannot
+ * be: JSON parsed it into a float before this saw it, so a count above
+ * 2^53 has already lost its low digits and nothing here can put them back —
+ * which is the whole reason the mapping says to send a string.
  */
 function nanoseconds(value: string | number | undefined): bigint | null {
   if (value === undefined) return null;
   const digits = String(value).trim();
-  if (!/^\d+$/.test(digits)) return null;
+  if (!DECIMAL_DIGITS.test(digits)) return null;
   return BigInt(digits);
 }
 
-/** Lowercase hex of the right width, which is the whole of what an id must be. */
-function isWireId(id: string, bytes: number): boolean {
-  return new RegExp(`^[0-9a-f]{${bytes * 2}}$`).test(id);
+/**
+ * The two id widths OpenTelemetry defines, as the hex they are written in.
+ * Compiled once: an export is tens of thousands of spans and building a regular
+ * expression per id is work nobody asked for.
+ */
+const WIRE_ID_PATTERNS: Readonly<Record<number, RegExp>> = {
+  8: /^[0-9a-f]{16}$/,
+  16: /^[0-9a-f]{32}$/,
+};
+
+/**
+ * An id off the wire in the one form egma stores it in, or `""` for anything
+ * that is not one.
+ *
+ * Hex of the right width is the whole of what an id must be. Uppercase is
+ * accepted and lowered rather than refused — the JSON mapping says lowercase
+ * and every exporter obeys, but a hand-written client that shouts its hex means
+ * the same id, and storing the two spellings as two different traces would
+ * split one conversation in half.
+ */
+function wireId(id: string | undefined, bytes: 8 | 16): string {
+  const lowered = (id ?? "").toLowerCase();
+  return WIRE_ID_PATTERNS[bytes]?.test(lowered) === true ? lowered : "";
 }
 
 function kindOf(scope: OtlpScope | undefined, span: OtlpSpan): string {
@@ -224,9 +270,10 @@ function kindOf(scope: OtlpScope | undefined, span: OtlpSpan): string {
     const known = LIVEKIT_KINDS[span.name ?? ""];
     if (known !== undefined) return known;
   }
-  // The published convention for a model call, which several frameworks emit
-  // and which costs nothing to recognise.
-  if (attribute(span.attributes, "gen_ai.operation.name") !== "") return "model";
+  // A scope this table does not know is `other`, including one emitting the
+  // GenAI semantic conventions: reading those arrives with the first non-LiveKit
+  // provider, recognised by scope like everything else here rather than by an
+  // attribute any framework might set on any span.
   return "other";
 }
 
@@ -262,25 +309,85 @@ function environmentOf(
   return { environment: declared };
 }
 
+/**
+ * Everything on a row except the span itself, serialised once for the whole
+ * scope rather than once per span.
+ *
+ * The resource and the scope ride every row on purpose — a row has to say where
+ * it came from without a join — but they are the same two objects for every
+ * span in the group, and re-serialising a megabyte of resource attributes ten
+ * thousand times is how a small request becomes gigabytes of work. Built lazily,
+ * so a group whose spans are all refused never pays for it at all.
+ */
+function payloadPrefixFor(
+  resourceSpans: OtlpResourceSpans,
+  scopeSpans: OtlpScopeSpans,
+): string {
+  return (
+    `{"resource":${JSON.stringify(resourceSpans.resource ?? {})},` +
+    `"resourceSchemaUrl":${JSON.stringify(resourceSpans.schemaUrl ?? "")},` +
+    `"scope":${JSON.stringify(scopeSpans.scope ?? {})},` +
+    `"scopeSchemaUrl":${JSON.stringify(scopeSpans.schemaUrl ?? "")},` +
+    `"span":`
+  );
+}
+
+/** The two ways one request can ask for more than egma turns into rows. */
+const TOO_MANY_SPANS =
+  `this export carried more than the ${MAXIMUM_SPANS_PER_REQUEST.toLocaleString("en-US")} ` +
+  "spans egma turns into rows from one request. The spans that fitted were " +
+  "stored and the rest were refused rather than retried: send them as more " +
+  "than one export, which is what an exporter's own batch size is for.";
+
+const TOO_MANY_BYTES =
+  `this export's spans came to more than the ${MAXIMUM_NORMALISED_BYTES / (1024 * 1024)} MiB of rows egma ` +
+  "writes from one request — every span carries its resource and its scope " +
+  "verbatim, so a large resource repeated across many spans reaches this long " +
+  "before the body does. The spans that fitted were stored and the rest were " +
+  "refused rather than retried; flush smaller batches.";
+
 export function normaliseOtlpExport(request: OtlpExport): NormalisedExport {
   const spans: NewSpan[] = [];
   const rejected: RejectedSpan[] = [];
+
+  // The whole of what an over-budget request is told, made once and pushed by
+  // reference: a client that sent a hundred thousand spans is owed a count of
+  // what was refused, not a hundred thousand copies of one sentence.
+  let excess: RejectedSpan | undefined;
+  let normalisedBytes = 0;
 
   for (const resourceSpans of request.resourceSpans ?? []) {
     const environment = environmentOf(resourceSpans);
 
     for (const scopeSpans of resourceSpans.scopeSpans ?? []) {
       const scope = scopeSpans.scope;
+      let payloadPrefix: string | undefined;
 
       for (const span of scopeSpans.spans ?? []) {
+        // Asked before anything is built, because building the row is the cost
+        // the caps exist to bound.
+        if (
+          spans.length >= MAXIMUM_SPANS_PER_REQUEST ||
+          normalisedBytes >= MAXIMUM_NORMALISED_BYTES
+        ) {
+          excess ??= {
+            reason:
+              spans.length >= MAXIMUM_SPANS_PER_REQUEST
+                ? TOO_MANY_SPANS
+                : TOO_MANY_BYTES,
+          };
+          rejected.push(excess);
+          continue;
+        }
+
         if ("refusal" in environment) {
           rejected.push({ reason: environment.refusal });
           continue;
         }
 
-        const traceId = span.traceId ?? "";
-        const spanId = span.spanId ?? "";
-        if (!isWireId(traceId, 16) || !isWireId(spanId, 8)) {
+        const traceId = wireId(span.traceId, 16);
+        const spanId = wireId(span.spanId, 8);
+        if (traceId === "" || spanId === "") {
           rejected.push({
             reason:
               "a span arrived without a usable trace id and span id. egma " +
@@ -309,12 +416,21 @@ export function normaliseOtlpExport(request: OtlpExport): NormalisedExport {
         const kind = kindOf(scope, span);
         const isLiveKit = scope?.name === LIVEKIT_SCOPE;
 
+        payloadPrefix ??= payloadPrefixFor(resourceSpans, scopeSpans);
+        const payload = `${payloadPrefix}${JSON.stringify(span)}}`;
+        // Bytes rather than code units, because bytes are what the store holds
+        // and what the memory this bounds is made of.
+        normalisedBytes += Buffer.byteLength(payload);
+
         spans.push({
           traceId,
           spanId,
-          parentSpanId: isWireId(span.parentSpanId ?? "", 8)
-            ? (span.parentSpanId ?? "")
-            : "",
+          // A parent that is not a usable id is dropped to `''`, which is how a
+          // root is recognised — so a span whose parent arrived malformed reads
+          // as a second root rather than as a child of nothing. The original is
+          // still in the payload, and the nesting ticket treats a span whose
+          // parent is not in the trace as top-level under the real root.
+          parentSpanId: wireId(span.parentSpanId, 8),
           source: INGESTED_AT_THIS_DOOR.source,
           emitter: INGESTED_AT_THIS_DOOR.emitter,
           environment: environment.environment,
@@ -351,13 +467,7 @@ export function normaliseOtlpExport(request: OtlpExport): NormalisedExport {
           agentVersionId: "",
           testVersionId: "",
           digitalHumanVersionId: "",
-          payload: JSON.stringify({
-            resource: resourceSpans.resource ?? {},
-            resourceSchemaUrl: resourceSpans.schemaUrl ?? "",
-            scope: scope ?? {},
-            scopeSchemaUrl: scopeSpans.schemaUrl ?? "",
-            span,
-          }),
+          payload,
         });
       }
     }

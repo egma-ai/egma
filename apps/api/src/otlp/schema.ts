@@ -17,9 +17,10 @@ import protobuf from "protobufjs";
  * means re-transcribing from a named upstream tag, which is the same discipline
  * the captured fixture is refreshed under.
  *
- * **Reading is all this is for.** Nothing in egma writes OTLP; the one message
- * encoded here is the response the specification requires the door to answer
- * with.
+ * **Reading is almost all this is for.** Nothing in egma writes OTLP; the two
+ * messages encoded here are the responses the specification requires the door
+ * to answer with — `ExportTraceServiceResponse` when the export was accepted,
+ * and `google.rpc.Status` when it was refused.
  */
 
 const COMMON = `
@@ -177,6 +178,26 @@ message ExportTracePartialSuccess {
 `;
 
 /**
+ * The message OTLP/HTTP requires every 4xx and 5xx body to be, in the encoding
+ * the request arrived in.
+ *
+ * From `google/rpc/status.proto`, minus its third field — `repeated
+ * google.protobuf.Any details` — which egma never sets and which would drag the
+ * whole of `Any` in behind it. A decoder skips a field that is not there, and
+ * the two that are keep their numbers, so this reads as a `Status` to anything
+ * that knows one.
+ */
+const RPC_STATUS = `
+syntax = "proto3";
+package google.rpc;
+
+message Status {
+  int32 code = 1;
+  string message = 2;
+}
+`;
+
+/**
  * One root holding all four, parsed in dependency order. `parse` adds types to
  * the root it is given and resolves nothing by itself, so a reference across
  * packages is settled by the `resolveAll` below rather than by reaching for a
@@ -184,7 +205,7 @@ message ExportTracePartialSuccess {
  */
 function buildRoot(): protobuf.Root {
   const root = new protobuf.Root();
-  for (const source of [COMMON, RESOURCE, TRACE, TRACE_SERVICE]) {
+  for (const source of [COMMON, RESOURCE, TRACE, TRACE_SERVICE, RPC_STATUS]) {
     protobuf.parse(source, root);
   }
   root.resolveAll();
@@ -200,3 +221,5 @@ export const EXPORT_TRACE_SERVICE_REQUEST = root.lookupType(
 export const EXPORT_TRACE_SERVICE_RESPONSE = root.lookupType(
   "opentelemetry.proto.collector.trace.v1.ExportTraceServiceResponse",
 );
+
+export const RPC_STATUS_MESSAGE = root.lookupType("google.rpc.Status");

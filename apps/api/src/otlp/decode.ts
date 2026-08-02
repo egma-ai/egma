@@ -29,6 +29,13 @@ export type OtlpValue = {
   readonly doubleValue?: number;
   readonly arrayValue?: { readonly values?: readonly OtlpValue[] };
   readonly kvlistValue?: { readonly values?: readonly OtlpAttribute[] };
+  /**
+   * Base64, which is what the OTLP JSON mapping says a `bytes` field is and
+   * what the protobuf decoding below is asked for, so the two encodings agree
+   * on one string rather than on a string in one and an array of numbers in the
+   * other. Nothing here decodes it: egma does not know what a customer put in
+   * an attribute, and base64 text is at least text.
+   */
   readonly bytesValue?: string;
 };
 
@@ -109,8 +116,17 @@ export function encodingOf(contentType: string | undefined): OtlpEncoding | null
   return null;
 }
 
-function hex(bytes: Uint8Array | undefined): string {
-  return bytes === undefined ? "" : Buffer.from(bytes).toString("hex");
+/**
+ * A trace or span id from base64 to the lowercase hex the JSON mapping uses.
+ *
+ * The ids are the one place the two encodings disagree — protobuf carries raw
+ * bytes, and OTLP/JSON writes hex rather than base64 — so this is where the
+ * disagreement is settled, once, at the edge.
+ */
+function hex(base64: string | undefined): string {
+  return base64 === undefined || base64 === ""
+    ? ""
+    : Buffer.from(base64, "base64").toString("hex");
 }
 
 /**
@@ -119,8 +135,10 @@ function hex(bytes: Uint8Array | undefined): string {
  * `longs: String` because a 64-bit nanosecond timestamp is larger than a JS
  * number can hold exactly, and losing its low digits would move a span's
  * recorded start time — the one value ticket 09 requires be replayed
- * byte-identically. `bytes: Array` so ids can be hexed here rather than
- * arriving base64 and being converted somewhere further away from the wire.
+ * byte-identically. `bytes: String` because that is what the JSON mapping does
+ * with a `bytes` field, so an attribute carrying binary reads the same in both
+ * encodings; the three id fields are the mapping's own exception and are hexed
+ * below.
  */
 function fromProtobuf(body: Uint8Array): OtlpExport {
   let decoded: unknown;
@@ -129,7 +147,7 @@ function fromProtobuf(body: Uint8Array): OtlpExport {
     decoded = EXPORT_TRACE_SERVICE_REQUEST.toObject(message, {
       longs: String,
       enums: String,
-      bytes: Array,
+      bytes: String,
       defaults: false,
       arrays: false,
       objects: false,
@@ -151,11 +169,9 @@ function fromProtobuf(body: Uint8Array): OtlpExport {
       scopeSpans?: {
         scope?: OtlpScope;
         schemaUrl?: string;
-        spans?: (Omit<OtlpSpan, "traceId" | "spanId" | "parentSpanId"> & {
-          traceId?: Uint8Array;
-          spanId?: Uint8Array;
-          parentSpanId?: Uint8Array;
-        })[];
+        // The three ids arrive base64, as every other `bytes` field now does,
+        // and are the only ones the JSON mapping writes differently.
+        spans?: OtlpSpan[];
       }[];
     }[];
   };
