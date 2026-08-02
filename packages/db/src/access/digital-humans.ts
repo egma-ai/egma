@@ -136,6 +136,43 @@ function validateNewDigitalHuman(input: NewDigitalHuman): void {
 }
 
 /**
+ * The shape guard on every read. Stored jsonb comes back `unknown`, and a row
+ * somebody hand-edited must fail here, loudly and naming itself, rather than
+ * leak into a caller as a `DigitalHumanTraits` that isn't one. Shape only,
+ * deliberately: the allowed provider list and the speed range may tighten
+ * later, and an old version must stay readable exactly as it was written —
+ * so the provider is taken on trust once it is a string.
+ */
+function traitsFromRow(value: unknown, versionId: string): DigitalHumanTraits {
+  const malformed = () =>
+    new Error(
+      `version ${versionId} holds traits in a shape egma never writes; the row needs repairing before anybody can read it`,
+    );
+
+  if (typeof value !== "object" || value === null) throw malformed();
+  const { personality, language, voice } = value as Record<string, unknown>;
+  if (typeof personality !== "string" || personality.trim() === "") {
+    throw malformed();
+  }
+  if (typeof language !== "string" || language.trim() === "") throw malformed();
+  if (typeof voice !== "object" || voice === null) throw malformed();
+  const { provider, voiceId, speed } = voice as Record<string, unknown>;
+  if (
+    typeof provider !== "string" ||
+    typeof voiceId !== "string" ||
+    typeof speed !== "number"
+  ) {
+    throw malformed();
+  }
+
+  return {
+    personality,
+    language,
+    voice: { provider: provider as VoiceProvider, voiceId, speed },
+  };
+}
+
+/**
  * Byte-identical or not, decided field by field. The traits shape is closed,
  * so this is the same answer canonical serialization would give, without
  * trusting any serializer to order keys the way jsonb re-ordered them.
@@ -244,7 +281,7 @@ export async function getDigitalHuman(
     .limit(1);
 
   if (row === undefined) return undefined;
-  return { ...row, traits: row.traits as DigitalHumanTraits };
+  return { ...row, traits: traitsFromRow(row.traits, row.versionId) };
 }
 
 /**
@@ -298,7 +335,7 @@ export async function editDigitalHuman(
       throw new Error("the digital human's current version is missing");
     }
 
-    const storedTraits = currentVersion.traits as DigitalHumanTraits;
+    const storedTraits = traitsFromRow(currentVersion.traits, currentVersion.id);
     const nextTraits =
       changes.traits !== undefined && !sameTraits(storedTraits, changes.traits)
         ? changes.traits
@@ -389,5 +426,5 @@ export async function getDigitalHumanVersion(
     .limit(1);
 
   if (row === undefined) return undefined;
-  return { ...row, traits: row.traits as DigitalHumanTraits };
+  return { ...row, traits: traitsFromRow(row.traits, row.id) };
 }

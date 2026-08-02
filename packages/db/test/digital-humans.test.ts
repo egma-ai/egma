@@ -418,6 +418,29 @@ describe("a digital human that fails validation", () => {
   });
 });
 
+describe("a version row somebody hand-corrupted", () => {
+  it("fails loudly on every read, naming the version, rather than leaking", async () => {
+    const created = await createDigitalHuman(actingAsAcme(), rita);
+
+    // Raw SQL on purpose: the factory can never write this, so the guard is
+    // the only thing standing between the row and the caller.
+    await database.sql(
+      `update digital_human_version set traits = '{"personality": 12}'::jsonb where id = $1`,
+      [created.versionId],
+    );
+
+    await expect(getDigitalHuman(actingAsAcme(), created.id)).rejects.toThrow(
+      created.versionId,
+    );
+    await expect(
+      getDigitalHumanVersion(actingAsAcme(), created.versionId),
+    ).rejects.toThrow(created.versionId);
+    await expect(
+      editDigitalHuman(actingAsAcme(), created.id, { name: "Renamed anyway" }),
+    ).rejects.toThrow(created.versionId);
+  });
+});
+
 describe("tenancy", () => {
   it("refuses a context pairing one organization with another's project, leaving no rows", async () => {
     const before = await rowCounts();
