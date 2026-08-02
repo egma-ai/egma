@@ -135,15 +135,15 @@ export async function openSingleConnection(
 
 /**
  * The Postgres error code a failed constraint arrived as. Walks the `cause`
- * chain, because a query layer may wrap the driver's error in its own.
+ * chain, because a query layer may wrap the driver's error in its own. The
+ * walk is capped, so a circular chain cannot hang the test process.
  */
 export function errorCodeOf(error: unknown): string | undefined {
-  for (
-    let current = error;
-    typeof current === "object" && current !== null;
-    current = (current as { cause?: unknown }).cause
-  ) {
+  let current = error;
+  for (let depth = 0; depth < 10; depth += 1) {
+    if (typeof current !== "object" || current === null) return undefined;
     if ("code" in current) return String((current as { code: unknown }).code);
+    current = (current as { cause?: unknown }).cause;
   }
   return undefined;
 }

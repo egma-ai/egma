@@ -117,11 +117,14 @@ export async function createDigitalHuman(
       "a digital human belongs to a project, and this credential is for the whole organization and acting in none",
     );
   }
+
+  // Everything answerable without the database is answered first; only an
+  // input worth writing costs the project-membership read below.
+  validateNewDigitalHuman(input);
+
   if (!(await isProjectOfOrganization(auth, projectId))) {
     throw new ProjectOutsideOrganizationError(auth.organizationId, projectId);
   }
-
-  validateNewDigitalHuman(input);
 
   const id = newId("dh");
   const versionId = newId("dhv");
