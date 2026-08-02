@@ -105,6 +105,76 @@ async function refusalsBecomeAnswers<T>(work: () => Promise<T>): Promise<T> {
 }
 
 /**
+ * The prefix on every cookie the provider sets, as one value rather than as a
+ * string in two places that could drift apart.
+ */
+const COOKIE_PREFIX = "egma";
+
+/** What the provider calls the cookie it carries a session in. */
+const SESSION_COOKIE = `${COOKIE_PREFIX}.session_token`;
+
+/** The same cookie on an instance served over https, which the provider marks. */
+const SECURE_SESSION_COOKIE = `__Secure-${SESSION_COOKIE}`;
+
+/**
+ * What a browser is carrying, in the two strings egma needs in order to end it.
+ */
+export type BrowserSession = {
+  /** The token the session row is keyed on, which is what the seam revokes. */
+  readonly token: string;
+  /** A `set-cookie` line that takes the cookie back out of the browser. */
+  readonly expired: string;
+};
+
+/** Percent-decoding a value a stranger sent, without it being able to throw. */
+function decoded(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * The session a browser request is carrying, or nothing.
+ *
+ * Two of the provider's conventions are needed to read one, and both are known
+ * here and nowhere else: it signs the cookie it sets, so the value is the token
+ * with an HMAC appended after a dot, and it marks the name `__Secure-` when the
+ * instance is served over https. What leaves this file is a token and a header
+ * line — egma's own strings — so the seam still takes a token and the route that
+ * signs somebody out learns nothing about who set the cookie.
+ */
+export function browserSessionIn(request: Request): BrowserSession | null {
+  const header = request.headers.get("cookie");
+  if (header === null) return null;
+
+  for (const pair of header.split(";")) {
+    const at = pair.indexOf("=");
+    if (at === -1) continue;
+
+    const name = pair.slice(0, at).trim();
+    if (name !== SESSION_COOKIE && name !== SECURE_SESSION_COOKIE) continue;
+
+    // The token itself is alphanumeric, so the first dot is where the signature
+    // begins and everything before it is what the row is keyed on.
+    const token = decoded(pair.slice(at + 1).trim()).split(".")[0] ?? "";
+    if (token === "") return null;
+
+    return {
+      token,
+      // The same attributes it was set with, which is what a browser matches on
+      // — and `Secure` is not optional on a `__Secure-` name.
+      expired:
+        `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax` +
+        (name === SECURE_SESSION_COOKIE ? "; Secure" : ""),
+    };
+  }
+
+  return null;
+}
+
+/**
  * What a failed token exchange means, said in egma's four words.
  *
  * RFC 8628 gives the transport six error codes and egma's seam has four
@@ -178,7 +248,7 @@ export function createIdentity(options: IdentityOptions): Identity {
       // The cookie a person can see in their own browser says egma, not the
       // name of the library that happens to set it. A provider swap must not
       // be visible in a cookie name.
-      cookiePrefix: "egma",
+      cookiePrefix: COOKIE_PREFIX,
 
       database: {
         // One generator for every table, egma's and the provider's alike. An
