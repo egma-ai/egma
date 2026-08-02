@@ -2,6 +2,13 @@ import type { SmtpSettings } from "./auth/email.ts";
 
 export type Config = {
   readonly databaseUrl: string;
+  /**
+   * Where the trace store is. Required on the same terms as `databaseUrl`:
+   * ClickHouse is the floor rather than an upgrade, there is no second
+   * analytical path to fall back to, and an instance that started without it
+   * would accept a trace it had nowhere to put.
+   */
+  readonly clickhouseUrl: string;
   readonly host: string;
   readonly port: number;
   /**
@@ -115,6 +122,24 @@ export function loadConfig(
     throw new Error("DATABASE_URL is required and was not set");
   }
 
+  const clickhouseUrl = environment.CLICKHOUSE_URL?.trim();
+  if (!clickhouseUrl) {
+    throw new Error("CLICKHOUSE_URL is required and was not set");
+  }
+  let clickhouse: URL;
+  try {
+    clickhouse = new URL(clickhouseUrl);
+  } catch {
+    throw new Error(
+      `CLICKHOUSE_URL is not a URL: ${clickhouseUrl}. It looks like http://user:password@host:8123/database`,
+    );
+  }
+  if (!["http:", "https:"].includes(clickhouse.protocol)) {
+    throw new Error(
+      `CLICKHOUSE_URL speaks ${clickhouse.protocol} and egma reaches ClickHouse over http: or https:`,
+    );
+  }
+
   const authSecret = environment.EGMA_AUTH_SECRET?.trim();
   if (!authSecret) {
     throw new Error(
@@ -148,6 +173,7 @@ export function loadConfig(
   return {
     smtp: smtpSettings(environment, baseUrl),
     databaseUrl,
+    clickhouseUrl,
     host: environment.HOST?.trim() || "0.0.0.0",
     port,
     baseUrl: baseUrl.replace(/\/+$/, ""),

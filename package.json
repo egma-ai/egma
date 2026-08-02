@@ -12,7 +12,7 @@
     "build": "pnpm lint && tsc -b packages/ids packages/db packages/lint apps/api",
     "typecheck": "pnpm build && tsc -p tsconfig.tests.json && pnpm --filter @egma/web typecheck",
     "clean": "tsc -b --clean packages/ids packages/db packages/lint apps/api",
-    "db:up": "docker compose up -d --wait postgres",
+    "db:up": "docker compose up -d --wait postgres clickhouse",
     "db:down": "docker compose down",
     "db:generate": "pnpm --filter @egma/db generate",
     "test": "pnpm db:up && vitest run",

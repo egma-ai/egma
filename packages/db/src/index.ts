@@ -7,6 +7,16 @@ export {
   type MigrationResult,
 } from "./migrate.ts";
 export {
+  connectClickHouse,
+  disconnectClickHouse,
+  pingClickHouse,
+  type ClickHouseConnectOptions,
+} from "./clickhouse/client.ts";
+export {
+  CLICKHOUSE_MIGRATIONS_DIRECTORY,
+  runClickHouseMigrations,
+} from "./clickhouse/migrate.ts";
+export {
   identityId,
   identityStore,
   IDENTITY_MODELS,

@@ -11,15 +11,15 @@ You need Docker with Compose. Nothing else.
 docker compose up
 ```
 
-That starts three services and applies the database schema. Nobody runs a
-migration step, because there isn't one — the API applies its migrations while
-it boots.
+That starts four services and applies both schemas. Nobody runs a migration
+step, because there isn't one — the API applies its migrations while it boots.
 
 | Service | URL |
 | --- | --- |
 | Web application | http://localhost:3101 |
 | API | http://localhost:3100 |
 | Postgres | `postgres://egma:egma@localhost:5433/egma` |
+| ClickHouse | `http://egma:egma@localhost:8124/egma` |
 
 Open http://localhost:3101 and sign up. Your organization and your first project
 are created together, and you become their admin. On a fresh instance the first
@@ -29,8 +29,8 @@ after that arrives by invitation.
 `GET /health` on the API and `GET /api/health` on the web application are what
 the container health checks poll.
 
-Ports, Postgres credentials and the settings below come from the environment;
-see `.env.example` for the names and their defaults.
+Ports, the two stores' credentials and the settings below come from the
+environment; see `.env.example` for the names and their defaults.
 
 **`EGMA_AUTH_SECRET` signs session cookies and the API refuses to start without
 one.** Compose supplies a development default so that `docker compose up` works
@@ -45,16 +45,18 @@ Node 24 and pnpm 10.
 
 ```bash
 pnpm install
-pnpm db:up        # Postgres on 5433, which the tests need
+pnpm db:up        # Postgres on 5433 and ClickHouse on 8124, which the tests need
 pnpm test
 pnpm lint
 pnpm typecheck
 pnpm build
 ```
 
-Tests run against a real Postgres. Each test file creates a database of its own
-and drops it afterwards, so `pnpm test` needs a Postgres it may create databases
-on. `pnpm db:up` starts one; point `TEST_DATABASE_URL` somewhere else if you
+Tests run against a real Postgres and a real ClickHouse — never a substitute,
+because every guarantee under test is one of theirs. Each test file creates a
+database of its own in whichever store it uses and drops it afterwards, so
+`pnpm test` needs credentials that may create databases. `pnpm db:up` starts
+both; point `TEST_DATABASE_URL` and `TEST_CLICKHOUSE_URL` somewhere else if you
 would rather use your own.
 
 One test drives a real browser: `apps/api/test/login.browser.test.ts` starts the
@@ -190,9 +192,10 @@ wait for a message it never sent.
 
 ## Reading and writing data
 
-`packages/db` owns the Postgres connection, and it is the only way anything
-reads or writes. Two rules follow from that, and both fail the build rather than
-a review:
+`packages/db` owns both stores' connections — the Postgres pool and the
+ClickHouse client — and it is the only way anything reads or writes. One policed
+boundary, not one per store. Two rules follow from that, and both fail the build
+rather than a review:
 
 - **No file outside `packages/db/src` imports a database driver.** If you have
   just written `import pg from "pg"` somewhere and the build is refusing it,
@@ -221,3 +224,10 @@ That writes a new numbered `.sql` file into `packages/db/migrations`. Those file
 are what actually runs, so read the generated SQL before committing it. An
 applied migration is immutable — the migration runner refuses to boot against a
 file that changed after it was applied, so corrections go in a new file.
+
+ClickHouse's schema lives beside it in `packages/db/clickhouse-migrations`,
+numbered the same way, applied on the same boot by the same mechanism, and
+hand-written rather than generated. Two things it asks for that Postgres does
+not: statements are separated by `--> statement-breakpoint`, because ClickHouse
+runs one per request, and every statement must say `IF NOT EXISTS`, because there
+is no transaction to roll a half-applied file back with.

@@ -1,4 +1,10 @@
-import { connect, disconnect, runMigrations } from "@egma/db";
+import {
+  connect,
+  connectClickHouse,
+  disconnect,
+  disconnectClickHouse,
+  runMigrations,
+} from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -13,10 +19,15 @@ import {
   createEmptyDatabase,
   type EmptyDatabase,
 } from "../../../packages/db/test/support/database.ts";
+import {
+  createEmptyTraceStore,
+  type EmptyTraceStore,
+} from "../../../packages/db/test/support/clickhouse.ts";
 
 /** The least an environment can carry and still be startable. */
 const enough = {
   DATABASE_URL: "postgres://x/y",
+  CLICKHOUSE_URL: "http://x:8123/y",
   EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
 };
 
@@ -27,10 +38,33 @@ describe("configuration", () => {
     );
   });
 
+  /**
+   * On the same terms as Postgres, and deliberately not as an optional extra.
+   * There is no second analytical path behind ClickHouse, so an instance that
+   * started without one would accept a trace and have nowhere to put it.
+   */
+  it("refuses to start without a trace store to talk to", () => {
+    expect(() =>
+      loadConfig({ DATABASE_URL: "postgres://x/y", EGMA_AUTH_SECRET: "s" }),
+    ).toThrow(/CLICKHOUSE_URL is required/);
+  });
+
+  it("refuses a trace store address it could never reach", () => {
+    expect(() =>
+      loadConfig({ ...enough, CLICKHOUSE_URL: "not a url" }),
+    ).toThrow(/CLICKHOUSE_URL is not a URL/);
+    expect(() =>
+      loadConfig({ ...enough, CLICKHOUSE_URL: "postgres://x/y" }),
+    ).toThrow(/reaches ClickHouse over http/);
+  });
+
   it("refuses to start without a secret to sign sessions with", () => {
-    expect(() => loadConfig({ DATABASE_URL: "postgres://x/y" })).toThrow(
-      /EGMA_AUTH_SECRET is required/,
-    );
+    expect(() =>
+      loadConfig({
+        DATABASE_URL: "postgres://x/y",
+        CLICKHOUSE_URL: "http://x:8123/y",
+      }),
+    ).toThrow(/EGMA_AUTH_SECRET is required/);
   });
 
   it("refuses a port that is not a port", () => {
@@ -146,25 +180,61 @@ describe("the email seam", () => {
 
 describe("the API once it has booted", () => {
   let database: EmptyDatabase;
+  let traceStore: EmptyTraceStore;
   let app: ReturnType<typeof buildApi>["app"];
 
   beforeAll(async () => {
     database = await createEmptyDatabase("api_health");
+    traceStore = await createEmptyTraceStore("api_health");
     await runMigrations(database.url);
     connect({ databaseUrl: database.url, maxConnections: 2 });
-    app = buildApi({ config: testConfig({ databaseUrl: database.url }) }).app;
+    connectClickHouse({ clickhouseUrl: traceStore.url, maxOpenConnections: 2 });
+    app = buildApi({
+      config: testConfig({
+        databaseUrl: database.url,
+        clickhouseUrl: traceStore.url,
+      }),
+    }).app;
     await app.ready();
   });
 
   afterAll(async () => {
     await app.close();
     await disconnect();
+    await disconnectClickHouse();
     await database.drop();
+    await traceStore.drop();
   });
 
-  it("reports healthy, having reached Postgres", async () => {
+  /**
+   * Both stores, because the container health check is what the web service
+   * waits on and what an operator reads. An API that answered `ok` while the
+   * trace store was unreachable would be reporting on half of egma.
+   */
+  it("reports healthy, having reached both stores", async () => {
     const response = await app.inject({ method: "GET", url: "/health" });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ status: "ok", postgres: "reachable" });
+    expect(response.json()).toEqual({
+      status: "ok",
+      postgres: "reachable",
+      clickhouse: "reachable",
+    });
+  });
+
+  /**
+   * Last in the file, because it takes the trace store away and does not put it
+   * back. What it proves is that the response names which store is missing:
+   * "unavailable" on its own sends an operator looking at both.
+   */
+  it("says which store it could not reach, rather than only that it failed", async () => {
+    await disconnectClickHouse();
+
+    const response = await app.inject({ method: "GET", url: "/health" });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({
+      status: "unavailable",
+      postgres: "reachable",
+      clickhouse: "unreachable",
+    });
   });
 });

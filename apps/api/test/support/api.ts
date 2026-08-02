@@ -45,6 +45,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
   return {
     ...loadConfig({
       DATABASE_URL: "postgres://unused/unused",
+      CLICKHOUSE_URL: "http://unused/unused",
       EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
       EGMA_BASE_URL: "http://localhost:3101",
     }),

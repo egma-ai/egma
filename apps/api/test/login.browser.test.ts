@@ -2,7 +2,12 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 import path from "node:path";
 
-import { connect, disconnect } from "@egma/db";
+import {
+  connect,
+  connectClickHouse,
+  disconnect,
+  disconnectClickHouse,
+} from "@egma/db";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -12,6 +17,10 @@ import {
   createMigratedDatabase,
   type MigratedDatabase,
 } from "../../../packages/db/test/support/database.ts";
+import {
+  createEmptyTraceStore,
+  type EmptyTraceStore,
+} from "../../../packages/db/test/support/clickhouse.ts";
 
 /**
  * The two paths a person actually clicks through, once each, in a real browser:
@@ -42,6 +51,7 @@ const WEB = path.join(import.meta.dirname, "../../web");
 const SETTLE = 120_000;
 
 let database: MigratedDatabase;
+let traceStore: EmptyTraceStore;
 let api: Awaited<ReturnType<typeof startApi>>;
 let web: ChildProcess;
 let browser: Browser;
@@ -66,10 +76,16 @@ async function freePort(): Promise<number> {
   });
 }
 
-async function startApi(databaseUrl: string, apiPort: number, baseUrl: string) {
+async function startApi(
+  databaseUrl: string,
+  clickhouseUrl: string,
+  apiPort: number,
+  baseUrl: string,
+) {
   const { app } = buildApi({
     config: loadConfig({
       DATABASE_URL: databaseUrl,
+      CLICKHOUSE_URL: clickhouseUrl,
       EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
       EGMA_BASE_URL: baseUrl,
       EGMA_SINGLE_ORGANIZATION: "false",
@@ -115,7 +131,12 @@ async function openBrowser(): Promise<Browser> {
 
 beforeAll(async () => {
   database = await createMigratedDatabase("login_browser");
+  // Empty on purpose: neither flow reads a trace, and the health check the
+  // boot waits on only asks the store to answer. Migrating it here would spend
+  // time proving what `clickhouse-migrations.test.ts` already proves.
+  traceStore = await createEmptyTraceStore("login_browser");
   connect({ databaseUrl: database.url, maxConnections: 4 });
+  connectClickHouse({ clickhouseUrl: traceStore.url, maxOpenConnections: 4 });
 
   // Both ports up front: the API has to be told the origin a browser reaches
   // egma on, and the web process has to be told where to forward the API's
@@ -124,7 +145,7 @@ beforeAll(async () => {
   const webPort = await freePort();
   origin = `http://127.0.0.1:${webPort}`;
 
-  api = await startApi(database.url, apiPort, origin);
+  api = await startApi(database.url, traceStore.url, apiPort, origin);
 
   web = spawn(
     path.join(WEB, "node_modules/.bin/next"),
@@ -176,7 +197,9 @@ afterAll(async () => {
   web?.kill("SIGTERM");
   await api?.close();
   await disconnect();
+  await disconnectClickHouse();
   await database?.drop();
+  await traceStore?.drop();
 });
 
 describe("logging in from a terminal", () => {
