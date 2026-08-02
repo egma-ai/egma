@@ -1,176 +1,59 @@
-import { spawn, type ChildProcess } from "node:child_process";
-import { createServer } from "node:net";
-import path from "node:path";
-
-import {
-  connect,
-  connectClickHouse,
-  disconnect,
-  disconnectClickHouse,
-} from "@egma/db";
-import { chromium, type Browser, type Page } from "playwright-core";
+import type { Browser, Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { loadConfig } from "../src/config.ts";
-import { buildApi } from "../src/server.ts";
+import { openBrowser } from "./support/browser.ts";
 import {
-  createMigratedDatabase,
-  type MigratedDatabase,
-} from "../../../packages/db/test/support/database.ts";
-import {
-  createEmptyTraceStore,
-  type EmptyTraceStore,
-} from "../../../packages/db/test/support/clickhouse.ts";
+  capturedRequests,
+  FIXTURE_PROVIDER_CALL_ID,
+  FIXTURE_TRACE,
+} from "./support/fixture.ts";
+import { SETTLE, startInstance, type Instance } from "./support/instance.ts";
 
 /**
- * The two paths a person actually clicks through, once each, in a real browser:
- * logging in from a terminal, and adding a colleague.
+ * Everything a person actually clicks through, once each, in a real browser:
+ * logging in from a terminal, adding a colleague, and reading what an agent
+ * did.
  *
  * **The happy path of each, and resist growing it further.** Every error branch
  * — a mistyped code, a stale one, a denial, a client polling too fast, an
- * expired invitation, a link for somebody else — is proved in
- * `device-flow.test.ts` and `invitations.test.ts` beside this file, where each
- * costs milliseconds. What a browser proves and nothing else can is that the
- * pages exist, that they are served from this instance's own origin, that this
- * process forwards the API paths they use, that the code arrives already in the
- * field, and that clicking through them in order ends with a terminal holding a
- * key that works and a second person inside the organization.
+ * expired invitation, a link for somebody else, a window a read endpoint
+ * refuses — is proved in `device-flow.test.ts`, `invitations.test.ts` and
+ * `trace-reads-contract.test.ts` beside this file, where each costs
+ * milliseconds. What a browser proves and nothing else can is that the pages
+ * exist, that they are served from this instance's own origin, that this
+ * process forwards the API paths they use, and that clicking through them in
+ * order gets somebody where they were going.
  *
- * Everything in here is real: a real Postgres, the real API, the real Next
- * process with its real rewrites, and a real Chrome. A stub anywhere in that
- * list would remove the only reason this test exists.
+ * Everything in here is real: a real Postgres, a real ClickHouse, the real API,
+ * the real Next process with its real rewrites, and a real Chrome. A stub
+ * anywhere in that list would remove the only reason this test exists.
+ *
+ * **All of it is one file on purpose.** Two development servers compiling into
+ * one `apps/web/.next` each serve half of the other's build, so the browser
+ * tests run one at a time — and Vitest runs the tests within a file in order,
+ * which makes one file the whole of the arrangement. It is also the cheaper
+ * one: three flows share a single instance rather than standing up three.
+ * `support/instance.ts` records what the alternatives cost.
  *
  * It sits with the API's tests rather than with the web application's because
  * it builds the API in this process, and a test that spawned it instead would
  * depend on the workspace having been compiled first.
+ *
+ * The narrative is continuous and each part depends on the one above it. Ada
+ * signs up on the way to authorizing a terminal; she is already signed in when
+ * she adds a colleague; and she is still signed in when she points an agent at
+ * egma and goes to read what it did. That is the order somebody meets the
+ * product in.
  */
 
-const WEB = path.join(import.meta.dirname, "../../web");
-
-/** Long, because a development server compiles each page the first time. */
-const SETTLE = 120_000;
-
-let database: MigratedDatabase;
-let traceStore: EmptyTraceStore;
-let api: Awaited<ReturnType<typeof startApi>>;
-let web: ChildProcess;
+let instance: Instance;
 let browser: Browser;
 let page: Page;
 let origin: string;
 
-/** A port nothing is listening on, so two test files never collide. */
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.on("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-      if (address === null || typeof address === "string") {
-        reject(new Error("could not find a free port"));
-        return;
-      }
-      probe.close(() => {
-        resolve(address.port);
-      });
-    });
-  });
-}
-
-async function startApi(
-  databaseUrl: string,
-  clickhouseUrl: string,
-  apiPort: number,
-  baseUrl: string,
-) {
-  const { app } = buildApi({
-    config: loadConfig({
-      DATABASE_URL: databaseUrl,
-      CLICKHOUSE_URL: clickhouseUrl,
-      EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
-      EGMA_BASE_URL: baseUrl,
-      EGMA_SINGLE_ORGANIZATION: "false",
-    }),
-  });
-  await app.listen({ host: "127.0.0.1", port: apiPort });
-  return app;
-}
-
-/** Wait until something answers, or give up loudly rather than hang forever. */
-async function answers(
-  url: string,
-  within: number,
-  gaveUp: () => Error | undefined,
-): Promise<void> {
-  const until = Date.now() + within;
-  for (;;) {
-    const failed = gaveUp();
-    if (failed !== undefined) throw failed;
-
-    try {
-      const response = await fetch(url);
-      if (response.ok) return;
-    } catch {
-      // Not up yet.
-    }
-    if (Date.now() > until) throw new Error(`nothing answered at ${url}`);
-    await new Promise((resume) => setTimeout(resume, 250));
-  }
-}
-
-/**
- * Chrome. The one already on the machine by preference, so that running the
- * suite does not mean downloading a browser first.
- */
-async function openBrowser(): Promise<Browser> {
-  try {
-    return await chromium.launch({ channel: "chrome", headless: true });
-  } catch {
-    return chromium.launch({ headless: true });
-  }
-}
-
 beforeAll(async () => {
-  database = await createMigratedDatabase("login_browser");
-  // Empty on purpose: neither flow reads a trace, and the health check the
-  // boot waits on only asks the store to answer. Migrating it here would spend
-  // time proving what `clickhouse-migrations.test.ts` already proves.
-  traceStore = await createEmptyTraceStore("login_browser");
-  connect({ databaseUrl: database.url, maxConnections: 4 });
-  connectClickHouse({ clickhouseUrl: traceStore.url, maxOpenConnections: 4 });
-
-  // Both ports up front: the API has to be told the origin a browser reaches
-  // egma on, and the web process has to be told where to forward the API's
-  // paths. One origin in every deployment, and both halves know it.
-  const apiPort = await freePort();
-  const webPort = await freePort();
-  origin = `http://127.0.0.1:${webPort}`;
-
-  api = await startApi(database.url, traceStore.url, apiPort, origin);
-
-  web = spawn(
-    path.join(WEB, "node_modules/.bin/next"),
-    ["dev", "--port", String(webPort), "--hostname", "127.0.0.1"],
-    {
-      cwd: WEB,
-      env: {
-        ...process.env,
-        EGMA_API_ORIGIN: `http://127.0.0.1:${apiPort}`,
-        NODE_ENV: "development",
-      },
-      stdio: "ignore",
-    },
-  );
-
-  // Loudly and at once, rather than after two minutes of nothing answering.
-  let failedToStart: Error | undefined;
-  web.on("error", (cause) => {
-    failedToStart = cause;
-  });
-  web.on("exit", (code) => {
-    failedToStart ??= new Error(`the web application exited with ${code}`);
-  });
-
-  await answers(`${origin}/api/health`, SETTLE, () => failedToStart);
+  instance = await startInstance("browser", { traces: true });
+  origin = instance.origin;
 
   browser = await openBrowser();
   page = await browser.newPage();
@@ -194,12 +77,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await browser?.close();
-  web?.kill("SIGTERM");
-  await api?.close();
-  await disconnect();
-  await disconnectClickHouse();
-  await database?.drop();
-  await traceStore?.drop();
+  await instance?.close();
 });
 
 describe("logging in from a terminal", () => {
@@ -286,7 +164,7 @@ describe("logging in from a terminal", () => {
       };
       expect(keys.keys).toHaveLength(1);
 
-      const { rows } = await database.sql<{ name: string }>(
+      const { rows } = await instance.database.sql<{ name: string }>(
         "select o.name from organization o join api_key k on k.organization_id = o.id",
       );
       expect(rows).toEqual([{ name: "Acme" }]);
@@ -344,7 +222,7 @@ describe("adding a colleague, with no mail configured", () => {
       await expect.poll(() => bob.innerText("main")).toContain("viewer");
       expect(await bob.innerText("main")).toContain("Acme");
 
-      const { rows } = await database.sql<{ email: string; role: string }>(
+      const { rows } = await instance.database.sql<{ email: string; role: string }>(
         `select u.email, m.role from membership m
            join "user" u on u.id = m.user_id
           order by u.email`,
@@ -355,6 +233,559 @@ describe("adding a colleague, with no mail configured", () => {
       ]);
 
       await his.close();
+    },
+    SETTLE,
+  );
+});
+
+/* ==================================================================== *
+ * The dashboard: a real agent's telemetry, read as a transcript.
+ * ==================================================================== */
+
+/**
+ * What the browser is told the time is, from here on.
+ *
+ * The capture happened at the instants it really happened at — `18:04:40Z` to
+ * `18:05:53Z` on 2 August 2026 — and the bytes are evidence, so they are never
+ * restamped. The list page asks about **the last twenty-four hours**, computed
+ * from the browser's own clock, and a fixed capture necessarily ages out of any
+ * window measured from now.
+ *
+ * So the clock is pinned instead. The page's default window is then exercised
+ * exactly as it is written — no widening, no absolute window typed into a
+ * control, no branch in the test — and the assertions below hold in a year as
+ * firmly as they do today. Only the browser's clock moves; the API, the store
+ * and every timestamp in them are the real ones.
+ */
+const AT = new Date("2026-08-02T20:00:00.000Z");
+
+const PASSWORD = "a-long-enough-password";
+
+let acmeKey: string;
+
+/** The cookie header a browser would send back, given what it was just set. */
+function cookiesFrom(header: string | null): string {
+  return (header ?? "")
+    .split(/,(?=[^;]+?=)/u)
+    .map((cookie) => cookie.split(";", 1)[0]?.trim() ?? "")
+    .filter((cookie) => cookie !== "")
+    .join("; ");
+}
+
+/**
+ * A key for the project an organization already has, and the exporter pointed
+ * at egma with it.
+ *
+ * **The key names a project, and that is load-bearing rather than
+ * incidental.** A key minted for a whole organization files its spans under no
+ * project at all, while a browser session always acts inside one — so an
+ * organization-wide key exports telemetry the dashboard cannot then find. That
+ * asymmetry is the API's rather than these pages', and it is reported with the
+ * ticket; what it means here is that the exporter is configured the way the
+ * README says to configure it.
+ */
+async function keyForTheProject(cookie: string, name: string): Promise<string> {
+  const me = await fetch(`${origin}/api/me`, { headers: { cookie } });
+  expect(me.status, await me.clone().text()).toBe(200);
+  const projects = ((await me.json()) as { projects: { id: string }[] }).projects;
+
+  const minted = await fetch(`${origin}/api/keys`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify({ name, project_id: projects[0]?.id }),
+  });
+  expect(minted.status, await minted.clone().text()).toBe(201);
+  return ((await minted.json()) as { secret: string }).secret;
+}
+
+/** Somebody else's organization entirely, with a key of its own. */
+async function anotherCustomer(
+  email: string,
+  organizationName: string,
+): Promise<string> {
+  const signedUp = await fetch(`${origin}/api/signup`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email, password: PASSWORD, organizationName }),
+  });
+  expect(signedUp.status, await signedUp.clone().text()).toBe(201);
+  return keyForTheProject(
+    cookiesFrom(signedUp.headers.get("set-cookie")),
+    organizationName,
+  );
+}
+
+/** A browser of their own, signed in, with the same pinned clock. */
+async function signedInBrowser(email: string): Promise<Page> {
+  const context = await browser.newContext();
+  const theirs = await context.newPage();
+  theirs.setDefaultTimeout(30_000);
+  await theirs.clock.setFixedTime(AT);
+  await theirs.goto(`${origin}/sign-in`);
+  await theirs.fill("#email", email);
+  await theirs.fill("#password", PASSWORD);
+  await theirs.getByRole("button", { name: "Sign in" }).click();
+  await theirs.waitForURL(new RegExp(`^${origin}/$`));
+  return theirs;
+}
+
+/** One short exchange as OTLP/JSON, at an instant of the test's choosing. */
+function exchange(
+  traceId: string,
+  openedAt: Date,
+  humanSaid: string,
+  agentSaid: string,
+) {
+  const at = (offsetSeconds: number) =>
+    String(BigInt(openedAt.getTime() + offsetSeconds * 1000) * 1_000_000n);
+  const root = `${traceId.slice(0, 14)}01`;
+  const span = (
+    suffix: string,
+    name: string,
+    parent: string,
+    from: number,
+    to: number,
+    attributes: { key: string; value: { stringValue: string } }[] = [],
+  ) => ({
+    traceId,
+    spanId: `${traceId.slice(0, 14)}${suffix}`,
+    parentSpanId: parent,
+    name,
+    startTimeUnixNano: at(from),
+    endTimeUnixNano: at(to),
+    attributes,
+    status: { code: "STATUS_CODE_UNSET" },
+  });
+
+  return {
+    resource: {
+      attributes: [
+        { key: "service.name", value: { stringValue: "a-sparse-agent" } },
+      ],
+    },
+    scopeSpans: [
+      {
+        scope: { name: "livekit-agents", version: "1.6.7" },
+        spans: [
+          span("01", "agent_session", "", 0, 4, [
+            { key: "session.id", value: { stringValue: `room-${traceId}` } },
+          ]),
+          span("02", "user_turn", root, 1, 2, [
+            { key: "lk.user_transcript", value: { stringValue: humanSaid } },
+          ]),
+          span("03", "agent_turn", root, 2, 3, [
+            { key: "lk.response.text", value: { stringValue: agentSaid } },
+          ]),
+        ],
+      },
+    ],
+  };
+}
+
+async function send(secret: string, resourceSpans: unknown[]): Promise<void> {
+  const sent = await fetch(`${origin}/v1/traces`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${secret}`,
+    },
+    body: JSON.stringify({ resourceSpans }),
+  });
+  expect(sent.status, await sent.clone().text()).toBe(200);
+}
+
+/**
+ * The banned list, as a person reading the screen would meet it.
+ *
+ * Held against **what is actually legible** — the rendered text of the page,
+ * with nothing expanded — rather than against the markup. Two words behave
+ * differently and it is worth saying which: `trace` and `span` are storage
+ * words and must never appear at all, and `session` is the one carve-out,
+ * correct for a signed-in browser session and wrong for an exchange, which
+ * these pages have no reason to mention either way.
+ *
+ * The pages' own copy is held against the same list from the other side, in
+ * `apps/web/test/transcripts.test.ts`, where every string they can render lives
+ * in one file. Both are worth having: that one catches a word before it can
+ * reach a screen, and this one catches a word that reached one anyway.
+ */
+const NEVER_SHOWN = [
+  "trace",
+  "span",
+  "session",
+  "conversation",
+  "caller",
+  "persona",
+  "eval",
+  "scenario",
+  "experiment",
+];
+
+function saysNothingBanned(shown: string): void {
+  for (const banned of NEVER_SHOWN) {
+    expect(
+      new RegExp(`\\b${banned}`, "iu").test(shown),
+      `the page says "${banned}"`,
+    ).toBe(false);
+  }
+}
+
+/**
+ * The whole slice: a real LiveKit agent's telemetry goes in at the door, and
+ * the developer who owns it opens the dashboard and reads the exchange.
+ *
+ * This is the spec's own demo sentence executed rather than described — *run
+ * compose, point an agent's export at egma, open the dashboard, read the
+ * exchange with its timings*. The fourteen captured bodies are the ones an
+ * exporter really sent, replayed byte for byte, and they arrive **through the
+ * same origin the dashboard is served from**, which is the deployment a
+ * self-hoster actually gets: one address, and the exporter aimed at it.
+ *
+ * Ada is the same Ada as above: already signed up, already signed in, already
+ * holding an organization. Which is exactly the state somebody is in when they
+ * first have telemetry to look at.
+ */
+describe("the list of what an organization recorded", () => {
+  beforeAll(async () => {
+    await page.clock.setFixedTime(AT);
+
+    const hers = (await page.context().cookies(origin))
+      .map((cookie) => `${cookie.name}=${cookie.value}`)
+      .join("; ");
+    acmeKey = await keyForTheProject(hers, "Acme");
+
+    for (const captured of await capturedRequests()) {
+      const sent = await fetch(`${origin}/v1/traces`, {
+        method: "POST",
+        headers: {
+          "content-type": captured.contentType,
+          authorization: `Bearer ${acmeKey}`,
+        },
+        body: captured.body,
+      });
+      expect(sent.status, captured.file).toBe(200);
+    }
+  }, SETTLE);
+
+  it(
+    "opens on the last day, and shows the exchange the agent just had",
+    async () => {
+      // Reached from the front page rather than by typing an address, because
+      // an unreachable page is not a page.
+      await page.goto(`${origin}/`);
+      await page.getByRole("link", { name: "Transcripts" }).click();
+      await page.waitForURL(/\/traces$/);
+
+      await page.waitForSelector("table");
+      const shown = await page.innerText("main");
+
+      // The window control is on the default nobody chose, and the capture is
+      // inside it. Nothing was widened to find this row.
+      expect(await page.inputValue("#window")).toBe("24h");
+
+      // The facts the list endpoint returns, as columns.
+      expect(shown).toContain("2026-08-02 18:04:40 UTC");
+      expect(shown).toContain("1m 13s");
+      expect(shown).toContain(
+        `${FIXTURE_TRACE.humanTurns} human · ${FIXTURE_TRACE.agentTurns} agent`,
+      );
+      expect(shown).toContain(String(FIXTURE_TRACE.spans));
+      expect(shown).toContain("livekit");
+      expect(shown).toContain("production");
+
+      // The first thing the *human* said, which is what somebody scanning a
+      // list is looking for — not the greeting the agent opens every one with.
+      expect(shown).toContain("Hi Kelly, my name is Sam.");
+      expect(shown).not.toContain("Hello! How can I assist you today?");
+
+      // And exactly one row: one exchange was recorded, and it is the last page.
+      expect(shown).toContain("1 transcript");
+      expect(await page.getByRole("button", { name: "Show more" }).count()).toBe(
+        0,
+      );
+    },
+    SETTLE,
+  );
+
+  it(
+    "marks what failed without anybody having to open anything",
+    async () => {
+      await page.goto(`${origin}/traces`);
+      await page.waitForSelector("table");
+
+      // Three spans of this capture carry an error status — a model timing out,
+      // the fallback giving up, and then a successful retry. The count is on the
+      // row, so a list of a hundred exchanges says which one to open.
+      const headings = await page.locator("thead th").allInnerTexts();
+      const errors = headings.indexOf("Errors");
+      expect(errors, headings.join(", ")).toBeGreaterThan(-1);
+
+      expect(await page.locator("tbody tr td").nth(errors).innerText()).toBe(
+        String(FIXTURE_TRACE.erroredSpans),
+      );
+    },
+    SETTLE,
+  );
+
+  it("says nothing the glossary bans", async () => {
+    await page.goto(`${origin}/traces`);
+    await page.waitForSelector("table");
+    saysNothingBanned(await page.innerText("main"));
+  });
+});
+
+describe("one exchange, read as a transcript", () => {
+  /** Following the link out of the list, which is how anybody arrives. */
+  async function openIt(): Promise<void> {
+    await page.goto(`${origin}/traces`);
+    await page.waitForSelector("table");
+    await page.locator("tbody tr td a").first().click();
+    await page.waitForSelector("text=The exchange");
+  }
+
+  it(
+    "is reached from the row, which carries when it happened",
+    async () => {
+      await openIt();
+
+      // The window rode along in the address. That is the whole reason this
+      // page can be a link somebody sends: the endpoint under it requires one,
+      // and the row already knew the answer.
+      const asked = new URL(page.url()).searchParams;
+      expect(Date.parse(asked.get("from") ?? "")).toBeLessThan(
+        Date.parse("2026-08-02T18:04:40.281989Z"),
+      );
+      expect(Date.parse(asked.get("to") ?? "")).toBeGreaterThan(
+        Date.parse("2026-08-02T18:05:53.776865Z"),
+      );
+
+      // And it deep-links: the same address, opened cold, is the same page.
+      const address = page.url();
+      await page.goto(`${origin}/`);
+      await page.goto(address);
+      await page.waitForSelector("text=The exchange");
+      expect(await page.innerText("main")).toContain(FIXTURE_PROVIDER_CALL_ID);
+    },
+    SETTLE,
+  );
+
+  it(
+    "is the exchange that was actually had, in the order it was had",
+    async () => {
+      await openIt();
+      const shown = await page.innerText("main");
+
+      // Thirteen turns, alternating, labelled the way a transcript labels them.
+      expect((shown.match(/^human:/gmu) ?? []).length).toBe(
+        FIXTURE_TRACE.humanTurns,
+      );
+      expect((shown.match(/^agent:/gmu) ?? []).length).toBe(
+        FIXTURE_TRACE.agentTurns,
+      );
+
+      const said = [
+        "Hello! How can I assist you today?",
+        "Hi Kelly, my name is Sam.",
+        "Can you tell me what the weather is like in Lisbon today?",
+        "The weather in Lisbon today is sunny with a temperature of 70 degrees.",
+        "Thanks, and how about Oslo? Is it colder there right now?",
+        "Oslo is also sunny, but it has the same temperature of 70 degrees.",
+        "Great, that is all I needed.",
+        "Have a good day, and goodbye.",
+        "Thank you, Sam! Have a great day, and goodbye!",
+      ];
+      let reached = -1;
+      for (const line of said) {
+        const at = shown.indexOf(line);
+        expect(at, `"${line}" is on the page`).toBeGreaterThan(-1);
+        expect(at, `"${line}" is in order`).toBeGreaterThan(reached);
+        reached = at;
+      }
+
+      // The four agent turns where nothing was said are turns, not gaps: two of
+      // them are where the agent only reached for the weather.
+      expect((shown.match(/\(no speech in this turn\)/gu) ?? []).length).toBe(4);
+    },
+    SETTLE,
+  );
+
+  it(
+    "opens a turn onto the timed steps inside it",
+    async () => {
+      await openIt();
+
+      // The fifth turn is the agent's answer to the Lisbon question: it says
+      // nothing out loud, because all it did was reach for the weather. Six
+      // timed things happened inside it — the tool, and a model request that
+      // nests four adapters deep — and the count says so before it is opened.
+      const turns = page.locator("main > div > details");
+      const weather = turns.nth(4);
+      expect(await weather.innerText()).toContain("6 steps");
+
+      await weather.locator("summary").first().click();
+      const steps = weather.locator("> div > details");
+      expect(await steps.count()).toBe(2);
+      expect(await steps.nth(0).innerText()).toContain("Model");
+      expect(await steps.nth(1).innerText()).toContain("Tool");
+      expect(await weather.innerText()).toMatch(/\d+(\.\d+)? (ms|s)/u);
+
+      // And a step opens again onto exactly what was recorded — which is where
+      // the raw facts live, and deliberately not the default view.
+      const tool = steps.nth(1);
+      expect(await tool.innerText()).not.toContain("lookup_weather");
+      await tool.locator("summary").first().click();
+      const recorded = await tool.innerText();
+      expect(recorded).toContain("lookup_weather");
+      expect(recorded).toContain('{"location": "Lisbon"}');
+      expect(recorded).toContain("sunny with a temperature of 70 degrees.");
+    },
+    SETTLE,
+  );
+
+  it(
+    "marks the turn something failed inside, before it is opened",
+    async () => {
+      await openIt();
+      const shown = await page.innerText("main");
+
+      // A failure four adapters down is still this turn's failure, and finding
+      // it must not mean opening all thirteen.
+      expect(shown).toContain("something failed inside");
+      expect(
+        await page
+          .locator("summary", { hasText: "something failed inside" })
+          .count(),
+      ).toBeGreaterThan(0);
+    },
+    SETTLE,
+  );
+
+  it("says nothing the glossary bans", async () => {
+    await openIt();
+    saysNothingBanned(await page.innerText("main"));
+  });
+});
+
+/**
+ * The transcript of an exchange nobody reported steps for.
+ *
+ * Span coverage is not uniform across providers — some emit rich native spans,
+ * some emit a turn and nothing else — and a page that rendered only the rich
+ * case would be a page that works for LiveKit. This one arrives at the same
+ * door as the capture, carrying two turns and no children at all.
+ */
+describe("an exchange with nothing timed inside its turns", () => {
+  it(
+    "still renders as a transcript, and says what is missing rather than hiding it",
+    async () => {
+      const theirs = await anotherCustomer("bare@sparse.example", "Sparse");
+      await send(theirs, [
+        exchange(
+          "4d1c0b9a8e7f6a5b4c3d2e1f00998877",
+          new Date(AT.getTime() - 60 * 60 * 1000),
+          "Is anybody there?",
+          "I am here.",
+        ),
+      ]);
+
+      // Their own browser, because this is a different organization and the two
+      // must never see each other's anything.
+      const them = await signedInBrowser("bare@sparse.example");
+
+      await them.goto(`${origin}/traces`);
+      await them.waitForSelector("table");
+
+      const listed = await them.innerText("main");
+      expect(listed).toContain("Is anybody there?");
+      expect(listed).not.toContain("Hi Kelly, my name is Sam.");
+
+      await them.locator("tbody tr td a").first().click();
+      await them.waitForSelector("text=The exchange");
+
+      const shown = await them.innerText("main");
+      expect(shown).toContain("human:");
+      expect(shown).toContain("Is anybody there?");
+      expect(shown).toContain("agent:");
+      expect(shown).toContain("I am here.");
+      // Nothing was reported inside either turn, and the page says exactly that
+      // rather than leaving a space that could mean anything.
+      expect((shown.match(/0 steps/gu) ?? []).length).toBe(2);
+
+      await them.locator("summary", { hasText: "Is anybody there?" }).click();
+      expect(await them.innerText("main")).toContain(
+        "Nothing timed was recorded inside this turn.",
+      );
+
+      saysNothingBanned(shown);
+      await them.context().close();
+    },
+    SETTLE,
+  );
+});
+
+/**
+ * More than one page of them.
+ *
+ * Paging is by **token**, not by offset: the answer carries where it stopped
+ * and asking for more hands that back. An offset would re-sort and re-read the
+ * rows already shown, and would skip or repeat one the moment something arrived
+ * mid-page — which, on a store being written into by a live agent, is every
+ * page. So the assertion that matters is not that a second page exists: it is
+ * that the two pages together are every exchange, each exactly once.
+ */
+describe("more exchanges than one page holds", () => {
+  const HOW_MANY = 51;
+
+  it(
+    "carries on from where the last page stopped, skipping none and repeating none",
+    async () => {
+      const theirs = await anotherCustomer("many@globex.example", "Globex");
+
+      // A minute apart, so newest-first is unambiguous, and inside the day the
+      // page asks about.
+      await send(
+        theirs,
+        Array.from({ length: HOW_MANY }, (_, index) =>
+          exchange(
+            `9a0b0c0d0e0f${String(index).padStart(20, "0")}`,
+            new Date(AT.getTime() - (index + 1) * 60 * 1000),
+            `This is exchange number ${index}.`,
+            "Understood.",
+          ),
+        ),
+      );
+
+      const them = await signedInBrowser("many@globex.example");
+      await them.goto(`${origin}/traces`);
+      await them.waitForSelector("table");
+
+      // One page is fifty, which is the contract's default. There is more, and
+      // the page says so rather than ending silently at the page boundary.
+      const rows = them.locator("tbody tr");
+      expect(await rows.count()).toBe(50);
+      expect(await them.innerText("main")).toContain("50 transcripts");
+
+      await them.getByRole("button", { name: "Show more" }).click();
+      await expect
+        .poll(async () => rows.count(), { timeout: 30_000 })
+        .toBe(HOW_MANY);
+
+      // Every one of them, each exactly once, newest first.
+      const shown = await them.innerText("main");
+      const numbered = [
+        ...shown.matchAll(/This is exchange number (\d+)\./gu),
+      ].map((found) => Number(found[1]));
+      expect(numbered).toEqual(
+        Array.from({ length: HOW_MANY }, (_, index) => index),
+      );
+
+      // And nothing is left to ask for.
+      expect(shown).toContain("51 transcripts");
+      expect(
+        await them.getByRole("button", { name: "Show more" }).count(),
+      ).toBe(0);
+
+      await them.context().close();
     },
     SETTLE,
   );
