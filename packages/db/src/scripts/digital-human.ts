@@ -6,7 +6,9 @@ import { eq } from "drizzle-orm";
 import { connect, disconnect, db } from "../client.ts";
 import {
   createDigitalHuman,
+  editDigitalHuman,
   getDigitalHuman,
+  getDigitalHumanVersion,
   VOICE_PROVIDERS,
   type VoiceProvider,
 } from "../access/digital-humans.ts";
@@ -86,6 +88,10 @@ function usage(): never {
       "    [--description <text>] [--language en-US]",
       `    [--voice-provider ${VOICE_PROVIDERS.join("|")}] [--voice-id <id>] [--speed 1.0]`,
       "  digital-human.js get <dh_id>",
+      "  digital-human.js edit <dh_id> [--name <name>] [--description <text>]",
+      "    [--personality <text>] [--language <tag>]",
+      `    [--voice-provider ${VOICE_PROVIDERS.join("|")}] [--voice-id <id>] [--speed 1.0]`,
+      "  digital-human.js get-version <dhv_id>",
     ].join("\n"),
   );
   process.exit(1);
@@ -134,6 +140,74 @@ async function main(): Promise<void> {
     const found = await getDigitalHuman(auth, id);
     if (found === undefined) {
       console.error(`no digital human ${id} in the development project`);
+      process.exit(1);
+    }
+    console.log(JSON.stringify(found, null, 2));
+  } else if (command === "edit") {
+    const [id, ...flags] = rest;
+    if (id === undefined) usage();
+    const { values } = parseArgs({
+      args: flags,
+      options: {
+        name: { type: "string" },
+        description: { type: "string" },
+        personality: { type: "string" },
+        language: { type: "string" },
+        "voice-provider": { type: "string" },
+        "voice-id": { type: "string" },
+        speed: { type: "string" },
+      },
+    });
+
+    // A trait flag edits one trait; the rest carry over from the current
+    // version, fetched here so the factory always receives whole traits.
+    const traitFlagPresent =
+      values.personality !== undefined ||
+      values.language !== undefined ||
+      values["voice-provider"] !== undefined ||
+      values["voice-id"] !== undefined ||
+      values.speed !== undefined;
+
+    let traits;
+    if (traitFlagPresent) {
+      const current = await getDigitalHuman(auth, id);
+      if (current === undefined) {
+        console.error(`no digital human ${id} in the development project`);
+        process.exit(1);
+      }
+      traits = {
+        personality: values.personality ?? current.traits.personality,
+        language: values.language ?? current.traits.language,
+        voice: {
+          provider: (values["voice-provider"] ??
+            current.traits.voice.provider) as VoiceProvider,
+          voiceId: values["voice-id"] ?? current.traits.voice.voiceId,
+          speed:
+            values.speed === undefined
+              ? current.traits.voice.speed
+              : Number(values.speed),
+        },
+      };
+    }
+
+    const edited = await editDigitalHuman(auth, id, {
+      ...(values.name === undefined ? {} : { name: values.name }),
+      ...(values.description === undefined
+        ? {}
+        : { description: values.description }),
+      ...(traits === undefined ? {} : { traits }),
+    });
+    if (edited === undefined) {
+      console.error(`no digital human ${id} in the development project`);
+      process.exit(1);
+    }
+    console.log(JSON.stringify(edited, null, 2));
+  } else if (command === "get-version") {
+    const [versionId] = rest;
+    if (versionId === undefined) usage();
+    const found = await getDigitalHumanVersion(auth, versionId);
+    if (found === undefined) {
+      console.error(`no version ${versionId} in the development project`);
       process.exit(1);
     }
     console.log(JSON.stringify(found, null, 2));

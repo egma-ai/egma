@@ -3,10 +3,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createDigitalHuman,
+  editDigitalHuman,
   getDigitalHuman,
+  getDigitalHumanVersion,
   NotPermittedError,
   ProjectOutsideOrganizationError,
   type AuthContext,
+  type DigitalHumanTraits,
   type Role,
 } from "@egma/db";
 
@@ -94,6 +97,7 @@ describe("creating a digital human", () => {
     const created = await createDigitalHuman(actingAsAcme(), rita);
 
     expect(isId("dh", created.id)).toBe(true);
+    expect(isId("dhv", created.versionId)).toBe(true);
 
     const fetched = await getDigitalHuman(actingAsAcme(), created.id);
     expect(fetched).toBeDefined();
@@ -162,6 +166,193 @@ describe("a credential for the whole organization", () => {
     const fetched = await getDigitalHuman(wholeCustomer, created.id);
     expect(fetched?.id).toBe(created.id);
     expect(fetched?.projectId).toBe(acme.project);
+  });
+
+  it("edits what already exists: the row names its own project", async () => {
+    const created = await createDigitalHuman(actingAsAcme(), rita);
+
+    const wholeCustomer = { ...actingAsAcme(), projectId: undefined };
+    const edited = await editDigitalHuman(wholeCustomer, created.id, {
+      traits: { ...rita.traits, language: "en-CA" },
+    });
+
+    expect(edited?.version).toBe(2);
+    expect(edited?.projectId).toBe(acme.project);
+
+    const version = await getDigitalHumanVersion(wholeCustomer, created.versionId);
+    expect(version?.version).toBe(1);
+  });
+});
+
+describe("editing a digital human's traits", () => {
+  it("creates version 2, moves the pointer, and leaves version 1 untouched", async () => {
+    const created = await createDigitalHuman(actingAsAcme(), rita);
+
+    const calmer = { ...rita.traits, personality: "Rita, but rested." };
+    const edited = await editDigitalHuman(actingAsAcme(), created.id, {
+      traits: calmer,
+    });
+
+    expect(edited?.version).toBe(2);
+    expect(edited?.versionId).not.toBe(created.versionId);
+    expect(edited?.traits).toEqual(calmer);
+
+    const fetched = await getDigitalHuman(actingAsAcme(), created.id);
+    expect(fetched?.version).toBe(2);
+    expect(fetched?.versionId).toBe(edited?.versionId);
+
+    const frozen = await getDigitalHumanVersion(actingAsAcme(), created.versionId);
+    expect(frozen?.version).toBe(1);
+    expect(frozen?.digitalHumanId).toBe(created.id);
+    expect(frozen?.traits).toEqual(rita.traits);
+  });
+
+  it("versions on any single trait change", async () => {
+    const created = await createDigitalHuman(actingAsAcme(), rita);
+
+    let traits: DigitalHumanTraits = rita.traits;
+    const oneAtATime = [
+      { personality: "Rita after a good nap." },
+      { language: "en-GB" },
+      { voice: { ...rita.traits.voice, provider: "cartesia" } },
+      { voice: { ...rita.traits.voice, provider: "cartesia", voiceId: "sonic-rita" } },
+      {
+        voice: {
+          ...rita.traits.voice,
+          provider: "cartesia",
+          voiceId: "sonic-rita",
+          speed: 1.1,
+        },
+      },
+    ] as const;
+
+    let expected = 1;
+    for (const change of oneAtATime) {
+      traits = { ...traits, ...change };
+      const edited = await editDigitalHuman(actingAsAcme(), created.id, { traits });
+      expected += 1;
+      expect(edited?.version).toBe(expected);
+    }
+
+    const fetched = await getDigitalHuman(actingAsAcme(), created.id);
+    expect(fetched?.version).toBe(6);
+    expect(fetched?.traits).toEqual(traits);
+  });
+
+  it("does nothing for a byte-identical save, and returns the current version", async () => {
+    const created = await createDigitalHuman(actingAsAcme(), rita);
+    const before = await rowCounts();
+
+    const saved = await editDigitalHuman(actingAsAcme(), created.id, {
+      traits: { ...rita.traits, voice: { ...rita.traits.voice } },
+    });
+
+    expect(saved?.version).toBe(1);
+    expect(saved?.versionId).toBe(created.versionId);
+    expect(await rowCounts()).toEqual(before);
+
+    const fetched = await getDigitalHuman(actingAsAcme(), created.id);
+    expect(fetched?.updatedAt.getTime()).toBe(created.updatedAt.getTime());
+  });
+
+  it("keeps every old version fetchable by its dhv_ id after later edits", async () => {
+    const created = await createDigitalHuman(actingAsAcme(), rita);
+    const second = await editDigitalHuman(actingAsAcme(), created.id, {
+      traits: { ...rita.traits, language: "en-AU" },
+    });
+    await editDigitalHuman(actingAsAcme(), created.id, {
+      traits: { ...rita.traits, language: "en-NZ" },
+    });
+
+    const first = await getDigitalHumanVersion(actingAsAcme(), created.versionId);
+    expect(first?.version).toBe(1);
+    expect(first?.traits).toEqual(rita.traits);
+
+    if (second?.versionId === undefined) throw new Error("no second version");
+    const middle = await getDigitalHumanVersion(actingAsAcme(), second.versionId);
+    expect(middle?.version).toBe(2);
+    expect(middle?.traits).toEqual({ ...rita.traits, language: "en-AU" });
+  });
+
+  it("validates edited traits exactly as created ones, and versions nothing", async () => {
+    const created = await createDigitalHuman(actingAsAcme(), rita);
+
+    await expect(
+      editDigitalHuman(actingAsAcme(), created.id, {
+        traits: {
+          ...rita.traits,
+          voice: { ...rita.traits.voice, speed: 5 },
+        },
+      }),
+    ).rejects.toThrow(/speed/);
+
+    const fetched = await getDigitalHuman(actingAsAcme(), created.id);
+    expect(fetched?.version).toBe(1);
+    expect(fetched?.traits).toEqual(rita.traits);
+  });
+
+  it("is refused to a viewer, per the permission table", async () => {
+    const created = await createDigitalHuman(actingAsAcme(), rita);
+
+    await expect(
+      editDigitalHuman(actingAsAcme("viewer"), created.id, {
+        traits: { ...rita.traits, language: "en-GB" },
+      }),
+    ).rejects.toThrow(NotPermittedError);
+  });
+});
+
+describe("renaming a digital human", () => {
+  it("updates name and description and creates no version", async () => {
+    const created = await createDigitalHuman(actingAsAcme(), rita);
+    const before = await rowCounts();
+
+    const renamed = await editDigitalHuman(actingAsAcme(), created.id, {
+      name: "Patient Rita",
+      description: "Rita, after the hearing aid arrived",
+    });
+
+    expect(renamed?.name).toBe("Patient Rita");
+    expect(renamed?.description).toBe("Rita, after the hearing aid arrived");
+    expect(renamed?.version).toBe(1);
+    expect(renamed?.versionId).toBe(created.versionId);
+    expect(await rowCounts()).toEqual(before);
+
+    const fetched = await getDigitalHuman(actingAsAcme(), created.id);
+    expect(fetched?.name).toBe("Patient Rita");
+    expect(fetched?.version).toBe(1);
+    expect(fetched?.traits).toEqual(rita.traits);
+  });
+
+  it("clears the description with null, still without versioning", async () => {
+    const created = await createDigitalHuman(actingAsAcme(), rita);
+
+    const cleared = await editDigitalHuman(actingAsAcme(), created.id, {
+      description: null,
+    });
+
+    expect(cleared?.description).toBeNull();
+    expect(cleared?.version).toBe(1);
+  });
+
+  it("refuses a blank name", async () => {
+    const created = await createDigitalHuman(actingAsAcme(), rita);
+
+    await expect(
+      editDigitalHuman(actingAsAcme(), created.id, { name: "   " }),
+    ).rejects.toThrow(/name/);
+  });
+
+  it("renames and versions together when one edit carries both", async () => {
+    const created = await createDigitalHuman(actingAsAcme(), rita);
+
+    const edited = await editDigitalHuman(actingAsAcme(), created.id, {
+      name: "Louder Rita",
+      traits: { ...rita.traits, voice: { ...rita.traits.voice, speed: 1.2 } },
+    });
+
+    expect(edited?.name).toBe("Louder Rita");
+    expect(edited?.version).toBe(2);
   });
 });
 
@@ -252,6 +443,37 @@ describe("tenancy", () => {
       via: "session",
     };
     expect(await getDigitalHuman(actingAsGlobex, created.id)).toBeUndefined();
+  });
+
+  it("edits nothing and returns nothing when another organization asks", async () => {
+    const created = await createDigitalHuman(actingAsAcme(), rita);
+
+    const actingAsGlobex: AuthContext = {
+      userId: newId("usr"),
+      organizationId: globex.organization,
+      projectId: globex.project,
+      role: "admin",
+      via: "session",
+    };
+    const stolen = await editDigitalHuman(actingAsGlobex, created.id, {
+      name: "Globex Rita",
+      traits: { ...rita.traits, language: "en-GB" },
+    });
+    expect(stolen).toBeUndefined();
+
+    const untouched = await getDigitalHuman(actingAsAcme(), created.id);
+    expect(untouched?.name).toBe(rita.name);
+    expect(untouched?.version).toBe(1);
+
+    expect(
+      await getDigitalHumanVersion(actingAsGlobex, created.versionId),
+    ).toBeUndefined();
+  });
+
+  it("edits nothing for an id that does not exist", async () => {
+    expect(
+      await editDigitalHuman(actingAsAcme(), newId("dh"), { name: "Nobody" }),
+    ).toBeUndefined();
   });
 
   it("refuses the mismatched pairing even for raw SQL that bypasses the module", async () => {
