@@ -539,6 +539,15 @@ export async function listDigitalHumans(
  * through the same seam as `getDigitalHuman`, so a clone can only be taken of
  * what the caller could have fetched: same customer, same acting project,
  * not deleted.
+ *
+ * Authorization is layered on purpose, not by accident of delegation. The
+ * leading check refuses a viewer before anything is read; `getDigitalHuman`'s
+ * `read` applies because the clone hands the source's traits back, which is a
+ * read; `createDigitalHuman`'s check applies because a clone is a create. If
+ * reading ever gains a gate of its own, a caller who may not read the source
+ * must be refused out loud here — never handed an `undefined` that pretends
+ * the source does not exist, which would make clone the one path that reads
+ * without the read permission.
  */
 export async function cloneDigitalHuman(
   auth: AuthContext,
