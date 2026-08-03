@@ -1,4 +1,4 @@
-import { access, readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { chromium, type Browser } from "playwright-core";
@@ -30,9 +30,18 @@ import { chromium, type Browser } from "playwright-core";
  * not use a browser would prove nothing at all.
  */
 
-async function exists(candidate: string): Promise<boolean> {
-  return access(candidate).then(
-    () => true,
+/**
+ * A file, rather than merely a path that resolves.
+ *
+ * `chromium` beside the versioned directories is a symlink on some images and a
+ * *directory* on others, and `executablePath` handed a directory fails deep
+ * inside the launcher with a message about the browser having closed. Asking
+ * whether it is a file — through `stat`, so a symlink is judged by what it
+ * points at — rules that out here, where the error can still say what is wrong.
+ */
+async function isExecutableFile(candidate: string): Promise<boolean> {
+  return stat(candidate).then(
+    (found) => found.isFile(),
     () => false,
   );
 }
@@ -61,7 +70,7 @@ async function chromiumAlreadyHere(): Promise<string | undefined> {
   ];
 
   for (const candidate of candidates) {
-    if (await exists(candidate)) return candidate;
+    if (await isExecutableFile(candidate)) return candidate;
   }
   return undefined;
 }
@@ -77,7 +86,20 @@ export async function openBrowser(): Promise<Browser> {
     return await chromium.launch({ headless: true });
   } catch (whyNot) {
     const found = await chromiumAlreadyHere();
-    if (found === undefined) throw whyNot;
-    return chromium.launch({ headless: true, executablePath: found });
+    if (found !== undefined) {
+      return chromium.launch({ headless: true, executablePath: found });
+    }
+
+    // Playwright's own message here advises `npx playwright install`, which is
+    // advice for a repository that depends on `playwright`. This one depends on
+    // `playwright-core` and deliberately downloads nothing, so following it
+    // would install a browser under a directory nothing above looks in. Say
+    // what actually works instead, and keep the launcher's reason underneath.
+    throw new Error(
+      "no browser found. Install Google Chrome, or set " +
+        "PLAYWRIGHT_BROWSERS_PATH to a directory holding a Playwright " +
+        "Chromium.",
+      { cause: whyNot },
+    );
   }
 }

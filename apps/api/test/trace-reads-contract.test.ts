@@ -620,6 +620,53 @@ describe("a browser session rather than a key", () => {
     const response = await listTracesAsSignedIn(api.app, acme.cookie, {});
     expect(response.statusCode).toBe(400);
   });
+
+  /**
+   * And what it cannot see, which is the asymmetry the README and the empty
+   * list both warn about.
+   *
+   * A key minted for a whole organization names no project, so what it exports
+   * files under the sentinel the schema keeps for exactly that. A session is
+   * always acting inside a real project, so it reads that project and never the
+   * sentinel — the telemetry arrived, the key was valid, and the dashboard is
+   * empty. That is documented in three places and asserted here, so a change
+   * that quietly widened either side would be caught rather than read about.
+   */
+  it("cannot see what an organization-wide key filed, because that names no project", async () => {
+    const OUTSIDE = {
+      from: "2026-09-05T00:00:00Z",
+      to: "2026-09-06T00:00:00Z",
+    } as const;
+    const FILED_WITHOUT_A_PROJECT = "dd000000000000000000000000000002";
+
+    await ingest(
+      api.app,
+      acme.secret,
+      syntheticExport({
+        traceId: FILED_WITHOUT_A_PROJECT,
+        startedAt: new Date("2026-09-05T09:00:00Z"),
+        humanSaid: "Exported with a key for the whole organization.",
+      }),
+    );
+
+    const asSignedIn = await listTracesAsSignedIn(api.app, acme.cookie, {
+      ...OUTSIDE,
+      limit: 200,
+    });
+    expect(asSignedIn.statusCode, asSignedIn.body).toBe(200);
+    expect((asSignedIn.json() as ListedPage).traces).toEqual([]);
+
+    // It is stored, and the credential that filed it reads it back. The
+    // dashboard's blindness is about the project, not about the write.
+    const asTheKey = await listTracesOverHttp(api.app, acme.secret, {
+      ...OUTSIDE,
+      limit: 200,
+    });
+    expect(asTheKey.statusCode, asTheKey.body).toBe(200);
+    expect(
+      (asTheKey.json() as ListedPage).traces.map((trace) => trace.trace_id),
+    ).toEqual([FILED_WITHOUT_A_PROJECT]);
+  });
 });
 
 describe("a read with no usable credential", () => {

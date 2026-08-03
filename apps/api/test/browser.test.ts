@@ -315,6 +315,41 @@ async function anotherCustomer(
   );
 }
 
+/**
+ * Wait until React has taken the page over, before clicking something only
+ * React answers.
+ *
+ * The markup is served before the script that makes it work, and in between
+ * every one of these pages is inert. A `<button type="button">` clicked in that
+ * gap does nothing at all, and a form clicked in it does something worse: with
+ * no `action` a browser submits it natively, as a GET to the page's own
+ * address, which navigates away and puts the password in the URL bar. Both are
+ * intermittent — the gap is milliseconds on a warm development server and
+ * seconds on a cold one — and the second is what a ~6% failure rate here
+ * turned out to be.
+ *
+ * Most clicks in this file need no gate because they already wait on something
+ * only React could have put there: a prefilled field, a table drawn from a
+ * fetch, a line of text that arrived with an answer. The two below wait on
+ * markup that is in the server's own response, so they wait on this instead.
+ *
+ * The signal is React's own bookkeeping: hydration attaches the fiber for a DOM
+ * node to the node, under a key nothing else writes. Checking for it says
+ * exactly the thing worth knowing — this element's handlers are live — rather
+ * than approximating it with a timeout.
+ *
+ * The condition is a string because it is evaluated in the browser and not in
+ * this process: these tests are compiled without the DOM library, on purpose,
+ * so that Node code cannot reach for `document` by accident.
+ */
+async function reactHasTakenOver(page: Page, selector: string): Promise<void> {
+  await page.waitForSelector(selector);
+  await page.waitForFunction(
+    `Object.keys(document.querySelector(${JSON.stringify(selector)}) ?? {})` +
+      `.some((key) => key.startsWith("__react"))`,
+  );
+}
+
 /** A browser of their own, signed in, with the same pinned clock. */
 async function signedInBrowser(email: string): Promise<Page> {
   const context = await browser.newContext();
@@ -322,6 +357,7 @@ async function signedInBrowser(email: string): Promise<Page> {
   theirs.setDefaultTimeout(30_000);
   await theirs.clock.setFixedTime(AT);
   await theirs.goto(`${origin}/sign-in`);
+  await reactHasTakenOver(theirs, "form");
   await theirs.fill("#email", email);
   await theirs.fill("#password", PASSWORD);
   await theirs.getByRole("button", { name: "Sign in" }).click();
@@ -527,6 +563,34 @@ describe("the list of what an organization recorded", () => {
     SETTLE,
   );
 
+  it(
+    "keeps the window somebody chose in the address, so a reload stays on it",
+    async () => {
+      await page.goto(`${origin}/traces`);
+      await page.waitForSelector("table");
+      expect(await page.inputValue("#window")).toBe("24h");
+
+      await page.selectOption("#window", "7d");
+      await expect
+        .poll(() => new URL(page.url()).searchParams.get("window"))
+        .toBe("7d");
+
+      // Which is the whole point of putting it there: opened again, cold, the
+      // page is on the window it was left on rather than back on the default.
+      await page.reload();
+      await page.waitForSelector("table");
+      expect(await page.inputValue("#window")).toBe("7d");
+      expect(await page.innerText("main")).toContain("1 transcript");
+
+      // A window nobody was offered is not one. Editing the address to a word
+      // the store would refuse lands on the default instead of on an error.
+      await page.goto(`${origin}/traces?window=all-of-it`);
+      await page.waitForSelector("table");
+      expect(await page.inputValue("#window")).toBe("24h");
+    },
+    SETTLE,
+  );
+
   it("says nothing the glossary bans", async () => {
     await page.goto(`${origin}/traces`);
     await page.waitForSelector("table");
@@ -638,6 +702,31 @@ describe("one exchange, read as a transcript", () => {
       expect(recorded).toContain("lookup_weather");
       expect(recorded).toContain('{"location": "Lisbon"}');
       expect(recorded).toContain("sunny with a temperature of 70 degrees.");
+    },
+    SETTLE,
+  );
+
+  it(
+    "reaches what the framework did around the exchange, without it being the page",
+    async () => {
+      await openIt();
+
+      // Not every recorded step happened inside a turn. The one everything else
+      // happened inside is the clearest of them, and it is deliberately not part
+      // of the exchange — a transcript that opened with a row for the whole
+      // recording would be a table pretending to be a transcript.
+      const shown = await page.innerText("main");
+      expect(shown).toContain("Everything else recorded");
+      expect(shown).not.toContain("Overview");
+
+      // One click in, it is there, under egma's word for it rather than the
+      // provider's. `agent_session` is the name LiveKit gave it and it is shown
+      // beside — the two carry different information.
+      const around = page.locator("main > div > details").last();
+      await around.locator("summary").first().click();
+      const reached = await around.innerText();
+      expect(reached).toContain("Overview");
+      expect(reached).toContain("agent_session");
     },
     SETTLE,
   );
@@ -765,6 +854,7 @@ describe("more exchanges than one page holds", () => {
       expect(await rows.count()).toBe(50);
       expect(await them.innerText("main")).toContain("50 transcripts");
 
+      await reactHasTakenOver(them, "main button");
       await them.getByRole("button", { name: "Show more" }).click();
       await expect
         .poll(async () => rows.count(), { timeout: 30_000 })

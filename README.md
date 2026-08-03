@@ -69,14 +69,15 @@ database of its own in whichever store it uses and drops it afterwards, so
 both; point `TEST_DATABASE_URL` and `TEST_CLICKHOUSE_URL` somewhere else if you
 would rather use your own.
 
-One test drives a real browser: `apps/api/test/login.browser.test.ts` starts the
-API and the web application on ports of their own and clicks through the two
-paths a person actually walks — logging in from a terminal, and inviting a
-colleague on an instance with no mail configured. It uses the Chrome already on
-your machine and falls back to a Playwright-managed one, so
-`npx playwright install chromium` is what to run if you have neither. Every
-branch of both flows other than the happy one is covered against the API
-instead, where it costs milliseconds.
+One test drives a real browser: `apps/api/test/browser.test.ts` starts the API
+and the web application on ports of their own and clicks through the paths a
+person actually walks — logging in from a terminal, inviting a colleague on an
+instance with no mail configured, and reading what an agent did. It uses the
+Chrome already on your machine, and failing that any Chromium under
+`PLAYWRIGHT_BROWSERS_PATH`; this repository depends on `playwright-core` and
+downloads no browser of its own, so **install Google Chrome or point that
+variable at one** if you have neither. Every branch of those flows other than
+the happy one is covered against the API instead, where it costs milliseconds.
 
 ## Layout
 
