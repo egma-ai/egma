@@ -32,16 +32,14 @@ services:
       - "${CLICKHOUSE_PORT:-8124}:8123"
     volumes:
       - clickhouse-data:/var/lib/clickhouse
-    # ClickHouse keeps a descriptor per open part and per connection, and its
-    # own documented requirement is a limit far above a shell's default. A host
-    # whose default is 1024 or 4096 does not fail at startup — it fails later
-    # and intermittently, as "Cannot open epoll descriptor … Too many open
-    # files" on whichever query happened to be running, which reads like a bug
-    # in egma and is not one.
-    ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
+    # No `ulimits` here on purpose. ClickHouse wants far more descriptors than
+    # a shell's default hands it, but asking for them in this file makes
+    # `docker compose up` fail outright — a container may not raise its limit
+    # above the daemon's own hard one, and on a host whose hard `nofile` is
+    # 1024 or 4096 creation fails with "error setting rlimit type 7: operation
+    # not permitted". A compose file that does not start is worse than one
+    # whose descriptor limit is low, so the raise lives in
+    # `docker-compose.override.yml.example` for the self-hoster who needs it.
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8123/ping"]
       interval: 2s

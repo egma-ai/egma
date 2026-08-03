@@ -39,6 +39,16 @@ out of the box. Change it before anybody else can reach your instance.
 Email is optional, and this is load-bearing rather than a convenience. See
 [Adding a second person](#adding-a-second-person).
 
+**If a busy instance logs `Cannot open epoll descriptor … Too many open
+files`**, ClickHouse has run out of file descriptors rather than egma having a
+bug: it keeps one per open part and per connection, and its documented
+requirement is far above what a login shell hands a container. Copy
+`docker-compose.override.yml.example` to `docker-compose.override.yml` and
+bring the services back up — Compose reads it on top with no further arguments.
+It is an override rather than the default because a container may not raise its
+limit past the daemon's own, so a host with a low hard `nofile` would not start
+at all.
+
 ## Working on it
 
 Node 24 and pnpm 10.
