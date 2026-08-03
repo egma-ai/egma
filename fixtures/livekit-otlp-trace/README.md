@@ -194,6 +194,31 @@ Afterwards, check the capture before committing it: the bodies contain the
 transcript and the agent's system prompt, so make sure nothing you would not
 publish was said, and confirm no header or attribute carries a key.
 
+## Is it still what a live agent sends?
+
+Checked on 2026-08-03, against a live run of the same example at the same
+version — a different exchange, held over a fresh `livekit-server --dev`, ingested
+through a compose deployment's `POST /v1/traces` and read back through the v1
+endpoints. 150 spans, six human and nine agent turns, two `lookup_weather` calls.
+
+**The shapes agree exactly.** The live run's span names are the same twenty
+listed above — none missing, none new — nesting is the same, and every one of the
+150 spans landed in a column the normalisation already had a place for. Nothing
+had to change to accept it.
+
+Two differences, and neither is a difference of shape:
+
+- **The live run had no errors**, where this capture keeps three spans with
+  `STATUS_CODE_ERROR` from a cold-start timeout. That path is worth keeping
+  precisely because it does not reproduce on demand.
+- **The live run's turns are choppier** — a single spoken sentence became three
+  human turns, and several agent turns carry no text because they ended in a tool
+  call or were interrupted. That is turn detection doing its job on real audio,
+  and it is a good argument for this capture staying the tidy one: a fixture that
+  is also the awkward case tests two things at once and diagnoses neither.
+
+So there is no reason to recapture yet. What follows is how, when there is.
+
 ## Refreshing this capture
 
 **Only ever on purpose.** Nothing regenerates these files automatically, and
