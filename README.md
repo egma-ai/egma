@@ -85,6 +85,7 @@ the happy one is covered against the API instead, where it costs milliseconds.
 apps/api        Fastify API. Applies migrations on boot, then serves.
 apps/web        Next.js web application: signup, sign-in, invitations, and
                 where you are.
+docs            Guides that are longer than a section of this file.
 fixtures        Checked-in captures used as test inputs. The LiveKit one is
                 replayed at the ingest door on every test run.
 packages/db     The data-access module: schema, migrations, and every read
@@ -210,6 +211,11 @@ A few things worth knowing about what happens next:
   `deployment.environment.name` if your telemetry sets it and `default` if it
   does not. There is nothing to declare first. Names beginning `egma` are
   reserved and are refused with a reason.
+
+**[Sending a LiveKit agent's telemetry](docs/livekit.md)** walks the whole path
+end to end — which example agent, where its model keys come from, a development
+server on your machine or LiveKit Cloud, and the exchange on screen with its
+timings.
 
 Spans egma will not store are reported in the response's partial-success field
 rather than as a failure, because the specification is explicit that rejected
