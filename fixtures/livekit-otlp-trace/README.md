@@ -180,7 +180,9 @@ You need a LiveKit server, an OpenAI API key and a way to talk to the agent.
    model.
 
 5. **Hold the exchange.** Join the room and talk: LiveKit's agents playground
-   or the CLI's `console` mode both work if you have a microphone. Without one,
+   works if you have a microphone. (The framework's `console` mode is not a way
+   to join — it runs the agent terminal-only with no server or room, which
+   captures no room telemetry.) Without a microphone,
    have a scripted participant join with the `livekit` SDK, publish
    text-to-speech audio of a few utterances, and pause between them long enough
    for the agent to take its turn. Either way, aim for several turns and let the
