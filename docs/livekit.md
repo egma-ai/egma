@@ -41,11 +41,12 @@ you pick while approving it. Either route is fine.
 
 **Which project the key names is the one thing on this page you can get wrong
 silently.** A key minted for the whole organization files its telemetry under no
-project. Everything is stored, `GET /v1/traces` returns it, and the dashboard
-shows you nothing at all — because a signed-in browser reads the project its
-session is acting in, and telemetry filed under no project is in no project.
-There is no error, because nothing went wrong; the spans simply are not where the
-page is looking. Mint the key against a project and the two agree.
+project. Everything is stored and the export is accepted; `GET /v1/traces` with
+that same organization-wide key hands it all back — and the dashboard shows you
+nothing at all, because a signed-in browser reads the project its session is
+acting in, and telemetry filed under no project is in no project. There is no
+error, because nothing went wrong; the spans simply are not where the page is
+looking. Mint the key against a project and the two agree.
 
 Keep the secret. It is shown once.
 
