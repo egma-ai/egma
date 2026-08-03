@@ -285,12 +285,13 @@ within a few months, and a silently rounded latency is worse than no latency.
 
 ## Reading one in the dashboard
 
-Sign in and open **Transcripts**. You get your organization's recent
-transcripts, newest first, defaulting to the last twenty-four hours — when each
-one started, how long it ran, how many turns each speaker took, how many steps
-and tools and failures are in it, and the first thing the human said. Pick a
-different window from the control beside the heading; **Show more** walks the
-pages.
+Sign in and open **Transcripts**. You get the recent transcripts of the project
+your session is acting in, newest first, defaulting to the last twenty-four
+hours — when each one started, how long it ran, how many turns each speaker
+took, how many steps and tools and failures are in it, and the first thing the
+human said. Pick a different window from the control beside the heading and the
+address carries it, so a refresh and a link both stay on the window you chose;
+**Show more** walks the pages.
 
 Open one and you read it as a transcript: alternating `human:` and `agent:`
 turns in the order they were taken, each with how far into the exchange it

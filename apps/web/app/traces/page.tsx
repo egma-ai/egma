@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import {
   COLUMNS,
+  DEFAULT_WINDOW,
   LIST,
   WINDOWS,
   type WindowChoice,
@@ -13,13 +14,21 @@ import {
   recentWindow,
   transcriptPath,
   whenItWas,
+  WINDOW_PARAMETER,
+  windowChoiceOf,
   type Listed,
   type ListPage,
 } from "../../lib/transcripts.ts";
 import { Card, Screen, styles } from "../ui.tsx";
 
 /**
- * Everything your organization recorded, newest first.
+ * Everything this project recorded, newest first.
+ *
+ * *This project* rather than this organization, and the distinction is the
+ * store's rather than this page's: a browser is always acting inside one
+ * project, so this list is that project's. Telemetry exported with a key that
+ * names the whole organization files outside every project, and `LIST.empty`
+ * says so where somebody would otherwise conclude their exporter is broken.
  *
  * The first page of the dashboard, and deliberately the **first consumer of the
  * public v1 contract** rather than of a private one built for it: what a
@@ -38,6 +47,10 @@ import { Card, Screen, styles } from "../ui.tsx";
  *   more means handing that back. An offset would re-sort and re-scan the rows
  *   already read, and would skip or repeat one the moment something arrived
  *   mid-page.
+ * - **The chosen window lives in the address**, the same way one transcript's
+ *   window does. Somebody who widened to thirty days and reloaded should still
+ *   be looking at thirty days, and somebody sending "look at last week" should
+ *   be able to send the address they are looking at.
  *
  * Signed in with a browser session like every other page here, on the origin
  * the page was served from. There is no API key in a browser and there never
@@ -51,9 +64,43 @@ type State =
   | { status: "loaded"; rows: readonly Listed[]; more: string | null };
 
 export default function TranscriptsPage() {
-  const [choice, setChoice] = useState<WindowChoice>("24h");
+  /**
+   * Which window this page is on, read out of the address.
+   *
+   * `null` until it has been: the address exists only in a browser, and this
+   * component is rendered on the server first, so a choice guessed there and
+   * corrected here would be a hydration mismatch and a wasted first read. The
+   * control shows the default meanwhile, which is the choice it will settle on
+   * for every address that names none.
+   */
+  const [choice, setChoice] = useState<WindowChoice | null>(null);
   const [state, setState] = useState<State>({ status: "loading" });
   const [busy, setBusy] = useState(false);
+
+  /**
+   * Which window the rows on screen belong to, readable from inside a promise
+   * that was started under a different one. See `showMore`.
+   */
+  const showing = useRef<WindowChoice | null>(null);
+
+  useEffect(() => {
+    setChoice(
+      windowChoiceOf(
+        new URLSearchParams(globalThis.location.search).get(WINDOW_PARAMETER),
+      ),
+    );
+  }, []);
+
+  /** Chosen, remembered in the address, and read back on the next visit. */
+  function choose(chosen: WindowChoice): void {
+    // At the click rather than only in the effect below, so that a request
+    // already in flight cannot answer into the gap between the two.
+    showing.current = chosen;
+    setChoice(chosen);
+    const asked = new URLSearchParams(globalThis.location.search);
+    asked.set(WINDOW_PARAMETER, chosen);
+    globalThis.history.replaceState(null, "", `?${asked.toString()}`);
+  }
 
   /**
    * One page of the list. `after` is the token the last answer stopped at, and
@@ -86,7 +133,9 @@ export default function TranscriptsPage() {
   );
 
   useEffect(() => {
+    if (choice === null) return undefined;
     let current = true;
+    showing.current = choice;
     setState({ status: "loading" });
 
     void ask(choice, null)
@@ -107,14 +156,28 @@ export default function TranscriptsPage() {
     };
   }, [ask, choice]);
 
-  /** The next page, appended — the token says where the last one stopped. */
+  /**
+   * The next page, appended — the token says where the last one stopped.
+   *
+   * The window is captured at the click and checked again at the append,
+   * because the two can disagree. Somebody clicks **Show more** on the last
+   * hour, then picks the last thirty days while that request is still out; the
+   * effect above starts the thirty-day list, that one answers first, and then
+   * the hour's second page arrives and appends rows from an hour to a list of
+   * a month — silently, and in the wrong order, since both are newest-first
+   * within themselves. Guarding on `state.status` alone does not catch it: by
+   * the time the late answer lands the new window has usually already loaded,
+   * so the status is `loaded` again.
+   */
   async function showMore(after: string): Promise<void> {
+    const asked = choice;
+    if (asked === null) return;
     setBusy(true);
     try {
-      const page = await ask(choice, after);
+      const page = await ask(asked, after);
       if (page === null) return;
       setState((was) =>
-        was.status === "loaded"
+        was.status === "loaded" && showing.current === asked
           ? {
               status: "loaded",
               rows: [...was.rows, ...page.traces],
@@ -152,8 +215,10 @@ export default function TranscriptsPage() {
       <select
         id="window"
         style={{ fontFamily: "inherit" }}
-        value={choice}
-        onChange={(event) => setChoice(event.target.value as WindowChoice)}
+        value={choice ?? DEFAULT_WINDOW}
+        onChange={(event) => {
+          choose(windowChoiceOf(event.target.value));
+        }}
       >
         {WINDOWS.map((one) => (
           <option key={one.id} value={one.id}>

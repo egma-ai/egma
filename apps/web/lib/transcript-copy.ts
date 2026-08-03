@@ -26,14 +26,26 @@ export const LIST = {
   lead: "What your agents did, newest first.",
   loading: "Loading…",
   signedOut: "Sign in first",
-  signedOutLead: "This page is about your organization.",
+  signedOutLead: "This page is about your project.",
   signIn: "Sign in",
   setUp: "Set up egma",
   back: "Back",
   unreachable: "egma could not be reached. Is the API running?",
+  /**
+   * The third sentence is the one that saves an afternoon.
+   *
+   * A browser always acts inside one project, and this page shows that
+   * project. A key minted for a whole organization names none, so what it
+   * exports files outside every project and cannot be reached from here — an
+   * empty list that looks exactly like an exporter that was never pointed at
+   * egma at all. The only place somebody meets that is here, so it is said
+   * here rather than only in the README.
+   */
   empty:
     "Nothing was recorded in this window. Point an agent's OpenTelemetry " +
-    "export at egma, or widen the window above.",
+    "export at egma, or widen the window above. The key that export uses has " +
+    "to name this project — a key minted for the whole organization files " +
+    "its telemetry outside every project, and none of it appears here.",
   window: "Window",
   showMore: "Show more",
   loadingMore: "Loading…",
@@ -98,7 +110,15 @@ export const DETAIL = {
     "No turns were recorded here. Not every provider reports who spoke and " +
     "when — what did arrive is below.",
   noSteps: "Nothing timed was recorded inside this turn.",
-  steps: (howMany: number) => (howMany === 1 ? "1 step" : `${howMany} steps`),
+  /**
+   * Every timed step inside this turn, however deeply nested — which is not
+   * the number of things expanding it puts on screen, because a model request
+   * nests four adapters deep and only the outermost is a direct child. So the
+   * label says what it counts rather than promising a row per unit: **recorded
+   * inside this turn**, at any depth.
+   */
+  steps: (howMany: number) =>
+    howMany === 1 ? "1 step recorded" : `${howMany} steps recorded`,
   otherSteps: "Everything else recorded",
   otherStepsLead:
     "What the framework did around the exchange rather than inside a turn.",
@@ -150,6 +170,11 @@ export const SPEAKERS = { human: "human:", agent: "agent:" } as const;
  * - `model` → **Model** — the language model answering.
  * - `tts` → **Speech** — turning the answer into audio. Not "TTS": an acronym
  *   is a word only to whoever already knows it.
+ * - `stt` → **Speech recognition** — turning what was heard into words. No
+ *   provider egma has met emits it: LiveKit puts what was heard on the turn
+ *   itself rather than on a step of its own. It is here because the ticket
+ *   names the step, and a framework that does emit one should meet a word for
+ *   it rather than **Other**.
  * - `tool` → **Tool** — the agent reaching for something outside itself.
  * - `end-of-turn` → **Turn detection** — deciding the speaker had finished.
  * - `speaking` → **Speaking** — how long somebody's audio ran.
@@ -168,6 +193,8 @@ export const STEP_LABELS: Readonly<Record<string, string>> = {
   "turn:agent": "Agent turn",
   model: "Model",
   tts: "Speech",
+  // No provider egma has met emits this one yet; see above.
+  stt: "Speech recognition",
   tool: "Tool",
   "end-of-turn": "Turn detection",
   speaking: "Speaking",

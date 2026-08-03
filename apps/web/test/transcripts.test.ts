@@ -17,6 +17,7 @@ import {
   whenItWas,
   windowAround,
   windowChoiceOf,
+  WINDOW_PARAMETER,
   type Facts,
   type Step,
 } from "../lib/transcripts.ts";
@@ -92,6 +93,31 @@ describe("the window the list asks about", () => {
   });
 
   /**
+   * The default is written once. Three copies of "24h" — one in the page's
+   * initial state, one behind `windowChoiceOf`, one behind `recentWindow` —
+   * would be three places to change it and two to forget.
+   */
+  it("takes its default from the one place that names it", () => {
+    expect(windowChoiceOf(null)).toBe(copy.DEFAULT_WINDOW);
+    expect(recentWindow(windowChoiceOf(null), now)).toEqual(
+      recentWindow(copy.DEFAULT_WINDOW, now),
+    );
+  });
+
+  /**
+   * The choice rides in the address so a reload and a link both stay on the
+   * window somebody chose — and it is the *choice* that rides there rather
+   * than the two instants it computes to, which would freeze the list at
+   * whenever the link was made.
+   */
+  it("is named in the address by the choice, not by the instants", () => {
+    const address = new URLSearchParams(`${WINDOW_PARAMETER}=7d`);
+    expect(windowChoiceOf(address.get(WINDOW_PARAMETER))).toBe("7d");
+    expect(recentWindow(windowChoiceOf(address.get(WINDOW_PARAMETER)), now).from)
+      .toBe("2026-07-26T20:00:00.000Z");
+  });
+
+  /**
    * The store holds at most thirty-one days in one read, and refuses a wider
    * window rather than narrowing it silently. Every choice the page offers is
    * therefore one the store will actually answer.
@@ -161,6 +187,18 @@ describe("the numbers the contract sends", () => {
     expect(howLong("73494876403")).toBe("1m 13s");
   });
 
+  /**
+   * A unit is chosen by what it would print. Rounding after the choice is what
+   * produces `1000 ms` and `60.0 s` — both of which are the next unit up,
+   * spelled as though it were not.
+   */
+  it("never prints a figure that is really the next unit up", () => {
+    expect(howLong("999400000")).toBe("999 ms");
+    expect(howLong("999600000")).toBe("1.0 s");
+    expect(howLong("59940000000")).toBe("59.9 s");
+    expect(howLong("59960000000")).toBe("1m 0s");
+  });
+
   it("says how far into the exchange something happened", () => {
     expect(howFarIn("2026-08-02T18:04:52.681989Z", FACTS.started_at)).toBe(
       "+12.4 s",
@@ -219,6 +257,15 @@ describe("what a stored kind is called where somebody reads it", () => {
     expect(copy.stepLabel("speaking")).toBe("Speaking");
     expect(copy.stepLabel("root")).toBe("Overview");
     expect(copy.stepLabel("other")).toBe("Other");
+  });
+
+  /**
+   * Named ahead of a provider that emits it. LiveKit puts what was heard on the
+   * turn itself, so nothing egma has met sends this kind — and the first
+   * framework that does should meet a word rather than **Other**.
+   */
+  it("already has a word for the recognition step nobody sends yet", () => {
+    expect(copy.stepLabel("stt")).toBe("Speech recognition");
   });
 
   /**

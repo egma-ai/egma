@@ -90,14 +90,41 @@ const HOUR = 60 * 60 * 1000;
  */
 const CLOCK_SKEW = 60 * 1000;
 
+/**
+ * What the list's window is called in the address.
+ *
+ * The chosen window rides there rather than living only in this page's state,
+ * so that a reload, a bookmark and a link somebody was sent all stay on the
+ * window they were looking at. It is deliberately the choice — `7d` — and not
+ * the two instants it computes to: those are a moment's arithmetic and would
+ * freeze the list at whenever the link was made, which is the opposite of what
+ * "the last seven days" means.
+ */
+export const WINDOW_PARAMETER = "window";
+
+/**
+ * Whichever of the offered windows the address named, and the default for
+ * everything else — an absent parameter, a stale one, a mistyped one.
+ *
+ * `DEFAULT_WINDOW` is the only place that default is written down. The store
+ * refuses a request naming no window and caps a wide one, and neither refusal
+ * is worth reaching by editing a URL.
+ */
 export function windowChoiceOf(value: string | null): WindowChoice {
   const known = WINDOWS.find((choice) => choice.id === value);
   return known?.id ?? DEFAULT_WINDOW;
 }
 
+/** How many hours the offered window is, with the default's own as the floor. */
+function hoursIn(choice: WindowChoice): number {
+  const known = WINDOWS.find((one) => one.id === choice);
+  const fallback = WINDOWS.find((one) => one.id === DEFAULT_WINDOW);
+  return known?.hours ?? fallback?.hours ?? 24;
+}
+
 /** The last day, or whichever span of time was chosen instead. */
 export function recentWindow(choice: WindowChoice, now: Date): Window {
-  const hours = WINDOWS.find((one) => one.id === choice)?.hours ?? 24;
+  const hours = hoursIn(choice);
   return {
     from: new Date(now.getTime() - hours * HOUR).toISOString(),
     to: new Date(now.getTime() + CLOCK_SKEW).toISOString(),
@@ -164,14 +191,25 @@ export function milliseconds(nanoseconds: string): number {
   return Number(millis) + Number(remainder) / 1_000_000;
 }
 
-/** How long something took, at a precision somebody can read. */
+/**
+ * How long something took, at a precision somebody can read.
+ *
+ * Each unit is chosen by what it would **print**, not by what it holds. 999.6
+ * milliseconds is under a second and rounds to `1000 ms`, which is a unit
+ * nobody uses; 59.96 seconds is under a minute and rounds to `60.0 s`, which is
+ * a minute spelled wrong. So the comparison is made against the rounded figure,
+ * and each of those falls through to the next unit up instead.
+ */
 export function howLong(nanoseconds: string): string {
   const millis = milliseconds(nanoseconds);
-  if (millis < 1000) return `${Math.round(millis)} ms`;
+  if (Math.round(millis) < 1000) return `${Math.round(millis)} ms`;
+
   const seconds = millis / 1000;
-  if (seconds < 60) return `${seconds.toFixed(1)} s`;
+  if (Number(seconds.toFixed(1)) < 60) return `${seconds.toFixed(1)} s`;
+
   const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${Math.round(seconds - minutes * 60)}s`;
+  const rest = Math.round(seconds - minutes * 60);
+  return rest === 60 ? `${minutes + 1}m 0s` : `${minutes}m ${rest}s`;
 }
 
 /**

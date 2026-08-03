@@ -56,7 +56,10 @@ const config: NextConfig = {
         // is widened by this: it is the same API, reached on the origin a
         // browser already has a session for, and every one of these routes
         // authenticates for itself.
-        { source: "/v1/traces", destination: `${api}/v1/traces` },
+        //
+        // One rule and not two: `:path*` matches zero segments, so this also
+        // matches the bare `/v1/traces` and forwards it to exactly that, with
+        // no trailing slash for the API to have an opinion about.
         { source: "/v1/traces/:path*", destination: `${api}/v1/traces/:path*` },
       ],
       afterFiles: [],
