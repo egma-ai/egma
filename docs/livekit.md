@@ -26,18 +26,25 @@ to point at.
 
 Open egma, sign up, and you land in an organization with a project in it.
 
-Then mint a key **against that project**:
+Then mint a key **against that project**. The terminal login flow in the
+[README](../README.md#logging-in-from-a-terminal) is the shortest way there and
+asks you for nothing you have to go and dig out of a browser: the terminal shows
+a short code, you approve it and say which project the terminal is for, and the
+key it collects is scoped to that project by construction.
+
+The other route is one request, authenticated by the browser session you signed
+in with. egma's session cookie is `egma.session_token` — `__Secure-`-prefixed
+when the instance is served over HTTPS — and `curl -b` wants the whole
+`name=value` pair, not the value on its own:
 
 ```bash
 curl -sX POST http://localhost:3101/api/keys \
   -H 'content-type: application/json' \
-  -b "$YOUR_SESSION_COOKIE" \
+  -b "egma.session_token=$YOUR_SESSION_TOKEN" \
   -d '{"name":"livekit-agent","project_id":"prj_..."}'
 ```
 
-`GET /api/me` names the projects you are in, and the terminal login flow in the
-[README](../README.md#logging-in-from-a-terminal) mints a key against the project
-you pick while approving it. Either route is fine.
+`GET /api/me` names the projects you are in and their ids.
 
 **Which project the key names is the one thing on this page you can get wrong
 silently.** A key minted for the whole organization files its telemetry under no
@@ -58,6 +65,10 @@ called Kelly with one tool, and it already builds a `TracerProvider` and calls
 `set_tracer_provider` — so its export destination comes from the standard
 OpenTelemetry environment variables and needs no edit.
 
+Check out `livekit/agents` at the tag you want, copy
+`examples/voice_agents/otel_trace.py` to a working directory as `agent.py`, and
+install what it runs on:
+
 ```bash
 pip install "livekit-agents[openai,silero,turn-detector]==1.6.7" \
             python-dotenv opentelemetry-exporter-otlp-proto-http
@@ -72,13 +83,31 @@ own machine, point those three steps at a provider directly instead. LiveKit's
 plugins each want your own account with the provider they wrap; routing all three
 through one provider keeps it to a single key:
 
-```python
-from livekit.plugins import openai
-
-llm=FallbackLLMAdapter(llm=[openai.LLM(model="gpt-4o-mini")]),
-stt=FallbackSTTAdapter(stt=[openai.STT(model="gpt-4o-mini-transcribe", use_realtime=True)]),
-tts=FallbackTTSAdapter(tts=[openai.TTS(model="gpt-4o-mini-tts", voice="ash")]),
+```diff
+             llm=FallbackLLMAdapter(
+                 llm=[
+-                    inference.LLM("openai/gpt-4.1-mini"),
+-                    inference.LLM("google/gemini-2.5-flash"),
++                    openai.LLM(model="gpt-4o-mini"),
+                 ]
+             ),
+             stt=FallbackSTTAdapter(
+                 stt=[
+-                    inference.STT("deepgram/nova-3"),
+-                    inference.STT("cartesia/ink-whisper"),
++                    openai.STT(model="gpt-4o-mini-transcribe", use_realtime=True),
+                 ]
+             ),
+             tts=FallbackTTSAdapter(
+                 tts=[
+-                    inference.TTS("cartesia"),
+-                    inference.TTS("rime/arcana"),
++                    openai.TTS(model="gpt-4o-mini-tts", voice="ash"),
+                 ]
+             ),
 ```
+
+The import goes with it: `from livekit.plugins import openai`.
 
 `use_realtime=True` is not a preference: the example wraps speech-to-text in a
 fallback adapter, and that adapter only accepts a streaming recogniser.
@@ -113,10 +142,10 @@ put them in front of anything you care about.
 ### LiveKit Cloud
 
 The same three variables, with your project's values instead. LiveKit's
-documentation is the authority here: a Cloud project's URL begins `wss://` and is
-[on the project settings
-page](https://docs.livekit.io/intro/basics/connect/), and `lk cloud auth`
-followed by `lk agent init` [writes an `.env.local` holding all
+documentation is the authority here: the URL is the project URL [shown on your
+project's settings page](https://docs.livekit.io/intro/basics/connect/), which in
+practice is a `wss://` address, and `lk cloud auth` followed by `lk agent init`
+[writes an `.env.local` holding all
 three](https://docs.livekit.io/agents/start/voice-ai/). LiveKit Cloud can also
 [hold secrets for a deployed
 agent](https://docs.livekit.io/agents/ops/deployment/) and inject them into its
@@ -165,10 +194,27 @@ python agent.py start
 
 ## 5. Talk to it
 
-Join a room and speak. LiveKit's agents playground and the CLI's `console` mode
-both work if you have a microphone. Without one, have a participant join with the
-`livekit` SDK and publish synthesised audio, leaving a pause between utterances
-long enough for the agent to take its turn.
+### Join the room the worker is serving
+
+With the worker from step 4 running, join a room and speak: LiveKit's agents
+playground does it in a browser, and it wants a microphone. Without one, have a
+participant join with the `livekit` SDK and publish synthesised audio, leaving a
+pause between utterances long enough for the agent to take its turn.
+
+### Or skip the server entirely
+
+`console` is a mode of the agents framework's own CLI — the same `agent.py`, not
+`lk` — and it runs the agent locally in your terminal against your microphone
+and speakers, with no LiveKit server and no room in the picture at all:
+
+```bash
+python agent.py console
+```
+
+It replaces `python agent.py start`, so it skips step 3 and the room in this
+step, and step 4's three `OTEL_` variables still apply — the telemetry leaves
+the same process the same way. It still wants a microphone: it gets you out of
+running a server, not out of having something to speak into.
 
 Whichever way, let the agent finish speaking before you start again, and let the
 agent's job end when you are done: the batch processor exports every few seconds
@@ -193,6 +239,7 @@ The same data is available over HTTP with the same key, which is the
 [contract the dashboard itself reads](../README.md#reading-traces-back):
 
 ```bash
+# from and to are whichever window your own run happened in
 curl -H "authorization: Bearer egma_sk_..." \
   "http://localhost:3100/v1/traces?from=2026-08-03T00:00:00Z&to=2026-08-04T00:00:00Z"
 ```
@@ -244,3 +291,13 @@ egma ships a captured export from a real run of this example under
 the dashboard with a genuine transcript and needs no LiveKit server, no model
 credentials and no microphone — which is the fastest way to see what this page
 ends at before setting any of it up.
+
+**Then look in the right window.** The capture keeps the timestamps it was
+recorded with — it ran on 2 August 2026, from `18:04:40Z` to `18:05:53Z` — and
+replaying does not move them. So the last twenty-four hours the list opens on is
+empty, and stays empty however many times you replay. Pick a window containing
+that day instead: **Last 30 days** from the control beside the heading, which
+the address carries as `window=30d`, and which reaches back that far only until
+early September 2026 — or name the interval outright with `from` and `to` on
+`GET /v1/traces`. The exact bounds are in the fixture's own
+[README](../fixtures/livekit-otlp-trace/README.md), under **Time window**.
