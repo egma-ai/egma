@@ -127,9 +127,9 @@ export type CreatedAgent = Agent & {
 
 /**
  * What an edit may touch: the two identity fields, in place. There is no
- * version to move — the spec defers agent versioning on purpose, because the
- * agent's real content lives on the provider's side where egma cannot freeze
- * it. Absent means keep; a null description clears it.
+ * version to move — the agent is deliberately unversioned, because its real
+ * content lives on the provider's side where egma cannot freeze it. Absent
+ * means keep; a null description clears it.
  */
 export type AgentChanges = {
   readonly name?: string | undefined;
@@ -604,8 +604,8 @@ export async function listAgents(
 }
 
 /**
- * Name and description, in place — there is no version to move, per the
- * spec's deferred-versioning decision, so a rename is just a rename and the
+ * Name and description, in place — there is no version to move, because the
+ * agent is deliberately unversioned, so a rename is just a rename and the
  * run history stays the change record. Editing what the caller cannot see
  * returns what reading it would have: `undefined`, with nothing disturbed.
  * An organization-scoped credential may edit, as the digital-human factory
