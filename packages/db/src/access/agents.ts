@@ -606,10 +606,13 @@ export async function listAgents(
 /**
  * Name and description, in place — there is no version to move, because the
  * agent is deliberately unversioned, so a rename is just a rename and the
- * run history stays the change record. Editing what the caller cannot see
- * returns what reading it would have: `undefined`, with nothing disturbed.
- * An organization-scoped credential may edit, as the digital-human factory
- * allows: the row names its own project, so the write has somewhere to land.
+ * run history stays the change record. A change that changes nothing is not
+ * an edit at all: nothing is written, not even `updated_at`, and the current
+ * row comes back — anything watching the timestamp hears only real changes.
+ * Editing what the caller cannot see returns what reading it would have:
+ * `undefined`, with nothing disturbed. An organization-scoped credential may
+ * edit, as the digital-human factory allows: the row names its own project,
+ * so the write has somewhere to land.
  */
 export async function updateAgent(
   auth: AuthContext,
@@ -622,6 +625,10 @@ export async function updateAgent(
     changes.name === undefined
       ? undefined
       : validName(changes.name, "an agent");
+
+  if (name === undefined && changes.description === undefined) {
+    return getAgent(auth, id);
+  }
 
   const [updated] = await db()
     .update(agent)

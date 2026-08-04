@@ -228,6 +228,21 @@ describe("updating an agent", () => {
     expect(fetched?.description).toBe("Books appointments for the clinic");
   });
 
+  it("treats an empty change as no edit: nothing written, not even updated_at", async () => {
+    const created = await createAgent(actingIn(acme.updating), {
+      name: "Unmoved",
+      description: "As it was",
+    });
+    const before = await getAgent(actingIn(acme.updating), created.id);
+
+    const unchanged = await updateAgent(actingIn(acme.updating), created.id, {});
+    expect(unchanged?.name).toBe("Unmoved");
+    expect(unchanged?.updatedAt).toEqual(before?.updatedAt);
+
+    const after = await getAgent(actingIn(acme.updating), created.id);
+    expect(after?.updatedAt).toEqual(before?.updatedAt);
+  });
+
   it("keeps what a change leaves absent, and clears a description set to null", async () => {
     const created = await createAgent(actingIn(acme.updating), {
       name: "Keeper",
