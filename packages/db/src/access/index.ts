@@ -131,6 +131,13 @@ export {
 } from "./device-authorizations.ts";
 
 export {
+  createAgent,
+  getAgent,
+  type Agent,
+  type NewAgent,
+} from "./agents.ts";
+
+export {
   cloneDigitalHuman,
   createDigitalHuman,
   deleteDigitalHuman,
