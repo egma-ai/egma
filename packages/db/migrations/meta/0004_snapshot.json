@@ -1,5 +1,5 @@
 {
-  "id": "fcda3c65-8152-49f8-a1f6-562f08c0f892",
+  "id": "36454b5d-c2c4-4cd2-9bd7-fe40c6f83b03",
   "prevId": "df01ff33-9185-490e-b168-82a137f6f7fd",
   "version": "7",
   "dialect": "postgresql",
@@ -1701,7 +1701,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "agent_id_project_id_unique": {
+          "name": "agent_id_project_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "project_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "agent_id_prefix": {
@@ -1911,6 +1920,21 @@
           "columnsTo": [
             "id",
             "organization_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "connection_agent_project_fk": {
+          "name": "connection_agent_project_fk",
+          "tableFrom": "connection",
+          "tableTo": "agent",
+          "columnsFrom": [
+            "agent_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "id",
+            "project_id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"

@@ -51,10 +51,16 @@ const COLUMNS = {
   updatedAt: agent.updatedAt,
 } as const;
 
-function validateName(name: string): void {
-  if (name.trim() === "") {
+/**
+ * The name as it will be stored: trimmed, because a handle that participates
+ * in a uniqueness check must not get around it on invisible characters.
+ */
+function validName(name: string): string {
+  const trimmed = name.trim();
+  if (trimmed === "") {
     throw new Error("an agent needs a name");
   }
+  return trimmed;
 }
 
 /**
@@ -108,7 +114,7 @@ export async function createAgent(
 
   // Everything answerable without the database is answered first; only an
   // input worth writing costs the project-membership read below.
-  validateName(input.name);
+  const name = validName(input.name);
 
   if (!(await isProjectOfOrganization(auth, projectId))) {
     throw new ProjectOutsideOrganizationError(auth.organizationId, projectId);
@@ -120,7 +126,7 @@ export async function createAgent(
       id: newId("agt"),
       organizationId: auth.organizationId,
       projectId,
-      name: input.name,
+      name,
       description: input.description ?? null,
       createdBy: auth.userId,
     })
@@ -128,7 +134,7 @@ export async function createAgent(
     .catch((error: unknown) => {
       if (nameAlreadyAlive(error)) {
         throw new Error(
-          `an agent named "${input.name}" already exists in this project`,
+          `an agent named "${name}" already exists in this project`,
         );
       }
       throw error;

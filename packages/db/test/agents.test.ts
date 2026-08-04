@@ -104,6 +104,15 @@ describe("creating an agent", () => {
     );
   });
 
+  it("stores the name trimmed, so padding cannot slip past the uniqueness rule", async () => {
+    const created = await createAgent(actingAsAcme(), { name: "  Padded  " });
+    expect(created.name).toBe("Padded");
+
+    await expect(
+      createAgent(actingAsAcme(), { name: "Padded" }),
+    ).rejects.toThrow(/already/);
+  });
+
   it("is allowed to a member and refused to a viewer, per the permission table", async () => {
     await expect(
       createAgent(actingAsAcme("viewer"), { name: "Viewer's Try" }),
@@ -225,6 +234,24 @@ describe("the database itself", () => {
            (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
          values ($1, $2, $3, $4, 'staging', 'retell', 'chat', 'hosted-broker', '{}')`,
         [newId("con"), acme.organization, globex.project, anchor.id],
+      ),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
+    );
+  });
+
+  it("rejects a connection row naming one project and another project's agent", async () => {
+    // The sharp case: the organization, the project pair, and the agent all
+    // exist — every single-column reference is satisfied, and only the
+    // agent/project pairing is wrong.
+    const homed = await createAgent(actingAsAcme(), { name: "Homed" });
+
+    await expect(
+      database.sql(
+        `insert into connection
+           (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
+         values ($1, $2, $3, $4, 'astray', 'retell', 'chat', 'hosted-broker', '{}')`,
+        [newId("con"), acme.organization, acme.secondProject, homed.id],
       ),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,

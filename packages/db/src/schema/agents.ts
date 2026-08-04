@@ -86,6 +86,9 @@ export const agent = pgTable(
       columns: [table.projectId, table.organizationId],
       foreignColumns: [project.id, project.organizationId],
     }).onDelete("cascade"),
+    // Looks redundant next to the primary key; it is the composite-foreign-key
+    // target that makes an agent/connection project mismatch unrepresentable.
+    unique("agent_id_project_id_unique").on(table.id, table.projectId),
     // Partial, so a deleted agent releases its name to the living.
     uniqueIndex("agent_project_id_name_unique")
       .on(table.projectId, table.name)
@@ -148,6 +151,15 @@ export const connection = pgTable(
       name: "connection_project_organization_fk",
       columns: [table.projectId, table.organizationId],
       foreignColumns: [project.id, project.organizationId],
+    }).onDelete("cascade"),
+    // The pairing again, one level down: a connection cannot name one project
+    // and another project's agent. With both rows' own project/organization
+    // pairs already pinned above, matching the agent's project is what makes
+    // the whole tenancy triangle agree.
+    foreignKey({
+      name: "connection_agent_project_fk",
+      columns: [table.agentId, table.projectId],
+      foreignColumns: [agent.id, agent.projectId],
     }).onDelete("cascade"),
     // Inert today; the composite-FK target that lets the future run table
     // prove its (agent_id, connection_id) actually pair.
