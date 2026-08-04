@@ -33,6 +33,8 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   api_key: "key",
   digital_human: "dh",
   digital_human_version: "dhv",
+  agent: "agt",
+  connection: "con",
 };
 
 const declaredTables = (Object.values(schema) as unknown[])
@@ -207,6 +209,9 @@ describe("every enumerated value", () => {
       { table: "invitation", column: "role" },
       { table: "api_key", column: "scope" },
       { table: "device_code", column: "status" },
+      { table: "connection", column: "type" },
+      { table: "connection", column: "modality" },
+      { table: "connection", column: "topology" },
     ];
 
     const { rows } = await database.sql<{

@@ -55,6 +55,7 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
 const CONTEXT_REQUIRING = [
   "changeRole",
   "cloneDigitalHuman",
+  "createAgent",
   "createApiKey",
   "createDigitalHuman",
   "createInvitation",
@@ -62,6 +63,7 @@ const CONTEXT_REQUIRING = [
   "deactivateUser",
   "deleteDigitalHuman",
   "editDigitalHuman",
+  "getAgent",
   "getDigitalHuman",
   "getDigitalHumanVersion",
   "listApiKeys",
