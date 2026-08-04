@@ -49,7 +49,7 @@ export const MODALITIES = ["voice", "chat"] as const;
 export type Modality = (typeof MODALITIES)[number];
 
 /**
- * Who moves first when a conversation starts. Derived from the type by the
+ * Who moves first when a simulation starts. Derived from the type by the
  * access layer, never supplied by a caller — it predicts whether an agent on a
  * laptop is reachable, and a caller's guess would just be wrong.
  */
