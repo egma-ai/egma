@@ -1,5 +1,5 @@
-import { newId } from "@egma/ids";
-import { and, asc, eq, isNull, type SQL } from "drizzle-orm";
+import { isId, newId } from "@egma/ids";
+import { and, asc, desc, eq, isNull, lt, type SQL } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
 import {
@@ -35,9 +35,10 @@ import { within } from "./within.ts";
  * Project scoping works as the digital-human factory's does. A context acting
  * in a project writes and reads there; a context acting in none — an
  * organization-scoped credential — reaches the whole customer. It creates no
- * agent, because an agent belongs to a project and a credential for the whole
- * customer is acting in none; the connection verbs it may use, because a
- * connection lands in the project its agent already names.
+ * agent and deletes none, because an agent belongs to a project and a
+ * credential for the whole customer is acting in none; the connection verbs
+ * it may use, because a connection lands in the project its agent already
+ * names.
  *
  * Credentials pass through here exactly twice: sealed on the way in (create
  * and whole-object rotation), and unsealed in `resolveConnectionCredentials`,
@@ -122,6 +123,30 @@ export type Agent = {
 /** What `createAgent` answers: the agent, wired if the create asked for it. */
 export type CreatedAgent = Agent & {
   readonly connection?: Connection;
+};
+
+/**
+ * What an edit may touch: the two identity fields, in place. There is no
+ * version to move — the agent is deliberately unversioned, because its real
+ * content lives on the provider's side where egma cannot freeze it. Absent
+ * means keep; a null description clears it.
+ */
+export type AgentChanges = {
+  readonly name?: string | undefined;
+  readonly description?: string | null | undefined;
+};
+
+export type AgentPage = {
+  readonly items: readonly Agent[];
+  /** Hand back as `cursor` to continue; absent on the last page. */
+  readonly nextCursor: string | undefined;
+};
+
+export type DeletedAgent = {
+  readonly id: string;
+  readonly projectId: string;
+  readonly name: string;
+  readonly deletedAt: Date;
 };
 
 const notDeleted: SQL = isNull(agent.deletedAt);
@@ -380,6 +405,21 @@ async function freeDefaultName(
 }
 
 /**
+ * The refusal both agent writes share, for the moment the database says a
+ * living agent in the project already holds the name.
+ */
+function refusingHeldAgentName(name: string): (error: unknown) => never {
+  return (error: unknown) => {
+    if (lostToConstraint(error, "agent_project_id_name_unique")) {
+      throw new Error(
+        `an agent named "${name}" already exists in this project`,
+      );
+    }
+    throw error;
+  };
+}
+
+/**
  * The refusal both connection writes share, for the moment the database says
  * a living connection already holds the name.
  */
@@ -471,14 +511,7 @@ export async function createAgent(
         createdBy: auth.userId,
       })
       .returning(COLUMNS)
-      .catch((error: unknown) => {
-        if (lostToConstraint(error, "agent_project_id_name_unique")) {
-          throw new Error(
-            `an agent named "${name}" already exists in this project`,
-          );
-        }
-        throw error;
-      });
+      .catch(refusingHeldAgentName(name));
 
     if (inserted === undefined) throw new Error("the agent was not written");
     return inserted;
@@ -512,6 +545,151 @@ export async function getAgent(
     .where(theAgent(auth, id))
     .limit(1);
   return row;
+}
+
+const DEFAULT_PAGE_SIZE = 50;
+const LARGEST_PAGE_SIZE = 200;
+
+/**
+ * One page of the agents the caller can reach — the acting project's, or the
+ * whole customer's for a credential acting in none — and where the next page
+ * starts.
+ *
+ * The ids are Crockford base32 of UUIDv7 under `COLLATE "C"`, so ordering by
+ * id *is* ordering by mint time and the last id of a page is the whole cursor
+ * — no second sort column, no offset to drift when rows arrive mid-scroll.
+ * Newest first, because the agent somebody is looking for is usually the one
+ * they just registered.
+ */
+export async function listAgents(
+  auth: AuthContext,
+  page?: {
+    readonly limit?: number | undefined;
+    readonly cursor?: string | undefined;
+  },
+): Promise<AgentPage> {
+  authorize(auth, "read", here(auth));
+
+  const limit = page?.limit ?? DEFAULT_PAGE_SIZE;
+  if (!Number.isInteger(limit) || limit < 1 || limit > LARGEST_PAGE_SIZE) {
+    throw new Error(`a page holds between 1 and ${LARGEST_PAGE_SIZE} agents`);
+  }
+  const cursor = page?.cursor;
+  if (cursor !== undefined && !isId("agt", cursor)) {
+    throw new Error(`"${cursor}" is not an agent id, so it cannot be a cursor`);
+  }
+
+  const olderThanCursor =
+    cursor === undefined ? undefined : lt(agent.id, cursor);
+
+  // One row beyond the page answers "is there more?" without a second query.
+  const rows = await db()
+    .select(COLUMNS)
+    .from(agent)
+    .where(
+      within(
+        auth,
+        agent,
+        and(notDeleted, inActingProject(auth), olderThanCursor),
+      ),
+    )
+    .orderBy(desc(agent.id))
+    .limit(limit + 1);
+
+  const items = rows.slice(0, limit);
+  return {
+    items,
+    nextCursor: rows.length > limit ? items[items.length - 1]?.id : undefined,
+  };
+}
+
+/**
+ * Name and description, in place — there is no version to move, because the
+ * agent is deliberately unversioned, so a rename is just a rename and the
+ * run history stays the change record. A change that changes nothing is not
+ * an edit at all: nothing is written, not even `updated_at`, and the current
+ * row comes back — anything watching the timestamp hears only real changes.
+ * Editing what the caller cannot see returns what reading it would have:
+ * `undefined`, with nothing disturbed. An organization-scoped credential may
+ * edit, as the digital-human factory allows: the row names its own project,
+ * so the write has somewhere to land.
+ */
+export async function updateAgent(
+  auth: AuthContext,
+  id: string,
+  changes: AgentChanges,
+): Promise<Agent | undefined> {
+  authorize(auth, "configure_agents", here(auth));
+
+  const name =
+    changes.name === undefined
+      ? undefined
+      : validName(changes.name, "an agent");
+
+  if (name === undefined && changes.description === undefined) {
+    return getAgent(auth, id);
+  }
+
+  const [updated] = await db()
+    .update(agent)
+    .set({
+      ...(name === undefined ? {} : { name }),
+      ...(changes.description === undefined
+        ? {}
+        : { description: changes.description }),
+      updatedAt: new Date(),
+    })
+    .where(theAgent(auth, id))
+    .returning(COLUMNS)
+    .catch(
+      // Only a name change can lose to the name constraint.
+      name === undefined
+        ? (error: unknown) => {
+            throw error;
+          }
+        : refusingHeldAgentName(name),
+    );
+
+  return updated;
+}
+
+/**
+ * The soft-delete marker, and only the marker — on the agent alone. Every
+ * connection verb walks through `visibleAgent` first, so marking the agent is
+ * what makes its connections answer nothing through every read at once; their
+ * own rows stay exactly as they were, for the deletion worker to sweep. The
+ * agent's name returns to the living, per the partial unique index.
+ *
+ * Like create, this refuses a credential acting in no project. An edit lands
+ * on a row that already names its own project; a delete decides the agent
+ * should stop appearing in one, and emptying a project is an act taken from
+ * inside it — the digital-human factory's stance, held here.
+ */
+export async function deleteAgent(
+  auth: AuthContext,
+  id: string,
+): Promise<DeletedAgent | undefined> {
+  authorize(auth, "configure_agents", here(auth));
+
+  if (auth.projectId === undefined) {
+    throw new Error(
+      "deleting an agent happens inside its project, and this credential is for the whole organization and acting in none",
+    );
+  }
+
+  const deletedAt = new Date();
+  const [row] = await db()
+    .update(agent)
+    .set({ deletedAt, updatedAt: deletedAt })
+    .where(theAgent(auth, id))
+    .returning({
+      id: agent.id,
+      projectId: agent.projectId,
+      name: agent.name,
+    });
+
+  if (row === undefined) return undefined;
+  return { ...row, deletedAt };
 }
 
 /**
