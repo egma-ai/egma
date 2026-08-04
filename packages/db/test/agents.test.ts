@@ -231,6 +231,58 @@ describe("the database itself", () => {
     );
   });
 
+  it("rejects a connection row whose credentials and hint disagree", async () => {
+    const sealed = await createAgent(actingAsAcme(), { name: "Sealed" });
+
+    const halfSealed = (credentials: string | null, hint: string | null) =>
+      database.sql(
+        `insert into connection
+           (id, organization_id, project_id, agent_id, name, type, modality, topology, config, credentials, credentials_hint)
+         values ($1, $2, $3, $4, $5, 'retell', 'chat', 'hosted-broker', '{}', $6, $7)`,
+        [
+          newId("con"),
+          acme.organization,
+          acme.project,
+          sealed.id,
+          credentials === null ? "hint-alone" : "envelope-alone",
+          credentials,
+          hint,
+        ],
+      );
+
+    await expect(halfSealed("v1.iv.ciphertext.tag", null)).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+    await expect(halfSealed(null, "wxyz")).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+  });
+
+  it("refuses a second live connection holding a name, and a removed one releases it", async () => {
+    const wired = await createAgent(actingAsAcme(), { name: "Wired" });
+
+    const staging = (id: string) =>
+      database.sql(
+        `insert into connection
+           (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
+         values ($1, $2, $3, $4, 'staging', 'retell', 'chat', 'hosted-broker', '{}')`,
+        [id, acme.organization, acme.project, wired.id],
+      );
+
+    const first = newId("con");
+    await staging(first);
+
+    await expect(staging(newId("con"))).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.uniqueViolation,
+    );
+
+    await database.sql(
+      "update connection set deleted_at = now() where id = $1",
+      [first],
+    );
+    await expect(staging(newId("con"))).resolves.toBeDefined();
+  });
+
   it("carries UNIQUE (id, agent_id) on connection — the future run table's composite-FK target", async () => {
     const { rows } = await database.sql<{ definition: string }>(
       `select pg_get_constraintdef(oid) as definition

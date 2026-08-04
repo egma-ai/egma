@@ -121,7 +121,7 @@ export const connection = pgTable(
      * one opener is the access layer's credential resolver.
      */
     credentials: text("credentials"),
-    /** The last characters of the secret, kept so a human can tell keys apart. */
+    /** The last characters of the secret, kept so a person can tell keys apart. */
     credentialsHint: text("credentials_hint"),
     /**
      * What this specific target turned out to support — discovered by the
