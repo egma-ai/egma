@@ -9,7 +9,10 @@ const config = loadConfig();
 // manual step, and two instances starting at once cannot both apply.
 const migrations = await runMigrations(config.databaseUrl);
 
-connect({ databaseUrl: config.databaseUrl });
+connect({
+  databaseUrl: config.databaseUrl,
+  encryptionKey: config.encryptionKey,
+});
 
 const { app } = buildApi({ config });
 app.log.info(

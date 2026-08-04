@@ -71,6 +71,7 @@ async function startApi(databaseUrl: string, apiPort: number, baseUrl: string) {
     config: loadConfig({
       DATABASE_URL: databaseUrl,
       EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
+      EGMA_ENCRYPTION_KEY: "0123456789abcdef".repeat(4),
       EGMA_BASE_URL: baseUrl,
       EGMA_SINGLE_ORGANIZATION: "false",
     }),

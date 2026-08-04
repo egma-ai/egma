@@ -18,19 +18,34 @@ import {
 const enough = {
   DATABASE_URL: "postgres://x/y",
   EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
+  EGMA_ENCRYPTION_KEY: "0123456789abcdef".repeat(4),
 };
 
 describe("configuration", () => {
   it("refuses to start without a database to talk to", () => {
-    expect(() => loadConfig({ EGMA_AUTH_SECRET: "s" })).toThrow(
+    expect(() => loadConfig({ ...enough, DATABASE_URL: "" })).toThrow(
       /DATABASE_URL is required/,
     );
   });
 
   it("refuses to start without a secret to sign sessions with", () => {
-    expect(() => loadConfig({ DATABASE_URL: "postgres://x/y" })).toThrow(
+    expect(() => loadConfig({ ...enough, EGMA_AUTH_SECRET: "" })).toThrow(
       /EGMA_AUTH_SECRET is required/,
     );
+  });
+
+  it("refuses to start without a well-formed encryption key", () => {
+    expect(() => loadConfig({ ...enough, EGMA_ENCRYPTION_KEY: "" })).toThrow(
+      /EGMA_ENCRYPTION_KEY is required/,
+    );
+    // The right length and a fraction of the entropy: a passphrase is refused
+    // on its alphabet, not waved through on its byte count.
+    expect(() =>
+      loadConfig({
+        ...enough,
+        EGMA_ENCRYPTION_KEY: "not-hex-but-sixty-four-characters-long-oh-dear!!".padEnd(64, "x"),
+      }),
+    ).toThrow(/64 hex characters/);
   });
 
   it("refuses a port that is not a port", () => {

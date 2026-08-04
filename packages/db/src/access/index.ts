@@ -131,11 +131,27 @@ export {
 } from "./device-authorizations.ts";
 
 export {
+  addConnection,
   createAgent,
   getAgent,
+  getConnection,
+  listConnections,
+  removeConnection,
+  resolveConnectionCredentials,
+  updateConnection,
   type Agent,
+  type Connection,
+  type ConnectionChanges,
+  type CreatedAgent,
   type NewAgent,
+  type NewConnection,
+  type RemovedConnection,
 } from "./agents.ts";
+export type {
+  ConnectionType,
+  Modality,
+  Topology,
+} from "../schema/agents.ts";
 
 export {
   cloneDigitalHuman,
