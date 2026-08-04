@@ -243,31 +243,39 @@ async function visibleAgent(
 }
 
 /**
- * The shape guard on every read. Stored jsonb comes back `unknown`, and a row
- * somebody hand-edited must fail here, loudly and naming itself, rather than
- * leak into a caller as a config that isn't one. Shape only, deliberately:
- * the registry's demands may tighten later, and an old row must stay readable
- * exactly as it was written.
+ * The shape guard on every read of stored key-value data. Jsonb — and an
+ * opened envelope — comes back `unknown`, and a row somebody hand-edited must
+ * fail here, loudly and naming itself, rather than leak into a caller as a
+ * shape it isn't. Shape only, deliberately: the registry's demands may
+ * tighten later, and an old row must stay readable exactly as it was written.
  */
+function stringRecordFromRow(
+  value: unknown,
+  malformed: () => Error,
+): Record<string, string> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw malformed();
+  }
+  const record: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry !== "string") throw malformed();
+    record[key] = entry;
+  }
+  return record;
+}
+
 function configFromRow(
   value: unknown,
   connectionId: string,
 ): Record<string, string> {
-  const malformed = () =>
-    new Error(
-      `connection ${connectionId} holds config in a shape egma never writes; ` +
-        `the row needs repairing before anybody can read it`,
-    );
-
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw malformed();
-  }
-  const config: Record<string, string> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (typeof entry !== "string") throw malformed();
-    config[key] = entry;
-  }
-  return config;
+  return stringRecordFromRow(
+    value,
+    () =>
+      new Error(
+        `connection ${connectionId} holds config in a shape egma never ` +
+          `writes; the row needs repairing before anybody can read it`,
+      ),
+  );
 }
 
 type ConnectionRow = {
@@ -304,13 +312,13 @@ function connectionFromRow(row: ConnectionRow): Connection {
 }
 
 /**
- * A new connection with everything the registry decides settled: modality
- * checked against the type, config gated key by key, credentials sealed or
- * refused, topology derived. Pure validation — nothing here touches the
- * database, so a bad payload dies before anything is written, wherever the
- * caller is in a transaction.
+ * A new connection once the registry has had its say: modality checked
+ * against the type, config gated key by key, credentials sealed or refused,
+ * topology derived. The name may still be absent — defaulting it takes a
+ * read, and this shape exists so that read can wait for the insert's own
+ * transaction.
  */
-function admitConnection(input: NewConnection): {
+type AdmittedConnection = {
   readonly name: string | undefined;
   readonly type: ConnectionType;
   readonly modality: Modality;
@@ -319,7 +327,13 @@ function admitConnection(input: NewConnection): {
   readonly config: Record<string, string>;
   readonly credentials: string | null;
   readonly credentialsHint: string | null;
-} {
+};
+
+/**
+ * Pure validation — nothing here touches the database, so a bad payload dies
+ * before anything is written, wherever the caller is in a transaction.
+ */
+function admitConnection(input: NewConnection): AdmittedConnection {
   const descriptor = descriptorOf(input.type);
   const modality = validModality(input.type, input.modality);
   const config = validConfig(input.type, input.config);
@@ -366,6 +380,21 @@ async function freeDefaultName(
 }
 
 /**
+ * The refusal both connection writes share, for the moment the database says
+ * a living connection already holds the name.
+ */
+function refusingHeldConnectionName(name: string): (error: unknown) => never {
+  return (error: unknown) => {
+    if (lostToConstraint(error, "connection_agent_id_name_unique")) {
+      throw new Error(
+        `a connection named "${name}" already exists on this agent`,
+      );
+    }
+    throw error;
+  };
+}
+
+/**
  * The insert both create paths share, wherever the caller is in a
  * transaction. The input has already passed `admitConnection`; this owns the
  * name default and the friendly refusal when a living connection holds the
@@ -375,7 +404,7 @@ async function insertConnection(
   on: Queryable,
   auth: AuthContext,
   home: { readonly id: string; readonly projectId: string },
-  admitted: ReturnType<typeof admitConnection>,
+  admitted: AdmittedConnection,
 ): Promise<Connection> {
   const name =
     admitted.name ?? (await freeDefaultName(on, home.id, admitted.type));
@@ -398,14 +427,7 @@ async function insertConnection(
       createdBy: auth.userId,
     })
     .returning(CONNECTION_COLUMNS)
-    .catch((error: unknown) => {
-      if (lostToConstraint(error, "connection_agent_id_name_unique")) {
-        throw new Error(
-          `a connection named "${name}" already exists on this agent`,
-        );
-      }
-      throw error;
-    });
+    .catch(refusingHeldConnectionName(name));
 
   if (inserted === undefined) throw new Error("the connection was not written");
   return connectionFromRow(inserted);
@@ -631,14 +653,14 @@ export async function updateConnection(
     })
     .where(theConnection(auth, agentId, connectionId))
     .returning(CONNECTION_COLUMNS)
-    .catch((error: unknown) => {
-      if (lostToConstraint(error, "connection_agent_id_name_unique")) {
-        throw new Error(
-          `a connection named "${name}" already exists on this agent`,
-        );
-      }
-      throw error;
-    });
+    .catch(
+      // Only a name change can lose to the name constraint.
+      name === undefined
+        ? (error: unknown) => {
+            throw error;
+          }
+        : refusingHeldConnectionName(name),
+    );
 
   return updated === undefined ? undefined : connectionFromRow(updated);
 }
@@ -701,19 +723,12 @@ export async function resolveConnectionCredentials(
   if (row === undefined) return undefined;
   if (row.credentials === null) return null;
 
-  const opened = openCredentials(row.credentials);
-  const malformed = () =>
-    new Error(
-      `connection ${row.id} holds credentials in a shape egma never writes; ` +
-        `the row needs repairing before anybody can use it`,
-    );
-  if (typeof opened !== "object" || opened === null || Array.isArray(opened)) {
-    throw malformed();
-  }
-  const credentials: Record<string, string> = {};
-  for (const [key, value] of Object.entries(opened)) {
-    if (typeof value !== "string") throw malformed();
-    credentials[key] = value;
-  }
-  return credentials;
+  return stringRecordFromRow(
+    openCredentials(row.credentials),
+    () =>
+      new Error(
+        `connection ${row.id} holds credentials in a shape egma never ` +
+          `writes; the row needs repairing before anybody can use it`,
+      ),
+  );
 }

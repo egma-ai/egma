@@ -6,8 +6,7 @@ import {
 
 /**
  * How a customer's provider credential is sealed before it touches a row, and
- * the one place it is ever unsealed. The whole decision is ADR-0003; the shape
- * of it here:
+ * the one place it is ever unsealed.
  *
  * A connection's credential cannot be hashed — egma must replay it to the
  * provider every time a simulation starts — so it is encrypted in this process

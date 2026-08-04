@@ -17,11 +17,11 @@ export type Config = {
   readonly authSecret: string;
   /**
    * What connection credentials are sealed under before they touch a row —
-   * 32 random bytes as 64 hex characters (`openssl rand -hex 32`), per
-   * ADR-0003. Malformed or absent means the service will not start: a
-   * deployment that stored customers' provider keys under a weak or missing
-   * key would be quietly under-encrypted, which is the one failure nobody
-   * notices until the database leaks.
+   * 32 random bytes as 64 hex characters (`openssl rand -hex 32`). Malformed
+   * or absent means the service will not start: a deployment that stored
+   * customers' provider keys under a weak or missing key would be quietly
+   * under-encrypted, which is the one failure nobody notices until the
+   * database leaks.
    */
   readonly encryptionKey: string;
   /**

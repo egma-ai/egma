@@ -243,6 +243,18 @@ describe("what the registry refuses at the door, by name", () => {
       ),
     ).rejects.toThrow(/needs credentials/);
   });
+
+  it("refuses a credential so short its last-4 hint would give it away", async () => {
+    const agentId = await agentNamed("Tiny Secret");
+
+    await expect(
+      addConnection(
+        actingAsAcme(),
+        agentId,
+        retellConnection({ credentials: { apiKey: "abcd" } }),
+      ),
+    ).rejects.toThrow(/at least 8 characters/);
+  });
 });
 
 describe("the sealed credential", () => {
@@ -493,6 +505,9 @@ describe("reaching a connection through the wrong door", () => {
     ).toBeUndefined();
     expect(
       await removeConnection(actingAsAcme(), neighbour, added?.id ?? ""),
+    ).toBeUndefined();
+    expect(
+      await resolveConnectionCredentials(actingAsAcme(), neighbour, added?.id ?? ""),
     ).toBeUndefined();
   });
 

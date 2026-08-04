@@ -75,6 +75,9 @@ function nonEmptyString(key: string, value: unknown): string {
  */
 const E164 = /^\+[1-9]\d{1,14}$/;
 
+/** The floor under a credential field, so the last-4 hint stays a hint. */
+const SHORTEST_CREDENTIAL = 8;
+
 function e164PhoneNumber(key: string, value: unknown): string {
   const candidate = typeof value === "string" ? value.trim() : "";
   if (!E164.test(candidate)) {
@@ -219,6 +222,15 @@ export function validCredentials(
     if (typeof value !== "string" || value.trim() === "") {
       throw new Error(
         `a ${type} connection's credentials need ${field} to be a non-empty string`,
+      );
+    }
+    // Real provider keys are tens of characters, so anything this short is a
+    // paste gone wrong — and the stored last-4 hint must stay a hint, never
+    // most of the secret it hints at.
+    if (value.trim().length < SHORTEST_CREDENTIAL) {
+      throw new Error(
+        `a ${type} connection's credentials need ${field} to be at least ` +
+          `${SHORTEST_CREDENTIAL} characters`,
       );
     }
     sealed[field] = value;

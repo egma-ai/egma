@@ -17,10 +17,10 @@ export type ConnectOptions = {
   readonly maxConnections?: number;
   /**
    * `EGMA_ENCRYPTION_KEY`: 32 random bytes as 64 hex characters, under which
-   * connection credentials are sealed before they touch a row (ADR-0003). It
-   * arrives here — the same door the database URL does — and a malformed one
-   * refuses to connect at all, so a misconfigured deployment is loud at boot.
-   * Without one, everything runs except sealing and unsealing a credential.
+   * connection credentials are sealed before they touch a row. It arrives
+   * here — the same door the database URL does — and a malformed one refuses
+   * to connect at all, so a misconfigured deployment is loud at boot. Without
+   * one, everything runs except sealing and unsealing a credential.
    */
   readonly encryptionKey?: string;
 };
