@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createAgent,
+  deleteAgent,
   getAgent,
   NotPermittedError,
   ProjectOutsideOrganizationError,
@@ -20,10 +21,9 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
  * The factory functions are the seam: every assertion goes through create and
- * get, never through table internals. Raw SQL appears only in fixtures, in the
- * soft-delete marks made by hand because the delete verb has not landed yet,
- * and in the inserts that bypass the module on purpose to show the database
- * refuses what the module never attempts.
+ * get, never through table internals. Raw SQL appears only in fixtures and in
+ * the inserts that bypass the module on purpose to show the database refuses
+ * what the module never attempts.
  */
 
 let database: MigratedDatabase;
@@ -176,10 +176,7 @@ describe("an agent's name", () => {
   it("is released by a deleted agent, which also vanishes from fetch", async () => {
     const retiring = await createAgent(actingAsAcme(), { name: "Retiring" });
 
-    // The delete verb has not landed yet; until then the mark is made by hand.
-    await database.sql("update agent set deleted_at = now() where id = $1", [
-      retiring.id,
-    ]);
+    await deleteAgent(actingAsAcme(), retiring.id);
 
     expect(await getAgent(actingAsAcme(), retiring.id)).toBeUndefined();
 

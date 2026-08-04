@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   addConnection,
   createAgent,
+  deleteAgent,
   getConnection,
   listConnections,
   NotPermittedError,
@@ -565,11 +566,7 @@ describe("reaching a connection through the wrong door", () => {
     const agentId = await agentNamed("Doomed");
     const added = await addConnection(actingAsAcme(), agentId, retellConnection());
 
-    // The agent's delete verb is the next issue's; until then the mark is made
-    // by hand.
-    await database.sql("update agent set deleted_at = now() where id = $1", [
-      agentId,
-    ]);
+    await deleteAgent(actingAsAcme(), agentId);
 
     expect(await listConnections(actingAsAcme(), agentId)).toBeUndefined();
     expect(
