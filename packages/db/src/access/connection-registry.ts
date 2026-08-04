@@ -219,7 +219,11 @@ export function validCredentials(
   const sealed: Record<string, string> = {};
   for (const field of rule.fields) {
     const value = (credentials as Record<string, unknown>)[field];
-    if (typeof value !== "string" || value.trim() === "") {
+    // Stored trimmed, like every config gate: a key pasted with whitespace
+    // would pass the checks, seal the padding, and fail at the provider with
+    // nothing to say the stored value was the problem.
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    if (trimmed === "") {
       throw new Error(
         `a ${type} connection's credentials need ${field} to be a non-empty string`,
       );
@@ -227,13 +231,13 @@ export function validCredentials(
     // Real provider keys are tens of characters, so anything this short is a
     // paste gone wrong — and the stored last-4 hint must stay a hint, never
     // most of the secret it hints at.
-    if (value.trim().length < SHORTEST_CREDENTIAL) {
+    if (trimmed.length < SHORTEST_CREDENTIAL) {
       throw new Error(
         `a ${type} connection's credentials need ${field} to be at least ` +
           `${SHORTEST_CREDENTIAL} characters`,
       );
     }
-    sealed[field] = value;
+    sealed[field] = trimmed;
   }
 
   return { sealed, hint: sealed[rule.hintField]?.slice(-4) ?? "" };

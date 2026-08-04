@@ -330,6 +330,23 @@ describe("the sealed credential", () => {
     ).rejects.toThrow(NotPermittedError);
   });
 
+  it("stores the key trimmed, so a padded paste still authenticates", async () => {
+    const agentId = await agentNamed("Padded Key");
+    const added = await addConnection(
+      actingAsAcme(),
+      agentId,
+      retellConnection({ credentials: { apiKey: "  retell-secret-padded-1234  " } }),
+    );
+
+    expect(added?.credentialsHint).toBe("1234");
+    const resolved = await resolveConnectionCredentials(
+      actingAsAcme(),
+      agentId,
+      added?.id ?? "",
+    );
+    expect(resolved).toEqual({ apiKey: "retell-secret-padded-1234" });
+  });
+
   it("rotates by replacing the object whole, resealing envelope and hint", async () => {
     const agentId = await agentNamed("Rotated");
     const added = await addConnection(actingAsAcme(), agentId, retellConnection());
