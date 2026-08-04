@@ -89,6 +89,13 @@ export async function createMigratedDatabase(
 }
 
 /**
+ * The master key the connected module seals credentials under in tests. Fixed
+ * and well-formed — 32 bytes as 64 hex characters — because the tests assert
+ * what sealing does, never that this particular key is secret.
+ */
+export const TEST_ENCRYPTION_KEY = "0123456789abcdef".repeat(4);
+
+/**
  * A migrated database that the data-access module is connected to, for the
  * tests that go through it. The raw `sql` handle stays available so a test can
  * check what actually landed in the table without asking the module to tell it.
@@ -97,7 +104,7 @@ export async function createConnectedDatabase(
   label: string,
 ): Promise<MigratedDatabase> {
   const database = await createMigratedDatabase(label);
-  connect({ databaseUrl: database.url });
+  connect({ databaseUrl: database.url, encryptionKey: TEST_ENCRYPTION_KEY });
 
   return {
     ...database,
