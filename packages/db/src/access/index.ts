@@ -58,9 +58,11 @@ export {
   AlreadyBelongsToAnOrganizationError,
   LastAdminError,
   NotPermittedError,
+  PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
   TraceStoreRefusedError,
   UnreadableTraceQueryError,
+  type TestNamingPersona,
 } from "./errors.ts";
 
 export {
@@ -208,3 +210,20 @@ export {
   type PersonaVersion,
   type VoiceProvider,
 } from "./personas.ts";
+
+export {
+  cloneTest,
+  createTest,
+  deleteTest,
+  editTest,
+  getTest,
+  getTestVersion,
+  listTests,
+  type DeletedTest,
+  type NewTest,
+  type Test,
+  type TestChanges,
+  type TestPage,
+  type TestPersona,
+  type TestVersion,
+} from "./tests.ts";

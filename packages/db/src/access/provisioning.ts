@@ -1,7 +1,10 @@
 import { newId } from "@egma/ids";
+import { eq } from "drizzle-orm";
 
-import { db } from "../client.ts";
+import { db, type Queryable } from "../client.ts";
+import { persona, personaVersion } from "../schema/personas.ts";
 import { organization, project } from "../schema/tenancy.ts";
+import type { PersonaTraits } from "./personas.ts";
 import type { Membership } from "./memberships.ts";
 import { insertMembership } from "./memberships.ts";
 
@@ -12,9 +15,76 @@ import { insertMembership } from "./memberships.ts";
  * and the only rows it can touch are the ones it just made.
  *
  * Signup either fully succeeds or fully fails. An account with an organization
- * but no project is a developer with no way forward, so the organization, its
- * first project and the owner's membership are one transaction.
+ * but no project is a developer with no way forward, and a project with no
+ * persona in it is a first test waiting on one, so the organization, its first
+ * project, that project's starter persona and the owner's membership are one
+ * transaction.
  */
+
+/**
+ * Who the starter persona is.
+ *
+ * **This is a placeholder, and it is waiting to be replaced.** Which
+ * personality a new project should meet, and which voice should say it, is a
+ * product decision that has not been made yet; what is below is deliberately
+ * plain, so that it says nothing about any industry, accent or manner while
+ * still being a persona the factory would accept.
+ */
+const STARTER_NAME = "Starter";
+const STARTER_DESCRIPTION =
+  "The persona a test gets when it names none. Rename them, rewrite them, or point the project at somebody else.";
+const STARTER_TRAITS: PersonaTraits = {
+  personality: "Speaks plainly, stays patient, and asks one question at a time.",
+  language: "en-US",
+  voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
+};
+
+/**
+ * The starter persona, written into a project that exists but has nobody
+ * in it yet.
+ *
+ * These are the same two inserts `createPersona` makes, in the same order
+ * and the same shape: the identity row first, naming a version that does not
+ * exist yet, because that pointer's constraint is deferred and Postgres checks
+ * it at commit. They are made here rather than by calling that function,
+ * because it opens a transaction of its own and takes an `AuthContext` — and
+ * at this moment there is neither.
+ *
+ * The two write shapes are held together by a test rather than the compiler:
+ * `provisioning-starter-persona.test.ts` compares these rows against ones
+ * `createPersona` wrote, and fails on a column only one of them fills.
+ */
+async function insertStarterPersona(
+  on: Queryable,
+  values: {
+    readonly organizationId: string;
+    readonly projectId: string;
+    readonly createdBy: string;
+  },
+): Promise<string> {
+  const id = newId("prs");
+  const versionId = newId("prsv");
+
+  await on.insert(persona).values({
+    id,
+    organizationId: values.organizationId,
+    projectId: values.projectId,
+    name: STARTER_NAME,
+    description: STARTER_DESCRIPTION,
+    currentVersionId: versionId,
+    createdBy: values.createdBy,
+  });
+
+  await on.insert(personaVersion).values({
+    id: versionId,
+    personaId: id,
+    version: 1,
+    traits: STARTER_TRAITS,
+    createdBy: values.createdBy,
+  });
+
+  return id;
+}
 
 export type NewOrganization = {
   /** The person the organization is being created for. They become its admin. */
@@ -51,6 +121,23 @@ export async function provisionOrganization(
       slug: input.projectSlug,
       createdBy: input.ownerUserId,
     });
+
+    // The project's first persona, and the project pointed at them, so a
+    // developer's first test never waits on authoring one. In this transaction
+    // like everything else, on the same terms the project itself is: a project
+    // pointing at nobody would refuse the first test written in it.
+    const starterId = await insertStarterPersona(tx, {
+      organizationId,
+      projectId,
+      createdBy: input.ownerUserId,
+    });
+
+    // Its own statement because the project has to exist before a persona
+    // can name it, and this reference back is not the deferred one.
+    await tx
+      .update(project)
+      .set({ defaultPersonaId: starterId })
+      .where(eq(project.id, projectId));
 
     // Everyone is an admin in v1 and roles are invisible, but the permission
     // map is real from the first commit. The creator of an organization is its

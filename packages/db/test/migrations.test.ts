@@ -206,9 +206,13 @@ describe("the persona rename (0005)", () => {
     await database.drop();
   });
 
-  it("is the one pending migration on a pre-rename database", async () => {
+  it("leads what is still pending on a pre-rename database", async () => {
     const result = await runMigrations(database.url);
-    expect(result.applied).toEqual(["0005_rename_digital_human_to_persona.sql"]);
+    // Everything before the rename is already applied and must not run twice,
+    // so the rename is the first thing left. Whatever was numbered after it
+    // follows, which is why this names the leader rather than the whole list.
+    expect(result.applied[0]).toBe("0005_rename_digital_human_to_persona.sql");
+    expect(result.applied.every((name) => name >= "0005")).toBe(true);
   });
 
   it("carries the rows across: dh_ becomes prs_, dhv_ becomes prsv_, same bodies", async () => {

@@ -7,9 +7,13 @@ import {
   personaVersion,
 } from "../schema/personas.ts";
 import type { AuthContext } from "./context.ts";
-import { ProjectOutsideOrganizationError } from "./errors.ts";
+import {
+  PersonaNamedByTestsError,
+  ProjectOutsideOrganizationError,
+} from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
+import { liveTestsNamingPersona } from "./tests.ts";
 import { within } from "./within.ts";
 
 /**
@@ -587,6 +591,10 @@ export type DeletedPersona = {
  * the run itself is kept. Sweeping orphaned versions is the deletion worker's
  * job, not this function's.
  *
+ * **Refused while the current version of a live test names them**, naming every
+ * test standing in the way; `PersonaNamedByTestsError` says why. Historical
+ * versions never block, and neither does a deleted test.
+ *
  * Like create, this refuses a credential acting in no project. An edit lands
  * on a row that already names its own project; a delete decides the persona
  * should stop appearing in one, and emptying a project is an act taken
@@ -605,16 +613,42 @@ export async function deletePersona(
   }
 
   const deletedAt = new Date();
-  const [row] = await db()
-    .update(persona)
-    .set({ deletedAt, updatedAt: deletedAt })
-    .where(thePersona(auth, id))
-    .returning({
-      id: persona.id,
-      projectId: persona.projectId,
-      name: persona.name,
-    });
+  return db().transaction(async (tx) => {
+    // Locked before the tests naming them are counted, and held until this
+    // transaction ends, so nothing can come to name them between the count and
+    // the write — which a count taken on this transaction's own snapshot could
+    // not promise. The other half is the shared lock a test being written takes
+    // on this same row, which `validateNamedPersonas` in `tests.ts`
+    // explains: the two modes conflict, so one of the two writes always waits
+    // for the other and then sees how it ended.
+    const [locked] = await tx
+      .select({ id: persona.id })
+      .from(persona)
+      .where(thePersona(auth, id))
+      .limit(1)
+      .for("update");
 
-  if (row === undefined) return undefined;
-  return { ...row, deletedAt };
+    if (locked === undefined) return undefined;
+
+    const blocking = await liveTestsNamingPersona(tx, locked.id);
+    if (blocking.length > 0) {
+      throw new PersonaNamedByTestsError(locked.id, blocking);
+    }
+
+    // A bare `eq` on an id that just came off the tenancy-checked row locked
+    // above, in this same transaction, so it reaches no further than that check
+    // already did — the move `editPersona` makes, for the same reason.
+    const [row] = await tx
+      .update(persona)
+      .set({ deletedAt, updatedAt: deletedAt })
+      .where(eq(persona.id, locked.id))
+      .returning({
+        id: persona.id,
+        projectId: persona.projectId,
+        name: persona.name,
+      });
+
+    if (row === undefined) throw new Error("the persona was not written");
+    return { ...row, deletedAt };
+  });
 }

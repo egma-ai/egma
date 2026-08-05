@@ -6,8 +6,10 @@ import {
   pgTable,
   text,
   unique,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
+import { persona } from "./personas.ts";
 import { user } from "./identity.ts";
 import {
   API_KEY_SCOPES,
@@ -76,6 +78,35 @@ export const project = pgTable(
       .references(() => organization.id, { onDelete: "restrict" }),
     name: text("name").notNull(),
     slug: text("slug").notNull(),
+    /**
+     * The persona a test created naming none receives, so authoring a
+     * first test never waits on authoring a persona. An ordinary row the
+     * project points at, editable like any other. Nullable because the pointer
+     * is set after the project exists, and because a row it named can be swept
+     * away — a test then has to name its own until somebody points it again.
+     *
+     * **It lives on the project, and this is the one place the layering
+     * bends.** Every other table below the tenancy tables points *up* at a
+     * project; this column points down at a product table, so this file has to
+     * import one. The default belongs to the project rather than to any test:
+     * it is one answer for the whole product area, changed in one place, and
+     * putting it anywhere else would mean each test carrying a copy of a
+     * decision nobody made per test.
+     *
+     * **The resulting import cycle is deliberate and safe**, and it is worth
+     * knowing why before either file is rearranged. `persona` names
+     * `project` for its tenancy and `project` now names `persona` for
+     * this pointer. Neither reads the other while either is still being
+     * evaluated: a column's `references` takes a function rather than a
+     * column, and a table's constraint list is a function the table definition
+     * stores instead of calling. Both are only run later, once every table in
+     * this schema exists. Replace either with a value read at definition time
+     * and the cycle stops being safe.
+     */
+    defaultPersonaId: idText("default_persona_id").references(
+      (): AnyPgColumn => persona.id,
+      { onDelete: "set null" },
+    ),
     deletedAt: moment("deleted_at"),
     createdBy: idText("created_by").references(() => user.id, {
       onDelete: "set null",

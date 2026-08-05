@@ -75,6 +75,57 @@ export class LastAdminError extends Error {
   }
 }
 
+/** A test, as a refusal names it: enough to go and find it and fix it. */
+export type TestNamingPersona = {
+  readonly id: string;
+  readonly name: string;
+};
+
+/** How many blocking tests the message spells out before it starts counting. */
+const TESTS_NAMED_IN_MESSAGE = 5;
+
+function spelledOutAndCounted(tests: readonly TestNamingPersona[]): string {
+  const named = tests
+    .slice(0, TESTS_NAMED_IN_MESSAGE)
+    .map((test) => `${test.id} "${test.name}"`)
+    .join(", ");
+  const rest = tests.length - TESTS_NAMED_IN_MESSAGE;
+  return rest > 0 ? `${named}, and ${rest} more` : named;
+}
+
+/**
+ * A persona's delete was refused because live tests still name them.
+ *
+ * A test names the people who call about its scenario, and executing it
+ * produces one simulation per person named. Letting the delete through would
+ * leave each of those tests quietly running one simulation fewer than it says
+ * it runs — a suite going green while the case somebody wrote it for never
+ * ran. So the delete is refused, and the developer decides what those tests
+ * should say instead.
+ *
+ * It carries every blocking test, because the fix is to go and edit each one
+ * and a refusal that only said "something names them" would send somebody
+ * hunting. The message spells out the first few and counts the rest: the
+ * persona a project points at by default is named by every test created
+ * without naming one, so an uncapped message would be a page long.
+ */
+export class PersonaNamedByTestsError extends Error {
+  readonly personaId: string;
+  /** Every live test whose current version names them, oldest first. */
+  readonly tests: readonly TestNamingPersona[];
+
+  constructor(personaId: string, tests: readonly TestNamingPersona[]) {
+    super(
+      `persona ${personaId} is named by ${tests.length} live ${
+        tests.length === 1 ? "test" : "tests"
+      } (${spelledOutAndCounted(tests)}), and a test must never silently lose one of the people who call about it; name somebody else on those tests, or delete them, and then delete the persona`,
+    );
+    this.name = "PersonaNamedByTestsError";
+    this.personaId = personaId;
+    this.tests = tests;
+  }
+}
+
 /**
  * The trace store read a batch of spans and refused it, and would refuse the
  * identical bytes again.
