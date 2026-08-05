@@ -1,5 +1,6 @@
 import { newId } from "@egma/ids";
 import {
+  createDigitalHuman,
   createTest,
   editDigitalHuman,
   getDigitalHuman,
@@ -13,6 +14,7 @@ import {
   createConnectedDatabase,
   type MigratedDatabase,
 } from "./support/database.ts";
+import { seedUser } from "./support/tenancy.ts";
 
 /**
  * Signup provisions a customer, and the project it creates already holds a
@@ -20,9 +22,10 @@ import {
  *
  * Everything here goes through the front door signup itself uses: one call to
  * `provisionOrganization`, and then the ordinary factory reads. Raw SQL appears
- * only to read the pointer column, which no exported call answers, and to count
- * what a refused provisioning left behind — absence is the one thing no seam
- * can show.
+ * three times and never to set anything up — to read the pointer column, which
+ * no exported call answers; to compare the seeded rows against ones the
+ * digital-human factory wrote itself; and to count what a refused provisioning
+ * left behind, absence being the one thing no seam can show.
  *
  * Who the starter is is deliberately not asserted. Their personality and their
  * voice are a placeholder waiting on a product decision, so a test spelling
@@ -44,10 +47,7 @@ type Provisioned = {
 /** A customer arriving the way signup brings one in, and acting as its owner. */
 async function signUp(slug: string, email: string): Promise<Provisioned> {
   const userId = newId("usr");
-  await database.sql('insert into "user" (id, email) values ($1, $2)', [
-    userId,
-    email,
-  ]);
+  await seedUser(database, userId, email);
 
   const provisioned = await provisionOrganization({
     ownerUserId: userId,
@@ -92,11 +92,63 @@ async function countOf(query: string): Promise<string | undefined> {
   return rows[0]?.count;
 }
 
+/** One whole row, `select *`, so a column added later arrives without being named. */
+async function rowOf(
+  table: string,
+  id: string,
+): Promise<Record<string, unknown>> {
+  const { rows } = await database.sql(`select * from ${table} where id = $1`, [
+    id,
+  ]);
+  const row = rows[0];
+  if (row === undefined) throw new Error(`no ${table} ${id}`);
+  return row;
+}
+
+/**
+ * Two rows of one table, compared column by column.
+ *
+ * `ownWords` names the columns each row is entitled to differ on — its id, what
+ * it points at, when it was written, and what it was called — and nothing else
+ * is excused from the comparison of values.
+ *
+ * Which columns are *filled* is then compared over every column, `ownWords`
+ * included, and that is the half that catches drift in both directions: a
+ * column one write fills and the other leaves null fails here whichever of the
+ * two started it.
+ */
+async function expectSameWriteShape(
+  table: string,
+  starterId: string,
+  factoryId: string,
+  ownWords: readonly string[],
+): Promise<void> {
+  const starter = await rowOf(table, starterId);
+  const factory = await rowOf(table, factoryId);
+
+  const filled = (row: Record<string, unknown>): string[] =>
+    Object.keys(row)
+      .filter((column) => row[column] !== null)
+      .sort();
+  expect(filled(starter), `${table}: which columns are filled`).toEqual(
+    filled(factory),
+  );
+
+  const said = (row: Record<string, unknown>): Record<string, unknown> =>
+    Object.fromEntries(
+      Object.entries(row).filter(([column]) => !ownWords.includes(column)),
+    );
+  expect(said(starter), `${table}: what the two rows say`).toEqual(said(factory));
+}
+
 let acme: Provisioned;
 
 beforeAll(async () => {
   database = await createConnectedDatabase("provisioning_starter");
   acme = await signUp("acme", "ada@acme.example");
+  // A second customer, seeded before anything is read, so that a read missing
+  // its tenancy predicate has another customer's starter to wrongly return.
+  await signUp("globex", "grace@globex.example");
 });
 
 afterAll(async () => {
@@ -108,7 +160,10 @@ describe("the project provisioning creates", () => {
     const pointer = await pointerOf(acme.projectId);
     expect(pointer).not.toBeNull();
 
-    const starter = await getDigitalHuman(acme.auth, await starterOf(acme.projectId));
+    const starter = await getDigitalHuman(
+      acme.auth,
+      await starterOf(acme.projectId),
+    );
     expect(starter).toBeDefined();
     expect(starter?.projectId).toBe(acme.projectId);
     expect(starter?.version).toBe(1);
@@ -139,18 +194,62 @@ describe("the project provisioning creates", () => {
     expect(edited?.versionId).toBe(starter.versionId);
   });
 
-  it("seeded an ordinary row, renamed and rewritten like any other", async () => {
-    // Its own customer, because this test changes what it reads.
+  it("seeded rows the factory would have written the same way", async () => {
+    // Its own customer, because this test puts a second digital human in the
+    // project it reads.
     const initech = await signUp("initech", "hedy@initech.example");
     const pointer = await starterOf(initech.projectId);
+    const starter = await getDigitalHuman(initech.auth, pointer);
+    if (starter === undefined) throw new Error("the starter was not seeded");
 
-    const renamed = await editDigitalHuman(initech.auth, pointer, {
+    // Provisioning writes these rows itself, because `createDigitalHuman`
+    // cannot run inside its transaction, so nothing but this keeps the two
+    // writes saying the same thing.
+    //
+    // The name and the description are typed here rather than copied off the
+    // starter, deliberately. Copying them would let the starter stop writing a
+    // description and this test hand the same emptiness to the factory, and
+    // the two rows would agree all the way to the day nobody could explain why
+    // a new project's digital human had none. What is asserted about them is
+    // that both writes fill them; what they say is each write's own business.
+    // The traits are the one thing copied, because comparing the stored jsonb
+    // is what shows provisioning writes traits the way the factory does.
+    const made = await createDigitalHuman(initech.auth, {
+      name: "Authored by hand",
+      description: "Whatever the developer typed",
+      traits: starter.traits,
+    });
+
+    // `created_by` is compared rather than excused: provisioning knows who it
+    // is provisioning for, and records them exactly as the factory records the
+    // credential that called it.
+    await expectSameWriteShape("digital_human", pointer, made.id, [
+      "id",
+      "current_version_id",
+      "name",
+      "description",
+      "created_at",
+      "updated_at",
+    ]);
+    await expectSameWriteShape(
+      "digital_human_version",
+      starter.versionId,
+      made.versionId,
+      ["id", "digital_human_id", "created_at"],
+    );
+  });
+
+  it("seeded an ordinary row, renamed and rewritten like any other", async () => {
+    const umbrella = await signUp("umbrella", "ada@umbrella.example");
+    const pointer = await starterOf(umbrella.projectId);
+
+    const renamed = await editDigitalHuman(umbrella.auth, pointer, {
       name: "Impatient Rita",
     });
     expect(renamed?.name).toBe("Impatient Rita");
     expect(renamed?.version).toBe(1);
 
-    const rewritten = await editDigitalHuman(initech.auth, pointer, {
+    const rewritten = await editDigitalHuman(umbrella.auth, pointer, {
       traits: {
         personality: "Interrupts, and will not be put on hold.",
         language: "en-GB",
@@ -160,15 +259,15 @@ describe("the project provisioning creates", () => {
     expect(rewritten?.version).toBe(2);
 
     // Still the project's default: editing them is not replacing them.
-    expect(await pointerOf(initech.projectId)).toBe(pointer);
+    expect(await pointerOf(umbrella.projectId)).toBe(pointer);
   });
 });
 
 describe("a first test in a freshly provisioned project", () => {
   it("is created naming no digital human, and receives the starter", async () => {
-    const globex = await signUp("globex", "grace@globex.example");
+    const wayne = await signUp("wayne", "lucius@wayne.example");
 
-    const created = await createTest(globex.auth, {
+    const created = await createTest(wayne.auth, {
       name: "Reschedules a booked appointment",
       scenario:
         "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
@@ -176,20 +275,9 @@ describe("a first test in a freshly provisioned project", () => {
     });
 
     expect(created.digitalHumans.map((human) => human.id)).toEqual([
-      await starterOf(globex.projectId),
+      await starterOf(wayne.projectId),
     ]);
     expect(created.digitalHumans[0]?.deletedAt).toBeNull();
-  });
-
-  it("never reaches another customer's starter", async () => {
-    const umbrella = await signUp("umbrella", "ada@umbrella.example");
-
-    expect(await starterOf(umbrella.projectId)).not.toBe(
-      await starterOf(acme.projectId),
-    );
-    expect(
-      (await listDigitalHumans(umbrella.auth)).items.map((human) => human.id),
-    ).toEqual([await starterOf(umbrella.projectId)]);
   });
 });
 

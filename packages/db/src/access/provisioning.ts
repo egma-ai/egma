@@ -28,10 +28,7 @@ import { insertMembership } from "./memberships.ts";
  * personality a new project should meet, and which voice should say it, is a
  * product decision that has not been made yet; what is below is deliberately
  * plain, so that it says nothing about any industry, accent or manner while
- * still being a digital human the factory would accept. Replacing it changes
- * nothing that already exists — this is read once, when a project is created,
- * and every project seeded before the change keeps the row it was given, to
- * rename or rewrite like any other.
+ * still being a digital human the factory would accept.
  */
 const STARTER_NAME = "Starter";
 const STARTER_DESCRIPTION =
@@ -51,13 +48,15 @@ const STARTER_TRAITS: DigitalHumanTraits = {
  * exist yet, because that pointer's constraint is deferred and Postgres checks
  * it at commit. They are made here rather than by calling that function,
  * because it opens a transaction of its own and takes an `AuthContext` — and
- * at this moment there is neither. The organization a context would name is
- * being brought into existence by the very transaction these rows have to
- * join, and a second transaction could not see it.
+ * at this moment there is neither.
+ *
+ * The two write shapes are held together by a test rather than the compiler:
+ * `provisioning-starter-digital-human.test.ts` compares these rows against ones
+ * `createDigitalHuman` wrote, and fails on a column only one of them fills.
  */
 async function insertStarterDigitalHuman(
   on: Queryable,
-  into: {
+  values: {
     readonly organizationId: string;
     readonly projectId: string;
     readonly createdBy: string;
@@ -68,12 +67,12 @@ async function insertStarterDigitalHuman(
 
   await on.insert(digitalHuman).values({
     id,
-    organizationId: into.organizationId,
-    projectId: into.projectId,
+    organizationId: values.organizationId,
+    projectId: values.projectId,
     name: STARTER_NAME,
     description: STARTER_DESCRIPTION,
     currentVersionId: versionId,
-    createdBy: into.createdBy,
+    createdBy: values.createdBy,
   });
 
   await on.insert(digitalHumanVersion).values({
@@ -81,7 +80,7 @@ async function insertStarterDigitalHuman(
     digitalHumanId: id,
     version: 1,
     traits: STARTER_TRAITS,
-    createdBy: into.createdBy,
+    createdBy: values.createdBy,
   });
 
   return id;
@@ -133,13 +132,8 @@ export async function provisionOrganization(
       createdBy: input.ownerUserId,
     });
 
-    // The pointer is its own statement rather than a column on the insert
-    // above, because the two rows reference each other and only one of the two
-    // constraints is deferred: the digital human names the project for its
-    // tenancy, so the project has to be there first, and the project's
-    // reference back is an ordinary foreign key checked statement by statement.
-    // `updated_at` stays where the insert left it — the row is being finished,
-    // not edited.
+    // Its own statement because the project has to exist before a digital
+    // human can name it, and this reference back is not the deferred one.
     await tx
       .update(project)
       .set({ defaultDigitalHumanId: starterId })
