@@ -183,6 +183,5 @@ export {
   getTest,
   type NewTest,
   type Test,
-  type TestContent,
   type TestDigitalHuman,
 } from "./tests.ts";

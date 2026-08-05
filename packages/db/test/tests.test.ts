@@ -36,6 +36,8 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
 let database: MigratedDatabase;
 
 const acme = { organization: newId("org"), project: newId("prj") };
+/** A second project of Acme's, so a read can be narrowed past its sibling. */
+const acmeOutbound = newId("prj");
 const globex = { organization: newId("org"), project: newId("prj") };
 const ada = newId("usr");
 const gene = newId("usr");
@@ -108,11 +110,13 @@ async function pointProjectAt(
 beforeAll(async () => {
   database = await createConnectedDatabase("tests");
 
-  for (const tenant of [acme, globex]) {
-    await seedOrganization(database, tenant.organization, [
-      { id: tenant.project, slug: "default" },
-    ]);
-  }
+  await seedOrganization(database, acme.organization, [
+    { id: acme.project, slug: "default" },
+    { id: acmeOutbound, slug: "outbound" },
+  ]);
+  await seedOrganization(database, globex.organization, [
+    { id: globex.project, slug: "default" },
+  ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, gene, "gene@globex.example");
 
@@ -408,6 +412,27 @@ describe("a test naming no digital human", () => {
 
     await pointProjectAt(globex.project, null);
   });
+
+  it("says the default is not this project's, not that it is deleted, when it points elsewhere", async () => {
+    // The column's foreign key only says the row exists, so a pointer at a
+    // living digital human of another project is a state the database allows
+    // and the developer has to be told the truth about.
+    await pointProjectAt(acmeOutbound, rita);
+
+    const before = await rowCounts();
+
+    const inOutbound = { ...actingAsAcme(), projectId: acmeOutbound };
+    await expect(createTest(inOutbound, rescheduling)).rejects.toThrow(
+      /no digital human .* in this project/,
+    );
+    await expect(createTest(inOutbound, rescheduling)).rejects.not.toThrow(
+      /is deleted/,
+    );
+
+    expect(await rowCounts()).toEqual(before);
+
+    await pointProjectAt(acmeOutbound, null);
+  });
 });
 
 describe("a digital human deleted after the test named them", () => {
@@ -457,6 +482,20 @@ describe("tenancy", () => {
     const created = await createTest(actingAsAcme(), rescheduling);
 
     expect(await getTest(actingAsGlobex(), created.id)).toBeUndefined();
+  });
+
+  it("returns nothing to the same customer acting in a sibling project", async () => {
+    const created = await createTest(actingAsAcme(), rescheduling);
+
+    // Same organization, same person, same role — only the project differs,
+    // which is the whole of what a project is: a filter, not a wall.
+    const inOutbound = { ...actingAsAcme(), projectId: acmeOutbound };
+    expect(await getTest(inOutbound, created.id)).toBeUndefined();
+
+    // And the credential acting in no project still reaches it, so the arm
+    // above failed for the project and not for something else.
+    const wholeCustomer = { ...actingAsAcme(), projectId: undefined };
+    expect((await getTest(wholeCustomer, created.id))?.id).toBe(created.id);
   });
 
   it("returns nothing for an id that does not exist", async () => {

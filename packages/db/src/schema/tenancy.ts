@@ -84,6 +84,24 @@ export const project = pgTable(
      * project points at, editable like any other. Nullable because the pointer
      * is set after the project exists, and because a row it named can be swept
      * away — a test then has to name its own until somebody points it again.
+     *
+     * **It lives on the project, and this is the one place the layering
+     * bends.** Every other table below the tenancy tables points *up* at a
+     * project; this column points down at a product table, so this file has to
+     * import one. The default belongs to the project rather than to any test:
+     * it is one answer for the whole product area, changed in one place, and
+     * putting it anywhere else would mean each test carrying a copy of a
+     * decision nobody made per test.
+     *
+     * **The resulting import cycle is deliberate and safe**, and it is worth
+     * knowing why before either file is rearranged. `digital_human` names
+     * `project` for its tenancy and `project` now names `digital_human` for
+     * this pointer. Neither reads the other while either is still being
+     * evaluated: a column's `references` takes a function rather than a
+     * column, and a table's constraint list is a function the table definition
+     * stores instead of calling. Both are only run later, once every table in
+     * this schema exists. Replace either with a value read at definition time
+     * and the cycle stops being safe.
      */
     defaultDigitalHumanId: idText("default_digital_human_id").references(
       (): AnyPgColumn => digitalHuman.id,

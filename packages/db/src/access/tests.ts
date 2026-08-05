@@ -32,8 +32,12 @@ import { theProject, within } from "./within.ts";
  * what the digital human wants, and the circumstances. The expected behaviors
  * are statements about what should happen, in the order they were authored,
  * and at least one of them always exists.
+ *
+ * Internal, because the exported API is flat: a caller hands the two fields to
+ * `createTest` beside the name, and reads them back off a `Test` the same way.
+ * The pairing matters only to the version row that stores them together.
  */
-export type TestContent = {
+type TestContent = {
   readonly scenario: string;
   readonly expectedBehaviors: readonly string[];
 };
@@ -134,12 +138,13 @@ function validContent(input: {
 }
 
 /**
- * The ids as they will be looked up: every one an identifier of a digital
- * human, and each one named once. Naming the same digital human twice would
- * ask for the same simulation twice, which is a run's business and not a
- * test's, so it is refused here rather than left to a constraint.
+ * Everything about the named ids that is answerable without the database:
+ * every one is an identifier of a digital human, and each one is named once.
+ * Naming the same digital human twice would ask for the same simulation
+ * twice, which is a run's business and not a test's, so it is refused here
+ * rather than left to a constraint.
  */
-function validDigitalHumanIds(ids: readonly string[]): readonly string[] {
+function validateDigitalHumanIds(ids: readonly string[]): void {
   const seen = new Set<string>();
   for (const id of ids) {
     if (!isId("dh", id)) {
@@ -150,7 +155,6 @@ function validDigitalHumanIds(ids: readonly string[]): readonly string[] {
     }
     seen.add(id);
   }
-  return ids;
 }
 
 /**
@@ -191,20 +195,20 @@ function theTest(auth: AuthContext, id: string): SQL {
 }
 
 /**
- * The digital humans a create names, checked against the project they have to
- * be in, and handed back in the order they were authored.
+ * Whether the ids a create names are digital humans this project can use:
+ * each one exists, is alive, and is this project's.
  *
  * One read for the whole set, and then one refusal per id that did not come
- * back. A digital human of another customer or another project is not found
- * and is refused in the same words as one that never existed, because
+ * back whole. A digital human of another customer or another project is not
+ * found and is refused in the same words as one that never existed, because
  * confirming that somebody else's row exists is itself a leak.
  */
-async function namedDigitalHumans(
+async function validateNamedDigitalHumans(
   on: Queryable,
   auth: AuthContext,
   projectId: string,
   ids: readonly string[],
-): Promise<readonly string[]> {
+): Promise<void> {
   const found = new Map(
     (
       await on
@@ -233,22 +237,27 @@ async function namedDigitalHumans(
       );
     }
   }
-
-  return ids;
 }
 
 /**
- * The project's default digital human, for a create that named none.
+ * The one digital human the project points at, for a create that named none.
  *
- * Both ways this can fail say what to do about it, and neither creates
- * anything: a test whose digital human egma picked for itself would be a test
- * nobody authored.
+ * The pointer can be wrong in two different ways and they need different
+ * words, because they need different fixes. A pointer at a digital human who
+ * has since been deleted wants a living one; a pointer at nothing, or at
+ * another project's digital human — which the column's plain foreign key
+ * allows — wants pointing somewhere real. Reading the row without the
+ * deleted filter is what lets the two be told apart, instead of reporting
+ * every reachable failure as a deletion.
+ *
+ * Every way this fails says what to do about it and writes nothing: a test
+ * whose digital human egma picked for itself would be a test nobody authored.
  */
-async function defaultDigitalHuman(
+async function projectDefaultDigitalHuman(
   on: Queryable,
   auth: AuthContext,
   projectId: string,
-): Promise<readonly string[]> {
+): Promise<string> {
   const [row] = await on
     .select({ defaultDigitalHumanId: project.defaultDigitalHumanId })
     .from(project)
@@ -262,8 +271,8 @@ async function defaultDigitalHuman(
     );
   }
 
-  const [alive] = await on
-    .select({ id: digitalHuman.id })
+  const [pointed] = await on
+    .select({ id: digitalHuman.id, deletedAt: digitalHuman.deletedAt })
     .from(digitalHuman)
     .where(
       within(
@@ -272,19 +281,23 @@ async function defaultDigitalHuman(
         and(
           eq(digitalHuman.id, id),
           eq(digitalHuman.projectId, projectId),
-          isNull(digitalHuman.deletedAt),
         ),
       ),
     )
     .limit(1);
 
-  if (alive === undefined) {
+  if (pointed === undefined) {
+    throw new Error(
+      `this test names no digital human and the project's default points at ${id}, and there is no digital human ${id} in this project; name one on the test, or point the project's default at a living digital human of this project`,
+    );
+  }
+  if (pointed.deletedAt !== null) {
     throw new Error(
       `this test names no digital human and the project's default digital human ${id} is deleted; name one on the test, or point the project's default at a living digital human`,
     );
   }
 
-  return [id];
+  return id;
 }
 
 /**
@@ -313,7 +326,8 @@ export async function createTest(
   // input worth writing costs the reads below.
   const name = validName(input.name);
   const content = validContent(input);
-  const named = validDigitalHumanIds(input.digitalHumanIds ?? []);
+  const named = input.digitalHumanIds ?? [];
+  validateDigitalHumanIds(named);
 
   if (!(await isProjectOfOrganization(auth, projectId))) {
     throw new ProjectOutsideOrganizationError(auth.organizationId, projectId);
@@ -323,10 +337,13 @@ export async function createTest(
   const versionId = newId("tstv");
 
   const written = await db().transaction(async (tx) => {
-    const digitalHumanIds =
-      named.length === 0
-        ? await defaultDigitalHuman(tx, auth, projectId)
-        : await namedDigitalHumans(tx, auth, projectId, named);
+    let digitalHumanIds: readonly string[];
+    if (named.length === 0) {
+      digitalHumanIds = [await projectDefaultDigitalHuman(tx, auth, projectId)];
+    } else {
+      await validateNamedDigitalHumans(tx, auth, projectId, named);
+      digitalHumanIds = named;
+    }
 
     const [identity] = await tx
       .insert(test)
@@ -340,6 +357,8 @@ export async function createTest(
         createdBy: auth.userId,
       })
       .returning(COLUMNS);
+
+    if (identity === undefined) throw new Error("the test was not written");
 
     await tx.insert(testVersion).values({
       id: versionId,
@@ -357,26 +376,21 @@ export async function createTest(
       })),
     );
 
-    return identity;
+    // Read back inside the transaction, so what the create answers with is
+    // what the transaction wrote and checked, rather than whatever the table
+    // holds by the time it has committed.
+    return { ...identity, digitalHumans: await digitalHumansOf(tx, versionId) };
   });
 
-  if (written === undefined) throw new Error("the test was not written");
-
-  return {
-    ...written,
-    version: 1,
-    versionId,
-    ...content,
-    digitalHumans: await digitalHumansOf(db(), versionId),
-  };
+  return { ...written, version: 1, versionId, ...content };
 }
 
 /**
  * The version's digital humans, in the order they were authored.
  *
- * The `where` starts from a bare `eq` rather than `within`: the version id it
- * names has already come off a tenancy-checked row, in the call above it, so
- * the predicate cannot reach further than that check already did.
+ * The `where` starts from a bare `eq` rather than `within`: every caller hands
+ * it a version id that has already come off a tenancy-checked row, so the
+ * predicate cannot reach further than that check already did.
  */
 async function digitalHumansOf(
   on: Queryable,
