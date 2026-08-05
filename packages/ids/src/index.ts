@@ -47,6 +47,7 @@ export const ID_PREFIXES = [
   "grdv",
   "ste",
   "run",
+  "sim",
   "del",
 ] as const;
 

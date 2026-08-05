@@ -42,6 +42,8 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   test: "tst",
   test_version: "tstv",
   test_version_persona: "tstv",
+  run: "run",
+  simulation: "sim",
 };
 
 const declaredTables = (Object.values(schema) as unknown[])
@@ -219,6 +221,12 @@ describe("every enumerated value", () => {
       { table: "connection", column: "type" },
       { table: "connection", column: "modality" },
       { table: "connection", column: "topology" },
+      { table: "run", column: "status" },
+      { table: "run", column: "triggered_via" },
+      { table: "simulation", column: "status" },
+      { table: "simulation", column: "ending_reason" },
+      { table: "simulation", column: "connection_type" },
+      { table: "simulation", column: "modality" },
     ];
 
     const { rows } = await database.sql<{
@@ -243,7 +251,9 @@ describe("every enumerated value", () => {
           (row) =>
             row.table_name === table &&
             row.definition.includes(column) &&
-            /= ANY|IN \(/i.test(row.definition),
+            // Postgres folds a one-value list to plain equality in the
+            // catalog, so `in ('manual')` reads back as `= 'manual'`.
+            new RegExp(`= ANY|IN \\(|${column} = '`, "i").test(row.definition),
         ),
         `${table}.${column} has an allowed-value check`,
       ).toBe(true);

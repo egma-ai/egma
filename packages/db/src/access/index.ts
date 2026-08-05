@@ -227,3 +227,35 @@ export {
   type TestPersona,
   type TestVersion,
 } from "./tests.ts";
+
+export {
+  cancelRun,
+  claimSimulations,
+  completeSimulation,
+  failSimulation,
+  getRun,
+  getSimulation,
+  listRuns,
+  listSimulations,
+  markSimulationCanceled,
+  recordSimulationHeartbeat,
+  startRun,
+  startSimulation,
+  sweepOrphanedSimulations,
+  type CompletedEndingReason,
+  type ConnectionSnapshot,
+  type FailedEndingReason,
+  type NewRun,
+  type Run,
+  type RunPage,
+  type Simulation,
+  type SimulationFailure,
+  type SimulationReport,
+  type StartedRun,
+} from "./runs.ts";
+export type {
+  RunStatus,
+  RunTrigger,
+  SimulationEndingReason,
+  SimulationStatus,
+} from "../schema/runs.ts";
