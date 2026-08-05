@@ -2,6 +2,8 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  toIdentityRequest,
+  toWebRequest,
   webHandler,
   WEB_HANDLER_METHODS,
   type WebHandler,
@@ -253,5 +255,59 @@ describe("the response", () => {
 
     const response = await app.inject({ method: "GET", url: "/api/auth/x" });
     expect(response.rawPayload.equals(payload)).toBe(true);
+  });
+});
+
+/**
+ * Asking who is calling reads a bearer token or a session cookie, and nothing
+ * else — so the request built for that question carries no body.
+ *
+ * It matters most where the body is largest. The identity hook runs in front of
+ * every credentialed route including the ingest door, where a body is somebody's
+ * telemetry: building a `Request` around it copied those bytes for a question
+ * that never reads them, on every export. The route that genuinely forwards a
+ * body to the auth provider is unchanged, and both are asserted here together
+ * because the difference between them is the whole point.
+ */
+describe("the request an identity is resolved from", () => {
+  it("carries the headers and the URL, and none of the body", async () => {
+    app = Fastify({ logger: false });
+    app.removeAllContentTypeParsers();
+    app.addContentTypeParser("*", { parseAs: "buffer" }, (_request, body, done) => {
+      done(null, body);
+    });
+    app.post("/v1/traces", async (request) => {
+      const identity = toIdentityRequest(request);
+      const forwarded = toWebRequest(request);
+      return {
+        url: identity.url,
+        authorization: identity.headers.get("authorization"),
+        hasBody: identity.body !== null,
+        identityBytes: (await identity.arrayBuffer()).byteLength,
+        forwardedBytes: (await forwarded.arrayBuffer()).byteLength,
+      };
+    });
+    await app.ready();
+
+    const telemetry = Buffer.alloc(64 * 1024, 7);
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/traces",
+      headers: {
+        "content-type": "application/x-protobuf",
+        authorization: "Bearer egma_sk_whatever",
+      },
+      payload: telemetry,
+    });
+
+    expect(response.json()).toEqual({
+      url: "http://localhost/v1/traces",
+      authorization: "Bearer egma_sk_whatever",
+      hasBody: false,
+      identityBytes: 0,
+      // The forwarding conversion is untouched: a route that hands a body to
+      // the provider still hands over all of it.
+      forwardedBytes: telemetry.byteLength,
+    });
   });
 });

@@ -63,6 +63,40 @@ export async function readMigrations(
   );
 }
 
+/**
+ * The migrations not yet recorded, in order.
+ *
+ * Both stores' runners go through here, because the rule it enforces is the one
+ * thing they must never disagree about: **an applied migration is immutable.** A
+ * file that changed after it ran is refused rather than quietly skipped, and
+ * corrections go in a new file. Written once so that the two runners cannot
+ * drift into two answers.
+ */
+export function pendingMigrations(
+  migrations: readonly Migration[],
+  alreadyApplied: ReadonlyMap<string, string>,
+): Migration[] {
+  const pending: Migration[] = [];
+
+  for (const migration of migrations) {
+    const knownHash = alreadyApplied.get(migration.name);
+
+    if (knownHash === undefined) {
+      pending.push(migration);
+      continue;
+    }
+
+    if (knownHash !== migration.hash) {
+      throw new Error(
+        `migration ${migration.name} has changed since it was applied; ` +
+          `applied migrations are immutable, add a new file instead`,
+      );
+    }
+  }
+
+  return pending;
+}
+
 export async function runMigrations(
   databaseUrl: string,
   directory: string = MIGRATIONS_DIRECTORY,
@@ -114,19 +148,7 @@ async function apply(
 
   const applied: string[] = [];
 
-  for (const migration of migrations) {
-    const knownHash = alreadyApplied.get(migration.name);
-
-    if (knownHash !== undefined) {
-      if (knownHash !== migration.hash) {
-        throw new Error(
-          `migration ${migration.name} has changed since it was applied; ` +
-            `applied migrations are immutable, add a new file instead`,
-        );
-      }
-      continue;
-    }
-
+  for (const migration of pendingMigrations(migrations, alreadyApplied)) {
     await client.query("begin");
     try {
       await client.query(migration.sql);

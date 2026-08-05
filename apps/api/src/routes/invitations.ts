@@ -4,7 +4,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { hashInvitationToken } from "../auth/invitation.ts";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { resolveSession } from "../auth/session.ts";
-import { toWebRequest } from "../http/web-handler.ts";
+import { toIdentityRequest } from "../http/web-handler.ts";
 
 /**
  * The invited person's side of an invitation, and the one part of egma that
@@ -87,7 +87,7 @@ export async function invitationRoutes(
 
     const session = await resolveSession(
       options.provider,
-      toWebRequest(request),
+      toIdentityRequest(request),
     );
     if (session === null) {
       return reply.code(401).send({

@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { resolveRequester, type Requester } from "../auth/requester.ts";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import type { RateLimit } from "./rate-limit.ts";
-import { toWebRequest } from "./web-handler.ts";
+import { toIdentityRequest } from "./web-handler.ts";
 
 /**
  * Everything that has to be true before a route with a customer's data in it
@@ -59,9 +59,14 @@ export function credentialed(
   app.decorateRequest("requester", null);
 
   app.addHook("preHandler", async (request, reply) => {
+    // Headers and a URL, and deliberately no body: who is calling is answered
+    // from a bearer token or a session cookie, and this hook runs in front of
+    // the ingest door, where the body is somebody's telemetry and copying it
+    // for a question that will never read it is the most expensive thing on
+    // the path.
     const requester = await resolveRequester(
       options.provider,
-      toWebRequest(request),
+      toIdentityRequest(request),
     );
 
     if (requester === null) {

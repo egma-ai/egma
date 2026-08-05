@@ -1,0 +1,228 @@
+{
+  "requests": [
+    {
+      "file": "request-000.bin",
+      "received_at": "2026-08-02T18:04:45.134641+00:00",
+      "method": "POST",
+      "path": "/v1/traces",
+      "byte_length": 480,
+      "headers": {
+        "Host": "127.0.0.1:4318",
+        "User-Agent": "OTel-OTLP-Exporter-Python/1.39.1",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "Content-Type": "application/x-protobuf",
+        "Content-Length": "480"
+      }
+    },
+    {
+      "file": "request-001.bin",
+      "received_at": "2026-08-02T18:04:50.140197+00:00",
+      "method": "POST",
+      "path": "/v1/traces",
+      "byte_length": 10248,
+      "headers": {
+        "Host": "127.0.0.1:4318",
+        "User-Agent": "OTel-OTLP-Exporter-Python/1.39.1",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "Content-Type": "application/x-protobuf",
+        "Content-Length": "10248"
+      }
+    },
+    {
+      "file": "request-002.bin",
+      "received_at": "2026-08-02T18:04:55.147462+00:00",
+      "method": "POST",
+      "path": "/v1/traces",
+      "byte_length": 2767,
+      "headers": {
+        "Host": "127.0.0.1:4318",
+        "User-Agent": "OTel-OTLP-Exporter-Python/1.39.1",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "Content-Type": "application/x-protobuf",
+        "Content-Length": "2767"
+      }
+    },
+    {
+      "file": "request-003.bin",
+      "received_at": "2026-08-02T18:05:00.155527+00:00",
+      "method": "POST",
+      "path": "/v1/traces",
+      "byte_length": 3842,
+      "headers": {
+        "Host": "127.0.0.1:4318",
+        "User-Agent": "OTel-OTLP-Exporter-Python/1.39.1",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "Content-Type": "application/x-protobuf",
+        "Content-Length": "3842"
+      }
+    },
+    {
+      "file": "request-004.bin",
+      "received_at": "2026-08-02T18:05:05.166424+00:00",
+      "method": "POST",
+      "path": "/v1/traces",
+      "byte_length": 14572,
+      "headers": {
+        "Host": "127.0.0.1:4318",
+        "User-Agent": "OTel-OTLP-Exporter-Python/1.39.1",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "Content-Type": "application/x-protobuf",
+        "Content-Length": "14572"
+      }
+    },
+    {
+      "file": "request-005.bin",
+      "received_at": "2026-08-02T18:05:10.188605+00:00",
+      "method": "POST",
+      "path": "/v1/traces",
+      "byte_length": 3697,
+      "headers": {
+        "Host": "127.0.0.1:4318",
+        "User-Agent": "OTel-OTLP-Exporter-Python/1.39.1",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "Content-Type": "application/x-protobuf",
+        "Content-Length": "3697"
+      }
+    },
+    {
+      "file": "request-006.bin",
+      "received_at": "2026-08-02T18:05:15.194864+00:00",
+      "method": "POST",
+      "path": "/v1/traces",
+      "byte_length": 990,
+      "headers": {
+        "Host": "127.0.0.1:4318",
+        "User-Agent": "OTel-OTLP-Exporter-Python/1.39.1",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "Content-Type": "application/x-protobuf",
+        "Content-Length": "990"
+      }
+    },
+    {
+      "file": "request-007.bin",
+      "received_at": "2026-08-02T18:05:20.198494+00:00",
+      "method": "POST",
+      "path": "/v1/traces",
+      "byte_length": 700,
+      "headers": {
+        "Host": "127.0.0.1:4318",
+        "User-Agent": "OTel-OTLP-Exporter-Python/1.39.1",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "Content-Type": "application/x-protobuf",
+        "Content-Length": "700"
+      }
+    },
+    {
+      "file": "request-008.bin",
+      "received_at": "2026-08-02T18:05:25.209370+00:00",
+      "method": "POST",
+      "path": "/v1/traces",
+      "byte_length": 15739,
+      "headers": {
+        "Host": "127.0.0.1:4318",
+        "User-Agent": "OTel-OTLP-Exporter-Python/1.39.1",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "Content-Type": "application/x-protobuf",
+        "Content-Length": "15739"
+      }
+    },
+    {
+      "file": "request-009.bin",
+      "received_at": "2026-08-02T18:05:30.214588+00:00",
+      "method": "POST",
+      "path": "/v1/traces",
+      "byte_length": 3685,
+      "headers": {
+        "Host": "127.0.0.1:4318",
+        "User-Agent": "OTel-OTLP-Exporter-Python/1.39.1",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "Content-Type": "application/x-protobuf",
+        "Content-Length": "3685"
+      }
+    },
+    {
+      "file": "request-010.bin",
+      "received_at": "2026-08-02T18:05:35.223757+00:00",
+      "method": "POST",
+      "path": "/v1/traces",
+      "byte_length": 1019,
+      "headers": {
+        "Host": "127.0.0.1:4318",
+        "User-Agent": "OTel-OTLP-Exporter-Python/1.39.1",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "Content-Type": "application/x-protobuf",
+        "Content-Length": "1019"
+      }
+    },
+    {
+      "file": "request-011.bin",
+      "received_at": "2026-08-02T18:05:45.233036+00:00",
+      "method": "POST",
+      "path": "/v1/traces",
+      "byte_length": 22311,
+      "headers": {
+        "Host": "127.0.0.1:4318",
+        "User-Agent": "OTel-OTLP-Exporter-Python/1.39.1",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "Content-Type": "application/x-protobuf",
+        "Content-Length": "22311"
+      }
+    },
+    {
+      "file": "request-012.bin",
+      "received_at": "2026-08-02T18:05:50.237100+00:00",
+      "method": "POST",
+      "path": "/v1/traces",
+      "byte_length": 2253,
+      "headers": {
+        "Host": "127.0.0.1:4318",
+        "User-Agent": "OTel-OTLP-Exporter-Python/1.39.1",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "Content-Type": "application/x-protobuf",
+        "Content-Length": "2253"
+      }
+    },
+    {
+      "file": "request-013.bin",
+      "received_at": "2026-08-02T18:05:55.241342+00:00",
+      "method": "POST",
+      "path": "/v1/traces",
+      "byte_length": 1498,
+      "headers": {
+        "Host": "127.0.0.1:4318",
+        "User-Agent": "OTel-OTLP-Exporter-Python/1.39.1",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "Content-Type": "application/x-protobuf",
+        "Content-Length": "1498"
+      }
+    }
+  ]
+}

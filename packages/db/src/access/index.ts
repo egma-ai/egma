@@ -42,9 +42,14 @@
  * than remembered. They are here, beside the context they read, because the
  * context is the only input they have.
  *
- * The ClickHouse client arrives behind this same boundary on these same terms:
- * a file beside these, taking the same `AuthContext`, injecting the same
- * predicates, with its driver already named in the lint rule's list.
+ * The ClickHouse client sits behind this same boundary on these same terms:
+ * `appendSpans` writes and `listTraces` and `readTrace` read, all three are
+ * files beside these, all three take the same `AuthContext` and stamp the same
+ * tenancy, and the driver was already named in the lint rule's list before any
+ * of them existed. The two reads also take a **required time window** and a
+ * project to narrow to — a narrowing argument, never a filter — because the
+ * trace store is filed by time and a read that named none would be the one
+ * unfiltered scan this boundary exists to make unreachable.
  */
 
 export type { AuthContext, Role, Via } from "./context.ts";
@@ -54,6 +59,8 @@ export {
   LastAdminError,
   NotPermittedError,
   ProjectOutsideOrganizationError,
+  TraceStoreRefusedError,
+  UnreadableTraceQueryError,
 } from "./errors.ts";
 
 export {
@@ -129,6 +136,30 @@ export {
   type DeviceAuthorization,
   type DeviceAuthorizationTarget,
 } from "./device-authorizations.ts";
+
+export {
+  appendSpans,
+  type AppendedSpans,
+  type NewSpan,
+  type SpanEmitter,
+  type SpanSource,
+} from "./spans.ts";
+
+export {
+  listTraces,
+  readTrace,
+  MAXIMUM_LIST_LIMIT,
+  MAXIMUM_SPANS_PER_TRACE,
+  MAXIMUM_WINDOW_MILLISECONDS,
+  type ListTracesOptions,
+  type ReadTraceOptions,
+  type TimeWindow,
+  type TraceDetail,
+  type TraceFacts,
+  type TraceList,
+  type TraceSpan,
+  type TraceSummary,
+} from "./traces.ts";
 
 export {
   addConnection,
