@@ -21,6 +21,7 @@ import {
   type SimulationStatus,
 } from "../schema/runs.ts";
 import type { AuthContext } from "./context.ts";
+import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import { within } from "./within.ts";
 
@@ -306,22 +307,42 @@ function runFromRow(row: RunRow): Run {
   };
 }
 
-/** Acting in a project narrows to it; acting in none reaches the customer. */
-function runInActingProject(auth: AuthContext): SQL | undefined {
-  return auth.projectId === undefined
-    ? undefined
-    : eq(run.projectId, auth.projectId);
+/** What a `SIMULATION_COLUMNS` select answers with: the enumerated columns
+ * still wearing `string`. The checks and the trigger keep the stored values
+ * inside the vocabulary, so reading one back is a narrowing, not a guess. */
+type SimulationRow = Omit<
+  Simulation,
+  "status" | "endingReason" | "connectionType" | "modality"
+> & {
+  readonly status: string;
+  readonly endingReason: string | null;
+  readonly connectionType: string;
+  readonly modality: string;
+};
+
+function simulationFromRow(row: SimulationRow): Simulation {
+  return {
+    ...row,
+    status: row.status as SimulationStatus,
+    endingReason: row.endingReason as SimulationEndingReason | null,
+    connectionType: row.connectionType as ConnectionType,
+    modality: row.modality as Modality,
+  };
 }
 
-function simulationInActingProject(auth: AuthContext): SQL | undefined {
+/** Acting in a project narrows to it; acting in none reaches the customer. */
+function inActingProject(
+  auth: AuthContext,
+  table: typeof run | typeof simulation,
+): SQL | undefined {
   return auth.projectId === undefined
     ? undefined
-    : eq(simulation.projectId, auth.projectId);
+    : eq(table.projectId, auth.projectId);
 }
 
 /** The named run, within the caller's tenancy and scope. */
 function theRun(auth: AuthContext, id: string): SQL {
-  return within(auth, run, and(eq(run.id, id), runInActingProject(auth)));
+  return within(auth, run, and(eq(run.id, id), inActingProject(auth, run)));
 }
 
 /**
@@ -566,7 +587,7 @@ export async function startRun(
   return {
     ...runFromRow(written.header),
     simulations: written.simulations
-      .map((row) => row as Simulation)
+      .map(simulationFromRow)
       .sort((a, b) => a.position - b.position),
   };
 }
@@ -598,42 +619,28 @@ export type RunPage = {
   readonly nextCursor: string | undefined;
 };
 
-const DEFAULT_PAGE_SIZE = 50;
-const LARGEST_PAGE_SIZE = 200;
-
 export async function listRuns(
   auth: AuthContext,
-  page?: {
-    readonly limit?: number | undefined;
-    readonly cursor?: string | undefined;
-  },
+  page?: PageRequest,
 ): Promise<RunPage> {
   authorize(auth, "read", here(auth));
 
-  const limit = page?.limit ?? DEFAULT_PAGE_SIZE;
-  if (!Number.isInteger(limit) || limit < 1 || limit > LARGEST_PAGE_SIZE) {
-    throw new Error(`a page holds between 1 and ${LARGEST_PAGE_SIZE} runs`);
-  }
-  const cursor = page?.cursor;
-  if (cursor !== undefined && !isId("run", cursor)) {
-    throw new Error(`"${cursor}" is not a run id, so it cannot be a cursor`);
-  }
-
+  const { limit, cursor } = pageWindow(page, {
+    singular: "run",
+    plural: "runs",
+    prefix: "run",
+  });
   const olderThanCursor = cursor === undefined ? undefined : lt(run.id, cursor);
 
-  // One row beyond the page answers "is there more?" without a second query.
   const rows = await db()
     .select(RUN_COLUMNS)
     .from(run)
-    .where(within(auth, run, and(runInActingProject(auth), olderThanCursor)))
+    .where(within(auth, run, and(inActingProject(auth, run), olderThanCursor)))
     .orderBy(desc(run.id))
     .limit(limit + 1);
 
-  const items = rows.slice(0, limit).map(runFromRow);
-  return {
-    items,
-    nextCursor: rows.length > limit ? items[items.length - 1]?.id : undefined,
-  };
+  const { items, nextCursor } = pageOf(rows, limit);
+  return { items: items.map(runFromRow), nextCursor };
 }
 
 /**
@@ -655,7 +662,7 @@ export async function listSimulations(
     .where(within(auth, simulation, eq(simulation.runId, runId)))
     .orderBy(asc(simulation.position));
 
-  return rows.map((row) => row as Simulation);
+  return rows.map(simulationFromRow);
 }
 
 /** One simulation with everything reported about it. */
@@ -672,12 +679,12 @@ export async function getSimulation(
       within(
         auth,
         simulation,
-        and(eq(simulation.id, id), simulationInActingProject(auth)),
+        and(eq(simulation.id, id), inActingProject(auth, simulation)),
       ),
     )
     .limit(1);
 
-  return row === undefined ? undefined : (row as Simulation);
+  return row === undefined ? undefined : simulationFromRow(row);
 }
 
 /**
@@ -882,7 +889,7 @@ export async function claimSimulations(
           simulation,
           and(
             eq(simulation.status, "queued"),
-            simulationInActingProject(auth),
+            inActingProject(auth, simulation),
           ),
         ),
       )
@@ -923,7 +930,7 @@ export async function claimSimulations(
   });
 
   return claimed
-    .map((row) => row as Simulation)
+    .map(simulationFromRow)
     .sort((a, b) => (a.id < b.id ? -1 : 1));
 }
 
@@ -952,7 +959,7 @@ export async function recordSimulationHeartbeat(
           eq(simulation.id, id),
           eq(simulation.claimedBy, validClaimant(claimant)),
           inArray(simulation.status, ["claimed", "running"]),
-          simulationInActingProject(auth),
+          inActingProject(auth, simulation),
         ),
       ),
     )
@@ -987,21 +994,65 @@ export async function startSimulation(
           eq(simulation.id, id),
           eq(simulation.claimedBy, validClaimant(claimant)),
           eq(simulation.status, "claimed"),
-          simulationInActingProject(auth),
+          inActingProject(auth, simulation),
         ),
       ),
     )
     .returning(SIMULATION_COLUMNS);
 
-  return row === undefined ? undefined : (row as Simulation);
+  return row === undefined ? undefined : simulationFromRow(row);
+}
+
+/**
+ * How every simulation lands: one guarded update — this claimant's row, in a
+ * state the landing may leave, within the caller's reach — writing the
+ * terminal facts, and the run finalized in the same transaction when the
+ * landing was its last. The three landings below differ only in what they
+ * write and what they require, so that is all they say; `undefined` still
+ * means there was nothing here to move.
+ */
+async function landSimulation(
+  auth: AuthContext,
+  id: string,
+  claimant: string,
+  landing: {
+    readonly from: readonly SimulationStatus[];
+    /** Everything this landing writes beside `ended_at` and the heartbeat. */
+    readonly write: Record<string, unknown>;
+    /** Any further condition the landing requires of the row. */
+    readonly onlyWhere?: SQL | undefined;
+  },
+): Promise<Simulation | undefined> {
+  const now = new Date();
+  return db().transaction(async (tx) => {
+    const [row] = await tx
+      .update(simulation)
+      .set({ ...landing.write, endedAt: now, heartbeatAt: now })
+      .where(
+        within(
+          auth,
+          simulation,
+          and(
+            eq(simulation.id, id),
+            eq(simulation.claimedBy, validClaimant(claimant)),
+            inArray(simulation.status, [...landing.from]),
+            landing.onlyWhere,
+            inActingProject(auth, simulation),
+          ),
+        ),
+      )
+      .returning(SIMULATION_COLUMNS);
+
+    if (row === undefined) return undefined;
+    await finalizeRunIfDone(tx, row.runId, now);
+    return simulationFromRow(row);
+  });
 }
 
 /**
  * A conversation happened and this is its record: `running → completed`, the
  * report written once with the terminal facts — how it ended, the transcript,
- * the measured audio band that can never be backfilled. If it was the
- * run's last moving simulation, the header is finalized in the same
- * transaction.
+ * the measured audio band that can never be backfilled.
  */
 export async function completeSimulation(
   auth: AuthContext,
@@ -1011,7 +1062,6 @@ export async function completeSimulation(
 ): Promise<Simulation | undefined> {
   authorize(auth, "start_and_cancel_runs", here(auth));
 
-  const named = validClaimant(claimant);
   if (!COMPLETED_ENDING_REASONS.includes(report.endingReason)) {
     throw new Error(
       `"${report.endingReason}" is not a way a conversation ends`,
@@ -1021,40 +1071,18 @@ export async function completeSimulation(
   if (band !== undefined && (!Number.isInteger(band) || band <= 0)) {
     throw new Error("a measured audio band is a positive whole number of hertz");
   }
-  const recording = report.recordingReference?.trim() || null;
 
-  const now = new Date();
-  return db().transaction(async (tx) => {
-    const [row] = await tx
-      .update(simulation)
-      .set({
-        status: "completed",
-        endingReason: report.endingReason,
-        endedAt: now,
-        heartbeatAt: now,
-        transcript: report.transcript ?? null,
-        events: report.events ?? null,
-        metrics: report.metrics ?? null,
-        measuredAudioBandHertz: band ?? null,
-        recordingReference: recording,
-      })
-      .where(
-        within(
-          auth,
-          simulation,
-          and(
-            eq(simulation.id, id),
-            eq(simulation.claimedBy, named),
-            eq(simulation.status, "running"),
-            simulationInActingProject(auth),
-          ),
-        ),
-      )
-      .returning(SIMULATION_COLUMNS);
-
-    if (row === undefined) return undefined;
-    await finalizeRunIfDone(tx, row.runId, now);
-    return row as Simulation;
+  return landSimulation(auth, id, claimant, {
+    from: ["running"],
+    write: {
+      status: "completed",
+      endingReason: report.endingReason,
+      transcript: report.transcript ?? null,
+      events: report.events ?? null,
+      metrics: report.metrics ?? null,
+      measuredAudioBandHertz: band ?? null,
+      recordingReference: report.recordingReference?.trim() || null,
+    },
   });
 }
 
@@ -1074,41 +1102,19 @@ export async function failSimulation(
 ): Promise<Simulation | undefined> {
   authorize(auth, "start_and_cancel_runs", here(auth));
 
-  const named = validClaimant(claimant);
   if (!REPORTABLE_FAILURE_REASONS.includes(failure.reason)) {
     throw new Error(`"${failure.reason}" is not a way a simulation fails`);
   }
 
-  const now = new Date();
-  return db().transaction(async (tx) => {
-    const [row] = await tx
-      .update(simulation)
-      .set({
-        status: "failed",
-        endingReason: failure.reason,
-        endedAt: now,
-        heartbeatAt: now,
-        transcript: failure.transcript ?? null,
-        events: failure.events ?? null,
-        metrics: failure.metrics ?? null,
-      })
-      .where(
-        within(
-          auth,
-          simulation,
-          and(
-            eq(simulation.id, id),
-            eq(simulation.claimedBy, named),
-            inArray(simulation.status, ["claimed", "running"]),
-            simulationInActingProject(auth),
-          ),
-        ),
-      )
-      .returning(SIMULATION_COLUMNS);
-
-    if (row === undefined) return undefined;
-    await finalizeRunIfDone(tx, row.runId, now);
-    return row as Simulation;
+  return landSimulation(auth, id, claimant, {
+    from: ["claimed", "running"],
+    write: {
+      status: "failed",
+      endingReason: failure.reason,
+      transcript: failure.transcript ?? null,
+      events: failure.events ?? null,
+      metrics: failure.metrics ?? null,
+    },
   });
 }
 
@@ -1126,29 +1132,10 @@ export async function markSimulationCanceled(
 ): Promise<Simulation | undefined> {
   authorize(auth, "start_and_cancel_runs", here(auth));
 
-  const now = new Date();
-  return db().transaction(async (tx) => {
-    const [row] = await tx
-      .update(simulation)
-      .set({ status: "canceled", endedAt: now, heartbeatAt: now })
-      .where(
-        within(
-          auth,
-          simulation,
-          and(
-            eq(simulation.id, id),
-            eq(simulation.claimedBy, validClaimant(claimant)),
-            inArray(simulation.status, ["claimed", "running"]),
-            isNotNull(simulation.cancelRequestedAt),
-            simulationInActingProject(auth),
-          ),
-        ),
-      )
-      .returning(SIMULATION_COLUMNS);
-
-    if (row === undefined) return undefined;
-    await finalizeRunIfDone(tx, row.runId, now);
-    return row as Simulation;
+  return landSimulation(auth, id, claimant, {
+    from: ["claimed", "running"],
+    write: { status: "canceled" },
+    onlyWhere: isNotNull(simulation.cancelRequestedAt),
   });
 }
 
@@ -1189,7 +1176,7 @@ export async function sweepOrphanedSimulations(
           and(
             inArray(simulation.status, ["claimed", "running"]),
             lt(simulation.heartbeatAt, silentSince),
-            simulationInActingProject(auth),
+            inActingProject(auth, simulation),
           ),
         ),
       )
@@ -1204,5 +1191,5 @@ export async function sweepOrphanedSimulations(
     return rows;
   });
 
-  return swept.map((row) => row as Simulation);
+  return swept.map(simulationFromRow);
 }

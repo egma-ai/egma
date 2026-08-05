@@ -1,4 +1,4 @@
-import { isId, newId } from "@egma/ids";
+import { newId } from "@egma/ids";
 import { and, desc, eq, isNull, lt, type SQL } from "drizzle-orm";
 
 import { db } from "../client.ts";
@@ -11,6 +11,7 @@ import {
   PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
 } from "./errors.ts";
+import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
 import { liveTestsNamingPersona } from "./tests.ts";
@@ -483,35 +484,20 @@ export type PersonaPage = {
   readonly nextCursor: string | undefined;
 };
 
-const DEFAULT_PAGE_SIZE = 50;
-const LARGEST_PAGE_SIZE = 200;
-
 export async function listPersonas(
   auth: AuthContext,
-  page?: {
-    readonly limit?: number | undefined;
-    readonly cursor?: string | undefined;
-  },
+  page?: PageRequest,
 ): Promise<PersonaPage> {
   authorize(auth, "read", here(auth));
 
-  const limit = page?.limit ?? DEFAULT_PAGE_SIZE;
-  if (!Number.isInteger(limit) || limit < 1 || limit > LARGEST_PAGE_SIZE) {
-    throw new Error(
-      `a page holds between 1 and ${LARGEST_PAGE_SIZE} personas`,
-    );
-  }
-  const cursor = page?.cursor;
-  if (cursor !== undefined && !isId("prs", cursor)) {
-    throw new Error(
-      `"${cursor}" is not a persona id, so it cannot be a cursor`,
-    );
-  }
-
+  const { limit, cursor } = pageWindow(page, {
+    singular: "persona",
+    plural: "personas",
+    prefix: "prs",
+  });
   const olderThanCursor =
     cursor === undefined ? undefined : lt(persona.id, cursor);
 
-  // One row beyond the page answers "is there more?" without a second query.
   const rows = await selectWithCurrentVersion()
     .where(
       within(
@@ -523,13 +509,13 @@ export async function listPersonas(
     .orderBy(desc(persona.id))
     .limit(limit + 1);
 
-  const items = rows
-    .slice(0, limit)
-    .map((row) => ({ ...row, traits: traitsFromRow(row.traits, row.versionId) }));
-
+  const { items, nextCursor } = pageOf(rows, limit);
   return {
-    items,
-    nextCursor: rows.length > limit ? items[items.length - 1]?.id : undefined,
+    items: items.map((row) => ({
+      ...row,
+      traits: traitsFromRow(row.traits, row.versionId),
+    })),
+    nextCursor,
   };
 }
 

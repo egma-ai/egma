@@ -124,7 +124,7 @@ CREATE INDEX "run_organization_id_project_id_id_idx" ON "run" USING btree ("orga
 CREATE INDEX "run_agent_id_idx" ON "run" USING btree ("agent_id");--> statement-breakpoint
 CREATE INDEX "simulation_run_id_idx" ON "simulation" USING btree ("run_id");--> statement-breakpoint
 CREATE INDEX "simulation_queued_idx" ON "simulation" USING btree ("organization_id","id") WHERE "simulation"."status" = 'queued';--> statement-breakpoint
-CREATE INDEX "simulation_heartbeat_idx" ON "simulation" USING btree ("heartbeat_at") WHERE "simulation"."status" in ('claimed', 'running');--> statement-breakpoint
+CREATE INDEX "simulation_heartbeat_idx" ON "simulation" USING btree ("organization_id","heartbeat_at") WHERE "simulation"."status" in ('claimed', 'running');--> statement-breakpoint
 CREATE INDEX "simulation_persona_version_id_idx" ON "simulation" USING btree ("persona_version_id");--> statement-breakpoint
 CREATE INDEX "simulation_persona_id_idx" ON "simulation" USING btree ("persona_id");--> statement-breakpoint
 -- Written here by hand: the schema source cannot express a trigger, and a

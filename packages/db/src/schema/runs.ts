@@ -105,6 +105,10 @@ export const SIMULATION_ENDING_REASONS = [
 export type SimulationEndingReason =
   (typeof SIMULATION_ENDING_REASONS)[number];
 
+/** A quoted value list, as a check's SQL wants one: `('a', 'b', 'c')`. */
+const quoted = (values: readonly string[]) =>
+  sql.raw(`(${values.map((value) => `'${value}'`).join(", ")})`);
+
 export const run = pgTable(
   "run",
   {
@@ -233,6 +237,8 @@ export const run = pgTable(
       table.projectId,
       table.id,
     ),
+    // What the agent's own hard delete checks, and the per-agent history read
+    // when it arrives; the id-ordered pair above already serves every list.
     index("run_agent_id_idx").on(table.agentId),
   ],
 );
@@ -318,8 +324,8 @@ export const simulation = pgTable(
     ),
     check(
       "simulation_ending_reason_allowed",
-      sql`${table.endingReason} is null or ${table.endingReason} in ${sql.raw(
-        `(${SIMULATION_ENDING_REASONS.map((reason) => `'${reason}'`).join(", ")})`,
+      sql`${table.endingReason} is null or ${table.endingReason} in ${quoted(
+        SIMULATION_ENDING_REASONS,
       )}`,
     ),
     // The reason's class follows the status: a conversation ended one of the
@@ -330,11 +336,11 @@ export const simulation = pgTable(
     check(
       "simulation_ending_reason_agrees",
       sql`case ${table.status}
-        when 'completed' then ${table.endingReason} in ${sql.raw(
-          `(${COMPLETED_ENDING_REASONS.map((reason) => `'${reason}'`).join(", ")})`,
+        when 'completed' then ${table.endingReason} in ${quoted(
+          COMPLETED_ENDING_REASONS,
         )}
-        when 'failed' then ${table.endingReason} in ${sql.raw(
-          `(${FAILED_ENDING_REASONS.map((reason) => `'${reason}'`).join(", ")})`,
+        when 'failed' then ${table.endingReason} in ${quoted(
+          FAILED_ENDING_REASONS,
         )}
         else ${table.endingReason} is null
       end`,
@@ -445,9 +451,10 @@ export const simulation = pgTable(
     index("simulation_queued_idx")
       .on(table.organizationId, table.id)
       .where(sql`${table.status} = 'queued'`),
-    // The orphan sweep's: everything claimed or running, by last heartbeat.
+    // The orphan sweep's: one customer's claimed and running rows, oldest
+    // heartbeat first — the same shape the sweep's own where clause has.
     index("simulation_heartbeat_idx")
-      .on(table.heartbeatAt)
+      .on(table.organizationId, table.heartbeatAt)
       .where(sql`${table.status} in ('claimed', 'running')`),
     // "Which simulations were conducted with version so-and-so" — the read
     // the orphan sweep of persona versions will one day ask — and the same

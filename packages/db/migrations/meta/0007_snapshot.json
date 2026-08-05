@@ -1,5 +1,5 @@
 {
-  "id": "3d6c2ad4-cd85-4dc3-9302-bdf897e6c6b5",
+  "id": "78a51b61-2404-46dc-91c1-b3b658e232ea",
   "prevId": "fbb9bb6b-c36d-4505-bbd7-1a317fde37f4",
   "version": "7",
   "dialect": "postgresql",
@@ -2877,6 +2877,12 @@
         "simulation_heartbeat_idx": {
           "name": "simulation_heartbeat_idx",
           "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
             {
               "expression": "heartbeat_at",
               "isExpression": false,
