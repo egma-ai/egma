@@ -16,7 +16,8 @@
     "db:down": "docker compose down",
     "db:generate": "pnpm --filter @egma/db generate",
     "test": "pnpm db:up && vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "skills:update": "npx -y skills@latest update --project --yes"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
