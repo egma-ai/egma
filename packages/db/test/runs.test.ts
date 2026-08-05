@@ -469,6 +469,29 @@ describe("the lifecycle, conducted by a claimant", () => {
     ).toBe("claimed");
   });
 
+  it("narrows the claimant's writes to the acting project, like every other verb", async () => {
+    const { simulationId } = await claimedOne();
+
+    // The right claimant, the wrong project: a credential acting in the
+    // sibling reaches nothing, even inside its own organization.
+    const actingInSibling = { ...actingAsAcme(), projectId: acme.outbound };
+    expect(
+      await recordSimulationHeartbeat(actingInSibling, simulationId, simulator),
+    ).toBeUndefined();
+    expect(
+      await startSimulation(actingInSibling, simulationId, simulator),
+    ).toBeUndefined();
+    expect(
+      await failSimulation(actingInSibling, simulationId, simulator, {
+        reason: "simulator_error",
+      }),
+    ).toBeUndefined();
+
+    expect(
+      (await getSimulation(actingAsAcme(), simulationId))?.status,
+    ).toBe("claimed");
+  });
+
   it("keeps a completed simulation's report readable exactly as reported", async () => {
     const { simulationId } = await claimedOne();
     await startSimulation(actingAsAcme(), simulationId, simulator);

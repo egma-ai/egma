@@ -406,7 +406,7 @@ export const simulation = pgTable(
     // the run of the same project, so a simulation cannot sit in a run that
     // cannot see it. The persona pin closes the same way: the version is the
     // named persona's, and the persona is this project's, so a raw write
-    // cannot pin another customer's caller.
+    // cannot pin another customer's persona.
     foreignKey({
       name: "simulation_project_organization_fk",
       columns: [table.projectId, table.organizationId],

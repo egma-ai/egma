@@ -36,10 +36,13 @@ import { within } from "./within.ts";
  * and reporting a simulation *is* conducting the run somebody started.
  *
  * Writers keep to one lock order — simulation rows first, the run header last
- * — so the claim path, the cancel path and the report path can interleave
- * without deadlocking each other. The header is finalized under its own row
- * lock by whichever terminal transition lands last, which is what lets the
- * counts be written once, together, and never by two writers at once.
+ * — so the claim path, the cancel path and the report path do not deadlock
+ * each other. (Two bulk simulation writes racing over one set can still, in
+ * principle, collide over row order inside a statement; Postgres aborts one
+ * and both callers here are retried by their nature — a sweep re-runs, a
+ * cancel is re-asked.) The header is finalized under its own row lock by
+ * whichever terminal transition lands last, which is what lets the counts be
+ * written once, together, and never by two writers at once.
  */
 
 export type NewRun = {
@@ -949,6 +952,7 @@ export async function recordSimulationHeartbeat(
           eq(simulation.id, id),
           eq(simulation.claimedBy, validClaimant(claimant)),
           inArray(simulation.status, ["claimed", "running"]),
+          simulationInActingProject(auth),
         ),
       ),
     )
@@ -983,6 +987,7 @@ export async function startSimulation(
           eq(simulation.id, id),
           eq(simulation.claimedBy, validClaimant(claimant)),
           eq(simulation.status, "claimed"),
+          simulationInActingProject(auth),
         ),
       ),
     )
@@ -1041,6 +1046,7 @@ export async function completeSimulation(
             eq(simulation.id, id),
             eq(simulation.claimedBy, named),
             eq(simulation.status, "running"),
+            simulationInActingProject(auth),
           ),
         ),
       )
@@ -1094,6 +1100,7 @@ export async function failSimulation(
             eq(simulation.id, id),
             eq(simulation.claimedBy, named),
             inArray(simulation.status, ["claimed", "running"]),
+            simulationInActingProject(auth),
           ),
         ),
       )
@@ -1133,6 +1140,7 @@ export async function markSimulationCanceled(
             eq(simulation.claimedBy, validClaimant(claimant)),
             inArray(simulation.status, ["claimed", "running"]),
             isNotNull(simulation.cancelRequestedAt),
+            simulationInActingProject(auth),
           ),
         ),
       )
