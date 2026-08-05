@@ -992,9 +992,9 @@ export async function deleteTest(
  * without one. Whether the delete is refused is a fact about the digital human
  * rather than about who is asking, and a refusal that depended on the asker
  * would let one credential delete what another credential's test needs. The
- * caller has already checked its own tenancy on the digital-human row before
- * asking, and a version may only ever name a digital human of its own project,
- * so every row this can return is a test standing where the caller already is.
+ * digital human's own delete has checked its tenancy on that row before asking
+ * this, and a version may only ever name a digital human of its own project, so
+ * every row this can return is a test of that same project.
  *
  * Exported to the module, not from the package: this answers a question the
  * digital-human factory has to ask before it deletes, and the test tables have

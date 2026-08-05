@@ -84,7 +84,9 @@ export type TestNamingDigitalHuman = {
 /** How many blocking tests the message spells out before it starts counting. */
 const TESTS_NAMED_IN_MESSAGE = 5;
 
-function readableList(tests: readonly TestNamingDigitalHuman[]): string {
+function spelledOutAndCounted(
+  tests: readonly TestNamingDigitalHuman[],
+): string {
   const named = tests
     .slice(0, TESTS_NAMED_IN_MESSAGE)
     .map((test) => `${test.id} "${test.name}"`)
@@ -98,10 +100,10 @@ function readableList(tests: readonly TestNamingDigitalHuman[]): string {
  *
  * A test names the people who call about its scenario, and executing it
  * produces one simulation per person named. Letting the delete through would
- * leave each of those tests quietly checking one fewer conversation than it
- * says it checks — a suite going green while the case somebody wrote it for
- * never ran. So the delete is refused, and the developer decides what those
- * tests should say instead.
+ * leave each of those tests quietly running one simulation fewer than it says
+ * it runs — a suite going green while the case somebody wrote it for never
+ * ran. So the delete is refused, and the developer decides what those tests
+ * should say instead.
  *
  * It carries every blocking test, because the fix is to go and edit each one
  * and a refusal that only said "something names them" would send somebody
@@ -121,7 +123,7 @@ export class DigitalHumanNamedByTestsError extends Error {
     super(
       `digital human ${digitalHumanId} is named by ${tests.length} live ${
         tests.length === 1 ? "test" : "tests"
-      } (${readableList(tests)}), and a test must never silently lose one of the people who call about it; name somebody else on those tests, or delete them, and then delete the digital human`,
+      } (${spelledOutAndCounted(tests)}), and a test must never silently lose one of the people who call about it; name somebody else on those tests, or delete them, and then delete the digital human`,
     );
     this.name = "DigitalHumanNamedByTestsError";
     this.digitalHumanId = digitalHumanId;

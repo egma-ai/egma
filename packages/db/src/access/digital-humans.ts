@@ -591,15 +591,9 @@ export type DeletedDigitalHuman = {
  * the run itself is kept. Sweeping orphaned versions is the deletion worker's
  * job, not this function's.
  *
- * **Refused while the current version of a live test names them.** A test names
- * the people who call about its scenario, and executing it produces one
- * simulation per person named; a digital human taken out from under it would
- * leave that test quietly checking one fewer conversation than it says it
- * checks. So the delete is refused and the refusal names every test standing in
- * the way, and the developer decides what those tests should say instead.
- * Historical versions never block — a run that pinned one has to stay readable,
- * and nothing deleted today changes what that run executed — and a deleted test
- * blocks nothing either, because it has no simulation left to lose.
+ * **Refused while the current version of a live test names them**, naming every
+ * test standing in the way; `DigitalHumanNamedByTestsError` says why. Historical
+ * versions never block, and neither does a deleted test.
  *
  * Like create, this refuses a credential acting in no project. An edit lands
  * on a row that already names its own project; a delete decides the digital
@@ -620,18 +614,13 @@ export async function deleteDigitalHuman(
 
   const deletedAt = new Date();
   return db().transaction(async (tx) => {
-    // The row is locked before the tests naming it are counted, and the lock is
-    // held until this transaction ends. Writing a test takes a shared lock on
-    // the same row while it checks that the digital humans it is about to name
-    // are alive, and the two lock modes conflict, so the two writes cannot walk
-    // past each other: whichever reaches the row first makes the other wait and
-    // then see how it ended. If the test got there first, its rows are committed
-    // by the time they are counted here and this delete is refused. If this
-    // delete got there first, the test's check resumes on the row this one left
-    // behind and refuses the test for naming somebody deleted. Without the lock
-    // both would decide on a snapshot taken before the other wrote, and a live
-    // test would be left naming a deleted digital human — the one state the
-    // count below exists to make impossible.
+    // Locked before the tests naming them are counted, and held until this
+    // transaction ends, so nothing can come to name them between the count and
+    // the write — which a count taken on this transaction's own snapshot could
+    // not promise. The other half is the shared lock a test being written takes
+    // on this same row, which `validateNamedDigitalHumans` in `tests.ts`
+    // explains: the two modes conflict, so one of the two writes always waits
+    // for the other and then sees how it ended.
     const [locked] = await tx
       .select({ id: digitalHuman.id })
       .from(digitalHuman)
