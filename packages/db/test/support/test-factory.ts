@@ -85,7 +85,7 @@ export async function seedDigitalHuman(
   return created.id;
 }
 
-/** What provisioning will do when it seeds a project's starter digital human. */
+/** What provisioning does when it seeds a project's starter digital human. */
 export async function pointProjectAt(
   projectId: string,
   digitalHumanId: string | null,

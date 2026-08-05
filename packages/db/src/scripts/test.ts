@@ -39,9 +39,9 @@ import { organization, user } from "../schema/index.ts";
  *   node packages/db/dist/scripts/test.js clone tst_…
  *   node packages/db/dist/scripts/test.js delete tst_…
  *
- * Naming no digital human takes the project's default. The development
- * project has none until one is set, so the first create either names one or
- * says so.
+ * Naming no digital human takes the project's default, which provisioning
+ * seeds when it creates the development organization — so a create can leave
+ * the flag out from the very first one.
  *
  * On an edit, a flag left out keeps what the test already says, so editing the
  * scenario alone is one flag. A `--behavior` or a `--digital-human` given at
