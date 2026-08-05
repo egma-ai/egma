@@ -2,14 +2,14 @@ import { isId, newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  createDigitalHuman,
-  editDigitalHuman,
-  getDigitalHuman,
-  getDigitalHumanVersion,
+  createPersona,
+  editPersona,
+  getPersona,
+  getPersonaVersion,
   NotPermittedError,
   ProjectOutsideOrganizationError,
   type AuthContext,
-  type DigitalHumanTraits,
+  type PersonaTraits,
   type Role,
 } from "@egma/db";
 
@@ -58,7 +58,7 @@ const rita = {
 } as const;
 
 beforeAll(async () => {
-  database = await createConnectedDatabase("digital_humans");
+  database = await createConnectedDatabase("personas");
 
   for (const tenant of [acme, globex]) {
     await seedOrganization(database, tenant.organization, [
@@ -72,27 +72,27 @@ afterAll(async () => {
   await database.drop();
 });
 
-async function rowCounts(): Promise<{ humans: number; versions: number }> {
-  const humans = await database.sql<{ count: string }>(
-    "select count(*) as count from digital_human",
+async function rowCounts(): Promise<{ personas: number; versions: number }> {
+  const personas = await database.sql<{ count: string }>(
+    "select count(*) as count from persona",
   );
   const versions = await database.sql<{ count: string }>(
-    "select count(*) as count from digital_human_version",
+    "select count(*) as count from persona_version",
   );
   return {
-    humans: Number(humans.rows[0]?.count),
+    personas: Number(personas.rows[0]?.count),
     versions: Number(versions.rows[0]?.count),
   };
 }
 
-describe("creating a digital human", () => {
-  it("returns a dh_ id and fetch round-trips every input", async () => {
-    const created = await createDigitalHuman(actingAsAcme(), rita);
+describe("creating a persona", () => {
+  it("returns a prs_ id and fetch round-trips every input", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
 
-    expect(isId("dh", created.id)).toBe(true);
-    expect(isId("dhv", created.versionId)).toBe(true);
+    expect(isId("prs", created.id)).toBe(true);
+    expect(isId("prsv", created.versionId)).toBe(true);
 
-    const fetched = await getDigitalHuman(actingAsAcme(), created.id);
+    const fetched = await getPersona(actingAsAcme(), created.id);
     expect(fetched).toBeDefined();
     expect(fetched?.name).toBe(rita.name);
     expect(fetched?.description).toBe(rita.description);
@@ -103,17 +103,17 @@ describe("creating a digital human", () => {
 
   it("is allowed to a member and refused to a viewer, per the permission table", async () => {
     await expect(
-      createDigitalHuman(actingAsAcme("viewer"), rita),
+      createPersona(actingAsAcme("viewer"), rita),
     ).rejects.toThrow(NotPermittedError);
 
-    const fetchedByViewer = await createDigitalHuman(actingAsAcme("member"), rita)
-      .then((created) => getDigitalHuman(actingAsAcme("viewer"), created.id));
+    const fetchedByViewer = await createPersona(actingAsAcme("member"), rita)
+      .then((created) => getPersona(actingAsAcme("viewer"), created.id));
     expect(fetchedByViewer?.name).toBe(rita.name);
   });
 
   it("is refused to a credential acting in no project", async () => {
     await expect(
-      createDigitalHuman(
+      createPersona(
         { ...actingAsAcme(), projectId: undefined },
         rita,
       ),
@@ -127,13 +127,13 @@ describe("creating a digital human", () => {
     // the database, for a writer that is not the factory.
     const connection = await openSingleConnection(database.url);
     try {
-      const orphan = newId("dh");
+      const orphan = newId("prs");
       await connection.sql("begin");
       await connection.sql(
-        `insert into digital_human
+        `insert into persona
            (id, organization_id, project_id, name, current_version_id)
          values ($1, $2, $3, 'Halfway', $4)`,
-        [orphan, acme.organization, acme.project, newId("dhv")],
+        [orphan, acme.organization, acme.project, newId("prsv")],
       );
 
       await expect(connection.sql("commit")).rejects.toSatisfy(
@@ -141,7 +141,7 @@ describe("creating a digital human", () => {
       );
 
       const { rows } = await database.sql(
-        "select 1 from digital_human where id = $1",
+        "select 1 from persona where id = $1",
         [orphan],
       );
       expect(rows).toEqual([]);
@@ -152,37 +152,37 @@ describe("creating a digital human", () => {
 });
 
 describe("a credential for the whole organization", () => {
-  it("reads a project's digital humans without acting in the project", async () => {
-    const created = await createDigitalHuman(actingAsAcme(), rita);
+  it("reads a project's personas without acting in the project", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
 
     const wholeCustomer = { ...actingAsAcme(), projectId: undefined };
-    const fetched = await getDigitalHuman(wholeCustomer, created.id);
+    const fetched = await getPersona(wholeCustomer, created.id);
     expect(fetched?.id).toBe(created.id);
     expect(fetched?.projectId).toBe(acme.project);
   });
 
   it("edits what already exists: the row names its own project", async () => {
-    const created = await createDigitalHuman(actingAsAcme(), rita);
+    const created = await createPersona(actingAsAcme(), rita);
 
     const wholeCustomer = { ...actingAsAcme(), projectId: undefined };
-    const edited = await editDigitalHuman(wholeCustomer, created.id, {
+    const edited = await editPersona(wholeCustomer, created.id, {
       traits: { ...rita.traits, language: "en-CA" },
     });
 
     expect(edited?.version).toBe(2);
     expect(edited?.projectId).toBe(acme.project);
 
-    const version = await getDigitalHumanVersion(wholeCustomer, created.versionId);
+    const version = await getPersonaVersion(wholeCustomer, created.versionId);
     expect(version?.version).toBe(1);
   });
 });
 
-describe("editing a digital human's traits", () => {
+describe("editing a persona's traits", () => {
   it("creates version 2, moves the pointer, and leaves version 1 untouched", async () => {
-    const created = await createDigitalHuman(actingAsAcme(), rita);
+    const created = await createPersona(actingAsAcme(), rita);
 
     const calmer = { ...rita.traits, personality: "Rita, but rested." };
-    const edited = await editDigitalHuman(actingAsAcme(), created.id, {
+    const edited = await editPersona(actingAsAcme(), created.id, {
       traits: calmer,
     });
 
@@ -190,20 +190,20 @@ describe("editing a digital human's traits", () => {
     expect(edited?.versionId).not.toBe(created.versionId);
     expect(edited?.traits).toEqual(calmer);
 
-    const fetched = await getDigitalHuman(actingAsAcme(), created.id);
+    const fetched = await getPersona(actingAsAcme(), created.id);
     expect(fetched?.version).toBe(2);
     expect(fetched?.versionId).toBe(edited?.versionId);
 
-    const frozen = await getDigitalHumanVersion(actingAsAcme(), created.versionId);
+    const frozen = await getPersonaVersion(actingAsAcme(), created.versionId);
     expect(frozen?.version).toBe(1);
-    expect(frozen?.digitalHumanId).toBe(created.id);
+    expect(frozen?.personaId).toBe(created.id);
     expect(frozen?.traits).toEqual(rita.traits);
   });
 
   it("versions on any single trait change", async () => {
-    const created = await createDigitalHuman(actingAsAcme(), rita);
+    const created = await createPersona(actingAsAcme(), rita);
 
-    let traits: DigitalHumanTraits = rita.traits;
+    let traits: PersonaTraits = rita.traits;
     const oneAtATime = [
       { personality: "Rita after a good nap." },
       { language: "en-GB" },
@@ -222,21 +222,21 @@ describe("editing a digital human's traits", () => {
     let expected = 1;
     for (const change of oneAtATime) {
       traits = { ...traits, ...change };
-      const edited = await editDigitalHuman(actingAsAcme(), created.id, { traits });
+      const edited = await editPersona(actingAsAcme(), created.id, { traits });
       expected += 1;
       expect(edited?.version).toBe(expected);
     }
 
-    const fetched = await getDigitalHuman(actingAsAcme(), created.id);
+    const fetched = await getPersona(actingAsAcme(), created.id);
     expect(fetched?.version).toBe(6);
     expect(fetched?.traits).toEqual(traits);
   });
 
   it("does nothing for a byte-identical save, and returns the current version", async () => {
-    const created = await createDigitalHuman(actingAsAcme(), rita);
+    const created = await createPersona(actingAsAcme(), rita);
     const before = await rowCounts();
 
-    const saved = await editDigitalHuman(actingAsAcme(), created.id, {
+    const saved = await editPersona(actingAsAcme(), created.id, {
       traits: { ...rita.traits, voice: { ...rita.traits.voice } },
     });
 
@@ -244,34 +244,34 @@ describe("editing a digital human's traits", () => {
     expect(saved?.versionId).toBe(created.versionId);
     expect(await rowCounts()).toEqual(before);
 
-    const fetched = await getDigitalHuman(actingAsAcme(), created.id);
+    const fetched = await getPersona(actingAsAcme(), created.id);
     expect(fetched?.updatedAt.getTime()).toBe(created.updatedAt.getTime());
   });
 
-  it("keeps every old version fetchable by its dhv_ id after later edits", async () => {
-    const created = await createDigitalHuman(actingAsAcme(), rita);
-    const second = await editDigitalHuman(actingAsAcme(), created.id, {
+  it("keeps every old version fetchable by its prsv_ id after later edits", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
+    const second = await editPersona(actingAsAcme(), created.id, {
       traits: { ...rita.traits, language: "en-AU" },
     });
-    await editDigitalHuman(actingAsAcme(), created.id, {
+    await editPersona(actingAsAcme(), created.id, {
       traits: { ...rita.traits, language: "en-NZ" },
     });
 
-    const first = await getDigitalHumanVersion(actingAsAcme(), created.versionId);
+    const first = await getPersonaVersion(actingAsAcme(), created.versionId);
     expect(first?.version).toBe(1);
     expect(first?.traits).toEqual(rita.traits);
 
     if (second?.versionId === undefined) throw new Error("no second version");
-    const middle = await getDigitalHumanVersion(actingAsAcme(), second.versionId);
+    const middle = await getPersonaVersion(actingAsAcme(), second.versionId);
     expect(middle?.version).toBe(2);
     expect(middle?.traits).toEqual({ ...rita.traits, language: "en-AU" });
   });
 
   it("validates edited traits exactly as created ones, and versions nothing", async () => {
-    const created = await createDigitalHuman(actingAsAcme(), rita);
+    const created = await createPersona(actingAsAcme(), rita);
 
     await expect(
-      editDigitalHuman(actingAsAcme(), created.id, {
+      editPersona(actingAsAcme(), created.id, {
         traits: {
           ...rita.traits,
           voice: { ...rita.traits.voice, speed: 5 },
@@ -279,28 +279,28 @@ describe("editing a digital human's traits", () => {
       }),
     ).rejects.toThrow(/speed/);
 
-    const fetched = await getDigitalHuman(actingAsAcme(), created.id);
+    const fetched = await getPersona(actingAsAcme(), created.id);
     expect(fetched?.version).toBe(1);
     expect(fetched?.traits).toEqual(rita.traits);
   });
 
   it("is refused to a viewer, per the permission table", async () => {
-    const created = await createDigitalHuman(actingAsAcme(), rita);
+    const created = await createPersona(actingAsAcme(), rita);
 
     await expect(
-      editDigitalHuman(actingAsAcme("viewer"), created.id, {
+      editPersona(actingAsAcme("viewer"), created.id, {
         traits: { ...rita.traits, language: "en-GB" },
       }),
     ).rejects.toThrow(NotPermittedError);
   });
 });
 
-describe("renaming a digital human", () => {
+describe("renaming a persona", () => {
   it("updates name and description and creates no version", async () => {
-    const created = await createDigitalHuman(actingAsAcme(), rita);
+    const created = await createPersona(actingAsAcme(), rita);
     const before = await rowCounts();
 
-    const renamed = await editDigitalHuman(actingAsAcme(), created.id, {
+    const renamed = await editPersona(actingAsAcme(), created.id, {
       name: "Patient Rita",
       description: "Rita, after the hearing aid arrived",
     });
@@ -311,16 +311,16 @@ describe("renaming a digital human", () => {
     expect(renamed?.versionId).toBe(created.versionId);
     expect(await rowCounts()).toEqual(before);
 
-    const fetched = await getDigitalHuman(actingAsAcme(), created.id);
+    const fetched = await getPersona(actingAsAcme(), created.id);
     expect(fetched?.name).toBe("Patient Rita");
     expect(fetched?.version).toBe(1);
     expect(fetched?.traits).toEqual(rita.traits);
   });
 
   it("clears the description with null, still without versioning", async () => {
-    const created = await createDigitalHuman(actingAsAcme(), rita);
+    const created = await createPersona(actingAsAcme(), rita);
 
-    const cleared = await editDigitalHuman(actingAsAcme(), created.id, {
+    const cleared = await editPersona(actingAsAcme(), created.id, {
       description: null,
     });
 
@@ -329,17 +329,17 @@ describe("renaming a digital human", () => {
   });
 
   it("refuses a blank name", async () => {
-    const created = await createDigitalHuman(actingAsAcme(), rita);
+    const created = await createPersona(actingAsAcme(), rita);
 
     await expect(
-      editDigitalHuman(actingAsAcme(), created.id, { name: "   " }),
+      editPersona(actingAsAcme(), created.id, { name: "   " }),
     ).rejects.toThrow(/name/);
   });
 
   it("renames and versions together when one edit carries both", async () => {
-    const created = await createDigitalHuman(actingAsAcme(), rita);
+    const created = await createPersona(actingAsAcme(), rita);
 
-    const edited = await editDigitalHuman(actingAsAcme(), created.id, {
+    const edited = await editPersona(actingAsAcme(), created.id, {
       name: "Louder Rita",
       traits: { ...rita.traits, voice: { ...rita.traits.voice, speed: 1.2 } },
     });
@@ -349,12 +349,12 @@ describe("renaming a digital human", () => {
   });
 });
 
-describe("a digital human that fails validation", () => {
+describe("a persona that fails validation", () => {
   it("is refused for a missing name, and no rows are left behind", async () => {
     const before = await rowCounts();
 
     await expect(
-      createDigitalHuman(actingAsAcme(), { ...rita, name: "   " }),
+      createPersona(actingAsAcme(), { ...rita, name: "   " }),
     ).rejects.toThrow(/name/);
 
     expect(await rowCounts()).toEqual(before);
@@ -364,7 +364,7 @@ describe("a digital human that fails validation", () => {
     const before = await rowCounts();
 
     await expect(
-      createDigitalHuman(actingAsAcme(), {
+      createPersona(actingAsAcme(), {
         ...rita,
         traits: { ...rita.traits, personality: "" },
       }),
@@ -377,7 +377,7 @@ describe("a digital human that fails validation", () => {
     const before = await rowCounts();
 
     await expect(
-      createDigitalHuman(actingAsAcme(), {
+      createPersona(actingAsAcme(), {
         ...rita,
         traits: {
           ...rita.traits,
@@ -391,7 +391,7 @@ describe("a digital human that fails validation", () => {
 
   it("is refused for an empty language", async () => {
     await expect(
-      createDigitalHuman(actingAsAcme(), {
+      createPersona(actingAsAcme(), {
         ...rita,
         traits: { ...rita.traits, language: " " },
       }),
@@ -400,7 +400,7 @@ describe("a digital human that fails validation", () => {
 
   it("is refused for a speaking speed outside the intelligible range", async () => {
     await expect(
-      createDigitalHuman(actingAsAcme(), {
+      createPersona(actingAsAcme(), {
         ...rita,
         traits: {
           ...rita.traits,
@@ -413,23 +413,23 @@ describe("a digital human that fails validation", () => {
 
 describe("a version row somebody hand-corrupted", () => {
   it("fails loudly on every read, naming the version, rather than leaking", async () => {
-    const created = await createDigitalHuman(actingAsAcme(), rita);
+    const created = await createPersona(actingAsAcme(), rita);
 
     // Raw SQL on purpose: the factory can never write this, so the guard is
     // the only thing standing between the row and the caller.
     await database.sql(
-      `update digital_human_version set traits = '{"personality": 12}'::jsonb where id = $1`,
+      `update persona_version set traits = '{"personality": 12}'::jsonb where id = $1`,
       [created.versionId],
     );
 
-    await expect(getDigitalHuman(actingAsAcme(), created.id)).rejects.toThrow(
+    await expect(getPersona(actingAsAcme(), created.id)).rejects.toThrow(
       created.versionId,
     );
     await expect(
-      getDigitalHumanVersion(actingAsAcme(), created.versionId),
+      getPersonaVersion(actingAsAcme(), created.versionId),
     ).rejects.toThrow(created.versionId);
     await expect(
-      editDigitalHuman(actingAsAcme(), created.id, { name: "Renamed anyway" }),
+      editPersona(actingAsAcme(), created.id, { name: "Renamed anyway" }),
     ).rejects.toThrow(created.versionId);
   });
 });
@@ -439,7 +439,7 @@ describe("tenancy", () => {
     const before = await rowCounts();
 
     await expect(
-      createDigitalHuman(
+      createPersona(
         { ...actingAsAcme(), projectId: globex.project },
         rita,
       ),
@@ -448,8 +448,8 @@ describe("tenancy", () => {
     expect(await rowCounts()).toEqual(before);
   });
 
-  it("returns nothing when another organization asks for my digital human", async () => {
-    const created = await createDigitalHuman(actingAsAcme(), rita);
+  it("returns nothing when another organization asks for my persona", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
 
     const actingAsGlobex: AuthContext = {
       userId: newId("usr"),
@@ -458,11 +458,11 @@ describe("tenancy", () => {
       role: "member",
       via: "session",
     };
-    expect(await getDigitalHuman(actingAsGlobex, created.id)).toBeUndefined();
+    expect(await getPersona(actingAsGlobex, created.id)).toBeUndefined();
   });
 
   it("edits nothing and returns nothing when another organization asks", async () => {
-    const created = await createDigitalHuman(actingAsAcme(), rita);
+    const created = await createPersona(actingAsAcme(), rita);
 
     const actingAsGlobex: AuthContext = {
       userId: newId("usr"),
@@ -471,34 +471,34 @@ describe("tenancy", () => {
       role: "admin",
       via: "session",
     };
-    const stolen = await editDigitalHuman(actingAsGlobex, created.id, {
+    const stolen = await editPersona(actingAsGlobex, created.id, {
       name: "Globex Rita",
       traits: { ...rita.traits, language: "en-GB" },
     });
     expect(stolen).toBeUndefined();
 
-    const untouched = await getDigitalHuman(actingAsAcme(), created.id);
+    const untouched = await getPersona(actingAsAcme(), created.id);
     expect(untouched?.name).toBe(rita.name);
     expect(untouched?.version).toBe(1);
 
     expect(
-      await getDigitalHumanVersion(actingAsGlobex, created.versionId),
+      await getPersonaVersion(actingAsGlobex, created.versionId),
     ).toBeUndefined();
   });
 
   it("edits nothing for an id that does not exist", async () => {
     expect(
-      await editDigitalHuman(actingAsAcme(), newId("dh"), { name: "Nobody" }),
+      await editPersona(actingAsAcme(), newId("prs"), { name: "Nobody" }),
     ).toBeUndefined();
   });
 
   it("refuses the mismatched pairing even for raw SQL that bypasses the module", async () => {
     await expect(
       database.sql(
-        `insert into digital_human
+        `insert into persona
            (id, organization_id, project_id, name, current_version_id)
          values ($1, $2, $3, 'Smuggled', $4)`,
-        [newId("dh"), acme.organization, globex.project, newId("dhv")],
+        [newId("prs"), acme.organization, globex.project, newId("prsv")],
       ),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,

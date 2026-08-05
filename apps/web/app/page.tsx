@@ -111,7 +111,7 @@ export default function Home() {
 
       <p style={styles.aside}>
         Nothing else is built yet. Everything a test needs — agents,
-        connections, digital humans, graders — arrives with the effort that can
+        connections, personas, graders — arrives with the effort that can
         run one.
       </p>
 

@@ -37,7 +37,7 @@ const PERMISSIONS = {
   /** Read anything in the organization. */
   read:                   ["viewer", "member", "admin"],
 
-  /** Create, edit, delete tests, digital humans, graders and test suites. */
+  /** Create, edit, delete tests, personas, graders and test suites. */
   author_definitions:     [          "member", "admin"],
 
   /** Create, edit, delete agents and connections. */
