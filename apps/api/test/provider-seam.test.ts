@@ -108,6 +108,9 @@ describe("the provider's footprint on the schema", () => {
     "organization_settings",
     "project",
     "session",
+    "test",
+    "test_version",
+    "test_version_digital_human",
     "user",
     "verification",
   ];

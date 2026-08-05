@@ -177,3 +177,12 @@ export {
   type NewDigitalHuman,
   type VoiceProvider,
 } from "./digital-humans.ts";
+
+export {
+  createTest,
+  getTest,
+  type NewTest,
+  type Test,
+  type TestContent,
+  type TestDigitalHuman,
+} from "./tests.ts";

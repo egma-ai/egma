@@ -36,6 +36,13 @@
       "when": 1785816408700,
       "tag": "0004_agents",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785951987381,
+      "tag": "0005_tests",
+      "breakpoints": true
     }
   ]
 }

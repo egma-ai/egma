@@ -6,8 +6,10 @@ import {
   pgTable,
   text,
   unique,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
+import { digitalHuman } from "./digital-humans.ts";
 import { user } from "./identity.ts";
 import {
   API_KEY_SCOPES,
@@ -76,6 +78,17 @@ export const project = pgTable(
       .references(() => organization.id, { onDelete: "restrict" }),
     name: text("name").notNull(),
     slug: text("slug").notNull(),
+    /**
+     * The digital human a test created naming none receives, so authoring a
+     * first test never waits on authoring a digital human. An ordinary row the
+     * project points at, editable like any other. Nullable because the pointer
+     * is set after the project exists, and because a row it named can be swept
+     * away — a test then has to name its own until somebody points it again.
+     */
+    defaultDigitalHumanId: idText("default_digital_human_id").references(
+      (): AnyPgColumn => digitalHuman.id,
+      { onDelete: "set null" },
+    ),
     deletedAt: moment("deleted_at"),
     createdBy: idText("created_by").references(() => user.id, {
       onDelete: "set null",

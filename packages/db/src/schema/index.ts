@@ -4,3 +4,4 @@ export * from "./tenancy.ts";
 export * from "./device.ts";
 export * from "./digital-humans.ts";
 export * from "./agents.ts";
+export * from "./tests.ts";

@@ -1,0 +1,496 @@
+import { isId, newId } from "@egma/ids";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import {
+  createDigitalHuman,
+  createTest,
+  deleteDigitalHuman,
+  getTest,
+  NotPermittedError,
+  ProjectOutsideOrganizationError,
+  type AuthContext,
+  type NewTest,
+  type Role,
+} from "@egma/db";
+
+import {
+  createConnectedDatabase,
+  errorCodeOf,
+  openSingleConnection,
+  POSTGRES_ERROR,
+  type MigratedDatabase,
+} from "./support/database.ts";
+import { seedOrganization, seedUser } from "./support/tenancy.ts";
+
+/**
+ * The factory functions are the seam: every assertion goes through create and
+ * get, never through table internals. Raw SQL appears only in fixtures, in row
+ * counts proving what a failed create left behind, and in the inserts that
+ * bypass the module on purpose to show the database refuses what the module
+ * never attempts.
+ *
+ * Digital humans arrive through their own factory, which has its own tests —
+ * they are an input to this one, not a thing it is checking.
+ */
+
+let database: MigratedDatabase;
+
+const acme = { organization: newId("org"), project: newId("prj") };
+const globex = { organization: newId("org"), project: newId("prj") };
+const ada = newId("usr");
+const gene = newId("usr");
+
+/** Acme's starter digital human, and the one its project points at. */
+let rita: string;
+/** Globex's, so a cross-project reference has something real to name. */
+let grace: string;
+
+function actingAsAcme(role: Role = "member"): AuthContext {
+  return {
+    userId: ada,
+    organizationId: acme.organization,
+    projectId: acme.project,
+    role,
+    via: "session",
+  };
+}
+
+function actingAsGlobex(role: Role = "member"): AuthContext {
+  return {
+    userId: gene,
+    organizationId: globex.organization,
+    projectId: globex.project,
+    role,
+    via: "session",
+  };
+}
+
+const rescheduling = {
+  name: "Reschedules a booked appointment",
+  description: "The bread-and-butter front-desk call",
+  scenario:
+    "Their cleaning is booked for Thursday morning and has to move to any afternoon next week. They do not remember the exact time of the existing booking.",
+  expectedBehaviors: [
+    "verifies who it is speaking to before discussing the booking",
+    "offers at least one afternoon slot next week",
+    "confirms the new time back before finishing",
+  ],
+} as const satisfies NewTest;
+
+const neutralTraits = {
+  personality: "Speaks plainly, stays patient, asks one question at a time.",
+  language: "en-US",
+  voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
+} as const;
+
+async function seedDigitalHuman(
+  auth: AuthContext,
+  name: string,
+): Promise<string> {
+  const created = await createDigitalHuman(auth, {
+    name,
+    traits: neutralTraits,
+  });
+  return created.id;
+}
+
+/** What provisioning will do when it seeds a project's starter digital human. */
+async function pointProjectAt(
+  projectId: string,
+  digitalHumanId: string | null,
+): Promise<void> {
+  await database.sql(
+    "update project set default_digital_human_id = $1 where id = $2",
+    [digitalHumanId, projectId],
+  );
+}
+
+beforeAll(async () => {
+  database = await createConnectedDatabase("tests");
+
+  for (const tenant of [acme, globex]) {
+    await seedOrganization(database, tenant.organization, [
+      { id: tenant.project, slug: "default" },
+    ]);
+  }
+  await seedUser(database, ada, "ada@acme.example");
+  await seedUser(database, gene, "gene@globex.example");
+
+  rita = await seedDigitalHuman(actingAsAcme(), "Impatient Rita");
+  grace = await seedDigitalHuman(actingAsGlobex(), "Careful Grace");
+  await pointProjectAt(acme.project, rita);
+});
+
+afterAll(async () => {
+  await database.drop();
+});
+
+async function rowCounts(): Promise<{
+  tests: number;
+  versions: number;
+  named: number;
+}> {
+  const count = async (table: string): Promise<number> => {
+    const { rows } = await database.sql<{ count: string }>(
+      `select count(*) as count from ${table}`,
+    );
+    return Number(rows[0]?.count);
+  };
+  return {
+    tests: await count("test"),
+    versions: await count("test_version"),
+    named: await count("test_version_digital_human"),
+  };
+}
+
+describe("creating a test", () => {
+  it("returns a tst_ id and fetch round-trips every input", async () => {
+    const created = await createTest(actingAsAcme(), {
+      ...rescheduling,
+      digitalHumanIds: [rita],
+    });
+
+    expect(isId("tst", created.id)).toBe(true);
+    expect(isId("tstv", created.versionId)).toBe(true);
+
+    const fetched = await getTest(actingAsAcme(), created.id);
+    expect(fetched).toBeDefined();
+    expect(fetched?.name).toBe(rescheduling.name);
+    expect(fetched?.description).toBe(rescheduling.description);
+    expect(fetched?.version).toBe(1);
+    expect(fetched?.scenario).toBe(rescheduling.scenario);
+    expect(fetched?.expectedBehaviors).toEqual(rescheduling.expectedBehaviors);
+    expect(fetched?.projectId).toBe(acme.project);
+    expect(fetched?.digitalHumans).toEqual([
+      { id: rita, name: "Impatient Rita", deletedAt: null },
+    ]);
+  });
+
+  it("keeps several digital humans in the order they were authored", async () => {
+    const nadia = await seedDigitalHuman(actingAsAcme(), "Nadia");
+    const omar = await seedDigitalHuman(actingAsAcme(), "Omar");
+
+    const created = await createTest(actingAsAcme(), {
+      ...rescheduling,
+      digitalHumanIds: [omar, rita, nadia],
+    });
+
+    const fetched = await getTest(actingAsAcme(), created.id);
+    expect(fetched?.digitalHumans.map((human) => human.id)).toEqual([
+      omar,
+      rita,
+      nadia,
+    ]);
+    expect(created.digitalHumans.map((human) => human.id)).toEqual([
+      omar,
+      rita,
+      nadia,
+    ]);
+  });
+
+  it("is allowed to a member and refused to a viewer, per the permission table", async () => {
+    await expect(
+      createTest(actingAsAcme("viewer"), rescheduling),
+    ).rejects.toThrow(NotPermittedError);
+
+    const created = await createTest(actingAsAcme("member"), rescheduling);
+    const fetchedByViewer = await getTest(actingAsAcme("viewer"), created.id);
+    expect(fetchedByViewer?.name).toBe(rescheduling.name);
+  });
+
+  it("is refused to a credential acting in no project", async () => {
+    await expect(
+      createTest({ ...actingAsAcme(), projectId: undefined }, rescheduling),
+    ).rejects.toThrow(/project/);
+  });
+
+  it("cannot commit halfway: an identity row without its version dies at commit", async () => {
+    // The factory writes the test, its version and its join rows in one
+    // transaction, so a create that fails part-way leaves nothing. That
+    // guarantee is the deferred pointer constraint, and this proves it where
+    // it lives — at commit, in the database, for a writer that is not the
+    // factory.
+    const connection = await openSingleConnection(database.url);
+    try {
+      const orphan = newId("tst");
+      await connection.sql("begin");
+      await connection.sql(
+        `insert into test
+           (id, organization_id, project_id, name, current_version_id)
+         values ($1, $2, $3, 'Halfway', $4)`,
+        [orphan, acme.organization, acme.project, newId("tstv")],
+      );
+
+      await expect(connection.sql("commit")).rejects.toSatisfy(
+        (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
+      );
+
+      const { rows } = await database.sql("select 1 from test where id = $1", [
+        orphan,
+      ]);
+      expect(rows).toEqual([]);
+    } finally {
+      await connection.close();
+    }
+  });
+});
+
+describe("a test that fails validation", () => {
+  it("is refused for a missing name, and no rows are left behind", async () => {
+    const before = await rowCounts();
+
+    await expect(
+      createTest(actingAsAcme(), { ...rescheduling, name: "   " }),
+    ).rejects.toThrow(/name/);
+
+    expect(await rowCounts()).toEqual(before);
+  });
+
+  it("is refused for an empty scenario, and no rows are left behind", async () => {
+    const before = await rowCounts();
+
+    await expect(
+      createTest(actingAsAcme(), { ...rescheduling, scenario: "  " }),
+    ).rejects.toThrow(/scenario/);
+
+    expect(await rowCounts()).toEqual(before);
+  });
+
+  it("is refused for an empty behaviors list, because an unfalsifiable test cannot exist", async () => {
+    const before = await rowCounts();
+
+    await expect(
+      createTest(actingAsAcme(), { ...rescheduling, expectedBehaviors: [] }),
+    ).rejects.toThrow(/expected behavior/);
+
+    expect(await rowCounts()).toEqual(before);
+  });
+
+  it("is refused when one of the behaviors says nothing", async () => {
+    await expect(
+      createTest(actingAsAcme(), {
+        ...rescheduling,
+        expectedBehaviors: [...rescheduling.expectedBehaviors, "   "],
+      }),
+    ).rejects.toThrow(/expected behavior/);
+  });
+
+  it("is refused when the same digital human is named twice", async () => {
+    await expect(
+      createTest(actingAsAcme(), {
+        ...rescheduling,
+        digitalHumanIds: [rita, rita],
+      }),
+    ).rejects.toThrow(/twice/);
+  });
+
+  it("stores the name, scenario and behaviors trimmed", async () => {
+    const created = await createTest(actingAsAcme(), {
+      ...rescheduling,
+      name: "  Padded  ",
+      scenario: "  They want a refund and have no receipt.  ",
+      expectedBehaviors: ["  states the refund policy  "],
+    });
+
+    const fetched = await getTest(actingAsAcme(), created.id);
+    expect(fetched?.name).toBe("Padded");
+    expect(fetched?.scenario).toBe("They want a refund and have no receipt.");
+    expect(fetched?.expectedBehaviors).toEqual(["states the refund policy"]);
+  });
+});
+
+describe("a test naming a digital human it may not have", () => {
+  it("is refused when the digital human does not exist, and leaves nothing", async () => {
+    const before = await rowCounts();
+
+    await expect(
+      createTest(actingAsAcme(), {
+        ...rescheduling,
+        digitalHumanIds: [newId("dh")],
+      }),
+    ).rejects.toThrow(/no digital human/);
+
+    expect(await rowCounts()).toEqual(before);
+  });
+
+  it("is refused when the id is not a digital human's at all", async () => {
+    await expect(
+      createTest(actingAsAcme(), {
+        ...rescheduling,
+        digitalHumanIds: [newId("agt")],
+      }),
+    ).rejects.toThrow(/digital-human id/);
+  });
+
+  it("is refused when the digital human is deleted, and leaves nothing", async () => {
+    const retired = await seedDigitalHuman(actingAsAcme(), "Retired Rex");
+    await deleteDigitalHuman(actingAsAcme(), retired);
+
+    const before = await rowCounts();
+
+    await expect(
+      createTest(actingAsAcme(), {
+        ...rescheduling,
+        digitalHumanIds: [retired],
+      }),
+    ).rejects.toThrow(/deleted/);
+
+    expect(await rowCounts()).toEqual(before);
+  });
+
+  it("is refused when the digital human belongs to another project, and leaves nothing", async () => {
+    const before = await rowCounts();
+
+    await expect(
+      createTest(actingAsAcme(), { ...rescheduling, digitalHumanIds: [grace] }),
+    ).rejects.toThrow(/no digital human/);
+
+    expect(await rowCounts()).toEqual(before);
+  });
+
+  it("leaves nothing behind even when the good digital humans come first", async () => {
+    const before = await rowCounts();
+
+    await expect(
+      createTest(actingAsAcme(), {
+        ...rescheduling,
+        digitalHumanIds: [rita, newId("dh")],
+      }),
+    ).rejects.toThrow(/no digital human/);
+
+    expect(await rowCounts()).toEqual(before);
+  });
+});
+
+describe("a test naming no digital human", () => {
+  it("receives the project's default", async () => {
+    const created = await createTest(actingAsAcme(), rescheduling);
+
+    const fetched = await getTest(actingAsAcme(), created.id);
+    expect(fetched?.digitalHumans).toEqual([
+      { id: rita, name: "Impatient Rita", deletedAt: null },
+    ]);
+  });
+
+  it("receives the project's default for an empty list too", async () => {
+    const created = await createTest(actingAsAcme(), {
+      ...rescheduling,
+      digitalHumanIds: [],
+    });
+
+    expect(created.digitalHumans.map((human) => human.id)).toEqual([rita]);
+  });
+
+  it("errors clearly when the project has no default, and creates nothing", async () => {
+    const before = await rowCounts();
+
+    // Globex's project was never pointed at anything, which is where a project
+    // sits before provisioning seeds its starter digital human.
+    await expect(createTest(actingAsGlobex(), rescheduling)).rejects.toThrow(
+      /no default digital human/,
+    );
+
+    expect(await rowCounts()).toEqual(before);
+  });
+
+  it("errors clearly when the default has been deleted, and creates nothing", async () => {
+    const stale = await seedDigitalHuman(actingAsGlobex(), "Stale Default");
+    await pointProjectAt(globex.project, stale);
+    await deleteDigitalHuman(actingAsGlobex(), stale);
+
+    const before = await rowCounts();
+
+    await expect(createTest(actingAsGlobex(), rescheduling)).rejects.toThrow(
+      /is deleted/,
+    );
+
+    expect(await rowCounts()).toEqual(before);
+
+    await pointProjectAt(globex.project, null);
+  });
+});
+
+describe("a digital human deleted after the test named them", () => {
+  it("stays on the test, and the read says they are gone", async () => {
+    const leaving = await seedDigitalHuman(actingAsAcme(), "Leaving Lena");
+    const created = await createTest(actingAsAcme(), {
+      ...rescheduling,
+      digitalHumanIds: [rita, leaving],
+    });
+
+    await deleteDigitalHuman(actingAsAcme(), leaving);
+
+    const fetched = await getTest(actingAsAcme(), created.id);
+    expect(fetched?.digitalHumans.map((human) => human.id)).toEqual([
+      rita,
+      leaving,
+    ]);
+    expect(fetched?.digitalHumans[0]?.deletedAt).toBeNull();
+    expect(fetched?.digitalHumans[1]?.deletedAt).toBeInstanceOf(Date);
+  });
+});
+
+describe("a credential for the whole organization", () => {
+  it("reads a project's tests without acting in the project", async () => {
+    const created = await createTest(actingAsAcme(), rescheduling);
+
+    const wholeCustomer = { ...actingAsAcme(), projectId: undefined };
+    const fetched = await getTest(wholeCustomer, created.id);
+    expect(fetched?.id).toBe(created.id);
+    expect(fetched?.projectId).toBe(acme.project);
+    expect(fetched?.digitalHumans.map((human) => human.id)).toEqual([rita]);
+  });
+});
+
+describe("tenancy", () => {
+  it("refuses a context pairing one organization with another's project, leaving no rows", async () => {
+    const before = await rowCounts();
+
+    await expect(
+      createTest({ ...actingAsAcme(), projectId: globex.project }, rescheduling),
+    ).rejects.toThrow(ProjectOutsideOrganizationError);
+
+    expect(await rowCounts()).toEqual(before);
+  });
+
+  it("returns nothing when another organization asks for my test", async () => {
+    const created = await createTest(actingAsAcme(), rescheduling);
+
+    expect(await getTest(actingAsGlobex(), created.id)).toBeUndefined();
+  });
+
+  it("returns nothing for an id that does not exist", async () => {
+    expect(await getTest(actingAsAcme(), newId("tst"))).toBeUndefined();
+  });
+
+  it("refuses the mismatched pairing even for raw SQL that bypasses the module", async () => {
+    await expect(
+      database.sql(
+        `insert into test
+           (id, organization_id, project_id, name, current_version_id)
+         values ($1, $2, $3, 'Smuggled', $4)`,
+        [newId("tst"), acme.organization, globex.project, newId("tstv")],
+      ),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
+    );
+  });
+});
+
+describe("a version row somebody hand-corrupted", () => {
+  it("fails loudly on the read, naming the version, rather than leaking", async () => {
+    const created = await createTest(actingAsAcme(), rescheduling);
+
+    // Raw SQL on purpose: the factory can never write this, so the guard is
+    // the only thing standing between the row and the caller.
+    await database.sql(
+      `update test_version set content = '{"scenario": "still here", "expectedBehaviors": []}'::jsonb
+        where id = $1`,
+      [created.versionId],
+    );
+
+    await expect(getTest(actingAsAcme(), created.id)).rejects.toThrow(
+      created.versionId,
+    );
+  });
+});
