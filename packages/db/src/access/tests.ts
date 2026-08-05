@@ -239,6 +239,11 @@ function sameOrderedList(a: readonly string[], b: readonly string[]): boolean {
  * A hand-maintained comparator that missed a field would call two different
  * versions identical, and an edit would vanish without a version — the one loss
  * the whole versioning exists to rule out.
+ *
+ * The jsonb content is all this table covers. The digital humans a version
+ * names are content too and version on exactly the same terms, but they are
+ * rows rather than a field, so they are compared beside this rather than
+ * inside it — `editTest` asks both questions and mints on either answer.
  */
 const sameContentField: {
   readonly [K in keyof TestContent]: (a: TestContent, b: TestContent) => boolean;
@@ -379,10 +384,15 @@ async function projectDefaultDigitalHuman(
  * once has learned it everywhere. Naming some checks them, and the ids come
  * back in the order they were given, because that order is content.
  *
+ * Every set a version is about to name comes through here, including the one an
+ * edit carried forward from the version before it. A version names digital
+ * humans that exist, are alive, and are this project's — a rule about the row
+ * being written, not about who typed the ids.
+ *
  * Called inside the write's transaction, so the set that was checked is the
  * set the join rows name.
  */
-async function digitalHumansFor(
+async function digitalHumanIdsFor(
   on: Queryable,
   auth: AuthContext,
   projectId: string,
@@ -447,7 +457,7 @@ export async function createTest(
   const versionId = newId("tstv");
 
   const written = await db().transaction(async (tx) => {
-    const digitalHumanIds = await digitalHumansFor(tx, auth, projectId, named);
+    const digitalHumanIds = await digitalHumanIdsFor(tx, auth, projectId, named);
 
     const [identity] = await tx
       .insert(test)
@@ -565,10 +575,11 @@ export async function getTest(
  *
  * What an edit leaves out, it keeps. A field absent from the changes is read
  * off the current version and carried into the next one, which is what lets an
- * edit to the scenario alone stay an edit to the scenario alone — including
- * when a digital human the version names has since been deleted. Refusing an
- * unrelated edit over them would make the test uneditable, and would refuse it
- * for something the developer did not touch.
+ * edit to the scenario alone stay an edit to the scenario alone. Carried
+ * forward is not a way past validation, though: the digital humans a version is
+ * about to name are checked whether the edit typed them or inherited them, so
+ * no version can come to name one that is missing, deleted, or another
+ * project's.
  *
  * Editing what the caller cannot see returns what reading it would have:
  * `undefined`, with nothing disturbed.
@@ -620,15 +631,25 @@ export async function editTest(
 
     // Omitted means unchanged: what the edit did not mention is read off the
     // current version, and the whole is then held to what a create is held to.
+    // One path, both ways round — a set carried forward is a set this write is
+    // about to name, and it is checked like any other.
+    //
+    // `contentFromRow` hands back what the row holds, untrimmed, because an old
+    // version has to stay readable exactly as it was written; `validContent`
+    // trims what it is given. Only raw SQL can make the two disagree, and when
+    // one has, the next edit mints a version that trims the row and every edit
+    // after it agrees.
     const content = validContent({
       scenario: changes.scenario ?? storedContent.scenario,
       expectedBehaviors:
         changes.expectedBehaviors ?? storedContent.expectedBehaviors,
     });
-    const digitalHumanIds =
-      named === undefined
-        ? storedIds
-        : await digitalHumansFor(tx, auth, current.projectId, named);
+    const digitalHumanIds = await digitalHumanIdsFor(
+      tx,
+      auth,
+      current.projectId,
+      named ?? storedIds,
+    );
 
     const mintsVersion =
       !sameContent(storedContent, content) ||

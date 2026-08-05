@@ -2,25 +2,31 @@ import { isId, newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  createDigitalHuman,
   createTest,
   deleteDigitalHuman,
   getTest,
   NotPermittedError,
   ProjectOutsideOrganizationError,
-  type AuthContext,
-  type NewTest,
-  type Role,
 } from "@egma/db";
 
 import {
-  createConnectedDatabase,
   errorCodeOf,
   openSingleConnection,
   POSTGRES_ERROR,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedOrganization, seedUser } from "./support/tenancy.ts";
+import {
+  acme,
+  actingAsAcme,
+  actingAsGlobex,
+  globex,
+  pointProjectAt,
+  rescheduling,
+  rowCounts,
+  seedDigitalHuman,
+  seedTestFactory,
+  STARTER_DIGITAL_HUMAN,
+} from "./support/test-factory.ts";
 
 /**
  * The factory functions are the seam: every assertion goes through create and
@@ -29,123 +35,23 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
  * bypass the module on purpose to show the database refuses what the module
  * never attempts.
  *
- * Digital humans arrive through their own factory, which has its own tests —
- * they are an input to this one, not a thing it is checking.
+ * The customers, their projects and their starter digital humans are the shared
+ * fixture in `support/test-factory.ts`, which the editing tests seed from too.
  */
 
 let database: MigratedDatabase;
-
-const acme = { organization: newId("org"), project: newId("prj") };
-/** A second project of Acme's, so a read can be narrowed past its sibling. */
-const acmeOutbound = newId("prj");
-const globex = { organization: newId("org"), project: newId("prj") };
-const ada = newId("usr");
-const gene = newId("usr");
-
 /** Acme's starter digital human, and the one its project points at. */
 let rita: string;
 /** Globex's, so a cross-project reference has something real to name. */
 let grace: string;
 
-function actingAsAcme(role: Role = "member"): AuthContext {
-  return {
-    userId: ada,
-    organizationId: acme.organization,
-    projectId: acme.project,
-    role,
-    via: "session",
-  };
-}
-
-function actingAsGlobex(role: Role = "member"): AuthContext {
-  return {
-    userId: gene,
-    organizationId: globex.organization,
-    projectId: globex.project,
-    role,
-    via: "session",
-  };
-}
-
-const rescheduling = {
-  name: "Reschedules a booked appointment",
-  description: "The bread-and-butter front-desk call",
-  scenario:
-    "Their cleaning is booked for Thursday morning and has to move to any afternoon next week. They do not remember the exact time of the existing booking.",
-  expectedBehaviors: [
-    "verifies who it is speaking to before discussing the booking",
-    "offers at least one afternoon slot next week",
-    "confirms the new time back before finishing",
-  ],
-} as const satisfies NewTest;
-
-const neutralTraits = {
-  personality: "Speaks plainly, stays patient, asks one question at a time.",
-  language: "en-US",
-  voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
-} as const;
-
-async function seedDigitalHuman(
-  auth: AuthContext,
-  name: string,
-): Promise<string> {
-  const created = await createDigitalHuman(auth, {
-    name,
-    traits: neutralTraits,
-  });
-  return created.id;
-}
-
-/** What provisioning will do when it seeds a project's starter digital human. */
-async function pointProjectAt(
-  projectId: string,
-  digitalHumanId: string | null,
-): Promise<void> {
-  await database.sql(
-    "update project set default_digital_human_id = $1 where id = $2",
-    [digitalHumanId, projectId],
-  );
-}
-
 beforeAll(async () => {
-  database = await createConnectedDatabase("tests");
-
-  await seedOrganization(database, acme.organization, [
-    { id: acme.project, slug: "default" },
-    { id: acmeOutbound, slug: "outbound" },
-  ]);
-  await seedOrganization(database, globex.organization, [
-    { id: globex.project, slug: "default" },
-  ]);
-  await seedUser(database, ada, "ada@acme.example");
-  await seedUser(database, gene, "gene@globex.example");
-
-  rita = await seedDigitalHuman(actingAsAcme(), "Impatient Rita");
-  grace = await seedDigitalHuman(actingAsGlobex(), "Careful Grace");
-  await pointProjectAt(acme.project, rita);
+  ({ database, rita, grace } = await seedTestFactory("tests"));
 });
 
 afterAll(async () => {
   await database.drop();
 });
-
-async function rowCounts(): Promise<{
-  tests: number;
-  versions: number;
-  named: number;
-}> {
-  const count = async (table: string): Promise<number> => {
-    const { rows } = await database.sql<{ count: string }>(
-      `select count(*) as count from ${table}`,
-    );
-    return Number(rows[0]?.count);
-  };
-  return {
-    tests: await count("test"),
-    versions: await count("test_version"),
-    named: await count("test_version_digital_human"),
-  };
-}
 
 describe("creating a test", () => {
   it("returns a tst_ id and fetch round-trips every input", async () => {
@@ -166,7 +72,7 @@ describe("creating a test", () => {
     expect(fetched?.expectedBehaviors).toEqual(rescheduling.expectedBehaviors);
     expect(fetched?.projectId).toBe(acme.project);
     expect(fetched?.digitalHumans).toEqual([
-      { id: rita, name: "Impatient Rita", deletedAt: null },
+      { id: rita, name: STARTER_DIGITAL_HUMAN, deletedAt: null },
     ]);
   });
 
@@ -372,7 +278,7 @@ describe("a test naming no digital human", () => {
 
     const fetched = await getTest(actingAsAcme(), created.id);
     expect(fetched?.digitalHumans).toEqual([
-      { id: rita, name: "Impatient Rita", deletedAt: null },
+      { id: rita, name: STARTER_DIGITAL_HUMAN, deletedAt: null },
     ]);
   });
 
@@ -417,11 +323,11 @@ describe("a test naming no digital human", () => {
     // The column's foreign key only says the row exists, so a pointer at a
     // living digital human of another project is a state the database allows
     // and the developer has to be told the truth about.
-    await pointProjectAt(acmeOutbound, rita);
+    await pointProjectAt(acme.outbound, rita);
 
     const before = await rowCounts();
 
-    const inOutbound = { ...actingAsAcme(), projectId: acmeOutbound };
+    const inOutbound = { ...actingAsAcme(), projectId: acme.outbound };
     await expect(createTest(inOutbound, rescheduling)).rejects.toThrow(
       /no digital human .* in this project/,
     );
@@ -431,7 +337,7 @@ describe("a test naming no digital human", () => {
 
     expect(await rowCounts()).toEqual(before);
 
-    await pointProjectAt(acmeOutbound, null);
+    await pointProjectAt(acme.outbound, null);
   });
 });
 
@@ -489,7 +395,7 @@ describe("tenancy", () => {
 
     // Same organization, same person, same role — only the project differs,
     // which is the whole of what a project is: a filter, not a wall.
-    const inOutbound = { ...actingAsAcme(), projectId: acmeOutbound };
+    const inOutbound = { ...actingAsAcme(), projectId: acme.outbound };
     expect(await getTest(inOutbound, created.id)).toBeUndefined();
 
     // And the credential acting in no project still reaches it, so the arm

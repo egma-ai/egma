@@ -2,151 +2,58 @@ import { newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  createDigitalHuman,
   createTest,
-  deleteDigitalHuman,
   editDigitalHuman,
   editTest,
   getTest,
   getTestVersion,
   NotPermittedError,
-  type AuthContext,
-  type NewTest,
-  type Role,
 } from "@egma/db";
 
+import { type MigratedDatabase } from "./support/database.ts";
 import {
-  createConnectedDatabase,
-  type MigratedDatabase,
-} from "./support/database.ts";
-import { seedOrganization, seedUser } from "./support/tenancy.ts";
+  acme,
+  actingAsAcme,
+  actingAsGlobex,
+  neutralTraits,
+  rescheduling,
+  rowCounts,
+  seedDigitalHuman,
+  seedTestFactory,
+  STARTER_DIGITAL_HUMAN,
+} from "./support/test-factory.ts";
 
 /**
  * Editing a test, and reading one frozen version of it — through the factory
  * functions only, like the create and fetch tests before them. Raw SQL appears
- * in fixtures and in the reads that prove an old version's rows were left
- * exactly where they were, which no seam shows; every id an assertion needs
- * comes off the seam itself.
+ * in the reads that prove an old version's rows were left exactly where they
+ * were, which no seam shows; every id an assertion needs comes off the seam
+ * itself.
+ *
+ * What a write refuses is walked through in full at the create seam, in
+ * `tests.test.ts`. Here one representative arm per rule shows the edit is held
+ * to the same rules, rather than enumerating them a second time.
  */
 
 let database: MigratedDatabase;
-
-const acme = { organization: newId("org"), project: newId("prj") };
-/** A second project of Acme's, so an edit can be narrowed past its sibling. */
-const acmeOutbound = newId("prj");
-const globex = { organization: newId("org"), project: newId("prj") };
-const ada = newId("usr");
-const gene = newId("usr");
-
 /** Acme's starter digital human, and the one its project points at. */
 let rita: string;
+/** Globex's, so its test has a digital human of its own to name. */
+let grace: string;
 /** Two more of Acme's, for the sets an edit moves between. */
 let nadia: string;
 let omar: string;
-/** Globex's, so a cross-project reference has something real to name. */
-let grace: string;
-
-function actingAsAcme(role: Role = "member"): AuthContext {
-  return {
-    userId: ada,
-    organizationId: acme.organization,
-    projectId: acme.project,
-    role,
-    via: "session",
-  };
-}
-
-function actingAsGlobex(role: Role = "member"): AuthContext {
-  return {
-    userId: gene,
-    organizationId: globex.organization,
-    projectId: globex.project,
-    role,
-    via: "session",
-  };
-}
-
-const rescheduling = {
-  name: "Reschedules a booked appointment",
-  description: "The bread-and-butter front-desk call",
-  scenario:
-    "Their cleaning is booked for Thursday morning and has to move to any afternoon next week. They do not remember the exact time of the existing booking.",
-  expectedBehaviors: [
-    "verifies who it is speaking to before discussing the booking",
-    "offers at least one afternoon slot next week",
-    "confirms the new time back before finishing",
-  ],
-} as const satisfies NewTest;
-
-const neutralTraits = {
-  personality: "Speaks plainly, stays patient, asks one question at a time.",
-  language: "en-US",
-  voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
-} as const;
-
-async function seedDigitalHuman(
-  auth: AuthContext,
-  name: string,
-): Promise<string> {
-  const created = await createDigitalHuman(auth, {
-    name,
-    traits: neutralTraits,
-  });
-  return created.id;
-}
-
-/** What provisioning will do when it seeds a project's starter digital human. */
-async function pointProjectAt(
-  projectId: string,
-  digitalHumanId: string | null,
-): Promise<void> {
-  await database.sql(
-    "update project set default_digital_human_id = $1 where id = $2",
-    [digitalHumanId, projectId],
-  );
-}
 
 beforeAll(async () => {
-  database = await createConnectedDatabase("tests_edit");
+  ({ database, rita, grace } = await seedTestFactory("tests_edit"));
 
-  await seedOrganization(database, acme.organization, [
-    { id: acme.project, slug: "default" },
-    { id: acmeOutbound, slug: "outbound" },
-  ]);
-  await seedOrganization(database, globex.organization, [
-    { id: globex.project, slug: "default" },
-  ]);
-  await seedUser(database, ada, "ada@acme.example");
-  await seedUser(database, gene, "gene@globex.example");
-
-  rita = await seedDigitalHuman(actingAsAcme(), "Impatient Rita");
   nadia = await seedDigitalHuman(actingAsAcme(), "Nadia");
   omar = await seedDigitalHuman(actingAsAcme(), "Omar");
-  grace = await seedDigitalHuman(actingAsGlobex(), "Careful Grace");
-  await pointProjectAt(acme.project, rita);
 });
 
 afterAll(async () => {
   await database.drop();
 });
-
-async function rowCounts(): Promise<{
-  tests: number;
-  versions: number;
-  named: number;
-}> {
-  const count = async (table: string): Promise<number> => {
-    const { rows } = await database.sql<{ count: string }>(
-      `select count(*) as count from ${table}`,
-    );
-    return Number(rows[0]?.count);
-  };
-  return {
-    tests: await count("test"),
-    versions: await count("test_version"),
-    named: await count("test_version_digital_human"),
-  };
-}
 
 /**
  * The join rows of one version, read raw. Nothing else can show that an old
@@ -269,25 +176,6 @@ describe("editing what a test checks", () => {
     ]);
   });
 
-  it("keeps what the edit did not mention, and gives the new version its own rows", async () => {
-    const created = await createTest(actingAsAcme(), {
-      ...rescheduling,
-      digitalHumanIds: [nadia, omar],
-    });
-
-    const edited = await editTest(actingAsAcme(), created.id, {
-      expectedBehaviors: ["confirms the new time back before finishing"],
-    });
-
-    expect(edited?.version).toBe(2);
-    expect(edited?.scenario).toBe(rescheduling.scenario);
-    if (edited?.versionId === undefined) throw new Error("no second version");
-    expect(await namedOn(edited.versionId)).toEqual([
-      { digitalHumanId: nadia, position: 1 },
-      { digitalHumanId: omar, position: 2 },
-    ]);
-  });
-
   it("does nothing for a byte-identical save, and returns the current version", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
@@ -310,14 +198,18 @@ describe("editing what a test checks", () => {
     expect(fetched?.updatedAt.getTime()).toBe(created.updatedAt.getTime());
   });
 
-  it("keeps every old version fetchable by its tstv_ id after later edits", async () => {
+  it("numbers each edit after the last, and keeps every version fetchable by its tstv_ id", async () => {
     const created = await createTest(actingAsAcme(), rescheduling);
     const second = await editTest(actingAsAcme(), created.id, {
       scenario: "They want the Tuesday slot instead.",
     });
-    await editTest(actingAsAcme(), created.id, {
+    const third = await editTest(actingAsAcme(), created.id, {
       scenario: "They want the Wednesday slot instead.",
     });
+
+    expect(second?.version).toBe(2);
+    expect(third?.version).toBe(3);
+    expect((await getTest(actingAsAcme(), created.id))?.version).toBe(3);
 
     const first = await getTestVersion(actingAsAcme(), created.versionId);
     expect(first?.version).toBe(1);
@@ -327,6 +219,11 @@ describe("editing what a test checks", () => {
     const middle = await getTestVersion(actingAsAcme(), second.versionId);
     expect(middle?.version).toBe(2);
     expect(middle?.scenario).toBe("They want the Tuesday slot instead.");
+
+    if (third?.versionId === undefined) throw new Error("no third version");
+    const last = await getTestVersion(actingAsAcme(), third.versionId);
+    expect(last?.version).toBe(3);
+    expect(last?.scenario).toBe("They want the Wednesday slot instead.");
   });
 
   it("validates edited content exactly as created content, and versions nothing", async () => {
@@ -338,15 +235,22 @@ describe("editing what a test checks", () => {
     await expect(
       editTest(actingAsAcme(), created.id, { scenario: "   " }),
     ).rejects.toThrow(/scenario/);
-    await expect(
-      editTest(actingAsAcme(), created.id, {
-        expectedBehaviors: ["  "],
-      }),
-    ).rejects.toThrow(/expected behavior/);
 
     const fetched = await getTest(actingAsAcme(), created.id);
     expect(fetched?.version).toBe(1);
     expect(fetched?.scenario).toBe(rescheduling.scenario);
+  });
+
+  it("validates edited digital humans exactly as created ones, and versions nothing", async () => {
+    const created = await createTest(actingAsAcme(), rescheduling);
+    const before = await rowCounts();
+
+    await expect(
+      editTest(actingAsAcme(), created.id, { digitalHumanIds: [newId("dh")] }),
+    ).rejects.toThrow(/no digital human/);
+
+    expect(await rowCounts()).toEqual(before);
+    expect((await getTest(actingAsAcme(), created.id))?.version).toBe(1);
   });
 
   it("stores an edited scenario and behaviors trimmed", async () => {
@@ -427,59 +331,8 @@ describe("renaming a test", () => {
   });
 });
 
-describe("an edit naming a digital human it may not have", () => {
-  it("is refused when the digital human does not exist, and versions nothing", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
-    const before = await rowCounts();
-
-    await expect(
-      editTest(actingAsAcme(), created.id, { digitalHumanIds: [newId("dh")] }),
-    ).rejects.toThrow(/no digital human/);
-
-    expect(await rowCounts()).toEqual(before);
-    expect((await getTest(actingAsAcme(), created.id))?.version).toBe(1);
-  });
-
-  it("is refused when the digital human is deleted, and versions nothing", async () => {
-    const retired = await seedDigitalHuman(actingAsAcme(), "Retired Rex");
-    await deleteDigitalHuman(actingAsAcme(), retired);
-    const created = await createTest(actingAsAcme(), rescheduling);
-    const before = await rowCounts();
-
-    await expect(
-      editTest(actingAsAcme(), created.id, { digitalHumanIds: [retired] }),
-    ).rejects.toThrow(/deleted/);
-
-    expect(await rowCounts()).toEqual(before);
-  });
-
-  it("is refused when the digital human belongs to another project", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
-
-    await expect(
-      editTest(actingAsAcme(), created.id, { digitalHumanIds: [grace] }),
-    ).rejects.toThrow(/no digital human/);
-  });
-
-  it("is refused when the same digital human is named twice", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
-
-    await expect(
-      editTest(actingAsAcme(), created.id, { digitalHumanIds: [rita, rita] }),
-    ).rejects.toThrow(/twice/);
-  });
-
-  it("is refused when the id is not a digital human's at all", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
-
-    await expect(
-      editTest(actingAsAcme(), created.id, { digitalHumanIds: [newId("agt")] }),
-    ).rejects.toThrow(/digital-human id/);
-  });
-});
-
 describe("an edit naming no digital human", () => {
-  it("leaves the set alone when the field is absent", async () => {
+  it("keeps the set the version already named when the field is absent", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
       digitalHumanIds: [nadia, omar],
@@ -489,9 +342,19 @@ describe("an edit naming no digital human", () => {
       scenario: "They want the Monday slot instead.",
     });
 
-    expect(edited?.digitalHumans.map((human) => human.id)).toEqual([
-      nadia,
-      omar,
+    expect(edited?.version).toBe(2);
+    expect(edited?.expectedBehaviors).toEqual(rescheduling.expectedBehaviors);
+    expect(edited?.digitalHumans).toEqual([
+      { id: nadia, name: "Nadia", deletedAt: null },
+      { id: omar, name: "Omar", deletedAt: null },
+    ]);
+
+    // The set carried forward, and the new version holds rows of its own that
+    // say so — nothing is shared with the version left behind.
+    if (edited?.versionId === undefined) throw new Error("no second version");
+    expect(await namedOn(edited.versionId)).toEqual([
+      { digitalHumanId: nadia, position: 1 },
+      { digitalHumanId: omar, position: 2 },
     ]);
   });
 
@@ -540,28 +403,6 @@ describe("an edit naming no digital human", () => {
   });
 });
 
-describe("a digital human deleted after a version named them", () => {
-  it("travels forward on an edit that did not name them", async () => {
-    const leaving = await seedDigitalHuman(actingAsAcme(), "Leaving Lena");
-    const created = await createTest(actingAsAcme(), {
-      ...rescheduling,
-      digitalHumanIds: [rita, leaving],
-    });
-    await deleteDigitalHuman(actingAsAcme(), leaving);
-
-    const edited = await editTest(actingAsAcme(), created.id, {
-      scenario: "They want the Saturday slot instead.",
-    });
-
-    expect(edited?.version).toBe(2);
-    expect(edited?.digitalHumans.map((human) => human.id)).toEqual([
-      rita,
-      leaving,
-    ]);
-    expect(edited?.digitalHumans[1]?.deletedAt).toBeInstanceOf(Date);
-  });
-});
-
 describe("one frozen version", () => {
   it("answers with its content and its digital humans in the authored order", async () => {
     const created = await createTest(actingAsAcme(), {
@@ -577,7 +418,7 @@ describe("one frozen version", () => {
     expect(frozen?.expectedBehaviors).toEqual(rescheduling.expectedBehaviors);
     expect(frozen?.digitalHumans).toEqual([
       { id: omar, name: "Omar", deletedAt: null },
-      { id: rita, name: "Impatient Rita", deletedAt: null },
+      { id: rita, name: STARTER_DIGITAL_HUMAN, deletedAt: null },
       { id: nadia, name: "Nadia", deletedAt: null },
     ]);
     expect(frozen?.createdAt).toBeInstanceOf(Date);
@@ -620,9 +461,7 @@ describe("one frozen version", () => {
   });
 
   it("returns nothing for an id no version carries", async () => {
-    expect(
-      await getTestVersion(actingAsAcme(), newId("tstv")),
-    ).toBeUndefined();
+    expect(await getTestVersion(actingAsAcme(), newId("tstv"))).toBeUndefined();
   });
 });
 
@@ -648,11 +487,20 @@ describe("tenancy", () => {
   it("returns nothing to the same customer acting in a sibling project", async () => {
     const created = await createTest(actingAsAcme(), rescheduling);
 
-    const inOutbound = { ...actingAsAcme(), projectId: acmeOutbound };
+    const inOutbound = { ...actingAsAcme(), projectId: acme.outbound };
     expect(
       await editTest(inOutbound, created.id, { name: "Outbound's now" }),
     ).toBeUndefined();
+    expect(
+      await editTest(inOutbound, created.id, {
+        scenario: "Outbound's scenario now.",
+      }),
+    ).toBeUndefined();
     expect(await getTestVersion(inOutbound, created.versionId)).toBeUndefined();
+
+    const untouched = await getTest(actingAsAcme(), created.id);
+    expect(untouched?.name).toBe(rescheduling.name);
+    expect(untouched?.version).toBe(1);
 
     // And the credential acting in no project still reaches both, so the arms
     // above failed for the project and not for something else.

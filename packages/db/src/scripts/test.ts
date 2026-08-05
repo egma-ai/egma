@@ -106,6 +106,13 @@ function usage(): never {
   process.exit(1);
 }
 
+/** The one positional argument most commands take. */
+function requiredId(rest: readonly string[]): string {
+  const [id] = rest;
+  if (id === undefined) usage();
+  return id;
+}
+
 /** Print what the factory answered, or say the id reached nothing and exit. */
 function printTest(id: string, found: unknown): void {
   if (found === undefined) {
@@ -146,9 +153,7 @@ async function main(): Promise<void> {
     });
     console.log(JSON.stringify(created, null, 2));
   } else if (command === "get") {
-    const [id] = rest;
-    if (id === undefined) usage();
-
+    const id = requiredId(rest);
     printTest(id, await getTest(auth, id));
   } else if (command === "edit") {
     const [id, ...flags] = rest;
@@ -181,9 +186,7 @@ async function main(): Promise<void> {
     });
     printTest(id, edited);
   } else if (command === "get-version") {
-    const [versionId] = rest;
-    if (versionId === undefined) usage();
-
+    const versionId = requiredId(rest);
     const found = await getTestVersion(auth, versionId);
     if (found === undefined) {
       console.error(`no version ${versionId} in the development project`);
