@@ -96,7 +96,9 @@ export type Simulation = {
   readonly projectId: string;
   readonly agentId: string;
   readonly connectionId: string;
-  /** The pin: exactly who called, frozen for as long as this row is kept. */
+  /** Who called, by identity… */
+  readonly personaId: string;
+  /** …and the pin: exactly as they were, for as long as this row is kept. */
   readonly personaVersionId: string;
   readonly position: number;
   readonly connectionType: ConnectionType;
@@ -175,6 +177,7 @@ const SIMULATION_COLUMNS = {
   projectId: simulation.projectId,
   agentId: simulation.agentId,
   connectionId: simulation.connectionId,
+  personaId: simulation.personaId,
   personaVersionId: simulation.personaVersionId,
   position: simulation.position,
   connectionType: simulation.connectionType,
@@ -376,7 +379,7 @@ async function resolvePersonaVersions(
   auth: AuthContext,
   projectId: string,
   ids: readonly string[],
-): Promise<readonly string[]> {
+): Promise<readonly { personaId: string; personaVersionId: string }[]> {
   const found = new Map(
     (
       await on
@@ -410,7 +413,7 @@ async function resolvePersonaVersions(
         `persona ${id} is deleted, and a run cannot conduct a simulation with a deleted persona`,
       );
     }
-    return row.currentVersionId;
+    return { personaId: id, personaVersionId: row.currentVersionId };
   });
 }
 
@@ -498,7 +501,7 @@ export async function startRun(
       }
     }
 
-    const personaVersionIds = await resolvePersonaVersions(
+    const pinned = await resolvePersonaVersions(
       tx,
       auth,
       projectId,
@@ -536,13 +539,14 @@ export async function startRun(
     const simulations = await tx
       .insert(simulation)
       .values(
-        personaVersionIds.map((personaVersionId, index) => ({
+        pinned.map(({ personaId, personaVersionId }, index) => ({
           id: newId("sim"),
           runId,
           organizationId: auth.organizationId,
           projectId,
           agentId: input.agentId,
           connectionId: input.connectionId,
+          personaId,
           personaVersionId,
           position: index + 1,
           connectionType: reached.type,

@@ -44,6 +44,7 @@ CREATE TABLE "simulation" (
 	"project_id" text COLLATE "C" NOT NULL,
 	"agent_id" text COLLATE "C" NOT NULL,
 	"connection_id" text COLLATE "C" NOT NULL,
+	"persona_id" text COLLATE "C" NOT NULL,
 	"persona_version_id" text COLLATE "C" NOT NULL,
 	"position" integer NOT NULL,
 	"connection_type" text NOT NULL,
@@ -107,11 +108,17 @@ ALTER TABLE "run" ADD CONSTRAINT "run_project_organization_fk" FOREIGN KEY ("pro
 ALTER TABLE "run" ADD CONSTRAINT "run_agent_project_fk" FOREIGN KEY ("agent_id","project_id") REFERENCES "public"."agent"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "run" ADD CONSTRAINT "run_connection_agent_fk" FOREIGN KEY ("connection_id","agent_id") REFERENCES "public"."connection"("id","agent_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "simulation" ADD CONSTRAINT "simulation_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "simulation" ADD CONSTRAINT "simulation_persona_version_id_persona_version_id_fk" FOREIGN KEY ("persona_version_id") REFERENCES "public"."persona_version"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "simulation" ADD CONSTRAINT "simulation_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "simulation" ADD CONSTRAINT "simulation_agent_project_fk" FOREIGN KEY ("agent_id","project_id") REFERENCES "public"."agent"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "simulation" ADD CONSTRAINT "simulation_connection_agent_fk" FOREIGN KEY ("connection_id","agent_id") REFERENCES "public"."connection"("id","agent_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "simulation" ADD CONSTRAINT "simulation_run_project_fk" FOREIGN KEY ("run_id","project_id") REFERENCES "public"."run"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+-- Moved ahead of the two foreign keys that target them; the generator emits
+-- the unique constraints last, and a key cannot reference one that does not
+-- exist yet.
+ALTER TABLE "persona" ADD CONSTRAINT "persona_id_project_id_unique" UNIQUE("id","project_id");--> statement-breakpoint
+ALTER TABLE "persona_version" ADD CONSTRAINT "persona_version_id_persona_id_unique" UNIQUE("id","persona_id");--> statement-breakpoint
+ALTER TABLE "simulation" ADD CONSTRAINT "simulation_persona_version_persona_fk" FOREIGN KEY ("persona_version_id","persona_id") REFERENCES "public"."persona_version"("id","persona_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "simulation" ADD CONSTRAINT "simulation_persona_project_fk" FOREIGN KEY ("persona_id","project_id") REFERENCES "public"."persona"("id","project_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "run_organization_id_id_idx" ON "run" USING btree ("organization_id","id");--> statement-breakpoint
 CREATE INDEX "run_organization_id_project_id_id_idx" ON "run" USING btree ("organization_id","project_id","id");--> statement-breakpoint
 CREATE INDEX "run_agent_id_idx" ON "run" USING btree ("agent_id");--> statement-breakpoint
@@ -119,6 +126,7 @@ CREATE INDEX "simulation_run_id_idx" ON "simulation" USING btree ("run_id");--> 
 CREATE INDEX "simulation_queued_idx" ON "simulation" USING btree ("organization_id","id") WHERE "simulation"."status" = 'queued';--> statement-breakpoint
 CREATE INDEX "simulation_heartbeat_idx" ON "simulation" USING btree ("heartbeat_at") WHERE "simulation"."status" in ('claimed', 'running');--> statement-breakpoint
 CREATE INDEX "simulation_persona_version_id_idx" ON "simulation" USING btree ("persona_version_id");--> statement-breakpoint
+CREATE INDEX "simulation_persona_id_idx" ON "simulation" USING btree ("persona_id");--> statement-breakpoint
 -- Written here by hand: the schema source cannot express a trigger, and a
 -- check constraint cannot see the row being replaced, so this is the only
 -- form in which "no illegal state transition can be written" is enforced by

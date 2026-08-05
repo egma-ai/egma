@@ -12,7 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { agent, connection, CONNECTION_TYPES, MODALITIES } from "./agents.ts";
-import { personaVersion } from "./personas.ts";
+import { persona, personaVersion } from "./personas.ts";
 import { organization, project } from "./tenancy.ts";
 import { user } from "./identity.ts";
 import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
@@ -249,13 +249,14 @@ export const simulation = pgTable(
     agentId: idText("agent_id").notNull(),
     connectionId: idText("connection_id").notNull(),
     /**
-     * The pin. A persona version can never change, so this row says exactly
-     * who called for as long as the simulation is kept — and the version is
-     * refused deletion while it does.
+     * Who called, and the pin. The version can never change, so this row says
+     * exactly who called for as long as the simulation is kept — and the
+     * version is refused deletion while it does. The identity rides beside it
+     * because it is what the composite keys below pair on: the version is
+     * this persona's, and the persona is this project's.
      */
-    personaVersionId: idText("persona_version_id")
-      .notNull()
-      .references(() => personaVersion.id),
+    personaId: idText("persona_id").notNull(),
+    personaVersionId: idText("persona_version_id").notNull(),
     /** Where in the run's requested order this conversation sits, from one. */
     position: integer("position").notNull(),
     /**
@@ -403,7 +404,9 @@ export const simulation = pgTable(
     // The tenancy triangle, edge by edge, exactly as the run's: project of
     // the organization, agent of the project, connection of the agent — and
     // the run of the same project, so a simulation cannot sit in a run that
-    // cannot see it.
+    // cannot see it. The persona pin closes the same way: the version is the
+    // named persona's, and the persona is this project's, so a raw write
+    // cannot pin another customer's caller.
     foreignKey({
       name: "simulation_project_organization_fk",
       columns: [table.projectId, table.organizationId],
@@ -424,6 +427,16 @@ export const simulation = pgTable(
       columns: [table.runId, table.projectId],
       foreignColumns: [run.id, run.projectId],
     }).onDelete("cascade"),
+    foreignKey({
+      name: "simulation_persona_version_persona_fk",
+      columns: [table.personaVersionId, table.personaId],
+      foreignColumns: [personaVersion.id, personaVersion.personaId],
+    }),
+    foreignKey({
+      name: "simulation_persona_project_fk",
+      columns: [table.personaId, table.projectId],
+      foreignColumns: [persona.id, persona.projectId],
+    }),
     // A run's conversations are an ordered list, and no place in it is
     // claimed twice.
     unique("simulation_run_id_position_unique").on(table.runId, table.position),
@@ -437,7 +450,9 @@ export const simulation = pgTable(
       .on(table.heartbeatAt)
       .where(sql`${table.status} in ('claimed', 'running')`),
     // "Which simulations were conducted with version so-and-so" — the read
-    // the orphan sweep of persona versions will one day ask.
+    // the orphan sweep of persona versions will one day ask — and the same
+    // question by identity, which is what a persona's own erasure checks.
     index("simulation_persona_version_id_idx").on(table.personaVersionId),
+    index("simulation_persona_id_idx").on(table.personaId),
   ],
 );

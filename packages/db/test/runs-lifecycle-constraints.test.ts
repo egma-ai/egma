@@ -34,6 +34,8 @@ const outboundAgentId = newId("agt");
 const outboundConnectionId = newId("con");
 const personaId = newId("prs");
 const personaVersionId = newId("prsv");
+const globexPersonaId = newId("prs");
+const globexPersonaVersionId = newId("prsv");
 
 async function seedTenancy(): Promise<void> {
   for (const [organization, slug] of [
@@ -74,18 +76,23 @@ async function seedAgent(
   );
 }
 
-async function seedPersona(): Promise<void> {
+async function seedPersona(
+  persona: string,
+  version: string,
+  organization: string,
+  project: string,
+): Promise<void> {
   // The current-version pointer is deferred, so the pair lands in one
   // transaction exactly as the application writes it.
   await db.sql("begin");
   await db.sql(
     `insert into persona (id, organization_id, project_id, name, current_version_id)
      values ($1, $2, $3, 'Impatient Rita', $4)`,
-    [personaId, acme.organization, acme.project, personaVersionId],
+    [persona, organization, project, version],
   );
   await db.sql(
     "insert into persona_version (id, persona_id, version, traits) values ($1, $2, 1, '{}'::jsonb)",
-    [personaVersionId, personaId],
+    [version, persona],
   );
   await db.sql("commit");
 }
@@ -167,6 +174,7 @@ async function insertSimulation(
     project_id: acme.project,
     agent_id: agentId,
     connection_id: connectionId,
+    persona_id: personaId,
     persona_version_id: personaVersionId,
     position: 1,
     connection_type: "retell",
@@ -205,7 +213,13 @@ beforeAll(async () => {
   await seedTenancy();
   await seedAgent(agentId, acme.project, connectionId);
   await seedAgent(outboundAgentId, outbound, outboundConnectionId);
-  await seedPersona();
+  await seedPersona(personaId, personaVersionId, acme.organization, acme.project);
+  await seedPersona(
+    globexPersonaId,
+    globexPersonaVersionId,
+    globex.organization,
+    globex.project,
+  );
 });
 
 afterAll(async () => {
@@ -397,6 +411,28 @@ describe("what a simulation cannot name", () => {
   it("another customer's project, whichever columns look real on their own", async () => {
     await expect(
       insertRun({ project_id: globex.project }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
+    );
+  });
+
+  it("another customer's persona pin, even though the version exists", async () => {
+    await expect(
+      insertSimulation("queued", {
+        persona_id: globexPersonaId,
+        persona_version_id: globexPersonaVersionId,
+      }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
+    );
+  });
+
+  it("a version that is not the named persona's, even when both are this project's", async () => {
+    await expect(
+      insertSimulation("queued", {
+        persona_id: personaId,
+        persona_version_id: globexPersonaVersionId,
+      }),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
     );

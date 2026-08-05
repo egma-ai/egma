@@ -184,6 +184,9 @@ describe("starting a run", () => {
     expect(started.startedAt).toBeNull();
 
     expect(started.simulations).toHaveLength(2);
+    expect(started.simulations.map((simulation) => simulation.personaId)).toEqual(
+      [rita, sam],
+    );
     for (const [index, simulation] of started.simulations.entries()) {
       expect(simulation.id).toMatch(/^sim_/);
       expect(simulation.runId).toBe(started.id);
@@ -207,6 +210,7 @@ describe("starting a run", () => {
     expect(after?.versionId).not.toBe(before?.versionId);
 
     const simulations = await listSimulations(actingAsAcme(), started.id);
+    expect(simulations?.[0]?.personaId).toBe(rita);
     expect(simulations?.[0]?.personaVersionId).toBe(before?.versionId);
   });
 
