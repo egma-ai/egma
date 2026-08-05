@@ -180,8 +180,12 @@ export {
 
 export {
   createTest,
+  editTest,
   getTest,
+  getTestVersion,
   type NewTest,
   type Test,
+  type TestChanges,
   type TestDigitalHuman,
+  type TestVersion,
 } from "./tests.ts";

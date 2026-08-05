@@ -4,7 +4,12 @@ import { newId } from "@egma/ids";
 import { eq } from "drizzle-orm";
 
 import { connect, disconnect, db } from "../client.ts";
-import { createTest, getTest } from "../access/tests.ts";
+import {
+  createTest,
+  editTest,
+  getTest,
+  getTestVersion,
+} from "../access/tests.ts";
 import type { AuthContext } from "../access/context.ts";
 import { projectsOf } from "../access/projects.ts";
 import { provisionOrganization } from "../access/provisioning.ts";
@@ -25,10 +30,16 @@ import { organization, user } from "../schema/index.ts";
  *     [--digital-human dh_…]
  *
  *   node packages/db/dist/scripts/test.js get tst_…
+ *   node packages/db/dist/scripts/test.js edit tst_… --scenario "…"
+ *   node packages/db/dist/scripts/test.js get-version tstv_…
  *
  * Naming no digital human takes the project's default. The development
  * project has none until one is set, so the first create either names one or
  * says so.
+ *
+ * On an edit, a flag left out keeps what the test already says, so editing the
+ * scenario alone is one flag. A `--behavior` or a `--digital-human` given at
+ * all replaces the whole list, because the order is content.
  */
 
 const DATABASE_URL =
@@ -87,9 +98,21 @@ function usage(): never {
       "    --behavior <text> [--behavior <text> …]",
       "    [--description <text>] [--digital-human <dh_id> …]",
       "  test.js get <tst_id>",
+      "  test.js edit <tst_id> [--name <name>] [--description <text>]",
+      "    [--scenario <text>] [--behavior <text> …] [--digital-human <dh_id> …]",
+      "  test.js get-version <tstv_id>",
     ].join("\n"),
   );
   process.exit(1);
+}
+
+/** Print what the factory answered, or say the id reached nothing and exit. */
+function printTest(id: string, found: unknown): void {
+  if (found === undefined) {
+    console.error(`no test ${id} in the development project`);
+    process.exit(1);
+  }
+  console.log(JSON.stringify(found, null, 2));
 }
 
 async function main(): Promise<void> {
@@ -126,9 +149,44 @@ async function main(): Promise<void> {
     const [id] = rest;
     if (id === undefined) usage();
 
-    const found = await getTest(auth, id);
+    printTest(id, await getTest(auth, id));
+  } else if (command === "edit") {
+    const [id, ...flags] = rest;
+    if (id === undefined) usage();
+    const { values } = parseArgs({
+      args: flags,
+      options: {
+        name: { type: "string" },
+        description: { type: "string" },
+        scenario: { type: "string" },
+        behavior: { type: "string", multiple: true },
+        "digital-human": { type: "string", multiple: true },
+      },
+    });
+
+    // Only the flags that were given are handed on, so what the edit does not
+    // mention is what the factory keeps.
+    const edited = await editTest(auth, id, {
+      ...(values.name === undefined ? {} : { name: values.name }),
+      ...(values.description === undefined
+        ? {}
+        : { description: values.description }),
+      ...(values.scenario === undefined ? {} : { scenario: values.scenario }),
+      ...(values.behavior === undefined
+        ? {}
+        : { expectedBehaviors: values.behavior }),
+      ...(values["digital-human"] === undefined
+        ? {}
+        : { digitalHumanIds: values["digital-human"] }),
+    });
+    printTest(id, edited);
+  } else if (command === "get-version") {
+    const [versionId] = rest;
+    if (versionId === undefined) usage();
+
+    const found = await getTestVersion(auth, versionId);
     if (found === undefined) {
-      console.error(`no test ${id} in the development project`);
+      console.error(`no version ${versionId} in the development project`);
       process.exit(1);
     }
     console.log(JSON.stringify(found, null, 2));

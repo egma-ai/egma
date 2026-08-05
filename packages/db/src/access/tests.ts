@@ -19,7 +19,8 @@ import { theProject, within } from "./within.ts";
  * context acting in a project writes and reads there; a context acting in
  * none — an organization-scoped credential — reads the whole customer and
  * creates nothing, because a test belongs to a project and a credential for
- * the whole customer is acting in none.
+ * the whole customer is acting in none. What already exists it may edit: the
+ * row names its own project, so that write has somewhere to land.
  *
  * **A test is falsifiable from birth.** Its expected behaviors are required
  * non-empty at write time, and judging a simulation against them is part of
@@ -81,6 +82,42 @@ export type Test = {
   readonly digitalHumans: readonly TestDigitalHuman[];
   readonly createdAt: Date;
   readonly updatedAt: Date;
+};
+
+/**
+ * What an edit may touch. Name and description are identity and version
+ * nothing; the scenario, the expected behaviors and the digital humans are what
+ * the test checks, and version on any change. Absent means keep.
+ */
+export type TestChanges = {
+  readonly name?: string;
+  readonly description?: string | null;
+  readonly scenario?: string;
+  readonly expectedBehaviors?: readonly string[];
+  /**
+   * Who calls about the scenario, as the next version should name them.
+   *
+   * An empty list means here exactly what it means on a create: take the
+   * project's default digital human. The two verbs are deliberately not allowed
+   * to disagree about one input — a developer who learns `[]` on a create
+   * cannot be ambushed by a different meaning on an edit. It could not mean
+   * "name nobody" in any case: a test with no digital humans produces no
+   * simulations, so it could never run. Leaving the set alone is what leaving
+   * the field out does.
+   */
+  readonly digitalHumanIds?: readonly string[];
+};
+
+/** One version, frozen: the test exactly as some simulation executed it. */
+export type TestVersion = {
+  readonly id: string;
+  readonly testId: string;
+  readonly version: number;
+  readonly scenario: string;
+  readonly expectedBehaviors: readonly string[];
+  /** By identity, in the order they were authored. */
+  readonly digitalHumans: readonly TestDigitalHuman[];
+  readonly createdAt: Date;
 };
 
 const notDeleted: SQL = isNull(test.deletedAt);
@@ -182,6 +219,39 @@ function contentFromRow(value: unknown, versionId: string): TestContent {
   return { scenario, expectedBehaviors: expectedBehaviors as string[] };
 }
 
+/**
+ * Two ordered lists of strings, compared as written. Order is content in both
+ * places this is asked: the expected behaviors are a list a reader goes down,
+ * and the digital humans are named in the order they were authored, so a
+ * version that reorders either says something the version before it did not.
+ */
+function sameOrderedList(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((entry, index) => entry === b[index]);
+}
+
+/**
+ * Byte-identical or not, decided field by field — the same answer canonical
+ * serialization would give, without trusting any serializer to order keys the
+ * way jsonb re-ordered them.
+ *
+ * One comparator per field, in a table the compiler holds exhaustive: a field
+ * added to the content refuses to build until it is also told how to compare.
+ * A hand-maintained comparator that missed a field would call two different
+ * versions identical, and an edit would vanish without a version — the one loss
+ * the whole versioning exists to rule out.
+ */
+const sameContentField: {
+  readonly [K in keyof TestContent]: (a: TestContent, b: TestContent) => boolean;
+} = {
+  scenario: (a, b) => a.scenario === b.scenario,
+  expectedBehaviors: (a, b) =>
+    sameOrderedList(a.expectedBehaviors, b.expectedBehaviors),
+};
+
+function sameContent(a: TestContent, b: TestContent): boolean {
+  return Object.values(sameContentField).every((same) => same(a, b));
+}
+
 /** Acting in a project narrows to it; acting in none reaches the customer. */
 function inActingProject(auth: AuthContext): SQL | undefined {
   return auth.projectId === undefined
@@ -195,7 +265,7 @@ function theTest(auth: AuthContext, id: string): SQL {
 }
 
 /**
- * Whether the ids a create names are digital humans this project can use:
+ * Whether the ids a write names are digital humans this project can use:
  * each one exists, is alive, and is this project's.
  *
  * One read for the whole set, and then one refusal per id that did not come
@@ -240,7 +310,7 @@ async function validateNamedDigitalHumans(
 }
 
 /**
- * The one digital human the project points at, for a create that named none.
+ * The one digital human the project points at, for a write that named none.
  *
  * The pointer can be wrong in two different ways and they need different
  * words, because they need different fixes. A pointer at a digital human who
@@ -301,6 +371,46 @@ async function projectDefaultDigitalHuman(
 }
 
 /**
+ * Which digital humans a write should name, from what it was handed.
+ *
+ * One function for both write verbs, so the two can never come to disagree
+ * about the same input. Naming none — an empty list — takes the project's
+ * default on a create and on an edit alike; a developer who learns the meaning
+ * once has learned it everywhere. Naming some checks them, and the ids come
+ * back in the order they were given, because that order is content.
+ *
+ * Called inside the write's transaction, so the set that was checked is the
+ * set the join rows name.
+ */
+async function digitalHumansFor(
+  on: Queryable,
+  auth: AuthContext,
+  projectId: string,
+  named: readonly string[],
+): Promise<readonly string[]> {
+  if (named.length === 0) {
+    return [await projectDefaultDigitalHuman(on, auth, projectId)];
+  }
+  await validateNamedDigitalHumans(on, auth, projectId, named);
+  return named;
+}
+
+/** The join rows of one version, in the order the ids were authored. */
+async function nameDigitalHumansOn(
+  on: Queryable,
+  versionId: string,
+  digitalHumanIds: readonly string[],
+): Promise<void> {
+  await on.insert(testVersionDigitalHuman).values(
+    digitalHumanIds.map((digitalHumanId, index) => ({
+      testVersionId: versionId,
+      digitalHumanId,
+      position: index + 1,
+    })),
+  );
+}
+
+/**
  * The test, its first version and the version's digital humans, or none of
  * them. The identity row goes in first naming a version that does not exist
  * yet — its pointer's constraint is deferred, so Postgres checks it at commit
@@ -337,13 +447,7 @@ export async function createTest(
   const versionId = newId("tstv");
 
   const written = await db().transaction(async (tx) => {
-    let digitalHumanIds: readonly string[];
-    if (named.length === 0) {
-      digitalHumanIds = [await projectDefaultDigitalHuman(tx, auth, projectId)];
-    } else {
-      await validateNamedDigitalHumans(tx, auth, projectId, named);
-      digitalHumanIds = named;
-    }
+    const digitalHumanIds = await digitalHumansFor(tx, auth, projectId, named);
 
     const [identity] = await tx
       .insert(test)
@@ -368,13 +472,7 @@ export async function createTest(
       createdBy: auth.userId,
     });
 
-    await tx.insert(testVersionDigitalHuman).values(
-      digitalHumanIds.map((digitalHumanId, index) => ({
-        testVersionId: versionId,
-        digitalHumanId,
-        position: index + 1,
-      })),
-    );
+    await nameDigitalHumansOn(tx, versionId, digitalHumanIds);
 
     // Read back inside the transaction, so what the create answers with is
     // what the transaction wrote and checked, rather than whatever the table
@@ -449,5 +547,183 @@ export async function getTest(
     ...rest,
     ...contentFromRow(content, row.versionId),
     digitalHumans: await digitalHumansOf(db(), row.versionId),
+  };
+}
+
+/**
+ * One door for every change, so no caller needs the version rules to pick a
+ * function — the rules live here. Name and description write in place and
+ * version nothing. The scenario, the expected behaviors and the digital humans
+ * are what the test checks: any of them differing from the current version
+ * inserts the next version, with its own join rows, and moves the pointer — all
+ * in one transaction with the identity row locked, so two concurrent edits
+ * number one after the other rather than fighting over the same version number.
+ * The rows of the version being left behind are never touched, because a run
+ * that pinned it must still say what it executed. Content byte-identical to the
+ * current version is not an edit at all: nothing is written, not even
+ * `updated_at`, and the current version comes back.
+ *
+ * What an edit leaves out, it keeps. A field absent from the changes is read
+ * off the current version and carried into the next one, which is what lets an
+ * edit to the scenario alone stay an edit to the scenario alone — including
+ * when a digital human the version names has since been deleted. Refusing an
+ * unrelated edit over them would make the test uneditable, and would refuse it
+ * for something the developer did not touch.
+ *
+ * Editing what the caller cannot see returns what reading it would have:
+ * `undefined`, with nothing disturbed.
+ */
+export async function editTest(
+  auth: AuthContext,
+  id: string,
+  changes: TestChanges,
+): Promise<Test | undefined> {
+  authorize(auth, "author_definitions", here(auth));
+
+  // Everything answerable without the database is answered first, exactly as
+  // create answers it, so an edit is refused on the same grounds a create is.
+  const name = changes.name === undefined ? undefined : validName(changes.name);
+  const named = changes.digitalHumanIds;
+  if (named !== undefined) validateDigitalHumanIds(named);
+
+  return db().transaction(async (tx) => {
+    const [locked] = await tx
+      .select({ ...COLUMNS, currentVersionId: test.currentVersionId })
+      .from(test)
+      .where(theTest(auth, id))
+      .limit(1)
+      .for("update");
+
+    if (locked === undefined) return undefined;
+    const { currentVersionId, ...current } = locked;
+
+    // This select and the update below are the two `where`s in this file that
+    // start from a bare `eq` rather than `within`: each names an id that just
+    // came off the tenancy-checked row locked above, in this same transaction,
+    // so neither predicate can reach further than that check already did.
+    const [currentVersion] = await tx
+      .select({
+        id: testVersion.id,
+        version: testVersion.version,
+        content: testVersion.content,
+      })
+      .from(testVersion)
+      .where(eq(testVersion.id, currentVersionId))
+      .limit(1);
+    if (currentVersion === undefined) {
+      throw new Error("the test's current version is missing");
+    }
+
+    const storedContent = contentFromRow(currentVersion.content, currentVersion.id);
+    const storedDigitalHumans = await digitalHumansOf(tx, currentVersion.id);
+    const storedIds = storedDigitalHumans.map((human) => human.id);
+
+    // Omitted means unchanged: what the edit did not mention is read off the
+    // current version, and the whole is then held to what a create is held to.
+    const content = validContent({
+      scenario: changes.scenario ?? storedContent.scenario,
+      expectedBehaviors:
+        changes.expectedBehaviors ?? storedContent.expectedBehaviors,
+    });
+    const digitalHumanIds =
+      named === undefined
+        ? storedIds
+        : await digitalHumansFor(tx, auth, current.projectId, named);
+
+    const mintsVersion =
+      !sameContent(storedContent, content) ||
+      !sameOrderedList(storedIds, digitalHumanIds);
+    const identityChanged =
+      changes.name !== undefined || changes.description !== undefined;
+
+    if (!mintsVersion && !identityChanged) {
+      return {
+        ...current,
+        version: currentVersion.version,
+        versionId: currentVersion.id,
+        ...storedContent,
+        digitalHumans: storedDigitalHumans,
+      };
+    }
+
+    let versionId = currentVersion.id;
+    let version = currentVersion.version;
+    let digitalHumans = storedDigitalHumans;
+    if (mintsVersion) {
+      versionId = newId("tstv");
+      version = currentVersion.version + 1;
+      await tx.insert(testVersion).values({
+        id: versionId,
+        testId: current.id,
+        version,
+        content,
+        createdBy: auth.userId,
+      });
+      await nameDigitalHumansOn(tx, versionId, digitalHumanIds);
+      // Read back inside the transaction, for the reason create reads back
+      // inside it: the answer is what this transaction wrote and checked.
+      digitalHumans = await digitalHumansOf(tx, versionId);
+    }
+
+    const [updated] = await tx
+      .update(test)
+      .set({
+        ...(name === undefined ? {} : { name }),
+        ...(changes.description === undefined
+          ? {}
+          : { description: changes.description }),
+        ...(mintsVersion ? { currentVersionId: versionId } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(test.id, current.id))
+      .returning(COLUMNS);
+
+    if (updated === undefined) throw new Error("the test was not written");
+    return { ...updated, version, versionId, ...content, digitalHumans };
+  });
+}
+
+/**
+ * One frozen version, by its own `tstv_` id — the read a run uses to stay
+ * interpretable after the test moves on: the scenario and expected behaviors as
+ * they were, and the digital humans the version named, by identity and in the
+ * order they were authored. Which version of each of them a simulation met is
+ * the run's to pin, never this row's.
+ *
+ * Deliberately no deleted filter: versions outlive their test's deletion, so a
+ * run that pinned one can always say exactly what it executed.
+ */
+export async function getTestVersion(
+  auth: AuthContext,
+  versionId: string,
+): Promise<TestVersion | undefined> {
+  authorize(auth, "read", here(auth));
+
+  const [row] = await db()
+    .select({
+      id: testVersion.id,
+      testId: testVersion.testId,
+      version: testVersion.version,
+      content: testVersion.content,
+      createdAt: testVersion.createdAt,
+    })
+    .from(testVersion)
+    .innerJoin(test, eq(testVersion.testId, test.id))
+    .where(
+      within(
+        auth,
+        test,
+        and(eq(testVersion.id, versionId), inActingProject(auth)),
+      ),
+    )
+    .limit(1);
+
+  if (row === undefined) return undefined;
+
+  const { content, ...rest } = row;
+  return {
+    ...rest,
+    ...contentFromRow(content, row.id),
+    digitalHumans: await digitalHumansOf(db(), row.id),
   };
 }
