@@ -160,3 +160,51 @@ export {
   type TraceSpan,
   type TraceSummary,
 } from "./traces.ts";
+
+export {
+  addConnection,
+  createAgent,
+  deleteAgent,
+  getAgent,
+  getConnection,
+  listAgents,
+  listConnections,
+  removeConnection,
+  resolveConnectionCredentials,
+  updateAgent,
+  updateConnection,
+  type Agent,
+  type AgentChanges,
+  type AgentPage,
+  type Connection,
+  type ConnectionChanges,
+  type CreatedAgent,
+  type DeletedAgent,
+  type NewAgent,
+  type NewConnection,
+  type RemovedConnection,
+} from "./agents.ts";
+export type {
+  ConnectionType,
+  Modality,
+  Topology,
+} from "../schema/agents.ts";
+
+export {
+  cloneDigitalHuman,
+  createDigitalHuman,
+  deleteDigitalHuman,
+  editDigitalHuman,
+  getDigitalHuman,
+  getDigitalHumanVersion,
+  listDigitalHumans,
+  VOICE_PROVIDERS,
+  type DeletedDigitalHuman,
+  type DigitalHuman,
+  type DigitalHumanChanges,
+  type DigitalHumanPage,
+  type DigitalHumanTraits,
+  type DigitalHumanVersion,
+  type NewDigitalHuman,
+  type VoiceProvider,
+} from "./digital-humans.ts";

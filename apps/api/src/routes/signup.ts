@@ -117,6 +117,13 @@ export async function signupRoutes(
               // It came from the origin it is configured for, because that is
               // the only origin egma is served on.
               origin: options.baseUrl,
+              // The provider budgets signups per caller, and this header is
+              // where it looks for who is calling. The address is the one
+              // Fastify already resolved under the proxy setting — never the
+              // caller's own claim, which would let anybody pick their own
+              // budget. Without it, every relayed signup is one anonymous
+              // caller sharing one budget for the whole instance.
+              "x-forwarded-for": request.ip,
             },
             body: JSON.stringify({ email, password, name }),
           }),

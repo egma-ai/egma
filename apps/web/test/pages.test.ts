@@ -258,6 +258,20 @@ describe("the pages", () => {
     expect(members).toContain('fetch("/api/members")');
   });
 
+  /**
+   * Somewhere to click, and a path that reaches the API rather than this
+   * process. Without the rewrite the button would post at Next, which has no
+   * such route, and signing out would 404 while looking like a product bug.
+   */
+  it("give a signed-in person somewhere to sign out, at a path this instance rewrites", async () => {
+    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
+    const home = await readFile(path.join(WEB, "app/page.tsx"), "utf8");
+
+    expect(rewrites).toContain("/api/sign-out");
+    expect(home).toContain('fetch("/api/sign-out"');
+    expect(home).toContain("Sign out");
+  });
+
   it("reach the API for the device flow at paths this instance rewrites", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
     const approve = await readFile(

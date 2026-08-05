@@ -58,6 +58,11 @@ services:
       # Signs session cookies. The default is a development one and every
       # instance that anybody else can reach needs its own; see .env.example.
       EGMA_AUTH_SECRET: ${EGMA_AUTH_SECRET:-development-only-change-this-before-anybody-else-can-reach-it}
+      # Seals connection credentials before they reach the database. The
+      # default is a development one and every instance that anybody else can
+      # reach needs its own — `openssl rand -hex 32` makes one. Back it up
+      # alongside the database; losing it loses every stored credential.
+      EGMA_ENCRYPTION_KEY: ${EGMA_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
       # Where a browser reaches this instance. The pages and the API answer on
       # one origin, and that origin is the self-hoster's own.
       EGMA_BASE_URL: ${EGMA_BASE_URL:-http://localhost:3101}

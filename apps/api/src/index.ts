@@ -20,7 +20,10 @@ const config = loadConfig();
 const migrations = await runMigrations(config.databaseUrl);
 const traceMigrations = await runClickHouseMigrations(config.clickhouseUrl);
 
-connect({ databaseUrl: config.databaseUrl });
+connect({
+  databaseUrl: config.databaseUrl,
+  encryptionKey: config.encryptionKey,
+});
 connectClickHouse({ clickhouseUrl: config.clickhouseUrl });
 
 const { app } = buildApi({ config });

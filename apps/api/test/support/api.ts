@@ -13,6 +13,7 @@ import { buildApi } from "../../src/server.ts";
 import type { Identity } from "../../src/auth/better-auth.ts";
 import {
   createMigratedDatabase,
+  TEST_ENCRYPTION_KEY,
   type MigratedDatabase,
 } from "../../../../packages/db/test/support/database.ts";
 import {
@@ -68,6 +69,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
       DATABASE_URL: "postgres://unused/unused",
       CLICKHOUSE_URL: "http://unused/unused",
       EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
+      EGMA_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
       EGMA_BASE_URL: "http://localhost:3101",
     }),
     ...overrides,
@@ -79,7 +81,11 @@ export async function createApi(
   options: TestApiOptions = {},
 ): Promise<TestApi> {
   const database = await createMigratedDatabase(label);
-  connect({ databaseUrl: database.url, maxConnections: 4 });
+  connect({
+    databaseUrl: database.url,
+    maxConnections: 4,
+    encryptionKey: TEST_ENCRYPTION_KEY,
+  });
 
   const traceStore =
     options.traceStore === true

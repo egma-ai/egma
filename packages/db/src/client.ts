@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import pg from "pg";
 
 import * as schema from "./schema/index.ts";
+import { holdMasterKey, releaseMasterKey } from "./sealing.ts";
 
 /**
  * The Postgres pool is private to this module and is never exported. Reaching
@@ -14,10 +15,21 @@ let database: ReturnType<typeof drizzle<typeof schema>> | undefined;
 export type ConnectOptions = {
   readonly databaseUrl: string;
   readonly maxConnections?: number;
+  /**
+   * `EGMA_ENCRYPTION_KEY`: 32 random bytes as 64 hex characters, under which
+   * connection credentials are sealed before they touch a row. It arrives
+   * here — the same door the database URL does — and a malformed one refuses
+   * to connect at all, so a misconfigured deployment is loud at boot. Without
+   * one, everything runs except sealing and unsealing a credential.
+   */
+  readonly encryptionKey?: string;
 };
 
 export function connect(options: ConnectOptions): void {
   if (pool !== undefined) throw new Error("already connected to Postgres");
+  if (options.encryptionKey !== undefined) {
+    holdMasterKey(options.encryptionKey);
+  }
   pool = new pg.Pool({
     connectionString: options.databaseUrl,
     max: options.maxConnections ?? 10,
@@ -29,6 +41,7 @@ export async function disconnect(): Promise<void> {
   const open = pool;
   pool = undefined;
   database = undefined;
+  releaseMasterKey();
   await open?.end();
 }
 

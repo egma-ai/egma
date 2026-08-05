@@ -381,6 +381,33 @@ describe("a self-hosted instance", () => {
   });
 });
 
+describe("the caller behind a relayed signup", () => {
+  it("is known to the provider by their own address, not as one shared nobody", async () => {
+    api = await createApi("signup_caller_address");
+
+    const response = await api.app.inject({
+      method: "POST",
+      url: "/api/signup",
+      remoteAddress: "203.0.113.9",
+      payload: {
+        email: "ada@acme.example",
+        password: "a-long-enough-password",
+        organizationName: "Acme",
+      },
+    });
+    expect(response.statusCode).toBe(201);
+
+    // The address on the session the provider issued is the caller's own.
+    // The same resolution feeds the provider's per-caller signup budget, so
+    // an address lost in the relay would mean every signup on the instance
+    // shares one budget — a handful per ten seconds, total.
+    const { rows } = await api.database.sql<{ ip_address: string | null }>(
+      "select ip_address from session",
+    );
+    expect(rows).toEqual([{ ip_address: "203.0.113.9" }]);
+  });
+});
+
 describe("a person with one organization and one project", () => {
   it("is offered nothing to pick between", async () => {
     api = await createApi("signup_cardinality");

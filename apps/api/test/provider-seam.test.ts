@@ -96,8 +96,12 @@ describe("the provider's footprint on the schema", () => {
   /** Every table egma's own migrations create, and the whole of it. */
   const EGMA_TABLES = [
     "account",
+    "agent",
     "api_key",
+    "connection",
     "device_code",
+    "digital_human",
+    "digital_human_version",
     "invitation",
     "membership",
     "organization",

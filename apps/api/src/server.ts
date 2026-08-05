@@ -13,6 +13,7 @@ import { deviceRoutes } from "./routes/device.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
+import { signOutRoutes } from "./routes/sign-out.ts";
 import { signupRoutes } from "./routes/signup.ts";
 import { traceReadRoutes } from "./routes/trace-reads.ts";
 import { traceRoutes } from "./routes/traces.ts";
@@ -138,6 +139,8 @@ export function buildApi(options: ServerOptions): Api {
   });
 
   void app.register(meRoutes, { provider: identity.provider });
+
+  void app.register(signOutRoutes, { provider: identity.provider });
 
   void app.register(deviceRoutes, {
     identity,

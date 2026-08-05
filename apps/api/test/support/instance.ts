@@ -14,6 +14,7 @@ import { loadConfig } from "../../src/config.ts";
 import { buildApi } from "../../src/server.ts";
 import {
   createMigratedDatabase,
+  TEST_ENCRYPTION_KEY,
   type MigratedDatabase,
 } from "../../../../packages/db/test/support/database.ts";
 import {
@@ -121,7 +122,11 @@ export async function startInstance(
       ? await createMigratedTraceStore(label)
       : await createEmptyTraceStore(label);
 
-  connect({ databaseUrl: database.url, maxConnections: 4 });
+  connect({
+    databaseUrl: database.url,
+    maxConnections: 4,
+    encryptionKey: TEST_ENCRYPTION_KEY,
+  });
   connectClickHouse({ clickhouseUrl: traceStore.url, maxOpenConnections: 4 });
 
   const apiPort = await freePort();
@@ -133,6 +138,7 @@ export async function startInstance(
       DATABASE_URL: database.url,
       CLICKHOUSE_URL: traceStore.url,
       EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
+      EGMA_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
       EGMA_BASE_URL: origin,
       EGMA_SINGLE_ORGANIZATION: "false",
     }),

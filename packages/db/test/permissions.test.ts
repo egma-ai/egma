@@ -116,10 +116,6 @@ describe("the action list", () => {
  * exist yet. Never both, and never neither.
  */
 const NOT_YET_REACHABLE: Readonly<Record<string, string>> = {
-  author_definitions:
-    "nothing can write a test, a digital human, a grader or a suite yet",
-  configure_agents: "nothing can register an agent or a connection yet",
-  start_and_cancel_runs: "nothing can start a run yet",
   delete_run_data: "there is no run data to delete yet",
   delete_organization: "deleting an organization is designed and not built",
 };

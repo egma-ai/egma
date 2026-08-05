@@ -23,6 +23,15 @@ export type Config = {
   /** What sessions are signed with. Absent means the service will not start. */
   readonly authSecret: string;
   /**
+   * What connection credentials are sealed under before they touch a row —
+   * 32 random bytes as 64 hex characters (`openssl rand -hex 32`). Malformed
+   * or absent means the service will not start: a deployment that stored
+   * customers' provider keys under a weak or missing key would be quietly
+   * under-encrypted, which is the one failure nobody notices until the
+   * database leaks.
+   */
+  readonly encryptionKey: string;
+  /**
    * One organization on this deployment, and the first person to sign up claims
    * it. Sentry's flag, and Sentry's reason: without it anyone who can reach the
    * URL signs up, joins the only organization, and — because everyone defaults
@@ -149,6 +158,20 @@ export function loadConfig(
     );
   }
 
+  // Length and alphabet, not just presence: a 32-character passphrase has the
+  // right byte count and a fraction of the entropy, and must be refused
+  // rather than accepted quietly.
+  const encryptionKey = environment.EGMA_ENCRYPTION_KEY?.trim();
+  if (!encryptionKey || !/^[0-9a-f]{64}$/i.test(encryptionKey)) {
+    throw new Error(
+      "EGMA_ENCRYPTION_KEY is required: 32 random bytes written as 64 hex " +
+        "characters — `openssl rand -hex 32` makes one. Connection " +
+        "credentials are sealed under it before they touch the database. " +
+        "Back it up alongside the database; a backup of one without the " +
+        "other is half a backup.",
+    );
+  }
+
   const port = Number(environment.PORT ?? 3100);
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
     throw new Error(`PORT is not a usable port number: ${environment.PORT}`);
@@ -178,6 +201,7 @@ export function loadConfig(
     port,
     baseUrl: baseUrl.replace(/\/+$/, ""),
     authSecret,
+    encryptionKey,
     singleOrganization: flag(environment, "EGMA_SINGLE_ORGANIZATION", true),
     trustProxy: flag(environment, "EGMA_TRUST_PROXY", false),
     rateLimitPerMinute,

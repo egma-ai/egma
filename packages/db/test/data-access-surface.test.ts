@@ -79,13 +79,27 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
  * be called in a way that scans the whole table.
  */
 const CONTEXT_REQUIRING = [
+  "addConnection",
   "appendSpans",
   "changeRole",
+  "cloneDigitalHuman",
+  "createAgent",
   "createApiKey",
+  "createDigitalHuman",
   "createInvitation",
   "createProject",
   "deactivateUser",
+  "deleteAgent",
+  "deleteDigitalHuman",
+  "editDigitalHuman",
+  "getAgent",
+  "getConnection",
+  "getDigitalHuman",
+  "getDigitalHumanVersion",
+  "listAgents",
   "listApiKeys",
+  "listConnections",
+  "listDigitalHumans",
   "listMembers",
   "listPendingInvitations",
   "listProjects",
@@ -95,8 +109,12 @@ const CONTEXT_REQUIRING = [
   "readProject",
   "readTrace",
   "recordDeviceAuthorization",
+  "removeConnection",
   "removeMember",
+  "resolveConnectionCredentials",
   "revokeApiKey",
+  "updateAgent",
+  "updateConnection",
   "updateOrganizationSettings",
 ];
 
@@ -127,6 +145,7 @@ const VALUES = [
   // page token that was not issued here. Both are 400s, and neither is a fault.
   "UnreadableTraceQueryError",
   "VIA",
+  "VOICE_PROVIDERS",
   "schema",
 ];
 
