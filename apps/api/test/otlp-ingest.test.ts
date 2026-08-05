@@ -340,7 +340,7 @@ describe("the captured trace, posted at the door", () => {
       await countOf(
         "select count() as n from spans where run_id != '' or agent_id != '' " +
           "or agent_version_id != '' or test_version_id != '' " +
-          "or digital_human_version_id != ''",
+          "or persona_version_id != ''",
       ),
     ).toBe(0);
   });

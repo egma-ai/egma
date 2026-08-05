@@ -36,6 +36,13 @@
       "when": 1785816408700,
       "tag": "0004_agents",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785955851349,
+      "tag": "0005_rename_digital_human_to_persona",
+      "breakpoints": true
     }
   ]
 }

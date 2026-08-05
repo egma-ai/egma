@@ -33,7 +33,7 @@ import {
  * Deliberately unversioned, both tables. egma versions what egma authors, and
  * an agent's real content — prompt, model, tools — lives on the provider's
  * side or in the customer's own repo, where egma cannot freeze it. The table
- * is shaped so an `agent_version` pair can arrive later (the digital-human
+ * is shaped so an `agent_version` pair can arrive later (the persona
  * pattern) without touching anything that references `agent`.
  */
 

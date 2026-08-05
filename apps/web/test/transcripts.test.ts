@@ -305,7 +305,7 @@ const NEVER_SAID = [
   "evaluator",
   "scorer",
   "assertion",
-  "persona",
+  "digital human",
   "simulant",
   "virtual human",
   "synthetic user",

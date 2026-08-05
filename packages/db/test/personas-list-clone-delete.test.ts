@@ -2,16 +2,16 @@ import { isId, newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  cloneDigitalHuman,
-  createDigitalHuman,
-  deleteDigitalHuman,
-  getDigitalHuman,
-  getDigitalHumanVersion,
-  listDigitalHumans,
+  clonePersona,
+  createPersona,
+  deletePersona,
+  getPersona,
+  getPersonaVersion,
+  listPersonas,
   NotPermittedError,
   type AuthContext,
-  type DigitalHuman,
-  type NewDigitalHuman,
+  type Persona,
+  type NewPersona,
   type Role,
 } from "@egma/db";
 
@@ -65,7 +65,7 @@ function actingAsGlobex(): AuthContext {
   };
 }
 
-function digitalHumanNamed(name: string): NewDigitalHuman {
+function personaNamed(name: string): NewPersona {
   return {
     name,
     description: `${name}, of the list-clone-delete tests`,
@@ -82,7 +82,7 @@ function digitalHumanNamed(name: string): NewDigitalHuman {
 }
 
 beforeAll(async () => {
-  database = await createConnectedDatabase("digital_humans_list_clone_delete");
+  database = await createConnectedDatabase("personas_list_clone_delete");
 
   await seedOrganization(database, acme.organization, [
     { id: acme.listing, slug: "listing" },
@@ -99,34 +99,34 @@ afterAll(async () => {
   await database.drop();
 });
 
-async function versionIdsOf(digitalHumanId: string): Promise<readonly string[]> {
+async function versionIdsOf(personaId: string): Promise<readonly string[]> {
   const { rows } = await database.sql<{ id: string }>(
-    "select id from digital_human_version where digital_human_id = $1 order by version",
-    [digitalHumanId],
+    "select id from persona_version where persona_id = $1 order by version",
+    [personaId],
   );
   return rows.map((row) => row.id);
 }
 
-describe("listing digital humans", () => {
-  const created: DigitalHuman[] = [];
-  let neighbour: DigitalHuman;
-  let stranger: DigitalHuman;
+describe("listing personas", () => {
+  const created: Persona[] = [];
+  let neighbour: Persona;
+  let stranger: Persona;
 
   beforeAll(async () => {
     for (const name of ["One", "Two", "Three", "Four", "Five"]) {
-      created.push(await createDigitalHuman(actingIn(acme.listing), digitalHumanNamed(name)));
+      created.push(await createPersona(actingIn(acme.listing), personaNamed(name)));
     }
     // One in a sibling project and one at another customer, so "only the
     // acting project's" is a claim the assertions can actually falsify.
-    neighbour = await createDigitalHuman(
+    neighbour = await createPersona(
       actingIn(acme.cloning),
-      digitalHumanNamed("Neighbour"),
+      personaNamed("Neighbour"),
     );
-    stranger = await createDigitalHuman(actingAsGlobex(), digitalHumanNamed("Stranger"));
+    stranger = await createPersona(actingAsGlobex(), personaNamed("Stranger"));
   });
 
-  it("returns only the acting project's digital humans, newest first", async () => {
-    const page = await listDigitalHumans(actingIn(acme.listing));
+  it("returns only the acting project's personas, newest first", async () => {
+    const page = await listPersonas(actingIn(acme.listing));
 
     expect(page.items.map((item) => item.id)).toEqual(
       created.map((item) => item.id).reverse(),
@@ -142,25 +142,25 @@ describe("listing digital humans", () => {
   });
 
   it("carries the current traits on every row", async () => {
-    const page = await listDigitalHumans(actingIn(acme.listing));
+    const page = await listPersonas(actingIn(acme.listing));
     const five = page.items[0];
     expect(five?.version).toBe(1);
     expect(five?.traits.personality).toContain("Five");
   });
 
   it("pages across the whole set with no overlap and no missed row", async () => {
-    const first = await listDigitalHumans(actingIn(acme.listing), { limit: 2 });
+    const first = await listPersonas(actingIn(acme.listing), { limit: 2 });
     expect(first.items).toHaveLength(2);
     expect(first.nextCursor).toBe(first.items[1]?.id);
 
-    const second = await listDigitalHumans(actingIn(acme.listing), {
+    const second = await listPersonas(actingIn(acme.listing), {
       limit: 2,
       cursor: first.nextCursor,
     });
     expect(second.items).toHaveLength(2);
     expect(second.nextCursor).toBe(second.items[1]?.id);
 
-    const third = await listDigitalHumans(actingIn(acme.listing), {
+    const third = await listPersonas(actingIn(acme.listing), {
       limit: 2,
       cursor: second.nextCursor,
     });
@@ -173,20 +173,20 @@ describe("listing digital humans", () => {
     );
   });
 
-  it("refuses a page size outside the range and a cursor that is not a dh_ id", async () => {
+  it("refuses a page size outside the range and a cursor that is not a prs_ id", async () => {
     await expect(
-      listDigitalHumans(actingIn(acme.listing), { limit: 0 }),
+      listPersonas(actingIn(acme.listing), { limit: 0 }),
     ).rejects.toThrow(/between 1 and/);
     await expect(
-      listDigitalHumans(actingIn(acme.listing), { limit: 201 }),
+      listPersonas(actingIn(acme.listing), { limit: 201 }),
     ).rejects.toThrow(/between 1 and/);
     await expect(
-      listDigitalHumans(actingIn(acme.listing), { cursor: "dhv_nonsense" }),
+      listPersonas(actingIn(acme.listing), { cursor: "prsv_nonsense" }),
     ).rejects.toThrow(/cursor/);
   });
 
   it("shows a credential for the whole organization every project, and no other customer", async () => {
-    const page = await listDigitalHumans(actingIn(undefined));
+    const page = await listPersonas(actingIn(undefined));
 
     const ids = page.items.map((item) => item.id);
     expect(ids).toHaveLength(6);
@@ -200,17 +200,17 @@ describe("listing digital humans", () => {
   });
 
   it("shows another customer none of them", async () => {
-    const page = await listDigitalHumans(actingAsGlobex());
+    const page = await listPersonas(actingAsGlobex());
     expect(page.items.map((item) => item.id)).toEqual([stranger.id]);
   });
 
-  it("drops a deleted digital human from the list immediately", async () => {
+  it("drops a deleted persona from the list immediately", async () => {
     const [three] = created.filter((item) => item.name === "Three");
     if (three === undefined) throw new Error("Three was never created");
 
-    await deleteDigitalHuman(actingIn(acme.listing), three.id);
+    await deletePersona(actingIn(acme.listing), three.id);
 
-    const page = await listDigitalHumans(actingIn(acme.listing));
+    const page = await listPersonas(actingIn(acme.listing));
     expect(page.items.map((item) => item.name)).toEqual([
       "Five",
       "Four",
@@ -220,19 +220,19 @@ describe("listing digital humans", () => {
   });
 });
 
-describe("cloning a digital human", () => {
-  let source: DigitalHuman;
+describe("cloning a persona", () => {
+  let source: Persona;
 
   beforeAll(async () => {
-    source = await createDigitalHuman(actingIn(acme.cloning), digitalHumanNamed("Original"));
+    source = await createPersona(actingIn(acme.cloning), personaNamed("Original"));
   });
 
-  it("copies the current traits into a fresh digital human at version 1, with its own ids", async () => {
-    const clone = await cloneDigitalHuman(actingIn(acme.cloning), source.id);
+  it("copies the current traits into a fresh persona at version 1, with its own ids", async () => {
+    const clone = await clonePersona(actingIn(acme.cloning), source.id);
 
     expect(clone).toBeDefined();
     if (clone === undefined) throw new Error("unreachable");
-    expect(isId("dh", clone.id)).toBe(true);
+    expect(isId("prs", clone.id)).toBe(true);
     expect(clone.id).not.toBe(source.id);
     expect(clone.versionId).not.toBe(source.versionId);
     expect(clone.version).toBe(1);
@@ -240,7 +240,7 @@ describe("cloning a digital human", () => {
     expect(clone.description).toBe(source.description);
     expect(clone.traits).toEqual(source.traits);
 
-    const fetched = await getDigitalHuman(actingIn(acme.cloning), clone.id);
+    const fetched = await getPersona(actingIn(acme.cloning), clone.id);
     expect(fetched?.traits).toEqual(source.traits);
 
     // No shared history: one version row each, and not the same row.
@@ -251,106 +251,106 @@ describe("cloning a digital human", () => {
     expect(cloneVersions[0]).not.toBe(sourceVersions[0]);
   });
 
-  it("returns nothing for a digital human the caller could not have fetched", async () => {
+  it("returns nothing for a persona the caller could not have fetched", async () => {
     expect(
-      await cloneDigitalHuman(actingAsGlobex(), source.id),
+      await clonePersona(actingAsGlobex(), source.id),
     ).toBeUndefined();
     expect(
-      await cloneDigitalHuman(actingIn(acme.deleting), source.id),
+      await clonePersona(actingIn(acme.deleting), source.id),
     ).toBeUndefined();
 
     // Neither refused clone created anything: globex still holds only the
     // Stranger, and the project the second attempt acted in is still empty.
-    const globexPage = await listDigitalHumans(actingAsGlobex());
+    const globexPage = await listPersonas(actingAsGlobex());
     expect(globexPage.items.map((item) => item.name)).toEqual(["Stranger"]);
-    const deletingPage = await listDigitalHumans(actingIn(acme.deleting));
+    const deletingPage = await listPersonas(actingIn(acme.deleting));
     expect(deletingPage.items).toEqual([]);
   });
 
   it("is refused to a viewer", async () => {
     await expect(
-      cloneDigitalHuman(actingIn(acme.cloning, "viewer"), source.id),
+      clonePersona(actingIn(acme.cloning, "viewer"), source.id),
     ).rejects.toThrow(NotPermittedError);
   });
 
   it("is refused to a credential acting in no project, which has nowhere to put the clone", async () => {
     await expect(
-      cloneDigitalHuman(actingIn(undefined), source.id),
+      clonePersona(actingIn(undefined), source.id),
     ).rejects.toThrow(/project/);
 
     // The refusal comes before the read, so an id that names nothing gets
     // the same loud answer — never an `undefined` that reads as invisible.
     await expect(
-      cloneDigitalHuman(actingIn(undefined), newId("dh")),
+      clonePersona(actingIn(undefined), newId("prs")),
     ).rejects.toThrow(/project/);
   });
 });
 
-describe("deleting a digital human", () => {
-  let doomed: DigitalHuman;
+describe("deleting a persona", () => {
+  let doomed: Persona;
 
   beforeAll(async () => {
-    doomed = await createDigitalHuman(actingIn(acme.deleting), digitalHumanNamed("Doomed"));
+    doomed = await createPersona(actingIn(acme.deleting), personaNamed("Doomed"));
   });
 
   it("is refused to a credential acting in no project, like create", async () => {
     await expect(
-      deleteDigitalHuman(actingIn(undefined), doomed.id),
+      deletePersona(actingIn(undefined), doomed.id),
     ).rejects.toThrow(/project/);
 
-    const stillThere = await getDigitalHuman(actingIn(acme.deleting), doomed.id);
+    const stillThere = await getPersona(actingIn(acme.deleting), doomed.id);
     expect(stillThere?.id).toBe(doomed.id);
   });
 
   it("hides it from fetch and list, while its version rows stay readable", async () => {
-    const deleted = await deleteDigitalHuman(actingIn(acme.deleting), doomed.id);
+    const deleted = await deletePersona(actingIn(acme.deleting), doomed.id);
     expect(deleted?.id).toBe(doomed.id);
     expect(deleted?.deletedAt).toBeInstanceOf(Date);
 
     expect(
-      await getDigitalHuman(actingIn(acme.deleting), doomed.id),
+      await getPersona(actingIn(acme.deleting), doomed.id),
     ).toBeUndefined();
-    const page = await listDigitalHumans(actingIn(acme.deleting));
+    const page = await listPersonas(actingIn(acme.deleting));
     expect(page.items.map((item) => item.id)).not.toContain(doomed.id);
 
-    const version = await getDigitalHumanVersion(
+    const version = await getPersonaVersion(
       actingIn(acme.deleting),
       doomed.versionId,
     );
-    expect(version?.digitalHumanId).toBe(doomed.id);
+    expect(version?.personaId).toBe(doomed.id);
     expect(version?.version).toBe(1);
     expect(version?.traits).toEqual(doomed.traits);
   });
 
   it("deletes only once: a second delete finds nothing", async () => {
     expect(
-      await deleteDigitalHuman(actingIn(acme.deleting), doomed.id),
+      await deletePersona(actingIn(acme.deleting), doomed.id),
     ).toBeUndefined();
   });
 
   it("keeps the surviving version invisible to another customer", async () => {
     expect(
-      await getDigitalHumanVersion(actingAsGlobex(), doomed.versionId),
+      await getPersonaVersion(actingAsGlobex(), doomed.versionId),
     ).toBeUndefined();
   });
 
-  it("returns nothing for another customer's digital human, and leaves it live", async () => {
-    const bystander = await createDigitalHuman(
+  it("returns nothing for another customer's persona, and leaves it live", async () => {
+    const bystander = await createPersona(
       actingIn(acme.deleting),
-      digitalHumanNamed("Bystander"),
+      personaNamed("Bystander"),
     );
 
     expect(
-      await deleteDigitalHuman(actingAsGlobex(), bystander.id),
+      await deletePersona(actingAsGlobex(), bystander.id),
     ).toBeUndefined();
 
-    const fetched = await getDigitalHuman(actingIn(acme.deleting), bystander.id);
+    const fetched = await getPersona(actingIn(acme.deleting), bystander.id);
     expect(fetched?.id).toBe(bystander.id);
   });
 
   it("is refused to a viewer", async () => {
     await expect(
-      deleteDigitalHuman(actingIn(acme.deleting, "viewer"), doomed.id),
+      deletePersona(actingIn(acme.deleting, "viewer"), doomed.id),
     ).rejects.toThrow(NotPermittedError);
   });
 });

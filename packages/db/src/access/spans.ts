@@ -101,7 +101,7 @@ export type NewSpan = {
   readonly agentId: string;
   readonly agentVersionId: string;
   readonly testVersionId: string;
-  readonly digitalHumanVersionId: string;
+  readonly personaVersionId: string;
   /**
    * The provider's payload for this span, exactly as it arrived, and the reason
    * truncating the columns above loses nothing: whatever a cap shortened is
@@ -256,7 +256,7 @@ function rowFor(auth: AuthContext, span: NewSpan): Record<string, unknown> {
     agent_id: span.agentId,
     agent_version_id: span.agentVersionId,
     test_version_id: span.testVersionId,
-    digital_human_version_id: span.digitalHumanVersionId,
+    persona_version_id: span.personaVersionId,
     payload: span.payload,
   };
 }

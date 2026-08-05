@@ -484,7 +484,7 @@ export function normaliseOtlpExport(request: OtlpExport): NormalisedExport {
           agentId: "",
           agentVersionId: "",
           testVersionId: "",
-          digitalHumanVersionId: "",
+          personaVersionId: "",
           payload,
         });
       }

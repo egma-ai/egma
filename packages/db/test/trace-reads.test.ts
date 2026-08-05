@@ -102,7 +102,7 @@ function span(overrides: Partial<NewSpan> = {}): NewSpan {
     agentId: "",
     agentVersionId: "",
     testVersionId: "",
-    digitalHumanVersionId: "",
+    personaVersionId: "",
     payload: "{}",
     ...overrides,
   };

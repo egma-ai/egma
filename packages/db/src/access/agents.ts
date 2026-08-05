@@ -32,7 +32,7 @@ import { within } from "./within.ts";
  * the wrong agent — or the wrong customer — answers exactly what a connection
  * that doesn't exist answers.
  *
- * Project scoping works as the digital-human factory's does. A context acting
+ * Project scoping works as the persona factory's does. A context acting
  * in a project writes and reads there; a context acting in none — an
  * organization-scoped credential — reaches the whole customer. It creates no
  * agent and deletes none, because an agent belongs to a project and a
@@ -611,7 +611,7 @@ export async function listAgents(
  * row comes back — anything watching the timestamp hears only real changes.
  * Editing what the caller cannot see returns what reading it would have:
  * `undefined`, with nothing disturbed. An organization-scoped credential may
- * edit, as the digital-human factory allows: the row names its own project,
+ * edit, as the persona factory allows: the row names its own project,
  * so the write has somewhere to land.
  */
 export async function updateAgent(
@@ -663,7 +663,7 @@ export async function updateAgent(
  * Like create, this refuses a credential acting in no project. An edit lands
  * on a row that already names its own project; a delete decides the agent
  * should stop appearing in one, and emptying a project is an act taken from
- * inside it — the digital-human factory's stance, held here.
+ * inside it — the persona factory's stance, held here.
  */
 export async function deleteAgent(
   auth: AuthContext,
