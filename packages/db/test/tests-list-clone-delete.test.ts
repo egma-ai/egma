@@ -41,11 +41,12 @@ let database: MigratedDatabase;
 let rita: string;
 /** Globex's, so its test has a digital human of its own to name. */
 let grace: string;
-/** Two more of Acme's, so a cloned caller set is longer than one. */
+/** Two more of Acme's, so a cloned set of digital humans is longer than one. */
 let nadia: string;
 let omar: string;
-/** The sibling project's own, since that project points at no default. */
+/** The sibling project's own two, since that project points at no default. */
 let olive: string;
+let oscar: string;
 
 /** The sibling project, which the listing block has to itself. */
 function actingInOutbound() {
@@ -63,6 +64,7 @@ beforeAll(async () => {
   nadia = await seedDigitalHuman(actingAsAcme(), "Nadia");
   omar = await seedDigitalHuman(actingAsAcme(), "Omar");
   olive = await seedDigitalHuman(actingInOutbound(), "Olive");
+  oscar = await seedDigitalHuman(actingInOutbound(), "Oscar");
 });
 
 afterAll(async () => {
@@ -88,12 +90,16 @@ describe("listing tests", () => {
   let stranger: Test;
 
   beforeAll(async () => {
+    // All but one name the same single digital human; "Four" names two, in an
+    // order that is not the order they were minted. A page that bucketed every
+    // row under one test, or dropped the authored order for the id order,
+    // could not survive that.
     for (const name of ["One", "Two", "Three", "Four", "Five"]) {
       created.push(
         await createTest(actingInOutbound(), {
           ...rescheduling,
           name,
-          digitalHumanIds: [olive],
+          digitalHumanIds: name === "Four" ? [oscar, olive] : [olive],
         }),
       );
     }
@@ -126,7 +132,7 @@ describe("listing tests", () => {
     expect(page.nextCursor).toBeUndefined();
   });
 
-  it("carries the current content and callers on every row", async () => {
+  it("carries the current content and digital humans on every row", async () => {
     const page = await listTests(actingInOutbound());
 
     expect(
@@ -137,6 +143,15 @@ describe("listing tests", () => {
     const five = page.items[0];
     expect(five?.expectedBehaviors).toEqual(rescheduling.expectedBehaviors);
     expect(five?.digitalHumans).toEqual([
+      { id: olive, name: "Olive", deletedAt: null },
+    ]);
+
+    // The one row naming two, in the order it authored them and no other: a
+    // page reads every row's digital humans in one go, and each row has to
+    // come back with its own.
+    const four = page.items.find((item) => item.name === "Four");
+    expect(four?.digitalHumans).toEqual([
+      { id: oscar, name: "Oscar", deletedAt: null },
       { id: olive, name: "Olive", deletedAt: null },
     ]);
   });
@@ -181,7 +196,11 @@ describe("listing tests", () => {
   it("shows a credential for the whole organization every project, and no other customer", async () => {
     const page = await listTests(actingAsWholeCustomer());
 
+    // Exactly the five of this block and the one in the sibling project —
+    // nothing else of Acme's exists yet, so the count is a claim and not a
+    // floor.
     const ids = page.items.map((item) => item.id);
+    expect(ids).toHaveLength(6);
     for (const item of created) expect(ids).toContain(item.id);
     expect(ids).toContain(sibling.id);
     expect(ids).not.toContain(stranger.id);
@@ -249,7 +268,7 @@ describe("cloning a test", () => {
     source = second;
   });
 
-  it("copies the current scenario, behaviors and callers into a fresh test at version 1", async () => {
+  it("copies the current scenario, behaviors and digital humans into a fresh test at version 1", async () => {
     const clone = await cloneTest(actingAsAcme(), source.id);
 
     expect(clone).toBeDefined();
@@ -395,7 +414,7 @@ describe("deleting a test", () => {
     expect(wholeCustomer.items.map((item) => item.id)).not.toContain(doomed.id);
   });
 
-  it("keeps every version fetchable by its tstv_ id, with its content and callers", async () => {
+  it("keeps every version fetchable by its tstv_ id, with its content and digital humans", async () => {
     const first = await getTestVersion(actingAsAcme(), firstVersionId);
     expect(first?.testId).toBe(doomed.id);
     expect(first?.version).toBe(1);

@@ -502,12 +502,12 @@ export async function createTest(
  * hands it version ids that have already come off tenancy-checked rows, so the
  * predicate cannot reach further than that check already did.
  */
-async function digitalHumansOfEach(
+async function digitalHumansOfVersions(
   on: Queryable,
   versionIds: readonly string[],
 ): Promise<Map<string, TestDigitalHuman[]>> {
-  const named = new Map<string, TestDigitalHuman[]>();
-  if (versionIds.length === 0) return named;
+  const byVersion = new Map<string, TestDigitalHuman[]>();
+  if (versionIds.length === 0) return byVersion;
 
   const rows = await on
     .select({
@@ -528,11 +528,11 @@ async function digitalHumansOfEach(
     );
 
   for (const { versionId, ...human } of rows) {
-    const already = named.get(versionId);
-    if (already === undefined) named.set(versionId, [human]);
+    const already = byVersion.get(versionId);
+    if (already === undefined) byVersion.set(versionId, [human]);
     else already.push(human);
   }
-  return named;
+  return byVersion;
 }
 
 /** The one version's digital humans, in the order they were authored. */
@@ -540,7 +540,7 @@ async function digitalHumansOf(
   on: Queryable,
   versionId: string,
 ): Promise<readonly TestDigitalHuman[]> {
-  return (await digitalHumansOfEach(on, [versionId])).get(versionId) ?? [];
+  return (await digitalHumansOfVersions(on, [versionId])).get(versionId) ?? [];
 }
 
 /**
@@ -828,7 +828,7 @@ export async function listTests(
   // A page's digital humans come back in one read, not one per row: a page of
   // two hundred tests is two queries, the same as a page of one.
   const wanted = rows.slice(0, limit);
-  const named = await digitalHumansOfEach(
+  const byVersion = await digitalHumansOfVersions(
     db(),
     wanted.map((row) => row.versionId),
   );
@@ -836,7 +836,7 @@ export async function listTests(
   const items = wanted.map(({ content, ...rest }) => ({
     ...rest,
     ...contentFromRow(content, rest.versionId),
-    digitalHumans: named.get(rest.versionId) ?? [],
+    digitalHumans: byVersion.get(rest.versionId) ?? [],
   }));
 
   return {
@@ -859,12 +859,14 @@ export async function listTests(
  *
  * The digital humans are handed on exactly as the source names them, and
  * `createTest` is the only thing that judges them — one rule about what a
- * version may name, in one place. A source naming a deleted digital human
- * would therefore be refused rather than quietly cloned without them, or
- * quietly given the project's default; neither silence would be a copy. That
- * refusal is not a state a caller can reach: deleting a digital human is
- * refused while a live test's current version names them, and a test that
- * cannot be fetched cannot be cloned.
+ * version may name, in one place. So a source whose current version names a
+ * deleted digital human is refused by that same validation, rather than
+ * quietly cloned without them or quietly given the project's default; neither
+ * silence would be a copy, and a clone that checked something the source does
+ * not is worse than no clone. Once the digital human's own delete refuses
+ * while a live test's current version names them, that refusal stops being
+ * reachable at all: a test that cannot be fetched cannot be cloned, so no
+ * clonable source can name a deleted digital human.
  *
  * Authorization is layered on purpose, not by accident of delegation. The
  * leading check refuses a viewer before anything is read, and a credential
@@ -910,12 +912,12 @@ export type DeletedTest = {
  * kept. Sweeping orphaned versions is the deletion worker's job, not this
  * function's.
  *
- * Nothing blocks this, ever. Deleting a digital human is refused while a live
- * test's current version names them, because that test would silently lose a
- * caller; a test has no dependant of its own that could lose anything. A suite
- * selects tests and a run executes them, and neither is a reason to keep a test
- * somebody has abandoned, because both keep what they need by pinning versions
- * that outlive it.
+ * Nothing blocks this, ever. A digital human's delete is the one that can be
+ * refused, because a live test's current version naming them would silently
+ * lose one of the people who call about it; a test has no dependant of its own
+ * that could lose anything that way. A suite selects tests and a run executes
+ * them, and neither is a reason to keep a test somebody has abandoned, because
+ * both keep what they need by pinning versions that outlive it.
  *
  * Like create, this refuses a credential acting in no project. An edit lands on
  * a row that already names its own project; a delete decides the test should
