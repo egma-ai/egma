@@ -104,16 +104,35 @@ function requestBody(request: FastifyRequest): Uint8Array | null {
 }
 
 /**
- * A Fastify request as a web-standard one. The same conversion the route below
- * performs, exported because resolving an identity out of a session cookie
- * needs a `Request` too, and the provider is entitled to see the same headers
- * either way.
+ * A Fastify request as a web-standard one, body and all. What the route below
+ * hands the provider, whose endpoints are the ones that genuinely read a body —
+ * a sign-in posts credentials, RFC 8628's token endpoint posts a form.
  */
 export function toWebRequest(request: FastifyRequest): Request {
   return new Request(new URL(request.url, originOf(request)), {
     method: request.method,
     headers: requestHeaders(request),
     body: requestBody(request),
+  });
+}
+
+/**
+ * The same request with no body on it, for asking who is calling.
+ *
+ * Resolving an identity reads the URL and the headers — a bearer token or a
+ * session cookie — and nothing else, so the body is not withheld from the
+ * provider here so much as never relevant to the question. Copying it would be:
+ * the identity hook runs on every credentialed route including the ingest door,
+ * where the body is an export of telemetry, and building a `Request` out of it
+ * copies those bytes twice over for something that will never read them.
+ *
+ * Kept a separate function rather than a flag on the one above, so that a route
+ * which does forward a body cannot lose it by passing the wrong argument.
+ */
+export function toIdentityRequest(request: FastifyRequest): Request {
+  return new Request(new URL(request.url, originOf(request)), {
+    method: request.method,
+    headers: requestHeaders(request),
   });
 }
 

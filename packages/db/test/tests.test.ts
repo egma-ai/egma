@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createTest,
-  deleteDigitalHuman,
+  deletePersona,
   getTest,
   NotPermittedError,
   ProjectOutsideOrganizationError,
@@ -23,9 +23,9 @@ import {
   pointProjectAt,
   rescheduling,
   rowCounts,
-  seedDigitalHuman,
+  seedPersona,
   seedTestFactory,
-  STARTER_DIGITAL_HUMAN,
+  STARTER_PERSONA,
 } from "./support/test-factory.ts";
 
 /**
@@ -35,12 +35,12 @@ import {
  * bypass the module on purpose to show the database refuses what the module
  * never attempts.
  *
- * The customers, their projects and their starter digital humans are the shared
+ * The customers, their projects and their starter personas are the shared
  * fixture in `support/test-factory.ts`, which the editing tests seed from too.
  */
 
 let database: MigratedDatabase;
-/** Acme's starter digital human, and the one its project points at. */
+/** Acme's starter persona, and the one its project points at. */
 let rita: string;
 /** Globex's, so a cross-project reference has something real to name. */
 let grace: string;
@@ -57,7 +57,7 @@ describe("creating a test", () => {
   it("returns a tst_ id and fetch round-trips every input", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
-      digitalHumanIds: [rita],
+      personaIds: [rita],
     });
 
     expect(isId("tst", created.id)).toBe(true);
@@ -71,27 +71,27 @@ describe("creating a test", () => {
     expect(fetched?.scenario).toBe(rescheduling.scenario);
     expect(fetched?.expectedBehaviors).toEqual(rescheduling.expectedBehaviors);
     expect(fetched?.projectId).toBe(acme.project);
-    expect(fetched?.digitalHumans).toEqual([
-      { id: rita, name: STARTER_DIGITAL_HUMAN, deletedAt: null },
+    expect(fetched?.personas).toEqual([
+      { id: rita, name: STARTER_PERSONA, deletedAt: null },
     ]);
   });
 
-  it("keeps several digital humans in the order they were authored", async () => {
-    const nadia = await seedDigitalHuman(actingAsAcme(), "Nadia");
-    const omar = await seedDigitalHuman(actingAsAcme(), "Omar");
+  it("keeps several personas in the order they were authored", async () => {
+    const nadia = await seedPersona(actingAsAcme(), "Nadia");
+    const omar = await seedPersona(actingAsAcme(), "Omar");
 
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
-      digitalHumanIds: [omar, rita, nadia],
+      personaIds: [omar, rita, nadia],
     });
 
     const fetched = await getTest(actingAsAcme(), created.id);
-    expect(fetched?.digitalHumans.map((human) => human.id)).toEqual([
+    expect(fetched?.personas.map((named) => named.id)).toEqual([
       omar,
       rita,
       nadia,
     ]);
-    expect(created.digitalHumans.map((human) => human.id)).toEqual([
+    expect(created.personas.map((named) => named.id)).toEqual([
       omar,
       rita,
       nadia,
@@ -117,9 +117,8 @@ describe("creating a test", () => {
   it("cannot commit halfway: an identity row without its version dies at commit", async () => {
     // The factory writes the test, its version and its join rows in one
     // transaction, so a create that fails part-way leaves nothing. That
-    // guarantee is the deferred pointer constraint, and this proves it where
-    // it lives — at commit, in the database, for a writer that is not the
-    // factory.
+    // guarantee is the deferred pointer constraint, and this proves it where it
+    // lives — at commit, in the database, for a writer that is not the factory.
     const connection = await openSingleConnection(database.url);
     try {
       const orphan = newId("tst");
@@ -185,11 +184,11 @@ describe("a test that fails validation", () => {
     ).rejects.toThrow(/expected behavior/);
   });
 
-  it("is refused when the same digital human is named twice", async () => {
+  it("is refused when the same persona is named twice", async () => {
     await expect(
       createTest(actingAsAcme(), {
         ...rescheduling,
-        digitalHumanIds: [rita, rita],
+        personaIds: [rita, rita],
       }),
     ).rejects.toThrow(/twice/);
   });
@@ -209,104 +208,104 @@ describe("a test that fails validation", () => {
   });
 });
 
-describe("a test naming a digital human it may not have", () => {
-  it("is refused when the digital human does not exist, and leaves nothing", async () => {
+describe("a test naming a persona it may not have", () => {
+  it("is refused when the persona does not exist, and leaves nothing", async () => {
     const before = await rowCounts();
 
     await expect(
       createTest(actingAsAcme(), {
         ...rescheduling,
-        digitalHumanIds: [newId("dh")],
+        personaIds: [newId("prs")],
       }),
-    ).rejects.toThrow(/no digital human/);
+    ).rejects.toThrow(/no persona/);
 
     expect(await rowCounts()).toEqual(before);
   });
 
-  it("is refused when the id is not a digital human's at all", async () => {
+  it("is refused when the id is not a persona's at all", async () => {
     await expect(
       createTest(actingAsAcme(), {
         ...rescheduling,
-        digitalHumanIds: [newId("agt")],
+        personaIds: [newId("agt")],
       }),
-    ).rejects.toThrow(/digital-human id/);
+    ).rejects.toThrow(/persona id/);
   });
 
-  it("is refused when the digital human is deleted, and leaves nothing", async () => {
-    const retired = await seedDigitalHuman(actingAsAcme(), "Retired Rex");
-    await deleteDigitalHuman(actingAsAcme(), retired);
+  it("is refused when the persona is deleted, and leaves nothing", async () => {
+    const retired = await seedPersona(actingAsAcme(), "Retired Rex");
+    await deletePersona(actingAsAcme(), retired);
 
     const before = await rowCounts();
 
     await expect(
       createTest(actingAsAcme(), {
         ...rescheduling,
-        digitalHumanIds: [retired],
+        personaIds: [retired],
       }),
     ).rejects.toThrow(/deleted/);
 
     expect(await rowCounts()).toEqual(before);
   });
 
-  it("is refused when the digital human belongs to another project, and leaves nothing", async () => {
+  it("is refused when the persona belongs to another project, and leaves nothing", async () => {
     const before = await rowCounts();
 
     await expect(
-      createTest(actingAsAcme(), { ...rescheduling, digitalHumanIds: [grace] }),
-    ).rejects.toThrow(/no digital human/);
+      createTest(actingAsAcme(), { ...rescheduling, personaIds: [grace] }),
+    ).rejects.toThrow(/no persona/);
 
     expect(await rowCounts()).toEqual(before);
   });
 
-  it("leaves nothing behind even when the good digital humans come first", async () => {
+  it("leaves nothing behind even when the good personas come first", async () => {
     const before = await rowCounts();
 
     await expect(
       createTest(actingAsAcme(), {
         ...rescheduling,
-        digitalHumanIds: [rita, newId("dh")],
+        personaIds: [rita, newId("prs")],
       }),
-    ).rejects.toThrow(/no digital human/);
+    ).rejects.toThrow(/no persona/);
 
     expect(await rowCounts()).toEqual(before);
   });
 });
 
-describe("a test naming no digital human", () => {
+describe("a test naming no persona", () => {
   it("receives the project's default", async () => {
     const created = await createTest(actingAsAcme(), rescheduling);
 
     const fetched = await getTest(actingAsAcme(), created.id);
-    expect(fetched?.digitalHumans).toEqual([
-      { id: rita, name: STARTER_DIGITAL_HUMAN, deletedAt: null },
+    expect(fetched?.personas).toEqual([
+      { id: rita, name: STARTER_PERSONA, deletedAt: null },
     ]);
   });
 
   it("receives the project's default for an empty list too", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
-      digitalHumanIds: [],
+      personaIds: [],
     });
 
-    expect(created.digitalHumans.map((human) => human.id)).toEqual([rita]);
+    expect(created.personas.map((named) => named.id)).toEqual([rita]);
   });
 
   it("errors clearly when the project has no default, and creates nothing", async () => {
     const before = await rowCounts();
 
     // Globex's project was never pointed at anything, which is where a project
-    // sits before provisioning seeds its starter digital human.
+    // sits before provisioning seeds its starter persona.
     await expect(createTest(actingAsGlobex(), rescheduling)).rejects.toThrow(
-      /no default digital human/,
+      /no default persona/,
     );
 
     expect(await rowCounts()).toEqual(before);
   });
 
   it("errors clearly when the default has been deleted, and creates nothing", async () => {
-    const stale = await seedDigitalHuman(actingAsGlobex(), "Stale Default");
+    const stale = await seedPersona(actingAsGlobex(), "Stale Default");
     await pointProjectAt(globex.project, stale);
-    await deleteDigitalHuman(actingAsGlobex(), stale);
+    await deletePersona(actingAsGlobex(), stale);
 
     const before = await rowCounts();
 
@@ -321,15 +320,15 @@ describe("a test naming no digital human", () => {
 
   it("says the default is not this project's, not that it is deleted, when it points elsewhere", async () => {
     // The column's foreign key only says the row exists, so a pointer at a
-    // living digital human of another project is a state the database allows
-    // and the developer has to be told the truth about.
+    // living persona of another project is a state the database allows and the
+    // developer has to be told the truth about.
     await pointProjectAt(acme.outbound, rita);
 
     const before = await rowCounts();
 
     const inOutbound = { ...actingAsAcme(), projectId: acme.outbound };
     await expect(createTest(inOutbound, rescheduling)).rejects.toThrow(
-      /no digital human .* in this project/,
+      /no persona .* in this project/,
     );
     await expect(createTest(inOutbound, rescheduling)).rejects.not.toThrow(
       /is deleted/,
@@ -349,7 +348,7 @@ describe("a credential for the whole organization", () => {
     const fetched = await getTest(wholeCustomer, created.id);
     expect(fetched?.id).toBe(created.id);
     expect(fetched?.projectId).toBe(acme.project);
-    expect(fetched?.digitalHumans.map((human) => human.id)).toEqual([rita]);
+    expect(fetched?.personas.map((named) => named.id)).toEqual([rita]);
   });
 });
 
@@ -406,8 +405,8 @@ describe("a version row somebody hand-corrupted", () => {
   it("fails loudly on the read, naming the version, rather than leaking", async () => {
     const created = await createTest(actingAsAcme(), rescheduling);
 
-    // Raw SQL on purpose: the factory can never write this, so the guard is
-    // the only thing standing between the row and the caller.
+    // Raw SQL on purpose: the factory can never write this, so the guard is the
+    // only thing standing between the row and the caller.
     await database.sql(
       `update test_version set content = '{"scenario": "still here", "expectedBehaviors": []}'::jsonb
         where id = $1`,

@@ -1,0 +1,22 @@
+# More descriptors for ClickHouse, on a host that can hand them out.
+#
+# Copy this to `docker-compose.override.yml` and Compose reads it on top of
+# `docker-compose.yml` with no further arguments. It is not the default because
+# a container cannot raise its limit above the daemon's own hard `nofile`: on a
+# host where that is 1024 or 4096, asking for more does not degrade — the
+# container fails to be created at all, with `error setting rlimit type 7:
+# operation not permitted`, and `docker compose up` stops there.
+#
+# Take this override when a busy instance reports `Cannot open epoll descriptor
+# … Too many open files` on whichever query happened to be running. ClickHouse
+# keeps a descriptor per open part and per connection, and its own documented
+# requirement is far above a login shell's default. Check what your host allows
+# first — `ulimit -Hn`, and for the daemon itself the `LimitNOFILE` on
+# `docker.service` — and lower the numbers below to fit if it is less.
+
+services:
+  clickhouse:
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144

@@ -5,16 +5,16 @@ import { eq } from "drizzle-orm";
 
 import { connect, disconnect, db } from "../client.ts";
 import {
-  cloneDigitalHuman,
-  createDigitalHuman,
-  deleteDigitalHuman,
-  editDigitalHuman,
-  getDigitalHuman,
-  getDigitalHumanVersion,
-  listDigitalHumans,
+  clonePersona,
+  createPersona,
+  deletePersona,
+  editPersona,
+  getPersona,
+  getPersonaVersion,
+  listPersonas,
   VOICE_PROVIDERS,
   type VoiceProvider,
-} from "../access/digital-humans.ts";
+} from "../access/personas.ts";
 import type { AuthContext } from "../access/context.ts";
 import { projectsOf } from "../access/projects.ts";
 import { provisionOrganization } from "../access/provisioning.ts";
@@ -22,20 +22,20 @@ import { runMigrations } from "../migrate.ts";
 import { organization, user } from "../schema/index.ts";
 
 /**
- * Drives the digital-human factory from a terminal, until the real front door
+ * Drives the persona factory from a terminal, until the real front door
  * (the API) exists. Signup does not reach a terminal yet either, so the script
  * keeps one development organization of its own — provisioned through the same
  * front door signup will use — and acts in it as its admin.
  *
- *   node packages/db/dist/scripts/digital-human.js create \
+ *   node packages/db/dist/scripts/persona.js create \
  *     --name "Impatient Rita" \
  *     --personality "70, hard of hearing, gets louder when mishears." \
  *     --voice-id EXAVITQu4vr4xnSDxMaL
  *
- *   node packages/db/dist/scripts/digital-human.js get dh_…
- *   node packages/db/dist/scripts/digital-human.js list [--limit 50] [--cursor dh_…]
- *   node packages/db/dist/scripts/digital-human.js clone dh_…
- *   node packages/db/dist/scripts/digital-human.js delete dh_…
+ *   node packages/db/dist/scripts/persona.js get prs_…
+ *   node packages/db/dist/scripts/persona.js list [--limit 50] [--cursor prs_…]
+ *   node packages/db/dist/scripts/persona.js clone prs_…
+ *   node packages/db/dist/scripts/persona.js delete prs_…
  */
 
 const DATABASE_URL =
@@ -90,17 +90,17 @@ function usage(): never {
   console.error(
     [
       "usage:",
-      "  digital-human.js create --name <name> --personality <text>",
+      "  persona.js create --name <name> --personality <text>",
       "    [--description <text>] [--language en-US]",
       `    [--voice-provider ${VOICE_PROVIDERS.join("|")}] [--voice-id <id>] [--speed 1.0]`,
-      "  digital-human.js get <dh_id>",
-      "  digital-human.js edit <dh_id> [--name <name>] [--description <text>]",
+      "  persona.js get <prs_id>",
+      "  persona.js edit <prs_id> [--name <name>] [--description <text>]",
       "    [--personality <text>] [--language <tag>]",
       `    [--voice-provider ${VOICE_PROVIDERS.join("|")}] [--voice-id <id>] [--speed 1.0]`,
-      "  digital-human.js get-version <dhv_id>",
-      "  digital-human.js list [--limit <n>] [--cursor <dh_id>]",
-      "  digital-human.js clone <dh_id>",
-      "  digital-human.js delete <dh_id>",
+      "  persona.js get-version <prsv_id>",
+      "  persona.js list [--limit <n>] [--cursor <prs_id>]",
+      "  persona.js clone <prs_id>",
+      "  persona.js delete <prs_id>",
     ].join("\n"),
   );
   process.exit(1);
@@ -114,9 +114,9 @@ function requiredId(rest: readonly string[]): string {
 }
 
 /** Print what the factory answered, or say the id reached nothing and exit. */
-function printDigitalHuman(id: string, found: unknown): void {
+function printPersona(id: string, found: unknown): void {
   if (found === undefined) {
-    console.error(`no digital human ${id} in the development project`);
+    console.error(`no persona ${id} in the development project`);
     process.exit(1);
   }
   console.log(JSON.stringify(found, null, 2));
@@ -145,7 +145,7 @@ async function main(): Promise<void> {
     });
     if (values.name === undefined || values.personality === undefined) usage();
 
-    const created = await createDigitalHuman(auth, {
+    const created = await createPersona(auth, {
       name: values.name,
       description: values.description,
       traits: {
@@ -161,7 +161,7 @@ async function main(): Promise<void> {
     console.log(JSON.stringify(created, null, 2));
   } else if (command === "get") {
     const id = requiredId(rest);
-    printDigitalHuman(id, await getDigitalHuman(auth, id));
+    printPersona(id, await getPersona(auth, id));
   } else if (command === "edit") {
     const [id, ...flags] = rest;
     if (id === undefined) usage();
@@ -189,9 +189,9 @@ async function main(): Promise<void> {
 
     let traits;
     if (traitFlagPresent) {
-      const current = await getDigitalHuman(auth, id);
+      const current = await getPersona(auth, id);
       if (current === undefined) {
-        console.error(`no digital human ${id} in the development project`);
+        console.error(`no persona ${id} in the development project`);
         process.exit(1);
       }
       traits = {
@@ -209,17 +209,17 @@ async function main(): Promise<void> {
       };
     }
 
-    const edited = await editDigitalHuman(auth, id, {
+    const edited = await editPersona(auth, id, {
       ...(values.name === undefined ? {} : { name: values.name }),
       ...(values.description === undefined
         ? {}
         : { description: values.description }),
       ...(traits === undefined ? {} : { traits }),
     });
-    printDigitalHuman(id, edited);
+    printPersona(id, edited);
   } else if (command === "get-version") {
     const versionId = requiredId(rest);
-    const found = await getDigitalHumanVersion(auth, versionId);
+    const found = await getPersonaVersion(auth, versionId);
     if (found === undefined) {
       console.error(`no version ${versionId} in the development project`);
       process.exit(1);
@@ -233,17 +233,17 @@ async function main(): Promise<void> {
         cursor: { type: "string" },
       },
     });
-    const page = await listDigitalHumans(auth, {
+    const page = await listPersonas(auth, {
       limit: values.limit === undefined ? undefined : Number(values.limit),
       cursor: values.cursor,
     });
     console.log(JSON.stringify(page, null, 2));
   } else if (command === "clone") {
     const id = requiredId(rest);
-    printDigitalHuman(id, await cloneDigitalHuman(auth, id));
+    printPersona(id, await clonePersona(auth, id));
   } else if (command === "delete") {
     const id = requiredId(rest);
-    printDigitalHuman(id, await deleteDigitalHuman(auth, id));
+    printPersona(id, await deletePersona(auth, id));
   } else {
     usage();
   }

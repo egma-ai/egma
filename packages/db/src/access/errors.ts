@@ -76,7 +76,7 @@ export class LastAdminError extends Error {
 }
 
 /** A test, as a refusal names it: enough to go and find it and fix it. */
-export type TestNamingDigitalHuman = {
+export type TestNamingPersona = {
   readonly id: string;
   readonly name: string;
 };
@@ -84,9 +84,7 @@ export type TestNamingDigitalHuman = {
 /** How many blocking tests the message spells out before it starts counting. */
 const TESTS_NAMED_IN_MESSAGE = 5;
 
-function spelledOutAndCounted(
-  tests: readonly TestNamingDigitalHuman[],
-): string {
+function spelledOutAndCounted(tests: readonly TestNamingPersona[]): string {
   const named = tests
     .slice(0, TESTS_NAMED_IN_MESSAGE)
     .map((test) => `${test.id} "${test.name}"`)
@@ -96,7 +94,7 @@ function spelledOutAndCounted(
 }
 
 /**
- * A digital human's delete was refused because live tests still name them.
+ * A persona's delete was refused because live tests still name them.
  *
  * A test names the people who call about its scenario, and executing it
  * produces one simulation per person named. Letting the delete through would
@@ -108,26 +106,84 @@ function spelledOutAndCounted(
  * It carries every blocking test, because the fix is to go and edit each one
  * and a refusal that only said "something names them" would send somebody
  * hunting. The message spells out the first few and counts the rest: the
- * digital human a project points at by default is named by every test created
+ * persona a project points at by default is named by every test created
  * without naming one, so an uncapped message would be a page long.
  */
-export class DigitalHumanNamedByTestsError extends Error {
-  readonly digitalHumanId: string;
+export class PersonaNamedByTestsError extends Error {
+  readonly personaId: string;
   /** Every live test whose current version names them, oldest first. */
-  readonly tests: readonly TestNamingDigitalHuman[];
+  readonly tests: readonly TestNamingPersona[];
+
+  constructor(personaId: string, tests: readonly TestNamingPersona[]) {
+    super(
+      `persona ${personaId} is named by ${tests.length} live ${
+        tests.length === 1 ? "test" : "tests"
+      } (${spelledOutAndCounted(tests)}), and a test must never silently lose one of the people who call about it; name somebody else on those tests, or delete them, and then delete the persona`,
+    );
+    this.name = "PersonaNamedByTestsError";
+    this.personaId = personaId;
+    this.tests = tests;
+  }
+}
+
+/**
+ * The trace store read a batch of spans and refused it, and would refuse the
+ * identical bytes again.
+ *
+ * The distinction this exists to make is between *these rows* and *right now*.
+ * A store that cannot be reached, or that is out of memory, or that is behind on
+ * its merges, will take the same batch happily in a minute — and a door that
+ * told an exporter "rejected" for one of those would have thrown a customer's
+ * telemetry away, because OTLP is explicit that rejected data must not be
+ * retried. So only a refusal that is about the data itself is turned into this;
+ * everything else stays an error and is answered as one, and an exporter
+ * retries.
+ *
+ * It carries the store's own code and name rather than a rewritten message,
+ * because the person who has to fix a batch the store will not take needs the
+ * words the store used.
+ */
+export class TraceStoreRefusedError extends Error {
+  /** ClickHouse's numeric error code, as it reported it. */
+  readonly code: string;
+  /** Its symbolic name — `INCORRECT_DATA`, `TYPE_MISMATCH` — when it gave one. */
+  readonly type: string | undefined;
 
   constructor(
-    digitalHumanId: string,
-    tests: readonly TestNamingDigitalHuman[],
+    code: string,
+    type: string | undefined,
+    message: string,
+    options?: ErrorOptions,
   ) {
-    super(
-      `digital human ${digitalHumanId} is named by ${tests.length} live ${
-        tests.length === 1 ? "test" : "tests"
-      } (${spelledOutAndCounted(tests)}), and a test must never silently lose one of the people who call about it; name somebody else on those tests, or delete them, and then delete the digital human`,
-    );
-    this.name = "DigitalHumanNamedByTestsError";
-    this.digitalHumanId = digitalHumanId;
-    this.tests = tests;
+    super(message, options);
+    this.name = "TraceStoreRefusedError";
+    this.code = code;
+    this.type = type;
+  }
+}
+
+/**
+ * A trace query egma will not run, because of how it was asked rather than
+ * because of who asked it.
+ *
+ * There are exactly two ways to get one, and both are refusals the read surface
+ * exists to make: a window that is missing, backwards, or wider than one request
+ * may name; and a page token that is not one egma issued. Neither is a fault and
+ * neither is a permission problem — they are a caller being told what a bounded
+ * read requires, which is why they carry a sentence a person can act on rather
+ * than a code they have to look up.
+ *
+ * It is one error with a `reason` rather than two classes, because the two are
+ * answered identically at every layer above: a 400, and the message. Splitting
+ * them would multiply the handling without changing any of it.
+ */
+export class UnreadableTraceQueryError extends Error {
+  readonly reason: "time_window" | "cursor";
+
+  constructor(reason: "time_window" | "cursor", message: string) {
+    super(message);
+    this.name = "UnreadableTraceQueryError";
+    this.reason = reason;
   }
 }
 

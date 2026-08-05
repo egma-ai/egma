@@ -1,4 +1,9 @@
-import { connect, disconnect } from "@egma/db";
+import {
+  connect,
+  connectClickHouse,
+  disconnect,
+  disconnectClickHouse,
+} from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
 import { loadConfig, type Config } from "../../src/config.ts";
@@ -11,6 +16,10 @@ import {
   TEST_ENCRYPTION_KEY,
   type MigratedDatabase,
 } from "../../../../packages/db/test/support/database.ts";
+import {
+  createMigratedTraceStore,
+  type MigratedTraceStore,
+} from "../../../../packages/db/test/support/clickhouse.ts";
 
 /**
  * A running API with a database of its own.
@@ -28,6 +37,12 @@ export type TestApi = {
   readonly config: Config;
   /** Raw SQL, for checking what actually landed rather than asking the API. */
   readonly database: MigratedDatabase;
+  /**
+   * The trace store, present only for a test that asked for one. Reading it is
+   * deliberately raw: the read functions over `spans` are a later ticket's, and
+   * what these tests need to know is what the door actually filed.
+   */
+  readonly traceStore: MigratedTraceStore | undefined;
   /** Everything the email transport was handed, in order. */
   readonly mail: readonly Email[];
   close(): Promise<void>;
@@ -40,12 +55,19 @@ export type TestApiOptions = {
   readonly emailDelivers?: boolean;
   /** A budget small enough to reach, for the tests about reaching it. */
   readonly rateLimit?: RateLimit;
+  /**
+   * Whether this API needs a trace store of its own. Off by default: creating
+   * and migrating a ClickHouse database costs a second, and only the files
+   * about ingest have anything to put in one.
+   */
+  readonly traceStore?: boolean;
 };
 
 export function testConfig(overrides: Partial<Config> = {}): Config {
   return {
     ...loadConfig({
       DATABASE_URL: "postgres://unused/unused",
+      CLICKHOUSE_URL: "http://unused/unused",
       EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
       EGMA_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
       EGMA_BASE_URL: "http://localhost:3101",
@@ -65,6 +87,14 @@ export async function createApi(
     encryptionKey: TEST_ENCRYPTION_KEY,
   });
 
+  const traceStore =
+    options.traceStore === true
+      ? await createMigratedTraceStore(label)
+      : undefined;
+  if (traceStore !== undefined) {
+    connectClickHouse({ clickhouseUrl: traceStore.url, maxOpenConnections: 4 });
+  }
+
   const mail: Email[] = [];
   const emailSender: EmailSender = {
     delivers: options.emailDelivers ?? false,
@@ -75,6 +105,7 @@ export async function createApi(
 
   const config = testConfig({
     databaseUrl: database.url,
+    ...(traceStore === undefined ? {} : { clickhouseUrl: traceStore.url }),
     singleOrganization: options.singleOrganization ?? false,
     trustProxy: options.trustProxy ?? false,
   });
@@ -91,11 +122,16 @@ export async function createApi(
     identity,
     config,
     database,
+    traceStore,
     mail,
     async close() {
       await app.close();
       await disconnect();
       await database.drop();
+      if (traceStore !== undefined) {
+        await disconnectClickHouse();
+        await traceStore.drop();
+      }
     },
   };
 }

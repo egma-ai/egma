@@ -3,32 +3,32 @@ import { and, desc, eq, isNull, lt, type SQL } from "drizzle-orm";
 
 import { db } from "../client.ts";
 import {
-  digitalHuman,
-  digitalHumanVersion,
-} from "../schema/digital-humans.ts";
+  persona,
+  personaVersion,
+} from "../schema/personas.ts";
 import type { AuthContext } from "./context.ts";
 import {
-  DigitalHumanNamedByTestsError,
+  PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
 } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
-import { liveTestsNamingDigitalHuman } from "./tests.ts";
+import { liveTestsNamingPersona } from "./tests.ts";
 import { within } from "./within.ts";
 
 /**
- * Reading and writing digital humans — what they are is the schema file's
- * story (`schema/digital-humans.ts`); this file is how they are reached.
+ * Reading and writing personas — what they are is the schema file's
+ * story (`schema/personas.ts`); this file is how they are reached.
  *
  * The first project-scoped entity, so the first table where `within` narrows
  * by the project as well as the organization. A context acting in a project
  * writes and reads there; a context acting in none — an organization-scoped
  * credential — reads the whole customer and creates nothing, because a
- * digital human belongs to a project and a credential for the whole customer
+ * persona belongs to a project and a credential for the whole customer
  * is acting in none. What already exists it may edit: the row names its own
  * project, so that write has somewhere to land. Deleting it refuses like
- * creating, because taking a digital human out of a project is an act taken
- * inside one — `deleteDigitalHuman` says why.
+ * creating, because taking a persona out of a project is an act taken
+ * inside one — `deletePersona` says why.
  */
 
 /** The mouths egma knows how to ask for. Grows one entry at a time. */
@@ -36,11 +36,11 @@ export const VOICE_PROVIDERS = ["elevenlabs", "cartesia", "openai"] as const;
 export type VoiceProvider = (typeof VOICE_PROVIDERS)[number];
 
 /**
- * Who the digital human is. The voice is concrete — provider, that provider's
- * catalog id, and pace — so the same digital human sounds identical on every
+ * Who the persona is. The voice is concrete — provider, that provider's
+ * catalog id, and pace — so the same persona sounds identical on every
  * future simulation; a described voice would let two runs cast two people.
  */
-export type DigitalHumanTraits = {
+export type PersonaTraits = {
   readonly personality: string;
   readonly language: string;
   readonly voice: {
@@ -50,21 +50,21 @@ export type DigitalHumanTraits = {
   };
 };
 
-export type NewDigitalHuman = {
+export type NewPersona = {
   readonly name: string;
   readonly description?: string | undefined;
-  readonly traits: DigitalHumanTraits;
+  readonly traits: PersonaTraits;
 };
 
-export type DigitalHuman = {
+export type Persona = {
   readonly id: string;
   readonly projectId: string;
   readonly name: string;
   readonly description: string | null;
   readonly version: number;
-  /** The current version's own `dhv_` id — what a run pins. */
+  /** The current version's own `prsv_` id — what a run pins. */
   readonly versionId: string;
-  readonly traits: DigitalHumanTraits;
+  readonly traits: PersonaTraits;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 };
@@ -73,31 +73,31 @@ export type DigitalHuman = {
  * What an edit may touch. Name and description are identity and version
  * nothing; traits are behavior and version on any change. Absent means keep.
  */
-export type DigitalHumanChanges = {
+export type PersonaChanges = {
   readonly name?: string;
   readonly description?: string | null;
-  readonly traits?: DigitalHumanTraits;
+  readonly traits?: PersonaTraits;
 };
 
-/** One version, frozen: the digital human exactly as some simulation met them. */
-export type DigitalHumanVersion = {
+/** One version, frozen: the persona exactly as some simulation met them. */
+export type PersonaVersion = {
   readonly id: string;
-  readonly digitalHumanId: string;
+  readonly personaId: string;
   readonly version: number;
-  readonly traits: DigitalHumanTraits;
+  readonly traits: PersonaTraits;
   readonly createdAt: Date;
 };
 
-const notDeleted: SQL = isNull(digitalHuman.deletedAt);
+const notDeleted: SQL = isNull(persona.deletedAt);
 
 /** An answer's columns, and no more — the hash-free, tenant-free view. */
 const COLUMNS = {
-  id: digitalHuman.id,
-  projectId: digitalHuman.projectId,
-  name: digitalHuman.name,
-  description: digitalHuman.description,
-  createdAt: digitalHuman.createdAt,
-  updatedAt: digitalHuman.updatedAt,
+  id: persona.id,
+  projectId: persona.projectId,
+  name: persona.name,
+  description: persona.description,
+  createdAt: persona.createdAt,
+  updatedAt: persona.updatedAt,
 } as const;
 
 /** Speech only stays intelligible so far from natural pace. */
@@ -105,16 +105,16 @@ const SPEED_RANGE = { slowest: 0.5, fastest: 2 } as const;
 
 function validateName(name: string): void {
   if (name.trim() === "") {
-    throw new Error("a digital human needs a name");
+    throw new Error("a persona needs a name");
   }
 }
 
-function validateTraits(traits: DigitalHumanTraits): void {
+function validateTraits(traits: PersonaTraits): void {
   if (traits.personality.trim() === "") {
-    throw new Error("a digital human needs a personality");
+    throw new Error("a persona needs a personality");
   }
   if (traits.language.trim() === "") {
-    throw new Error("a digital human needs a language");
+    throw new Error("a persona needs a language");
   }
   const { provider, voiceId, speed } = traits.voice;
   if (!VOICE_PROVIDERS.includes(provider)) {
@@ -123,7 +123,7 @@ function validateTraits(traits: DigitalHumanTraits): void {
     );
   }
   if (voiceId.trim() === "") {
-    throw new Error("a digital human needs a voice id from its provider");
+    throw new Error("a persona needs a voice id from its provider");
   }
   if (
     !Number.isFinite(speed) ||
@@ -136,7 +136,7 @@ function validateTraits(traits: DigitalHumanTraits): void {
   }
 }
 
-function validateNewDigitalHuman(input: NewDigitalHuman): void {
+function validateNewPersona(input: NewPersona): void {
   validateName(input.name);
   validateTraits(input.traits);
 }
@@ -144,12 +144,12 @@ function validateNewDigitalHuman(input: NewDigitalHuman): void {
 /**
  * The shape guard on every read. Stored jsonb comes back `unknown`, and a row
  * somebody hand-edited must fail here, loudly and naming itself, rather than
- * leak into a caller as a `DigitalHumanTraits` that isn't one. Shape only,
+ * leak into a caller as a `PersonaTraits` that isn't one. Shape only,
  * deliberately: the allowed provider list and the speed range may tighten
  * later, and an old version must stay readable exactly as it was written —
  * so the provider is taken on trust once it is a string.
  */
-function traitsFromRow(value: unknown, versionId: string): DigitalHumanTraits {
+function traitsFromRow(value: unknown, versionId: string): PersonaTraits {
   const malformed = () =>
     new Error(
       `version ${versionId} holds traits in a shape egma never writes; the row needs repairing before anybody can read it`,
@@ -190,9 +190,9 @@ function traitsFromRow(value: unknown, versionId: string): DigitalHumanTraits {
  * without a version — the one loss this whole file exists to rule out.
  */
 const sameVoiceField: {
-  readonly [K in keyof DigitalHumanTraits["voice"]]: (
-    a: DigitalHumanTraits["voice"],
-    b: DigitalHumanTraits["voice"],
+  readonly [K in keyof PersonaTraits["voice"]]: (
+    a: PersonaTraits["voice"],
+    b: PersonaTraits["voice"],
   ) => boolean;
 } = {
   provider: (a, b) => a.provider === b.provider,
@@ -201,9 +201,9 @@ const sameVoiceField: {
 };
 
 const sameTraitsField: {
-  readonly [K in keyof DigitalHumanTraits]: (
-    a: DigitalHumanTraits,
-    b: DigitalHumanTraits,
+  readonly [K in keyof PersonaTraits]: (
+    a: PersonaTraits,
+    b: PersonaTraits,
   ) => boolean;
 } = {
   personality: (a, b) => a.personality === b.personality,
@@ -212,7 +212,7 @@ const sameTraitsField: {
     Object.values(sameVoiceField).every((same) => same(a.voice, b.voice)),
 };
 
-function sameTraits(a: DigitalHumanTraits, b: DigitalHumanTraits): boolean {
+function sameTraits(a: PersonaTraits, b: PersonaTraits): boolean {
   return Object.values(sameTraitsField).every((same) => same(a, b));
 }
 
@@ -220,47 +220,47 @@ function sameTraits(a: DigitalHumanTraits, b: DigitalHumanTraits): boolean {
 function inActingProject(auth: AuthContext): SQL | undefined {
   return auth.projectId === undefined
     ? undefined
-    : eq(digitalHuman.projectId, auth.projectId);
+    : eq(persona.projectId, auth.projectId);
 }
 
-/** The named digital human, alive, within the caller's tenancy and scope. */
-function theDigitalHuman(auth: AuthContext, id: string): SQL {
+/** The named persona, alive, within the caller's tenancy and scope. */
+function thePersona(auth: AuthContext, id: string): SQL {
   return within(
     auth,
-    digitalHuman,
-    and(eq(digitalHuman.id, id), notDeleted, inActingProject(auth)),
+    persona,
+    and(eq(persona.id, id), notDeleted, inActingProject(auth)),
   );
 }
 
-export async function createDigitalHuman(
+export async function createPersona(
   auth: AuthContext,
-  input: NewDigitalHuman,
-): Promise<DigitalHuman> {
+  input: NewPersona,
+): Promise<Persona> {
   authorize(auth, "author_definitions", here(auth));
 
   const { projectId } = auth;
   if (projectId === undefined) {
     throw new Error(
-      "a digital human belongs to a project, and this credential is for the whole organization and acting in none",
+      "a persona belongs to a project, and this credential is for the whole organization and acting in none",
     );
   }
 
   // Everything answerable without the database is answered first; only an
   // input worth writing costs the project-membership read below.
-  validateNewDigitalHuman(input);
+  validateNewPersona(input);
 
   if (!(await isProjectOfOrganization(auth, projectId))) {
     throw new ProjectOutsideOrganizationError(auth.organizationId, projectId);
   }
 
-  const id = newId("dh");
-  const versionId = newId("dhv");
+  const id = newId("prs");
+  const versionId = newId("prsv");
 
   const inserted = await db().transaction(async (tx) => {
     // The identity row goes first, naming a version that does not exist yet;
     // the pointer's constraint is deferred, so Postgres checks it at commit.
     const [identity] = await tx
-      .insert(digitalHuman)
+      .insert(persona)
       .values({
         id,
         organizationId: auth.organizationId,
@@ -272,9 +272,9 @@ export async function createDigitalHuman(
       })
       .returning(COLUMNS);
 
-    await tx.insert(digitalHumanVersion).values({
+    await tx.insert(personaVersion).values({
       id: versionId,
-      digitalHumanId: id,
+      personaId: id,
       version: 1,
       traits: input.traits,
       createdBy: auth.userId,
@@ -283,7 +283,7 @@ export async function createDigitalHuman(
     return identity;
   });
 
-  if (inserted === undefined) throw new Error("the digital human was not written");
+  if (inserted === undefined) throw new Error("the persona was not written");
 
   return { ...inserted, version: 1, versionId, traits: input.traits };
 }
@@ -296,25 +296,25 @@ function selectWithCurrentVersion() {
   return db()
     .select({
       ...COLUMNS,
-      version: digitalHumanVersion.version,
-      versionId: digitalHumanVersion.id,
-      traits: digitalHumanVersion.traits,
+      version: personaVersion.version,
+      versionId: personaVersion.id,
+      traits: personaVersion.traits,
     })
-    .from(digitalHuman)
+    .from(persona)
     .innerJoin(
-      digitalHumanVersion,
-      eq(digitalHuman.currentVersionId, digitalHumanVersion.id),
+      personaVersion,
+      eq(persona.currentVersionId, personaVersion.id),
     );
 }
 
-export async function getDigitalHuman(
+export async function getPersona(
   auth: AuthContext,
   id: string,
-): Promise<DigitalHuman | undefined> {
+): Promise<Persona | undefined> {
   authorize(auth, "read", here(auth));
 
   const [row] = await selectWithCurrentVersion()
-    .where(theDigitalHuman(auth, id))
+    .where(thePersona(auth, id))
     .limit(1);
 
   if (row === undefined) return undefined;
@@ -334,11 +334,11 @@ export async function getDigitalHuman(
  * Editing what the caller cannot see returns what reading it would have:
  * `undefined`, with nothing disturbed.
  */
-export async function editDigitalHuman(
+export async function editPersona(
   auth: AuthContext,
   id: string,
-  changes: DigitalHumanChanges,
-): Promise<DigitalHuman | undefined> {
+  changes: PersonaChanges,
+): Promise<Persona | undefined> {
   authorize(auth, "author_definitions", here(auth));
 
   if (changes.name !== undefined) validateName(changes.name);
@@ -346,9 +346,9 @@ export async function editDigitalHuman(
 
   return db().transaction(async (tx) => {
     const [locked] = await tx
-      .select({ ...COLUMNS, currentVersionId: digitalHuman.currentVersionId })
-      .from(digitalHuman)
-      .where(theDigitalHuman(auth, id))
+      .select({ ...COLUMNS, currentVersionId: persona.currentVersionId })
+      .from(persona)
+      .where(thePersona(auth, id))
       .limit(1)
       .for("update");
 
@@ -361,15 +361,15 @@ export async function editDigitalHuman(
     // so neither predicate can reach further than that check already did.
     const [currentVersion] = await tx
       .select({
-        id: digitalHumanVersion.id,
-        version: digitalHumanVersion.version,
-        traits: digitalHumanVersion.traits,
+        id: personaVersion.id,
+        version: personaVersion.version,
+        traits: personaVersion.traits,
       })
-      .from(digitalHumanVersion)
-      .where(eq(digitalHumanVersion.id, currentVersionId))
+      .from(personaVersion)
+      .where(eq(personaVersion.id, currentVersionId))
       .limit(1);
     if (currentVersion === undefined) {
-      throw new Error("the digital human's current version is missing");
+      throw new Error("the persona's current version is missing");
     }
 
     const storedTraits = traitsFromRow(currentVersion.traits, currentVersion.id);
@@ -392,11 +392,11 @@ export async function editDigitalHuman(
     let versionId = currentVersion.id;
     let version = currentVersion.version;
     if (nextTraits !== undefined) {
-      versionId = newId("dhv");
+      versionId = newId("prsv");
       version = currentVersion.version + 1;
-      await tx.insert(digitalHumanVersion).values({
+      await tx.insert(personaVersion).values({
         id: versionId,
-        digitalHumanId: current.id,
+        personaId: current.id,
         version,
         traits: nextTraits,
         createdBy: auth.userId,
@@ -404,7 +404,7 @@ export async function editDigitalHuman(
     }
 
     const [updated] = await tx
-      .update(digitalHuman)
+      .update(persona)
       .set({
         ...(changes.name === undefined ? {} : { name: changes.name }),
         ...(changes.description === undefined
@@ -413,11 +413,11 @@ export async function editDigitalHuman(
         ...(nextTraits === undefined ? {} : { currentVersionId: versionId }),
         updatedAt: new Date(),
       })
-      .where(eq(digitalHuman.id, current.id))
+      .where(eq(persona.id, current.id))
       .returning(COLUMNS);
 
     if (updated === undefined) {
-      throw new Error("the digital human was not written");
+      throw new Error("the persona was not written");
     }
     return {
       ...updated,
@@ -429,35 +429,35 @@ export async function editDigitalHuman(
 }
 
 /**
- * One frozen version, by its own `dhv_` id — the read a run uses to stay
- * interpretable after the digital human moves on. Deliberately no deleted
- * filter: versions outlive their digital human's deletion, so a run that
- * pinned one can always say exactly who the digital human was.
+ * One frozen version, by its own `prsv_` id — the read a run uses to stay
+ * interpretable after the persona moves on. Deliberately no deleted
+ * filter: versions outlive their persona's deletion, so a run that
+ * pinned one can always say exactly who the persona was.
  */
-export async function getDigitalHumanVersion(
+export async function getPersonaVersion(
   auth: AuthContext,
   versionId: string,
-): Promise<DigitalHumanVersion | undefined> {
+): Promise<PersonaVersion | undefined> {
   authorize(auth, "read", here(auth));
 
   const [row] = await db()
     .select({
-      id: digitalHumanVersion.id,
-      digitalHumanId: digitalHumanVersion.digitalHumanId,
-      version: digitalHumanVersion.version,
-      traits: digitalHumanVersion.traits,
-      createdAt: digitalHumanVersion.createdAt,
+      id: personaVersion.id,
+      personaId: personaVersion.personaId,
+      version: personaVersion.version,
+      traits: personaVersion.traits,
+      createdAt: personaVersion.createdAt,
     })
-    .from(digitalHumanVersion)
+    .from(personaVersion)
     .innerJoin(
-      digitalHuman,
-      eq(digitalHumanVersion.digitalHumanId, digitalHuman.id),
+      persona,
+      eq(personaVersion.personaId, persona.id),
     )
     .where(
       within(
         auth,
-        digitalHuman,
-        and(eq(digitalHumanVersion.id, versionId), inActingProject(auth)),
+        persona,
+        and(eq(personaVersion.id, versionId), inActingProject(auth)),
       ),
     )
     .limit(1);
@@ -467,18 +467,18 @@ export async function getDigitalHumanVersion(
 }
 
 /**
- * One page of the digital humans the caller can reach — the acting project's,
+ * One page of the personas the caller can reach — the acting project's,
  * or the whole customer's for a credential acting in none — and where the
  * next page starts.
  *
  * The ids are Crockford base32 of UUIDv7 under `COLLATE "C"`, so ordering by
  * id *is* ordering by mint time and the last id of a page is the whole cursor
  * — no second sort column, no offset to drift when rows arrive mid-scroll.
- * Newest first, because the digital human somebody is looking for is usually
+ * Newest first, because the persona somebody is looking for is usually
  * the one they just made.
  */
-export type DigitalHumanPage = {
-  readonly items: readonly DigitalHuman[];
+export type PersonaPage = {
+  readonly items: readonly Persona[];
   /** Hand back as `cursor` to continue; absent on the last page. */
   readonly nextCursor: string | undefined;
 };
@@ -486,41 +486,41 @@ export type DigitalHumanPage = {
 const DEFAULT_PAGE_SIZE = 50;
 const LARGEST_PAGE_SIZE = 200;
 
-export async function listDigitalHumans(
+export async function listPersonas(
   auth: AuthContext,
   page?: {
     readonly limit?: number | undefined;
     readonly cursor?: string | undefined;
   },
-): Promise<DigitalHumanPage> {
+): Promise<PersonaPage> {
   authorize(auth, "read", here(auth));
 
   const limit = page?.limit ?? DEFAULT_PAGE_SIZE;
   if (!Number.isInteger(limit) || limit < 1 || limit > LARGEST_PAGE_SIZE) {
     throw new Error(
-      `a page holds between 1 and ${LARGEST_PAGE_SIZE} digital humans`,
+      `a page holds between 1 and ${LARGEST_PAGE_SIZE} personas`,
     );
   }
   const cursor = page?.cursor;
-  if (cursor !== undefined && !isId("dh", cursor)) {
+  if (cursor !== undefined && !isId("prs", cursor)) {
     throw new Error(
-      `"${cursor}" is not a digital-human id, so it cannot be a cursor`,
+      `"${cursor}" is not a persona id, so it cannot be a cursor`,
     );
   }
 
   const olderThanCursor =
-    cursor === undefined ? undefined : lt(digitalHuman.id, cursor);
+    cursor === undefined ? undefined : lt(persona.id, cursor);
 
   // One row beyond the page answers "is there more?" without a second query.
   const rows = await selectWithCurrentVersion()
     .where(
       within(
         auth,
-        digitalHuman,
+        persona,
         and(notDeleted, inActingProject(auth), olderThanCursor),
       ),
     )
-    .orderBy(desc(digitalHuman.id))
+    .orderBy(desc(persona.id))
     .limit(limit + 1);
 
   const items = rows
@@ -534,12 +534,12 @@ export async function listDigitalHumans(
 }
 
 /**
- * A new digital human whose version 1 carries the source's current traits.
+ * A new persona whose version 1 carries the source's current traits.
  *
- * A clone is a create with the retyping saved: fresh `dh_` and `dhv_` ids,
+ * A clone is a create with the retyping saved: fresh `prs_` and `prsv_` ids,
  * version numbering starting over at 1, and no link back — the source's
  * history is the source's, and nothing of it comes along. The source is read
- * through the same seam as `getDigitalHuman`, so a clone can only be taken of
+ * through the same seam as `getPersona`, so a clone can only be taken of
  * what the caller could have fetched: same customer, same acting project,
  * not deleted.
  *
@@ -547,18 +547,18 @@ export async function listDigitalHumans(
  * leading check refuses a viewer before anything is read, and a credential
  * acting in no project is refused right after it, still before the read —
  * the same stance as create and delete, and it keeps `undefined` meaning
- * invisible rather than refused. `getDigitalHuman`'s `read` applies because
+ * invisible rather than refused. `getPersona`'s `read` applies because
  * the clone hands the source's traits back, which is a read;
- * `createDigitalHuman`'s check applies because a clone is a create. If
+ * `createPersona`'s check applies because a clone is a create. If
  * reading ever gains a gate of its own, a caller who may not read the source
  * must be refused out loud here — never handed an `undefined` that pretends
  * the source does not exist, which would make clone the one path that reads
  * without the read permission.
  */
-export async function cloneDigitalHuman(
+export async function clonePersona(
   auth: AuthContext,
   id: string,
-): Promise<DigitalHuman | undefined> {
+): Promise<Persona | undefined> {
   authorize(auth, "author_definitions", here(auth));
 
   if (auth.projectId === undefined) {
@@ -567,17 +567,17 @@ export async function cloneDigitalHuman(
     );
   }
 
-  const source = await getDigitalHuman(auth, id);
+  const source = await getPersona(auth, id);
   if (source === undefined) return undefined;
 
-  return createDigitalHuman(auth, {
+  return createPersona(auth, {
     name: source.name,
     description: source.description ?? undefined,
     traits: source.traits,
   });
 }
 
-export type DeletedDigitalHuman = {
+export type DeletedPersona = {
   readonly id: string;
   readonly projectId: string;
   readonly name: string;
@@ -585,30 +585,30 @@ export type DeletedDigitalHuman = {
 };
 
 /**
- * The soft-delete marker, and only the marker. The digital human vanishes
+ * The soft-delete marker, and only the marker. The persona vanishes
  * from lists and fetches at once; the version rows stay exactly where they
  * are, because a run that pinned one must stay interpretable for as long as
  * the run itself is kept. Sweeping orphaned versions is the deletion worker's
  * job, not this function's.
  *
  * **Refused while the current version of a live test names them**, naming every
- * test standing in the way; `DigitalHumanNamedByTestsError` says why. Historical
+ * test standing in the way; `PersonaNamedByTestsError` says why. Historical
  * versions never block, and neither does a deleted test.
  *
  * Like create, this refuses a credential acting in no project. An edit lands
- * on a row that already names its own project; a delete decides the digital
- * human should stop appearing in one, and emptying a project is an act taken
+ * on a row that already names its own project; a delete decides the persona
+ * should stop appearing in one, and emptying a project is an act taken
  * from inside it — a credential for the whole customer is acting in none.
  */
-export async function deleteDigitalHuman(
+export async function deletePersona(
   auth: AuthContext,
   id: string,
-): Promise<DeletedDigitalHuman | undefined> {
+): Promise<DeletedPersona | undefined> {
   authorize(auth, "author_definitions", here(auth));
 
   if (auth.projectId === undefined) {
     throw new Error(
-      "deleting a digital human happens inside their project, and this credential is for the whole organization and acting in none",
+      "deleting a persona happens inside their project, and this credential is for the whole organization and acting in none",
     );
   }
 
@@ -618,37 +618,37 @@ export async function deleteDigitalHuman(
     // transaction ends, so nothing can come to name them between the count and
     // the write — which a count taken on this transaction's own snapshot could
     // not promise. The other half is the shared lock a test being written takes
-    // on this same row, which `validateNamedDigitalHumans` in `tests.ts`
+    // on this same row, which `validateNamedPersonas` in `tests.ts`
     // explains: the two modes conflict, so one of the two writes always waits
     // for the other and then sees how it ended.
     const [locked] = await tx
-      .select({ id: digitalHuman.id })
-      .from(digitalHuman)
-      .where(theDigitalHuman(auth, id))
+      .select({ id: persona.id })
+      .from(persona)
+      .where(thePersona(auth, id))
       .limit(1)
       .for("update");
 
     if (locked === undefined) return undefined;
 
-    const blocking = await liveTestsNamingDigitalHuman(tx, locked.id);
+    const blocking = await liveTestsNamingPersona(tx, locked.id);
     if (blocking.length > 0) {
-      throw new DigitalHumanNamedByTestsError(locked.id, blocking);
+      throw new PersonaNamedByTestsError(locked.id, blocking);
     }
 
     // A bare `eq` on an id that just came off the tenancy-checked row locked
     // above, in this same transaction, so it reaches no further than that check
-    // already did — the move `editDigitalHuman` makes, for the same reason.
+    // already did — the move `editPersona` makes, for the same reason.
     const [row] = await tx
-      .update(digitalHuman)
+      .update(persona)
       .set({ deletedAt, updatedAt: deletedAt })
-      .where(eq(digitalHuman.id, locked.id))
+      .where(eq(persona.id, locked.id))
       .returning({
-        id: digitalHuman.id,
-        projectId: digitalHuman.projectId,
-        name: digitalHuman.name,
+        id: persona.id,
+        projectId: persona.projectId,
+        name: persona.name,
       });
 
-    if (row === undefined) throw new Error("the digital human was not written");
+    if (row === undefined) throw new Error("the persona was not written");
     return { ...row, deletedAt };
   });
 }

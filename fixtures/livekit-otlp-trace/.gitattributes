@@ -1,0 +1,2 @@
+# These are captured wire bytes. Nothing may normalise them.
+*.bin -text -diff

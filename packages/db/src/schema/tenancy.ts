@@ -9,7 +9,7 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
-import { digitalHuman } from "./digital-humans.ts";
+import { persona } from "./personas.ts";
 import { user } from "./identity.ts";
 import {
   API_KEY_SCOPES,
@@ -79,8 +79,8 @@ export const project = pgTable(
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     /**
-     * The digital human a test created naming none receives, so authoring a
-     * first test never waits on authoring a digital human. An ordinary row the
+     * The persona a test created naming none receives, so authoring a
+     * first test never waits on authoring a persona. An ordinary row the
      * project points at, editable like any other. Nullable because the pointer
      * is set after the project exists, and because a row it named can be swept
      * away — a test then has to name its own until somebody points it again.
@@ -94,8 +94,8 @@ export const project = pgTable(
      * decision nobody made per test.
      *
      * **The resulting import cycle is deliberate and safe**, and it is worth
-     * knowing why before either file is rearranged. `digital_human` names
-     * `project` for its tenancy and `project` now names `digital_human` for
+     * knowing why before either file is rearranged. `persona` names
+     * `project` for its tenancy and `project` now names `persona` for
      * this pointer. Neither reads the other while either is still being
      * evaluated: a column's `references` takes a function rather than a
      * column, and a table's constraint list is a function the table definition
@@ -103,8 +103,8 @@ export const project = pgTable(
      * this schema exists. Replace either with a value read at definition time
      * and the cycle stops being safe.
      */
-    defaultDigitalHumanId: idText("default_digital_human_id").references(
-      (): AnyPgColumn => digitalHuman.id,
+    defaultPersonaId: idText("default_persona_id").references(
+      (): AnyPgColumn => persona.id,
       { onDelete: "set null" },
     ),
     deletedAt: moment("deleted_at"),

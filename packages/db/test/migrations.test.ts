@@ -1,5 +1,9 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { newId } from "@egma/ids";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -141,5 +145,122 @@ describe("the boot-time advisory lock", () => {
 
     const result = await booting;
     expect(result.applied.length).toBeGreaterThan(0);
+  });
+});
+
+describe("the persona rename (0005)", () => {
+  let database: EmptyDatabase;
+  let beforeTheRename: string;
+  let client: pg.Client;
+
+  const organizationId = newId("org");
+  const projectId = newId("prj");
+  // The bodies are minted now-format and re-prefixed old-format, so the rows
+  // below are exactly what a pre-rename deployment would hold.
+  const identityBody = newId("prs").slice("prs_".length);
+  const versionBody = newId("prsv").slice("prsv_".length);
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("persona_rename");
+
+    // The world as it was: every migration before the rename, in a directory
+    // of its own, so a digital_human row can exist for 0005 to find.
+    beforeTheRename = await mkdtemp(path.join(os.tmpdir(), "egma-before-0005-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0005") {
+        await writeFile(
+          path.join(beforeTheRename, migration.name),
+          migration.sql,
+        );
+      }
+    }
+    await runMigrations(database.url, beforeTheRename);
+
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query("begin");
+    await client.query(
+      "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
+      [organizationId],
+    );
+    await client.query(
+      "insert into project (id, organization_id, name, slug) values ($1, $2, 'Default', 'default')",
+      [projectId, organizationId],
+    );
+    await client.query(
+      `insert into digital_human (id, organization_id, project_id, name, current_version_id)
+       values ($1, $2, $3, 'Impatient Rita', $4)`,
+      [`dh_${identityBody}`, organizationId, projectId, `dhv_${versionBody}`],
+    );
+    await client.query(
+      `insert into digital_human_version (id, digital_human_id, version, traits)
+       values ($1, $2, 1, '{}'::jsonb)`,
+      [`dhv_${versionBody}`, `dh_${identityBody}`],
+    );
+    await client.query("commit");
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(beforeTheRename, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("leads what is still pending on a pre-rename database", async () => {
+    const result = await runMigrations(database.url);
+    // Everything before the rename is already applied and must not run twice,
+    // so the rename is the first thing left. Whatever was numbered after it
+    // follows, which is why this names the leader rather than the whole list.
+    expect(result.applied[0]).toBe("0005_rename_digital_human_to_persona.sql");
+    expect(result.applied.every((name) => name >= "0005")).toBe(true);
+  });
+
+  it("carries the rows across: dh_ becomes prs_, dhv_ becomes prsv_, same bodies", async () => {
+    const personas = await client.query<{
+      id: string;
+      current_version_id: string;
+    }>("select id, current_version_id from persona");
+    expect(personas.rows).toEqual([
+      {
+        id: `prs_${identityBody}`,
+        current_version_id: `prsv_${versionBody}`,
+      },
+    ]);
+
+    const versions = await client.query<{ id: string; persona_id: string }>(
+      "select id, persona_id from persona_version",
+    );
+    expect(versions.rows).toEqual([
+      { id: `prsv_${versionBody}`, persona_id: `prs_${identityBody}` },
+    ]);
+  });
+
+  it("keeps the current-version pointer deferred, which create depends on", async () => {
+    // 0003 wrote DEFERRABLE INITIALLY DEFERRED by hand because the schema
+    // source cannot express it; 0005 renames that constraint rather than
+    // recreating it, and this is the proof the clause survived the trip.
+    const { rows } = await client.query<{
+      condeferrable: boolean;
+      condeferred: boolean;
+    }>(
+      `select condeferrable, condeferred from pg_constraint
+       where conname = 'persona_current_version_id_persona_version_id_fk'`,
+    );
+    expect(rows).toEqual([{ condeferrable: true, condeferred: true }]);
+  });
+
+  it("pins the new prefixes: a dh_ id no longer fits the check", async () => {
+    await expect(
+      client.query(
+        `insert into persona (id, organization_id, project_id, name, current_version_id)
+         values ($1, $2, $3, 'Old Format', $4)`,
+        [
+          `dh_${newId("prs").slice("prs_".length)}`,
+          organizationId,
+          projectId,
+          `prsv_${versionBody}`,
+        ],
+      ),
+    ).rejects.toThrow(/persona_id_prefix/);
   });
 });

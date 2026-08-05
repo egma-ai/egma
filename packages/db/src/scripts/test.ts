@@ -30,7 +30,7 @@ import { organization, user } from "../schema/index.ts";
  *     --scenario "Their cleaning is booked for Thursday and has to move…" \
  *     --behavior "verifies who it is speaking to first" \
  *     --behavior "confirms the new time back before finishing" \
- *     [--digital-human dh_…]
+ *     [--persona prs_…]
  *
  *   node packages/db/dist/scripts/test.js get tst_…
  *   node packages/db/dist/scripts/test.js edit tst_… --scenario "…"
@@ -39,12 +39,12 @@ import { organization, user } from "../schema/index.ts";
  *   node packages/db/dist/scripts/test.js clone tst_…
  *   node packages/db/dist/scripts/test.js delete tst_…
  *
- * Naming no digital human takes the project's default, which provisioning
+ * Naming no persona takes the project's default, which provisioning
  * seeds when it creates the development organization — so a create can leave
  * the flag out from the very first one.
  *
  * On an edit, a flag left out keeps what the test already says, so editing the
- * scenario alone is one flag. A `--behavior` or a `--digital-human` given at
+ * scenario alone is one flag. A `--behavior` or a `--persona` given at
  * all replaces the whole list, because the order is content.
  */
 
@@ -102,10 +102,10 @@ function usage(): never {
       "usage:",
       "  test.js create --name <name> --scenario <text>",
       "    --behavior <text> [--behavior <text> …]",
-      "    [--description <text>] [--digital-human <dh_id> …]",
+      "    [--description <text>] [--persona <prs_id> …]",
       "  test.js get <tst_id>",
       "  test.js edit <tst_id> [--name <name>] [--description <text>]",
-      "    [--scenario <text>] [--behavior <text> …] [--digital-human <dh_id> …]",
+      "    [--scenario <text>] [--behavior <text> …] [--persona <prs_id> …]",
       "  test.js get-version <tstv_id>",
       "  test.js list [--limit <n>] [--cursor <tst_id>]",
       "  test.js clone <tst_id>",
@@ -148,7 +148,7 @@ async function main(): Promise<void> {
         scenario: { type: "string" },
         // Repeatable, and the order they are given is the order they are kept.
         behavior: { type: "string", multiple: true },
-        "digital-human": { type: "string", multiple: true },
+        "persona": { type: "string", multiple: true },
       },
     });
     if (values.name === undefined || values.scenario === undefined) usage();
@@ -158,7 +158,7 @@ async function main(): Promise<void> {
       description: values.description,
       scenario: values.scenario,
       expectedBehaviors: values.behavior ?? [],
-      digitalHumanIds: values["digital-human"],
+      personaIds: values["persona"],
     });
     console.log(JSON.stringify(created, null, 2));
   } else if (command === "get") {
@@ -174,7 +174,7 @@ async function main(): Promise<void> {
         description: { type: "string" },
         scenario: { type: "string" },
         behavior: { type: "string", multiple: true },
-        "digital-human": { type: "string", multiple: true },
+        "persona": { type: "string", multiple: true },
       },
     });
 
@@ -189,9 +189,9 @@ async function main(): Promise<void> {
       ...(values.behavior === undefined
         ? {}
         : { expectedBehaviors: values.behavior }),
-      ...(values["digital-human"] === undefined
+      ...(values["persona"] === undefined
         ? {}
-        : { digitalHumanIds: values["digital-human"] }),
+        : { personaIds: values["persona"] }),
     });
     printTest(id, edited);
   } else if (command === "get-version") {

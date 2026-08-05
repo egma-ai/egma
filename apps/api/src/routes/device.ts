@@ -18,7 +18,7 @@ import { mintApiKeySecret } from "../auth/api-key.ts";
 import type { Identity } from "../auth/better-auth.ts";
 import { DEVICE_CLIENT_ID, normalizeUserCode } from "../auth/device.ts";
 import { resolveSession, type Session } from "../auth/session.ts";
-import { toWebRequest } from "../http/web-handler.ts";
+import { toIdentityRequest } from "../http/web-handler.ts";
 
 /**
  * Logging in from a terminal, without a secret ever passing through a chat
@@ -462,7 +462,7 @@ export async function deviceRoutes(
   ): Promise<Session | null> {
     const session = await resolveSession(
       options.identity.provider,
-      toWebRequest(request),
+      toIdentityRequest(request),
     );
     if (session === null) {
       void reply.code(401).send({

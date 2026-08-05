@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createTest,
-  editDigitalHuman,
+  editPersona,
   editTest,
   getTest,
   getTestVersion,
@@ -18,9 +18,9 @@ import {
   neutralTraits,
   rescheduling,
   rowCounts,
-  seedDigitalHuman,
+  seedPersona,
   seedTestFactory,
-  STARTER_DIGITAL_HUMAN,
+  STARTER_PERSONA,
 } from "./support/test-factory.ts";
 
 /**
@@ -36,9 +36,9 @@ import {
  */
 
 let database: MigratedDatabase;
-/** Acme's starter digital human, and the one its project points at. */
+/** Acme's starter persona, and the one its project points at. */
 let rita: string;
-/** Globex's, so its test has a digital human of its own to name. */
+/** Globex's, so its test has a persona of its own to name. */
 let grace: string;
 /** Two more of Acme's, for the sets an edit moves between. */
 let nadia: string;
@@ -47,8 +47,8 @@ let omar: string;
 beforeAll(async () => {
   ({ database, rita, grace } = await seedTestFactory("tests_edit"));
 
-  nadia = await seedDigitalHuman(actingAsAcme(), "Nadia");
-  omar = await seedDigitalHuman(actingAsAcme(), "Omar");
+  nadia = await seedPersona(actingAsAcme(), "Nadia");
+  omar = await seedPersona(actingAsAcme(), "Omar");
 });
 
 afterAll(async () => {
@@ -62,19 +62,19 @@ afterAll(async () => {
  */
 async function namedOn(
   versionId: string,
-): Promise<{ digitalHumanId: string; position: number }[]> {
+): Promise<{ personaId: string; position: number }[]> {
   const { rows } = await database.sql<{
-    digital_human_id: string;
+    persona_id: string;
     position: number;
   }>(
-    `select digital_human_id, position
-       from test_version_digital_human
+    `select persona_id, position
+       from test_version_persona
       where test_version_id = $1
       order by position`,
     [versionId],
   );
   return rows.map((row) => ({
-    digitalHumanId: row.digital_human_id,
+    personaId: row.persona_id,
     position: row.position,
   }));
 }
@@ -83,7 +83,7 @@ describe("editing what a test checks", () => {
   it("creates version 2 with its own rows, and leaves version 1 exactly where it was", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
-      digitalHumanIds: [omar, rita],
+      personaIds: [omar, rita],
     });
 
     const edited = await editTest(actingAsAcme(), created.id, {
@@ -95,7 +95,7 @@ describe("editing what a test checks", () => {
     expect(edited?.scenario).toBe(
       "Their cleaning is booked for Thursday and has to move.",
     );
-    expect(edited?.digitalHumans.map((human) => human.id)).toEqual([omar, rita]);
+    expect(edited?.personas.map((named) => named.id)).toEqual([omar, rita]);
 
     const fetched = await getTest(actingAsAcme(), created.id);
     expect(fetched?.version).toBe(2);
@@ -111,13 +111,13 @@ describe("editing what a test checks", () => {
     // was written with — the whole point of minting a version rather than
     // rewriting one.
     expect(await namedOn(created.versionId)).toEqual([
-      { digitalHumanId: omar, position: 1 },
-      { digitalHumanId: rita, position: 2 },
+      { personaId: omar, position: 1 },
+      { personaId: rita, position: 2 },
     ]);
     if (edited?.versionId === undefined) throw new Error("no second version");
     expect(await namedOn(edited.versionId)).toEqual([
-      { digitalHumanId: omar, position: 1 },
-      { digitalHumanId: rita, position: 2 },
+      { personaId: omar, position: 1 },
+      { personaId: rita, position: 2 },
     ]);
   });
 
@@ -137,40 +137,40 @@ describe("editing what a test checks", () => {
     expect(edited?.scenario).toBe(rescheduling.scenario);
   });
 
-  it("versions on a change to the digital humans alone", async () => {
+  it("versions on a change to the personas alone", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
-      digitalHumanIds: [rita],
+      personaIds: [rita],
     });
 
     const edited = await editTest(actingAsAcme(), created.id, {
-      digitalHumanIds: [rita, nadia],
+      personaIds: [rita, nadia],
     });
 
     expect(edited?.version).toBe(2);
     expect(edited?.scenario).toBe(rescheduling.scenario);
-    expect(edited?.digitalHumans.map((human) => human.id)).toEqual([
+    expect(edited?.personas.map((named) => named.id)).toEqual([
       rita,
       nadia,
     ]);
 
     expect(await namedOn(created.versionId)).toEqual([
-      { digitalHumanId: rita, position: 1 },
+      { personaId: rita, position: 1 },
     ]);
   });
 
   it("counts the authored order as content, so reordering versions", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
-      digitalHumanIds: [nadia, omar],
+      personaIds: [nadia, omar],
     });
 
     const edited = await editTest(actingAsAcme(), created.id, {
-      digitalHumanIds: [omar, nadia],
+      personaIds: [omar, nadia],
     });
 
     expect(edited?.version).toBe(2);
-    expect(edited?.digitalHumans.map((human) => human.id)).toEqual([
+    expect(edited?.personas.map((named) => named.id)).toEqual([
       omar,
       nadia,
     ]);
@@ -179,19 +179,19 @@ describe("editing what a test checks", () => {
   it("does nothing for a byte-identical save, and returns the current version", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
-      digitalHumanIds: [rita, nadia],
+      personaIds: [rita, nadia],
     });
     const before = await rowCounts();
 
     const saved = await editTest(actingAsAcme(), created.id, {
       scenario: rescheduling.scenario,
       expectedBehaviors: [...rescheduling.expectedBehaviors],
-      digitalHumanIds: [rita, nadia],
+      personaIds: [rita, nadia],
     });
 
     expect(saved?.version).toBe(1);
     expect(saved?.versionId).toBe(created.versionId);
-    expect(saved?.digitalHumans.map((human) => human.id)).toEqual([rita, nadia]);
+    expect(saved?.personas.map((named) => named.id)).toEqual([rita, nadia]);
     expect(await rowCounts()).toEqual(before);
 
     const fetched = await getTest(actingAsAcme(), created.id);
@@ -241,13 +241,13 @@ describe("editing what a test checks", () => {
     expect(fetched?.scenario).toBe(rescheduling.scenario);
   });
 
-  it("validates edited digital humans exactly as created ones, and versions nothing", async () => {
+  it("validates edited personas exactly as created ones, and versions nothing", async () => {
     const created = await createTest(actingAsAcme(), rescheduling);
     const before = await rowCounts();
 
     await expect(
-      editTest(actingAsAcme(), created.id, { digitalHumanIds: [newId("dh")] }),
-    ).rejects.toThrow(/no digital human/);
+      editTest(actingAsAcme(), created.id, { personaIds: [newId("prs")] }),
+    ).rejects.toThrow(/no persona/);
 
     expect(await rowCounts()).toEqual(before);
     expect((await getTest(actingAsAcme(), created.id))?.version).toBe(1);
@@ -296,7 +296,7 @@ describe("renaming a test", () => {
     expect(fetched?.name).toBe("Moves a booked appointment");
     expect(fetched?.version).toBe(1);
     expect(fetched?.scenario).toBe(rescheduling.scenario);
-    expect(fetched?.digitalHumans.map((human) => human.id)).toEqual([rita]);
+    expect(fetched?.personas.map((named) => named.id)).toEqual([rita]);
   });
 
   it("clears the description with null, still without versioning", async () => {
@@ -331,11 +331,11 @@ describe("renaming a test", () => {
   });
 });
 
-describe("an edit naming no digital human", () => {
+describe("an edit naming no persona", () => {
   it("keeps the set the version already named when the field is absent", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
-      digitalHumanIds: [nadia, omar],
+      personaIds: [nadia, omar],
     });
 
     const edited = await editTest(actingAsAcme(), created.id, {
@@ -344,7 +344,7 @@ describe("an edit naming no digital human", () => {
 
     expect(edited?.version).toBe(2);
     expect(edited?.expectedBehaviors).toEqual(rescheduling.expectedBehaviors);
-    expect(edited?.digitalHumans).toEqual([
+    expect(edited?.personas).toEqual([
       { id: nadia, name: "Nadia", deletedAt: null },
       { id: omar, name: "Omar", deletedAt: null },
     ]);
@@ -353,34 +353,34 @@ describe("an edit naming no digital human", () => {
     // say so — nothing is shared with the version left behind.
     if (edited?.versionId === undefined) throw new Error("no second version");
     expect(await namedOn(edited.versionId)).toEqual([
-      { digitalHumanId: nadia, position: 1 },
-      { digitalHumanId: omar, position: 2 },
+      { personaId: nadia, position: 1 },
+      { personaId: omar, position: 2 },
     ]);
   });
 
   it("takes the project's default for an empty list, exactly as a create does", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
-      digitalHumanIds: [nadia, omar],
+      personaIds: [nadia, omar],
     });
 
     const edited = await editTest(actingAsAcme(), created.id, {
-      digitalHumanIds: [],
+      personaIds: [],
     });
 
     expect(edited?.version).toBe(2);
-    expect(edited?.digitalHumans.map((human) => human.id)).toEqual([rita]);
+    expect(edited?.personas.map((named) => named.id)).toEqual([rita]);
   });
 
   it("is no change at all when the default is already the one named", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
-      digitalHumanIds: [rita],
+      personaIds: [rita],
     });
     const before = await rowCounts();
 
     const saved = await editTest(actingAsAcme(), created.id, {
-      digitalHumanIds: [],
+      personaIds: [],
     });
 
     expect(saved?.version).toBe(1);
@@ -391,23 +391,23 @@ describe("an edit naming no digital human", () => {
   it("errors clearly when the project has no default, and versions nothing", async () => {
     const created = await createTest(actingAsGlobex(), {
       ...rescheduling,
-      digitalHumanIds: [grace],
+      personaIds: [grace],
     });
     const before = await rowCounts();
 
     await expect(
-      editTest(actingAsGlobex(), created.id, { digitalHumanIds: [] }),
-    ).rejects.toThrow(/no default digital human/);
+      editTest(actingAsGlobex(), created.id, { personaIds: [] }),
+    ).rejects.toThrow(/no default persona/);
 
     expect(await rowCounts()).toEqual(before);
   });
 });
 
 describe("one frozen version", () => {
-  it("answers with its content and its digital humans in the authored order", async () => {
+  it("answers with its content and its personas in the authored order", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
-      digitalHumanIds: [omar, rita, nadia],
+      personaIds: [omar, rita, nadia],
     });
 
     const frozen = await getTestVersion(actingAsAcme(), created.versionId);
@@ -416,28 +416,28 @@ describe("one frozen version", () => {
     expect(frozen?.version).toBe(1);
     expect(frozen?.scenario).toBe(rescheduling.scenario);
     expect(frozen?.expectedBehaviors).toEqual(rescheduling.expectedBehaviors);
-    expect(frozen?.digitalHumans).toEqual([
+    expect(frozen?.personas).toEqual([
       { id: omar, name: "Omar", deletedAt: null },
-      { id: rita, name: STARTER_DIGITAL_HUMAN, deletedAt: null },
+      { id: rita, name: STARTER_PERSONA, deletedAt: null },
       { id: nadia, name: "Nadia", deletedAt: null },
     ]);
     expect(frozen?.createdAt).toBeInstanceOf(Date);
   });
 
-  it("names its digital humans by identity, so editing one versions no test", async () => {
+  it("names its personas by identity, so editing one versions no test", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
-      digitalHumanIds: [nadia],
+      personaIds: [nadia],
     });
 
-    const moved = await editDigitalHuman(actingAsAcme(), nadia, {
+    const moved = await editPersona(actingAsAcme(), nadia, {
       traits: { ...neutralTraits, language: "en-GB" },
     });
     expect(moved?.version).toBe(2);
 
     const frozen = await getTestVersion(actingAsAcme(), created.versionId);
     expect(frozen?.version).toBe(1);
-    expect(frozen?.digitalHumans.map((human) => human.id)).toEqual([nadia]);
+    expect(frozen?.personas.map((named) => named.id)).toEqual([nadia]);
 
     const fetched = await getTest(actingAsAcme(), created.id);
     expect(fetched?.version).toBe(1);
@@ -447,8 +447,8 @@ describe("one frozen version", () => {
   it("fails loudly on a hand-corrupted row, naming the version, rather than leaking", async () => {
     const created = await createTest(actingAsAcme(), rescheduling);
 
-    // Raw SQL on purpose: the factory can never write this, so the guard is
-    // the only thing standing between the row and the caller.
+    // Raw SQL on purpose: the factory can never write this, so the guard is the
+    // only thing standing between the row and the caller.
     await database.sql(
       `update test_version set content = '{"scenario": "", "expectedBehaviors": ["a"]}'::jsonb
         where id = $1`,

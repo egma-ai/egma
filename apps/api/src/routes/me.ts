@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { resolveSession } from "../auth/session.ts";
-import { toWebRequest } from "../http/web-handler.ts";
+import { toIdentityRequest } from "../http/web-handler.ts";
 
 /**
  * Where the person holding this session is: who they are, which organization,
@@ -21,7 +21,7 @@ export async function meRoutes(
   app.get("/api/me", async (request, reply) => {
     const session = await resolveSession(
       options.provider,
-      toWebRequest(request),
+      toIdentityRequest(request),
     );
 
     if (session === null) {

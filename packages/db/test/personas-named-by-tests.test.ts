@@ -3,11 +3,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createTest,
-  deleteDigitalHuman,
+  deletePersona,
   deleteTest,
-  DigitalHumanNamedByTestsError,
+  PersonaNamedByTestsError,
   editTest,
-  getDigitalHuman,
+  getPersona,
   getTestVersion,
   type Test,
 } from "@egma/db";
@@ -23,17 +23,17 @@ import {
   pointProjectAt,
   rescheduling,
   rowCounts,
-  seedDigitalHuman,
+  seedPersona,
   seedTestFactory,
 } from "./support/test-factory.ts";
 
 /**
- * Deleting a digital human while the current version of a live test names them:
+ * Deleting a persona while the current version of a live test names them:
  * refused, and the refusal names those tests. What history names, what a
  * deleted test names, and what a project points at by default all delete fine.
  *
  * It sits in a file of its own because it belongs to neither factory alone —
- * the rule is written into the digital human's delete and answered by the test
+ * the rule is written into the persona's delete and answered by the test
  * tables, and a reader looking for why a delete was refused should find both
  * halves in one place.
  *
@@ -43,7 +43,7 @@ import {
  */
 
 let database: MigratedDatabase;
-/** Acme's starter digital human, and the one its project points at. */
+/** Acme's starter persona, and the one its project points at. */
 let rita: string;
 
 beforeAll(async () => {
@@ -57,28 +57,28 @@ afterAll(async () => {
 /** The error a refusal threw, so the facts it carries can be read off it. */
 async function refusalFrom(
   work: Promise<unknown>,
-): Promise<DigitalHumanNamedByTestsError> {
+): Promise<PersonaNamedByTestsError> {
   const error = await work.then(
     () => {
       throw new Error("the delete was expected to be refused, and was not");
     },
     (thrown: unknown) => thrown,
   );
-  expect(error).toBeInstanceOf(DigitalHumanNamedByTestsError);
-  return error as DigitalHumanNamedByTestsError;
+  expect(error).toBeInstanceOf(PersonaNamedByTestsError);
+  return error as PersonaNamedByTestsError;
 }
 
-describe("deleting a digital human a live test names", () => {
+describe("deleting a persona a live test names", () => {
   it("is refused, and the refusal names the test", async () => {
-    const cass = await seedDigitalHuman(actingAsAcme(), "Called-On Cass");
+    const cass = await seedPersona(actingAsAcme(), "Called-On Cass");
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
-      digitalHumanIds: [cass],
+      personaIds: [cass],
     });
 
-    const refusal = await refusalFrom(deleteDigitalHuman(actingAsAcme(), cass));
+    const refusal = await refusalFrom(deletePersona(actingAsAcme(), cass));
 
-    expect(refusal.digitalHumanId).toBe(cass);
+    expect(refusal.personaId).toBe(cass);
     expect(refusal.tests).toEqual([{ id: created.id, name: rescheduling.name }]);
     // Named in the message too, not only on the error, because the message is
     // what a developer running a script actually reads.
@@ -86,23 +86,23 @@ describe("deleting a digital human a live test names", () => {
     expect(refusal.message).toContain(rescheduling.name);
 
     // Refused means nothing written: they are still there, and still nameable.
-    expect((await getDigitalHuman(actingAsAcme(), cass))?.id).toBe(cass);
+    expect((await getPersona(actingAsAcme(), cass))?.id).toBe(cass);
   });
 
   it("names every test standing in the way, oldest first", async () => {
-    const mo = await seedDigitalHuman(actingAsAcme(), "Much-Named Mo");
+    const mo = await seedPersona(actingAsAcme(), "Much-Named Mo");
     const first = await createTest(actingAsAcme(), {
       ...rescheduling,
       name: "Asks about parking",
-      digitalHumanIds: [mo],
+      personaIds: [mo],
     });
     const second = await createTest(actingAsAcme(), {
       ...rescheduling,
       name: "Asks about insurance",
-      digitalHumanIds: [rita, mo],
+      personaIds: [rita, mo],
     });
 
-    const refusal = await refusalFrom(deleteDigitalHuman(actingAsAcme(), mo));
+    const refusal = await refusalFrom(deletePersona(actingAsAcme(), mo));
 
     expect(refusal.tests).toEqual([
       { id: first.id, name: "Asks about parking" },
@@ -111,77 +111,77 @@ describe("deleting a digital human a live test names", () => {
   });
 
   it("counts the rest rather than printing a page of them", async () => {
-    const ellis = await seedDigitalHuman(actingAsAcme(), "Everybody's Ellis");
+    const ellis = await seedPersona(actingAsAcme(), "Everybody's Ellis");
     const created: Test[] = [];
     for (let nth = 1; nth <= 7; nth += 1) {
       created.push(
         await createTest(actingAsAcme(), {
           ...rescheduling,
           name: `Scenario ${nth}`,
-          digitalHumanIds: [ellis],
+          personaIds: [ellis],
         }),
       );
     }
 
-    const refusal = await refusalFrom(deleteDigitalHuman(actingAsAcme(), ellis));
+    const refusal = await refusalFrom(deletePersona(actingAsAcme(), ellis));
 
     // Every one of them on the error, because the fix is to go and edit each.
     expect(refusal.tests.map((test) => test.id)).toEqual(
       created.map((test) => test.id),
     );
-    // A readable few in the message, and a count for the rest — the digital
-    // human a project points at by default is named by every test written
-    // without naming one, so an uncapped message would be unreadable.
+    // A readable few in the message, and a count for the rest — the persona a
+    // project points at by default is named by every test written without
+    // naming one, so an uncapped message would be unreadable.
     expect(refusal.message).toContain('"Scenario 5"');
     expect(refusal.message).not.toContain('"Scenario 6"');
     expect(refusal.message).toContain("and 2 more");
   });
 });
 
-describe("a digital human only history names", () => {
+describe("a persona only history names", () => {
   it("deletes fine, and the version that named them keeps them", async () => {
-    const lena = await seedDigitalHuman(actingAsAcme(), "Leaving Lena");
+    const lena = await seedPersona(actingAsAcme(), "Leaving Lena");
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
-      digitalHumanIds: [rita, lena],
+      personaIds: [rita, lena],
     });
 
     // While version 1 is the current one, the delete is refused.
-    await refusalFrom(deleteDigitalHuman(actingAsAcme(), lena));
+    await refusalFrom(deletePersona(actingAsAcme(), lena));
 
     // Version 2 does not name them, so version 1 is history and blocks nothing.
     const moved = await editTest(actingAsAcme(), created.id, {
-      digitalHumanIds: [rita],
+      personaIds: [rita],
     });
     expect(moved?.version).toBe(2);
 
-    expect((await deleteDigitalHuman(actingAsAcme(), lena))?.id).toBe(lena);
+    expect((await deletePersona(actingAsAcme(), lena))?.id).toBe(lena);
 
-    // Version 1 goes on naming them, and says plainly that they are gone —
-    // what a run that pinned that version needs to stay interpretable.
+    // Version 1 goes on naming them, and says plainly that they are gone — what
+    // a run that pinned that version needs to stay interpretable.
     const first = await getTestVersion(actingAsAcme(), created.versionId);
-    expect(first?.digitalHumans.map((human) => human.id)).toEqual([rita, lena]);
-    expect(first?.digitalHumans[0]?.deletedAt).toBeNull();
-    expect(first?.digitalHumans[1]?.deletedAt).toBeInstanceOf(Date);
+    expect(first?.personas.map((named) => named.id)).toEqual([rita, lena]);
+    expect(first?.personas[0]?.deletedAt).toBeNull();
+    expect(first?.personas[1]?.deletedAt).toBeInstanceOf(Date);
   });
 });
 
-describe("a digital human only deleted tests name", () => {
+describe("a persona only deleted tests name", () => {
   it("deletes fine, and the deleted test's version keeps them", async () => {
-    const dana = await seedDigitalHuman(actingAsAcme(), "Departing Dana");
+    const dana = await seedPersona(actingAsAcme(), "Departing Dana");
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
-      digitalHumanIds: [dana],
+      personaIds: [dana],
     });
 
-    await refusalFrom(deleteDigitalHuman(actingAsAcme(), dana));
+    await refusalFrom(deletePersona(actingAsAcme(), dana));
 
     await deleteTest(actingAsAcme(), created.id);
 
-    expect((await deleteDigitalHuman(actingAsAcme(), dana))?.id).toBe(dana);
+    expect((await deletePersona(actingAsAcme(), dana))?.id).toBe(dana);
 
     const version = await getTestVersion(actingAsAcme(), created.versionId);
-    expect(version?.digitalHumans.map((human) => human.id)).toEqual([dana]);
+    expect(version?.personas.map((named) => named.id)).toEqual([dana]);
   });
 });
 
@@ -206,7 +206,7 @@ async function hasFinished(work: Promise<unknown>): Promise<boolean> {
 }
 
 /**
- * The rows a create writes once it has resolved and locked the digital human a
+ * The rows a create writes once it has resolved and locked the persona a
  * version will name. Written out because a race test has to hold a create open
  * between its lock and its commit, which the factory cannot be asked to do.
  */
@@ -214,7 +214,7 @@ async function writeTestNaming(
   connection: SingleConnection,
   named: {
     readonly projectId: string;
-    readonly digitalHumanId: string;
+    readonly personaId: string;
     readonly name: string;
   },
 ): Promise<{ readonly testId: string; readonly versionId: string }> {
@@ -239,36 +239,36 @@ async function writeTestNaming(
     ],
   );
   await connection.sql(
-    `insert into test_version_digital_human (test_version_id, digital_human_id, position)
+    `insert into test_version_persona (test_version_id, persona_id, position)
      values ($1, $2, 1)`,
-    [versionId, named.digitalHumanId],
+    [versionId, named.personaId],
   );
 
   return { testId, versionId };
 }
 
-describe("the race between deleting a digital human and naming them", () => {
+describe("the race between deleting a persona and naming them", () => {
   it("makes a create wait behind a delete already holding the row, then refuses the create", async () => {
-    const cora = await seedDigitalHuman(actingAsAcme(), "Contested Cora");
+    const cora = await seedPersona(actingAsAcme(), "Contested Cora");
     const connection = await openSingleConnection(database.url);
 
     try {
       // The first two statements of a delete, held open: the exclusive lock on
-      // the digital human, and the marker it is about to commit.
+      // the persona, and the marker it is about to commit.
       await connection.sql("begin");
       await connection.sql(
-        "select id from digital_human where id = $1 for update",
+        "select id from persona where id = $1 for update",
         [cora],
       );
       await connection.sql(
-        "update digital_human set deleted_at = now() where id = $1",
+        "update persona set deleted_at = now() where id = $1",
         [cora],
       );
 
       const before = await rowCounts();
       const creating = createTest(actingAsAcme(), {
         ...rescheduling,
-        digitalHumanIds: [cora],
+        personaIds: [cora],
       });
 
       // The create cannot decide yet: checking that Cora is alive takes the
@@ -280,8 +280,8 @@ describe("the race between deleting a digital human and naming them", () => {
 
       // Released onto the row the delete left behind, the create sees the
       // marker and refuses — rather than writing a live test naming a deleted
-      // digital human, which is what a create deciding on its own snapshot
-      // would have done.
+      // persona, which is what a create deciding on its own snapshot would have
+      // done.
       await expect(creating).rejects.toThrow(/is deleted/);
       expect(await rowCounts()).toEqual(before);
     } finally {
@@ -290,24 +290,24 @@ describe("the race between deleting a digital human and naming them", () => {
   });
 
   it("makes a delete wait behind a create already naming them, then refuses the delete", async () => {
-    const cyrus = await seedDigitalHuman(actingAsAcme(), "Contested Cyrus");
+    const cyrus = await seedPersona(actingAsAcme(), "Contested Cyrus");
     const connection = await openSingleConnection(database.url);
 
     try {
-      // What a create does, held open: the shared lock on the digital human it
-      // is about to name, then the rows that name them.
+      // What a create does, held open: the shared lock on the persona it is
+      // about to name, then the rows that name them.
       await connection.sql("begin");
       await connection.sql(
-        "select id from digital_human where id = $1 for share",
+        "select id from persona where id = $1 for share",
         [cyrus],
       );
       const written = await writeTestNaming(connection, {
         projectId: acme.project,
-        digitalHumanId: cyrus,
+        personaId: cyrus,
         name: "Races the delete",
       });
 
-      const deleting = deleteDigitalHuman(actingAsAcme(), cyrus);
+      const deleting = deletePersona(actingAsAcme(), cyrus);
 
       // The delete cannot decide yet: it takes the row exclusively before it
       // counts anything, and the create is holding it shared.
@@ -320,14 +320,14 @@ describe("the race between deleting a digital human and naming them", () => {
       expect(refusal.tests).toEqual([
         { id: written.testId, name: "Races the delete" },
       ]);
-      expect((await getDigitalHuman(actingAsAcme(), cyrus))?.id).toBe(cyrus);
+      expect((await getPersona(actingAsAcme(), cyrus))?.id).toBe(cyrus);
     } finally {
       await connection.close();
     }
   });
 });
 
-describe("the digital human a project points at by default", () => {
+describe("the persona a project points at by default", () => {
   /** The sibling project, which points at nobody until a test points it. */
   const inOutbound = { ...actingAsAcme(), projectId: acme.outbound };
 
@@ -336,12 +336,12 @@ describe("the digital human a project points at by default", () => {
   });
 
   it("deletes like any other, because a pointer is not a test naming them", async () => {
-    const pia = await seedDigitalHuman(inOutbound, "Pointed-At Pia");
+    const pia = await seedPersona(inOutbound, "Pointed-At Pia");
     await pointProjectAt(acme.outbound, pia);
 
     // A project setting is not a test's claim: only a test standing to lose a
     // simulation refuses a delete, and no test here names them.
-    expect((await deleteDigitalHuman(inOutbound, pia))?.id).toBe(pia);
+    expect((await deletePersona(inOutbound, pia))?.id).toBe(pia);
 
     // A soft delete leaves the row where it was, so the pointer goes on naming
     // them — and the next test written without naming anybody says so out loud
@@ -352,7 +352,7 @@ describe("the digital human a project points at by default", () => {
   });
 
   it("makes a create taking the default wait behind a delete, then refuses it in the pointer's own words", async () => {
-    const dee = await seedDigitalHuman(inOutbound, "Default Dee");
+    const dee = await seedPersona(inOutbound, "Default Dee");
     await pointProjectAt(acme.outbound, dee);
     const connection = await openSingleConnection(database.url);
 
@@ -360,11 +360,11 @@ describe("the digital human a project points at by default", () => {
       // The first two statements of a delete, held open.
       await connection.sql("begin");
       await connection.sql(
-        "select id from digital_human where id = $1 for update",
+        "select id from persona where id = $1 for update",
         [dee],
       );
       await connection.sql(
-        "update digital_human set deleted_at = now() where id = $1",
+        "update persona set deleted_at = now() where id = $1",
         [dee],
       );
 
@@ -374,8 +374,8 @@ describe("the digital human a project points at by default", () => {
       const creating = createTest(inOutbound, rescheduling);
 
       // The create cannot decide yet: resolving the pointer takes the shared
-      // lock on the digital human it points at, and the delete is holding the
-      // row exclusively.
+      // lock on the persona it points at, and the delete is holding the row
+      // exclusively.
       expect(await hasFinished(creating)).toBe(false);
       expect(await rowCounts()).toEqual(before);
 
@@ -384,10 +384,10 @@ describe("the digital human a project points at by default", () => {
       const refused = String(await creating.catch((thrown: unknown) => thrown));
       // Released onto the row the delete left behind, the create reads the
       // marker off it and names the fix that matches: repoint the default.
-      expect(refused).toMatch(/default digital human .* is deleted/);
-      // Not the other way a pointer can be wrong, which wants a different fix
-      // — which is what a read that filtered the deleted row out would say.
-      expect(refused).not.toMatch(/there is no digital human/);
+      expect(refused).toMatch(/default persona .* is deleted/);
+      // Not the other way a pointer can be wrong, which wants a different fix —
+      // which is what a read that filtered the deleted row out would say.
+      expect(refused).not.toMatch(/there is no persona/);
       expect(await rowCounts()).toEqual(before);
     } finally {
       await connection.close();
@@ -395,7 +395,7 @@ describe("the digital human a project points at by default", () => {
   });
 
   it("makes a delete wait behind a create taking the default, then refuses the delete", async () => {
-    const dixon = await seedDigitalHuman(inOutbound, "Default Dixon");
+    const dixon = await seedPersona(inOutbound, "Default Dixon");
     await pointProjectAt(acme.outbound, dixon);
     const connection = await openSingleConnection(database.url);
 
@@ -404,22 +404,22 @@ describe("the digital human a project points at by default", () => {
       // shared lock on who it points at, then write the rows that name them.
       await connection.sql("begin");
       const pointer = await connection.sql<{
-        default_digital_human_id: string | null;
-      }>("select default_digital_human_id from project where id = $1", [
+        default_persona_id: string | null;
+      }>("select default_persona_id from project where id = $1", [
         acme.outbound,
       ]);
-      expect(pointer.rows[0]?.default_digital_human_id).toBe(dixon);
+      expect(pointer.rows[0]?.default_persona_id).toBe(dixon);
       await connection.sql(
-        "select id from digital_human where id = $1 for share",
+        "select id from persona where id = $1 for share",
         [dixon],
       );
       const written = await writeTestNaming(connection, {
         projectId: acme.outbound,
-        digitalHumanId: dixon,
+        personaId: dixon,
         name: "Takes the default",
       });
 
-      const deleting = deleteDigitalHuman(inOutbound, dixon);
+      const deleting = deletePersona(inOutbound, dixon);
 
       expect(await hasFinished(deleting)).toBe(false);
 
@@ -430,7 +430,7 @@ describe("the digital human a project points at by default", () => {
       expect(refusal.tests).toEqual([
         { id: written.testId, name: "Takes the default" },
       ]);
-      expect((await getDigitalHuman(inOutbound, dixon))?.id).toBe(dixon);
+      expect((await getPersona(inOutbound, dixon))?.id).toBe(dixon);
     } finally {
       await connection.close();
     }

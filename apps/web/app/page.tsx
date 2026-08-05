@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { pickers, type Me } from "../lib/me.ts";
+import { LIST } from "../lib/transcript-copy.ts";
 import { Card, styles } from "./ui.tsx";
 
 /**
@@ -99,15 +100,8 @@ export default function Home() {
       <Fact label="Your role" value={organization?.role ?? "—"} />
 
       <p style={styles.aside}>
-        <button
-          type="button"
-          style={{ fontFamily: "inherit" }}
-          onClick={() => {
-            void signOut();
-          }}
-        >
-          Sign out
-        </button>
+        <a href="/traces">{LIST.navigation}</a> — read what your agents did,
+        turn by turn.
       </p>
 
       <p style={styles.aside}>
@@ -117,8 +111,20 @@ export default function Home() {
 
       <p style={styles.aside}>
         Nothing else is built yet. Everything a test needs — agents,
-        connections, digital humans, graders — arrives with the effort that can
+        connections, personas, graders — arrives with the effort that can
         run one.
+      </p>
+
+      <p style={styles.aside}>
+        <button
+          type="button"
+          style={{ fontFamily: "inherit" }}
+          onClick={() => {
+            void signOut();
+          }}
+        >
+          Sign out
+        </button>
       </p>
     </Card>
   );

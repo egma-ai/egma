@@ -49,6 +49,19 @@ const config: NextConfig = {
           source: "/api/invitations/:path*",
           destination: `${api}/api/invitations/:path*`,
         },
+        // The public v1 contract, forwarded whole rather than read-endpoint by
+        // read-endpoint. `/v1/traces` is one path answering two things — the
+        // OTLP door on POST, the list on GET — and a proxy forwards paths, not
+        // methods; carving out the verbs here would put a second, quieter copy
+        // of the API's routing table in a file that cannot enforce it. Nothing
+        // is widened by this: it is the same API, reached on the origin a
+        // browser already has a session for, and every one of these routes
+        // authenticates for itself.
+        //
+        // One rule and not two: `:path*` matches zero segments, so this also
+        // matches the bare `/v1/traces` and forwards it to exactly that, with
+        // no trailing slash for the API to have an opinion about.
+        { source: "/v1/traces/:path*", destination: `${api}/v1/traces/:path*` },
       ],
       afterFiles: [],
       fallback: [],

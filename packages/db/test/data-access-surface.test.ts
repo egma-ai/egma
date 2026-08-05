@@ -11,11 +11,28 @@ import { describe, expect, it } from "vitest";
  * context-establishing group.
  */
 
-/** Opening and closing the connection, and asking whether it is there. */
-const CONNECTION = ["connect", "disconnect", "ping"];
+/**
+ * Opening and closing the connections, and asking whether they are there. Two
+ * stores, one module: the ClickHouse client is as private as the pool, and what
+ * is exported for it is the same three verbs and no more.
+ */
+const CONNECTION = [
+  "connect",
+  "disconnect",
+  "ping",
+  "connectClickHouse",
+  "disconnectClickHouse",
+  "pingClickHouse",
+];
 
 /** Applying the schema, which happens on boot before any context exists. */
-const MIGRATIONS = ["MIGRATIONS_DIRECTORY", "readMigrations", "runMigrations"];
+const MIGRATIONS = [
+  "MIGRATIONS_DIRECTORY",
+  "readMigrations",
+  "runMigrations",
+  "CLICKHOUSE_MIGRATIONS_DIRECTORY",
+  "runClickHouseMigrations",
+];
 
 /**
  * How the auth provider reaches the five identity tables. It is handed a
@@ -51,41 +68,53 @@ const CONTEXT_ESTABLISHING = [
  */
 const INSTANCE_SCOPED = ["instanceIsClaimed"];
 
-/** Everything that touches a customer's data. All of it needs the context. */
+/**
+ * Everything that touches a customer's data. All of it needs the context.
+ *
+ * The trace store's three are `appendSpans`, which writes, and `listTraces` and
+ * `readTrace`, which arrived with the two v1 endpoints that call them — an
+ * exported read with no caller would be a hole in the boundary that nothing is
+ * watching, which is the same objection as a permission row nothing enforces.
+ * Both reads take a required time window on top of the context, so neither can
+ * be called in a way that scans the whole table.
+ */
 const CONTEXT_REQUIRING = [
   "addConnection",
+  "appendSpans",
   "changeRole",
-  "cloneDigitalHuman",
+  "clonePersona",
   "cloneTest",
   "createAgent",
   "createApiKey",
-  "createDigitalHuman",
   "createInvitation",
+  "createPersona",
   "createProject",
   "createTest",
   "deactivateUser",
   "deleteAgent",
-  "deleteDigitalHuman",
+  "deletePersona",
   "deleteTest",
-  "editDigitalHuman",
+  "editPersona",
   "editTest",
   "getAgent",
   "getConnection",
-  "getDigitalHuman",
-  "getDigitalHumanVersion",
+  "getPersona",
+  "getPersonaVersion",
   "getTest",
   "getTestVersion",
   "listAgents",
   "listApiKeys",
   "listConnections",
-  "listDigitalHumans",
   "listMembers",
   "listPendingInvitations",
+  "listPersonas",
   "listProjects",
   "listTests",
+  "listTraces",
   "readOrganization",
   "readOrganizationSettings",
   "readProject",
+  "readTrace",
   "recordDeviceAuthorization",
   "removeConnection",
   "removeMember",
@@ -112,13 +141,32 @@ const PERMISSION = [
 /** Vocabulary: the table definitions, how a caller proved who they are, and the refusals. */
 const VALUES = [
   "AlreadyBelongsToAnOrganizationError",
-  "DigitalHumanNamedByTestsError",
   "LastAdminError",
   "NotPermittedError",
+  "PersonaNamedByTestsError",
   "ProjectOutsideOrganizationError",
+  // The store's answer to a batch it will never take, told apart from a store
+  // that is merely unreachable — a door has to answer those two differently,
+  // and only the module that owns the client can tell them apart.
+  "TraceStoreRefusedError",
+  // And the read surface's own refusal: a window that cannot be served, or a
+  // page token that was not issued here. Both are 400s, and neither is a fault.
+  "UnreadableTraceQueryError",
   "VIA",
   "VOICE_PROVIDERS",
   "schema",
+];
+
+/**
+ * The read surface's own limits, exported because the endpoints that enforce
+ * them have to say what they are in a refusal, and a cap named in two places is
+ * a cap that will one day disagree with itself. Each is a number; none of them
+ * reaches a store or names a customer.
+ */
+const READ_LIMITS = [
+  "MAXIMUM_LIST_LIMIT",
+  "MAXIMUM_SPANS_PER_TRACE",
+  "MAXIMUM_WINDOW_MILLISECONDS",
 ];
 
 describe("the data-access module's surface", () => {
@@ -133,17 +181,22 @@ describe("the data-access module's surface", () => {
         ...CONTEXT_REQUIRING,
         ...PERMISSION,
         ...VALUES,
+        ...READ_LIMITS,
       ].sort(),
     );
   });
 
-  it("hands out no pool, and no way to run a statement of your own", () => {
+  it("hands out no pool and no client, and no way to run a statement of your own", () => {
     const escapeHatches = [
       "pool",
       "db",
       "database",
       "client",
+      "clickhouse",
+      "traceStore",
       "query",
+      "command",
+      "insert",
       "execute",
       "sql",
       "transaction",

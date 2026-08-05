@@ -1,5 +1,5 @@
 import { newId } from "@egma/ids";
-import { createDigitalHuman, type AuthContext, type NewTest, type Role } from "@egma/db";
+import { createPersona, type AuthContext, type NewTest, type Role } from "@egma/db";
 
 import { createConnectedDatabase, type MigratedDatabase } from "./database.ts";
 import { seedOrganization, seedUser } from "./tenancy.ts";
@@ -7,7 +7,7 @@ import { seedOrganization, seedUser } from "./tenancy.ts";
 /**
  * The world a test-factory test needs before it can write a test: two
  * customers, a sibling project inside the first one to be narrowed past, a
- * digital human in each, and the scenario every file authors.
+ * persona in each, and the scenario every file authors.
  *
  * It lives here rather than in whichever file needed it first, because every
  * file needs all of it and a second copy is a copy that drifts. The ids are
@@ -16,9 +16,9 @@ import { seedOrganization, seedUser } from "./tenancy.ts";
  * never each other's — the same thing that lets each file connect the data
  * access module to a database of its own.
  *
- * Digital humans arrive through their own factory, which has its own tests:
- * they are an input to these files, not a thing they are checking. Tenancy
- * arrives by raw SQL, for the reason `tenancy.ts` gives.
+ * Personas arrive through their own factory, which has its own tests: they are
+ * an input to these files, not a thing they are checking. Tenancy arrives by
+ * raw SQL, for the reason `tenancy.ts` gives.
  */
 
 export const acme = {
@@ -32,8 +32,8 @@ export const globex = { organization: newId("org"), project: newId("prj") };
 const ada = newId("usr");
 const gene = newId("usr");
 
-/** What Acme's starter digital human is called, for the reads that show it. */
-export const STARTER_DIGITAL_HUMAN = "Impatient Rita";
+/** What Acme's starter persona is called, for the reads that show it. */
+export const STARTER_PERSONA = "Impatient Rita";
 
 export function actingAsAcme(role: Role = "member"): AuthContext {
   return {
@@ -68,7 +68,7 @@ export const rescheduling = {
   ],
 } as const satisfies NewTest;
 
-/** Somebody plain, because who the digital human is is not under test here. */
+/** Somebody plain, because who the persona is is not under test here. */
 export const neutralTraits = {
   personality: "Speaks plainly, stays patient, asks one question at a time.",
   language: "en-US",
@@ -77,22 +77,22 @@ export const neutralTraits = {
 
 let database: MigratedDatabase;
 
-export async function seedDigitalHuman(
+export async function seedPersona(
   auth: AuthContext,
   name: string,
 ): Promise<string> {
-  const created = await createDigitalHuman(auth, { name, traits: neutralTraits });
+  const created = await createPersona(auth, { name, traits: neutralTraits });
   return created.id;
 }
 
-/** What provisioning does when it seeds a project's starter digital human. */
+/** What provisioning does when it seeds a project's starter persona. */
 export async function pointProjectAt(
   projectId: string,
-  digitalHumanId: string | null,
+  personaId: string | null,
 ): Promise<void> {
   await database.sql(
-    "update project set default_digital_human_id = $1 where id = $2",
-    [digitalHumanId, projectId],
+    "update project set default_persona_id = $1 where id = $2",
+    [personaId, projectId],
   );
 }
 
@@ -114,14 +114,14 @@ export async function rowCounts(): Promise<{
   return {
     tests: await count("test"),
     versions: await count("test_version"),
-    named: await count("test_version_digital_human"),
+    named: await count("test_version_persona"),
   };
 }
 
 export type SeededWorld = {
   /** The raw handle, for the reads and writes that go around the module. */
   readonly database: MigratedDatabase;
-  /** Acme's starter digital human, and the one its project points at. */
+  /** Acme's starter persona, and the one its project points at. */
   readonly rita: string;
   /** Globex's, so a cross-project reference has something real to name. */
   readonly grace: string;
@@ -140,8 +140,8 @@ export async function seedTestFactory(label: string): Promise<SeededWorld> {
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, gene, "gene@globex.example");
 
-  const rita = await seedDigitalHuman(actingAsAcme(), STARTER_DIGITAL_HUMAN);
-  const grace = await seedDigitalHuman(actingAsGlobex(), "Careful Grace");
+  const rita = await seedPersona(actingAsAcme(), STARTER_PERSONA);
+  const grace = await seedPersona(actingAsGlobex(), "Careful Grace");
   await pointProjectAt(acme.project, rita);
 
   return { database, rita, grace };

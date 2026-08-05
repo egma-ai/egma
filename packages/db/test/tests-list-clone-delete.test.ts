@@ -20,9 +20,9 @@ import {
   actingAsGlobex,
   rescheduling,
   rowCounts,
-  seedDigitalHuman,
+  seedPersona,
   seedTestFactory,
-  STARTER_DIGITAL_HUMAN,
+  STARTER_PERSONA,
 } from "./support/test-factory.ts";
 
 /**
@@ -37,11 +37,11 @@ import {
  */
 
 let database: MigratedDatabase;
-/** Acme's starter digital human, and the one its default project points at. */
+/** Acme's starter persona, and the one its default project points at. */
 let rita: string;
-/** Globex's, so its test has a digital human of its own to name. */
+/** Globex's, so its test has a persona of its own to name. */
 let grace: string;
-/** Two more of Acme's, so a cloned set of digital humans is longer than one. */
+/** Two more of Acme's, so a cloned set of personas is longer than one. */
 let nadia: string;
 let omar: string;
 /** The sibling project's own two, since that project points at no default. */
@@ -61,10 +61,10 @@ function actingAsWholeCustomer() {
 beforeAll(async () => {
   ({ database, rita, grace } = await seedTestFactory("tests_lifecycle"));
 
-  nadia = await seedDigitalHuman(actingAsAcme(), "Nadia");
-  omar = await seedDigitalHuman(actingAsAcme(), "Omar");
-  olive = await seedDigitalHuman(actingInOutbound(), "Olive");
-  oscar = await seedDigitalHuman(actingInOutbound(), "Oscar");
+  nadia = await seedPersona(actingAsAcme(), "Nadia");
+  omar = await seedPersona(actingAsAcme(), "Omar");
+  olive = await seedPersona(actingInOutbound(), "Olive");
+  oscar = await seedPersona(actingInOutbound(), "Oscar");
 });
 
 afterAll(async () => {
@@ -90,16 +90,16 @@ describe("listing tests", () => {
   let stranger: Test;
 
   beforeAll(async () => {
-    // All but one name the same single digital human; "Four" names two, in an
-    // order that is not the order they were minted. A page that bucketed every
-    // row under one test, or dropped the authored order for the id order,
-    // could not survive that.
+    // All but one name the same single persona; "Four" names two, in an order
+    // that is not the order they were minted. A page that bucketed every row
+    // under one test, or dropped the authored order for the id order, could not
+    // survive that.
     for (const name of ["One", "Two", "Three", "Four", "Five"]) {
       created.push(
         await createTest(actingInOutbound(), {
           ...rescheduling,
           name,
-          digitalHumanIds: name === "Four" ? [oscar, olive] : [olive],
+          personaIds: name === "Four" ? [oscar, olive] : [olive],
         }),
       );
     }
@@ -112,7 +112,7 @@ describe("listing tests", () => {
     stranger = await createTest(actingAsGlobex(), {
       ...rescheduling,
       name: "Stranger",
-      digitalHumanIds: [grace],
+      personaIds: [grace],
     });
   });
 
@@ -132,7 +132,7 @@ describe("listing tests", () => {
     expect(page.nextCursor).toBeUndefined();
   });
 
-  it("carries the current content and digital humans on every row", async () => {
+  it("carries the current content and personas on every row", async () => {
     const page = await listTests(actingInOutbound());
 
     expect(
@@ -142,15 +142,15 @@ describe("listing tests", () => {
     ).toBe(true);
     const five = page.items[0];
     expect(five?.expectedBehaviors).toEqual(rescheduling.expectedBehaviors);
-    expect(five?.digitalHumans).toEqual([
+    expect(five?.personas).toEqual([
       { id: olive, name: "Olive", deletedAt: null },
     ]);
 
     // The one row naming two, in the order it authored them and no other: a
-    // page reads every row's digital humans in one go, and each row has to
-    // come back with its own.
+    // page reads every row's personas in one go, and each row has to come back
+    // with its own.
     const four = page.items.find((item) => item.name === "Four");
-    expect(four?.digitalHumans).toEqual([
+    expect(four?.personas).toEqual([
       { id: oscar, name: "Oscar", deletedAt: null },
       { id: olive, name: "Olive", deletedAt: null },
     ]);
@@ -257,7 +257,7 @@ describe("cloning a test", () => {
     const first = await createTest(actingAsAcme(), {
       ...rescheduling,
       name: "Original",
-      digitalHumanIds: [omar, rita, nadia],
+      personaIds: [omar, rita, nadia],
     });
     // A second version, so a clone that copied history rather than content
     // would have somewhere to show it.
@@ -268,7 +268,7 @@ describe("cloning a test", () => {
     source = second;
   });
 
-  it("copies the current scenario, behaviors and digital humans into a fresh test at version 1", async () => {
+  it("copies the current scenario, behaviors and personas into a fresh test at version 1", async () => {
     const clone = await cloneTest(actingAsAcme(), source.id);
 
     expect(clone).toBeDefined();
@@ -281,15 +281,15 @@ describe("cloning a test", () => {
     expect(clone.description).toBe(source.description);
     expect(clone.scenario).toBe(source.scenario);
     expect(clone.expectedBehaviors).toEqual(source.expectedBehaviors);
-    expect(clone.digitalHumans).toEqual([
+    expect(clone.personas).toEqual([
       { id: omar, name: "Omar", deletedAt: null },
-      { id: rita, name: STARTER_DIGITAL_HUMAN, deletedAt: null },
+      { id: rita, name: STARTER_PERSONA, deletedAt: null },
       { id: nadia, name: "Nadia", deletedAt: null },
     ]);
 
     const fetched = await getTest(actingAsAcme(), clone.id);
     expect(fetched?.scenario).toBe(source.scenario);
-    expect(fetched?.digitalHumans.map((human) => human.id)).toEqual([
+    expect(fetched?.personas.map((named) => named.id)).toEqual([
       omar,
       rita,
       nadia,
@@ -363,7 +363,7 @@ describe("deleting a test", () => {
     const first = await createTest(actingAsAcme(), {
       ...rescheduling,
       name: "Doomed",
-      digitalHumanIds: [rita, nadia],
+      personaIds: [rita, nadia],
     });
     firstVersionId = first.versionId;
     const second = await editTest(actingAsAcme(), first.id, {
@@ -398,9 +398,9 @@ describe("deleting a test", () => {
     expect(deleted?.projectId).toBe(acme.project);
     expect(deleted?.deletedAt).toBeInstanceOf(Date);
 
-    // Nothing blocked the delete — the test names two living digital humans
-    // across two versions — and nothing was taken away: the marker is the
-    // whole write, so every version row and every join row is still there.
+    // Nothing blocked the delete — the test names two living personas across
+    // two versions — and nothing was taken away: the marker is the whole write,
+    // so every version row and every join row is still there.
     expect(await rowCounts()).toEqual(before);
   });
 
@@ -414,12 +414,12 @@ describe("deleting a test", () => {
     expect(wholeCustomer.items.map((item) => item.id)).not.toContain(doomed.id);
   });
 
-  it("keeps every version fetchable by its tstv_ id, with its content and digital humans", async () => {
+  it("keeps every version fetchable by its tstv_ id, with its content and personas", async () => {
     const first = await getTestVersion(actingAsAcme(), firstVersionId);
     expect(first?.testId).toBe(doomed.id);
     expect(first?.version).toBe(1);
     expect(first?.scenario).toBe(rescheduling.scenario);
-    expect(first?.digitalHumans.map((human) => human.id)).toEqual([rita, nadia]);
+    expect(first?.personas.map((named) => named.id)).toEqual([rita, nadia]);
 
     const current = await getTestVersion(actingAsAcme(), doomed.versionId);
     expect(current?.version).toBe(2);
