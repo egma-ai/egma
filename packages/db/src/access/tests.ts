@@ -6,7 +6,10 @@ import { digitalHuman } from "../schema/digital-humans.ts";
 import { project } from "../schema/tenancy.ts";
 import { test, testVersion, testVersionDigitalHuman } from "../schema/tests.ts";
 import type { AuthContext } from "./context.ts";
-import { ProjectOutsideOrganizationError } from "./errors.ts";
+import {
+  ProjectOutsideOrganizationError,
+  type TestNamingDigitalHuman,
+} from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
 import { theProject, within } from "./within.ts";
@@ -277,6 +280,20 @@ function theTest(auth: AuthContext, id: string): SQL {
  * back whole. A digital human of another customer or another project is not
  * found and is refused in the same words as one that never existed, because
  * confirming that somebody else's row exists is itself a leak.
+ *
+ * **The read takes a shared lock on every row it finds, and this write's
+ * transaction holds it until it commits.** Deleting a digital human takes an
+ * exclusive lock on the same row before it counts the tests naming them, and
+ * the two lock modes conflict, so a delete and a write naming the same digital
+ * human cannot walk past each other: whichever reaches the row first makes the
+ * other wait and then see how it ended. If this write got there first, the
+ * delete counts the rows it wrote and refuses. If the delete got there first,
+ * this read resumes on the row it left behind and the deleted marker below
+ * refuses this write — which is why the marker is selected and judged here
+ * rather than filtered out in the `where`, where a re-read would simply find
+ * nothing and say the digital human never existed. Without the lock both could
+ * pass their own check and a live test would end up naming a deleted digital
+ * human, which is the one state this rule exists to make impossible.
  */
 async function validateNamedDigitalHumans(
   on: Queryable,
@@ -299,6 +316,7 @@ async function validateNamedDigitalHumans(
             ),
           ),
         )
+        .for("share")
     ).map((row) => [row.id, row.deletedAt] as const),
   );
 
@@ -346,6 +364,11 @@ async function projectDefaultDigitalHuman(
     );
   }
 
+  // The shared lock a named digital human is read under, for the same reason
+  // and on the same terms: the pointer resolves to a digital human this write
+  // is about to name, so a delete of that row must either land before this read
+  // and refuse the write, or wait behind it and be refused itself. A default
+  // resolved without the lock would be the one way past the rule.
   const [pointed] = await on
     .select({ id: digitalHuman.id, deletedAt: digitalHuman.deletedAt })
     .from(digitalHuman)
@@ -359,7 +382,8 @@ async function projectDefaultDigitalHuman(
         ),
       ),
     )
-    .limit(1);
+    .limit(1)
+    .for("share");
 
   if (pointed === undefined) {
     throw new Error(
@@ -863,9 +887,9 @@ export async function listTests(
  * deleted digital human is refused by that same validation, rather than
  * quietly cloned without them or quietly given the project's default; neither
  * silence would be a copy, and a clone that checked something the source does
- * not is worse than no clone. Once the digital human's own delete refuses
- * while a live test's current version names them, that refusal stops being
- * reachable at all: a test that cannot be fetched cannot be cloned, so no
+ * not is worse than no clone. That refusal is out of reach in practice: the
+ * digital human's own delete is refused while a live test's current version
+ * names them, and a test that cannot be fetched cannot be cloned, so no
  * clonable source can name a deleted digital human.
  *
  * Authorization is layered on purpose, not by accident of delegation. The
@@ -949,4 +973,49 @@ export async function deleteTest(
 
   if (row === undefined) return undefined;
   return { ...row, deletedAt };
+}
+
+/**
+ * The live tests whose current version names this digital human — the set that
+ * refuses the digital human's own delete, and the set that refusal names.
+ *
+ * Current versions of live tests, and nothing else. A historical version names
+ * who it named for as long as it is kept, because a run that pinned it has to
+ * stay readable, and no delete taken today can change what that run executed;
+ * a deleted test has no simulation left to lose. So neither is a reason to keep
+ * a digital human somebody wants gone, and neither appears here.
+ *
+ * The walk starts from the join table, where `digital_human_id` is indexed for
+ * exactly this question, and keeps the rows a live test currently points at.
+ *
+ * No tenancy predicate, deliberately, and this is the one read in the file
+ * without one. Whether the delete is refused is a fact about the digital human
+ * rather than about who is asking, and a refusal that depended on the asker
+ * would let one credential delete what another credential's test needs. The
+ * caller has already checked its own tenancy on the digital-human row before
+ * asking, and a version may only ever name a digital human of its own project,
+ * so every row this can return is a test standing where the caller already is.
+ *
+ * Exported to the module, not from the package: this answers a question the
+ * digital-human factory has to ask before it deletes, and the test tables have
+ * one owner, which is this file.
+ */
+export async function liveTestsNamingDigitalHuman(
+  on: Queryable,
+  digitalHumanId: string,
+): Promise<readonly TestNamingDigitalHuman[]> {
+  return on
+    .select({ id: test.id, name: test.name })
+    .from(testVersionDigitalHuman)
+    .innerJoin(
+      test,
+      eq(test.currentVersionId, testVersionDigitalHuman.testVersionId),
+    )
+    .where(
+      and(
+        eq(testVersionDigitalHuman.digitalHumanId, digitalHumanId),
+        notDeleted,
+      ),
+    )
+    .orderBy(asc(test.id));
 }

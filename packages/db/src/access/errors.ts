@@ -75,6 +75,60 @@ export class LastAdminError extends Error {
   }
 }
 
+/** A test, as a refusal names it: enough to go and find it and fix it. */
+export type TestNamingDigitalHuman = {
+  readonly id: string;
+  readonly name: string;
+};
+
+/** How many blocking tests the message spells out before it starts counting. */
+const TESTS_NAMED_IN_MESSAGE = 5;
+
+function readableList(tests: readonly TestNamingDigitalHuman[]): string {
+  const named = tests
+    .slice(0, TESTS_NAMED_IN_MESSAGE)
+    .map((test) => `${test.id} "${test.name}"`)
+    .join(", ");
+  const rest = tests.length - TESTS_NAMED_IN_MESSAGE;
+  return rest > 0 ? `${named}, and ${rest} more` : named;
+}
+
+/**
+ * A digital human's delete was refused because live tests still name them.
+ *
+ * A test names the people who call about its scenario, and executing it
+ * produces one simulation per person named. Letting the delete through would
+ * leave each of those tests quietly checking one fewer conversation than it
+ * says it checks — a suite going green while the case somebody wrote it for
+ * never ran. So the delete is refused, and the developer decides what those
+ * tests should say instead.
+ *
+ * It carries every blocking test, because the fix is to go and edit each one
+ * and a refusal that only said "something names them" would send somebody
+ * hunting. The message spells out the first few and counts the rest: the
+ * digital human a project points at by default is named by every test created
+ * without naming one, so an uncapped message would be a page long.
+ */
+export class DigitalHumanNamedByTestsError extends Error {
+  readonly digitalHumanId: string;
+  /** Every live test whose current version names them, oldest first. */
+  readonly tests: readonly TestNamingDigitalHuman[];
+
+  constructor(
+    digitalHumanId: string,
+    tests: readonly TestNamingDigitalHuman[],
+  ) {
+    super(
+      `digital human ${digitalHumanId} is named by ${tests.length} live ${
+        tests.length === 1 ? "test" : "tests"
+      } (${readableList(tests)}), and a test must never silently lose one of the people who call about it; name somebody else on those tests, or delete them, and then delete the digital human`,
+    );
+    this.name = "DigitalHumanNamedByTestsError";
+    this.digitalHumanId = digitalHumanId;
+    this.tests = tests;
+  }
+}
+
 /**
  * The caller's role does not permit the action, or the action named a customer
  * that is not theirs.

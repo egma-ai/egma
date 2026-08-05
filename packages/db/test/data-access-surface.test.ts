@@ -112,6 +112,7 @@ const PERMISSION = [
 /** Vocabulary: the table definitions, how a caller proved who they are, and the refusals. */
 const VALUES = [
   "AlreadyBelongsToAnOrganizationError",
+  "DigitalHumanNamedByTestsError",
   "LastAdminError",
   "NotPermittedError",
   "ProjectOutsideOrganizationError",

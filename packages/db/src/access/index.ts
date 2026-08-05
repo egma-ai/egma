@@ -51,9 +51,11 @@ export type { AuthContext, Role, Via } from "./context.ts";
 export { ROLES, VIA } from "./context.ts";
 export {
   AlreadyBelongsToAnOrganizationError,
+  DigitalHumanNamedByTestsError,
   LastAdminError,
   NotPermittedError,
   ProjectOutsideOrganizationError,
+  type TestNamingDigitalHuman,
 } from "./errors.ts";
 
 export {

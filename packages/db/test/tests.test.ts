@@ -341,26 +341,6 @@ describe("a test naming no digital human", () => {
   });
 });
 
-describe("a digital human deleted after the test named them", () => {
-  it("stays on the test, and the read says they are gone", async () => {
-    const leaving = await seedDigitalHuman(actingAsAcme(), "Leaving Lena");
-    const created = await createTest(actingAsAcme(), {
-      ...rescheduling,
-      digitalHumanIds: [rita, leaving],
-    });
-
-    await deleteDigitalHuman(actingAsAcme(), leaving);
-
-    const fetched = await getTest(actingAsAcme(), created.id);
-    expect(fetched?.digitalHumans.map((human) => human.id)).toEqual([
-      rita,
-      leaving,
-    ]);
-    expect(fetched?.digitalHumans[0]?.deletedAt).toBeNull();
-    expect(fetched?.digitalHumans[1]?.deletedAt).toBeInstanceOf(Date);
-  });
-});
-
 describe("a credential for the whole organization", () => {
   it("reads a project's tests without acting in the project", async () => {
     const created = await createTest(actingAsAcme(), rescheduling);
