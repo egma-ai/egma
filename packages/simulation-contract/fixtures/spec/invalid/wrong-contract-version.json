@@ -1,0 +1,32 @@
+{
+  "contract_version": 2,
+  "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWER",
+  "modality": "chat",
+  "connection": {
+    "type": "retell",
+    "config": {
+      "retellAgentId": "agent_2f6c9e8d7b5a4c3e2f1d0a9b8c"
+    },
+    "credentials": {
+      "apiKey": "fixture-not-a-real-secret-0000000000000000"
+    }
+  },
+  "persona": {
+    "traits": {
+      "personality": "A version this schema does not speak must be refused, never guessed at.",
+      "language": "en-US",
+      "voice": {
+        "provider": "cartesia",
+        "voiceId": "warm-alto-2",
+        "speed": 0.9
+      }
+    }
+  },
+  "scenario": {
+    "instructions": "Move a dental cleaning from Tuesday to Thursday."
+  },
+  "limits": {
+    "max_duration_seconds": 600,
+    "max_turns": 60
+  }
+}

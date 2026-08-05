@@ -1,0 +1,12 @@
+{
+  "contract_version": 1,
+  "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWER",
+  "events": [
+    {
+      "kind": "verdict",
+      "event_id": "evt-000401",
+      "at": "2026-08-05T09:02:10.551000Z",
+      "passed": true
+    }
+  ]
+}

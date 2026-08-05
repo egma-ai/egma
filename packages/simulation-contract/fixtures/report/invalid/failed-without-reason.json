@@ -1,0 +1,21 @@
+{
+  "contract_version": 1,
+  "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWES",
+  "events": [
+    {
+      "kind": "status",
+      "event_id": "evt-000201",
+      "at": "2026-08-05T09:01:02.339000Z",
+      "status": "failed",
+      "reason": null,
+      "facts": {
+        "ending": "error",
+        "started_at": "2026-08-05T09:00:12.000000Z",
+        "ended_at": "2026-08-05T09:01:02.339000Z",
+        "turn_count": 0,
+        "audio": null,
+        "provider_reference": null
+      }
+    }
+  ]
+}

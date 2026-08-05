@@ -1,0 +1,20 @@
+{
+  "contract_version": 1,
+  "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWER",
+  "events": [
+    {
+      "kind": "tool_call",
+      "event_id": "evt-000004",
+      "at": "2026-08-05T09:00:41.377000Z",
+      "name": "reschedule_appointment",
+      "arguments": "{\"appointment_id\":\"apt-88213\",\"from\":\"2026-08-11T15:00:00Z\",\"to\":\"2026-08-13T15:00:00Z\"}"
+    },
+    {
+      "kind": "tool_call",
+      "event_id": "evt-000005",
+      "at": "2026-08-05T09:00:44.020000Z",
+      "name": "send_confirmation_sms",
+      "arguments": null
+    }
+  ]
+}

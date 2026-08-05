@@ -1,0 +1,11 @@
+{
+  "name": "@egma/simulation-contract",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The versioned JSON contract between the control plane and the simulator: the spec and report schemas, with golden fixtures beside them.",
+  "devDependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1"
+  }
+}

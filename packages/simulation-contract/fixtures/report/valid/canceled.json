@@ -1,0 +1,21 @@
+{
+  "contract_version": 1,
+  "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWER",
+  "events": [
+    {
+      "kind": "status",
+      "event_id": "evt-000301",
+      "at": "2026-08-05T09:01:15.008000Z",
+      "status": "canceled",
+      "reason": "cancel directive received on the heartbeat and honored",
+      "facts": {
+        "ending": "canceled",
+        "started_at": "2026-08-05T09:00:00.000000Z",
+        "ended_at": "2026-08-05T09:01:15.008000Z",
+        "turn_count": 6,
+        "audio": null,
+        "provider_reference": "chat_5d1f9a3b7c"
+      }
+    }
+  ]
+}

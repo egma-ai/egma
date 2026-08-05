@@ -1,0 +1,20 @@
+{
+  "contract_version": 1,
+  "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWER",
+  "events": [
+    {
+      "kind": "timing",
+      "event_id": "evt-000006",
+      "at": "2026-08-05T09:00:01.214000Z",
+      "measure": "first_response_latency",
+      "milliseconds": 1214
+    },
+    {
+      "kind": "timing",
+      "event_id": "evt-000007",
+      "at": "2026-08-05T09:00:11.480000Z",
+      "measure": "turn_response_latency",
+      "milliseconds": 862.5
+    }
+  ]
+}
