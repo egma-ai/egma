@@ -10,6 +10,7 @@ import {
   ProjectOutsideOrganizationError,
   type TestNamingPersona,
 } from "./errors.ts";
+import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
 import { theProject, within } from "./within.ts";
@@ -812,30 +813,19 @@ export type TestPage = {
   readonly nextCursor: string | undefined;
 };
 
-const DEFAULT_PAGE_SIZE = 50;
-const LARGEST_PAGE_SIZE = 200;
-
 export async function listTests(
   auth: AuthContext,
-  page?: {
-    readonly limit?: number | undefined;
-    readonly cursor?: string | undefined;
-  },
+  page?: PageRequest,
 ): Promise<TestPage> {
   authorize(auth, "read", here(auth));
 
-  const limit = page?.limit ?? DEFAULT_PAGE_SIZE;
-  if (!Number.isInteger(limit) || limit < 1 || limit > LARGEST_PAGE_SIZE) {
-    throw new Error(`a page holds between 1 and ${LARGEST_PAGE_SIZE} tests`);
-  }
-  const cursor = page?.cursor;
-  if (cursor !== undefined && !isId("tst", cursor)) {
-    throw new Error(`"${cursor}" is not a test id, so it cannot be a cursor`);
-  }
-
+  const { limit, cursor } = pageWindow(page, {
+    singular: "test",
+    plural: "tests",
+    prefix: "tst",
+  });
   const olderThanCursor = cursor === undefined ? undefined : lt(test.id, cursor);
 
-  // One row beyond the page answers "is there more?" without a second query.
   const rows = await selectWithCurrentVersion()
     .where(
       within(
@@ -849,21 +839,19 @@ export async function listTests(
 
   // A page's personas come back in one read, not one per row: a page of two
   // hundred tests is two queries, the same as a page of one.
-  const wanted = rows.slice(0, limit);
+  const { items: wanted, nextCursor } = pageOf(rows, limit);
   const byVersion = await personasOfVersions(
     db(),
     wanted.map((row) => row.versionId),
   );
 
-  const items = wanted.map(({ content, ...rest }) => ({
-    ...rest,
-    ...contentFromRow(content, rest.versionId),
-    personas: byVersion.get(rest.versionId) ?? [],
-  }));
-
   return {
-    items,
-    nextCursor: rows.length > limit ? items[items.length - 1]?.id : undefined,
+    items: wanted.map(({ content, ...rest }) => ({
+      ...rest,
+      ...contentFromRow(content, rest.versionId),
+      personas: byVersion.get(rest.versionId) ?? [],
+    })),
+    nextCursor,
   };
 }
 

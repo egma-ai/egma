@@ -60,6 +60,10 @@ export const persona = pgTable(
       columns: [table.projectId, table.organizationId],
       foreignColumns: [project.id, project.organizationId],
     }).onDelete("cascade"),
+    // Looks redundant next to the primary key; it is the composite-foreign-key
+    // target that lets a simulation prove the persona it pins is its own
+    // project's.
+    unique("persona_id_project_id_unique").on(table.id, table.projectId),
     index("persona_organization_id_project_id_idx")
       .on(table.organizationId, table.projectId)
       .where(sql`${table.deletedAt} is null`),
@@ -90,6 +94,12 @@ export const personaVersion = pgTable(
     unique("persona_version_persona_id_version_unique").on(
       table.personaId,
       table.version,
+    ),
+    // The composite-foreign-key target that lets a simulation prove the
+    // version it pins really is a version of the persona it names.
+    unique("persona_version_id_persona_id_unique").on(
+      table.id,
+      table.personaId,
     ),
   ],
 );

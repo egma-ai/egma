@@ -159,4 +159,6 @@ export const POSTGRES_ERROR = {
   uniqueViolation: "23505",
   foreignKeyViolation: "23503",
   checkViolation: "23514",
+  /** What a lifecycle-guard trigger raises: `raise exception`'s own code. */
+  raiseException: "P0001",
 } as const;
