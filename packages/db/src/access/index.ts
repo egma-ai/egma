@@ -179,13 +179,18 @@ export {
 } from "./digital-humans.ts";
 
 export {
+  cloneTest,
   createTest,
+  deleteTest,
   editTest,
   getTest,
   getTestVersion,
+  listTests,
+  type DeletedTest,
   type NewTest,
   type Test,
   type TestChanges,
   type TestDigitalHuman,
+  type TestPage,
   type TestVersion,
 } from "./tests.ts";

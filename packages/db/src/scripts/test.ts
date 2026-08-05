@@ -5,10 +5,13 @@ import { eq } from "drizzle-orm";
 
 import { connect, disconnect, db } from "../client.ts";
 import {
+  cloneTest,
   createTest,
+  deleteTest,
   editTest,
   getTest,
   getTestVersion,
+  listTests,
 } from "../access/tests.ts";
 import type { AuthContext } from "../access/context.ts";
 import { projectsOf } from "../access/projects.ts";
@@ -32,6 +35,9 @@ import { organization, user } from "../schema/index.ts";
  *   node packages/db/dist/scripts/test.js get tst_…
  *   node packages/db/dist/scripts/test.js edit tst_… --scenario "…"
  *   node packages/db/dist/scripts/test.js get-version tstv_…
+ *   node packages/db/dist/scripts/test.js list [--limit 50] [--cursor tst_…]
+ *   node packages/db/dist/scripts/test.js clone tst_…
+ *   node packages/db/dist/scripts/test.js delete tst_…
  *
  * Naming no digital human takes the project's default. The development
  * project has none until one is set, so the first create either names one or
@@ -101,6 +107,9 @@ function usage(): never {
       "  test.js edit <tst_id> [--name <name>] [--description <text>]",
       "    [--scenario <text>] [--behavior <text> …] [--digital-human <dh_id> …]",
       "  test.js get-version <tstv_id>",
+      "  test.js list [--limit <n>] [--cursor <tst_id>]",
+      "  test.js clone <tst_id>",
+      "  test.js delete <tst_id>",
     ].join("\n"),
   );
   process.exit(1);
@@ -193,6 +202,25 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     console.log(JSON.stringify(found, null, 2));
+  } else if (command === "list") {
+    const { values } = parseArgs({
+      args: rest,
+      options: {
+        limit: { type: "string" },
+        cursor: { type: "string" },
+      },
+    });
+    const page = await listTests(auth, {
+      limit: values.limit === undefined ? undefined : Number(values.limit),
+      cursor: values.cursor,
+    });
+    console.log(JSON.stringify(page, null, 2));
+  } else if (command === "clone") {
+    const id = requiredId(rest);
+    printTest(id, await cloneTest(auth, id));
+  } else if (command === "delete") {
+    const id = requiredId(rest);
+    printTest(id, await deleteTest(auth, id));
   } else {
     usage();
   }

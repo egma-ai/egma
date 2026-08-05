@@ -1,5 +1,5 @@
 import { isId, newId } from "@egma/ids";
-import { and, asc, eq, inArray, isNull, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, type SQL } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
 import { digitalHuman } from "../schema/digital-humans.ts";
@@ -494,18 +494,24 @@ export async function createTest(
 }
 
 /**
- * The version's digital humans, in the order they were authored.
+ * The digital humans of several versions at once, keyed by version and each
+ * list in the order it was authored — one read for a whole page of tests
+ * rather than one read per row.
  *
- * The `where` starts from a bare `eq` rather than `within`: every caller hands
- * it a version id that has already come off a tenancy-checked row, so the
+ * The `where` starts from a bare `inArray` rather than `within`: every caller
+ * hands it version ids that have already come off tenancy-checked rows, so the
  * predicate cannot reach further than that check already did.
  */
-async function digitalHumansOf(
+async function digitalHumansOfEach(
   on: Queryable,
-  versionId: string,
-): Promise<readonly TestDigitalHuman[]> {
-  return on
+  versionIds: readonly string[],
+): Promise<Map<string, TestDigitalHuman[]>> {
+  const named = new Map<string, TestDigitalHuman[]>();
+  if (versionIds.length === 0) return named;
+
+  const rows = await on
     .select({
+      versionId: testVersionDigitalHuman.testVersionId,
       id: digitalHuman.id,
       name: digitalHuman.name,
       deletedAt: digitalHuman.deletedAt,
@@ -515,8 +521,26 @@ async function digitalHumansOf(
       digitalHuman,
       eq(testVersionDigitalHuman.digitalHumanId, digitalHuman.id),
     )
-    .where(eq(testVersionDigitalHuman.testVersionId, versionId))
-    .orderBy(asc(testVersionDigitalHuman.position));
+    .where(inArray(testVersionDigitalHuman.testVersionId, [...versionIds]))
+    .orderBy(
+      asc(testVersionDigitalHuman.testVersionId),
+      asc(testVersionDigitalHuman.position),
+    );
+
+  for (const { versionId, ...human } of rows) {
+    const already = named.get(versionId);
+    if (already === undefined) named.set(versionId, [human]);
+    else already.push(human);
+  }
+  return named;
+}
+
+/** The one version's digital humans, in the order they were authored. */
+async function digitalHumansOf(
+  on: Queryable,
+  versionId: string,
+): Promise<readonly TestDigitalHuman[]> {
+  return (await digitalHumansOfEach(on, [versionId])).get(versionId) ?? [];
 }
 
 /**
@@ -747,4 +771,180 @@ export async function getTestVersion(
     ...contentFromRow(content, row.id),
     digitalHumans: await digitalHumansOf(db(), row.id),
   };
+}
+
+/**
+ * One page of the tests the caller can reach — the acting project's, or the
+ * whole customer's for a credential acting in none — and where the next page
+ * starts.
+ *
+ * The ids are Crockford base32 of UUIDv7 under `COLLATE "C"`, so ordering by
+ * id *is* ordering by mint time and the last id of a page is the whole cursor
+ * — no second sort column, no offset to drift when rows arrive mid-scroll.
+ * Newest first, because the test somebody is looking for is usually the one
+ * they just wrote.
+ */
+export type TestPage = {
+  readonly items: readonly Test[];
+  /** Hand back as `cursor` to continue; absent on the last page. */
+  readonly nextCursor: string | undefined;
+};
+
+const DEFAULT_PAGE_SIZE = 50;
+const LARGEST_PAGE_SIZE = 200;
+
+export async function listTests(
+  auth: AuthContext,
+  page?: {
+    readonly limit?: number | undefined;
+    readonly cursor?: string | undefined;
+  },
+): Promise<TestPage> {
+  authorize(auth, "read", here(auth));
+
+  const limit = page?.limit ?? DEFAULT_PAGE_SIZE;
+  if (!Number.isInteger(limit) || limit < 1 || limit > LARGEST_PAGE_SIZE) {
+    throw new Error(`a page holds between 1 and ${LARGEST_PAGE_SIZE} tests`);
+  }
+  const cursor = page?.cursor;
+  if (cursor !== undefined && !isId("tst", cursor)) {
+    throw new Error(`"${cursor}" is not a test id, so it cannot be a cursor`);
+  }
+
+  const olderThanCursor = cursor === undefined ? undefined : lt(test.id, cursor);
+
+  // One row beyond the page answers "is there more?" without a second query.
+  const rows = await selectWithCurrentVersion()
+    .where(
+      within(
+        auth,
+        test,
+        and(notDeleted, inActingProject(auth), olderThanCursor),
+      ),
+    )
+    .orderBy(desc(test.id))
+    .limit(limit + 1);
+
+  // A page's digital humans come back in one read, not one per row: a page of
+  // two hundred tests is two queries, the same as a page of one.
+  const wanted = rows.slice(0, limit);
+  const named = await digitalHumansOfEach(
+    db(),
+    wanted.map((row) => row.versionId),
+  );
+
+  const items = wanted.map(({ content, ...rest }) => ({
+    ...rest,
+    ...contentFromRow(content, rest.versionId),
+    digitalHumans: named.get(rest.versionId) ?? [],
+  }));
+
+  return {
+    items,
+    nextCursor: rows.length > limit ? items[items.length - 1]?.id : undefined,
+  };
+}
+
+/**
+ * A new test whose version 1 carries the source's current content: the same
+ * scenario, the same expected behaviors, the same digital humans in the same
+ * order, under the same name — there is no per-project name uniqueness, so the
+ * name copies verbatim exactly as the digital-human factory copies it.
+ *
+ * A clone is a create with the retyping saved: fresh `tst_` and `tstv_` ids,
+ * version numbering starting over at 1, and no link back — the source's history
+ * is the source's, and nothing of it comes along. The source is read through
+ * the same seam as `getTest`, so a clone can only be taken of what the caller
+ * could have fetched: same customer, same acting project, not deleted.
+ *
+ * The digital humans are handed on exactly as the source names them, and
+ * `createTest` is the only thing that judges them — one rule about what a
+ * version may name, in one place. A source naming a deleted digital human
+ * would therefore be refused rather than quietly cloned without them, or
+ * quietly given the project's default; neither silence would be a copy. That
+ * refusal is not a state a caller can reach: deleting a digital human is
+ * refused while a live test's current version names them, and a test that
+ * cannot be fetched cannot be cloned.
+ *
+ * Authorization is layered on purpose, not by accident of delegation. The
+ * leading check refuses a viewer before anything is read, and a credential
+ * acting in no project is refused right after it, still before the read — the
+ * same stance as create and delete, and it keeps `undefined` meaning invisible
+ * rather than refused.
+ */
+export async function cloneTest(
+  auth: AuthContext,
+  id: string,
+): Promise<Test | undefined> {
+  authorize(auth, "author_definitions", here(auth));
+
+  if (auth.projectId === undefined) {
+    throw new Error(
+      "a clone lands in the acting project, and this credential is for the whole organization and acting in none",
+    );
+  }
+
+  const source = await getTest(auth, id);
+  if (source === undefined) return undefined;
+
+  return createTest(auth, {
+    name: source.name,
+    description: source.description ?? undefined,
+    scenario: source.scenario,
+    expectedBehaviors: source.expectedBehaviors,
+    digitalHumanIds: source.digitalHumans.map((human) => human.id),
+  });
+}
+
+export type DeletedTest = {
+  readonly id: string;
+  readonly projectId: string;
+  readonly name: string;
+  readonly deletedAt: Date;
+};
+
+/**
+ * The soft-delete marker, and only the marker. The test vanishes from lists and
+ * fetches at once; the version rows stay exactly where they are, because a run
+ * that pinned one must stay interpretable for as long as the run itself is
+ * kept. Sweeping orphaned versions is the deletion worker's job, not this
+ * function's.
+ *
+ * Nothing blocks this, ever. Deleting a digital human is refused while a live
+ * test's current version names them, because that test would silently lose a
+ * caller; a test has no dependant of its own that could lose anything. A suite
+ * selects tests and a run executes them, and neither is a reason to keep a test
+ * somebody has abandoned, because both keep what they need by pinning versions
+ * that outlive it.
+ *
+ * Like create, this refuses a credential acting in no project. An edit lands on
+ * a row that already names its own project; a delete decides the test should
+ * stop appearing in one, and emptying a project is an act taken from inside it
+ * — the digital-human factory's stance, held here.
+ */
+export async function deleteTest(
+  auth: AuthContext,
+  id: string,
+): Promise<DeletedTest | undefined> {
+  authorize(auth, "author_definitions", here(auth));
+
+  if (auth.projectId === undefined) {
+    throw new Error(
+      "deleting a test happens inside its project, and this credential is for the whole organization and acting in none",
+    );
+  }
+
+  const deletedAt = new Date();
+  const [row] = await db()
+    .update(test)
+    .set({ deletedAt, updatedAt: deletedAt })
+    .where(theTest(auth, id))
+    .returning({
+      id: test.id,
+      projectId: test.projectId,
+      name: test.name,
+    });
+
+  if (row === undefined) return undefined;
+  return { ...row, deletedAt };
 }
