@@ -1,0 +1,330 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:egma:simulation-contract:report:v1",
+  "title": "Simulation report",
+  "description": "The report direction of the simulation contract: what the simulator tells the control plane about one simulation, as it happens. One document carries one or more events, persisted whole to the simulator's write-ahead log before sending, so delivery is at-least-once and the control plane dedups on event ids. Every object in this schema is closed and no property is credential-shaped: a report carrying the spec's credential material cannot validate. That is deliberate, and the contract's test suites hold this schema to it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "simulation_id", "events"],
+  "properties": {
+    "contract_version": {
+      "description": "Which version of the simulation contract this document speaks. The control plane refuses a report whose version it does not implement.",
+      "type": "integer",
+      "const": 1
+    },
+    "simulation_id": {
+      "description": "The simulation this report is about, echoed verbatim from the spec that was claimed. Opaque to the simulator: never parsed, never minted, never rewritten.",
+      "type": "string",
+      "minLength": 1
+    },
+    "events": {
+      "description": "What happened, in the order the simulator observed it. Events are reported as they happen; a resent document replays the same events byte-identically, ids and timestamps included.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/event" }
+    }
+  },
+  "$defs": {
+    "moment": {
+      "description": "An instant, RFC 3339 with a UTC offset, stamped when the moment happened and replayed byte-identically on every resend — never re-derived at send time, because a drifted timestamp defeats the store's only duplicate guard.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "event_id": {
+      "description": "The event's identity, minted by the simulator at the moment the event happens, unique within the simulation, and stable across resends. The control plane dedups on it, which is what lets delivery be at-least-once without ever double-writing a fact.",
+      "type": "string",
+      "minLength": 1
+    },
+    "event": {
+      "description": "One observed fact about the simulation, written once, complete — there is no patch-after-the-fact in this direction. The status transitions come in four shapes, one per status the simulator may report, so that what each transition must carry is spelled out rather than implied: `claimed` never appears among them, because claiming is the control plane's own act, stamped when it answers the claim.",
+      "oneOf": [
+        { "$ref": "#/$defs/running_event" },
+        { "$ref": "#/$defs/completed_event" },
+        { "$ref": "#/$defs/failed_event" },
+        { "$ref": "#/$defs/canceled_event" },
+        { "$ref": "#/$defs/turn_event" },
+        { "$ref": "#/$defs/tool_call_event" },
+        { "$ref": "#/$defs/timing_event" }
+      ]
+    },
+    "running_event": {
+      "description": "The simulator began conducting the simulation. Running carries no terminal facts — this object being closed is what says so.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "event_id", "at", "status", "reason"],
+      "properties": {
+        "kind": { "const": "status" },
+        "event_id": { "$ref": "#/$defs/event_id" },
+        "at": { "$ref": "#/$defs/moment" },
+        "status": { "const": "running" },
+        "reason": {
+          "description": "Why, as prose for a person reading the record, or null where beginning speaks for itself.",
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "completed_event": {
+      "description": "The simulation ran and ended. The terminal facts arrive on the transition, atomically — there is no moment where a simulation is terminal but factless.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "event_id", "at", "status", "reason", "facts"],
+      "properties": {
+        "kind": { "const": "status" },
+        "event_id": { "$ref": "#/$defs/event_id" },
+        "at": { "$ref": "#/$defs/moment" },
+        "status": { "const": "completed" },
+        "reason": {
+          "description": "Why, as prose for a person reading the record, or null where the facts speak for themselves.",
+          "type": ["string", "null"]
+        },
+        "facts": { "$ref": "#/$defs/completed_facts" }
+      }
+    },
+    "failed_event": {
+      "description": "The simulator could not honestly finish the simulation. Failed is about conducting, never about the agent's conduct — an agent that behaved badly still completes, and the graders judge it later.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "event_id", "at", "status", "reason", "facts"],
+      "properties": {
+        "kind": { "const": "status" },
+        "event_id": { "$ref": "#/$defs/event_id" },
+        "at": { "$ref": "#/$defs/moment" },
+        "status": { "const": "failed" },
+        "reason": {
+          "description": "Why it failed, as prose for a person reading the record. Never null here: a failure with no reason is a record nobody can act on.",
+          "type": "string",
+          "minLength": 1
+        },
+        "facts": { "$ref": "#/$defs/failed_facts" }
+      }
+    },
+    "canceled_event": {
+      "description": "A cancel directive stopped the simulation. The directive travels on a heartbeat response; this transition is the simulator honoring it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "event_id", "at", "status", "reason", "facts"],
+      "properties": {
+        "kind": { "const": "status" },
+        "event_id": { "$ref": "#/$defs/event_id" },
+        "at": { "$ref": "#/$defs/moment" },
+        "status": { "const": "canceled" },
+        "reason": {
+          "description": "Why, as prose for a person reading the record — where the cancel came from, if the directive said — or null.",
+          "type": ["string", "null"]
+        },
+        "facts": { "$ref": "#/$defs/canceled_facts" }
+      }
+    },
+    "completed_facts": {
+      "description": "The terminal facts of a simulation that ran and ended. Written once, never edited afterwards: everything needed to read the simulation later without asking the connection — which is editable — what it looked like at the time. A completed simulation ended deliberately, so its endings are the deliberate ones.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ending",
+        "started_at",
+        "ended_at",
+        "turn_count",
+        "audio",
+        "provider_reference"
+      ],
+      "properties": {
+        "ending": {
+          "description": "How the simulation ended. `persona_concluded`: the persona decided the scenario was done and ended it. `agent_ended`: the agent ended the exchange. `limit_reached`: a limit from the spec tripped — deliberate, and never graded as the agent failing.",
+          "type": "string",
+          "enum": ["persona_concluded", "agent_ended", "limit_reached"]
+        },
+        "started_at": {
+          "description": "When the simulator began conducting this simulation — the moment the `running` transition reported.",
+          "$ref": "#/$defs/moment"
+        },
+        "ended_at": {
+          "description": "When it was over. Durations are this minus started_at; nothing re-measures them later.",
+          "$ref": "#/$defs/moment"
+        },
+        "turn_count": {
+          "description": "How many transcript turns the simulation reached, both speakers counted — the same turns reported as turn events.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "audio": {
+          "description": "The measured audio band and the recording, for voice; null for chat, where there is no audio to measure.",
+          "oneOf": [{ "$ref": "#/$defs/audio_band" }, { "type": "null" }]
+        },
+        "provider_reference": { "$ref": "#/$defs/provider_reference" }
+      }
+    },
+    "failed_facts": {
+      "description": "The terminal facts of a simulation the simulator could not honestly finish. Its endings all mean 'the test never ran' or 'the test broke' — and none of them is ever graded as the agent failing.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ending",
+        "started_at",
+        "ended_at",
+        "turn_count",
+        "audio",
+        "provider_reference"
+      ],
+      "properties": {
+        "ending": {
+          "description": "How the simulation ended. `agent_never_joined`: the way in opened but no agent turned up, so nothing was tested. `not_answered`: the simulator reached out and nothing picked up, so nothing was tested. `error`: the simulator hit a fault it could not conduct through.",
+          "type": "string",
+          "enum": ["agent_never_joined", "not_answered", "error"]
+        },
+        "started_at": {
+          "description": "When the simulator began conducting this simulation — the moment the `running` transition reported.",
+          "$ref": "#/$defs/moment"
+        },
+        "ended_at": {
+          "description": "When it was over. Durations are this minus started_at; nothing re-measures them later.",
+          "$ref": "#/$defs/moment"
+        },
+        "turn_count": {
+          "description": "How many transcript turns the simulation reached, both speakers counted — the same turns reported as turn events.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "audio": {
+          "description": "The measured audio band and the recording, for voice; null for chat, where there is no audio to measure.",
+          "oneOf": [{ "$ref": "#/$defs/audio_band" }, { "type": "null" }]
+        },
+        "provider_reference": { "$ref": "#/$defs/provider_reference" }
+      }
+    },
+    "canceled_facts": {
+      "description": "The terminal facts of a simulation a cancel directive stopped. The one ending says so; everything else is what had happened by then.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ending",
+        "started_at",
+        "ended_at",
+        "turn_count",
+        "audio",
+        "provider_reference"
+      ],
+      "properties": {
+        "ending": {
+          "description": "How the simulation ended: a cancel directive stopped it.",
+          "type": "string",
+          "enum": ["canceled"]
+        },
+        "started_at": {
+          "description": "When the simulator began conducting this simulation — the moment the `running` transition reported.",
+          "$ref": "#/$defs/moment"
+        },
+        "ended_at": {
+          "description": "When it was over. Durations are this minus started_at; nothing re-measures them later.",
+          "$ref": "#/$defs/moment"
+        },
+        "turn_count": {
+          "description": "How many transcript turns the simulation reached, both speakers counted — the same turns reported as turn events.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "audio": {
+          "description": "The measured audio band and the recording, for voice; null for chat, where there is no audio to measure.",
+          "oneOf": [{ "$ref": "#/$defs/audio_band" }, { "type": "null" }]
+        },
+        "provider_reference": { "$ref": "#/$defs/provider_reference" }
+      }
+    },
+    "provider_reference": {
+      "description": "The platform's own identifier for this exchange on the connection's side — a Retell chat id, a telephony provider's id for the dialed leg. The only join between egma's record and the agent's own telemetry, since no trace context crosses an audio channel. Null when the plug has none to offer.",
+      "type": ["string", "null"]
+    },
+    "audio_band": {
+      "description": "What the audio actually was, measured at execution and frozen here. The connection declares a band in its config, but connections are editable and unversioned — so the measured band lives on the simulation, or a later edit would silently rewrite what old results meant.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["measured_sample_rate_hz", "recording"],
+      "properties": {
+        "measured_sample_rate_hz": {
+          "description": "The sample rate the simulator actually heard, negotiated or measured, never copied from configuration. 8 kHz telephony and 48 kHz WebRTC are different units: the narrow band strips what audio graders read and inflates every latency number, so scores across bands are not comparable.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "recording": {
+          "description": "An opaque reference to the dual-channel recording the simulator wrote to the blob store — one side per channel, so each speaker can be heard alone when a transcript looks wrong. Resolved by the control plane; never a URL, never carries how to fetch it.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "turn_event": {
+      "description": "One transcript turn, written once, complete, when the turn is over.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "event_id",
+        "speaker",
+        "text",
+        "started_at",
+        "ended_at"
+      ],
+      "properties": {
+        "kind": { "const": "turn" },
+        "event_id": { "$ref": "#/$defs/event_id" },
+        "speaker": {
+          "description": "Whose turn it was: `human` is the persona's side of the transcript, `agent` is the agent under test. The transcript's two labels, exactly.",
+          "type": "string",
+          "enum": ["human", "agent"]
+        },
+        "text": {
+          "description": "What was said, as text — spoken and transcribed on voice, sent verbatim on chat. May be empty for a turn that carried no words.",
+          "type": "string"
+        },
+        "started_at": {
+          "description": "When the turn began.",
+          "$ref": "#/$defs/moment"
+        },
+        "ended_at": {
+          "description": "When the turn finished, or null for a turn that was one instant — a chat message has no duration.",
+          "oneOf": [{ "$ref": "#/$defs/moment" }, { "type": "null" }]
+        }
+      }
+    },
+    "tool_call_event": {
+      "description": "The agent under test called a tool, as observed from egma's side of the connection — reported where the platform exposes it, which is how the outcome gets populated. Never the persona's doing: the persona has no tools.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "event_id", "at", "name", "arguments"],
+      "properties": {
+        "kind": { "const": "tool_call" },
+        "event_id": { "$ref": "#/$defs/event_id" },
+        "at": { "$ref": "#/$defs/moment" },
+        "name": {
+          "description": "The tool's name, exactly as the platform reported it.",
+          "type": "string",
+          "minLength": 1
+        },
+        "arguments": {
+          "description": "The arguments, JSON-encoded, exactly as observed — or null where the platform reports the invocation but not its arguments. A string deliberately: it keeps every object in this schema closed, and the observed bytes are the fact worth keeping.",
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "timing_event": {
+      "description": "One measurement. A metric measures and a grader judges; nothing in this direction is a verdict.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "event_id", "at", "measure", "milliseconds"],
+      "properties": {
+        "kind": { "const": "timing" },
+        "event_id": { "$ref": "#/$defs/event_id" },
+        "at": { "$ref": "#/$defs/moment" },
+        "measure": {
+          "description": "What was measured, named in snake_case — `first_response_latency`, `turn_response_latency`. An open vocabulary: measures are emitted for every simulation whether or not anyone asked, and new ones join without a contract change.",
+          "type": "string",
+          "minLength": 1
+        },
+        "milliseconds": {
+          "description": "The measurement, in milliseconds.",
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

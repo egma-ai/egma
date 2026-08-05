@@ -92,6 +92,10 @@ packages/db     The data-access module: schema, migrations, and every read
                 and write there is.
 packages/ids    The identifier generator.
 packages/lint   Build-time rules that hold the boundaries in place.
+packages/simulation-contract
+                The versioned JSON contract between the control plane and the
+                simulator: a schema per direction, golden fixtures beside
+                them, and the suite that holds both to the fixtures.
 ```
 
 The two processes answer on **one origin**. The web application proxies the

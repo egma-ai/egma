@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:egma:simulation-contract:spec:v1",
+  "title": "Simulation spec",
+  "description": "The spec direction of the simulation contract: what the control plane hands the simulator when a queued simulation is claimed. The spec is fully flattened — the simulator receives no identifiers to resolve, no database to ask, and everything it needs to conduct one simulation from birth to a terminal report. This is the only direction credential material ever travels; the report schema (urn:egma:simulation-contract:report:v1) structurally forbids it coming back.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "simulation_id",
+    "modality",
+    "connection",
+    "persona",
+    "scenario",
+    "limits"
+  ],
+  "properties": {
+    "contract_version": {
+      "description": "Which version of the simulation contract this document speaks. A simulator refuses a spec whose version it does not implement; it never guesses at fields it does not know.",
+      "type": "integer",
+      "const": 1
+    },
+    "simulation_id": {
+      "description": "The simulation this spec conducts, echoed verbatim on every report about it. Opaque to the simulator: never parsed, never minted, never rewritten.",
+      "type": "string",
+      "minLength": 1
+    },
+    "modality": {
+      "description": "Which layer is under test. Chat exercises the agent's harness — prompt, reasoning, tools; voice exercises the harness plus the speech stack. The modality selects the pipeline legs; the persona brain is the same for both.",
+      "type": "string",
+      "enum": ["chat", "voice"]
+    },
+    "connection": {
+      "description": "How the simulator reaches the agent under test, resolved by the control plane from the connection the run named. The simulator selects its platform plug by `type` and hands the plug the config and credentials whole.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "config", "credentials"],
+      "properties": {
+        "type": {
+          "description": "The connection type, from the platform's open, growing list — `retell`, `phone`, and whatever lands next. Deliberately not an enum here: the list grows one plug at a time, and a simulator holding no plug for a type refuses the claim at runtime rather than this schema refusing the document.",
+          "type": "string",
+          "minLength": 1
+        },
+        "config": {
+          "description": "The non-secret reach configuration, exactly as stored on the connection — what to reach, never how to prove. Its keys belong to the plug for `type`; this schema does not know them.",
+          "type": "object"
+        },
+        "credentials": {
+          "description": "The resolved secret material for this connection, unsealed by the control plane for exactly this hand-off, or null for types where the customer supplies no secret. The simulator holds it in memory for the simulation, hands it only to the plug, and never logs, persists, or reports it. No report document has anywhere to put it.",
+          "oneOf": [{ "type": "object" }, { "type": "null" }]
+        }
+      }
+    },
+    "persona": {
+      "description": "Who does the talking on the human side of the transcript.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["traits"],
+      "properties": {
+        "traits": {
+          "description": "The persona's authored traits, exactly as saved on the version the run pinned — today personality, language, and the concrete voice. Passed through opaquely: what a persona is made of is authoring's business, and the simulator composes these with the scenario instructions into the persona brain's system prompt.",
+          "type": "object"
+        }
+      }
+    },
+    "scenario": {
+      "description": "What the persona wants on this occasion — the situation, from the test's own content. The persona says who; the scenario says why they are here today.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instructions"],
+      "properties": {
+        "instructions": {
+          "description": "The scenario as instructions to the persona brain: the goal, the circumstances, and anything the persona knows going in.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "limits": {
+      "description": "The walls around one simulation. A limit tripping ends the simulation deliberately, reported with ending `limit_reached` — which is never the agent failing, and never graded as if it were.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_duration_seconds", "max_turns"],
+      "properties": {
+        "max_duration_seconds": {
+          "description": "The most wall-clock seconds the simulation may run, measured from when the simulator begins conducting it.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_turns": {
+          "description": "The most transcript turns the simulation may reach, counting both speakers.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

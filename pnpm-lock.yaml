@@ -98,6 +98,15 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  packages/simulation-contract:
+    devDependencies:
+      ajv:
+        specifier: ^8.17.1
+        version: 8.20.0
+      ajv-formats:
+        specifier: ^3.0.1
+        version: 3.0.1(ajv@8.20.0)
+
 packages:
 
   '@better-auth/core@1.6.25':
