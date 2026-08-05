@@ -75,22 +75,65 @@ const validators = {
 } as const;
 
 /**
- * Why each deliberately invalid fixture is invalid, as a fragment the
- * validation errors must contain. Every invalid fixture must have an entry:
- * a fixture rejected for an unintended reason — a typo, a stray field — would
- * otherwise pass as "rejected" while testing nothing.
+ * Why each deliberately invalid fixture is invalid: the exact place Ajv must
+ * point at, and the keyword that must fail there. A substring check over the
+ * pooled error text would be looser than it reads — under a oneOf, Ajv
+ * reports every branch's complaints, and a fragment can match a branch the
+ * fixture was never aimed at. The map is also the inventory: a fixture
+ * without an entry, or an entry whose fixture is gone, fails the suite.
  */
-const EXPECTED_REJECTION: Record<string, string> = {
-  "spec/limits-missing.json": "limits",
-  "spec/modality-unknown.json": "modality",
-  "spec/unknown-field.json": "must NOT have additional properties",
-  "spec/wrong-contract-version.json": "contract_version",
-  "report/completed-claiming-never-ran.json": "ending",
-  "report/completed-without-facts.json": "facts",
-  "report/credentials-echoed.json": "must NOT have additional properties",
-  "report/failed-without-reason.json": "reason",
-  "report/running-with-facts.json": "must NOT have additional properties",
-  "report/unknown-event-kind.json": "kind",
+type Rejection = {
+  /** The instance path the decisive error sits at. */
+  readonly at: string;
+  /** The JSON Schema keyword that must have failed there. */
+  readonly keyword: string;
+  /** The missing or offending property, where the keyword names one. */
+  readonly property?: string;
+};
+
+const EXPECTED_REJECTION: Record<string, Rejection> = {
+  "spec/limits-missing.json": {
+    at: "",
+    keyword: "required",
+    property: "limits",
+  },
+  "spec/modality-unknown.json": { at: "/modality", keyword: "enum" },
+  "spec/unknown-field.json": {
+    at: "",
+    keyword: "additionalProperties",
+    property: "agent_id",
+  },
+  "spec/wrong-contract-version.json": {
+    at: "/contract_version",
+    keyword: "const",
+  },
+  "report/completed-claiming-never-ran.json": {
+    at: "/events/0/facts/ending",
+    keyword: "enum",
+  },
+  "report/completed-without-facts.json": {
+    at: "/events/0",
+    keyword: "required",
+    property: "facts",
+  },
+  "report/credentials-echoed.json": {
+    at: "",
+    keyword: "additionalProperties",
+    property: "connection",
+  },
+  "report/failed-without-reason.json": {
+    at: "/events/0/reason",
+    keyword: "type",
+  },
+  "report/running-with-facts.json": {
+    at: "/events/0",
+    keyword: "additionalProperties",
+    property: "facts",
+  },
+  "report/unknown-event-kind.json": {
+    at: "/events/0/kind",
+    keyword: "const",
+  },
 };
 
 describe("the two schemas, as one contract", () => {
@@ -163,21 +206,40 @@ for (const direction of ["spec", "report"] as const) {
       }
     });
 
-    it("rejects every deliberately invalid fixture, for the reason it is wrong", async () => {
+    it("rejects every deliberately invalid fixture, at the place it is wrong", async () => {
       const all = await fixturesUnder(direction, "invalid");
-      expect(all.length).toBeGreaterThan(0);
+
+      // The pin holds both ways: a fixture with no entry fails here, and so
+      // does an entry whose fixture was deleted — the invalid coverage can
+      // no more silently shrink than the valid coverage can.
+      const expected = Object.keys(EXPECTED_REJECTION)
+        .filter((key) => key.startsWith(`${direction}/`))
+        .sort();
+      expect(all.map((fixture) => `${direction}/${fixture.name}`)).toEqual(
+        expected,
+      );
 
       for (const fixture of all) {
         const validate = validators[direction];
-        const answer = validate(fixture.document);
-        expect(answer, `${fixture.name} was accepted`).toBe(false);
+        expect(validate(fixture.document), `${fixture.name} was accepted`).toBe(
+          false,
+        );
 
-        const expected = EXPECTED_REJECTION[`${direction}/${fixture.name}`];
+        const rejection = EXPECTED_REJECTION[`${direction}/${fixture.name}`];
+        if (rejection === undefined) continue; // unreachable: the sets matched
+        const decisive = (validate.errors ?? []).some(
+          (error) =>
+            error.instancePath === rejection.at &&
+            error.keyword === rejection.keyword &&
+            (rejection.property === undefined ||
+              error.params.missingProperty === rejection.property ||
+              error.params.additionalProperty === rejection.property),
+        );
         expect(
-          expected,
-          `${fixture.name} has no entry in EXPECTED_REJECTION saying why it is invalid`,
-        ).toBeDefined();
-        expect(ajv.errorsText(validate.errors)).toContain(expected);
+          decisive,
+          `${fixture.name}: no ${rejection.keyword} error at "${rejection.at}"; ` +
+            `the errors were: ${ajv.errorsText(validate.errors)}`,
+        ).toBe(true);
       }
     });
   });

@@ -13,7 +13,7 @@
   },
   "persona": {
     "traits": {
-      "personality": "A version this schema does not speak must be refused, never guessed at.",
+      "personality": "Margaret, 68, retired schoolteacher. Polite but easily flustered; asks for things to be repeated and apologises for it.",
       "language": "en-US",
       "voice": {
         "provider": "cartesia",
