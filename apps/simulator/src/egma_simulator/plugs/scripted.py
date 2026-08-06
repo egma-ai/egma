@@ -1,0 +1,127 @@
+"""The scripted counterpart: CI's platform, and honestly the first plug.
+
+A fake platform whose agent answers from a script, so a whole simulation
+conducts with no account, no network, and no model on the other side —
+deterministically. It is not a shortcut around the seam: it implements the
+same plug surface a real platform does, which is what makes the acceptance
+suite's walks representative.
+
+Its config keys, like every plug's, are its own:
+
+- ``greeting`` (string, optional) — spoken by the agent the moment the
+  exchange opens. Absent: the persona speaks first.
+- ``replies`` (list of strings, default empty) — the agent's answers, in
+  order, one per persona turn.
+- ``ends_after_replies`` (bool, default false) — when true, the last
+  scripted reply ends the exchange (with no replies at all, the exchange
+  ends silently on the first persona turn). When false, a spent script
+  falls back to a fixed holding line forever.
+- ``turn_seconds`` (number ≥ 0, default 0) — how long the agent takes to
+  answer, the way a real platform takes time. What makes mid-exchange
+  cancellation testable.
+- ``provider_reference`` (string, optional) — offered as the platform's
+  own identifier for the exchange, the way a real plug offers a chat id.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+
+from . import AgentReply, PlugError
+
+FALLBACK_REPLY = "Is there anything else I can help you with?"
+"""What the agent says once its script is spent but the exchange holds."""
+
+_KNOWN_KEYS = {
+    "greeting",
+    "replies",
+    "ends_after_replies",
+    "turn_seconds",
+    "provider_reference",
+}
+
+
+class ScriptedCounterpart:
+    """The scripted counterpart, one exchange per instance."""
+
+    def __init__(
+        self, *, modality: str, config: dict[str, Any], credentials: object
+    ) -> None:
+        # The scripted counterpart takes no credentials; anything handed
+        # over is ignored unread, the way a sentinel-planting test expects.
+        del credentials
+
+        if modality != "chat":
+            raise PlugError(
+                f"the scripted counterpart speaks chat only; a {modality!r} "
+                "simulation needs a plug with the matching legs"
+            )
+
+        unknown = set(config) - _KNOWN_KEYS
+        if unknown:
+            raise PlugError(
+                "the scripted counterpart does not know config "
+                f"key(s) {sorted(unknown)}; it knows {sorted(_KNOWN_KEYS)}"
+            )
+
+        greeting = config.get("greeting")
+        if greeting is not None and not isinstance(greeting, str):
+            raise PlugError("scripted config: greeting must be a string")
+
+        replies = config.get("replies", [])
+        if not isinstance(replies, list) or not all(
+            isinstance(reply, str) for reply in replies
+        ):
+            raise PlugError("scripted config: replies must be a list of strings")
+
+        ends_after_replies = config.get("ends_after_replies", False)
+        if not isinstance(ends_after_replies, bool):
+            raise PlugError("scripted config: ends_after_replies must be a bool")
+
+        turn_seconds = config.get("turn_seconds", 0)
+        if isinstance(turn_seconds, bool) or not isinstance(
+            turn_seconds, int | float
+        ):
+            raise PlugError("scripted config: turn_seconds must be a number")
+        if turn_seconds < 0:
+            raise PlugError("scripted config: turn_seconds must be zero or more")
+
+        reference = config.get("provider_reference")
+        if reference is not None and not isinstance(reference, str):
+            raise PlugError("scripted config: provider_reference must be a string")
+
+        self._greeting = greeting
+        self._replies = list(replies)
+        self._ends_after_replies = ends_after_replies
+        self._turn_seconds = float(turn_seconds)
+        self._provider_reference = reference
+        self._delivered = 0
+
+    @property
+    def provider_reference(self) -> str | None:
+        return self._provider_reference
+
+    async def open(self) -> str | None:
+        return self._greeting
+
+    async def deliver(self, text: str) -> AgentReply:
+        del text  # A script answers on cue, not on content.
+        if self._turn_seconds:
+            await asyncio.sleep(self._turn_seconds)
+
+        position = self._delivered
+        self._delivered += 1
+
+        if position < len(self._replies):
+            is_last = position == len(self._replies) - 1
+            return AgentReply(
+                text=self._replies[position],
+                ended=self._ends_after_replies and is_last,
+            )
+        if self._ends_after_replies:
+            return AgentReply(text=None, ended=True)
+        return AgentReply(text=FALLBACK_REPLY, ended=False)
+
+    async def close(self) -> None:
+        return None

@@ -1,0 +1,41 @@
+[project]
+name = "egma-simulator"
+version = "0.0.0"
+description = "The simulator: claims simulation specs from the control plane, conducts each one as a persona conversing with the agent under test through a platform plug, and reports what happened over the simulation contract."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "aiohttp>=3.13.3",
+    "jsonschema>=4.25.1",
+    "rfc3339-validator>=0.1.4",
+]
+
+[project.scripts]
+egma-simulator = "egma_simulator.__main__:main"
+egma-workbench = "egma_simulator.workbench.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
+    "pytest-timeout>=2.4.0",
+    "ruff>=0.14.5",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.0,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# The acceptance suite spawns real processes and real sockets; anything
+# slower than this is a hang, not a test.
+timeout = 120
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]

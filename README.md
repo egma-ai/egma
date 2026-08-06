@@ -51,7 +51,9 @@ at all.
 
 ## Working on it
 
-Node 24 and pnpm 10.
+Node 24 and pnpm 10. The simulator is Python, managed by
+[uv](https://docs.astral.sh/uv/) — install it too, and `pnpm test` covers
+both worlds.
 
 ```bash
 pnpm install
@@ -83,6 +85,12 @@ the happy one is covered against the API instead, where it costs milliseconds.
 
 ```
 apps/api        Fastify API. Applies migrations on boot, then serves.
+apps/simulator  The Python service that conducts simulations: claims specs
+                from the control plane, conducts each as a persona
+                conversing with the agent under test through a platform
+                plug, reports what happened. Ships with the workbench,
+                a dev-only fake control plane. Own toolchain (uv); see its
+                README.
 apps/web        Next.js web application: signup, sign-in, invitations, and
                 where you are.
 docs            Guides that are longer than a section of this file.

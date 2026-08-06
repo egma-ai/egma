@@ -71,6 +71,8 @@ importers:
         specifier: ^1.1.0
         version: 1.1.0
 
+  apps/simulator: {}
+
   apps/web:
     dependencies:
       next:
