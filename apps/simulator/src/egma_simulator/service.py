@@ -31,7 +31,7 @@ from .contract import ContractViolation
 from .model import build_model_client
 from .persona import Persona
 from .pipeline import assemble
-from .plugs import plug_for
+from .plugs import failed_ending, plug_for
 from .redaction import SecretRegistry
 from .reporting import Reporter, moment
 from .spec import SimulationSpec
@@ -226,7 +226,11 @@ class RunningSimulation:
         except Exception as fault:
             reason = self._secrets.redact(f"{type(fault).__name__}: {fault}")
             logger.exception("conducting %s hit a fault", self.simulation_id)
-            reporter.failed("error", reason)
+            # Which failed ending this is belongs to whoever raised: a
+            # phone that rang out is not the same record as a simulator
+            # that broke, and only the plug knows the difference. See
+            # `plugs.failed_ending`.
+            reporter.failed(failed_ending(fault), reason)
             return
 
         self._report_terminal(conducted)

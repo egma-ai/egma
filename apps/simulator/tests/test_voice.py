@@ -19,7 +19,7 @@ from conftest import (
     loopback_spec,
     scripted_spec,
 )
-from pipecat.frames.frames import TextFrame
+from pipecat.frames.frames import InputAudioRawFrame, TextFrame
 from pipecat.processors.frame_processor import FrameProcessor
 
 from egma_simulator import pipeline as pipeline_module
@@ -598,6 +598,50 @@ async def test_a_leg_that_refuses_a_turn_fails_the_simulation_in_its_own_words(
 
     with pytest.raises(SpeechFault, match="payment_required"):
         await voice_walk(tmp_path, scenario="One point.", replies=["Noted."])
+
+
+async def test_a_turn_no_transcriber_finds_words_in_is_a_turn_without_words(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The other way a turn goes wrong, and the one a phone call makes
+    ordinary: audio arrives and nobody can read it.
+
+    A streaming transcriber handed a stretch of audio it finds no words in
+    pushes no frame at all — there is no empty transcript, only silence.
+    So the turn waits on a frame that never comes, and without a backstop
+    the simulation runs to its duration limit and the record says "limit
+    reached" about hold music. What the record should say is that the turn
+    carried no words, which is what it did.
+    """
+
+    class DeafEars(FrameProcessor):
+        """A listening leg that swallows audio and says nothing about it."""
+
+        async def process_frame(self, frame, direction) -> None:
+            await super().process_frame(frame, direction)
+            if isinstance(frame, InputAudioRawFrame):
+                return
+            await self.push_frame(frame, direction)
+
+    def deaf_legs(providers, *, voice, sample_rate_hz):
+        return SpeechLegs(
+            stt=DeafEars(),
+            tts=ScriptedTTS(voice=voice, sample_rate_hz=sample_rate_hz),
+            voice=voice,
+        )
+
+    monkeypatch.setattr(pipeline_module, "build_legs", deaf_legs)
+    # Only the waiting is shortened; what is given up on is exactly what a
+    # deployment gives up on.
+    monkeypatch.setattr(pipeline_module, "HEARD_NOTHING_SECONDS", 0.3)
+
+    conducted, turns, _measures, _assembled = await voice_walk(
+        tmp_path, scenario="One point.", replies=["Noted."]
+    )
+
+    assert conducted.status == "completed"
+    assert conducted.ending == "persona_concluded"
+    assert ("agent", "") in turns, turns
 
 
 async def test_an_unconfigured_voice_exchange_connects_nothing(

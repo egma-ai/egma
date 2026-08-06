@@ -33,10 +33,12 @@ ALLOWED_DEPENDENCIES = {
     "aiohttp",  # the outbound HTTP client, and the workbench's server
     "jsonschema",  # holds every document to the contract, both directions
     "rfc3339-validator",  # so the schemas' date-time format is really checked
-    # The voice pipeline: the speech legs and the recording. Its two
-    # speech-provider extras ride with it, so a deployment that configures
-    # Deepgram or ElevenLabs already has what it needs and one that
-    # configures neither never imports either — the guard below.
+    # The voice pipeline: the speech legs, the recording, and the LiveKit
+    # transport a phone call rides. Its three extras ride with it — the
+    # two speech providers and livekit, which brings both the room client
+    # and the server API that places a SIP call — so a deployment that
+    # configures one already has what it needs and one that configures
+    # none never imports any of them: the guards below.
     "pipecat-ai",
     "loguru",  # what pipecat logs through, gathered under one filter
     "nltk",  # pipecat's tokenizer, held to no downloads (see __init__)
@@ -48,6 +50,15 @@ SPEECH_PROVIDER_MODULES = (
 )
 """The stock services a configured deployment gets, and the modules a
 deployment that configured nothing must never load."""
+
+MEDIA_BACKEND_MODULES = (
+    "livekit",
+    "pipecat.transports.livekit.transport",
+)
+"""The same rule one layer down: the bridge a phone call is placed
+through, and the modules a simulator that dials no phone must never load.
+``livekit`` is a native wheel with a Rust runtime inside it — precisely
+the sort of cost only a deployment that asked for it should pay."""
 
 # A datastore driver in here would mean the simulator had stopped asking
 # the control plane and started reading its answers, which is the one thing
@@ -99,8 +110,17 @@ def test_the_dependency_list_stays_short_and_declared():
 
 def test_no_module_imports_anything_from_outside_the_app():
     """Third-party imports are the declared ones; everything else is stdlib."""
-    # The distribution names above are not always the module names.
-    allowed_modules = {"aiohttp", "jsonschema", "pipecat", "loguru", "nltk"}
+    # The distribution names above are not always the module names, and
+    # `livekit` arrives inside pipecat-ai's own extra rather than as a
+    # dependency of its own.
+    allowed_modules = {
+        "aiohttp",
+        "jsonschema",
+        "pipecat",
+        "loguru",
+        "nltk",
+        "livekit",
+    }
     permitted = allowed_modules | set(sys.stdlib_module_names) | {"egma_simulator"}
 
     offenders: dict[str, set[str]] = {}
@@ -138,6 +158,7 @@ def test_a_provider_library_is_never_imported_at_module_scope():
     it. Written as a rule rather than as care: an import moved to the top
     of a file for tidiness would undo it silently.
     """
+    deferred = set(SPEECH_PROVIDER_MODULES) | set(MEDIA_BACKEND_MODULES)
     offenders: dict[str, set[str]] = {}
     for file in source_files():
         tree = ast.parse(file.read_text(encoding="utf-8"), filename=str(file))
@@ -151,7 +172,11 @@ def test_a_provider_library_is_never_imported_at_module_scope():
             if isinstance(node, ast.Import)
             for alias in node.names
         }
-        eager = at_module_scope & set(SPEECH_PROVIDER_MODULES)
+        eager = {
+            module
+            for module in at_module_scope
+            if module in deferred or module.split(".")[0] in deferred
+        }
         if eager:
             offenders[str(file.relative_to(APP_ROOT))] = eager
 
@@ -165,10 +190,12 @@ def test_a_provider_library_is_never_imported_at_module_scope():
 def test_an_unconfigured_simulator_loads_no_provider_library():
     """The same rule, proved by running rather than by reading.
 
-    A fresh process conducts a whole voice simulation with nothing
-    configured and then says which provider libraries it loaded. It has
-    to be a fresh one: this suite configures both providers elsewhere, so
-    by the time it asks, its own modules are already loaded.
+    A fresh process conducts two whole voice simulations with nothing
+    configured — one against the loopback counterpart and one that dials
+    a number through the scripted media backend — and then says which
+    provider and bridge libraries it loaded. It has to be a fresh one:
+    this suite configures the providers elsewhere, so by the time it asks,
+    its own modules are already loaded.
     """
     proof = textwrap.dedent(
         """
@@ -179,21 +206,33 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
         from egma_simulator.pipeline import assemble
         from egma_simulator.spec import SimulationSpec
 
-        spec = SimulationSpec.from_document({
-            "contract_version": 1,
-            "simulation_id": "sim-unconfigured",
-            "modality": "voice",
-            "connection": {
-                "type": "loopback",
-                "config": {"replies": ["Noted."]},
-                "credentials": None,
+        def spec_for(connection):
+            return SimulationSpec.from_document({
+                "contract_version": 1,
+                "simulation_id": "sim-unconfigured",
+                "modality": "voice",
+                "connection": connection,
+                "persona": {"traits": {"personality": "Terse."}},
+                "scenario": {"instructions": "One point."},
+                "limits": {"max_duration_seconds": 30, "max_turns": 8},
+            })
+
+        LOOPBACK = spec_for({
+            "type": "loopback",
+            "config": {"replies": ["Noted."]},
+            "credentials": None,
+        })
+        PHONE = spec_for({
+            "type": "phone",
+            "config": {
+                "phoneNumber": "+15551234567",
+                "backend": "scripted",
+                "scripted": {"replies": ["Noted."]},
             },
-            "persona": {"traits": {"personality": "Terse."}},
-            "scenario": {"instructions": "One point."},
-            "limits": {"max_duration_seconds": 30, "max_turns": 8},
+            "credentials": None,
         })
 
-        async def conduct_one():
+        async def conduct(spec):
             with tempfile.TemporaryDirectory() as blobs:
                 assembled = assemble(spec, blobs=FilesystemBlobStore(Path(blobs)))
                 plug = assembled.plug
@@ -205,12 +244,17 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
                 assert answer.text == "Noted.", answer
                 assert assembled.audio is not None
 
-        asyncio.run(conduct_one())
+        async def conduct_both():
+            await conduct(LOOPBACK)
+            await conduct(PHONE)
+
+        asyncio.run(conduct_both())
         print(json.dumps(sorted(
             name for name in sys.modules
-            if name.split(".")[0] in ("deepgram", "elevenlabs")
+            if name.split(".")[0] in ("deepgram", "elevenlabs", "livekit")
             or name.startswith("pipecat.services.deepgram")
             or name.startswith("pipecat.services.elevenlabs")
+            or name.startswith("pipecat.transports.livekit")
         )))
         """
     )
@@ -225,7 +269,8 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
     loaded = json.loads(finished.stdout.strip().splitlines()[-1])
     assert loaded == [], (
         f"an unconfigured voice simulation loaded {loaded}; a provider "
-        "library is a cost only a deployment that asked for it should pay"
+        "library or a media bridge is a cost only a deployment that asked "
+        "for it should pay"
     )
 
 

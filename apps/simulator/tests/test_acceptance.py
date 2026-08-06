@@ -20,6 +20,8 @@ from datetime import datetime
 
 from conftest import (
     HEARTBEAT_SECONDS,
+    SENTINEL_TRUNK_ENV,
+    TRUNK_SENTINELS,
     all_terminal,
     assert_kept_secret,
     assert_one_speaker_to_a_channel,
@@ -28,6 +30,7 @@ from conftest import (
     heartbeats_for,
     load_fixture_spec,
     loopback_spec,
+    phone_spec,
     retell_spec,
     scripted_spec,
     status_events_for,
@@ -834,6 +837,219 @@ async def test_one_scenario_over_chat_and_over_voice_is_one_transcript(
     voice = terminal_event_for(records, "sim-same-voice")["facts"]
     assert chat["audio"] is None
     assert voice["audio"]["measured_sample_rate_hz"] == 16000
+
+
+async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
+    workbench, start_simulator
+):
+    """The promise the effort exists for, black-box: a spec whose
+    connection names a phone number becomes a call, and what comes back is
+    what every other voice simulation owes — a transcript, a distinct
+    ending, per-turn timings that never run backwards, the band measured
+    on the wire, and a dual-channel recording that resolves.
+
+    The media backend is the scripted one, so there is no LiveKit server,
+    no trunk, no carrier and no network in this — and nothing above the
+    plug knows that, which is the whole extensibility claim.
+
+    A real deployment's LiveKit and trunk credentials are in the process
+    the whole time, planted as sentinels, so the scan at the end is a
+    scan of a process that really held them.
+    """
+    spec = phone_spec(
+        "sim-phone-001",
+        number="+15550100200",
+        scenario=(
+            "I need to move my Tuesday cleaning to Thursday. "
+            "My name is Margaret Hale."
+        ),
+        greeting="Lakeside Dental, how can I help?",
+        replies=[
+            "Of course — could I take your name?",
+            "Done: Thursday at half past two.",
+        ],
+        answer_delay_seconds=0.3,
+        provider_reference="SP_scripted_lakeside_1",
+    )
+    await workbench.offer(spec)
+    simulator = start_simulator(
+        workbench, log_level="DEBUG", extra_env=SENTINEL_TRUNK_ENV
+    )
+
+    records = await workbench.wait_for(has_terminal("sim-phone-001"))
+
+    assert [record for record in records if record["kind"] == "refusal"] == []
+    assert status_events_for(records, "sim-phone-001") == ["running", "completed"]
+
+    turns = events_for(records, "sim-phone-001", "turn")
+    spoken = [(turn["speaker"], turn["text"]) for turn in turns]
+    assert spoken == [
+        ("agent", "Lakeside Dental, how can I help?"),
+        ("human", "I need to move my Tuesday cleaning to Thursday."),
+        ("agent", "Of course — could I take your name?"),
+        ("human", "My name is Margaret Hale."),
+        ("agent", "Done: Thursday at half past two."),
+        ("human", GOODBYE),
+    ]
+    started_ats = [datetime.fromisoformat(turn["started_at"]) for turn in turns]
+    assert started_ats == sorted(started_ats)
+
+    terminal = terminal_event_for(records, "sim-phone-001")
+    facts = terminal["facts"]
+    assert facts["ending"] == "persona_concluded"
+    assert facts["turn_count"] == len(turns)
+    # The join to the bridge's own telemetry: LiveKit's SIP participant
+    # identity on a real call, and the scripted bridge's stand-in here.
+    assert facts["provider_reference"] == "SP_scripted_lakeside_1"
+
+    # Measured, and measured per turn: the far end was quiet for exactly
+    # as long as it waits before speaking, on every one of its turns, and
+    # nothing was stamped before the measurement reported ahead of it.
+    timings = events_for(records, "sim-phone-001", "timing")
+    measures = [event["measure"] for event in timings]
+    assert measures.count("time_to_first_word") == 3
+    assert measures.count("agent_speech_duration") == 3
+    assert measures.count("persona_speech_duration") == 2
+    assert measures.count("first_response_latency") == 1
+    assert measures.count("turn_response_latency") == 2
+    quiet = [
+        event["milliseconds"]
+        for event in timings
+        if event["measure"] == "time_to_first_word"
+    ]
+    assert quiet == [300.0, 300.0, 300.0]
+    stamped = [datetime.fromisoformat(event["at"]) for event in timings]
+    assert stamped == sorted(stamped)
+
+    # A phone call is narrowband, and the band on the record is the one
+    # that flowed rather than one copied out of a config.
+    audio = facts["audio"]
+    assert audio["measured_sample_rate_hz"] == 8000
+
+    # The reference is a reference: no bytes on the wire, and it resolves
+    # to a recording with one speaker to a channel.
+    assert "://" not in audio["recording"]
+    recording = simulator.blob(audio["recording"])
+    assert channels_of(recording)[2] == 8000
+    assert_one_speaker_to_a_channel(
+        recording, [turn for turn in spoken if turn[1] != GOODBYE]
+    )
+
+    simulator.stop()
+    for sentinel in TRUNK_SENTINELS:
+        assert_kept_secret(sentinel, records=records, simulator=simulator)
+
+
+async def test_every_call_that_never_became_a_conversation_fails_honestly(
+    workbench, start_simulator
+):
+    """Busy, no answer, declined, a carrier that failed, and a trunk that
+    cannot be used: five ways a call never happens, five records that say
+    which — and not one of them ever reads as the agent failing.
+
+    A busy line and a rung-out phone are ``not_answered``: the simulator
+    reached out and nothing picked up. A carrier that failed and a trunk
+    that was refused are ``error``: the call never reached the far end and
+    somebody has something to fix. Neither is ever graded.
+    """
+    outcomes = {
+        "sim-phone-busy": ("busy", "not_answered"),
+        "sim-phone-noanswer": ("no_answer", "not_answered"),
+        "sim-phone-declined": ("declined", "not_answered"),
+        "sim-phone-carrier": ("carrier_failure", "error"),
+        "sim-phone-trunk": ("bad_trunk_credentials", "error"),
+    }
+    for simulation_id, (outcome, _ending) in outcomes.items():
+        await workbench.offer(phone_spec(simulation_id, outcome=outcome))
+    # And the real LiveKit driver's own failing path, hermetically: the
+    # planted deployment points at a port nothing answers on, so the
+    # driver that holds the trunk credentials is the one that fails here.
+    await workbench.offer(phone_spec("sim-phone-livekit", backend="livekit"))
+
+    simulator = start_simulator(
+        workbench,
+        capacity=6,
+        log_level="DEBUG",
+        extra_env=SENTINEL_TRUNK_ENV,
+    )
+
+    simulation_ids = [*outcomes, "sim-phone-livekit"]
+    records = await workbench.wait_for(
+        all_terminal(simulation_ids), within_seconds=90
+    )
+
+    reasons = []
+    for simulation_id, (_outcome, ending) in outcomes.items():
+        terminal = terminal_event_for(records, simulation_id)
+        assert terminal["status"] == "failed", simulation_id
+        assert terminal["facts"]["ending"] == ending, simulation_id
+        assert terminal["facts"]["turn_count"] == 0, simulation_id
+        # Nothing was conducted, so no exchange happened off the record.
+        assert events_for(records, simulation_id, "turn") == [], simulation_id
+        reason = terminal["reason"]
+        assert "agent" not in reason.lower(), (simulation_id, reason)
+        reasons.append(reason)
+
+    # Distinct on the record: the ending enum is shared, and the reason is
+    # what tells a reader which call this was.
+    assert len(set(reasons)) == len(reasons), reasons
+    assert "486" in reasons[0], reasons[0]
+    assert "trunk" in reasons[-1], reasons[-1]
+
+    livekit = terminal_event_for(records, "sim-phone-livekit")
+    assert livekit["status"] == "failed"
+    assert livekit["facts"]["ending"] == "error"
+    assert "127.0.0.1:1" in livekit["reason"], livekit["reason"]
+
+    simulator.stop()
+    for sentinel in TRUNK_SENTINELS:
+        assert_kept_secret(sentinel, records=records, simulator=simulator)
+
+
+async def test_the_far_end_hanging_up_is_the_agent_ending_the_exchange(
+    workbench, start_simulator
+):
+    """A call the agent ends mid-scenario, with everything said up to that
+    moment on the record — transcript and recording both.
+
+    The persona still had things to say, so nothing here is a limit and
+    nothing here is a failure: the agent ended it, and that is what the
+    record says.
+    """
+    spec = phone_spec(
+        "sim-phone-hangup",
+        scenario=LONG_SCENARIO,
+        greeting="Front desk.",
+        replies=["I am afraid I have to go. Goodbye."],
+        hangs_up_after_replies=True,
+    )
+    await workbench.offer(spec)
+    simulator = start_simulator(workbench)
+
+    records = await workbench.wait_for(has_terminal("sim-phone-hangup"))
+
+    terminal = terminal_event_for(records, "sim-phone-hangup")
+    assert terminal["status"] == "completed"
+    assert terminal["facts"]["ending"] == "agent_ended"
+    assert terminal["reason"] == "the agent ended the exchange"
+
+    # The partial transcript: the greeting, one persona turn, the agent's
+    # last words — and nothing after them, because there was no line left.
+    turns = events_for(records, "sim-phone-hangup", "turn")
+    spoken = [(turn["speaker"], turn["text"]) for turn in turns]
+    assert spoken == [
+        ("agent", "Front desk."),
+        ("human", "Sentence number 1."),
+        ("agent", "I am afraid I have to go. Goodbye."),
+    ]
+    assert terminal["facts"]["turn_count"] == len(turns)
+
+    # And the recording of it, resolvable and readable, one speaker to a
+    # channel — a call cut short still leaves the audio it had.
+    audio = terminal["facts"]["audio"]
+    assert audio is not None
+    recording = simulator.blob(audio["recording"])
+    assert_one_speaker_to_a_channel(recording, spoken)
 
 
 async def test_credentials_never_appear_in_logs_or_reports(
