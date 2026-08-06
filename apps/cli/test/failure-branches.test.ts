@@ -1,10 +1,10 @@
 /**
  * The five ways the walk does not reach a suite, each one ending honestly.
  *
- * They are the branches the reviewed transcript names, and they are first-class
- * here rather than an afterthought: a wizard is judged on what it does when the
- * machine is cold, the key is wrong, the repository is the wrong one, or egma
- * cannot do the thing the developer is about to be charged for.
+ * They are first-class here rather than an afterthought, because a wizard is
+ * judged on what it does when the machine is cold, the key is wrong, the
+ * repository is the wrong one, or egma cannot do the thing the developer is
+ * about to be charged for.
  *
  * What is asserted is what the developer is left with — the line in their
  * scrollback, the number the shell gets, and whether they were asked the same

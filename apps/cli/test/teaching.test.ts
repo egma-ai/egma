@@ -22,6 +22,7 @@ import { walk } from "../src/wizard/walk.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
+import { bannedWordsIn } from "./support/glossary.ts";
 import { runInTerminal, showing } from "./support/pty.ts";
 import {
   CLI_ENTRY,
@@ -136,20 +137,13 @@ describe("the deck", () => {
     // And none of the words the glossary bans, which is the half that matters:
     // a card teaching a near synonym teaches a developer to ask for something
     // egma does not answer to.
-    for (const banned of [
-      "eval",
-      "evaluator",
-      "scorer",
-      "assertion",
-      "digital human",
-      "caller",
-      "experiment",
-      "batch",
-      "conversation with",
-      "caller's session",
-    ]) {
-      expect(said.toLowerCase(), banned).not.toContain(banned);
-    }
+    //
+    // It is the same list the skills are held to, and it is that list rather
+    // than a shorter one written to fit the cards — a guard shaped around the
+    // text it guards proves only that somebody read the text once. The deck
+    // takes no carve-out at all: the one the skills take is for a file format,
+    // and a card is prose from the first word to the last.
+    expect(bannedWordsIn(said)).toEqual([]);
   });
 
   it("is written to the width of the pane, so nothing rewraps it", () => {
@@ -208,7 +202,7 @@ describe("the pane, while the files land", () => {
 
       // The timer never fired: the second card was never on screen, so nothing
       // about this run waited on the deck turning.
-      expect(drawn).not.toContain("The synthetic person who calls");
+      expect(drawn).not.toContain("The synthetic person on the");
       expect(drawn).not.toContain("A persona");
 
       /* the same walk, with no screen at all */

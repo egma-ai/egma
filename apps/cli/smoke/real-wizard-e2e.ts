@@ -78,9 +78,9 @@ const NO_BROWSER = "/usr/bin/true";
  * How many tests have to land for this to be a pass.
  *
  * Fewer than the suite egma asks for, on purpose. How many a real coding agent
- * writes is the agent's business and generation quality is a different question
- * with a ticket of its own; what is being proved here is that what it wrote
- * reached the platform as frozen versions and reached the repository as files.
+ * writes is the agent's business, and how good the tests are is a different
+ * question altogether; what is being proved here is that what it wrote reached
+ * the platform as frozen versions and reached the repository as files.
  */
 const TESTS_ENOUGH = 6;
 
@@ -276,6 +276,32 @@ async function showing(
   return held;
 }
 
+/**
+ * Every name the walk has registered so far, held as a thing never to print.
+ *
+ * It reads the key this walk's own wizard just stored, in this walk's own home,
+ * and asks the platform what is under it. Nothing here is a check and a look
+ * that fails fails quietly: what it buys is that the screens printed after it
+ * are redacted by this script, which is where that decision belongs.
+ */
+async function rememberNames(platform: HalfRealPlatform, home: string): Promise<void> {
+  try {
+    const held = JSON.parse(await readFile(path.join(home, "credentials"), "utf8")) as {
+      key?: unknown;
+    };
+    if (typeof held.key !== "string") return;
+    const agents = await askThePlatform(platform.url, held.key, "/api/agents");
+    const items = Array.isArray(agents.body.items)
+      ? (agents.body.items as Record<string, unknown>[])
+      : [];
+    for (const agent of items) {
+      if (typeof agent.name === "string") secrets.push(agent.name);
+    }
+  } catch {
+    // Nothing to add, and nothing that depends on it.
+  }
+}
+
 async function walkOnce(options: {
   readonly label: string;
   readonly platform: HalfRealPlatform;
@@ -371,6 +397,13 @@ async function walkOnce(options: {
     /* [human 4] no, there are no test cases written down already */
     await showing(terminal, "the question about prior work", BUDGET.existing, "Do you already have");
     terminal.write("n");
+
+    // Everything registered so far becomes a secret before the first screen is
+    // printed. Whose agents these were is not worth printing and the line that
+    // names them is filtered out below anyway — but a screen that is clean
+    // because one filter happened to match is clean by luck, and this makes it
+    // clean by redaction, which is the only kind that survives a wording change.
+    await rememberNames(options.platform, home);
 
     /* [human 5] the keystroke at the gate */
     await showing(terminal, "the gate", BUDGET.gate, "[enter] run");
@@ -664,7 +697,17 @@ async function main(): Promise<void> {
   say(RULE);
 }
 
-await main();
+try {
+  await main();
+} catch (problem) {
+  // The last place a path could get out. A copy that fails throws with the
+  // folder it was copying in the message, and Node would print that whole
+  // stack — so the stack goes through the same redaction as everything else
+  // and the run ends as a failure rather than as an unhandled rejection.
+  say("");
+  say(redact(problem instanceof Error ? (problem.stack ?? problem.message) : String(problem)));
+  process.exitCode = 1;
+}
 
 // A pseudo-terminal and an adapter's own process tree can both outlive what
 // started them, and either keeps Node alive. This leaves on its own answer once

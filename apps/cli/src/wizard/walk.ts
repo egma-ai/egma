@@ -41,23 +41,45 @@ export type WalkOptions = {
   readonly howManyTests?: number;
 };
 
-/** Runs the walk and returns the line the wizard will leave behind. */
+/**
+ * Runs the walk and returns the line the wizard will leave behind.
+ *
+ * The one thing started here rather than inside the walk is the look around
+ * this machine. It is started before the intro is dismissed and shown behind
+ * the browser wait, which is the only dead time the walk has: nothing awaits
+ * it, no step reads it back, and a look that fails costs nothing.
+ *
+ * What it does need is a way to stop mattering. A walk can end — quit,
+ * interrupted, or simply finished — while the look is still going, and by then
+ * the screen it was for is coming down and the exit line is being written under
+ * it. So the answer is dropped rather than pushed at a UI that has nothing left
+ * to draw on.
+ */
 export async function walk(options: WalkOptions): Promise<ExitReport> {
+  const { ui, cwd, launch } = options;
+
+  let walking = true;
+  void detect({ cwd, drivenAgentName: launch.name }).then(
+    (detection) => {
+      if (walking) ui.setDetection(detection);
+    },
+    () => undefined,
+  );
+
+  try {
+    return await walkThrough(options);
+  } finally {
+    walking = false;
+  }
+}
+
+async function walkThrough(options: WalkOptions): Promise<ExitReport> {
   const { ui, launch, cwd, signal } = options;
 
   ui.setDrivenAgent({ id: launch.id, name: launch.name });
 
   const log = options.log ?? openDrivenAgentLog();
   ui.setDrivenAgentLog(log.file);
-
-  // Started before the intro is dismissed and shown behind the browser wait,
-  // which is the only dead time the walk has. It is handed to the UI whenever
-  // it lands and no step ever reads it back, so nothing in the walk is paced by
-  // it and a look that fails costs nothing.
-  void detect({ cwd, drivenAgentName: launch.name }).then(
-    (detection) => ui.setDetection(detection),
-    () => undefined,
-  );
 
   await untilAborted(ui.waitForGate("begin"), signal);
   if (signal.aborted) {

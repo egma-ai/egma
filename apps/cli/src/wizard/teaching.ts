@@ -15,7 +15,9 @@
  *
  * The words are the glossary's own, deliberately. A card that taught a near
  * synonym would be teaching a developer to say something egma does not answer
- * to, which is worse than teaching nothing.
+ * to, which is worse than teaching nothing. So the deck is held to the same ban
+ * list as the text egma puts in front of a coding agent, and to no weaker one:
+ * a word egma will not say to a model is a word it will not put on a screen.
  *
  * The shape — a card beside a wait, turning on its own — is the PostHog
  * wizard's idea. None of its code is here and none of these words are theirs.
@@ -32,7 +34,7 @@ export const CARD_WIDTH = 32;
 
 /**
  * The deck, in the order a developer meets the ideas: what they are authoring,
- * who calls about it, what happens when it runs, and what comes back.
+ * who is on the other end of it, what happens when it runs, and what comes back.
  */
 export const LEARN_CARDS: readonly LearnCard[] = [
   {
@@ -52,14 +54,14 @@ export const LEARN_CARDS: readonly LearnCard[] = [
   {
     heading: "A persona",
     lines: [
-      "The synthetic person who calls",
-      "your agent: their manner, their",
+      "The synthetic person on the",
+      "other end: their manner, their",
       "patience, how they behave when",
       "things go wrong.",
       "",
-      "A test names the personas who",
-      "should call about it. Naming",
-      "none takes your default one.",
+      "A test names the personas it",
+      "should be run with. Naming none",
+      "takes your default one.",
     ],
   },
   {
@@ -78,8 +80,8 @@ export const LEARN_CARDS: readonly LearnCard[] = [
     heading: "A simulation",
     lines: [
       "One test executed once inside a",
-      "run — one conversation, start to",
-      "finish.",
+      "run: your agent and one persona,",
+      "start to finish.",
       "",
       "A run produces one simulation",
       "per test per persona. Each one",
@@ -107,8 +109,8 @@ export const LEARN_CARDS: readonly LearnCard[] = [
       "",
       "A test that could not run is not",
       "a test that failed, so egma",
-      "never calls skipped or errored",
-      "a failure.",
+      "never counts skipped or errored",
+      "as one.",
     ],
   },
 ];

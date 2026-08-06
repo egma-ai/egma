@@ -6,12 +6,12 @@
  * request the CLI makes goes to it: the device flow, the key it mints, the door
  * that key opens. That is the half of the platform that has shipped.
  *
- * The agent, connection and test endpoints have not. The public API is a ticket
- * of its own and until it lands there is nothing at `/api/agents` or
- * `/api/tests` on a real instance to answer — so those paths, and only those,
- * are served by the same fixture the offline checks run against, standing at the
- * same seam. The alternative was to stop the end-to-end check at login, which
- * would leave the whole walk unproven against anything real at all.
+ * The agent, connection and test endpoints have not. Until they do there is
+ * nothing at `/api/agents` or `/api/tests` on a real instance to answer — so
+ * those paths, and only those, are served by the same fixture the offline
+ * checks run against, standing at the same seam. The alternative was to stop
+ * the end-to-end check at login, which would leave the whole walk unproven
+ * against anything real at all.
  *
  * The seam between the two halves is one line of code and it is worth reading:
  * the key the real instance mints is handed to the fixture as one of its own,
@@ -114,6 +114,11 @@ export async function startHalfRealPlatform(apiOrigin: string): Promise<HalfReal
         }
       }
 
+      // The status and the body come back whole; the headers do not. Both
+      // halves answer JSON to a bearer key and nothing the CLI reads is in a
+      // header, so what is forwarded is the one header that says how to read
+      // the body. A flow that ever needs another will fail loudly here rather
+      // than behave subtly differently through the hop than without it.
       outgoing.writeHead(answer.status, {
         "content-type": answer.headers.get("content-type") ?? "application/json",
         "cache-control": "no-store",

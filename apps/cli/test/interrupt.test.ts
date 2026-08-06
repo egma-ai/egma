@@ -129,15 +129,20 @@ describe("Ctrl-C while the browser is being waited on", () => {
       // The login screen: a code to approve, an address it is already in, and
       // the wait filled with what egma worked out while the developer read the
       // intro. None of it was asked for and none of it is waited on.
-      const waiting = await showing(
+      //
+      // Every line is waited for rather than read off one screen and asserted
+      // afterwards. The pane arrives on its own and a terminal paints a line at
+      // a time, so a screen caught between two of them is a screen that is half
+      // drawn — and a check that reads one is a check that fails on a fast day.
+      await showing(
         terminal,
         "Code:",
         "Approve this code",
         "While you were away, egma looked around:",
+        "Coding agent   node",
+        "Git            not a repository",
+        "egma folder    none yet — egma will make one",
       );
-      expect(waiting).toContain("Coding agent   node");
-      expect(waiting).toContain("Git            not a repository");
-      expect(waiting).toContain("egma folder    none yet");
 
       terminal.write(CTRL_C);
 
