@@ -16,8 +16,16 @@ Keys are the simulator's to compose and the store's to confine. A
 is a different thing: an id carrying a path separator would otherwise put
 a recording somewhere nobody configured. Segments that are already plain
 names are kept as they are, so a reference stays readable; anything else
-is flattened and given a digest of the original, so two keys that flatten
-alike cannot land on one blob.
+is flattened and given a digest of the original.
+
+Two keys that flatten alike must never land on one blob, and a key can be
+odd in two different ways. Its *segments* can be — a space, a null byte,
+a ``..`` — and a digest of each segment tells those apart. Its
+*separators* can be too: ``a//b``, ``/a/b``, ``a/b/`` and ``a/b`` all
+carry the same segments, so per-segment digests see nothing to tell apart
+and all four would name one blob, the last write quietly replacing the
+rest. So a key whose separators are not already the plain ones carries a
+digest of the whole original as well.
 """
 
 from __future__ import annotations
@@ -44,19 +52,33 @@ class BlobStore(Protocol):
 
 
 def confined_key(key: str) -> str:
-    """One key, flattened until it can only name a blob inside the store."""
+    """One key, flattened until it can only name a blob inside the store.
+
+    A key that was already plain comes back byte for byte, so an ordinary
+    reference stays readable. Everything else is flattened *and* marked,
+    per the module docstring: oddness in a segment is answered by that
+    segment's digest, and oddness in the separators — the only kind that
+    survives being split apart — by a digest of the whole key.
+    """
     segments = [segment for segment in key.split("/") if segment]
     if not segments:
         raise ValueError("a blob key needs at least one segment")
-    return "/".join(_confined_segment(segment) for segment in segments)
+
+    confined = [_confined_segment(segment) for segment in segments]
+    if "/".join(segments) != key:
+        confined[-1] = f"{confined[-1]}-{_digest(key)}"
+    return "/".join(confined)
 
 
 def _confined_segment(segment: str) -> str:
     if PLAIN_SEGMENT.match(segment):
         return segment
-    digest = hashlib.sha256(segment.encode()).hexdigest()[:16]
     readable = _UNSAFE_IN_A_SEGMENT.sub("_", segment)[:_READABLE_PREFIX_CHARS]
-    return f"{readable}-{digest}"
+    return f"{readable}-{_digest(segment)}"
+
+
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
 class FilesystemBlobStore:

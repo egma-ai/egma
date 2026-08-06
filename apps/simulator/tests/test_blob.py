@@ -51,10 +51,31 @@ async def test_no_key_can_name_anything_outside_the_store(
     assert written.read_bytes() == b"contained"
 
 
-def test_two_keys_that_flatten_alike_stay_apart():
+def test_a_plain_key_is_its_own_reference():
+    """The ordinary case comes back byte for byte, so a reference stays
+    readable and the one a report carried yesterday still resolves."""
+    assert confined_key("sim_01ABC/dual-channel.wav") == "sim_01ABC/dual-channel.wav"
+
+
+def test_two_keys_whose_segments_flatten_alike_stay_apart():
     """The digest is what stops one blob from becoming two simulations'."""
     assert confined_key("a/b") != confined_key("a b")
     assert confined_key("../x.wav") != confined_key("..\\x.wav")
+
+
+def test_two_keys_that_differ_only_in_their_separators_stay_apart():
+    """Odd separators are the oddness that survives being split apart.
+
+    All four of these carry the same two segments, so a digest of each
+    segment has nothing to tell them apart, and all four would name one
+    blob — the last recording written silently replacing the three before
+    it. The whole key's digest is what keeps them four.
+    """
+    quartet = ["a/b", "a//b", "/a/b", "a/b/"]
+    references = [confined_key(key) for key in quartet]
+    assert len(set(references)) == len(quartet), references
+    # And the plain one of the four is still the plain one.
+    assert references[0] == "a/b"
 
 
 def test_a_key_with_nothing_in_it_is_refused():
