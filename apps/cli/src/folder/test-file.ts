@@ -89,11 +89,16 @@ function frontmatterOf(document: string, where: string): {
  * headings of its own inside it keeps them. Anything before a scenario heading
  * — or a body with no heading at all — is read as the scenario, because a file
  * a person started typing is still a file egma should be able to push.
+ *
+ * The boundary is the *last* heading and the scenario opens at the *first* one,
+ * so a scenario whose prose quotes either heading keeps it. egma writes each
+ * heading once, which makes first and last the same line in every file egma
+ * has written.
  */
 function partsOf(body: string): { readonly scenario: string; readonly behaviors: string } {
   const lines = body.split("\n");
   const startsAt = lines.findIndex((line) => SCENARIO_LINE.test(line.trim()));
-  const boundary = lines.findIndex((line) => EXPECTED_BEHAVIORS_LINE.test(line.trim()));
+  const boundary = lines.findLastIndex((line) => EXPECTED_BEHAVIORS_LINE.test(line.trim()));
 
   const from = startsAt === -1 ? 0 : startsAt + 1;
   const to = boundary === -1 ? lines.length : boundary;
@@ -153,32 +158,54 @@ export function parseTestFile(
 }
 
 /**
+ * One expected behavior as the format holds it: one statement on one line.
+ *
+ * A statement that arrives with a line break in it is written as one line,
+ * because that is the only shape the list has and it is exactly what reading
+ * the file gives back — a line that is not itself a list item joins the one
+ * above it with a space. Writing the break would mean the file said one thing
+ * and read as another.
+ */
+function oneLine(behavior: string): string {
+  return behavior.replaceAll(/\s+/gu, " ").trim();
+}
+
+/**
  * Write one file, in the one shape egma ever writes.
  *
  * Every byte here is decided by the value handed in, and nothing is carried over
  * from whatever the file held before. That is what makes the round trip stable:
  * `push` rewrites each file from what the platform stored, and a `pull` straight
  * afterwards computes the same bytes and finds nothing to do.
+ *
+ * The shape is the format's, not the value's, so what goes out is what reading
+ * it gives back: no persona with nothing in it, no space wrapped around the
+ * prose, and one statement per line. A value that cannot be written in that
+ * shape is written in the nearest shape that can, rather than written in a way
+ * that would read as something else.
  */
 export function serializeTestFile(file: TestFile): string {
+  const personas = file.personas.filter((persona) => persona.trim() !== "");
   const frontmatter = [`name: ${yamlScalar(file.name)}`];
-  if (file.personas.length > 0) {
-    frontmatter.push(`personas: ${yamlFlowList(file.personas)}`);
+  if (personas.length > 0) {
+    frontmatter.push(`personas: ${yamlFlowList(personas)}`);
   }
   if (file.version !== null && file.version !== "") {
     frontmatter.push(`version: ${yamlScalar(file.version)}`);
   }
 
-  const behaviors = file.expectedBehaviors.map(
-    (behavior, index) => `${index + 1}. ${behavior}`,
-  );
+  const scenario = file.scenario.trim();
+  const behaviors = file.expectedBehaviors
+    .map(oneLine)
+    .filter((behavior) => behavior !== "")
+    .map((behavior, index) => `${index + 1}. ${behavior}`);
 
   return [
     "---",
     ...frontmatter,
     "---",
     SCENARIO_HEADING,
-    ...(file.scenario === "" ? [] : [file.scenario]),
+    ...(scenario === "" ? [] : [scenario]),
     EXPECTED_BEHAVIORS_HEADING,
     ...behaviors,
     "",

@@ -40,7 +40,7 @@ afterEach(async () => {
   await workspace.remove();
 });
 
-/** The file the prototype fixed, byte for byte. */
+/** The format as it was written down, byte for byte. */
 const GENERATED = `---
 name: missed-appointment-reschedule
 personas: [impatient-caller]
@@ -169,6 +169,127 @@ describe("the test file format", () => {
     expect(yamlScalar("caller: refuses to give a name")).toBe(
       '"caller: refuses to give a name"',
     );
+  });
+
+  /**
+   * Content that is awkward and entirely allowed.
+   *
+   * A test is prose a person wrote and a name a person chose, so the format has
+   * to hold a colon, a hash, a quote, a bracket, a comma, a blank line and a
+   * word in a script that is not this one. Two promises are held for every one
+   * of them, and they are different promises:
+   *
+   * - **what egma writes reads back as what egma wrote.** Whatever shape the
+   *   value arrived in, the file egma wrote is a fixed point — writing it,
+   *   reading it and writing it again changes nothing. This is the promise
+   *   `pull` straight after `push` depends on.
+   * - **content survives the trip**, wherever the format has room for it.
+   *   Where it has none — a statement with a line break in it, when the list
+   *   holds one statement per line — egma writes the nearest shape the format
+   *   does have rather than bytes that would read as something else.
+   */
+  describe("content that is awkward and entirely allowed", () => {
+    const plain: TestFile = {
+      name: "a-test",
+      personas: [],
+      version: null,
+      scenario: "The situation.",
+      expectedBehaviors: ["The agent does a thing."],
+    };
+
+    const held: readonly (readonly [string, TestFile])[] = [
+      ["a name with a colon", { ...plain, name: "caller: refuses to give a name" }],
+      ["a name with a colon and no space", { ...plain, name: "shift:two" }],
+      ["a name with a hash", { ...plain, name: "shift #2" }],
+      ["a name with a hash and no space", { ...plain, name: "shift#2" }],
+      ["a name with an apostrophe", { ...plain, name: "the caller's second try" }],
+      ["a name with quotation marks", { ...plain, name: 'says "no" twice' }],
+      ["a name with dots", { ...plain, name: "v1.2.3 regression" }],
+      ["a name with dashes", { ...plain, name: "missed--appointment-reschedule" }],
+      ["a name opening with a dash", { ...plain, name: "-opens-with-a-dash" }],
+      ["a name that is a number", { ...plain, name: "2026" }],
+      ["a name that is the word yes", { ...plain, name: "yes" }],
+      ["a name with a comma", { ...plain, name: "late, then rude" }],
+      ["a name with brackets", { ...plain, name: "[after hours]" }],
+      ["a name in another script", { ...plain, name: "réservé — 予約 🎧" }],
+      ["a persona with a comma", { ...plain, personas: ["impatient, rushed"] }],
+      ["a persona with an apostrophe", { ...plain, personas: ["the caller's friend"] }],
+      ["a persona with brackets", { ...plain, personas: ["caller [angry]"] }],
+      ["a persona with a colon", { ...plain, personas: ["caller: angry"] }],
+      ["a persona with a hash", { ...plain, personas: ["caller #2"] }],
+      ["a persona in another script", { ...plain, personas: ["予約 🎧"] }],
+      ["two personas", { ...plain, personas: ["first-caller", "second-caller"] }],
+      ["prose with a hash", { ...plain, scenario: "They ask about shift #2." }],
+      ["prose with a colon", { ...plain, scenario: "They say: no." }],
+      ["prose with quotation marks", { ...plain, scenario: `He said "no" and 'left'.` }],
+      ["prose with a blank line", { ...plain, scenario: "One thing.\n\nAnother thing." }],
+      ["prose that opens with a rule", { ...plain, scenario: "---\nbelow a rule" }],
+      ["prose with a heading of its own", { ...plain, scenario: "## Background\nmore" }],
+      [
+        "prose quoting the behaviors heading",
+        { ...plain, scenario: "before\n## Expected behaviors\nafter" },
+      ],
+      ["prose quoting the scenario heading", { ...plain, scenario: "## Scenario\nagain" }],
+      ["prose that looks like frontmatter", { ...plain, scenario: "name: not-frontmatter" }],
+      ["prose with a bullet in it", { ...plain, scenario: "- a bullet\n- another" }],
+      ["prose in another script", { ...plain, scenario: "予約を逃した — 🎧" }],
+      ["a statement with a colon", { ...plain, expectedBehaviors: ["The agent says: hello."] }],
+      ["a statement that looks like frontmatter", { ...plain, expectedBehaviors: ["name: value"] }],
+      ["a statement opening with a dash", { ...plain, expectedBehaviors: ["- a dash first"] }],
+      ["a statement already numbered", { ...plain, expectedBehaviors: ["1. already numbered"] }],
+      ["a statement that is a heading", { ...plain, expectedBehaviors: ["## Expected behaviors"] }],
+      ["a statement in another script", { ...plain, expectedBehaviors: ["予約 🎧 — done"] }],
+      ["nothing to check at all", { ...plain, expectedBehaviors: [] }],
+      ["a pinned version", { ...plain, version: "tstv_01K3XQ7M4E8YB2FVN0H9TZQWER" }],
+    ];
+
+    it.each(held)("writes %s as a file that reads back as itself", (_what, test) => {
+      const written = serializeTestFile(test);
+      const read = parseTestFile(written, "a.md", "fallback");
+
+      // Read it, write it again, and not one byte moves. Everything `pull`
+      // straight after `push` promises rests on this.
+      expect(serializeTestFile(read)).toBe(written);
+      expect(read).toEqual(test);
+    });
+
+    /**
+     * Values the format has no room for, and the shape egma writes instead.
+     *
+     * The list holds one statement per line and the prose is the block between
+     * two headings, so a statement carrying a line break and prose wrapped in
+     * blank space cannot be written as they stand. What egma writes is the
+     * nearest shape the format has, and reading it gives that shape back.
+     */
+    const shaped: readonly (readonly [string, TestFile, TestFile])[] = [
+      [
+        "space wrapped around the prose",
+        { ...plain, scenario: "\n  The situation.  \n" },
+        { ...plain, scenario: "The situation." },
+      ],
+      [
+        "a statement with a line break in it",
+        { ...plain, expectedBehaviors: ["The agent checks the number\nbefore saying anything."] },
+        { ...plain, expectedBehaviors: ["The agent checks the number before saying anything."] },
+      ],
+      [
+        "space wrapped around a statement",
+        { ...plain, expectedBehaviors: ["  The agent does a thing.  "] },
+        { ...plain, expectedBehaviors: ["The agent does a thing."] },
+      ],
+      [
+        "a persona with nothing in it",
+        { ...plain, personas: ["first-caller", "   ", "second-caller"] },
+        { ...plain, personas: ["first-caller", "second-caller"] },
+      ],
+    ];
+
+    it.each(shaped)("writes %s in the nearest shape the format has", (_what, given, wanted) => {
+      const written = serializeTestFile(given);
+      expect(parseTestFile(written, "a.md", "fallback")).toEqual(wanted);
+      // And that shape is where it stays.
+      expect(serializeTestFile(wanted)).toBe(written);
+    });
   });
 
   it("names a file after the test it holds", () => {
@@ -305,6 +426,19 @@ describe("the egma folder", () => {
       connection: null,
       suite: null,
     });
+  });
+
+  it("writes a name that needs quoting, and reads it back with its own spaces", () => {
+    for (const name of ["the front desk: mornings", "shift #2", "  padded  ", "2026", "yes"]) {
+      const written = serializeConfig({
+        agent: { name, id: null },
+        connection: null,
+        suite: null,
+      });
+      expect(parseConfig(written, "config.yaml").agent).toEqual({ name, id: null });
+      // And the second write finds nothing to change.
+      expect(serializeConfig(parseConfig(written, "config.yaml"))).toBe(written);
+    }
   });
 
   it("reads every test in the folder, in one order", async () => {

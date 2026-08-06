@@ -213,6 +213,16 @@ export function readYaml(document: string, where: string): YamlMapping {
 const RESERVED = new Set(["true", "false", "null", "yes", "no", "on", "off", "~", "-"]);
 
 /**
+ * The one extra thing a value may not hold when it is written inside `[…]`.
+ *
+ * A list is read by splitting on commas and stepping over quotes, so an item
+ * carrying either of those comes back as two items, or as a quote that never
+ * closes. A persona called `impatient, rushed` is one persona and has to read
+ * back as one.
+ */
+const READS_AS_LIST_PUNCTUATION = /[,[\]{}'"]/u;
+
+/**
  * A string as a value in one of these files: bare where bare is unambiguous,
  * and double-quoted where it is not.
  *
@@ -234,26 +244,34 @@ export function yamlScalar(value: string): string {
 
 /** `[a, b, c]`, written the way this module reads it back. */
 export function yamlFlowList(values: readonly string[]): string {
-  return `[${values.map(yamlScalar).join(", ")}]`;
+  const written = values.map((value) =>
+    READS_AS_LIST_PUNCTUATION.test(value) ? JSON.stringify(value) : yamlScalar(value),
+  );
+  return `[${written.join(", ")}]`;
 }
 
-/** A mapping's value as a string, or `null` when it is anything else. */
+/**
+ * A mapping's value as a string, or `null` when it is anything else.
+ *
+ * The value comes back exactly as it was written. A bare one had its
+ * surrounding spaces taken off when it was read, which is YAML's own rule for a
+ * bare value; a quoted one asked for the spaces it has and keeps them, so a
+ * name egma wrote quoted is the name egma reads back.
+ */
 export function textAt(mapping: YamlMapping, key: string): string | null {
   const value = mapping[key];
-  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+  return typeof value === "string" && value.trim() !== "" ? value : null;
 }
 
 /** A mapping's value as a list of strings; anything else reads as empty. */
 export function listAt(mapping: YamlMapping, key: string): readonly string[] {
   const value = mapping[key];
   if (Array.isArray(value)) {
-    return (value as readonly string[])
-      .map((item) => item.trim())
-      .filter((item) => item !== "");
+    return (value as readonly string[]).filter((item) => item.trim() !== "");
   }
   // One name written bare is what a person types when there is only one, and
   // reading it as that one name is kinder than refusing the file.
-  return typeof value === "string" && value.trim() !== "" ? [value.trim()] : [];
+  return typeof value === "string" && value.trim() !== "" ? [value] : [];
 }
 
 /** A mapping's value as a mapping, or `null` when the key names nothing. */

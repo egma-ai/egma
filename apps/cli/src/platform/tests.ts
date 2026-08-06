@@ -69,12 +69,24 @@ export class PlatformRefusedError extends Error {
   }
 }
 
+/**
+ * A string off the wire, with nothing in it a terminal would obey.
+ *
+ * Everything read here is either printed on a line a coding agent parses or
+ * written into a file in the developer's repository, and a terminal reads a
+ * control character as an instruction rather than as text: a test name carrying
+ * an escape sequence could redraw what egma just said, and one carrying a line
+ * break would turn one printed fact into two. They come off at the one edge
+ * that reads the wire, so nothing below here has to remember. Same rule, same
+ * reason, as the login end of this seam.
+ */
 function text(value: unknown): string {
-  return typeof value === "string" ? value : "";
+  return typeof value === "string" ? value.replaceAll(/[\p{Cc}\p{Cf}]/gu, "").trim() : "";
 }
 
 function textList(value: unknown): readonly string[] {
-  return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => text(item)).filter((item) => item !== "");
 }
 
 /**
@@ -87,12 +99,11 @@ function textList(value: unknown): readonly string[] {
 function personaNames(value: unknown): readonly string[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) => {
-    if (typeof entry === "string") return [entry];
-    if (typeof entry === "object" && entry !== null) {
-      const name = text((entry as Record<string, unknown>).name);
-      return name === "" ? [] : [name];
-    }
-    return [];
+    const named =
+      typeof entry === "object" && entry !== null
+        ? text((entry as Record<string, unknown>).name)
+        : text(entry);
+    return named === "" ? [] : [named];
   });
 }
 

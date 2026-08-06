@@ -16,35 +16,12 @@ import process from "node:process";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { runInTerminal, type TerminalRun } from "./support/pty.ts";
+import { runInTerminal, showing } from "./support/pty.ts";
 import { CLI_ENTRY, FAKE_AGENT, MANIFEST, makeWorkspace, type Workspace } from "./support/workspace.ts";
 
 // A real subprocess, a real terminal and a test run using every core: the
 // budget is generous so that only a broken wizard can reach it.
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
-
-/**
- * Waits until the screen holds every one of these, and answers that screen.
- *
- * The screen is captured at the moment the condition held, so a redraw that
- * starts immediately afterwards cannot take a line back out from under the
- * assertions.
- */
-async function showing(terminal: TerminalRun, ...parts: readonly string[]): Promise<string> {
-  let held = "";
-  const shown = await terminal.waitFor(() => {
-    const screen = terminal.screen();
-    if (!parts.every((part) => screen.includes(part))) return false;
-    held = screen;
-    return true;
-  });
-  if (!shown) {
-    throw new Error(
-      `the terminal never showed all of: ${parts.join(" | ")}\n\nlast screen:\n${terminal.screen()}`,
-    );
-  }
-  return held;
-}
 
 describe("the wizard on a real terminal", () => {
   let workspace: Workspace;
@@ -106,7 +83,7 @@ describe("the wizard on a real terminal", () => {
       expect(left).toBe("egma found your voice agent: retell-sdk.");
       expect(left.split("\n")).toHaveLength(1);
     } finally {
-      terminal.kill();
+      await terminal.kill();
     }
   });
 
@@ -144,7 +121,7 @@ describe("the wizard on a real terminal", () => {
         "egma found no voice agent to test. Run egma again where your agent is defined.",
       );
     } finally {
-      terminal.kill();
+      await terminal.kill();
     }
   });
 
@@ -173,7 +150,7 @@ describe("the wizard on a real terminal", () => {
       expect(await terminal.exited).toBe(130);
       expect(terminal.scrollback().trim()).toContain("stopped before the task finished");
     } finally {
-      terminal.kill();
+      await terminal.kill();
     }
   });
 
@@ -195,7 +172,7 @@ describe("the wizard on a real terminal", () => {
       expect(await terminal.exited).toBe(0);
       expect(terminal.scrollback().trim()).toBe("egma closed. Nothing ran.");
     } finally {
-      terminal.kill();
+      await terminal.kill();
     }
   });
 
@@ -228,7 +205,7 @@ describe("the wizard on a real terminal", () => {
         "egma stopped before the task finished, and shut node down.",
       );
     } finally {
-      terminal.kill();
+      await terminal.kill();
     }
   });
 });

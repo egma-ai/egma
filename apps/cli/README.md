@@ -111,9 +111,9 @@ reschedule this week. They are short on time and irritated.
 3. The agent confirms the new booking before ending the call.
 ```
 
-Name a persona only when the situation needs a particular kind of caller;
-leave `personas` out and the default one applies. `version:` is absent until
-`pull` or `push` writes it.
+Name a persona only when the situation needs a particular kind of person on the
+other end; leave `personas` out and the default one applies. `version:` is
+absent until `pull` or `push` writes it.
 
 ## Keeping the folder and egma in step
 
@@ -146,6 +146,20 @@ into your files.
 `egma push` also relays egma's own refusals. A test with no expected behaviors
 cannot ever fail, so egma will not store one, and the reason you see is egma's
 own words.
+
+All three verbs print one fact per line and answer with a number you can branch
+on, so a coding agent can run them and act on what comes back without anybody
+reading the screen:
+
+```
+url, folder, and then one line per test: what happened to it, the file,
+and the version the file now pins.
+
+0 done   1 no egma folder here   2 not signed in
+4 egma did not answer, or refused
+5 push refused: egma has moved on, pull first
+6 egma turned a test away at its door   130 stopped part way
+```
 
 ### Your own instance
 

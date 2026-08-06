@@ -9,7 +9,7 @@
  */
 
 import { execFile, spawn } from "node:child_process";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
@@ -258,6 +258,33 @@ describe("egma pull", () => {
     expect(again.code).toBe(0);
     expect(valuesOf(again.stdout, "unchanged")).toEqual(["one"]);
     expect(valuesOf(again.stdout, "written")).toEqual([]);
+  });
+
+  /**
+   * Nothing read off the wire can move a cursor or split a printed fact.
+   *
+   * Both are the same rule as the login end of this seam: what comes back is
+   * drawn on somebody's terminal and parsed by somebody's coding agent, and a
+   * terminal reads a control character as an instruction rather than as text.
+   */
+  it("prints one fact per line however the far end names a test", async () => {
+    platform.tests.add({
+      name: "quiet[2Jhours\nand more",
+      scenario: "The caller rings after hours.",
+      expectedBehaviors: ["The agent gives the emergency number."],
+    });
+    await makeFolder();
+
+    const result = await egma(["pull"]);
+
+    expect(result.code).toBe(0);
+    // The escape is gone, so what is left is text and not an instruction; the
+    // line break is gone, so one test is still one printed fact.
+    expect(result.stdout).not.toContain("");
+    expect(valuesOf(result.stdout, "written")).toEqual(["quiet[2Jhoursand more"]);
+    expect(await readTest("quiet-2jhoursand-more.md")).toContain(
+      "name: quiet[2Jhoursand more",
+    );
   });
 
   it("keeps a draft nobody has pushed, and never lands a test on top of it", async () => {
@@ -590,6 +617,49 @@ describe("both verbs, run with nobody watching", () => {
     expect(help.stdout).toContain("egma push");
     expect(help.stdout).toContain("5 push refused: egma has moved on, pull first");
     expect(help.stdout).toContain("6 egma turned a test away at its door");
+  });
+
+  /**
+   * The key this machine holds never leaves the home folder it is kept in.
+   *
+   * It rides every request these verbs make, so the one place it could escape
+   * to is a printed line or a written file — and the folder is committed, so a
+   * key that reached it would be a key in somebody's public repository. Every
+   * path is walked: the one that works, the one that is refused, and the two
+   * that fail.
+   */
+  it("never print the key, and never write it into the folder", async () => {
+    platform.tests.add({ name: "one", scenario: "s", expectedBehaviors: ["b"] });
+    await egma(["init", "--agent", "receptionist"]);
+    await egma(["pull"]);
+
+    // A conflict, a refusal at the door, and an egma that does not answer.
+    platform.tests.editInDashboard("one", { scenario: "s, changed" });
+    const held = await readTest("one.md");
+    await writeTest("one.md", held.replace("1. b", "1. b, said better"));
+    await writeTest(
+      "nothing-to-check.md",
+      ["---", "name: nothing-to-check", "---", "## Scenario", "s", "## Expected behaviors", ""].join("\n"),
+    );
+
+    const runs = [
+      await egma(["push"]),
+      await egma(["pull"]),
+      await egma(["push"]),
+      await egma(["pull", "--url", "http://127.0.0.1:1"]),
+    ];
+
+    for (const [index, result] of runs.entries()) {
+      expect(result.stdout + result.stderr, `run ${index}`).not.toContain(KEY);
+      expect(result.stdout + result.stderr, `run ${index}`).not.toContain("egma_sk_");
+    }
+
+    // And nothing in the folder holds it either — not the config, not a test.
+    for (const name of await readdir(path.join(workspace.dir, "egma"), { recursive: true })) {
+      const file = path.join(workspace.dir, "egma", String(name));
+      if (!(await stat(file)).isFile()) continue;
+      expect(await readFile(file, "utf8"), String(name)).not.toContain("egma_sk_");
+    }
   });
 
   /**
