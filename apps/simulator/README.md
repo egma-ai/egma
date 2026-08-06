@@ -33,12 +33,14 @@ touching the others:
   `plugs/__init__.py` docstring; it is the entire brief.
 - **The speech legs** (`speech.py`) — a voice simulation is a chat one
   with two more legs: the persona's words spoken into audio, the agent's
-  audio read back into words. Both sit in the pipeline exactly where a
-  real provider's service would, so the shape one must fit is settled —
-  but nothing selects a real one yet, and the assembly builds the
-  deterministic pair. That pair is what CI speaks and listens with: no
-  model, no network, no downloaded corpus, and the same words out that
-  went in. A live provider, and the switch that picks it, land together.
+  audio read back into words. Which pair fills them is configuration read
+  at assembly and nowhere else — a deterministic pair, or ElevenLabs
+  speaking and Deepgram listening, each chosen on its own. The
+  deterministic pair is the default everywhere and what CI speaks and
+  listens with: no account, no network, no downloaded corpus, and the
+  same words out that went in. Nothing above the assembly learns which
+  pair it got, which is what keeps a future speech-to-speech persona a
+  different leg-set rather than a rewrite.
 
 One pipeline is assembled per simulation from its own spec and torn down
 after (`pipeline.py`). Modality selects the legs and nothing else: a chat
@@ -136,6 +138,32 @@ EGMA_SIMULATOR_CONTROL_PLANE_URL=http://127.0.0.1:8085 \
 uv run egma-simulator
 ```
 
+To hear a real voice instead of the test tone, name the speech providers.
+The `.wav` the `loopback` fixture leaves behind is then genuinely spoken
+audio on one channel, and the transcript's agent turns are what a real
+transcriber made of the other. Each leg is chosen on its own, so a real
+voice with scripted ears is one variable:
+
+```bash
+EGMA_SIMULATOR_TTS_PROVIDER=elevenlabs \
+EGMA_SIMULATOR_ELEVENLABS_API_KEY=... \
+EGMA_SIMULATOR_STT_PROVIDER=deepgram \
+EGMA_SIMULATOR_DEEPGRAM_API_KEY=... \
+EGMA_SIMULATOR_CONTROL_PLANE_URL=http://127.0.0.1:8085 \
+uv run egma-simulator
+```
+
+Which voice the persona speaks with comes from its own authored traits —
+a `voice` block naming a `voiceId` — and a persona naming none speaks
+with a default English voice. A voice id belongs to the provider it was
+authored for, so a `voice` block naming a *different* provider than the
+one configured is treated as naming none: the default English voice
+speaks and a log line says why, rather than the simulation failing on a
+timbre. A block naming a `voiceId` and no provider is authored for
+whichever deployment runs it, and is used as written. Setting neither
+variable leaves everything exactly as it was: the scripted pair, no
+account, no network.
+
 ## Configuration
 
 Everything arrives as environment variables.
@@ -153,6 +181,10 @@ Everything arrives as environment variables.
 | `EGMA_SIMULATOR_MODEL_BASE_URL` | `https://api.openai.com/v1` | The provider, for `openai` — any OpenAI-compatible endpoint. |
 | `EGMA_SIMULATOR_MODEL_NAME` | (required for `openai`) | Which model to ask for. |
 | `EGMA_SIMULATOR_MODEL_API_KEY` | (required for `openai`) | The provider key. Never logged. |
+| `EGMA_SIMULATOR_STT_PROVIDER` | `scripted` | What the persona hears with, in a voice simulation: `scripted` or `deepgram`. |
+| `EGMA_SIMULATOR_DEEPGRAM_API_KEY` | (required for `deepgram`) | The provider key. Never logged. |
+| `EGMA_SIMULATOR_TTS_PROVIDER` | `scripted` | What the persona speaks with: `scripted` or `elevenlabs`. |
+| `EGMA_SIMULATOR_ELEVENLABS_API_KEY` | (required for `elevenlabs`) | The provider key. Never logged. |
 | `EGMA_SIMULATOR_WAL_DIR` | `.egma-simulator/wal` | Where report documents land before sending. |
 | `EGMA_SIMULATOR_BLOB_DIR` | `.egma-simulator/blobs` | Where recordings land, for the filesystem-backed blob store. |
 | `EGMA_SIMULATOR_LOG_LEVEL` | `INFO` | The usual levels: `CRITICAL`, `ERROR`, `WARNING`, `INFO`, `DEBUG`. |
@@ -235,6 +267,29 @@ uv run --frozen pytest tests/test_live_retell.py -v
 ```
 
 `TEST_RETELL_BASE_URL` points that test somewhere other than Retell.
+
+Real speech is opt-in the same way, one test per provider so a failure
+names the leg, plus one for the pair working together. Each skips on its
+own credential, and CI runs none of them:
+
+```bash
+ELEVENLABS_API_KEY=... uv run --frozen pytest tests/test_live_elevenlabs.py -v
+DEEPGRAM_API_KEY=...   uv run --frozen pytest tests/test_live_deepgram.py -v
+DEEPGRAM_API_KEY=... ELEVENLABS_API_KEY=... \
+  uv run --frozen pytest tests/test_live_speech.py -v
+```
+
+The first hears the persona speak for real and reads the recording back:
+one channel a synthesized voice, the other still the test codec. The
+second hands a checked-in recording of one spoken sentence —
+`fixtures/spoken-sentence/` — to a real transcriber and checks the words
+that come back, so proving the ears needs no synthesis. The third
+conducts a whole voice simulation through both, against the loopback's
+echo mode, where what a real voice says is what real ears read. All three
+also plant their keys and scan every byte the run emitted, the way the
+offline sentinel tests do. `TEST_DEEPGRAM_API_KEY` and
+`TEST_ELEVENLABS_API_KEY` are read first, for a machine that keeps its
+test credentials apart from its working ones.
 
 ## Layout
 

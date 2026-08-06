@@ -393,6 +393,7 @@ def loopback_spec(
     greeting: str | None = None,
     replies: list[str] | None = None,
     ends_after_replies: bool = False,
+    echoes_what_it_hears: bool = False,
     answer_delay_seconds: float = 0.0,
     sample_rate_hz: int | None = None,
     provider_reference: str | None = None,
@@ -414,6 +415,8 @@ def loopback_spec(
         config["replies"] = replies
     if ends_after_replies:
         config["ends_after_replies"] = True
+    if echoes_what_it_hears:
+        config["echoes_what_it_hears"] = True
     if sample_rate_hz is not None:
         config["sample_rate_hz"] = sample_rate_hz
     if provider_reference is not None:
@@ -434,6 +437,34 @@ def loopback_spec(
     if voice is not None:
         spec["persona"]["traits"]["voice"] = voice
     return spec
+
+
+def credential(*names: str) -> str:
+    """The first of these environment variables that carries a value.
+
+    The opt-in tests read a ``TEST_``-prefixed name first, so a machine can
+    keep the credentials it tests with apart from the ones it works with,
+    and fall back to the provider's own plain name.
+    """
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def words_of(said: str) -> set[str]:
+    """The words of one turn, as a transcriber would have to have heard them.
+
+    Real transcription is not a codec: it capitalises, punctuates, and
+    sometimes hears "Thursday" as "thursday". So a live comparison is on
+    words rather than on strings, and what is asserted is that most of
+    them survived — which is what "these words were really heard" can
+    honestly mean.
+    """
+    return {
+        word.strip(".,!?;:").lower() for word in said.split() if word.strip(".,!?;:")
+    }
 
 
 def assert_one_speaker_to_a_channel(

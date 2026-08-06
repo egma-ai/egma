@@ -35,6 +35,7 @@ from .plugs import plug_for
 from .redaction import SecretRegistry
 from .reporting import Reporter, moment
 from .spec import SimulationSpec
+from .speech import SpeechProviders
 from .walk import Conducted, WalkControls, conduct
 
 logger = logging.getLogger(__name__)
@@ -182,14 +183,20 @@ class RunningSimulation:
         reporter = self._reporter
         reporter.running()
         try:
+            # The model first, because the pipeline below holds things that
+            # have to be given back and only the walk gives them back.
+            model = build_model_client(self._config, self._spec)
             # One pipeline per simulation, built from its own spec: the plug
             # that knows the platform, and — for voice — the speech legs
-            # around it. Assembling is validation, so a connection config the
-            # plug does not understand is an honest failure, not a crash.
+            # around it, whichever pair this deployment configured.
+            # Assembling is validation, so a connection config the plug does
+            # not understand is an honest failure, not a crash.
             assembled = assemble(
-                self._spec, blobs=self._blobs, on_timing=self._on_timing
+                self._spec,
+                blobs=self._blobs,
+                speech=SpeechProviders.from_config(self._config),
+                on_timing=self._on_timing,
             )
-            model = build_model_client(self._config, self._spec)
             try:
                 conducted = await conduct(
                     persona=Persona(

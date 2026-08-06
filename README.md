@@ -70,13 +70,20 @@ container being restarted, replaced or rebuilt; only `docker compose down -v`
 removes them, and that is what it is for.
 
 Everything else is environment, and `.env.example` names each one with its
-default. Two are worth knowing about before anything else:
+default. Three are worth knowing about before anything else:
 
 - **`EGMA_SIMULATOR_MODEL_PROVIDER` decides where the persona's words come
   from.** The default, `scripted`, walks the scenario deterministically and
   needs no account at all. Set it to `openai` — with `EGMA_SIMULATOR_MODEL_NAME`
   and `EGMA_SIMULATOR_MODEL_API_KEY`, and `EGMA_SIMULATOR_MODEL_BASE_URL` for
   anything OpenAI-compatible — and the persona improvises instead.
+- **`EGMA_SIMULATOR_TTS_PROVIDER` and `EGMA_SIMULATOR_STT_PROVIDER` decide
+  whether a voice simulation is really spoken.** Both default to `scripted`,
+  which carries a deterministic test tone and needs no account, so a first
+  voice simulation costs nothing. Set them to `elevenlabs` and `deepgram` —
+  with `EGMA_SIMULATOR_ELEVENLABS_API_KEY` and
+  `EGMA_SIMULATOR_DEEPGRAM_API_KEY` — and the persona speaks with a human
+  voice and hears real words. Each leg is chosen on its own.
 - **`EGMA_SIMULATOR_CAPACITY` is how many conversations happen at once.** The
   simulator claims only what it can hold, so a big run degrades into a queue
   rather than into overload.
