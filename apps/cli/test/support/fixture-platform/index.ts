@@ -12,6 +12,7 @@ import { deviceRoutes, type DeviceControls } from "./device.ts";
 import { startFixturePlatform, type FixturePlatform } from "./server.ts";
 import { testRoutes, type TestControls } from "./tests.ts";
 
+export { noAdapterRefusal } from "./agents.ts";
 export type { AgentControls } from "./agents.ts";
 export type { DeviceControls } from "./device.ts";
 export type { FixturePlatform, Observation } from "./server.ts";

@@ -14,6 +14,7 @@
 
 import { Box, Text, useInput, useStdout } from "ink";
 
+import { detectionLines } from "../../../wizard/detection.ts";
 import { dispatchKey, hintBar, isEnter, type KeyBinding } from "../keybindings.ts";
 import type { WizardState } from "../state.ts";
 import { addressFits, columnsNeeded } from "../width.ts";
@@ -109,6 +110,22 @@ export function LoginScreen({
       {state.loginTyping === "" ? null : (
         <Box marginTop={1}>
           <Text>{`› ${state.loginTyping}`}</Text>
+        </Box>
+      )}
+      {/*
+        The wait is somebody else's — a browser on another screen — so the time
+        it takes is spent showing what egma has already worked out rather than
+        showing nothing. It is written before the developer left and read when
+        they come back.
+      */}
+      {state.detection === null ? null : (
+        <Box flexDirection="column" marginTop={1}>
+          <Text dimColor>While you were away, egma looked around:</Text>
+          {detectionLines(state.detection).map((line) => (
+            <Text key={line} dimColor>
+              {`  ${line}`}
+            </Text>
+          ))}
         </Box>
       )}
       <Box flexDirection="column" marginTop={1}>

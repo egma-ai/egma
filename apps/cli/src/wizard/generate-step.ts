@@ -82,6 +82,25 @@ export type GenerateStepOptions = {
 };
 
 /**
+ * How this step stops, with the folder counted.
+ *
+ * Everywhere else in the walk a stop leaves nothing behind. Here it leaves
+ * files: the coding agent writes them as it goes, and they are the developer's
+ * the moment they land. So the count is read off the disk at the moment of
+ * stopping and travels with the report, and the exit line says where they are.
+ */
+async function stoppedHere(
+  signal: AbortSignal,
+  drivenAgentName: string,
+  paths: FolderPaths,
+): Promise<ExitReport> {
+  const report = stopReport(signal, drivenAgentName);
+  if (report.kind !== "interrupted") return report;
+  const kept = (await namesInFolder(paths)).length;
+  return kept === 0 ? report : { ...report, testsKept: kept };
+}
+
+/**
  * One dispatch that writes files, with the pane following what really lands.
  *
  * The result is deliberately thin: whether the agent could be driven at all,
@@ -204,7 +223,7 @@ async function writeFiles(
       );
       return null;
     case "interrupted":
-      return stopReport(signal, launch.name);
+      return stoppedHere(signal, launch.name, paths);
     case "unreachable":
       return { kind: "no-coding-agent" };
     case "needs-login":
@@ -332,7 +351,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<ExitRe
   // closes the wizard instead of answering has answered too, so the wait ends
   // with the signal and not only with a keystroke.
   const said = await untilAborted(ui.waitForAnswer("existing-tests"), signal);
-  if (signal.aborted) return stopReport(signal, options.launch.name);
+  if (signal.aborted) return stoppedHere(signal, options.launch.name, paths);
 
   const existing = await readExistingTests(cwd, said ?? null);
   if (existing.kind === "unusable") {
@@ -415,7 +434,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<ExitRe
     // written, they are the developer's, and the line has to say where.
     return stopReasonOf(signal) === "quit"
       ? { kind: "tests-kept", count: gate.rows.length }
-      : stopReport(signal, options.launch.name);
+      : stoppedHere(signal, options.launch.name, paths);
   }
 
   return pushGate(options, paths, gate);

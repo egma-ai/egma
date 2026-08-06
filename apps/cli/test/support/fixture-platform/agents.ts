@@ -292,7 +292,30 @@ function connectionOut(connection: StoredConnection): Record<string, unknown> {
   return shown;
 }
 
+/**
+ * What the platform says about a connection type it cannot reach yet.
+ *
+ * The rule it stands for is the platform's: a connection whose adapter has not
+ * shipped is refused **loudly, at creation, in the platform's own words**, and
+ * the wizard prints those words rather than a summary of them. Where that
+ * refusal is served from is the platform's business and it will move to run
+ * creation the day the public API serves runs; what this pins is the only half
+ * the CLI owns — that it swallows nothing.
+ */
+export function noAdapterRefusal(type: string): string {
+  return (
+    `egma cannot run simulations over a ${type} connection yet: no adapter for it ` +
+    "has shipped. Nothing was registered, because a way of reaching your agent " +
+    "that egma cannot use is not one."
+  );
+}
+
 export type AgentControls = {
+  /**
+   * Make this connection type one egma has no adapter for, so registering one
+   * is refused the way the platform refuses it.
+   */
+  withoutAdapterFor(type: string): void;
   /** Every agent written, oldest first. */
   readonly agents: readonly StoredAgent[];
   /** Every connection written, oldest first. */
@@ -317,6 +340,8 @@ export function agentRoutes(knowsKey: (key: string) => boolean): {
   const connections: StoredConnection[] = [];
   const sealed: string[] = [];
   const projectsNamed: (string | null)[] = [];
+  /** Connection types this instance has no adapter for. Empty by default. */
+  const unreachableTypes = new Set<string>();
 
   /** The project everything lands in when a write names none. */
   const HOME_PROJECT = newId("prj");
@@ -359,6 +384,9 @@ export function agentRoutes(knowsKey: (key: string) => boolean): {
   ): StoredConnection => {
     const descriptor = descriptorOf(input["type"]);
     const type = input["type"] as string;
+    if (unreachableTypes.has(type)) {
+      throw new Refusal(noAdapterRefusal(type), { status: 422, code: "no_adapter" });
+    }
     const modality = validModality(type, input["modality"]);
     const config = validConfig(type, input["config"]);
     const credentials = validCredentials(type, input["credentials"]);
@@ -522,5 +550,16 @@ export function agentRoutes(knowsKey: (key: string) => boolean): {
     ],
   };
 
-  return { group, controls: { agents, connections, sealed, projectsNamed } };
+  return {
+    group,
+    controls: {
+      withoutAdapterFor(type) {
+        unreachableTypes.add(type);
+      },
+      agents,
+      connections,
+      sealed,
+      projectsNamed,
+    },
+  };
 }

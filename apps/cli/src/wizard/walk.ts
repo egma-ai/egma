@@ -14,6 +14,7 @@ import { signedInAt } from "../platform/signed-in.ts";
 import type { ConnectOptions } from "../retell/connect.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
 import { connectStep } from "./connect-step.ts";
+import { detect } from "./detection.ts";
 import { findTheAgent } from "./discovery.ts";
 import { openDrivenAgentLog, type DrivenAgentLog } from "./driven-agent-log.ts";
 import type { ExitReport } from "./exit-line.ts";
@@ -48,6 +49,15 @@ export async function walk(options: WalkOptions): Promise<ExitReport> {
 
   const log = options.log ?? openDrivenAgentLog();
   ui.setDrivenAgentLog(log.file);
+
+  // Started before the intro is dismissed and shown behind the browser wait,
+  // which is the only dead time the walk has. It is handed to the UI whenever
+  // it lands and no step ever reads it back, so nothing in the walk is paced by
+  // it and a look that fails costs nothing.
+  void detect({ cwd, drivenAgentName: launch.name }).then(
+    (detection) => ui.setDetection(detection),
+    () => undefined,
+  );
 
   await untilAborted(ui.waitForGate("begin"), signal);
   if (signal.aborted) {

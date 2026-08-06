@@ -9,6 +9,7 @@
 import type { LoginPrompt } from "../../platform/login.ts";
 import type { RetellAgent } from "../../retell/client.ts";
 import type { KeyAsk } from "../../retell/connect.ts";
+import type { Detection } from "../../wizard/detection.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
 import type { TestGate } from "../../wizard/gate.ts";
 import type { GenerationProgress } from "../../wizard/test-generation.ts";
@@ -18,6 +19,8 @@ export type WizardState = {
   readonly drivenAgent: DrivenAgent | null;
   /** Where the coding agent's own output is kept, for a screen that tails it. */
   readonly drivenAgentLog: string | null;
+  /** What egma worked out about this machine for itself, or `null` before it has. */
+  readonly detection: Detection | null;
   /** What has to be approved in a browser, while it still has to be. */
   readonly login: LoginPrompt | null;
   /** What the developer is typing back at the login screen, so far. */
@@ -59,6 +62,7 @@ export function emptyState(): WizardState {
   return {
     drivenAgent: null,
     drivenAgentLog: null,
+    detection: null,
     login: null,
     loginTyping: "",
     loginCopied: false,

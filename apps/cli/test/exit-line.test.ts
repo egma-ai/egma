@@ -22,6 +22,8 @@ const EVERY_ENDING: readonly ExitReport[] = [
   { kind: "quit" },
   { kind: "interrupted", drivenAgentName: "Claude Agent" },
   { kind: "interrupted", drivenAgentName: null },
+  { kind: "interrupted", drivenAgentName: "Claude Agent", testsKept: 12 },
+  { kind: "interrupted", drivenAgentName: "Claude Agent", testsKept: 1 },
   { kind: "failed", reason: "the agent stopped talking" },
 ];
 
@@ -52,6 +54,14 @@ describe("the exit line", () => {
 
     expect(buildExitLine({ kind: "interrupted", drivenAgentName: "Claude Agent" })).toContain(
       "stopped before the task finished",
+    );
+
+    // A stop that left files behind says so, in the same one line: a folder a
+    // developer was never told about is a half-truth.
+    expect(
+      buildExitLine({ kind: "interrupted", drivenAgentName: "Claude Agent", testsKept: 12 }),
+    ).toBe(
+      "egma stopped before the task finished, and shut Claude Agent down. Your 12 tests are in egma/tests/.",
     );
 
     expect(buildExitLine({ kind: "failed", reason: "no answer" })).toContain("no answer");

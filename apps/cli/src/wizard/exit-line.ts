@@ -54,7 +54,19 @@ export type ExitReport =
       readonly reason: string;
     }
   | { readonly kind: "quit" }
-  | { readonly kind: "interrupted"; readonly drivenAgentName: string | null }
+  /**
+   * The developer changed their mind while egma was working.
+   *
+   * `testsKept` is how many test files were really on disk when it stopped. A
+   * stop part way through writing a suite leaves files behind, and a line that
+   * only said egma had stopped would leave a developer with a folder they were
+   * never told about. Absent, or zero, means the folder holds nothing to say.
+   */
+  | {
+      readonly kind: "interrupted";
+      readonly drivenAgentName: string | null;
+      readonly testsKept?: number;
+    }
   | { readonly kind: "failed"; readonly reason: string };
 
 /** One line means one line, whatever shape the reason arrived in. */
@@ -97,10 +109,19 @@ export function buildExitLine(report: ExitReport): string {
         : `${report.drivenAgentName} stopped before it found your voice agent: ${oneLine(report.reason)}`;
     case "quit":
       return "egma closed. Nothing ran.";
-    case "interrupted":
-      return report.drivenAgentName === null
-        ? "egma stopped before the task finished."
-        : `egma stopped before the task finished, and shut ${report.drivenAgentName} down.`;
+    case "interrupted": {
+      const stopped =
+        report.drivenAgentName === null
+          ? "egma stopped before the task finished."
+          : `egma stopped before the task finished, and shut ${report.drivenAgentName} down.`;
+      const kept = report.testsKept ?? 0;
+      if (kept === 0) return stopped;
+      // The folder is not empty, so the line says so. A developer who finds
+      // files they were never told about has been told a half-truth.
+      return kept === 1
+        ? `${stopped} Your 1 test is in ${TESTS_FOLDER}.`
+        : `${stopped} Your ${kept} tests are in ${TESTS_FOLDER}.`;
+    }
     case "failed":
       return `egma could not finish: ${oneLine(report.reason)}`;
   }
