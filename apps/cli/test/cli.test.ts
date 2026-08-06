@@ -108,7 +108,7 @@ describe("the egma command", () => {
     expect(result.stdout).toBe("");
   });
 
-  it("drives the whole step and ends with the one exit line", async () => {
+  it("drives the whole step, then stops plainly where a provider key is needed", async () => {
     const script = await workspace.script({
       steps: [
         {
@@ -135,12 +135,17 @@ describe("the egma command", () => {
       workspace,
     );
 
-    expect(result.code).toBe(0);
     const lines = result.stdout.trimEnd().split("\n");
     expect(lines).toContain("◆ Read package.json");
     expect(lines).toContain("┊ Framework  retell-sdk");
+
+    // Finding the agent is not reaching it. The walk goes on to ask for the
+    // key that would reach it, and a run with nobody watching and nothing in
+    // its environment has none to give — so it says that, and stops.
+    expect(lines).toContain("Paste your Retell API key (Retell dashboard → Settings → API keys).");
+    expect(result.code).toBe(1);
     expect(lines.at(-1)).toBe(
-      "egma found your voice agent: retell-sdk, prompts in prompts/order-line.md.",
+      "egma could not finish: no Retell key was given, so there is nothing to test.",
     );
   });
 

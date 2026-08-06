@@ -15,6 +15,8 @@
  */
 
 import { loginLines, type LoginPrompt } from "../platform/login.ts";
+import type { RetellAgent } from "../retell/client.ts";
+import { keyAskLines, type KeyAsk } from "../retell/connect.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
 import type { AskId, DrivenAgent, GateId, WizardUI } from "./wizard-ui.ts";
 
@@ -22,6 +24,10 @@ export type HeadlessRecord = {
   drivenAgent: DrivenAgent | null;
   drivenAgentLog: string | null;
   logins: LoginPrompt[];
+  /** Every time a key was asked for, and what was said about it. */
+  keyAsks: KeyAsk[];
+  /** The agents a choice was offered between, when one was. */
+  agentChoices: RetellAgent[];
   statuses: string[];
   summary: string;
   exit: ExitReport | null;
@@ -41,6 +47,8 @@ export class HeadlessUI implements WizardUI {
     drivenAgent: null,
     drivenAgentLog: null,
     logins: [],
+    keyAsks: [],
+    agentChoices: [],
     statuses: [],
     summary: "",
     exit: null,
@@ -78,6 +86,23 @@ export class HeadlessUI implements WizardUI {
     // The same lines `egma login` prints, from the same place, so the two
     // promptless surfaces cannot drift apart.
     for (const line of loginLines(prompt)) this.write(line);
+  }
+
+  setKeyAsk(ask: KeyAsk | null): void {
+    if (ask === null) return;
+    this.record.keyAsks.push(ask);
+    // The same lines the wizard's screen draws, from the same place, so the two
+    // promptless surfaces cannot drift apart. The key itself is never among
+    // them: it is typed, not printed.
+    for (const line of keyAskLines(ask)) this.write(line);
+  }
+
+  setAgentChoices(agents: readonly RetellAgent[] | null): void {
+    if (agents === null) return;
+    this.record.agentChoices = [...agents];
+    for (const agent of agents) {
+      this.write(`retell_agent: ${agent.id} ${agent.name}`.trimEnd());
+    }
   }
 
   /** Nobody is at this keyboard, so nothing is ever pasted at it. */

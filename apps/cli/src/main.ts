@@ -17,8 +17,16 @@ import {
   launchForId,
   type DrivenAgentLaunch,
 } from "./acp/registry.ts";
+import {
+  AGENT_VARIABLE,
+  argumentRefusal,
+  KEY_VARIABLES,
+  refusedArgumentIn,
+  runConnectCommand,
+} from "./commands/connect.ts";
 import { runLoginCommand } from "./commands/login.ts";
 import { resolvePlatformAccess, UnusableUrlError } from "./platform/credentials.ts";
+import { RETELL_API } from "./retell/client.ts";
 import { HeadlessUI } from "./ui/headless-ui.ts";
 import { startTui } from "./ui/tui/start-tui.ts";
 import { buildExitLine, buildExitNotice, type ExitReport } from "./wizard/exit-line.ts";
@@ -32,7 +40,15 @@ import { walk } from "./wizard/walk.ts";
  * because a verb is what a coding agent types and a coding agent has no
  * keystroke to give.
  */
-export const VERBS = ["login"] as const;
+export const VERBS = ["login", "connect"] as const;
+
+/**
+ * The Retell the CLI talks to, for a check that stands one in.
+ *
+ * It is read here rather than deep in the client so that there is one place
+ * where "which Retell" is decided, exactly as there is one for which egma.
+ */
+export const RETELL_URL_VARIABLE = "EGMA_RETELL_URL";
 
 export type Verb = (typeof VERBS)[number];
 
@@ -49,6 +65,10 @@ export type Invocation = {
   readonly url: string | null;
   /** `--force`: do the work again even though it has been done. */
   readonly force: boolean;
+  /** `--retell-agent`: which agent, when the account holds several. */
+  readonly retellAgentId: string | null;
+  /** `--repo-prompt`: the repository's prompt, to compare the provider's with. */
+  readonly repoPrompt: string | null;
   /**
    * A test seam, not product surface: `-- <command>` starts a scripted agent in
    * place of a real one. It is not documented and it is not stable.
@@ -70,6 +90,8 @@ export function parseArgs(argv: readonly string[]): Invocation {
   let cwd: string | null = null;
   let url: string | null = null;
   let force = false;
+  let retellAgentId: string | null = null;
+  let repoPrompt: string | null = null;
   let drivenAgentCommand: string[] = [];
   const unknown: string[] = [];
 
@@ -86,6 +108,8 @@ export function parseArgs(argv: readonly string[]): Invocation {
     else if (argument === "--cwd") cwd = argv[(index += 1)] ?? null;
     else if (argument === "--url") url = argv[(index += 1)] ?? null;
     else if (argument === "--force") force = true;
+    else if (argument === "--retell-agent") retellAgentId = argv[(index += 1)] ?? null;
+    else if (argument === "--repo-prompt") repoPrompt = argv[(index += 1)] ?? null;
     else if (verb === null && isVerb(argument)) verb = argument;
     else unknown.push(argument);
   }
@@ -99,6 +123,8 @@ export function parseArgs(argv: readonly string[]): Invocation {
     cwd,
     url,
     force,
+    retellAgentId,
+    repoPrompt,
     drivenAgentCommand,
     unknown,
   };
@@ -111,6 +137,9 @@ export function helpText(): string {
     "Usage:",
     "  egma [options]           The wizard.",
     "  egma login [options]     Sign this machine in. No questions, plain lines.",
+    "  egma connect [options]   Register your voice agent and a way to reach it.",
+    "                           The key comes in on standard input or from the",
+    "                           environment, never as an argument.",
     "",
     "Options:",
     "  --coding-agent <id>  Which coding agent to drive, named as the agent",
@@ -121,6 +150,10 @@ export function helpText(): string {
     "                       does the same for a whole shell.",
     "  --force              With login: sign in again even when this machine",
     "                       already holds a key.",
+    "  --retell-agent <id>  With connect: which agent, when the Retell account",
+    "                       holds more than one.",
+    "  --repo-prompt <path> With connect: the prompt file in this repository, so",
+    "                       egma can say whether it and Retell have drifted apart.",
     "  --headless           Run with no terminal and no keystroke: plain lines,",
     "                       and the task taken as already agreed to.",
     "  -h, --help           Print this.",
@@ -130,6 +163,11 @@ export function helpText(): string {
     "  EGMA_URL             The egma to talk to, for a whole shell. Same as --url.",
     "  EGMA_HOME            The folder egma keeps this machine's key in.",
     "                       Default: ~/.egma",
+    `  ${KEY_VARIABLES[0]}  Your Retell key, for egma connect. ${KEY_VARIABLES[1]}`,
+    "                       is read too, so an environment that already has one",
+    "                       needs nothing new.",
+    `  ${AGENT_VARIABLE}  Which Retell agent, same as --retell-agent.`,
+    `  ${RETELL_URL_VARIABLE}     The Retell to talk to. Default: ${RETELL_API}`,
     "",
     "What egma login prints, one fact per line:",
     "  url, code, approve_url, browser, waiting, status, credentials",
@@ -137,6 +175,17 @@ export function helpText(): string {
     "What egma login answers with:",
     "  0 signed in   2 denied   3 the code ran out",
     "  4 egma did not answer, or refused   130 stopped part way",
+    "",
+    "What egma connect prints, one fact per line:",
+    "  url, retell_agents, retell_agent, retell_agent_id, retell_response_engine,",
+    "  prompt_characters, tools, agent_id, agent_name, connection_id,",
+    "  connection_name, connection_type, connection_modality, drift, grounded_in,",
+    "  status",
+    "",
+    "What egma connect answers with:",
+    "  0 connected   2 the key was refused   3 no agents on that account",
+    "  4 Retell or egma did not answer, or refused   5 several agents, none named",
+    "  6 no key given   7 not signed in to egma   130 stopped part way",
     "",
     `The agent registry was mirrored on ${REGISTRY_SNAPSHOT_MIRRORED_ON}.`,
   ].join("\n");
@@ -172,6 +221,7 @@ function launchFrom(invocation: Invocation): DrivenAgentLaunch {
 function walkExitCode(report: ExitReport): number {
   switch (report.kind) {
     case "found-agent":
+    case "connected":
     case "quit":
     // egma did everything it could here: it named what is missing and handed
     // over words that work without it. That is the run finishing, not failing.
@@ -188,7 +238,40 @@ function walkExitCode(report: ExitReport): number {
   }
 }
 
+/** Where Retell is for this run, or `undefined` for Retell's own address. */
+function retellReach(env: NodeJS.ProcessEnv): { readonly url: string } | undefined {
+  const named = env[RETELL_URL_VARIABLE]?.trim();
+  return named === undefined || named === "" ? undefined : { url: named };
+}
+
+/**
+ * What a headless walk would have been told, for the one question it cannot
+ * ask: the key, which arrives from the environment because a run with nobody
+ * watching has nobody to type it.
+ *
+ * Standard input is deliberately not read here. The wizard's own walk may still
+ * be reading it for keystrokes, and a flag that says "nobody is watching" must
+ * not change where a secret comes from.
+ */
+function headlessAnswers(
+  invocation: Invocation,
+  env: NodeJS.ProcessEnv,
+): Partial<Record<"retell-key" | "retell-agent", string>> {
+  const answers: Partial<Record<"retell-key" | "retell-agent", string>> = {};
+  for (const variable of KEY_VARIABLES) {
+    const held = env[variable];
+    if (typeof held === "string" && held.trim() !== "") {
+      answers["retell-key"] = held;
+      break;
+    }
+  }
+  const named = (invocation.retellAgentId ?? env[AGENT_VARIABLE] ?? "").trim();
+  if (named !== "") answers["retell-agent"] = named;
+  return answers;
+}
+
 async function runHeadless(
+  invocation: Invocation,
   launch: DrivenAgentLaunch,
   cwd: string,
   platform: PlatformAccess,
@@ -199,9 +282,19 @@ async function runHeadless(
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
 
-  const ui = new HeadlessUI({ write: (line) => process.stdout.write(`${line}\n`) });
+  const ui = new HeadlessUI({
+    write: (line) => process.stdout.write(`${line}\n`),
+    answers: headlessAnswers(invocation, process.env),
+  });
   try {
-    const report = await walk({ ui, launch, cwd, signal: controller.signal, platform });
+    const report = await walk({
+      ui,
+      launch,
+      cwd,
+      signal: controller.signal,
+      platform,
+      retell: retellReach(process.env),
+    });
     const notice = buildExitNotice(report);
     if (notice !== null) process.stdout.write(`${notice}\n\n`);
     process.stdout.write(`${buildExitLine(report)}\n`);
@@ -227,7 +320,14 @@ async function runWizard(
   process.on("SIGTERM", onSignal);
 
   try {
-    const report = await walk({ ui: tui.ui, launch, cwd, signal: controller.signal, platform });
+    const report = await walk({
+      ui: tui.ui,
+      launch,
+      cwd,
+      signal: controller.signal,
+      platform,
+      retell: retellReach(process.env),
+    });
     tui.close(report);
     return walkExitCode(report);
   } catch (error) {
@@ -262,7 +362,42 @@ async function runLogin(invocation: Invocation, access: PlatformAccess): Promise
   }
 }
 
+/** The connect verb: a key from a pipe or the environment, and plain lines. */
+async function runConnect(invocation: Invocation, access: PlatformAccess): Promise<number> {
+  const controller = new AbortController();
+  const onSignal = (): void => controller.abort("interrupt");
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+
+  try {
+    return await runConnectCommand({
+      access,
+      cwd: path.resolve(invocation.cwd ?? process.cwd()),
+      agentId: invocation.retellAgentId,
+      repoPrompt: invocation.repoPrompt,
+      env: process.env,
+      signal: controller.signal,
+      stdin: process.stdin,
+      retell: retellReach(process.env),
+      out: (line) => process.stdout.write(`${line}\n`),
+      fail: (line) => process.stderr.write(`${line}\n`),
+    });
+  } finally {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+  }
+}
+
 export async function main(argv: readonly string[]): Promise<void> {
+  // Before anything is parsed or printed: an argument that would have carried
+  // a secret is refused by name, and its value is never repeated back.
+  const leaked = refusedArgumentIn(argv);
+  if (leaked !== null) {
+    process.stderr.write(`${argumentRefusal(leaked)}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
   const invocation = parseArgs(argv);
 
   if (invocation.help) {
@@ -274,8 +409,11 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
   if (invocation.unknown.length > 0) {
+    // Only the name is said back. Something written as `--thing=value` may be
+    // carrying anything, and a refusal is no place to print it.
+    const named = (invocation.unknown[0] as string).split("=")[0] as string;
     process.stderr.write(
-      `egma does not know the option ${invocation.unknown[0]}. Run egma --help to see the ones it does.\n`,
+      `egma does not know the option ${named}. Run egma --help to see the ones it does.\n`,
     );
     process.exitCode = 1;
     return;
@@ -300,6 +438,10 @@ export async function main(argv: readonly string[]): Promise<void> {
   // so there is nothing for a keystroke to agree to.
   if (invocation.verb === "login") {
     process.exitCode = await runLogin(invocation, access);
+    return;
+  }
+  if (invocation.verb === "connect") {
+    process.exitCode = await runConnect(invocation, access);
     return;
   }
 
@@ -330,6 +472,6 @@ export async function main(argv: readonly string[]): Promise<void> {
   }
 
   process.exitCode = invocation.headless
-    ? await runHeadless(launch, cwd, access)
+    ? await runHeadless(invocation, launch, cwd, access)
     : await runWizard(launch, cwd, access);
 }

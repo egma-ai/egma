@@ -79,6 +79,15 @@ export type WorkspaceOptions = {
  */
 export const NO_BROWSER = "/usr/bin/true";
 
+/**
+ * A Retell that is not Retell.
+ *
+ * Every run started from here is pointed at a closed port unless the check
+ * itself says otherwise, so no check anywhere can reach the real Retell — not
+ * by accident, and not because somebody's shell had a key in it.
+ */
+export const NO_RETELL = "http://127.0.0.1:1";
+
 export async function makeWorkspace(
   files: Readonly<Record<string, string>> = {},
   options: WorkspaceOptions = {},
@@ -102,12 +111,18 @@ export async function makeWorkspace(
         ...process.env,
         EGMA_HOME: egmaFolder,
         BROWSER: NO_BROWSER,
+        EGMA_RETELL_URL: NO_RETELL,
         ...extra,
       };
       // Whatever the person running the suite has set, a check talks to the
       // egma it is checking against and to nothing else. Removed rather than
       // set to nothing: a pseudo-terminal turns an unset value into the word.
       if (extra.EGMA_URL === undefined) delete env.EGMA_URL;
+      // And a key the person running the suite happens to have in their shell
+      // is not a key any check may use.
+      if (extra.EGMA_RETELL_API_KEY === undefined) delete env.EGMA_RETELL_API_KEY;
+      if (extra.RETELL_API_KEY === undefined) delete env.RETELL_API_KEY;
+      if (extra.EGMA_RETELL_AGENT_ID === undefined) delete env.EGMA_RETELL_AGENT_ID;
       return env;
     },
     async signIn(url, key = "egma_sk_already-held") {

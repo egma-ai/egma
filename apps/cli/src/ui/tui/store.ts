@@ -14,6 +14,8 @@
 import { WizardRouter, type ScreenName, type Sequence } from "./router.ts";
 import { emptyState, type WizardState } from "./state.ts";
 import type { LoginPrompt } from "../../platform/login.ts";
+import type { RetellAgent } from "../../retell/client.ts";
+import type { KeyAsk } from "../../retell/connect.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
 import type { AskId, DrivenAgent, GateId } from "../wizard-ui.ts";
 
@@ -27,6 +29,10 @@ export const WALK_SCREENS: Sequence = [
   // Only ever on while the flow is parked on that one question, and gone the
   // moment it is answered — which is the router working the way it should.
   { id: "prompts-pointer", show: (state) => state.asking === "prompts-pointer" },
+  { id: "retell-key", show: (state) => state.asking === "retell-key" },
+  // Never reached with one agent on the account, because the flow only opens
+  // this question when there is a choice to make.
+  { id: "retell-agent", show: (state) => state.asking === "retell-agent" },
   { id: "task" },
 ];
 
@@ -138,6 +144,14 @@ export class WizardStore {
         ? { login, loginTyping: "", loginCopied: false }
         : { login },
     );
+  }
+
+  setKeyAsk(keyAsk: KeyAsk | null): void {
+    this.change({ keyAsk });
+  }
+
+  setAgentChoices(agentChoices: readonly RetellAgent[] | null): void {
+    this.change({ agentChoices });
   }
 
   /** Hands over what was typed back, and forgets it, so it is acted on once. */

@@ -1,0 +1,221 @@
+/**
+ * Retell, faked, speaking the shapes its published SDK speaks.
+ *
+ * The CLI talks to Retell over plain HTTP, so that is the seam a check stands
+ * in at: a server on this machine answering `/v2/list-agents`, `/get-agent/…`,
+ * `/get-retell-llm/…` and `/get-conversation-flow/…` with the fields the SDK's
+ * own types name. Nothing in CI ever reaches the real Retell, and no real key
+ * exists anywhere near these checks.
+ *
+ * It records what it was asked, including which key was offered, so a check can
+ * assert that the key reached the one place it is supposed to reach.
+ */
+
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+
+/** One agent as the listing answers it. */
+export type FakeAgentRow = {
+  readonly agent_id: string;
+  readonly agent_name: string;
+  readonly channel?: "voice" | "chat";
+};
+
+/** What `/get-agent/:id` answers, and what the engine behind it holds. */
+export type FakeAgent = {
+  readonly agent_id: string;
+  readonly agent_name?: string;
+  readonly voice_id?: string;
+  readonly channel?: "voice" | "chat";
+  readonly response_engine?: Record<string, unknown>;
+  /** Anything else this agent carries, kept as Retell would answer it. */
+  readonly extra?: Record<string, unknown>;
+};
+
+/** A Retell LLM, the commonest response engine. */
+export type FakeLlm = {
+  readonly llm_id: string;
+  readonly general_prompt?: string | null;
+  readonly general_tools?: readonly unknown[];
+  readonly extra?: Record<string, unknown>;
+};
+
+/** A conversation flow, the other engine Retell holds the words for. */
+export type FakeFlow = {
+  readonly conversation_flow_id: string;
+  readonly global_prompt?: string | null;
+  readonly tools?: readonly unknown[];
+  readonly extra?: Record<string, unknown>;
+};
+
+export type FakeRetellScript = {
+  /** The keys this account answers to. Anything else is refused. */
+  readonly keys: readonly string[];
+  readonly agents: readonly FakeAgent[];
+  readonly llms?: readonly FakeLlm[];
+  readonly flows?: readonly FakeFlow[];
+  /** Answer every request with this status and body instead. */
+  readonly refuseWith?: { readonly status: number; readonly body: unknown };
+};
+
+/** One request, as the fake saw it. */
+export type FakeRetellRequest = {
+  readonly method: string;
+  readonly path: string;
+  /** The key offered in the header, which is the only place it may appear. */
+  readonly key: string;
+  /** Everything else about the request, so a check can prove where it was not. */
+  readonly body: string;
+  readonly query: string;
+};
+
+export type FakeRetell = {
+  /** The address to point the CLI at. */
+  readonly url: string;
+  readonly requests: readonly FakeRetellRequest[];
+  /** The exact bytes this fake answered a path with, for a byte-for-byte check. */
+  answered(path: string): string | undefined;
+  close(): Promise<void>;
+};
+
+function agentBody(agent: FakeAgent): Record<string, unknown> {
+  return {
+    agent_id: agent.agent_id,
+    ...(agent.agent_name === undefined ? {} : { agent_name: agent.agent_name }),
+    ...(agent.voice_id === undefined ? {} : { voice_id: agent.voice_id }),
+    ...(agent.response_engine === undefined ? {} : { response_engine: agent.response_engine }),
+    version: 0,
+    last_modification_timestamp: 1_700_000_000_000,
+    ...(agent.extra ?? {}),
+  };
+}
+
+function llmBody(llm: FakeLlm): Record<string, unknown> {
+  return {
+    llm_id: llm.llm_id,
+    general_prompt: llm.general_prompt ?? null,
+    general_tools: llm.general_tools ?? [],
+    last_modification_timestamp: 1_700_000_000_000,
+    ...(llm.extra ?? {}),
+  };
+}
+
+function flowBody(flow: FakeFlow): Record<string, unknown> {
+  return {
+    conversation_flow_id: flow.conversation_flow_id,
+    version: 0,
+    global_prompt: flow.global_prompt ?? null,
+    tools: flow.tools ?? [],
+    nodes: [],
+    ...(flow.extra ?? {}),
+  };
+}
+
+export async function startFakeRetell(script: FakeRetellScript): Promise<FakeRetell> {
+  const requests: FakeRetellRequest[] = [];
+  const answers = new Map<string, string>();
+
+  const server: Server = createServer(
+    (incoming: IncomingMessage, outgoing: ServerResponse) => {
+      void (async () => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of incoming) chunks.push(chunk as Buffer);
+        const raw = Buffer.concat(chunks).toString("utf8");
+
+        const at = new URL(incoming.url ?? "/", "http://retell.invalid");
+        const key = (incoming.headers.authorization ?? "").replace(/^Bearer\s+/iu, "");
+
+        requests.push({
+          method: incoming.method ?? "GET",
+          path: at.pathname,
+          key,
+          body: raw,
+          query: at.search,
+        });
+
+        const send = (status: number, body: unknown): void => {
+          const text = JSON.stringify(body);
+          if (status >= 200 && status < 300) answers.set(at.pathname, text);
+          outgoing.writeHead(status, { "content-type": "application/json" });
+          outgoing.end(text);
+        };
+
+        if (script.refuseWith !== undefined) {
+          send(script.refuseWith.status, script.refuseWith.body);
+          return;
+        }
+
+        if (!script.keys.includes(key)) {
+          // What Retell answers a key it does not know.
+          send(401, { error_message: "Invalid API key" });
+          return;
+        }
+
+        if (incoming.method === "POST" && at.pathname === "/v2/list-agents") {
+          send(200, {
+            items: script.agents.map((agent) => ({
+              agent_id: agent.agent_id,
+              agent_name: agent.agent_name ?? "",
+              channel: agent.channel ?? "voice",
+              tags: {},
+              user_modified_timestamp: 1_700_000_000_000,
+            })),
+            has_more: false,
+          });
+          return;
+        }
+
+        if (incoming.method === "GET" && at.pathname.startsWith("/get-agent/")) {
+          const id = decodeURIComponent(at.pathname.slice("/get-agent/".length));
+          const agent = script.agents.find((held) => held.agent_id === id);
+          if (agent === undefined) {
+            send(404, { error_message: "agent not found" });
+            return;
+          }
+          send(200, agentBody(agent));
+          return;
+        }
+
+        if (incoming.method === "GET" && at.pathname.startsWith("/get-retell-llm/")) {
+          const id = decodeURIComponent(at.pathname.slice("/get-retell-llm/".length));
+          const llm = (script.llms ?? []).find((held) => held.llm_id === id);
+          if (llm === undefined) {
+            send(404, { error_message: "llm not found" });
+            return;
+          }
+          send(200, llmBody(llm));
+          return;
+        }
+
+        if (incoming.method === "GET" && at.pathname.startsWith("/get-conversation-flow/")) {
+          const id = decodeURIComponent(at.pathname.slice("/get-conversation-flow/".length));
+          const flow = (script.flows ?? []).find((held) => held.conversation_flow_id === id);
+          if (flow === undefined) {
+            send(404, { error_message: "conversation flow not found" });
+            return;
+          }
+          send(200, flowBody(flow));
+          return;
+        }
+
+        send(404, { error_message: `nothing serves ${at.pathname}` });
+      })();
+    },
+  );
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address() as AddressInfo;
+
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    requests,
+    answered: (path) => answers.get(path),
+    async close() {
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
+    },
+  };
+}

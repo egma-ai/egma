@@ -10,7 +10,9 @@
  */
 
 import type { DrivenAgentLaunch } from "../acp/registry.ts";
+import type { ConnectOptions } from "../retell/connect.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
+import { connectStep } from "./connect-step.ts";
 import { findTheAgent } from "./discovery.ts";
 import { openDrivenAgentLog, type DrivenAgentLog } from "./driven-agent-log.ts";
 import type { ExitReport } from "./exit-line.ts";
@@ -30,6 +32,8 @@ export type WalkOptions = {
    * coding agent stay about that.
    */
   readonly platform?: PlatformAccess;
+  /** Where Retell is. Retell's own address when omitted. */
+  readonly retell?: ConnectOptions["retell"];
 };
 
 /** Runs the walk and returns the line the wizard will leave behind. */
@@ -58,7 +62,28 @@ export async function walk(options: WalkOptions): Promise<ExitReport> {
     }
   }
 
-  const report = await findTheAgent({ ui, launch, cwd, signal, log });
+  const found = await findTheAgent({ ui, launch, cwd, signal, log });
+
+  // Knowing where the agent is defined is not the same as being able to reach
+  // it, and everything after this needs both. The step runs only when there is
+  // an egma to register on and an agent to register: a run that only drives a
+  // coding agent has neither, and asking it for a provider key would be asking
+  // for a secret nothing was going to use.
+  if (found.kind !== "found-agent" || options.platform === undefined) {
+    ui.setExit(found);
+    return found;
+  }
+
+  const report = await connectStep({
+    ui,
+    platform: options.platform,
+    cwd,
+    // What the coding agent said about where the words live, carried forward
+    // so the two prompts can be compared once the provider's is in hand.
+    repoPrompts: found.prompts,
+    signal,
+    retell: options.retell,
+  });
   ui.setExit(report);
   return report;
 }

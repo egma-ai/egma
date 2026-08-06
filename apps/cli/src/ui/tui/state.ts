@@ -7,6 +7,8 @@
  */
 
 import type { LoginPrompt } from "../../platform/login.ts";
+import type { RetellAgent } from "../../retell/client.ts";
+import type { KeyAsk } from "../../retell/connect.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
 import type { AskId, DrivenAgent } from "../wizard-ui.ts";
 
@@ -20,6 +22,16 @@ export type WizardState = {
   readonly loginTyping: string;
   /** True for the moment after the address is copied, so the screen can say so. */
   readonly loginCopied: boolean;
+  /**
+   * What the flow is waiting to be handed, while it still is.
+   *
+   * The value itself is never here. A key lives in the screen that collects it
+   * for as long as it is being typed and goes straight to the flow, so nothing
+   * a screen or a check can read back holds it.
+   */
+  readonly keyAsk: KeyAsk | null;
+  /** The agents a choice is open between, or `null` when none is. */
+  readonly agentChoices: readonly RetellAgent[] | null;
   /** The developer has read the intro and said go. */
   readonly begun: boolean;
   readonly running: boolean;
@@ -38,6 +50,8 @@ export function emptyState(): WizardState {
     login: null,
     loginTyping: "",
     loginCopied: false,
+    keyAsk: null,
+    agentChoices: null,
     begun: false,
     running: false,
     finished: false,
