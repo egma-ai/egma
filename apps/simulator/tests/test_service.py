@@ -14,10 +14,14 @@ exercise them.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import logging
 
 import pytest
 from conftest import scripted_spec
 
+from egma_simulator import service as service_module
+from egma_simulator.client import ClaimFailure
 from egma_simulator.config import SimulatorConfig
 from egma_simulator.redaction import SecretRegistry
 from egma_simulator.service import SimulatorService
@@ -121,6 +125,90 @@ def test_a_spec_naming_an_unplugged_connection_type_is_refused(tmp_path, caplog)
 
     assert [spec.simulation_id for spec in executor.accepted] == ["sim-plugged"]
     assert "no platform plug" in caplog.text
+
+
+class RefusingClient:
+    """A control plane that turns down every claim the same way.
+
+    Counts the attempts and raises ``enough`` once there have been the
+    asked-for number of them, so the test waits on the loop having really
+    gone round rather than on a clock.
+    """
+
+    def __init__(self, *, attempts_wanted: int) -> None:
+        self.attempts = 0
+        self.enough = asyncio.Event()
+        self._wanted = attempts_wanted
+
+    async def claim(self, claimant: str, capacity: int) -> list[dict]:
+        self.attempts += 1
+        if self.attempts >= self._wanted:
+            self.enough.set()
+        raise ClaimFailure("claim answered 404: Route POST:/v1/claims not found")
+
+
+async def test_a_claim_failure_that_never_changes_is_said_once_not_forever(
+    tmp_path, caplog, monkeypatch
+):
+    """An outage is one piece of news, however long it lasts.
+
+    A control plane that is down, or that does not answer this question
+    yet, fails the identical way on every retry. Written out each time,
+    that is one sentence a second for the length of the outage — megabytes
+    a day of a log nobody can read. The repeats stay at DEBUG for whoever
+    wants to count them.
+    """
+    monkeypatch.setattr(service_module, "CLAIM_RETRY_SECONDS", 0.001)
+    caplog.set_level(logging.DEBUG, logger="egma_simulator.service")
+    service = a_service(tmp_path)
+    client = RefusingClient(attempts_wanted=25)
+
+    claiming = asyncio.create_task(
+        service._claim_forever(client, RecordingExecutor(capacity=2))
+    )
+    await client.enough.wait()
+    claiming.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await claiming
+
+    shouted = [
+        record for record in caplog.records if record.levelno == logging.WARNING
+    ]
+    assert len(shouted) == 1, [record.getMessage() for record in shouted]
+    assert "claim did not land" in shouted[0].getMessage()
+    assert client.attempts >= 25, "the loop kept trying, quietly"
+
+
+async def test_an_outage_that_speaks_again_counts_from_when_it_began(
+    tmp_path, caplog, monkeypatch
+):
+    """"After N attempts" means since the failure started, not since it last spoke.
+
+    Nobody reads a number in a log line and mentally scopes it to the
+    window it was counted in. With the repeat interval collapsed to
+    nothing, every attempt after the first speaks up, and each one has to
+    have counted every attempt before it.
+    """
+    monkeypatch.setattr(service_module, "CLAIM_RETRY_SECONDS", 0.001)
+    monkeypatch.setattr(service_module, "REPEATED_CLAIM_FAILURE_SECONDS", 0.0)
+    caplog.set_level(logging.DEBUG, logger="egma_simulator.service")
+    service = a_service(tmp_path)
+    client = RefusingClient(attempts_wanted=6)
+
+    claiming = asyncio.create_task(
+        service._claim_forever(client, RecordingExecutor(capacity=2))
+    )
+    await client.enough.wait()
+    claiming.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await claiming
+
+    counted = [
+        int(record.args[0])
+        for record in caplog.records
+        if record.levelno == logging.WARNING and "still not landing" in record.msg
+    ]
+    assert counted[:5] == [2, 3, 4, 5, 6], counted
 
 
 def test_the_typed_spec_reads_what_the_document_says():

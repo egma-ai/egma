@@ -123,6 +123,75 @@ services:
       retries: 30
       start_period: 5s
 
+  # The simulator: the service that conducts simulations. It claims its
+  # work rather than being sent it, so there is no `ports:` here and there
+  # never will be — every arrow points out, and adding this container to a
+  # self-host costs no inbound networking at all. Everything it needs is
+  # below; there are no files to place and no flags to pass.
+  simulator:
+    build:
+      context: .
+      dockerfile: apps/simulator/Dockerfile
+    environment:
+      # Where it claims, heartbeats and reports. The API and the simulator
+      # meet inside this network, so this is the service name rather than
+      # the origin a browser uses. The endpoints it dials arrive with the
+      # trigger; until then it asks, is told there is nothing, and asks
+      # again, which is what a queue with nothing in it looks like.
+      EGMA_SIMULATOR_CONTROL_PLANE_URL: ${EGMA_SIMULATOR_CONTROL_PLANE_URL:-http://api:3100}
+      # What it shows the control plane to be allowed to claim, as a bearer
+      # — the same header an egma key uses everywhere else. Unset is fine
+      # while both halves are yours and meet on this network; a simulator
+      # claiming across the internet needs one.
+      EGMA_SIMULATOR_SERVICE_TOKEN: ${EGMA_SIMULATOR_SERVICE_TOKEN:-}
+      # How many simulations one simulator conducts at once. It claims only
+      # what it has room for, so a big run degrades to a queue rather than
+      # to overload — raise this, or start a second simulator, and they
+      # distribute between themselves with nothing in front of them.
+      EGMA_SIMULATOR_CAPACITY: ${EGMA_SIMULATOR_CAPACITY:-4}
+      # Where the persona's words come from. `scripted` walks the scenario
+      # deterministically and needs no account, which is why it is the
+      # default; `openai` speaks to any provider using that shape and makes
+      # the next two required.
+      EGMA_SIMULATOR_MODEL_PROVIDER: ${EGMA_SIMULATOR_MODEL_PROVIDER:-scripted}
+      EGMA_SIMULATOR_MODEL_NAME: ${EGMA_SIMULATOR_MODEL_NAME:-}
+      EGMA_SIMULATOR_MODEL_API_KEY: ${EGMA_SIMULATOR_MODEL_API_KEY:-}
+      EGMA_SIMULATOR_MODEL_BASE_URL: ${EGMA_SIMULATOR_MODEL_BASE_URL:-}
+      # The volume below, and the two things kept on it. Recordings are
+      # what a report can only point at, and the write-ahead log is the
+      # only record of a report that never got through — losing either to
+      # a container being replaced would lose a simulation's evidence, so
+      # both live on the volume rather than in the container.
+      EGMA_SIMULATOR_BLOB_DIR: /var/lib/egma-simulator/blobs
+      EGMA_SIMULATOR_WAL_DIR: /var/lib/egma-simulator/wal
+      # How the pull behaves. The defaults suit a control plane on the same
+      # network; a slow link is what these are for.
+      EGMA_SIMULATOR_CLAIMANT: ${EGMA_SIMULATOR_CLAIMANT:-}
+      EGMA_SIMULATOR_HEARTBEAT_SECONDS: ${EGMA_SIMULATOR_HEARTBEAT_SECONDS:-}
+      EGMA_SIMULATOR_CLAIM_WAIT_SECONDS: ${EGMA_SIMULATOR_CLAIM_WAIT_SECONDS:-}
+      EGMA_SIMULATOR_REPORT_DEADLINE_SECONDS: ${EGMA_SIMULATOR_REPORT_DEADLINE_SECONDS:-}
+      EGMA_SIMULATOR_LOG_LEVEL: ${EGMA_SIMULATOR_LOG_LEVEL:-INFO}
+    volumes:
+      - simulator-data:/var/lib/egma-simulator
+    depends_on:
+      api:
+        condition: service_healthy
+    # No `healthcheck` here, unlike every other service, and for the same
+    # reason there is no `ports`: nothing listens. The other four are
+    # probed by asking them something over a port they listen on, and this
+    # one listens on none — a check that only proved the process exists
+    # would prove nothing Docker does not already know, since the process
+    # is the container and its death is the container's exit.
+    #
+    # What could go wrong instead is already answered elsewhere. Bad
+    # configuration stops it before it claims anything, saying which
+    # variable. A control plane it cannot reach is in its log, once and
+    # then once a minute. And a simulator that dies holding claimed work
+    # is the control plane's to notice, by the heartbeats stopping — which
+    # is the one place that can act on it, because it is the only side
+    # that knows what was claimed.
+
 volumes:
   postgres-data:
   clickhouse-data:
+  simulator-data:

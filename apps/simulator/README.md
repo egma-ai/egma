@@ -143,6 +143,7 @@ Everything arrives as environment variables.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `EGMA_SIMULATOR_CONTROL_PLANE_URL` | (required) | Where to claim, heartbeat, and report. |
+| `EGMA_SIMULATOR_SERVICE_TOKEN` | (none) | Sent as `Authorization: Bearer` on every outbound call. The workbench asks for none. |
 | `EGMA_SIMULATOR_CAPACITY` | `4` | Most simulations conducted at once. |
 | `EGMA_SIMULATOR_CLAIMANT` | `egma-simulator-<host>-<pid>` | The name stamped on claims. |
 | `EGMA_SIMULATOR_HEARTBEAT_SECONDS` | `5` | Beat interval per running simulation. |
@@ -154,8 +155,39 @@ Everything arrives as environment variables.
 | `EGMA_SIMULATOR_MODEL_API_KEY` | (required for `openai`) | The provider key. Never logged. |
 | `EGMA_SIMULATOR_WAL_DIR` | `.egma-simulator/wal` | Where report documents land before sending. |
 | `EGMA_SIMULATOR_BLOB_DIR` | `.egma-simulator/blobs` | Where recordings land, for the filesystem-backed blob store. |
-| `EGMA_SIMULATOR_LOG_LEVEL` | `INFO` | The usual levels. |
+| `EGMA_SIMULATOR_LOG_LEVEL` | `INFO` | The usual levels: `CRITICAL`, `ERROR`, `WARNING`, `INFO`, `DEBUG`. |
 | `EGMA_SIMULATION_CONTRACT_DIR` | auto-located | The contract package, when the repo layout isn't around it. |
+
+One of these is required and the rest have working defaults, which is the
+whole rule. Anything set to something unusable stops the process on its
+first line in a sentence naming the variable — a capacity that is not a
+number, a level nobody defined, a URL with no scheme, a directory that
+cannot be written. The two directories are proved by writing to them at
+startup, and made if they are not there, because a volume mounted wrongly
+would otherwise stay quiet until it lost a recording. Blank counts as
+unset everywhere, so a compose entry can carry `${VAR:-}` for every
+optional one.
+
+## In a container
+
+`apps/simulator/Dockerfile` builds it, from the repository root like the
+other two apps — the contract package is the one thing it needs from
+outside this directory, and it is copied in and pointed at with
+`EGMA_SIMULATION_CONTRACT_DIR`. The image declares no port, because
+nothing ever dials in.
+
+The repository's `docker-compose.yml` runs it as one more service beside
+the API, with a named volume for the recordings and the write-ahead log,
+and `docker-compose.workbench.yml` is the dev overlay that stands a
+workbench up beside it and points the simulator there:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.workbench.yml \
+  up --build simulator workbench
+```
+
+That is the same story as the two terminals above, in containers, with
+the fixtures already inside the image. The root README tells the rest.
 
 ## Tests
 

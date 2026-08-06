@@ -41,6 +41,16 @@ logger = logging.getLogger(__name__)
 
 CLAIM_RETRY_SECONDS = 1.0
 
+REPEATED_CLAIM_FAILURE_SECONDS = 60.0
+"""How often a claim failure that has not changed says so again.
+
+A control plane that is down fails the same way every retry for as long as
+it lasts. Written out each time that is one sentence a second — megabytes
+a day of a log nobody can read, with the only thing that would be news, the
+failure changing, buried inside it. So a failure speaks up when it is new
+and once a minute while it persists; the repeats are still there at DEBUG
+for whoever wants to count them."""
+
 
 class Executor(Protocol):
     """The seam between claiming work and running it.
@@ -284,6 +294,15 @@ class SimulatorService:
         self._config = config
         self._secrets = secrets
         self._blobs = FilesystemBlobStore(config.blob_dir)
+        self._last_claim_failure: str | None = None
+        # Two clocks, because they answer two questions. One is how long
+        # this failure has been going on, which is what the operator wants
+        # to hear; the other is when it was last said, which is only what
+        # paces the repeats. Sharing one made the count restart every time
+        # it spoke, while the sentence read as a total.
+        self._claim_failure_began = 0.0
+        self._claim_failure_said_at = 0.0
+        self._claim_failure_count = 0
 
     async def run(self) -> None:
         """Claim and conduct until cancelled. Cancellation is the only exit."""
@@ -291,6 +310,7 @@ class SimulatorService:
         async with ControlPlaneClient(
             config.control_plane_url,
             claim_wait_seconds=config.claim_wait_seconds,
+            service_token=config.service_token,
         ) as client:
             executor = AsyncioExecutor(
                 config.capacity,
@@ -321,7 +341,7 @@ class SimulatorService:
                     self._config.claimant, executor.free_capacity
                 )
             except ClaimFailure as failure:
-                logger.warning("claim did not land: %s", failure)
+                self._note_claim_failure(str(failure))
                 await asyncio.sleep(CLAIM_RETRY_SECONDS)
                 continue
             except asyncio.CancelledError:
@@ -334,7 +354,42 @@ class SimulatorService:
                 await asyncio.sleep(CLAIM_RETRY_SECONDS)
                 continue
 
+            # Whatever was wrong is over; the next one to go wrong is news
+            # again, even if it is the same sentence as before.
+            self._last_claim_failure = None
             self._accept(specs, executor)
+
+    def _note_claim_failure(self, failure: str) -> None:
+        """Say a claim failure when it is new, and once a minute after that.
+
+        See :data:`REPEATED_CLAIM_FAILURE_SECONDS`. Nothing here decides
+        anything — the loop retries either way — so a quiet log costs no
+        behavior, only the repetition.
+        """
+        now = asyncio.get_running_loop().time()
+        if failure != self._last_claim_failure:
+            self._last_claim_failure = failure
+            self._claim_failure_began = now
+            self._claim_failure_said_at = now
+            self._claim_failure_count = 1
+            logger.warning("claim did not land: %s", failure)
+            return
+
+        # The count is every attempt since this failure began, not since it
+        # was last mentioned: "after 300 attempts" has to mean what an
+        # operator reads it to mean, and the elapsed time is said beside it
+        # so neither number has to be inferred from the other.
+        self._claim_failure_count += 1
+        if now - self._claim_failure_said_at < REPEATED_CLAIM_FAILURE_SECONDS:
+            logger.debug("claim did not land: %s", failure)
+            return
+        logger.warning(
+            "claim still not landing after %d attempts over %.0fs: %s",
+            self._claim_failure_count,
+            now - self._claim_failure_began,
+            failure,
+        )
+        self._claim_failure_said_at = now
 
     def _accept(self, documents: list, executor: Executor) -> None:
         """Take what fits and can be understood; refuse the rest out loud.

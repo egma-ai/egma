@@ -164,6 +164,7 @@ def start_simulator(
         capacity: int = 2,
         log_level: str = "INFO",
         claimant: str = "sim-under-test",
+        extra_env: dict[str, str] | None = None,
     ) -> SimulatorProcess:
         stdout_path = tmp_path / f"simulator-{len(started)}.out"
         stderr_path = tmp_path / f"simulator-{len(started)}.err"
@@ -187,7 +188,7 @@ def start_simulator(
             "EGMA_SIMULATOR_WAL_DIR": str(wal_dir),
             "EGMA_SIMULATOR_BLOB_DIR": str(blob_dir),
             "EGMA_SIMULATOR_LOG_LEVEL": log_level,
-        }
+        } | (extra_env or {})
         with open(stdout_path, "wb") as stdout, open(stderr_path, "wb") as stderr:
             process = subprocess.Popen(
                 [sys.executable, "-m", "egma_simulator"],
@@ -201,6 +202,7 @@ def start_simulator(
             stderr_path=stderr_path,
             wal_dir=wal_dir,
             blob_dir=blob_dir,
+            extra_env=extra_env or {},
         )
         started.append(simulator)
         return simulator

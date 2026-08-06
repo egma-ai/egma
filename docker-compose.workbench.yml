@@ -1,0 +1,59 @@
+# A whole simulation, with no database and no control plane.
+#
+# `docker compose up` starts no workbench, deliberately: a self-hoster's
+# simulator claims from the real control plane and from nothing else. This
+# file is for the other case — seeing the simulator conduct real
+# conversations before there is anything to trigger one, which is what its
+# own development runs on and what a first look should cost.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.workbench.yml \
+#     up --build simulator workbench
+#
+# It adds one container — the workbench, a fake control plane speaking the
+# same contract from the spec fixtures already inside the image — and
+# points the simulator at it instead of the API. The workbench names the
+# same Dockerfile as the simulator, so Compose builds it a second time and
+# tags a second image; every step of that second build is a cache hit on
+# the first, and nothing is installed or downloaded twice.
+#
+# Naming the two services is what keeps Postgres, ClickHouse, the API and
+# the web application out of it: the simulator's dependency on the API is
+# replaced below rather than added to, because a demo that needs two
+# databases running is not the demo the workbench exists to be. Replacing
+# it takes the `!override` tag, which Compose has had since 2.24 — this is
+# the one thing in this repository that asks for a version, and it asks
+# only of whoever wants the demo.
+#
+# Watch the workbench's log. Every claim, heartbeat, report and refusal
+# prints as one JSON line the moment it happens, which is a simulation
+# going queued → claimed → running → completed in front of you. The same
+# is readable at http://localhost:8085/workbench/records, where
+# `POST /workbench/specs` queues another spec and
+# `POST /workbench/simulations/<id>/cancel` stops one mid-exchange.
+
+services:
+  workbench:
+    build:
+      context: .
+      dockerfile: apps/simulator/Dockerfile
+    # `0.0.0.0` is inside the container, where it has to be: the simulator
+    # reaches the workbench across this network by its service name, and a
+    # server bound to the container's loopback would answer nobody.
+    command: ["egma-workbench", "--host", "0.0.0.0", "--port", "8085"]
+    # Published, unlike the simulator, and for the opposite reason: this
+    # one is dialled into. But bound to the host's loopback, because the
+    # workbench asks nobody who they are — it hands out specs, takes
+    # reports, queues work and cancels it, all unauthenticated, which is
+    # exactly right for a fake control plane on somebody's own machine and
+    # exactly wrong to offer the network. The simulator does not come
+    # through here; it uses the compose network either way. This mapping
+    # exists only so a person at this machine can read the records.
+    ports:
+      - "127.0.0.1:${EGMA_WORKBENCH_PORT:-8085}:8085"
+
+  simulator:
+    environment:
+      EGMA_SIMULATOR_CONTROL_PLANE_URL: http://workbench:8085
+    depends_on: !override
+      workbench:
+        condition: service_started
