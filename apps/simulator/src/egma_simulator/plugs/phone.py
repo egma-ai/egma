@@ -18,23 +18,34 @@ Its config keys, like every plug's, are its own:
 
 - ``phoneNumber`` (string, required) — what to dial, in E.164. The only
   field a spec author has to know.
-- ``backend`` (string, optional) — which media backend places the call.
-  Defaults to the deployment's ``EGMA_SIMULATOR_MEDIA_BACKEND``, and to
-  ``livekit`` where that says nothing.
 - ``callerId`` (string, optional) — the number the call appears to come
   from, where the backend can choose one. Absent: the trunk's own.
-- ``sample_rate_hz`` (integer, optional, default 8000) — the band the
-  connection asks for. The plug carries the nearest band it supports at
-  or below it, exactly as a real line negotiates down to what it can
-  do, and the simulation stamps the band that actually flowed.
 - one optional block per backend, named for it (``scripted``) — that
   backend's own config, handed to it whole. A block for a backend this
-  call is not using is refused: a script nobody reads was written by
-  mistake.
+  deployment does not use is refused: a script nobody reads was written
+  by mistake.
 
-Credentials are refused outright. A phone connection carries no secret
-of its own: the trunk belongs to the deployment, arrives from its
-environment, and is the media backend's to hold.
+Which bridge places the call is the deployment's, not the spec's, and so
+is the trunk: both are checked once at startup and arrive here already
+good. A spec that names a number on a simulator configured to place no
+calls is refused with the variable to set.
+
+Credentials are refused outright. A phone connection carries no secret of
+its own.
+
+## The band a call is carried at
+
+Always :data:`TELEPHONY_BAND_HZ`, and there is no way to ask for another.
+That is the band a call over the public telephone network really is, and
+the bridge resamples what it receives down to it — which can only remove
+what was never there rather than invent detail. So the band the recorder
+measures off what flowed is a band the audio genuinely carried, and a
+narrowband call can never be stamped as a wideband one.
+
+A trunk that negotiates wideband is understated by this rather than
+overstated, which is the safe direction: reading 8 kHz off a call that
+was wideband costs a comparison, and reading 16 kHz off a call that was
+not would make a score mean something it does not.
 
 ## Where a turn begins and ends
 
@@ -61,29 +72,23 @@ otherwise read as speech that started immediately.
 
 from __future__ import annotations
 
-import os
 import sys
 from array import array
 from typing import Any
 
+from ..config import MediaSettings
 from ..media import BACKENDS, MediaBackendError, MediaSession, backend_for
 from ..speech import SAMPLE_WIDTH_BYTES, silence
 from . import AgentSpeech, PlugError, Utterance
 
-SUPPORTED_BANDS_HZ = (8000, 16000)
-"""What a phone call can be carried at: narrowband, which is what the
-PSTN gives, and the wideband a trunk that negotiates G.722 can give."""
-
-DEFAULT_BAND_HZ = 8000
-"""What a connection that says nothing gets — the band a phone call is,
-unless somebody has arranged otherwise."""
-
-DEFAULT_BACKEND = "livekit"
-"""The bridge a deployment that names none places its calls through."""
+TELEPHONY_BAND_HZ = 8000
+"""The band a phone call is carried at, and the only one. See the module
+docstring: a band that could be asked for would be a band declared, and
+what a record stamps has to be a band the audio really carried."""
 
 BACKEND_VARIABLE = "EGMA_SIMULATOR_MEDIA_BACKEND"
-"""Where a deployment names its default bridge, so that a spec does not
-have to know which one this deployment runs."""
+"""Where a deployment says which bridge places its calls. Named in the
+refusal a simulator that cannot place one gives."""
 
 RINGING_SECONDS = 60.0
 """How long a call may ring before nobody answering is the answer. Longer
@@ -111,12 +116,6 @@ quiet talker and high enough to ignore a line's own hiss.
 """
 
 
-def negotiated_band(asked_for: int) -> int:
-    """The band a phone call will actually be carried at."""
-    supported = [band for band in SUPPORTED_BANDS_HZ if band <= asked_for]
-    return max(supported) if supported else min(SUPPORTED_BANDS_HZ)
-
-
 def carries_speech(pcm: bytes) -> bool:
     """Whether somebody is talking in this stretch of audio."""
     return peak_level(pcm) >= SPEECH_LEVEL
@@ -136,20 +135,26 @@ def peak_level(pcm: bytes) -> int:
     return max((abs(sample) for sample in samples), default=0)
 
 
-_KNOWN_KEYS = {
-    "phoneNumber",
-    "backend",
-    "callerId",
-    "sample_rate_hz",
-} | set(BACKENDS)
+_KNOWN_KEYS = {"phoneNumber", "callerId"} | set(BACKENDS)
 
 
 class PhoneCall:
     """One outbound phone call, dialled and conducted and ended."""
 
     def __init__(
-        self, *, modality: str, config: dict[str, Any], credentials: object
+        self,
+        *,
+        modality: str,
+        config: dict[str, Any],
+        credentials: object,
+        media: MediaSettings | None = None,
     ) -> None:
+        # Which bridge and which trunk were checked at startup; this reads
+        # the result rather than the environment, so nothing here can be
+        # the first to discover a deployment cannot dial. The keyword is
+        # for tests, which build settings rather than an environment.
+        settings = media if media is not None else MediaSettings.from_env()
+
         if modality != "voice":
             raise PlugError(
                 f"the phone plug speaks voice only; a {modality!r} simulation "
@@ -167,11 +172,13 @@ class PhoneCall:
         if not isinstance(number, str) or not number.strip():
             raise PlugError("phone config: phoneNumber must be a non-empty string")
 
-        backend_name = config.get(
-            "backend", os.environ.get(BACKEND_VARIABLE, "").strip() or DEFAULT_BACKEND
-        )
-        if not isinstance(backend_name, str):
-            raise PlugError("phone config: backend must be a string")
+        if settings is None:
+            raise PlugError(
+                "this simulator places no phone calls: set "
+                f"{BACKEND_VARIABLE} to one of {sorted(BACKENDS)}, with the "
+                "server and trunk that backend needs"
+            )
+        backend_name = settings.backend
         factory = backend_for(backend_name)
         if factory is None:
             raise PlugError(
@@ -182,8 +189,8 @@ class PhoneCall:
         stray = {name for name in BACKENDS if name != backend_name} & set(config)
         if stray:
             raise PlugError(
-                f"this call is placed through {backend_name!r}, so the "
-                f"config block(s) {sorted(stray)} are read by nobody"
+                f"this simulator places calls through {backend_name!r}, so "
+                f"the config block(s) {sorted(stray)} are read by nobody"
             )
 
         script = config.get(backend_name, {})
@@ -197,12 +204,6 @@ class PhoneCall:
         if caller_id is not None and not isinstance(caller_id, str):
             raise PlugError("phone config: callerId must be a string")
 
-        asked_for = config.get("sample_rate_hz", DEFAULT_BAND_HZ)
-        if isinstance(asked_for, bool) or not isinstance(asked_for, int):
-            raise PlugError("phone config: sample_rate_hz must be an integer")
-        if asked_for < 1:
-            raise PlugError("phone config: sample_rate_hz must be more than zero")
-
         if credentials is not None:
             raise PlugError(
                 "a phone connection carries no credentials: the trunk belongs "
@@ -211,13 +212,16 @@ class PhoneCall:
             )
 
         self._number = number.strip()
-        self._band_hz = negotiated_band(asked_for)
-        # Building the backend here is what makes a deployment that cannot
-        # place calls — no server, no trunk, credentials that are not
-        # usable — a refusal before any pipeline starts, rather than one
-        # failed simulation after another.
+        self._band_hz = TELEPHONY_BAND_HZ
+        # Building the backend here, before any pipeline starts, is what
+        # makes config the driver cannot use an honest refusal rather than
+        # a failure part-way through a call.
         self._backend = _built(
-            factory, config=script, band_hz=self._band_hz, caller_id=caller_id
+            factory,
+            settings=settings,
+            config=script,
+            band_hz=self._band_hz,
+            caller_id=caller_id,
         )
         self._session: MediaSession | None = None
         self._reference: str | None = None
@@ -233,7 +237,12 @@ class PhoneCall:
 
     @property
     def backend(self) -> object:
-        """The media backend placing this call — what a test listens to."""
+        """The media backend placing this call.
+
+        Here for the tests, honestly: the plug seam takes a spec and
+        nothing else, so a test cannot hand in a backend to watch and this
+        is the only way to ask what the call was really placed through.
+        """
         return self._backend
 
     async def open(self) -> AgentSpeech | None:

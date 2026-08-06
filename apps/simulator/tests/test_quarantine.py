@@ -199,8 +199,12 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
     """
     proof = textwrap.dedent(
         """
-        import asyncio, json, sys, tempfile
+        import asyncio, json, os, sys, tempfile
         from pathlib import Path
+
+        # A deployment that dials through the scripted bridge — which is
+        # still a deployment that never wants LiveKit's library.
+        os.environ["EGMA_SIMULATOR_MEDIA_BACKEND"] = "scripted"
 
         from egma_simulator.blob import FilesystemBlobStore
         from egma_simulator.pipeline import assemble
@@ -226,7 +230,6 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
             "type": "phone",
             "config": {
                 "phoneNumber": "+15551234567",
-                "backend": "scripted",
                 "scripted": {"replies": ["Noted."]},
             },
             "credentials": None,

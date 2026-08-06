@@ -20,6 +20,7 @@ from datetime import datetime
 
 from conftest import (
     HEARTBEAT_SECONDS,
+    SCRIPTED_TRUNK_ENV,
     SENTINEL_TRUNK_ENV,
     TRUNK_SENTINELS,
     all_terminal,
@@ -842,11 +843,11 @@ async def test_one_scenario_over_chat_and_over_voice_is_one_transcript(
 async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
     workbench, start_simulator
 ):
-    """The promise the effort exists for, black-box: a spec whose
-    connection names a phone number becomes a call, and what comes back is
-    what every other voice simulation owes — a transcript, a distinct
-    ending, per-turn timings that never run backwards, the band measured
-    on the wire, and a dual-channel recording that resolves.
+    """A spec whose connection names a phone number becomes a call, and
+    what comes back is what every other voice simulation owes — a
+    transcript, a distinct ending, per-turn timings that never run
+    backwards, the band the audio was carried at, and a dual-channel
+    recording that resolves.
 
     The media backend is the scripted one, so there is no LiveKit server,
     no trunk, no carrier and no network in this — and nothing above the
@@ -873,7 +874,7 @@ async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
     )
     await workbench.offer(spec)
     simulator = start_simulator(
-        workbench, log_level="DEBUG", extra_env=SENTINEL_TRUNK_ENV
+        workbench, log_level="DEBUG", extra_env=SCRIPTED_TRUNK_ENV
     )
 
     records = await workbench.wait_for(has_terminal("sim-phone-001"))
@@ -943,40 +944,30 @@ async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
 async def test_every_call_that_never_became_a_conversation_fails_honestly(
     workbench, start_simulator
 ):
-    """Busy, no answer, declined, a carrier that failed, and a trunk that
-    cannot be used: five ways a call never happens, five records that say
+    """Busy, no answer, declined, a carrier that failed, and a trunk the
+    carrier rejects: five ways a call never happens, five records that say
     which — and not one of them ever reads as the agent failing.
 
     A busy line and a rung-out phone are ``not_answered``: the simulator
     reached out and nothing picked up. A carrier that failed and a trunk
-    that was refused are ``error``: the call never reached the far end and
-    somebody has something to fix. Neither is ever graded.
+    it would not accept are ``error``: the call never reached the far end
+    and somebody has something to fix. Neither is ever graded.
     """
     outcomes = {
         "sim-phone-busy": ("busy", "not_answered"),
         "sim-phone-noanswer": ("no_answer", "not_answered"),
         "sim-phone-declined": ("declined", "not_answered"),
         "sim-phone-carrier": ("carrier_failure", "error"),
-        "sim-phone-trunk": ("bad_trunk_credentials", "error"),
+        "sim-phone-trunk": ("trunk_rejected", "error"),
     }
     for simulation_id, (outcome, _ending) in outcomes.items():
         await workbench.offer(phone_spec(simulation_id, outcome=outcome))
-    # And the real LiveKit driver's own failing path, hermetically: the
-    # planted deployment points at a port nothing answers on, so the
-    # driver that holds the trunk credentials is the one that fails here.
-    await workbench.offer(phone_spec("sim-phone-livekit", backend="livekit"))
 
     simulator = start_simulator(
-        workbench,
-        capacity=6,
-        log_level="DEBUG",
-        extra_env=SENTINEL_TRUNK_ENV,
+        workbench, capacity=5, log_level="DEBUG", extra_env=SCRIPTED_TRUNK_ENV
     )
 
-    simulation_ids = [*outcomes, "sim-phone-livekit"]
-    records = await workbench.wait_for(
-        all_terminal(simulation_ids), within_seconds=90
-    )
+    records = await workbench.wait_for(all_terminal(list(outcomes)), within_seconds=60)
 
     reasons = []
     for simulation_id, (_outcome, ending) in outcomes.items():
@@ -994,12 +985,38 @@ async def test_every_call_that_never_became_a_conversation_fails_honestly(
     # what tells a reader which call this was.
     assert len(set(reasons)) == len(reasons), reasons
     assert "486" in reasons[0], reasons[0]
-    assert "trunk" in reasons[-1], reasons[-1]
+    assert "403" in reasons[-1], reasons[-1]
 
-    livekit = terminal_event_for(records, "sim-phone-livekit")
-    assert livekit["status"] == "failed"
-    assert livekit["facts"]["ending"] == "error"
-    assert "127.0.0.1:1" in livekit["reason"], livekit["reason"]
+    simulator.stop()
+    for sentinel in TRUNK_SENTINELS:
+        assert_kept_secret(sentinel, records=records, simulator=simulator)
+
+
+async def test_a_livekit_that_cannot_be_reached_fails_without_a_credential(
+    workbench, start_simulator
+):
+    """The same honesty through the driver that really holds the secrets.
+
+    The simulator is started with a whole LiveKit deployment's worth of
+    credentials — every secret one a sentinel — pointed at a port nothing
+    answers on. So the code that fails is the code that would carry a
+    trunk password if anything ever did, and the scan afterwards is a scan
+    of a process that really held one.
+    """
+    await workbench.offer(phone_spec("sim-phone-livekit", backend="livekit"))
+    simulator = start_simulator(
+        workbench, log_level="DEBUG", extra_env=SENTINEL_TRUNK_ENV
+    )
+
+    records = await workbench.wait_for(
+        has_terminal("sim-phone-livekit"), within_seconds=90
+    )
+
+    terminal = terminal_event_for(records, "sim-phone-livekit")
+    assert terminal["status"] == "failed"
+    assert terminal["facts"]["ending"] == "error"
+    assert "127.0.0.1:1" in terminal["reason"], terminal["reason"]
+    assert events_for(records, "sim-phone-livekit", "turn") == []
 
     simulator.stop()
     for sentinel in TRUNK_SENTINELS:
@@ -1024,7 +1041,7 @@ async def test_the_far_end_hanging_up_is_the_agent_ending_the_exchange(
         hangs_up_after_replies=True,
     )
     await workbench.offer(spec)
-    simulator = start_simulator(workbench)
+    simulator = start_simulator(workbench, extra_env=SCRIPTED_TRUNK_ENV)
 
     records = await workbench.wait_for(has_terminal("sim-phone-hangup"))
 

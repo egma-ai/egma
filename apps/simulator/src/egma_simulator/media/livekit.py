@@ -1,44 +1,33 @@
 """The LiveKit driver: a room joined outbound, and a call placed into it.
 
-The bridge the founder settled on. Two halves, both LiveKit's own:
+Two halves, both LiveKit's own:
 
 - **The room.** The simulator joins it through Pipecat's stock LiveKit
-  transport, purely outbound — signalling over an outbound websocket,
-  media over ICE — so the simulator keeps the zero-inbound posture every
-  other part of egma has. Nothing dials egma; egma dials.
-- **The call.** LiveKit's SIP service places it, over a trunk the
+  transport, purely outbound — signalling over a websocket it opens,
+  media over ICE it negotiates — so the simulator needs no inbound
+  network surface to conduct a phone call. Nothing dials the simulator;
+  the simulator dials.
+- **The call.** LiveKit's SIP service places it, over a SIP trunk the
   deployment brings, and the answering phone appears in the room as an
-  ordinary participant. This is the one piece with no stock Pipecat
-  example — `create_sip_participant` with `wait_until_answered` is egma's
-  own code, and the decision record priced that in.
+  ordinary participant. Pipecat ships no example of this half, so the
+  ``create_sip_participant`` call below is written here — it is about
+  twenty lines, and it is what turns a room into a phone call.
 
-The same driver serves a self-hosted LiveKit and LiveKit Cloud: they are
-the same API behind the same URL variable, so a deployment moves between
-them by editing one line and nothing here changes.
+The same driver serves a self-hosted LiveKit and LiveKit Cloud, which
+are the same API behind the same URL: a deployment moves between them by
+changing one variable, and nothing in this file knows the difference.
 
-**The trunk is the deployment's, not the spec's.** A customer brings a
-trunk from any carrier, either as a reference to one already stored in
-LiveKit or as the four inline fields LiveKit documents for outbound
-credential auth. Both arrive from the environment, because a trunk
-belongs to a deployment rather than to one simulation, and neither ever
-reaches a report, a log line or an exception message.
+The trunk is the deployment's, not the spec's: a customer brings one from
+any carrier, either as a reference to a trunk already stored in LiveKit
+or as the inline fields LiveKit documents for outbound credential auth.
+Both are checked at startup (see
+:class:`egma_simulator.config.MediaSettings`) and arrive here already
+good, so nothing in this file reads an environment variable and nothing
+in it can be the first to discover a deployment cannot dial.
 
-Configuration, all of it::
-
-    EGMA_SIMULATOR_LIVEKIT_URL          ws(s):// or http(s):// — the server
-    EGMA_SIMULATOR_LIVEKIT_API_KEY      the API key
-    EGMA_SIMULATOR_LIVEKIT_API_SECRET   the API secret
-    EGMA_SIMULATOR_SIP_TRUNK_ID         a trunk already stored in LiveKit
-      -- or the inline trunk, when there is no stored one --
-    EGMA_SIMULATOR_SIP_TRUNK_ADDRESS    the carrier's termination hostname
-    EGMA_SIMULATOR_SIP_TRUNK_NUMBER     the number calls appear to come from
-    EGMA_SIMULATOR_SIP_TRUNK_USERNAME   credential auth, as LiveKit
-    EGMA_SIMULATOR_SIP_TRUNK_PASSWORD     documents it for outbound trunks
-
-Anything missing is refused when the plug is constructed — before any
-pipeline starts and before any number is dialled — naming the variable to
-set, because a simulator that cannot place calls should say so rather
-than fail one simulation at a time.
+What can only be known at dial time stays at dial time: a trunk whose
+credentials the *carrier* rejects is a SIP refusal like any other, and it
+is reported as one.
 
 (This module is named for the product it drives. ``from livekit import
 api`` inside it reaches the installed LiveKit package, not this file:
@@ -50,12 +39,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import os
 import uuid
-from dataclasses import dataclass, field
 
+from ..config import MediaSettings
+from ..redaction import SecretRegistry
 from ..speech import duration_seconds
-from . import ERROR, NOT_ANSWERED, MediaBackendError, sip_refusal, without_secrets
+from . import ERROR, NOT_ANSWERED, MediaBackendError, sip_refusal
 
 logger = logging.getLogger(__name__)
 
@@ -77,83 +66,6 @@ TEARDOWN_SECONDS = 10.0
 QUOTED_REFUSAL_CHARS = 200
 """How much of somebody else's refusal is quoted into a reason: enough to
 carry their own words about what was wrong, short of pasting a page."""
-
-
-def _text(name: str) -> str | None:
-    """A variable's value, where blank means absent.
-
-    Compose passes an unset optional through as an empty string rather
-    than leaving it out, so "" and "never set" have to mean the same
-    thing — the same rule the rest of the simulator's configuration
-    follows.
-    """
-    raw = os.environ.get(name)
-    if raw is None or not raw.strip():
-        return None
-    return raw.strip()
-
-
-@dataclass(frozen=True)
-class LiveKitSettings:
-    """Everything this driver needs, read from the environment.
-
-    A frozen record rather than a bag of ``os.environ`` reads scattered
-    through the driver, so that what a deployment must provide is one
-    readable list and a test can build one without an environment at all.
-    """
-
-    url: str
-    api_key: str
-    api_secret: str = field(repr=False)
-
-    trunk_id: str | None = None
-    """A trunk already stored in LiveKit. Wins over the inline fields."""
-
-    trunk_address: str | None = None
-    trunk_number: str | None = None
-    trunk_username: str | None = None
-    trunk_password: str | None = field(default=None, repr=False)
-
-    @property
-    def secrets(self) -> tuple[str, ...]:
-        """Every secret this configuration holds. One place to ask, so a
-        third secret arriving cannot fall out of the scrubbing."""
-        return tuple(
-            secret
-            for secret in (self.api_secret, self.trunk_password)
-            if secret is not None
-        )
-
-    @classmethod
-    def from_env(cls) -> LiveKitSettings:
-        """This deployment's LiveKit, or a refusal naming what is missing."""
-        url = _required("EGMA_SIMULATOR_LIVEKIT_URL")
-        settings = cls(
-            url=url,
-            api_key=_required("EGMA_SIMULATOR_LIVEKIT_API_KEY"),
-            api_secret=_required("EGMA_SIMULATOR_LIVEKIT_API_SECRET"),
-            trunk_id=_text("EGMA_SIMULATOR_SIP_TRUNK_ID"),
-            trunk_address=_text("EGMA_SIMULATOR_SIP_TRUNK_ADDRESS"),
-            trunk_number=_text("EGMA_SIMULATOR_SIP_TRUNK_NUMBER"),
-            trunk_username=_text("EGMA_SIMULATOR_SIP_TRUNK_USERNAME"),
-            trunk_password=_text("EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"),
-        )
-        if settings.trunk_id is None and settings.trunk_address is None:
-            raise MediaBackendError(
-                "a phone call needs a trunk: set EGMA_SIMULATOR_SIP_TRUNK_ID "
-                "for a trunk already stored in LiveKit, or "
-                "EGMA_SIMULATOR_SIP_TRUNK_ADDRESS with "
-                "EGMA_SIMULATOR_SIP_TRUNK_USERNAME and "
-                "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD for an inline one"
-            )
-        return settings
-
-
-def _required(name: str) -> str:
-    value = _text(name)
-    if value is None:
-        raise MediaBackendError(f"{name} is required to place a phone call")
-    return value
 
 
 async def _first_of(*events: asyncio.Event, within: float) -> bool:
@@ -216,9 +128,12 @@ class RoomSession:
 
         What the line carried during all that is then dropped, because it
         is the far end listening rather than the far end answering. An
-        agent that talks over the persona is lost with it, which is the
-        one thing this seam gives up and is exactly what the effort scoped
-        out: barge-in fidelity is a later effort's to tune.
+        agent that talks over the persona is lost with it: this seam
+        exchanges whole turns, so speech that overlaps two of them has
+        nowhere to go. What the record then shows is a conversation
+        without interruptions, which is true of what was measured and not
+        of what a real caller would have heard — worth knowing before
+        reading a transcript for barge-in behavior.
         """
         from pipecat.frames.frames import OutputAudioRawFrame
 
@@ -244,24 +159,35 @@ class LiveKitBackend:
     def __init__(
         self,
         *,
+        settings: MediaSettings,
         config: dict,
         band_hz: int,
         caller_id: str | None,
-        settings: LiveKitSettings | None = None,
     ) -> None:
         if config:
             raise MediaBackendError(
                 "the livekit media backend reads no connection config: its "
-                f"trunk comes from the environment, so {sorted(config)} was "
+                f"trunk belongs to the deployment, so {sorted(config)} was "
                 "handed over by mistake"
             )
-        # Reading the environment here is what makes an unusable trunk a
-        # construction-time refusal: the plug is built before the pipeline
-        # starts, so a deployment that cannot dial says so before a
-        # simulation pretends to.
-        self._settings = settings or LiveKitSettings.from_env()
+        if settings.livekit_url is None:
+            # Unreachable through a started simulator, which checks this at
+            # startup and names the variable. Kept because a driver that
+            # trusted its settings silently would fail somewhere far away
+            # from the thing that was wrong.
+            raise MediaBackendError(
+                "the livekit media backend was built without a livekit to "
+                "place calls through"
+            )
+        self._settings = settings
         self._band_hz = band_hz
-        self._caller_id = caller_id or self._settings.trunk_number
+        self._caller_id = caller_id or settings.trunk_number
+        # One registry, built from the same secrets the process-wide log
+        # filter was given at startup, so what a driver quotes goes through
+        # the same scrubbing every log line does rather than through a
+        # second implementation of it.
+        self._secrets = SecretRegistry()
+        self._secrets.register(list(settings.secrets))
         self._room_name = f"{ROOM_PREFIX}-{uuid.uuid4().hex}"
         self._session: RoomSession | None = None
         self._transport: object | None = None
@@ -284,7 +210,7 @@ class LiveKitBackend:
         from pipecat.workers.runner import WorkerRunner
 
         transport = LiveKitTransport(
-            url=self._settings.url,
+            url=self._settings.livekit_url,
             token=self._room_token(),
             room_name=self._room_name,
             params=LiveKitParams(
@@ -352,13 +278,13 @@ class LiveKitBackend:
 
         if not await _first_of(joined, refused, within=CONNECT_SECONDS):
             raise MediaBackendError(
-                f"the livekit server at {self._settings.url} did not let the "
+                f"the livekit server at {self._settings.livekit_url} did not let the "
                 f"simulator into a room within {CONNECT_SECONDS:.0f}s",
                 ending=ERROR,
             )
         if refused.is_set():
             raise MediaBackendError(
-                f"the livekit server at {self._settings.url} would not let "
+                f"the livekit server at {self._settings.livekit_url} would not let "
                 f"the simulator into a room: {self._quotable('; '.join(told))}",
                 ending=ERROR,
             )
@@ -414,7 +340,9 @@ class LiveKitBackend:
         from livekit import api
 
         return (
-            api.AccessToken(self._settings.api_key, self._settings.api_secret)
+            api.AccessToken(
+                self._settings.livekit_api_key, self._settings.livekit_api_secret
+            )
             .with_identity(PERSONA_IDENTITY)
             .with_name(PERSONA_IDENTITY)
             .with_grants(
@@ -461,9 +389,9 @@ class LiveKitBackend:
             request.sip_number = self._caller_id
 
         lkapi = api.LiveKitAPI(
-            self._settings.url,
-            self._settings.api_key,
-            self._settings.api_secret,
+            self._settings.livekit_url,
+            self._settings.livekit_api_key,
+            self._settings.livekit_api_secret,
         )
         try:
             participant = await lkapi.sip.create_sip_participant(request)
@@ -484,7 +412,7 @@ class LiveKitBackend:
         except Exception as unreachable:
             raise MediaBackendError(
                 "the call could not be placed: the livekit server at "
-                f"{self._settings.url} could not be reached — "
+                f"{self._settings.livekit_url} could not be reached — "
                 f"{self._quotable(repr(unreachable))}",
                 ending=ERROR,
             ) from unreachable
@@ -521,9 +449,9 @@ class LiveKitBackend:
         from livekit import api
 
         lkapi = api.LiveKitAPI(
-            self._settings.url,
-            self._settings.api_key,
-            self._settings.api_secret,
+            self._settings.livekit_url,
+            self._settings.livekit_api_key,
+            self._settings.livekit_api_secret,
         )
         try:
             await lkapi.room.delete_room(
@@ -547,4 +475,4 @@ class LiveKitBackend:
         to read. A bridge or a carrier that echoed a trunk password back
         must not get it repeated into a reason or into the traceback
         logged beneath one."""
-        return without_secrets(told, self._settings.secrets)[:QUOTED_REFUSAL_CHARS]
+        return self._secrets.redact(told)[:QUOTED_REFUSAL_CHARS]

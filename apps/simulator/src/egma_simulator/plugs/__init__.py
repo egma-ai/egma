@@ -93,15 +93,17 @@ exception's message as the reason, so word messages for the person who
 reads the record — and keep credentials out of them.
 
 A ``PlugError`` also carries **which of the contract's failed endings**
-the refusal deserves, and the default is the right answer nearly always:
+the refusal deserves. They are named in :mod:`egma_simulator.contract`,
+where the contract's vocabulary lives, and the default is the right
+answer nearly always:
 
-- :data:`ERROR` (the default) — the simulator hit a fault it could not
+- ``ERROR`` (the default) — the simulator hit a fault it could not
   conduct through: config it cannot use, a platform refusing, a way in
   that is not there.
-- :data:`NOT_ANSWERED` — the simulator reached out and nothing came on
-  the line. A phone that rang out or was engaged; never a fault, and
-  never the agent's doing.
-- :data:`AGENT_NEVER_JOINED` — the way in opened and no agent turned up.
+- ``NOT_ANSWERED`` — the simulator reached out and nothing came on the
+  line. A phone that rang out or was engaged; never a fault, and never
+  the agent's doing.
+- ``AGENT_NEVER_JOINED`` — the way in opened and no agent turned up.
 
 None of the three is ever graded as the agent failing: each of them
 means the exchange did not happen, so there is nothing to grade.
@@ -135,6 +137,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from ..contract import ERROR
+
 
 @dataclass(frozen=True)
 class AgentReply:
@@ -167,13 +171,6 @@ class AgentSpeech:
     ended: bool = False
     """True when this answer ended the exchange — the same meaning as on
     :class:`AgentReply`, one modality over."""
-
-
-ERROR = "error"
-AGENT_NEVER_JOINED = "agent_never_joined"
-NOT_ANSWERED = "not_answered"
-"""The contract's three failed endings, named here because a plug is what
-knows which of them a refusal is. See the module docstring."""
 
 
 class PlugError(Exception):

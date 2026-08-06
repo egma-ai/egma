@@ -33,11 +33,13 @@ phone connection's ``scripted`` block:
 - ``hangs_up_after_replies`` (bool, default false) — when true the far
   end leaves the call once its last reply has been carried, which is what
   the agent hanging up looks like from the plug's seat.
-- ``outcome`` (string, default ``answered``) — what the dial does. The
-  no-conversation outcomes are named for what the carrier does:
-  ``busy``, ``no_answer``, ``declined``, ``carrier_failure``, and
-  ``bad_trunk_credentials``, which refuses at construction the way a
-  deployment with an unusable trunk must.
+- ``outcome`` (string, default ``answered``) — what the dial does, named
+  for what the carrier does: ``busy``, ``no_answer``, ``declined``,
+  ``carrier_failure``, and ``trunk_rejected`` — a trunk whose credentials
+  the carrier will not accept, which is a refusal at the dial and not
+  before it, because only the carrier can say so. (Trunk configuration
+  that is *missing* is refused at startup, where the real driver refuses
+  it, and this fake models no path the real one does not have.)
 - ``provider_reference`` (string, optional) — offered as the bridge's own
   identifier for the call, the way the LiveKit driver offers the SIP
   participant's identity.
@@ -49,8 +51,9 @@ from collections import deque
 from collections.abc import Callable
 from typing import Any
 
+from ..config import MediaSettings
 from ..speech import SAMPLE_WIDTH_BYTES, encode_speech, silence
-from . import ERROR, MediaBackendError, sip_refusal
+from . import MediaBackendError, sip_refusal
 
 FRAME_SECONDS = 0.02
 """How much audio one carried frame holds — twenty milliseconds, the size
@@ -65,6 +68,7 @@ REFUSALS = {
     "no_answer": (480, "Temporarily Unavailable"),
     "declined": (603, "Decline"),
     "carrier_failure": (503, "Service Unavailable"),
+    "trunk_rejected": (403, "Forbidden"),
 }
 """The carrier statuses this backend can be told to answer with. Each one
 goes through the same table a real carrier's refusal goes through, so what
@@ -80,7 +84,7 @@ _KNOWN_KEYS = {
     "provider_reference",
 }
 
-_OUTCOMES = {"answered", "bad_trunk_credentials", *REFUSALS}
+_OUTCOMES = {"answered", *REFUSALS}
 
 
 class ScriptedSession:
@@ -154,11 +158,17 @@ class ScriptedBackend:
     """One scripted call, dialled and conducted and ended, per instance."""
 
     def __init__(
-        self, *, config: dict[str, Any], band_hz: int, caller_id: str | None
+        self,
+        *,
+        settings: MediaSettings,
+        config: dict[str, Any],
+        band_hz: int,
+        caller_id: str | None,
     ) -> None:
-        # The scripted bridge places no real call, so the number it would
-        # appear to come from is nothing to it.
-        del caller_id
+        # The scripted bridge places no real call, so neither the number it
+        # would appear to come from nor a trunk to place it over is
+        # anything to it.
+        del caller_id, settings
 
         unknown = set(config) - _KNOWN_KEYS
         if unknown:
@@ -201,16 +211,6 @@ class ScriptedBackend:
                 f"scripted backend: outcome must be one of {sorted(_OUTCOMES)}; "
                 f"got {outcome!r}"
             )
-        if outcome == "bad_trunk_credentials":
-            # Construction-time, before any pipeline starts and before any
-            # number is dialled — the refusal a deployment whose trunk
-            # cannot be used at all has to get.
-            raise MediaBackendError(
-                "the trunk this deployment configured was refused: its "
-                "credentials are not usable",
-                ending=ERROR,
-            )
-
         reference = config.get("provider_reference", DEFAULT_REFERENCE)
         if not isinstance(reference, str) or not reference:
             raise MediaBackendError(

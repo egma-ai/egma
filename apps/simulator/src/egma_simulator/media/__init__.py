@@ -85,37 +85,54 @@ Neither is ever the agent failing, and the reason carried alongside is
 what names which of them happened, in the carrier's own words where
 there are any.
 
-## Credentials
+## Configuration and credentials
 
-A driver's credentials arrive from the environment and nowhere else — a
-phone connection's spec carries no secret, because the trunk belongs to
-the deployment rather than to one simulation. Use them to reach the
-bridge and for nothing else: **never log one, never let one into an
-exception message, never let one into a returned value.** A driver that
-quotes a bridge's own words back into a refusal scrubs its secrets out
-of them first, here, where they are known — see :func:`without_secrets`.
-The acceptance suite plants sentinel trunk credentials and scans every
-byte the process emits, on the happy path and the failing ones both.
+A driver is handed ``settings`` — the deployment's already-checked
+:class:`egma_simulator.config.MediaSettings`. Nothing is read from the
+environment down here: a simulator that cannot place calls has to say so
+on its first line naming the variable, and that can only happen at
+startup, before anything is claimed. A phone connection's spec carries
+no secret at all, because a trunk belongs to a deployment rather than to
+one simulation.
+
+Use the secrets to reach the bridge and for nothing else: **never log
+one, never let one into an exception message, never let one into a
+returned value.** Every secret the settings hold is registered with the
+process's redacting log filter at startup, and a driver that quotes a
+bridge's own words back into a refusal scrubs them through the same
+:class:`egma_simulator.redaction.SecretRegistry` first — one
+implementation, used in both places. The acceptance suite plants
+sentinel trunk credentials and scans every byte the process emits, on
+the happy path and the failing ones both.
 
 ## Registration
 
-The registry is :func:`backend_for` below: one entry per backend name,
-the name exactly as a connection's ``backend`` key or the deployment's
-default will spell it.
+The registry is :data:`BACKENDS` below: one entry per driver, naming its
+module and its class. :func:`backend_for` reads it, so adding a bridge is
+one new module and one line.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from importlib import import_module
 from typing import Protocol
 
-from ..plugs import ERROR, NOT_ANSWERED
-from ..redaction import REDACTED
+from ..contract import ERROR, NOT_ANSWERED
 
-BACKENDS = ("livekit", "scripted")
-"""Every media backend this simulator can place a call through, in the
-one place the list lives. A phone connection names one of these — or
-names none and gets the deployment's default."""
+BACKENDS = {
+    "livekit": ("livekit", "LiveKitBackend"),
+    "scripted": ("scripted", "ScriptedBackend"),
+}
+"""Every media backend, by name: the module in this package that holds
+it, and the class inside it. One entry per driver and nothing else — the
+registry below reads this, so adding a bridge really is one line.
+
+The entries are names rather than classes because a deployment that never
+dials a phone must not pay for a bridge's client library, and a library
+that is never imported is one that cannot reach the network on its own.
+The quarantine suite holds both halves of that.
+"""
 
 
 class MediaBackendError(Exception):
@@ -192,40 +209,19 @@ class MediaBackend(Protocol):
 
 
 BackendFactory = Callable[..., MediaBackend]
-"""What the registry hands back: called with ``config=``, ``band_hz=`` and
-``caller_id=`` keywords, it returns one backend for one call — in
-practice, the driver class itself."""
-
-
-def without_secrets(text: str, secrets: tuple[str, ...]) -> str:
-    """Somebody else's words with this driver's own secrets taken out.
-
-    A bridge or a carrier that echoes a trunk password back in an error
-    body would otherwise put it into a failure reason and into the
-    traceback logged beneath one. What a driver quotes is not a driver's
-    to trust, so it is scrubbed here, where the secrets are known.
-    """
-    for secret in secrets:
-        if secret and secret in text:
-            text = text.replace(secret, REDACTED)
-    return text
+"""What the registry hands back: called with ``settings=``, ``config=``,
+``band_hz=`` and ``caller_id=`` keywords, it returns one backend for one
+call — in practice, the driver class itself."""
 
 
 def backend_for(name: str) -> BackendFactory | None:
     """The driver registered under one backend name, or ``None``.
 
-    The registry is deliberately a literal here, and the imports are
-    inside it: a deployment that never dials a phone must not pay for a
-    bridge's client library, and a library that is never imported is one
-    that cannot reach the network on its own. The quarantine suite holds
-    both halves of that.
+    Only the named driver's module is imported, which is what keeps a
+    simulator that dials no phone from loading a bridge's library at all.
     """
-    if name == "scripted":
-        from .scripted import ScriptedBackend
-
-        return ScriptedBackend
-    if name == "livekit":
-        from .livekit import LiveKitBackend
-
-        return LiveKitBackend
-    return None
+    entry = BACKENDS.get(name)
+    if entry is None:
+        return None
+    module, driver = entry
+    return getattr(import_module(f".{module}", __package__), driver)

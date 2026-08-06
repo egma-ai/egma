@@ -28,6 +28,20 @@ CONTRACT_DIR_ENV = "EGMA_SIMULATION_CONTRACT_DIR"
 SPEC_SCHEMA_FILENAME = "simulation-spec.v1.schema.json"
 REPORT_SCHEMA_FILENAME = "simulation-report.v1.schema.json"
 
+# The endings a failed simulation may carry, spelled here because this is
+# where the contract's vocabulary lives — the schema is the authority and
+# this module is the one that reads it. Naming them once means the code
+# that decides which one a failure deserves and the code that writes it
+# onto a report cannot drift into two different spellings.
+ERROR = "error"
+"""The simulator hit a fault it could not conduct through."""
+
+AGENT_NEVER_JOINED = "agent_never_joined"
+"""The way in opened and no agent turned up, so nothing was tested."""
+
+NOT_ANSWERED = "not_answered"
+"""The simulator reached out and nothing picked up, so nothing was tested."""
+
 
 class ContractViolation(Exception):
     """A document does not speak the simulation contract.

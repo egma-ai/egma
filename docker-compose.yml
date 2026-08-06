@@ -168,16 +168,18 @@ services:
       EGMA_SIMULATOR_TTS_PROVIDER: ${EGMA_SIMULATOR_TTS_PROVIDER:-scripted}
       EGMA_SIMULATOR_ELEVENLABS_API_KEY: ${EGMA_SIMULATOR_ELEVENLABS_API_KEY:-}
       # How a phone call's audio travels, for a simulation whose connection
-      # names a number. None of this is read until one does, and the
-      # simulator's own posture is unchanged either way: it joins a LiveKit
-      # room outbound and is never dialled into. `scripted` places no call
-      # at all and is what the local story and CI use. A LiveKit and a SIP
-      # trunk are what make a real call possible; the trunk is yours, from
-      # any carrier, either one already stored in LiveKit or the inline
-      # fields below. Standing the LiveKit and SIP containers up beside
-      # this one is a separate, opt-in overlay: those need a public IP,
-      # which this file never assumes.
-      EGMA_SIMULATOR_MEDIA_BACKEND: ${EGMA_SIMULATOR_MEDIA_BACKEND:-livekit}
+      # names a number. Naming a backend is what makes the rest required
+      # and what makes this simulator able to dial at all; unset, it starts
+      # in silence and refuses such a simulation with the variable to set.
+      # The simulator's own posture is unchanged either way: it joins a
+      # LiveKit room outbound and is never dialled into. `scripted` places
+      # no call at all and is what the local story and CI use. A LiveKit
+      # and a SIP trunk are what make a real call possible; the trunk is
+      # yours, from any carrier, either one already stored in LiveKit or
+      # the inline fields below. Standing the LiveKit and SIP containers up
+      # beside this one is a separate, opt-in overlay: those need a public
+      # IP, which this file never assumes.
+      EGMA_SIMULATOR_MEDIA_BACKEND: ${EGMA_SIMULATOR_MEDIA_BACKEND:-}
       EGMA_SIMULATOR_LIVEKIT_URL: ${EGMA_SIMULATOR_LIVEKIT_URL:-}
       EGMA_SIMULATOR_LIVEKIT_API_KEY: ${EGMA_SIMULATOR_LIVEKIT_API_KEY:-}
       EGMA_SIMULATOR_LIVEKIT_API_SECRET: ${EGMA_SIMULATOR_LIVEKIT_API_SECRET:-}

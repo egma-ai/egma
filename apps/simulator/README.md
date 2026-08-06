@@ -131,9 +131,9 @@ conduct whole exchanges over chat and the `loopback` one conducts a spoken
 one, leaving a real `.wav` under `EGMA_SIMULATOR_BLOB_DIR` that you can
 open and listen to a channel at a time; the `retell` fixture really does
 dial Retell and fails at the door, because the key in a fixture is a
-placeholder; the `phone` fixture tries to place a real call and fails at
-the door too, naming the LiveKit variable it wanted, because a local run
-configures no bridge to place one through.
+placeholder; the `phone` fixture is refused with a clear log
+line naming `EGMA_SIMULATOR_MEDIA_BACKEND`, because a local run
+configures no bridge to place a call through.
 `GET /workbench/records` returns the same as JSON;
 `POST /workbench/simulations/<id>/cancel` flags a cancel directive for the
 next heartbeat; `POST /workbench/specs` queues another spec while
@@ -185,6 +185,7 @@ speech providers belong with it: a call spoken in the test tone reaches a
 real agent as noise.
 
 ```bash
+EGMA_SIMULATOR_MEDIA_BACKEND=livekit \
 EGMA_SIMULATOR_LIVEKIT_URL=wss://... \
 EGMA_SIMULATOR_LIVEKIT_API_KEY=... \
 EGMA_SIMULATOR_LIVEKIT_API_SECRET=... \
@@ -199,10 +200,20 @@ uv run egma-simulator
 ```
 
 A connection's config carries the number and nothing secret: the trunk
-belongs to the deployment, which is why it arrives here and never in a
-spec. Set none of these and nothing changes — the simulator conducts chat
-and loopback simulations exactly as before, and refuses a spec that names
-a phone number with a sentence naming the variable to set.
+and the bridge belong to the deployment, which is why they arrive here
+and never in a spec. Anything missing stops the process on its first
+line naming the variable, the way every other required-if-enabled
+variable does. Set none of these and nothing changes — the simulator
+conducts chat and loopback simulations exactly as before, and refuses a
+spec that names a phone number with a sentence naming the variable to
+set.
+
+A phone call is carried at 8 kHz, always, and no connection can ask for
+another band. That is what the public telephone network gives, and a band
+a spec could choose would be a band declared rather than one the audio
+really had — so the number stamped on a result is a band that audio
+genuinely carried, and a narrowband call can never read as a wideband
+one.
 
 ## Configuration
 
@@ -225,10 +236,10 @@ Everything arrives as environment variables.
 | `EGMA_SIMULATOR_DEEPGRAM_API_KEY` | (required for `deepgram`) | The provider key. Never logged. |
 | `EGMA_SIMULATOR_TTS_PROVIDER` | `scripted` | What the persona speaks with: `scripted` or `elevenlabs`. |
 | `EGMA_SIMULATOR_ELEVENLABS_API_KEY` | (required for `elevenlabs`) | The provider key. Never logged. |
-| `EGMA_SIMULATOR_MEDIA_BACKEND` | `livekit` | Which bridge places a phone call: `livekit`, or `scripted` for the local stand-in that places none. A connection may name its own. |
-| `EGMA_SIMULATOR_LIVEKIT_URL` | (required to dial) | The LiveKit server — self-hosted or Cloud, only the URL differs. |
-| `EGMA_SIMULATOR_LIVEKIT_API_KEY` | (required to dial) | The LiveKit API key. |
-| `EGMA_SIMULATOR_LIVEKIT_API_SECRET` | (required to dial) | The LiveKit API secret. Never logged. |
+| `EGMA_SIMULATOR_MEDIA_BACKEND` | (none) | Which bridge places a phone call: `livekit`, or `scripted` for the local stand-in that places none. Unset, the simulator places no calls and says so when a simulation names a number. |
+| `EGMA_SIMULATOR_LIVEKIT_URL` | (required for `livekit`) | The LiveKit server — self-hosted or Cloud, only the URL differs. |
+| `EGMA_SIMULATOR_LIVEKIT_API_KEY` | (required for `livekit`) | The LiveKit API key. |
+| `EGMA_SIMULATOR_LIVEKIT_API_SECRET` | (required for `livekit`) | The LiveKit API secret. Never logged. |
 | `EGMA_SIMULATOR_SIP_TRUNK_ID` | (one of the two trunk forms) | A SIP trunk already stored in LiveKit, by id. |
 | `EGMA_SIMULATOR_SIP_TRUNK_ADDRESS` | (the other trunk form) | The carrier's termination hostname, for a trunk given inline. |
 | `EGMA_SIMULATOR_SIP_TRUNK_NUMBER` | (none) | The number calls appear to come from. |

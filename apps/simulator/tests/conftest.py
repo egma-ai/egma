@@ -448,7 +448,6 @@ def phone_spec(
     number: str = "+15551234567",
     backend: str = "scripted",
     caller_id: str | None = None,
-    sample_rate_hz: int | None = None,
     greeting: str | None = None,
     replies: list[str] | None = None,
     hangs_up_after_replies: bool = False,
@@ -463,15 +462,15 @@ def phone_spec(
 
     Deliberately the same shape as :func:`loopback_spec`: a phone
     simulation differs from every other voice one by its connection block
-    and by nothing else. The scripted media backend's own script — what
-    the far end says, whether it hangs up, what the carrier answers — is
-    the ``scripted`` block, which only that backend reads.
+    and by nothing else. Which bridge places the call is the simulator's
+    own configuration rather than the spec's, so ``backend`` here only
+    decides whether the scripted backend's script is written into the
+    spec — what the far end says, whether it hangs up, what the carrier
+    answers — which only that backend reads.
     """
-    config: dict = {"phoneNumber": number, "backend": backend}
+    config: dict = {"phoneNumber": number}
     if caller_id is not None:
         config["callerId"] = caller_id
-    if sample_rate_hz is not None:
-        config["sample_rate_hz"] = sample_rate_hz
     if backend == "scripted":
         script: dict = {"answer_delay_seconds": answer_delay_seconds}
         if greeting is not None:
@@ -500,6 +499,7 @@ def phone_spec(
 
 
 SENTINEL_TRUNK_ENV = {
+    "EGMA_SIMULATOR_MEDIA_BACKEND": "livekit",
     "EGMA_SIMULATOR_LIVEKIT_URL": "ws://127.0.0.1:1",
     "EGMA_SIMULATOR_LIVEKIT_API_KEY": "SENTINEL-livekit-key-6b13c7f0a45e",
     "EGMA_SIMULATOR_LIVEKIT_API_SECRET": "SENTINEL-livekit-secret-2a9d4f6c8b71",
@@ -521,6 +521,12 @@ TRUNK_SENTINELS = tuple(
     value for value in SENTINEL_TRUNK_ENV.values() if value.startswith("SENTINEL-")
 )
 """The planted values that must appear in nothing the simulator emits."""
+
+SCRIPTED_TRUNK_ENV = SENTINEL_TRUNK_ENV | {"EGMA_SIMULATOR_MEDIA_BACKEND": "scripted"}
+"""The same planted deployment, placing its calls through the scripted
+bridge instead. The LiveKit and trunk secrets are still in the process,
+which is the point: a simulator holding them must not emit them whichever
+bridge it is dialling through."""
 
 
 def credential(*names: str) -> str:

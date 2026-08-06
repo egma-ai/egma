@@ -23,6 +23,8 @@ import inspect
 import pytest
 from conftest import SENTINEL_TRUNK_ENV
 
+from egma_simulator.config import MediaSettings
+from egma_simulator.contract import ERROR, NOT_ANSWERED
 from egma_simulator.media import (
     BACKENDS,
     NOT_ANSWERED_STATUSES,
@@ -31,30 +33,33 @@ from egma_simulator.media import (
     MediaSession,
     backend_for,
     sip_refusal,
-    without_secrets,
 )
-from egma_simulator.media.livekit import LiveKitBackend, LiveKitSettings
+from egma_simulator.media.livekit import LiveKitBackend
 from egma_simulator.media.scripted import REFUSALS, ScriptedBackend
-from egma_simulator.plugs import ERROR, NOT_ANSWERED, PlugError, plug_for
+from egma_simulator.plugs import PlugError, plug_for
 from egma_simulator.plugs.phone import (
-    DEFAULT_BAND_HZ,
+    BACKEND_VARIABLE,
     SPEECH_LEVEL,
+    TELEPHONY_BAND_HZ,
     PhoneCall,
     carries_speech,
-    negotiated_band,
 )
-from egma_simulator.redaction import REDACTED
+from egma_simulator.redaction import REDACTED, SecretRegistry
 from egma_simulator.speech import decode_speech, encode_speech, silence
 
 A_NUMBER = "+15551234567"
+SCRIPTED = MediaSettings(backend="scripted")
+"""A deployment that places its calls through the scripted bridge."""
 
 
-def phone(script: dict | None = None, **config) -> PhoneCall:
+def phone(script: dict | None = None, *, media=SCRIPTED, **config) -> PhoneCall:
     """One phone plug against the scripted backend, dialling a number."""
-    whole = {"phoneNumber": A_NUMBER, "backend": "scripted"} | config
+    whole = {"phoneNumber": A_NUMBER} | config
     if script is not None:
         whole["scripted"] = script
-    return PhoneCall(modality="voice", config=whole, credentials=None)
+    return PhoneCall(
+        modality="voice", config=whole, credentials=None, media=media
+    )
 
 
 def said(speech) -> str:
@@ -94,7 +99,10 @@ async def test_the_plug_dials_converses_and_hangs_up():
 
     # And the far end's side of the same story: both persona turns really
     # went down the line, in order.
-    heard = [decode_speech(pcm, DEFAULT_BAND_HZ) for pcm in plug.backend.session.heard]
+    heard = [
+        decode_speech(pcm, TELEPHONY_BAND_HZ)
+        for pcm in plug.backend.session.heard
+    ]
     assert heard == ["I need to move my cleaning.", "Margaret Hale."]
 
 
@@ -176,18 +184,15 @@ async def test_closing_a_call_that_was_never_dialled_is_safe():
 # -- The band ----------------------------------------------------------------
 
 
-def test_a_phone_call_is_narrowband_unless_the_connection_says_otherwise():
-    assert phone().sample_rate_hz == DEFAULT_BAND_HZ == 8000
-    assert phone(sample_rate_hz=16000).sample_rate_hz == 16000
-
-
-@pytest.mark.parametrize(
-    ("asked_for", "carried"), [(8000, 8000), (16000, 16000), (48000, 16000), (1, 8000)]
-)
-def test_the_band_carried_is_the_nearest_one_a_line_can_do(
-    asked_for: int, carried: int
-):
-    assert negotiated_band(asked_for) == carried
+def test_a_phone_call_is_narrowband_and_nothing_can_ask_it_not_to_be():
+    """A band a connection could ask for would be a band declared, and
+    what a record stamps has to be a band the audio really carried. The
+    bridge resamples down to this one, which can only take away detail
+    that was never there — so a narrowband call is never stamped wide."""
+    assert phone().sample_rate_hz == TELEPHONY_BAND_HZ == 8000
+    with pytest.raises(PlugError) as refusal:
+        phone(sample_rate_hz=16000)
+    assert "sample_rate_hz" in str(refusal.value)
 
 
 # -- Every way a call fails to become a conversation -------------------------
@@ -200,6 +205,7 @@ def test_the_band_carried_is_the_nearest_one_a_line_can_do(
         ("no_answer", NOT_ANSWERED, "480"),
         ("declined", NOT_ANSWERED, "603"),
         ("carrier_failure", ERROR, "503"),
+        ("trunk_rejected", ERROR, "403"),
     ],
 )
 async def test_a_call_nobody_took_fails_honestly_and_names_what_happened(
@@ -217,12 +223,29 @@ async def test_a_call_nobody_took_fails_honestly_and_names_what_happened(
     assert "agent" not in told.lower()
 
 
-def test_a_trunk_that_cannot_be_used_refuses_before_anything_is_dialled():
-    """Construction-time, so no pipeline starts and no number is dialled."""
+async def test_a_trunk_the_carrier_rejects_is_a_refusal_at_the_dial():
+    """Where it really happens, in both drivers.
+
+    Trunk credentials the carrier will not accept cannot be known before
+    the carrier is asked, so this is a SIP refusal like any other — and a
+    fault rather than a phone nobody answered, because nobody was ever
+    reached to answer. Trunk configuration that is simply *missing* is a
+    different thing and is refused at startup; see the config suite.
+    """
+    plug = phone({"outcome": "trunk_rejected"})
     with pytest.raises(PlugError) as refused:
-        phone({"outcome": "bad_trunk_credentials"})
+        await plug.open()
+    await plug.close()
     assert refused.value.ending == ERROR
-    assert "trunk" in str(refused.value)
+    assert "403" in str(refused.value)
+
+
+def test_a_simulator_that_places_no_calls_refuses_a_number_by_name():
+    """The refusal a deployment that never configured a bridge gets, and
+    it names the variable rather than describing the problem."""
+    with pytest.raises(PlugError) as refusal:
+        phone({"replies": ["Noted."]}, media=None)
+    assert BACKEND_VARIABLE in str(refusal.value)
 
 
 def test_the_busy_and_declined_statuses_are_the_far_end_and_not_the_path():
@@ -237,9 +260,15 @@ def test_the_busy_and_declined_statuses_are_the_far_end_and_not_the_path():
 
 
 def test_a_carrier_refusal_carries_its_words_and_not_a_secret():
-    told = "auth failed for user egma with password SENTINEL-trunk-abc"
+    """A carrier careless enough to echo a trunk password back must not
+    get it repeated into a reason. What scrubs it is the same registry
+    the process's log filter uses, not a second implementation."""
+    secrets = SecretRegistry()
+    secrets.register(["SENTINEL-trunk-abc"])
     refusal = sip_refusal(
-        401, "Unauthorized", told=without_secrets(told, ("SENTINEL-trunk-abc",))
+        401,
+        "Unauthorized",
+        told=secrets.redact("auth failed for egma with password SENTINEL-trunk-abc"),
     )
     assert "401" in str(refusal)
     assert "SENTINEL-trunk-abc" not in str(refusal)
@@ -257,8 +286,7 @@ def test_a_carrier_refusal_carries_its_words_and_not_a_secret():
         {"phoneNumber": 15551234567},
         {"phoneNumber": A_NUMBER, "phoneNumbre": "a typo"},
         {"phoneNumber": A_NUMBER, "callerId": 7},
-        {"phoneNumber": A_NUMBER, "sample_rate_hz": "8000"},
-        {"phoneNumber": A_NUMBER, "sample_rate_hz": 0},
+        {"phoneNumber": A_NUMBER, "sample_rate_hz": 16000},
         {"phoneNumber": A_NUMBER, "backend": "a-bridge-nobody-wrote"},
         {"phoneNumber": A_NUMBER, "scripted": "not a script"},
     ],
@@ -266,35 +294,33 @@ def test_a_carrier_refusal_carries_its_words_and_not_a_secret():
 def test_config_the_plug_does_not_understand_is_refused(config: dict):
     with pytest.raises(PlugError):
         PhoneCall(
-            modality="voice",
-            config={"backend": "scripted"} | config,
-            credentials=None,
+            modality="voice", config=config, credentials=None, media=SCRIPTED
         )
 
 
 def test_a_config_typo_is_named_in_the_refusal():
     with pytest.raises(PlugError) as refusal:
-        PhoneCall(
-            modality="voice",
-            config={"phoneNumber": A_NUMBER, "phoneNumbre": "a typo"},
-            credentials=None,
-        )
+        phone(phoneNumbre="a typo")
     assert "phoneNumbre" in str(refusal.value)
 
 
-def test_a_script_for_a_backend_this_call_does_not_use_is_refused():
+def test_a_script_for_a_backend_this_deployment_does_not_use_is_refused():
     """A script nobody reads was written by mistake, and a silently
     ignored one would change nothing while looking like it changed
     everything."""
+    livekit = MediaSettings(
+        backend="livekit",
+        livekit_url="ws://127.0.0.1:1",
+        livekit_api_key="key",
+        livekit_api_secret="secret",
+        trunk_id="ST_trunk",
+    )
     with pytest.raises(PlugError) as refusal:
         PhoneCall(
             modality="voice",
-            config={
-                "phoneNumber": A_NUMBER,
-                "backend": "livekit",
-                "scripted": {"replies": ["Noted."]},
-            },
+            config={"phoneNumber": A_NUMBER, "scripted": {"replies": ["Noted."]}},
             credentials=None,
+            media=livekit,
         )
     assert "scripted" in str(refusal.value)
 
@@ -312,8 +338,9 @@ def test_credentials_on_a_phone_connection_are_refused():
     with pytest.raises(PlugError) as refusal:
         PhoneCall(
             modality="voice",
-            config={"phoneNumber": A_NUMBER, "backend": "scripted"},
+            config={"phoneNumber": A_NUMBER},
             credentials={"apiKey": "SENTINEL-not-read-here"},
+            media=SCRIPTED,
         )
     told = str(refusal.value)
     assert "environment" in told
@@ -324,15 +351,18 @@ def test_the_plug_speaks_voice_only():
     with pytest.raises(PlugError) as refusal:
         PhoneCall(
             modality="chat",
-            config={"phoneNumber": A_NUMBER, "backend": "scripted"},
+            config={"phoneNumber": A_NUMBER},
             credentials=None,
+            media=SCRIPTED,
         )
     assert "chat" in str(refusal.value)
 
 
-def test_a_deployment_names_its_own_default_bridge(monkeypatch: pytest.MonkeyPatch):
-    """A spec that says nothing about backends is the ordinary case, and
-    which bridge this deployment runs is the deployment's business."""
+def test_the_deployment_the_simulator_started_with_is_what_places_the_call(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A spec names a number and nothing else about how it travels; which
+    bridge this simulator dials through was settled at startup."""
     monkeypatch.setenv("EGMA_SIMULATOR_MEDIA_BACKEND", "scripted")
     plug = PhoneCall(
         modality="voice", config={"phoneNumber": A_NUMBER}, credentials=None
@@ -414,13 +444,18 @@ def test_an_unknown_backend_name_is_nobody():
 # -- The LiveKit driver, as far as it goes without a LiveKit ------------------
 
 
-def livekit_settings(**overrides) -> LiveKitSettings:
-    return LiveKitSettings(
-        url="ws://127.0.0.1:1",
-        api_key="key",
-        api_secret="secret",
-        trunk_id="ST_trunk",
-        **overrides,
+def livekit_settings(**overrides) -> MediaSettings:
+    """A deployment with a LiveKit and a trunk, as startup would have
+    checked it — pointed at a port nothing answers on."""
+    return MediaSettings(
+        **{
+            "backend": "livekit",
+            "livekit_url": "ws://127.0.0.1:1",
+            "livekit_api_key": "key",
+            "livekit_api_secret": "secret",
+            "trunk_id": "ST_trunk",
+        }
+        | overrides
     )
 
 
@@ -429,12 +464,12 @@ def test_the_livekit_driver_is_built_without_reaching_anything():
     LiveKit only when a call is placed, which is what keeps assembling a
     pipeline the validation step it has always been."""
     backend = LiveKitBackend(
-        config={}, band_hz=8000, caller_id=None, settings=livekit_settings()
+        settings=livekit_settings(), config={}, band_hz=8000, caller_id=None
     )
     assert backend.room_name.startswith("egma-sim-")
     # One room per call, never reused.
     other = LiveKitBackend(
-        config={}, band_hz=8000, caller_id=None, settings=livekit_settings()
+        settings=livekit_settings(), config={}, band_hz=8000, caller_id=None
     )
     assert other.room_name != backend.room_name
 
@@ -442,126 +477,12 @@ def test_the_livekit_driver_is_built_without_reaching_anything():
 def test_the_livekit_driver_reads_no_connection_config():
     with pytest.raises(MediaBackendError) as refusal:
         LiveKitBackend(
+            settings=livekit_settings(),
             config={"replies": ["Noted."]},
             band_hz=8000,
             caller_id=None,
-            settings=livekit_settings(),
         )
-    assert "environment" in str(refusal.value)
-
-
-@pytest.mark.parametrize(
-    "missing",
-    [
-        "EGMA_SIMULATOR_LIVEKIT_URL",
-        "EGMA_SIMULATOR_LIVEKIT_API_KEY",
-        "EGMA_SIMULATOR_LIVEKIT_API_SECRET",
-    ],
-)
-def test_a_livekit_deployment_missing_a_variable_is_refused_by_name(
-    monkeypatch: pytest.MonkeyPatch, missing: str
-):
-    for name, value in SENTINEL_TRUNK_ENV.items():
-        monkeypatch.setenv(name, value)
-    monkeypatch.delenv(missing)
-    with pytest.raises(MediaBackendError) as refusal:
-        LiveKitSettings.from_env()
-    assert missing in str(refusal.value)
-
-
-def test_a_deployment_with_no_trunk_at_all_is_refused_naming_both_ways(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    for name, value in SENTINEL_TRUNK_ENV.items():
-        monkeypatch.setenv(name, value)
-    monkeypatch.delenv("EGMA_SIMULATOR_SIP_TRUNK_ADDRESS")
-    with pytest.raises(MediaBackendError) as refusal:
-        LiveKitSettings.from_env()
-    told = str(refusal.value)
-    assert "EGMA_SIMULATOR_SIP_TRUNK_ID" in told
-    assert "EGMA_SIMULATOR_SIP_TRUNK_ADDRESS" in told
-
-
-def test_a_bring_your_own_trunk_arrives_whole_from_the_environment(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    for name, value in SENTINEL_TRUNK_ENV.items():
-        monkeypatch.setenv(name, value)
-    monkeypatch.delenv("EGMA_SIMULATOR_SIP_TRUNK_ID", raising=False)
-    settings = LiveKitSettings.from_env()
-    assert settings.trunk_address == "egma-test.pstn.twilio.com"
-    assert settings.trunk_username == "egma-trunk-user"
-    assert settings.trunk_number == "+15550000000"
-    # And its secrets are the ones every quoted word gets scrubbed of.
-    assert set(settings.secrets) == {
-        SENTINEL_TRUNK_ENV["EGMA_SIMULATOR_LIVEKIT_API_SECRET"],
-        SENTINEL_TRUNK_ENV["EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"],
-    }
-
-
-def test_the_settings_never_print_their_secrets():
-    """A record that lands in a log line by accident says nothing."""
-    for name, value in SENTINEL_TRUNK_ENV.items():
-        if not value.startswith("SENTINEL-"):
-            continue
-        settings = LiveKitSettings(
-            url="ws://127.0.0.1:1",
-            api_key="key",
-            api_secret=SENTINEL_TRUNK_ENV["EGMA_SIMULATOR_LIVEKIT_API_SECRET"],
-            trunk_id="ST_trunk",
-            trunk_password=SENTINEL_TRUNK_ENV["EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"],
-        )
-        assert value not in repr(settings), name
-
-
-class OneWire:
-    """A transport that keeps whatever was said down it, and nothing else."""
-
-    def __init__(self) -> None:
-        self.said: list[bytes] = []
-
-    async def send_audio(self, frame) -> None:
-        self.said.append(frame.audio)
-
-
-async def test_a_real_line_takes_as_long_to_say_a_turn_as_the_turn_lasts():
-    """A voice travels in real time, and everything measured about the
-    answer depends on the persona having finished before it starts.
-
-    Returning early would put the persona's own speaking time inside every
-    time-to-first-word on the record — and this is the one place that can
-    be held, because a session over a real line is the only thing that
-    knows a line is real.
-    """
-    import time
-
-    from egma_simulator.media.livekit import RoomSession
-
-    wire = OneWire()
-    session = RoomSession(wire, band_hz=8000)
-    # Audio that arrived while the persona was still talking: the far end
-    # listening, not the far end answering.
-    session.note_arrival(encode_speech("interrupting", 8000))
-
-    turn = silence(0.2, 8000)
-    started = time.monotonic()
-    await session.send(turn)
-    spent = time.monotonic() - started
-
-    assert wire.said == [turn]
-    assert spent >= 0.19, f"the turn was said in {spent:.3f}s of a 0.2s line"
-    assert await session.receive(0.01) is None, (
-        "what the line carried while the persona spoke became the answer"
-    )
-
-
-async def test_a_room_session_is_over_when_the_far_end_leaves_it():
-    from egma_simulator.media.livekit import RoomSession
-
-    session = RoomSession(OneWire(), band_hz=8000)
-    assert session.far_end_left is False
-    session.note_departure()
-    assert session.far_end_left is True
+    assert "deployment" in str(refusal.value)
 
 
 async def test_a_livekit_server_that_answers_nowhere_fails_without_a_secret():
@@ -569,15 +490,13 @@ async def test_a_livekit_server_that_answers_nowhere_fails_without_a_secret():
     a closed port on loopback, the real driver, real trunk credentials in
     hand — and a refusal that names what could not be reached and no
     secret at all."""
-    settings = LiveKitSettings(
-        url="http://127.0.0.1:1",
-        api_key="key",
-        api_secret=SENTINEL_TRUNK_ENV["EGMA_SIMULATOR_LIVEKIT_API_SECRET"],
-        trunk_id="ST_trunk",
+    settings = livekit_settings(
+        livekit_url="http://127.0.0.1:1",
+        livekit_api_secret=SENTINEL_TRUNK_ENV["EGMA_SIMULATOR_LIVEKIT_API_SECRET"],
         trunk_password=SENTINEL_TRUNK_ENV["EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"],
     )
     backend = LiveKitBackend(
-        config={}, band_hz=8000, caller_id=None, settings=settings
+        settings=settings, config={}, band_hz=8000, caller_id=None
     )
     with pytest.raises(MediaBackendError) as refusal:
         await backend.create_session()
@@ -590,7 +509,7 @@ async def test_a_livekit_server_that_answers_nowhere_fails_without_a_secret():
         assert secret not in told
 
 
-def _utterance(text: str, band: int = DEFAULT_BAND_HZ):
+def _utterance(text: str, band: int = TELEPHONY_BAND_HZ):
     from egma_simulator.plugs import Utterance
 
     return Utterance(pcm=encode_speech(text, band), sample_rate_hz=band)
