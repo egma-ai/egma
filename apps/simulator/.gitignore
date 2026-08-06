@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+# The default write-ahead-log location when run from this directory.
+.egma-simulator/
