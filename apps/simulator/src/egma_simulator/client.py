@@ -61,16 +61,26 @@ class ControlPlaneClient:
         base_url: str,
         *,
         claim_wait_seconds: float,
+        service_token: str | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._claim_timeout = aiohttp.ClientTimeout(
             total=claim_wait_seconds + CLAIM_TIMEOUT_MARGIN_SECONDS
         )
         self._brisk_timeout = aiohttp.ClientTimeout(total=BRISK_TIMEOUT_SECONDS)
+        # The simulator is never dialled into, so its own requests are the
+        # only place it can show it is allowed to claim work. The token sits
+        # on the session rather than on each call, because "every arrow out
+        # carries it" is not a thing to remember three times. No token
+        # means no header at all — the workbench asks for nothing, and a
+        # bare `Bearer ` would be a worse answer than silence.
+        self._headers = (
+            {"Authorization": f"Bearer {service_token}"} if service_token else {}
+        )
         self._session: aiohttp.ClientSession | None = None
 
     async def __aenter__(self) -> ControlPlaneClient:
-        self._session = aiohttp.ClientSession()
+        self._session = aiohttp.ClientSession(headers=self._headers)
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:

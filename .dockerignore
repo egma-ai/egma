@@ -7,6 +7,11 @@ node_modules
 **/.next
 **/.turbo
 **/*.tsbuildinfo
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.egma-simulator
 .env
 .env.*
 !.env.example

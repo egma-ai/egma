@@ -13,6 +13,7 @@ import asyncio
 import logging
 import signal
 import sys
+import traceback
 
 from .config import SimulatorConfig
 from .redaction import RedactingFilter, SecretRegistry
@@ -28,15 +29,48 @@ def _configure_logging(level: str, registry: SecretRegistry) -> None:
     root = logging.getLogger()
     root.setLevel(level.upper())
     root.addHandler(handler)
+    _gather_loguru(level)
 
 
-async def _run() -> None:
+def _gather_loguru(level: str) -> None:
+    """Bring the voice legs' logging under the same roof as everything else.
+
+    Pipecat logs through loguru, which writes to stderr on its own and so
+    would miss both the configured level and the credential filter — and a
+    filter with a way around it is not one. Every loguru record is handed
+    to the standard library instead; the level numbers already agree.
+
+    A traceback is rendered into the message rather than handed along as
+    ``exc_info``, because the filter scrubs a record's message and nothing
+    else: passed the other way, a credential inside an exception would go
+    out unscrubbed. This way the diagnostic survives and is scrubbed.
+    """
+    from loguru import logger as loguru_logger
+
+    def hand_over(message) -> None:
+        record = message.record
+        text = record["message"]
+        failure = record["exception"]
+        if failure is not None:
+            text += "\n" + "".join(
+                traceback.format_exception(
+                    failure.type, failure.value, failure.traceback
+                )
+            )
+        logging.getLogger(record["name"]).log(record["level"].no, text)
+
+    loguru_logger.remove()
+    loguru_logger.add(hand_over, level=level.upper())
+
+
+async def _run(config: SimulatorConfig) -> None:
     registry = SecretRegistry()
-    config = SimulatorConfig.from_env()
-    # The model key is configuration rather than a spec's credential, but it
-    # is a secret all the same, and the same filter keeps it out of logs.
-    if config.model_api_key is not None:
-        registry.register(config.model_api_key)
+    # The model key and the service token are configuration rather than a
+    # spec's credentials, but they are secrets all the same, and the same
+    # filter keeps them out of logs.
+    for secret in (config.model_api_key, config.service_token):
+        if secret is not None:
+            registry.register(secret)
     _configure_logging(config.log_level, registry)
 
     service = SimulatorService(config, secrets=registry)
@@ -53,7 +87,18 @@ async def _run() -> None:
 
 
 def main() -> None:
-    asyncio.run(_run())
+    try:
+        config = SimulatorConfig.from_env()
+    except ValueError as misconfigured:
+        # A container that cannot start says one thing, and it is the
+        # sentence naming the variable to fix. A traceback down through
+        # the standard library would bury it under frames nobody deploying
+        # this can act on — and this is written before logging is
+        # configured, because configuring it is one of the things that
+        # could have gone wrong.
+        print(f"egma-simulator cannot start: {misconfigured}", file=sys.stderr)
+        raise SystemExit(1) from None
+    asyncio.run(_run(config))
 
 
 if __name__ == "__main__":
