@@ -9,8 +9,9 @@ const EVERY_ENDING: readonly ExitReport[] = [
   { kind: "connected", agentName: "order-line", connectionName: "retell-1" },
   { kind: "tests-pushed", count: 12 },
   { kind: "tests-pushed", count: 1 },
-  { kind: "tests-kept", count: 12 },
-  { kind: "tests-kept", count: 1 },
+  { kind: "tests-kept", count: 12, stopped: false },
+  { kind: "tests-kept", count: 1, stopped: false },
+  { kind: "tests-kept", count: 12, stopped: true },
   { kind: "no-agent-context" },
   { kind: "no-coding-agent" },
   {
@@ -76,13 +77,23 @@ describe("the exit line", () => {
     expect(buildExitLine({ kind: "tests-pushed", count: 12 })).toBe(
       "egma put 12 tests on egma and left them in egma/tests/ — commit them, edit them, then run egma push.",
     );
-    expect(buildExitLine({ kind: "tests-kept", count: 12 })).toBe(
+    expect(buildExitLine({ kind: "tests-kept", count: 12, stopped: false })).toBe(
       "Nothing was uploaded. Your 12 tests are in egma/tests/ — read them, then run egma push.",
     );
 
     // One test is one test, in both of them.
     expect(buildExitLine({ kind: "tests-pushed", count: 1 })).toContain("1 test on egma");
-    expect(buildExitLine({ kind: "tests-kept", count: 1 })).toContain("Your test is in");
+    expect(buildExitLine({ kind: "tests-kept", count: 1, stopped: false })).toContain(
+      "Your test is in",
+    );
+
+    // Ctrl-C over the list is the same decision as q, and it leaves the same
+    // files. It says it stopped, because a person who pressed it knows they
+    // did — and it still says where the files are, which is the whole job of
+    // this line.
+    expect(buildExitLine({ kind: "tests-kept", count: 12, stopped: true })).toBe(
+      "egma stopped. Your 12 tests are in egma/tests/ — read them, then run egma push.",
+    );
   });
 
   /**

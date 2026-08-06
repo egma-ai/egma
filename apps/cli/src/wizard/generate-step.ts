@@ -23,7 +23,7 @@ import { readdir } from "node:fs/promises";
 import {
   createEgmaFolder,
   readConfig,
-  readFolderTests,
+  readFolder,
   updateConfig,
   type FolderPaths,
   type FolderTest,
@@ -205,12 +205,17 @@ async function writeFiles(
       onLogin: (name) =>
         ui.pushStatus(`${ACTION_MARK} ${name} needs you to log in. Handing you to its own login.`),
     });
+    // The agent's last line often arrives without the line ending that would
+    // have finished it, and it is read before the pane comes down.
+    take(markers.flush());
   } finally {
+    // However this ended — a stop, an interruption, or something nobody
+    // planned for — the timer stops and the pane comes down. A timer left
+    // running is a wizard that never leaves.
     clearInterval(watching);
+    ui.setGeneration(null);
+    ui.taskFinished();
   }
-  take(markers.flush());
-  ui.taskFinished();
-  ui.setGeneration(null);
 
   switch (result.kind) {
     case "done":
@@ -370,7 +375,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<ExitRe
         cwd,
         shown: existing.shown,
         content: existing.content,
-        taken: namesOf(await readFolderTests(paths)),
+        taken: namesOf((await readFolder(paths)).found),
         personas: PERSONAS_EGMA_HOLDS,
       }),
       // Nobody knows how many rows are in there, least of all egma, so the
@@ -380,7 +385,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<ExitRe
     if (stopped !== null) return stopped;
   }
 
-  const converted = await readFolderTests(paths);
+  const converted = (await readFolder(paths)).found;
   const missing = Math.max(howMany - converted.length, 0);
   if (missing === 0) {
     ui.pushStatus(
@@ -407,7 +412,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<ExitRe
   }
 
   // What is really on disk, whatever anybody said about it.
-  const gate = gateFrom(await readFolderTests(paths), {
+  const gate = gateFrom(await readFolder(paths), {
     agentName: options.registered.agent.name,
     connectionName: options.registered.connection.name,
     modality: options.registered.connection.modality,
@@ -430,11 +435,16 @@ export async function generateStep(options: GenerateStepOptions): Promise<ExitRe
   ui.setGate(null);
 
   if (signal.aborted) {
-    // Closing the wizard here is a decision and not a failure: the files are
-    // written, they are the developer's, and the line has to say where.
-    return stopReasonOf(signal) === "quit"
-      ? { kind: "tests-kept", count: gate.rows.length }
-      : stoppedHere(signal, options.launch.name, paths);
+    // Closing the wizard here is a decision and not a failure: nothing is
+    // running, the files are written, and they are the developer's. So Ctrl-C
+    // and `q` leave the same line about where the files are — an interruption
+    // here shut no coding agent down and stopped no task, and saying it did
+    // would be egma telling a story about itself rather than about the run.
+    return {
+      kind: "tests-kept",
+      count: gate.rows.length,
+      stopped: stopReasonOf(signal) !== "quit",
+    };
   }
 
   return pushGate(options, paths, gate);

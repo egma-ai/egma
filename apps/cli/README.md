@@ -228,8 +228,9 @@ own and nothing waits on them — the suite is written at exactly the speed it
 would be with the pane closed.
 
 Twelve tests, each with at least one expected behavior. A test with none can
-never fail, so egma will not upload one — it says which file and why, and
-leaves the file exactly where it is for you to fix.
+never fail, so egma will not upload one; nor will it upload a file it could not
+read. Either way it says which file and why, and leaves the file exactly where
+it is for you to fix.
 
 Then one keystroke:
 

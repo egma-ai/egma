@@ -8,10 +8,13 @@
  * None of those can be checked without a terminal, so a pseudo-terminal runs
  * the built command and a headless terminal emulator reads its screen.
  *
- * The editor here is a two-line shell script rather than a person in vim. It
- * writes down which file it was handed and adds a line to it, which is exactly
- * what the check needs to know: egma opened the right file, the developer's
- * edit survived, and the wizard came back.
+ * The editor here is a short shell script rather than a person in vim. It
+ * writes down every argument it was handed and adds a line to the file, which
+ * is exactly what the checks need to know: egma split the command line the way
+ * a shell would, it opened the right file, the developer's edit survived, and
+ * the wizard came back. One of them takes the alternate screen the way vim
+ * does, because "the wizard came back" is only worth checking against an editor
+ * that painted over it.
  */
 
 import { existsSync } from "node:fs";
@@ -202,6 +205,90 @@ describe("the files arriving", () => {
     expect(await run.exited).toBe(0);
   });
 
+  it("counts a file once when the agent both announces it and writes it", async () => {
+    // Every file here arrives twice over: as a marker line the agent wrote,
+    // and as a file the folder poller finds a moment later. Both are the same
+    // file, so the count is five and never ten — a developer reading "10/12"
+    // off five files would be reading egma's bookkeeping, not their folder.
+    const run = await toTheGate();
+
+    const pane = await showing(run, "5 tests generated", ...GATE_HINTS);
+    expect(pane).toContain("5 tests generated");
+
+    // Ten rows would be the double count, and the screen holds only five names.
+    for (const name of IN_ORDER.slice(0, 3)) {
+      expect(pane.split(name).length - 1, name).toBe(1);
+    }
+
+    run.write("\r");
+    expect(await run.exited).toBe(0);
+    expect(platform.tests.tests).toHaveLength(5);
+  });
+
+  it("stops rather than hangs when Ctrl-C lands on the one question it asks", async () => {
+    const script = await workspace.script({
+      steps: [
+        { kind: "say", text: "egma:found framework retell-sdk\n" },
+        { kind: "stop", reason: "end_turn" },
+      ],
+    });
+
+    const run = runInTerminal({
+      command: process.execPath,
+      args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+      cwd: workspace.dir,
+      env: workspace.env({
+        EGMA_URL: platform.url,
+        EGMA_RETELL_URL: retell?.url ?? "",
+        EGMA_RETELL_API_KEY: KEY,
+        VISUAL: "",
+        EDITOR: "",
+      }),
+      cols: 100,
+    });
+    terminal = run;
+
+    await showing(run, "[enter] begin", "[q] quit");
+    run.write("\r");
+    await showing(run, "Paste your Retell API key");
+    run.write(`${KEY}\r`);
+    await showing(run, "Do you already have test cases", "[n] none");
+
+    run.write("");
+
+    // A question the flow is parked on ends with the signal, not only with a
+    // keystroke, so nothing was generated and nothing hangs.
+    expect(await run.exited).toBe(130);
+    expect(run.scrollback().trim()).toContain("stopped before the task finished");
+    expect(platform.tests.tests).toHaveLength(0);
+  });
+
+  it("stops on Ctrl-C while the files are still arriving, and says so", async () => {
+    const run = await toTheGate({}, [
+      { kind: "say", text: `egma:plan ${TESTS.join(", ")}\n` },
+      ...writes(TESTS[0]),
+      { kind: "say", text: `egma:writing ${TESTS[1]}\n` },
+      { kind: "wait", ms: 60_000 },
+      { kind: "stop", reason: "end_turn" },
+    ]);
+
+    await showing(run, "Writing tests for your voice agent.", `▶ ${TESTS[1]}`);
+    run.write("");
+
+    // The poller is a timer, so a wizard that left it running would never leave.
+    // It does leave, on its own answer, with one honest line behind it — and the
+    // line counts the file the agent had already written, because a folder a
+    // developer was never told about is a half-truth.
+    expect(await run.exited).toBe(130);
+    expect(run.scrollback().trim()).toBe(
+      "egma stopped before the task finished, and shut node down. Your 1 test is in egma/tests/.",
+    );
+
+    // And what the agent had already written is still the developer's.
+    expect(await testsInFolder()).toEqual([`${TESTS[0]}.md`]);
+    expect(platform.tests.tests).toHaveLength(0);
+  });
+
   it("fills in from the folder, when the agent says nothing at all", async () => {
     // A real coding agent writes the files and forgets the marker lines it was
     // asked for — and it may write them any way it likes. What every way has in
@@ -281,6 +368,29 @@ describe("the gate", () => {
     }
   });
 
+  /**
+   * Ctrl-C over the list is the same decision as `q`: nothing is running, the
+   * files are written, and `q` is on the screen beside them. So it leaves the
+   * same files and the same sentence about where they are — a line saying egma
+   * had stopped a task and shut a coding agent down would be describing a run
+   * that was already over.
+   */
+  it("says where the files are when Ctrl-C lands on the list", async () => {
+    const run = await toTheGate();
+    await showing(run, "5 tests generated", ...GATE_HINTS);
+
+    run.write("");
+
+    // Still an interruption to a shell, and still an honest line to a person.
+    expect(await run.exited).toBe(130);
+    expect(run.scrollback().trim()).toBe(
+      "egma stopped. Your 5 tests are in egma/tests/ — read them, then run egma push.",
+    );
+
+    expect(await testsInFolder()).toHaveLength(5);
+    expect(platform.tests.tests).toHaveLength(0);
+  });
+
   it("leaves every file where it is when the developer quits", async () => {
     const run = await toTheGate();
     await showing(run, "5 tests generated", ...GATE_HINTS);
@@ -349,5 +459,151 @@ describe("the gate", () => {
     run.write("\r");
     expect(await run.exited).toBe(0);
     expect(platform.tests.tests).toHaveLength(5);
+  });
+
+  /**
+   * `$EDITOR` is a command line and not a command. `code --wait` and `emacs -nw`
+   * are both ordinary settings, and a wizard that spawned the whole string as
+   * one binary name would find nothing on this machine called `code --wait`.
+   */
+  it("honours an $EDITOR that carries arguments of its own", async () => {
+    const added = "2. The agent thanks the person.";
+    const editor = await workspace.editor(added);
+    const first = path.join(workspace.dir, "egma", "tests", `${IN_ORDER[0] as string}.md`);
+
+    const run = await toTheGate({ EDITOR: `${editor.command} --wait` });
+    await showing(run, "5 tests generated", ...GATE_HINTS);
+
+    run.write("e");
+
+    expect(await run.waitFor(() => existsSync(editor.opened))).toBe(true);
+    const given = (await readFile(editor.opened, "utf8")).trim().split("\n");
+    // The flag was passed on as a flag, and the file arrived after it.
+    expect(given).toEqual(["--wait", first]);
+
+    await showing(run, "5 tests generated", ...GATE_HINTS);
+    run.write("\r");
+    expect(await run.exited).toBe(0);
+    expect(await readFile(first, "utf8")).toContain(added);
+  });
+
+  /**
+   * An editor that takes the whole terminal is the ordinary case, not the odd
+   * one: vim, emacs and nano all paint over whatever was there. The promise the
+   * gate makes is that the wizard comes back afterwards, and only a terminal
+   * can say whether it did.
+   */
+  it("comes back drawn whole after an editor that took the alternate screen", async () => {
+    const added = "2. The agent thanks the person.";
+    const editor = await workspace.editor(added, { alternateScreen: true });
+    const first = path.join(workspace.dir, "egma", "tests", `${IN_ORDER[0] as string}.md`);
+
+    const run = await toTheGate({ EDITOR: editor.command });
+    await showing(run, "5 tests generated", ...GATE_HINTS);
+
+    run.write("e");
+    expect(await run.waitFor(() => existsSync(editor.opened))).toBe(true);
+
+    // Every line of the gate, not just its first: a half-diffed frame would
+    // show the heading and leave the rest as whatever the editor painted.
+    const back = await showing(
+      run,
+      "5 tests generated",
+      'suite "first-suite"',
+      IN_ORDER[0] as string,
+      "Run these against order-line over retell-1 (voice)?",
+      ...GATE_HINTS,
+    );
+    expect(back).not.toContain("STAND-IN EDITOR HAS THE SCREEN");
+
+    run.write("\r");
+    expect(await run.exited).toBe(0);
+    expect(await readFile(first, "utf8")).toContain(added);
+  });
+
+  it("says which editor it could not start, and keeps the list waiting", async () => {
+    const run = await toTheGate({ EDITOR: "egma-no-such-editor-on-this-machine" });
+    await showing(run, "5 tests generated", ...GATE_HINTS);
+
+    run.write("e");
+
+    await showing(
+      run,
+      "egma could not start egma-no-such-editor-on-this-machine",
+      ...GATE_HINTS,
+    );
+
+    // The gate is intact: enter still does the one thing it was always for.
+    run.write("\r");
+    expect(await run.exited).toBe(0);
+    expect(platform.tests.tests).toHaveLength(5);
+  });
+
+  /**
+   * A file egma will not push is not a file egma hides. Both reasons it holds
+   * one back — nothing to check, and nothing it could read — are named on the
+   * same screen, beside the tests that are going up.
+   */
+  it("names the files it is holding back, and pushes the rest", async () => {
+    const unfalsifiable = [
+      "---",
+      "name: nothing-to-check",
+      "---",
+      "## Scenario",
+      "Somebody rings about nothing in particular.",
+      "## Expected behaviors",
+      "",
+    ].join("\n");
+    const broken = [
+      "---",
+      "name: half-written",
+      "personas: [somebody-in-a-hurry",
+      "---",
+      "## Scenario",
+      "Somebody rings and the file was never finished.",
+      "## Expected behaviors",
+      "1. The agent says the workshop's name.",
+      "",
+    ].join("\n");
+
+    const run = await toTheGate({}, [
+      ...writes(TESTS[0]),
+      {
+        kind: "write-file",
+        path: "egma/tests/nothing-to-check.md",
+        content: unfalsifiable,
+      },
+      { kind: "say", text: "egma:wrote nothing-to-check\n" },
+      { kind: "write-file", path: "egma/tests/half-written.md", content: broken },
+      { kind: "say", text: "egma:wrote half-written\n" },
+      { kind: "stop", reason: "end_turn" },
+    ]);
+
+    // One test on the list, and both of the others named under it with what to
+    // do about them.
+    await showing(
+      run,
+      "1 test generated",
+      "egma/tests/half-written.md",
+      "egma could not read it",
+      "egma/tests/nothing-to-check.md",
+      "no expected behaviors",
+      ...GATE_HINTS,
+    );
+
+    run.write("\r");
+    expect(await run.exited).toBe(0);
+
+    // The good one went up; neither of the others did, and both are still on
+    // disk exactly as they were written.
+    expect(platform.tests.tests.map((test) => test.name)).toEqual([TESTS[0]]);
+    expect(await testsInFolder()).toEqual([
+      "half-written.md",
+      "nothing-to-check.md",
+      `${TESTS[0]}.md`,
+    ]);
+    const tests = path.join(workspace.dir, "egma", "tests");
+    expect(await readFile(path.join(tests, "half-written.md"), "utf8")).toBe(broken);
+    expect(await readFile(path.join(tests, "nothing-to-check.md"), "utf8")).toBe(unfalsifiable);
   });
 });

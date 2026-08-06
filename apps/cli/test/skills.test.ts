@@ -75,10 +75,13 @@ const BANNED = [
  * field on a test — and the test file format calls its first heading exactly
  * that. A skill that teaches the format has to write the heading, so the
  * heading is taken out before the bans are run and every other use of the word
- * still fails. Written as the heading it is, backticks and all, so a sentence
- * about "the scenario" cannot hide behind it.
+ * still fails. Written as the heading it is, backticks and all, and no wider
+ * than that: a hash and blank space on the same line, the word, and a boundary
+ * after it. A sentence about "the scenario" has no hash in front of it and a
+ * heading called `## Scenarios` is the entity the glossary bans — neither can
+ * hide behind this, and both still fail.
  */
-const SCENARIO_HEADING = /`?#{1,6}\s*scenario`?/gi;
+const SCENARIO_HEADING = /`?#{1,6}[ \t]*scenario(?!\w)`?/gi;
 
 describe("egma's skills", () => {
   it("are markdown content, shaped the way a skill file is", () => {
@@ -163,6 +166,31 @@ describe("egma's skills", () => {
       }
       // The bare word is the voice agent; the driven one is always named.
       expect(content).toContain("voice agent");
+    }
+  });
+
+  /**
+   * The carve-out is a hole in a guard, and a hole nobody measured is how a
+   * guard stops guarding. It takes out the heading and it takes out nothing
+   * else — so the one word a skill may write stays the one word it may write.
+   */
+  it("carve out the heading and nothing that hides behind it", () => {
+    const taken = (text: string): string => text.replaceAll(SCENARIO_HEADING, "");
+
+    // The heading, however a skill writes it — and it goes.
+    expect(taken("## Scenario")).toBe("");
+    expect(taken("- **`## Scenario`** is prose.")).toBe("- **** is prose.");
+    expect(taken("#### scenario")).toBe("");
+
+    // Everything else stays, and the ban is what meets it.
+    for (const hiding of [
+      "the scenario the test describes",
+      "## Scenarios",
+      "a scenario-led suite",
+      "Scenario: the person is late",
+    ]) {
+      expect(taken(hiding), hiding).toMatch(/scenario/i);
+      expect(/\bscenarios?\b/i.test(taken(hiding)), hiding).toBe(true);
     }
   });
 

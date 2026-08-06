@@ -239,9 +239,12 @@ describe("Ctrl-C at the gate, with the files already written", () => {
 
       terminal.write(CTRL_C);
 
+      // The shell is told this was an interruption, and the line is told the
+      // truth about what the interruption did: nothing was running here, so it
+      // shut nothing down. It stopped, and the files are where they always were.
       expect(await terminal.exited).toBe(130);
       expect(terminal.scrollback().trim()).toBe(
-        "egma stopped before the task finished, and shut node down. Your 3 tests are in egma/tests/.",
+        "egma stopped. Your 3 tests are in egma/tests/ — read them, then run egma push.",
       );
 
       // The agent that wrote them, and the process it started, are both gone —
