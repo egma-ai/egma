@@ -147,7 +147,7 @@ url: https://app.egma.ai
 retell_agents: 1
 retell_agent_id: agent_…
 retell_response_engine: retell-llm
-prompt_characters: 5795
+prompt_characters: 2140
 tools: 7
 agent_id: agt_01K…
 agent_name: order-line
