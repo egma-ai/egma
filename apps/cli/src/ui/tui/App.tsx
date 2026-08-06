@@ -9,6 +9,7 @@ import { useSyncExternalStore } from "react";
 import { useInput } from "ink";
 
 import { IntroScreen } from "./screens/IntroScreen.tsx";
+import { PromptsPointerScreen } from "./screens/PromptsPointerScreen.tsx";
 import { TaskScreen } from "./screens/TaskScreen.tsx";
 import type { WizardStore } from "./store.ts";
 
@@ -32,6 +33,13 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
 
   if (screen === "intro") {
     return <IntroScreen state={state} onBegin={() => store.begin()} onQuit={onQuit} />;
+  }
+  if (screen === "prompts-pointer") {
+    return (
+      <PromptsPointerScreen
+        onAnswer={(pointer) => store.answer("prompts-pointer", pointer)}
+      />
+    );
   }
   return <TaskScreen state={state} />;
 }

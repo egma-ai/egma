@@ -14,11 +14,14 @@
 import { WizardRouter, type ScreenName, type Sequence } from "./router.ts";
 import { emptyState, type WizardState } from "./state.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
-import type { DrivenAgent, GateId } from "../wizard-ui.ts";
+import type { AskId, DrivenAgent, GateId } from "../wizard-ui.ts";
 
 /** The screens of the walk, in order. */
 export const WALK_SCREENS: Sequence = [
   { id: "intro", isComplete: (state) => state.begun },
+  // Only ever on while the flow is parked on that one question, and gone the
+  // moment it is answered — which is the router working the way it should.
+  { id: "prompts-pointer", show: (state) => state.asking === "prompts-pointer" },
   { id: "task" },
 ];
 
@@ -34,6 +37,12 @@ type Gate = {
   opened: boolean;
 };
 
+/** A question the flow is parked on, and the promise waiting for its answer. */
+type OpenQuestion = {
+  readonly promise: Promise<string | null>;
+  readonly settle: (answer: string | null) => void;
+};
+
 /** The most recent status lines kept in memory, oldest dropped first. */
 const MAX_STATUS_LINES = 200;
 
@@ -41,6 +50,7 @@ export class WizardStore {
   private state: WizardState = emptyState();
   private readonly listeners = new Set<() => void>();
   private readonly gates = new Map<GateId, Gate>();
+  private readonly answers = new Map<AskId, OpenQuestion>();
 
   readonly router: WizardRouter;
 
@@ -77,6 +87,34 @@ export class WizardStore {
     return this.gates.get(gate)?.promise ?? Promise.resolve();
   }
 
+  /**
+   * Park on a question until a screen answers it.
+   *
+   * The same pattern as a gate, carrying a value. It is the flow that says a
+   * question is open and the screen that closes it, so no screen can be reached
+   * for a question nobody asked.
+   */
+  ask(ask: AskId): Promise<string | null> {
+    const held = this.answers.get(ask);
+    if (held !== undefined) return held.promise;
+
+    let settle!: (answer: string | null) => void;
+    const promise = new Promise<string | null>((resolve) => {
+      settle = resolve;
+    });
+    this.answers.set(ask, { promise, settle });
+    this.change({ asking: ask });
+    return promise;
+  }
+
+  /** A screen's answer to the open question. `null` means "I have none". */
+  answer(ask: AskId, value: string | null): void {
+    const open = this.answers.get(ask);
+    if (open === undefined) return;
+    this.change({ asking: this.state.asking === ask ? null : this.state.asking });
+    open.settle(value);
+  }
+
   // ── The flow's writes ────────────────────────────────────────────────
 
   setDrivenAgent(drivenAgent: DrivenAgent | null): void {
@@ -85,10 +123,6 @@ export class WizardStore {
 
   setDrivenAgentLog(drivenAgentLog: string): void {
     this.change({ drivenAgentLog });
-  }
-
-  setTaskFile(taskFile: string): void {
-    this.change({ taskFile });
   }
 
   taskStarted(): void {

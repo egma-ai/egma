@@ -8,41 +8,49 @@
  * path. Because every gate opens itself, nothing here may ever be reached
  * without that word from the developer: the gate is where consent is given,
  * and this UI answers it on their behalf.
+ *
+ * A gate carrying a value is different. Consent can be given in advance;
+ * knowledge cannot. So an answer nobody supplied is `null`, and the flow takes
+ * the branch it takes when a developer has nothing to add.
  */
 
 import type { ExitReport } from "../wizard/exit-line.ts";
-import type { DrivenAgent, GateId, WizardUI } from "./wizard-ui.ts";
+import type { AskId, DrivenAgent, GateId, WizardUI } from "./wizard-ui.ts";
 
 export type HeadlessRecord = {
   drivenAgent: DrivenAgent | null;
   drivenAgentLog: string | null;
-  taskFile: string | null;
   statuses: string[];
   summary: string;
   exit: ExitReport | null;
   gatesOpened: GateId[];
+  asked: AskId[];
 };
 
 export type HeadlessOptions = {
   /** Where plain lines go. Omit to keep the run silent. */
   readonly write?: (line: string) => void;
+  /** What the developer would have said, for a run where nobody is asked. */
+  readonly answers?: Partial<Readonly<Record<AskId, string>>>;
 };
 
 export class HeadlessUI implements WizardUI {
   readonly record: HeadlessRecord = {
     drivenAgent: null,
     drivenAgentLog: null,
-    taskFile: null,
     statuses: [],
     summary: "",
     exit: null,
     gatesOpened: [],
+    asked: [],
   };
 
   private readonly write: (line: string) => void;
+  private readonly answers: Partial<Readonly<Record<AskId, string>>>;
 
   constructor(options: HeadlessOptions = {}) {
     this.write = options.write ?? (() => undefined);
+    this.answers = options.answers ?? {};
   }
 
   readonly log = {
@@ -61,14 +69,14 @@ export class HeadlessUI implements WizardUI {
     this.record.drivenAgentLog = file;
   }
 
-  setTaskFile(file: string): void {
-    this.record.taskFile = file;
-    this.write(`Task: read ${file} and say what it is`);
-  }
-
   waitForGate(gate: GateId): Promise<void> {
     this.record.gatesOpened.push(gate);
     return Promise.resolve();
+  }
+
+  waitForAnswer(ask: AskId): Promise<string | null> {
+    this.record.asked.push(ask);
+    return Promise.resolve(this.answers[ask] ?? null);
   }
 
   taskStarted(): void {

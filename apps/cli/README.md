@@ -17,11 +17,28 @@ is how CI runs it.
 
 ## What it does today
 
-This is the first working slice. `npx egma` starts the coding agent you already
-have, gives it one small task — read a file in this folder and say what it is —
-and shows you every action it takes while it works. That proves the path the
-rest of the product runs on: egma drives your own agent, on your own machine,
-with your own login.
+`npx egma` finds your voice agent. It starts the coding agent you already have,
+hands it egma's own notes on how voice agents are built, and has it read this
+folder and report four things: which framework runs your voice agent, where its
+prompts live, where its tools are defined, and how it reaches production. Every
+action it takes appears on screen while it works, and the facts it finds arrive
+one line at a time.
+
+Nothing is changed and nothing is written. Your code and your prompts never
+leave this machine.
+
+If this folder holds no voice agent, egma asks once for the folder your prompts
+are in — teams often keep them apart — looks there, and otherwise says plainly
+that you should run it where your agent is defined.
+
+## The notes egma hands your coding agent
+
+They are markdown files inside this package, under `skills/`. They are sent as
+part of the task, at the moment the task is sent. Nothing is installed on your
+machine, nothing is downloaded, and nothing is written to your repository.
+
+Today there are two: one on finding a voice agent in a repository nobody has
+described, and one on what a Retell voice agent looks like from the inside.
 
 ## How it reaches your coding agent
 
@@ -64,9 +81,13 @@ is shut down before egma exits.
 
 ## Requirements
 
-Node 22 or newer. A coding agent installed and logged in — Claude Code and
-Codex both work, as does any agent in the protocol registry that ships as a
-package.
+Node 22 or newer. A coding agent installed — Claude Code and Codex both work,
+as does any agent in the protocol registry that ships as a package.
+
+You do not have to be logged in to it first. If it asks egma to log in, egma
+hands you to that agent's own login and carries on where it left off. And if
+there is no coding agent here for egma to drive at all, it prints the words to
+paste into whichever one you do use, and stops.
 
 ## Licence
 

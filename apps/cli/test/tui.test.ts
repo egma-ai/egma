@@ -37,9 +37,9 @@ describe("the wizard on a real terminal", () => {
       steps: [
         { kind: "tool-call", id: "t1", title: "Read", locations: [{ path: "package.json" }] },
         { kind: "read-file", path: "package.json", recordAs: "manifest" },
+        { kind: "say", text: "egma:found framework retell-sdk\n" },
         // A real agent takes seconds; this is long enough to watch it work.
         { kind: "wait", ms: 750 },
-        { kind: "say", text: "It is a package manifest." },
         { kind: "stop", reason: "end_turn" },
       ],
     });
@@ -51,11 +51,13 @@ describe("the wizard on a real terminal", () => {
     });
 
     try {
-      expect(await waitUntil(() => terminal.screen().includes("read package.json"))).toBe(true);
+      expect(
+        await waitUntil(() => terminal.screen().includes("egma is about to find your voice agent")),
+      ).toBe(true);
 
       // The intro says what is about to happen and what the keystroke means.
       const intro = terminal.screen();
-      expect(intro).toContain("This is the first check that egma can drive your own coding agent");
+      expect(intro).toContain("where its prompts live");
       expect(intro).toContain("[enter] begin");
       expect(intro).toContain("[q] quit");
       expect(intro.indexOf("[enter] begin")).toBeLessThan(intro.indexOf("[q] quit"));
@@ -66,16 +68,92 @@ describe("the wizard on a real terminal", () => {
       terminal.write("\r");
 
       expect(await waitUntil(() => terminal.screen().includes("Read package.json"))).toBe(true);
+      // Every fact the agent reports lands on screen as it reports it.
+      expect(
+        await waitUntil(() => terminal.screen().includes("┊ Framework  retell-sdk")),
+      ).toBe(true);
 
       const code = await terminal.exited;
       expect(code).toBe(0);
 
       // Everything the wizard drew is gone. One line is left, and it is plain.
       const left = terminal.scrollback().trim();
-      expect(left).toBe(
-        "node read package.json for egma. Nothing in this folder was changed.",
-      );
+      expect(left).toBe("egma found your voice agent: retell-sdk.");
       expect(left.split("\n")).toHaveLength(1);
+    } finally {
+      terminal.kill();
+    }
+  });
+
+  it("asks once for the prompts when the folder holds no voice agent", async () => {
+    const script = await workspace.script({
+      steps: [
+        { kind: "say", text: "egma:none There is no voice agent in this folder.\n" },
+        { kind: "stop", reason: "end_turn" },
+      ],
+    });
+
+    const terminal = runInTerminal({
+      command: process.execPath,
+      args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+      cwd: workspace.dir,
+    });
+
+    try {
+      expect(
+        await waitUntil(() => terminal.screen().includes("egma is about to find your voice agent")),
+      ).toBe(true);
+      terminal.write("\r");
+
+      expect(
+        await waitUntil(() =>
+          terminal.screen().includes("Nothing in this folder looks like a voice agent"),
+        ),
+      ).toBe(true);
+      expect(terminal.screen()).toContain("[enter] look there");
+      expect(terminal.screen()).toContain("[esc] nowhere else");
+
+      // The developer has nowhere to point egma at, and says so.
+      terminal.write("");
+
+      expect(await terminal.exited).toBe(1);
+      expect(terminal.scrollback().trim()).toBe(
+        "egma found no voice agent to test. Run egma again where your agent is defined.",
+      );
+    } finally {
+      terminal.kill();
+    }
+  });
+
+  it("stops rather than hangs when Ctrl-C lands on that question", async () => {
+    const script = await workspace.script({
+      steps: [
+        { kind: "say", text: "egma:none There is no voice agent in this folder.\n" },
+        { kind: "stop", reason: "end_turn" },
+      ],
+    });
+
+    const terminal = runInTerminal({
+      command: process.execPath,
+      args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+      cwd: workspace.dir,
+    });
+
+    try {
+      expect(
+        await waitUntil(() => terminal.screen().includes("egma is about to find")),
+      ).toBe(true);
+      terminal.write("\r");
+      expect(
+        await waitUntil(() =>
+          terminal.screen().includes("Nothing in this folder looks like a voice agent"),
+        ),
+      ).toBe(true);
+
+      terminal.write("");
+
+      expect(await terminal.exited).toBe(130);
+      expect(terminal.scrollback().trim()).toContain("stopped before the task finished");
     } finally {
       terminal.kill();
     }
@@ -92,7 +170,7 @@ describe("the wizard on a real terminal", () => {
 
     try {
       expect(
-        await waitUntil(() => terminal.screen().includes("This is the first check")),
+        await waitUntil(() => terminal.screen().includes("egma is about to find")),
       ).toBe(true);
 
       terminal.write("q");
@@ -122,7 +200,7 @@ describe("the wizard on a real terminal", () => {
 
     try {
       expect(
-        await waitUntil(() => terminal.screen().includes("This is the first check")),
+        await waitUntil(() => terminal.screen().includes("egma is about to find")),
       ).toBe(true);
       terminal.write("\r");
       expect(await waitUntil(() => terminal.screen().includes("Thinking about it"))).toBe(true);

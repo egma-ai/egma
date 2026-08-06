@@ -3,7 +3,7 @@
  * gets driven in it.
  */
 
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -13,6 +13,16 @@ import type { DrivenAgentLaunch } from "../../src/acp/registry.ts";
 import type { FakeScript } from "./fake-agent.ts";
 
 export const FAKE_AGENT = fileURLToPath(new URL("./fake-agent.ts", import.meta.url));
+
+/**
+ * A small repository shaped like a Retell voice agent, committed so CI has one.
+ *
+ * Every word of it is invented: a bookbinding workshop that does not exist,
+ * with prompts and tools written for this test and nowhere else.
+ */
+export const RETELL_FIXTURE_REPO = fileURLToPath(
+  new URL("../fixtures/retell-agent", import.meta.url),
+);
 
 /** The file a workspace is given so the walk has something to read. */
 export const MANIFEST = JSON.stringify({ name: "customer-repo", version: "1.0.0" }, null, 2);
@@ -32,10 +42,17 @@ export type Workspace = {
   remove(): Promise<void>;
 };
 
+export type WorkspaceOptions = {
+  /** A folder copied in whole before anything else, e.g. a fixture repository. */
+  readonly from?: string;
+};
+
 export async function makeWorkspace(
   files: Readonly<Record<string, string>> = {},
+  options: WorkspaceOptions = {},
 ): Promise<Workspace> {
   const dir = await mkdtemp(path.join(tmpdir(), "egma-cli-"));
+  if (options.from !== undefined) await cp(options.from, dir, { recursive: true });
   for (const [name, content] of Object.entries(files)) {
     await writeFile(path.join(dir, name), content, "utf8");
   }
@@ -62,6 +79,20 @@ export async function makeWorkspace(
       await rm(dir, { recursive: true, force: true });
     },
   };
+}
+
+/**
+ * Every file in a folder, relative and sorted — the way to check that a step
+ * which promised to leave a repository alone left it alone.
+ */
+export async function filesUnder(dir: string, prefix = ""): Promise<string[]> {
+  const found: string[] = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const name = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) found.push(...(await filesUnder(path.join(dir, entry.name), name)));
+    else found.push(name);
+  }
+  return found.sort();
 }
 
 /** True while the process is alive. */

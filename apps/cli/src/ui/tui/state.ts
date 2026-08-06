@@ -7,17 +7,18 @@
  */
 
 import type { ExitReport } from "../../wizard/exit-line.ts";
-import type { DrivenAgent } from "../wizard-ui.ts";
+import type { AskId, DrivenAgent } from "../wizard-ui.ts";
 
 export type WizardState = {
   readonly drivenAgent: DrivenAgent | null;
   /** Where the coding agent's own output is kept, for a screen that tails it. */
   readonly drivenAgentLog: string | null;
-  readonly taskFile: string | null;
   /** The developer has read the intro and said go. */
   readonly begun: boolean;
   readonly running: boolean;
   readonly finished: boolean;
+  /** The question the flow is parked on, or `null` when it is not parked. */
+  readonly asking: AskId | null;
   readonly statuses: readonly string[];
   readonly summary: string;
   readonly exit: ExitReport | null;
@@ -27,10 +28,10 @@ export function emptyState(): WizardState {
   return {
     drivenAgent: null,
     drivenAgentLog: null,
-    taskFile: null,
     begun: false,
     running: false,
     finished: false,
+    asking: null,
     statuses: [],
     summary: "",
     exit: null,

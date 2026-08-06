@@ -28,18 +28,21 @@ export function IntroScreen({ state, onBegin, onQuit }: IntroScreenProps) {
     dispatchKey(bindings, input, key);
   });
 
-  const drivenAgentName = state.drivenAgent?.name ?? "your coding agent";
-  const file = state.taskFile ?? "one file";
+  const drivenAgentName = state.drivenAgent?.name ?? "your own coding agent";
 
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
       <Text bold>egma</Text>
       <Box height={1} />
-      <Text>This is the first check that egma can drive your own coding agent.</Text>
+      <Text>egma is about to find your voice agent.</Text>
       <Box height={1} />
-      <Text>
-        {`egma will ask ${drivenAgentName} to read ${file} in this folder and say what it is.`}
-      </Text>
+      <Text>{`It reads this folder with ${drivenAgentName}, here on this machine, and reports:`}</Text>
+      <Box height={1} />
+      <Text> which framework runs your voice agent</Text>
+      <Text> where its prompts live</Text>
+      <Text> where its tools are defined</Text>
+      <Text> how it reaches production</Text>
+      <Box height={1} />
       <Text>Nothing here is changed. Your code stays on this machine.</Text>
       <Box height={1} />
       <Text>Every action your coding agent takes appears below as it happens.</Text>
