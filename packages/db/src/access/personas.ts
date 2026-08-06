@@ -6,8 +6,10 @@ import {
   persona,
   personaVersion,
 } from "../schema/personas.ts";
+import { project } from "../schema/tenancy.ts";
 import type { AuthContext } from "./context.ts";
 import {
+  InvalidInputError,
   PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
 } from "./errors.ts";
@@ -320,6 +322,32 @@ export async function getPersona(
 
   if (row === undefined) return undefined;
   return { ...row, traits: traitsFromRow(row.traits, row.versionId) };
+}
+
+/** The living persona the acting project uses when a test names nobody. */
+export async function getDefaultPersona(
+  auth: AuthContext,
+): Promise<Persona | undefined> {
+  authorize(auth, "read", here(auth));
+  if (auth.projectId === undefined) {
+    throw new InvalidInputError(
+      "a default persona belongs to a project, and this credential is acting in none",
+    );
+  }
+  const [home] = await db()
+    .select({ personaId: project.defaultPersonaId })
+    .from(project)
+    .where(
+      within(
+        auth,
+        project,
+        and(eq(project.id, auth.projectId), isNull(project.deletedAt)),
+      ),
+    )
+    .limit(1);
+  return home?.personaId === null || home?.personaId === undefined
+    ? undefined
+    : getPersona(auth, home.personaId);
 }
 
 /**

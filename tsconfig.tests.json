@@ -15,6 +15,7 @@
     "vitest.config.ts",
     "packages/*/src/**/*.test.ts",
     "packages/*/test/**/*.ts",
-    "apps/api/test/**/*.ts"
+    "apps/api/test/**/*.ts",
+    "apps/cli/test/**/*.ts"
   ]
 }

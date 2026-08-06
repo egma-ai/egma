@@ -1,5 +1,5 @@
 import { isId, newId } from "@egma/ids";
-import { and, asc, desc, eq, isNull, lt, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, lt, sql, type SQL } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
 import {
@@ -17,7 +17,11 @@ import {
   validModality,
 } from "./connection-registry.ts";
 import type { AuthContext } from "./context.ts";
-import { ProjectOutsideOrganizationError } from "./errors.ts";
+import {
+  InvalidInputError,
+  ProjectOutsideOrganizationError,
+  ResourceConflictError,
+} from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
 import { within } from "./within.ts";
@@ -186,7 +190,7 @@ const CONNECTION_COLUMNS = {
 function validName(name: string, what: string): string {
   const trimmed = name.trim();
   if (trimmed === "") {
-    throw new Error(`${what} needs a name`);
+    throw new InvalidInputError(`${what} needs a name`);
   }
   return trimmed;
 }
@@ -411,7 +415,7 @@ async function freeDefaultName(
 function refusingHeldAgentName(name: string): (error: unknown) => never {
   return (error: unknown) => {
     if (lostToConstraint(error, "agent_project_id_name_unique")) {
-      throw new Error(
+      throw new ResourceConflictError(
         `an agent named "${name}" already exists in this project`,
       );
     }
@@ -426,7 +430,7 @@ function refusingHeldAgentName(name: string): (error: unknown) => never {
 function refusingHeldConnectionName(name: string): (error: unknown) => never {
   return (error: unknown) => {
     if (lostToConstraint(error, "connection_agent_id_name_unique")) {
-      throw new Error(
+      throw new ResourceConflictError(
         `a connection named "${name}" already exists on this agent`,
       );
     }
@@ -481,7 +485,7 @@ export async function createAgent(
 
   const { projectId } = auth;
   if (projectId === undefined) {
-    throw new Error(
+    throw new InvalidInputError(
       "an agent belongs to a project, and this credential is for the whole organization and acting in none",
     );
   }
@@ -547,6 +551,37 @@ export async function getAgent(
   return row;
 }
 
+/** Every living Retell connection that points at one provider agent. */
+export async function findRetellAgents(
+  auth: AuthContext,
+  retellAgentId: string,
+): Promise<readonly (Agent & { readonly connection: Connection })[]> {
+  authorize(auth, "read", here(auth));
+  if (retellAgentId.trim() === "") {
+    throw new InvalidInputError("a Retell agent id must not be empty");
+  }
+  const rows = await db()
+    .select({ identity: COLUMNS, wired: CONNECTION_COLUMNS })
+    .from(agent)
+    .innerJoin(
+      connection,
+      and(
+        eq(connection.agentId, agent.id),
+        connectionNotDeleted,
+        eq(connection.type, "retell"),
+        sql`${connection.config} ->> 'retellAgentId' = ${retellAgentId.trim()}`,
+      ),
+    )
+    .where(
+      within(auth, agent, and(notDeleted, inActingProject(auth))),
+    )
+    .orderBy(asc(agent.id), asc(connection.id));
+  return rows.map(({ identity, wired }) => ({
+    ...identity,
+    connection: connectionFromRow(wired),
+  }));
+}
+
 const DEFAULT_PAGE_SIZE = 50;
 const LARGEST_PAGE_SIZE = 200;
 
@@ -566,21 +601,27 @@ export async function listAgents(
   page?: {
     readonly limit?: number | undefined;
     readonly cursor?: string | undefined;
+    readonly name?: string | undefined;
   },
 ): Promise<AgentPage> {
   authorize(auth, "read", here(auth));
 
   const limit = page?.limit ?? DEFAULT_PAGE_SIZE;
   if (!Number.isInteger(limit) || limit < 1 || limit > LARGEST_PAGE_SIZE) {
-    throw new Error(`a page holds between 1 and ${LARGEST_PAGE_SIZE} agents`);
+    throw new InvalidInputError(
+      `a page holds between 1 and ${LARGEST_PAGE_SIZE} agents`,
+    );
   }
   const cursor = page?.cursor;
   if (cursor !== undefined && !isId("agt", cursor)) {
-    throw new Error(`"${cursor}" is not an agent id, so it cannot be a cursor`);
+    throw new InvalidInputError(
+      `"${cursor}" is not an agent id, so it cannot be a cursor`,
+    );
   }
 
   const olderThanCursor =
     cursor === undefined ? undefined : lt(agent.id, cursor);
+  const named = page?.name === undefined ? undefined : eq(agent.name, page.name);
 
   // One row beyond the page answers "is there more?" without a second query.
   const rows = await db()
@@ -590,7 +631,7 @@ export async function listAgents(
       within(
         auth,
         agent,
-        and(notDeleted, inActingProject(auth), olderThanCursor),
+        and(notDeleted, inActingProject(auth), olderThanCursor, named),
       ),
     )
     .orderBy(desc(agent.id))
@@ -672,7 +713,7 @@ export async function deleteAgent(
   authorize(auth, "configure_agents", here(auth));
 
   if (auth.projectId === undefined) {
-    throw new Error(
+    throw new InvalidInputError(
       "deleting an agent happens inside its project, and this credential is for the whole organization and acting in none",
     );
   }
@@ -780,7 +821,7 @@ export async function updateConnection(
   // an edit quietly drop half its payload.
   for (const immutable of ["type", "modality", "topology"] as const) {
     if (immutable in changes) {
-      throw new Error(
+      throw new InvalidInputError(
         `a connection's ${immutable} never changes: what a connection is, ` +
           `is a new connection`,
       );

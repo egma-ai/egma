@@ -2,6 +2,22 @@ import type { Role } from "../schema/columns.ts";
 import type { AuthContext } from "./context.ts";
 import type { Action, ActionScope } from "./permissions.ts";
 
+/** A caller supplied a value the resource contract cannot accept. */
+export class InvalidInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidInputError";
+  }
+}
+
+/** A valid create collided with a living resource that already owns its key. */
+export class ResourceConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ResourceConflictError";
+  }
+}
+
 /**
  * A write named a project belonging to another customer.
  *

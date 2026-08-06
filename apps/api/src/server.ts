@@ -10,6 +10,7 @@ import {
 import { admitIdentity, onIdentityCreated } from "./auth/provisioning.ts";
 import { apiKeyRoutes } from "./routes/api-keys.ts";
 import { deviceRoutes } from "./routes/device.ts";
+import { factoryRoutes } from "./routes/factory.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
@@ -175,6 +176,11 @@ export function buildApi(options: ServerOptions): Api {
   // list and a transcript are ordinary JSON responses, and the parser the door
   // replaces is one they want back.
   void app.register(traceReadRoutes, {
+    provider: identity.provider,
+    rateLimit,
+  });
+
+  void app.register(factoryRoutes, {
     provider: identity.provider,
     rateLimit,
   });

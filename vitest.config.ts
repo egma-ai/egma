@@ -16,6 +16,7 @@ export default defineConfig({
       "packages/*/src/**/*.test.ts",
       "packages/*/test/**/*.test.ts",
       "apps/api/test/**/*.test.ts",
+      "apps/cli/test/**/*.test.ts",
       "apps/web/test/**/*.test.ts",
     ],
     // The API logs a line per request, and a test run is thousands of them.

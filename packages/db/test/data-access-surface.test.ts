@@ -100,8 +100,10 @@ const CONTEXT_REQUIRING = [
   "editPersona",
   "editTest",
   "failSimulation",
+  "findRetellAgents",
   "getAgent",
   "getConnection",
+  "getDefaultPersona",
   "getPersona",
   "getPersonaVersion",
   "getRun",
@@ -154,10 +156,12 @@ const PERMISSION = [
 /** Vocabulary: the table definitions, how a caller proved who they are, and the refusals. */
 const VALUES = [
   "AlreadyBelongsToAnOrganizationError",
+  "InvalidInputError",
   "LastAdminError",
   "NotPermittedError",
   "PersonaNamedByTestsError",
   "ProjectOutsideOrganizationError",
+  "ResourceConflictError",
   // The store's answer to a batch it will never take, told apart from a store
   // that is merely unreachable — a door has to answer those two differently,
   // and only the module that owns the client can tell them apart.

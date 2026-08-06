@@ -56,10 +56,12 @@ export type { AuthContext, Role, Via } from "./context.ts";
 export { ROLES, VIA } from "./context.ts";
 export {
   AlreadyBelongsToAnOrganizationError,
+  InvalidInputError,
   LastAdminError,
   NotPermittedError,
   PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
+  ResourceConflictError,
   TraceStoreRefusedError,
   UnreadableTraceQueryError,
   type TestNamingPersona,
@@ -167,6 +169,7 @@ export {
   addConnection,
   createAgent,
   deleteAgent,
+  findRetellAgents,
   getAgent,
   getConnection,
   listAgents,
@@ -197,6 +200,7 @@ export {
   createPersona,
   deletePersona,
   editPersona,
+  getDefaultPersona,
   getPersona,
   getPersonaVersion,
   listPersonas,

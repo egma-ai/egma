@@ -1,0 +1,19 @@
+{
+  "name": "@egma/cli",
+  "version": "0.0.0-prototype",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "egma": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "skills"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1"
+  }
+}

@@ -5,6 +5,7 @@ import {
   type Modality,
   type Topology,
 } from "../schema/agents.ts";
+import { InvalidInputError } from "./errors.ts";
 
 /**
  * What each connection type is made of. The registry is code, not a table,
@@ -63,7 +64,7 @@ export type ConnectionDescriptor = {
 
 function nonEmptyString(key: string, value: unknown): string {
   if (typeof value !== "string" || value.trim() === "") {
-    throw new Error(`the config's ${key} must be a non-empty string`);
+    throw new InvalidInputError(`the config's ${key} must be a non-empty string`);
   }
   return value.trim();
 }
@@ -81,7 +82,7 @@ const SHORTEST_CREDENTIAL = 8;
 function e164PhoneNumber(key: string, value: unknown): string {
   const candidate = typeof value === "string" ? value.trim() : "";
   if (!E164.test(candidate)) {
-    throw new Error(
+    throw new InvalidInputError(
       `the config's ${key} must be an E.164 phone number, which looks like ` +
         `+15551234567`,
     );
@@ -116,7 +117,7 @@ export const CONNECTION_REGISTRY: Readonly<
 export function descriptorOf(type: string): ConnectionDescriptor {
   const descriptor = CONNECTION_REGISTRY[type as ConnectionType];
   if (descriptor === undefined) {
-    throw new Error(
+    throw new InvalidInputError(
       `"${type}" is not a connection type egma knows; expected one of ` +
         CONNECTION_TYPES.join(", "),
     );
@@ -130,11 +131,11 @@ export function validModality(type: ConnectionType, modality: string): Modality 
   if (!descriptor.modalities.includes(modality as Modality)) {
     const speaks = descriptor.modalities.join(" or ");
     if (!MODALITIES.includes(modality as Modality)) {
-      throw new Error(
+      throw new InvalidInputError(
         `"${modality}" is not a modality; a ${type} connection speaks ${speaks}`,
       );
     }
-    throw new Error(
+    throw new InvalidInputError(
       `a ${type} connection speaks ${speaks}, and this one was asked for ${modality}`,
     );
   }
@@ -155,14 +156,14 @@ export function validConfig(
   const demanded = Object.keys(gates);
 
   if (typeof config !== "object" || config === null || Array.isArray(config)) {
-    throw new Error(
+    throw new InvalidInputError(
       `a ${type} connection's config is an object holding ${demanded.join(", ")}`,
     );
   }
 
   for (const key of Object.keys(config)) {
     if (!(key in gates)) {
-      throw new Error(
+      throw new InvalidInputError(
         `a ${type} connection's config has no key "${key}"; it holds ` +
           demanded.join(", "),
       );
@@ -173,7 +174,7 @@ export function validConfig(
   for (const [key, gate] of Object.entries(gates)) {
     const value = (config as Record<string, unknown>)[key];
     if (value === undefined) {
-      throw new Error(`a ${type} connection's config needs ${key}`);
+      throw new InvalidInputError(`a ${type} connection's config needs ${key}`);
     }
     stored[key] = gate(key, value);
   }
@@ -193,7 +194,7 @@ export function validCredentials(
   const rule = descriptorOf(type).credentials;
 
   if (!rule.required) {
-    if (credentials !== undefined) throw new Error(rule.refusal);
+    if (credentials !== undefined) throw new InvalidInputError(rule.refusal);
     return null;
   }
 
@@ -204,12 +205,12 @@ export function validCredentials(
     credentials === null ||
     Array.isArray(credentials)
   ) {
-    throw new Error(`a ${type} connection needs credentials shaped ${shape}`);
+    throw new InvalidInputError(`a ${type} connection needs credentials shaped ${shape}`);
   }
 
   for (const key of Object.keys(credentials)) {
     if (!rule.fields.includes(key)) {
-      throw new Error(
+      throw new InvalidInputError(
         `a ${type} connection's credentials have no key "${key}"; they are ` +
           `shaped ${shape}`,
       );
@@ -224,7 +225,7 @@ export function validCredentials(
     // nothing to say the stored value was the problem.
     const trimmed = typeof value === "string" ? value.trim() : "";
     if (trimmed === "") {
-      throw new Error(
+      throw new InvalidInputError(
         `a ${type} connection's credentials need ${field} to be a non-empty string`,
       );
     }
@@ -232,7 +233,7 @@ export function validCredentials(
     // paste gone wrong — and the stored last-4 hint must stay a hint, never
     // most of the secret it hints at.
     if (trimmed.length < SHORTEST_CREDENTIAL) {
-      throw new Error(
+      throw new InvalidInputError(
         `a ${type} connection's credentials need ${field} to be at least ` +
           `${SHORTEST_CREDENTIAL} characters`,
       );

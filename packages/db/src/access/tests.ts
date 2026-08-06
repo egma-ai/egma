@@ -1,5 +1,5 @@
 import { isId, newId } from "@egma/ids";
-import { and, asc, desc, eq, inArray, isNull, lt, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, sql, type SQL } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
 import { persona } from "../schema/personas.ts";
@@ -7,6 +7,7 @@ import { project } from "../schema/tenancy.ts";
 import { test, testVersion, testVersionPersona } from "../schema/tests.ts";
 import type { AuthContext } from "./context.ts";
 import {
+  InvalidInputError,
   ProjectOutsideOrganizationError,
   type TestNamingPersona,
 } from "./errors.ts";
@@ -58,6 +59,8 @@ export type NewTest = {
    * on authoring a persona.
    */
   readonly personaIds?: readonly string[] | undefined;
+  /** Serialize a create-or-reuse flow without making ordinary test names unique. */
+  readonly idempotencyKey?: string | undefined;
 };
 
 /**
@@ -141,7 +144,7 @@ const COLUMNS = {
  */
 function validName(name: string): string {
   const trimmed = name.trim();
-  if (trimmed === "") throw new Error("a test needs a name");
+  if (trimmed === "") throw new InvalidInputError("a test needs a name");
   return trimmed;
 }
 
@@ -158,18 +161,20 @@ function validContent(input: {
 }): TestContent {
   const scenario = input.scenario.trim();
   if (scenario === "") {
-    throw new Error("a test needs a scenario: the situation the agent is put in");
+    throw new InvalidInputError(
+      "a test needs a scenario: the situation the agent is put in",
+    );
   }
 
   if (input.expectedBehaviors.length === 0) {
-    throw new Error(
+    throw new InvalidInputError(
       "a test needs at least one expected behavior, because a test that cannot fail is not a test",
     );
   }
   const expectedBehaviors = input.expectedBehaviors.map((behavior) => {
     const trimmed = behavior.trim();
     if (trimmed === "") {
-      throw new Error("an expected behavior needs to say something");
+      throw new InvalidInputError("an expected behavior needs to say something");
     }
     return trimmed;
   });
@@ -188,10 +193,10 @@ function validatePersonaIds(ids: readonly string[]): void {
   const seen = new Set<string>();
   for (const id of ids) {
     if (!isId("prs", id)) {
-      throw new Error(`"${id}" is not a persona id`);
+      throw new InvalidInputError(`"${id}" is not a persona id`);
     }
     if (seen.has(id)) {
-      throw new Error(`persona ${id} is named twice on one test`);
+      throw new InvalidInputError(`persona ${id} is named twice on one test`);
     }
     seen.add(id);
   }
@@ -322,10 +327,10 @@ async function validateNamedPersonas(
 
   for (const id of ids) {
     if (!found.has(id)) {
-      throw new Error(`there is no persona ${id} in this project`);
+      throw new InvalidInputError(`there is no persona ${id} in this project`);
     }
     if (found.get(id) !== null) {
-      throw new Error(
+      throw new InvalidInputError(
         `persona ${id} is deleted, and a test cannot name a deleted persona`,
       );
     }
@@ -359,7 +364,7 @@ async function projectDefaultPersona(
 
   const id = row?.defaultPersonaId ?? null;
   if (id === null) {
-    throw new Error(
+    throw new InvalidInputError(
       "this test names no persona and the project has no default persona; name one on the test, or set the project's default",
     );
   }
@@ -386,12 +391,12 @@ async function projectDefaultPersona(
     .for("share");
 
   if (pointed === undefined) {
-    throw new Error(
+    throw new InvalidInputError(
       `this test names no persona and the project's default points at ${id}, and there is no persona ${id} in this project; name one on the test, or point the project's default at a living persona of this project`,
     );
   }
   if (pointed.deletedAt !== null) {
-    throw new Error(
+    throw new InvalidInputError(
       `this test names no persona and the project's default persona ${id} is deleted; name one on the test, or point the project's default at a living persona`,
     );
   }
@@ -461,7 +466,7 @@ export async function createTest(
 
   const { projectId } = auth;
   if (projectId === undefined) {
-    throw new Error(
+    throw new InvalidInputError(
       "a test belongs to a project, and this credential is for the whole organization and acting in none",
     );
   }
@@ -471,16 +476,44 @@ export async function createTest(
   const name = validName(input.name);
   const content = validContent(input);
   const named = input.personaIds ?? [];
+  const idempotencyKey = input.idempotencyKey?.trim();
+  if (input.idempotencyKey !== undefined && idempotencyKey === "") {
+    throw new InvalidInputError("an idempotency key must not be empty");
+  }
   validatePersonaIds(named);
 
   if (!(await isProjectOfOrganization(auth, projectId))) {
     throw new ProjectOutsideOrganizationError(auth.organizationId, projectId);
   }
 
-  const id = newId("tst");
-  const versionId = newId("tstv");
+  return db().transaction(async (tx) => {
+    if (idempotencyKey !== undefined) {
+      const lock = `${auth.organizationId}:${projectId}:${idempotencyKey}`;
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${lock}, 0))`,
+      );
+      const [existing] = await selectWithCurrentVersion(tx)
+        .where(
+          within(
+            auth,
+            test,
+            and(notDeleted, inActingProject(auth), eq(test.name, name)),
+          ),
+        )
+        .orderBy(desc(test.id))
+        .limit(1);
+      if (existing !== undefined) {
+        const { content: stored, ...identity } = existing;
+        return {
+          ...identity,
+          ...contentFromRow(stored, identity.versionId),
+          personas: await personasOf(tx, identity.versionId),
+        };
+      }
+    }
 
-  const written = await db().transaction(async (tx) => {
+    const id = newId("tst");
+    const versionId = newId("tstv");
     const personaIds = await personaIdsFor(tx, auth, projectId, named);
 
     const [identity] = await tx
@@ -511,10 +544,14 @@ export async function createTest(
     // Read back inside the transaction, so what the create answers with is what
     // the transaction wrote and checked, rather than whatever the table holds
     // by the time it has committed.
-    return { ...identity, personas: await personasOf(tx, versionId) };
+    return {
+      ...identity,
+      version: 1,
+      versionId,
+      ...content,
+      personas: await personasOf(tx, versionId),
+    };
   });
-
-  return { ...written, version: 1, versionId, ...content };
 }
 
 /**
@@ -571,8 +608,8 @@ async function personasOf(
  * The identity row joined to its current version — the shape every read of a
  * whole test answers with, written once so two readers can never drift.
  */
-function selectWithCurrentVersion() {
-  return db()
+function selectWithCurrentVersion(on: Queryable = db()) {
+  return on
     .select({
       ...COLUMNS,
       version: testVersion.version,
@@ -813,9 +850,14 @@ export type TestPage = {
   readonly nextCursor: string | undefined;
 };
 
+type TestPageRequest = PageRequest & {
+  /** Exact identity-name filter used by repository-first setup. */
+  readonly name?: string | undefined;
+};
+
 export async function listTests(
   auth: AuthContext,
-  page?: PageRequest,
+  page?: TestPageRequest,
 ): Promise<TestPage> {
   authorize(auth, "read", here(auth));
 
@@ -825,13 +867,14 @@ export async function listTests(
     prefix: "tst",
   });
   const olderThanCursor = cursor === undefined ? undefined : lt(test.id, cursor);
+  const named = page?.name === undefined ? undefined : eq(test.name, page.name);
 
   const rows = await selectWithCurrentVersion()
     .where(
       within(
         auth,
         test,
-        and(notDeleted, inActingProject(auth), olderThanCursor),
+        and(notDeleted, inActingProject(auth), olderThanCursor, named),
       ),
     )
     .orderBy(desc(test.id))
