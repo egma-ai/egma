@@ -16,6 +16,7 @@ from pathlib import Path
 from .reporting import DELIVERY_DEADLINE_SECONDS
 
 MODEL_PROVIDERS = ("scripted", "openai")
+DEFAULT_MODEL_BASE_URL = "https://api.openai.com/v1"
 
 
 def _seconds(name: str, fallback: float, *, allow_zero: bool = False) -> float:
@@ -62,7 +63,7 @@ class SimulatorConfig:
     what CI and the local workbench story run on) or ``openai`` (any
     provider speaking the OpenAI chat-completions shape)."""
 
-    model_base_url: str = "https://api.openai.com/v1"
+    model_base_url: str = DEFAULT_MODEL_BASE_URL
     """The provider's base URL, for the ``openai`` provider."""
 
     model_name: str | None = None
@@ -125,7 +126,7 @@ class SimulatorConfig:
             log_level=os.environ.get("EGMA_SIMULATOR_LOG_LEVEL", "INFO"),
             model_provider=provider,
             model_base_url=os.environ.get(
-                "EGMA_SIMULATOR_MODEL_BASE_URL", "https://api.openai.com/v1"
+                "EGMA_SIMULATOR_MODEL_BASE_URL", DEFAULT_MODEL_BASE_URL
             ).rstrip("/"),
             model_name=model_name,
             model_api_key=model_api_key,

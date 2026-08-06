@@ -2,10 +2,10 @@
 
 A **plug** is the component behind a connection type. It alone knows how
 to open an exchange with that platform, deliver the persona's turns, hear
-the agent's answers, and end the session. Everything else in the simulator
-is plug-blind: the persona brain, the walk, the claim loop, and the
-reporting never learn which platform they are talking through. Adding a
-platform therefore touches exactly two things — a new module in this
+the agent's answers, and end the exchange. Everything else in the
+simulator is plug-blind: the persona brain, the walk, the claim loop, and
+the reporting never learn which platform they are talking through. Adding
+a platform therefore touches exactly two things — a new module in this
 package, and one line in the registry below.
 
 This docstring is the plug author's whole brief. If writing a new plug
@@ -51,7 +51,7 @@ For one simulation, in order, always:
      again.
    ``deliver`` is called once per persona turn, sequentially — a plug
    never sees two deliveries in flight.
-3. ``await close()`` — tear the session down. Called exactly once,
+3. ``await close()`` — tear the exchange down. Called exactly once,
    whatever happened: after a natural end, after a limit tripped, after a
    cancel directive, and after a fault. Make it safe to call in every one
    of those states.
@@ -90,8 +90,9 @@ nothing — the row is the control plane's to sweep.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
 
 
 @dataclass(frozen=True)
@@ -103,7 +104,7 @@ class AgentReply:
 
     ended: bool = False
     """True when this answer ended the exchange — the agent's goodbye,
-    a hang-up, or the platform closing the session."""
+    a hang-up, or the platform closing it from its side."""
 
 
 class PlugError(Exception):
@@ -125,8 +126,14 @@ class PlatformPlug(Protocol):
     async def close(self) -> None: ...
 
 
-def plug_for(connection_type: str) -> type[Any] | None:
-    """The plug class registered for one connection type, or ``None``.
+PlugFactory = Callable[..., PlatformPlug]
+"""What the registry hands back: called with ``modality=``, ``config=``
+and ``credentials=`` keywords, it returns one plug for one simulation —
+in practice, the plug class itself."""
+
+
+def plug_for(connection_type: str) -> PlugFactory | None:
+    """The plug factory registered for one connection type, or ``None``.
 
     The registry is deliberately a literal here: adding a platform is one
     import and one line, and the diff that adds it touches nothing else.

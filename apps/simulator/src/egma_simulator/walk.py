@@ -31,6 +31,11 @@ logger = logging.getLogger(__name__)
 OnTurn = Callable[[str, str], Awaitable[None]]
 OnTiming = Callable[[str, float], Awaitable[None]]
 
+# The two causes a WalkControls can carry. Writer and reader both name
+# these constants, so a stop can never be misread as the other cause.
+CANCEL_DIRECTIVE = "cancel directive"
+DURATION_LIMIT = "duration limit"
+
 
 class _WalkStopped(Exception):
     """Internal: a stop cause landed while the walk awaited something."""
@@ -42,15 +47,13 @@ class WalkControls:
     def __init__(self) -> None:
         self._stopped = asyncio.Event()
         self.cause: str | None = None
-        self.cancel_requested = False
 
     def request_cancel(self) -> None:
         """A cancel directive, honored at the walk's next opportunity."""
-        self.cancel_requested = True
-        self._stop_for("cancel directive")
+        self._stop_for(CANCEL_DIRECTIVE)
 
     def trip_duration_limit(self) -> None:
-        self._stop_for("duration limit")
+        self._stop_for(DURATION_LIMIT)
 
     def _stop_for(self, cause: str) -> None:
         if self.cause is None:
@@ -94,7 +97,7 @@ class Conducted:
 
     status: str
     """``completed`` or ``canceled`` — conducting never fails by walking;
-    a fault raises instead, and the caller reports the failure."""
+    a fault raises instead, and the service reports the failure."""
 
     ending: str
     """The contract's ending for that status."""
@@ -176,7 +179,7 @@ async def conduct(
             if answer.ended:
                 return ended("agent_ended", "the agent ended the exchange")
     except _WalkStopped:
-        if controls.cause == "cancel directive":
+        if controls.cause == CANCEL_DIRECTIVE:
             return Conducted(
                 status="canceled",
                 ending="canceled",

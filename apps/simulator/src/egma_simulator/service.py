@@ -172,9 +172,9 @@ class RunningSimulation:
             # claim loop already guaranteed one exists for this type, and
             # its constructor validating the connection config is part of
             # conducting — a bad config is an honest failure, not a crash.
-            plug_class = plug_for(self._spec.connection_type)
-            assert plug_class is not None, "accepted a spec with no plug"
-            plug = plug_class(
+            plug_factory = plug_for(self._spec.connection_type)
+            assert plug_factory is not None, "accepted a spec with no plug"
+            plug = plug_factory(
                 modality=self._spec.modality,
                 config=self._spec.connection_config,
                 credentials=self._spec.credentials,

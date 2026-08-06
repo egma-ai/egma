@@ -450,6 +450,34 @@ async def test_a_spec_naming_an_unknown_connection_type_is_refused_out_loud(
     assert "no platform plug" in simulator.output()
 
 
+async def test_a_plug_refusal_is_an_honest_failure_on_the_record(
+    workbench, start_simulator
+):
+    """A plug that cannot conduct — here, config it does not know — ends
+    the simulation ``failed`` with a reason a person can act on. Refusing
+    config is the plug's promise; reporting the refusal honestly is the
+    simulator's."""
+    spec = scripted_spec("sim-misconfigured-001")
+    spec["connection"]["config"]["repliez"] = ["a typo, not a script"]
+    await workbench.offer(spec)
+    start_simulator(workbench)
+
+    records = await workbench.wait_for(has_terminal("sim-misconfigured-001"))
+
+    assert status_events_for(records, "sim-misconfigured-001") == [
+        "running",
+        "failed",
+    ]
+    terminal = terminal_event_for(records, "sim-misconfigured-001")
+    assert terminal["facts"]["ending"] == "error"
+    assert terminal["facts"]["turn_count"] == 0
+    assert "repliez" in terminal["reason"]
+
+    # Nothing was conducted: no exchange happened off the record.
+    assert events_for(records, "sim-misconfigured-001", "turn") == []
+    assert [record for record in records if record["kind"] == "refusal"] == []
+
+
 async def test_credentials_never_appear_in_logs_or_reports(
     workbench, start_simulator
 ):
