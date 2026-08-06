@@ -68,11 +68,13 @@ from .speech import (
     SAMPLE_WIDTH_BYTES,
     SCRIPTED_PAIR,
     PersonaVoice,
+    SpeechFault,
     SpeechLegs,
     SpeechProviders,
     build_legs,
     duration_seconds,
     leading_silence_seconds,
+    silence,
     spoken_seconds,
     voice_from_traits,
 )
@@ -310,6 +312,21 @@ class VoicePipeline:
         self.audio: AudioFacts | None = None
         """What the exchange measured about its own audio, once it is over."""
 
+        self._faulted = asyncio.Event()
+        self._fault = ""
+
+        @self._worker.event_handler("on_pipeline_error")
+        async def _remember_fault(_worker: object, error: object) -> None:
+            # A leg refusing a turn — a key the provider will not take, a
+            # plan that does not cover the voice — reaches here and
+            # nowhere else: error frames travel back up the pipeline, away
+            # from the sink. Without this the refusal is a log line, the
+            # turn quietly carries no audio, and the simulation stalls
+            # until its duration limit with nothing on the record saying
+            # why. What is kept is the provider's own words.
+            self._fault = str(getattr(error, "error", error))
+            self._faulted.set()
+
         @self._recorder.event_handler("on_track_audio_data")
         async def _keep_tracks(
             _processor: object,
@@ -387,6 +404,7 @@ class VoicePipeline:
         The pipeline's own mark goes last, and is what says the turn came
         all the way through — see :class:`TurnSpoken`.
         """
+        self._before_turn()
         self._sink.before_speaking()
         await self._worker.queue_frames(
             [
@@ -413,18 +431,25 @@ class VoicePipeline:
             "agent_speech_duration",
             spoken_seconds(speech.pcm, speech.sample_rate_hz),
         )
+        self._before_turn()
         self._sink.before_hearing()
         # The audio is one whole turn — the plug hands over nothing less —
         # so the pipeline knows exactly where the agent started and stopped
-        # speaking and says so. A transcriber that waits for a pause before
-        # it commits a transcript would otherwise still be waiting: on a
-        # real call the pause is in the audio, and here the turn simply
-        # ends.
+        # speaking and says so, twice over. It marks the boundary with the
+        # frames a transcriber commits on, and it carries the turn's last
+        # word into the pause a real line would have had after it, because
+        # hearing the speaker stop is what a transcriber trusts and being
+        # told is what it merely races. The pause is added to what is heard
+        # and never to what was measured: the numbers above are the
+        # agent's, not this pipeline's.
+        heard = speech.pcm + silence(
+            self._legs.trailing_quiet_seconds, speech.sample_rate_hz
+        )
         await self._worker.queue_frames(
             [
                 VADUserStartedSpeakingFrame(),
                 InputAudioRawFrame(
-                    audio=speech.pcm,
+                    audio=heard,
                     sample_rate=speech.sample_rate_hz,
                     num_channels=1,
                 ),
@@ -439,26 +464,46 @@ class VoicePipeline:
             await self._on_timing(measure, seconds * 1000)
 
     async def _reach(self, event: asyncio.Event) -> None:
-        """Wait for one point in the pipeline, or say plainly that it is gone.
+        """Wait for one point in the pipeline, or say plainly what stopped it.
 
         Racing the wait against the pipeline's own task is what stops a
         pipeline that ended early — a leg that raised, a worker cancelled —
-        from becoming a simulation that hangs until its duration limit.
+        from becoming a simulation that hangs until its duration limit. A
+        leg that refused this turn is raced the same way and for the same
+        reason, and its refusal is quoted rather than summarised: what a
+        provider says about a key or a plan is the whole diagnosis.
         """
         if self._running is None:
             raise PipelineGone("the voice pipeline was driven before it was opened")
         waiting = asyncio.ensure_future(event.wait())
+        faulted = asyncio.ensure_future(self._faulted.wait())
         try:
             done, _pending = await asyncio.wait(
-                {waiting, self._running}, return_when=asyncio.FIRST_COMPLETED
+                {waiting, faulted, self._running},
+                return_when=asyncio.FIRST_COMPLETED,
             )
         finally:
-            if not waiting.done():
-                waiting.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await waiting
-        if waiting not in done:
-            raise PipelineGone("the voice pipeline ended before the turn did")
+            for unfinished in (waiting, faulted):
+                if not unfinished.done():
+                    unfinished.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await unfinished
+        if waiting in done:
+            return
+        if faulted in done:
+            raise SpeechFault(f"a speech leg refused this turn: {self._fault}")
+        raise PipelineGone("the voice pipeline ended before the turn did")
+
+    def _before_turn(self) -> None:
+        """Forget any earlier refusal, so a turn answers for itself.
+
+        A leg can complain between turns — a transcriber reconnecting says
+        so — and an exchange that carried on regardless is an exchange
+        that was fine. What ends a simulation is a refusal landing while a
+        turn is waiting on the leg that refused.
+        """
+        self._faulted.clear()
+        self._fault = ""
 
     async def _finish(self) -> None:
         """Stop recording, write what was heard, and end the pipeline.

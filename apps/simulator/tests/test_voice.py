@@ -19,7 +19,10 @@ from conftest import (
     loopback_spec,
     scripted_spec,
 )
+from pipecat.frames.frames import TextFrame
+from pipecat.processors.frame_processor import FrameProcessor
 
+from egma_simulator import pipeline as pipeline_module
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.model import GOODBYE, ScriptedModel
 from egma_simulator.persona import Persona
@@ -40,6 +43,8 @@ from egma_simulator.speech import (
     SCRIPTED_PAIR,
     ScriptedSTT,
     ScriptedTTS,
+    SpeechFault,
+    SpeechLegs,
     SpeechProviders,
     decode_speech,
     duration_seconds,
@@ -520,6 +525,59 @@ async def test_a_persona_with_no_voice_of_this_providers_gets_the_default_englis
     overrides = {} if traits_voice is None else {"voice": traits_voice}
     async with assembled_with(REAL_PAIR, tmp_path, **overrides) as assembled:
         assert assembled.voice.speaking_voice.voice_id == DEFAULT_ENGLISH_VOICE_ID, why
+
+
+async def test_only_a_streaming_transcriber_asks_for_a_pause_after_a_turn(
+    tmp_path: Path,
+):
+    """The pause a real transcriber needs is a real transcriber's cost.
+
+    It is added to what the listening leg hears, so it also lands on the
+    recording; a scripted exchange asks for none and its audio is what it
+    always was, sample for sample.
+    """
+    async with assembled_with(SCRIPTED_PAIR, tmp_path) as scripted:
+        assert scripted.voice.legs.trailing_quiet_seconds == 0.0
+    async with assembled_with(REAL_PAIR, tmp_path) as real:
+        assert real.voice.legs.trailing_quiet_seconds > 0.0
+
+
+async def test_a_leg_that_refuses_a_turn_fails_the_simulation_in_its_own_words(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A provider saying no is a diagnosis, and it has to reach the record.
+
+    This is what a wrong key, an unpaid plan or a voice an account may not
+    use actually looks like: the library logs a line, pushes an error back
+    up the pipeline — away from the end everything else is read from — and
+    carries on. The turn then carries no audio and nothing is waiting for
+    it, so without this the simulation stalls until its duration limit and
+    the record says "limit reached" about a provider that refused.
+    """
+    refusal = (
+        'ElevenLabs API error: {"detail":{"status":"payment_required",'
+        '"message":"Free users cannot use library voices via the API."}}'
+    )
+
+    class RefusingMouth(FrameProcessor):
+        async def process_frame(self, frame, direction) -> None:
+            await super().process_frame(frame, direction)
+            if isinstance(frame, TextFrame):
+                await self.push_error(refusal)
+                return
+            await self.push_frame(frame, direction)
+
+    def refusing_legs(providers, *, voice, sample_rate_hz):
+        return SpeechLegs(
+            stt=ScriptedSTT(sample_rate_hz=sample_rate_hz),
+            tts=RefusingMouth(),
+            voice=voice,
+        )
+
+    monkeypatch.setattr(pipeline_module, "build_legs", refusing_legs)
+
+    with pytest.raises(SpeechFault, match="payment_required"):
+        await voice_walk(tmp_path, scenario="One point.", replies=["Noted."])
 
 
 async def test_an_unconfigured_voice_exchange_connects_nothing(

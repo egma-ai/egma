@@ -106,6 +106,11 @@ async def test_a_real_voice_speaks_and_real_ears_read_it_back(
     # which pair of legs it got.
     simulator = start_simulator(
         workbench,
+        # The loudest the simulator gets, for the two reasons the offline
+        # sentinel tests use it: a real provider's refusal is only
+        # diagnosable if it was written down, and the most likely place a
+        # key would leak is the chattiest one.
+        log_level="DEBUG",
         extra_env={
             "EGMA_SIMULATOR_STT_PROVIDER": "deepgram",
             "EGMA_SIMULATOR_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
