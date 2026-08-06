@@ -26,6 +26,8 @@ describe("the wizard on a real terminal", () => {
 
   beforeEach(async () => {
     workspace = await makeWorkspace({ "package.json": MANIFEST });
+    // Login has its own checks; these are about what a real terminal draws.
+    await workspace.signIn("https://egma.invalid");
   });
 
   afterEach(async () => {
@@ -48,6 +50,7 @@ describe("the wizard on a real terminal", () => {
       command: process.execPath,
       args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
       cwd: workspace.dir,
+      env: workspace.env(),
     });
 
     try {
@@ -88,6 +91,7 @@ describe("the wizard on a real terminal", () => {
       command: process.execPath,
       args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
       cwd: workspace.dir,
+      env: workspace.env(),
     });
 
     try {
@@ -118,6 +122,7 @@ describe("the wizard on a real terminal", () => {
       command: process.execPath,
       args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
       cwd: workspace.dir,
+      env: workspace.env(),
     });
 
     try {

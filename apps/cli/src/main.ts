@@ -17,19 +17,37 @@ import {
   launchForId,
   type DrivenAgentLaunch,
 } from "./acp/registry.ts";
+import { runLoginCommand } from "./commands/login.ts";
+import { credentialsFileIn, readCredentials, resolvePlatformUrl } from "./platform/credentials.ts";
 import { HeadlessUI } from "./ui/headless-ui.ts";
 import { startTui } from "./ui/tui/start-tui.ts";
 import { buildExitLine, type ExitReport } from "./wizard/exit-line.ts";
+import type { PlatformAccess } from "./wizard/login-step.ts";
 import type { StopReason } from "./wizard/stop.ts";
 import { walk } from "./wizard/walk.ts";
+
+/**
+ * The verbs. A bare `egma` runs the wizard; naming one runs it headlessly,
+ * because a verb is what a coding agent types and a coding agent has no
+ * keystroke to give.
+ */
+export const VERBS = ["login"] as const;
+
+export type Verb = (typeof VERBS)[number];
 
 export type Invocation = {
   readonly help: boolean;
   readonly version: boolean;
+  /** The verb that was named, or `null` for the wizard. */
+  readonly verb: Verb | null;
   /** The developer has said, in the command, to run with nobody watching. */
   readonly headless: boolean;
   readonly drivenAgentId: string;
   readonly cwd: string | null;
+  /** `--url`: which egma to talk to, when it is not egma's own. */
+  readonly url: string | null;
+  /** `--force`: do the work again even though it has been done. */
+  readonly force: boolean;
   /**
    * A test seam, not product surface: `--file` and `-- <command>` let a test
    * pin the file and start a scripted agent in place of a real one. Neither is
@@ -41,12 +59,19 @@ export type Invocation = {
   readonly unknown: readonly string[];
 };
 
+function isVerb(argument: string): argument is Verb {
+  return (VERBS as readonly string[]).includes(argument);
+}
+
 export function parseArgs(argv: readonly string[]): Invocation {
   let help = false;
   let version = false;
+  let verb: Verb | null = null;
   let headless = false;
   let drivenAgentId = DEFAULT_DRIVEN_AGENT_ID;
   let cwd: string | null = null;
+  let url: string | null = null;
+  let force = false;
   let file: string | null = null;
   let drivenAgentCommand: string[] = [];
   const unknown: string[] = [];
@@ -62,11 +87,26 @@ export function parseArgs(argv: readonly string[]): Invocation {
     else if (argument === "--headless") headless = true;
     else if (argument === "--coding-agent") drivenAgentId = argv[(index += 1)] ?? drivenAgentId;
     else if (argument === "--cwd") cwd = argv[(index += 1)] ?? null;
+    else if (argument === "--url") url = argv[(index += 1)] ?? null;
+    else if (argument === "--force") force = true;
     else if (argument === "--file") file = argv[(index += 1)] ?? null;
+    else if (verb === null && isVerb(argument)) verb = argument;
     else unknown.push(argument);
   }
 
-  return { help, version, headless, drivenAgentId, cwd, file, drivenAgentCommand, unknown };
+  return {
+    help,
+    version,
+    verb,
+    headless,
+    drivenAgentId,
+    cwd,
+    url,
+    force,
+    file,
+    drivenAgentCommand,
+    unknown,
+  };
 }
 
 export function helpText(): string {
@@ -74,16 +114,29 @@ export function helpText(): string {
     "egma — walk from a voice agent to graded results.",
     "",
     "Usage:",
-    "  egma [options]",
+    "  egma [options]           The wizard.",
+    "  egma login [options]     Sign this machine in. No questions, plain lines.",
     "",
     "Options:",
     "  --coding-agent <id>  Which coding agent to drive, named as the agent",
     `                       registry names it. Default: ${DEFAULT_DRIVEN_AGENT_ID}`,
     "  --cwd <path>         The folder to work in. Default: this folder.",
+    "  --url <address>      The egma to talk to, for a self-hosted one. Kept",
+    "                       after the first login, so it is set once. EGMA_URL",
+    "                       does the same for a whole shell.",
+    "  --force              With login: sign in again even when this machine",
+    "                       already holds a key.",
     "  --headless           Run with no terminal and no keystroke: plain lines,",
     "                       and the task taken as already agreed to.",
     "  -h, --help           Print this.",
     "  -v, --version        Print the version.",
+    "",
+    "What egma login prints, one fact per line:",
+    "  url, code, approve_url, browser, waiting, status, credentials",
+    "",
+    "What egma login answers with:",
+    "  0 signed in   2 denied   3 the code ran out   4 egma did not answer",
+    "  130 stopped part way",
     "",
     `The agent registry was mirrored on ${REGISTRY_SNAPSHOT_MIRRORED_ON}.`,
   ].join("\n");
@@ -127,10 +180,30 @@ function exitCodeFor(report: ExitReport): number {
   }
 }
 
+/**
+ * Which egma this run signs in to, and where the key it gets is kept.
+ *
+ * Resolved once, here, so the wizard and every verb read the same answer from
+ * the same three places in the same order.
+ */
+async function platformFor(invocation: Invocation): Promise<PlatformAccess> {
+  const credentialsFile = credentialsFileIn(process.env);
+  const stored = await readCredentials(credentialsFile);
+  return {
+    url: resolvePlatformUrl({
+      flag: invocation.url,
+      env: process.env.EGMA_URL,
+      stored: stored?.url ?? null,
+    }),
+    credentialsFile,
+  };
+}
+
 async function runHeadless(
   launch: DrivenAgentLaunch,
   cwd: string,
   file: string | null,
+  platform: PlatformAccess,
 ): Promise<number> {
   const controller = new AbortController();
   const stop = (reason: StopReason): void => controller.abort(reason);
@@ -145,6 +218,7 @@ async function runHeadless(
       launch,
       cwd,
       signal: controller.signal,
+      platform,
       ...(file === null ? {} : { file }),
     });
     process.stdout.write(`${buildExitLine(report)}\n`);
@@ -159,6 +233,7 @@ async function runWizard(
   launch: DrivenAgentLaunch,
   cwd: string,
   file: string | null,
+  platform: PlatformAccess,
 ): Promise<number> {
   const controller = new AbortController();
   const tui = startTui({ stop: (reason) => controller.abort(reason) });
@@ -175,6 +250,7 @@ async function runWizard(
       launch,
       cwd,
       signal: controller.signal,
+      platform,
       ...(file === null ? {} : { file }),
     });
     tui.close(report);
@@ -183,6 +259,28 @@ async function runWizard(
     const reason = error instanceof Error ? error.message : String(error);
     tui.close({ kind: "failed", reason });
     return 1;
+  } finally {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+  }
+}
+
+/** The login verb: no terminal needed, no keystroke taken, no question asked. */
+async function runLogin(invocation: Invocation): Promise<number> {
+  const controller = new AbortController();
+  const onSignal = (): void => controller.abort("interrupt");
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+
+  try {
+    return await runLoginCommand({
+      url: invocation.url,
+      force: invocation.force,
+      env: process.env,
+      signal: controller.signal,
+      out: (line) => process.stdout.write(`${line}\n`),
+      fail: (line) => process.stderr.write(`${line}\n`),
+    });
   } finally {
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
@@ -205,6 +303,13 @@ export async function main(argv: readonly string[]): Promise<void> {
       `egma does not know the option ${invocation.unknown[0]}. Run egma --help to see the ones it does.\n`,
     );
     process.exitCode = 1;
+    return;
+  }
+
+  // A verb needs no terminal and takes no keystroke: it drives no coding agent,
+  // so there is nothing for a keystroke to agree to.
+  if (invocation.verb === "login") {
+    process.exitCode = await runLogin(invocation);
     return;
   }
 
@@ -233,7 +338,9 @@ export async function main(argv: readonly string[]): Promise<void> {
     throw error;
   }
 
+  const platform = await platformFor(invocation);
+
   process.exitCode = invocation.headless
-    ? await runHeadless(launch, cwd, invocation.file)
-    : await runWizard(launch, cwd, invocation.file);
+    ? await runHeadless(launch, cwd, invocation.file, platform)
+    : await runWizard(launch, cwd, invocation.file, platform);
 }

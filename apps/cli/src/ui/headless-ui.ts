@@ -10,6 +10,7 @@
  * and this UI answers it on their behalf.
  */
 
+import type { LoginPrompt } from "../platform/login.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
 import type { DrivenAgent, GateId, WizardUI } from "./wizard-ui.ts";
 
@@ -17,6 +18,7 @@ export type HeadlessRecord = {
   drivenAgent: DrivenAgent | null;
   drivenAgentLog: string | null;
   taskFile: string | null;
+  logins: LoginPrompt[];
   statuses: string[];
   summary: string;
   exit: ExitReport | null;
@@ -33,6 +35,7 @@ export class HeadlessUI implements WizardUI {
     drivenAgent: null,
     drivenAgentLog: null,
     taskFile: null,
+    logins: [],
     statuses: [],
     summary: "",
     exit: null,
@@ -64,6 +67,19 @@ export class HeadlessUI implements WizardUI {
   setTaskFile(file: string): void {
     this.record.taskFile = file;
     this.write(`Task: read ${file} and say what it is`);
+  }
+
+  setLogin(prompt: LoginPrompt | null): void {
+    if (prompt === null) return;
+    this.record.logins.push(prompt);
+    this.write(`code: ${prompt.userCode}`);
+    this.write(`approve_url: ${prompt.url}`);
+    this.write(`browser: ${prompt.browserOpened ? "opened" : "not-opened"}`);
+  }
+
+  /** Nobody is at this keyboard, so nothing is ever pasted at it. */
+  takeLoginPaste(): string | null {
+    return null;
   }
 
   waitForGate(gate: GateId): Promise<void> {

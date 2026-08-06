@@ -10,6 +10,7 @@
  * depend on how a screen is drawn.
  */
 
+import type { LoginPrompt } from "../platform/login.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
 
 /** A point the flow waits at until the developer has moved past it. */
@@ -27,6 +28,25 @@ export interface WizardUI {
 
   /** Name the file the one task is about. */
   setTaskFile(file: string): void;
+
+  /**
+   * What login is waiting to be approved, or `null` once it no longer is.
+   *
+   * This is a write and not a question. The flow says what has to be approved
+   * and where; whether that is drawn in a box, printed as two plain lines, or
+   * drawn nowhere at all is the UI's business.
+   */
+  setLogin(prompt: LoginPrompt | null): void;
+
+  /**
+   * What the developer has pasted at the login screen since the last look, or
+   * `null`. Taken rather than read, so one paste is acted on once.
+   *
+   * This is still not a prompt: the flow never waits on it and never blocks
+   * for it. Typing lands in the UI, the flow looks up between polls, and a UI
+   * with nobody at the keyboard answers `null` forever.
+   */
+  takeLoginPaste(): string | null;
 
   /**
    * Park until the developer has let the flow past this point. A gate that the
