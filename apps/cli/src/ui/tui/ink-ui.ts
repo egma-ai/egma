@@ -9,6 +9,8 @@ import type { LoginPrompt } from "../../platform/login.ts";
 import type { RetellAgent } from "../../retell/client.ts";
 import type { KeyAsk } from "../../retell/connect.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
+import type { TestGate } from "../../wizard/gate.ts";
+import type { GenerationProgress } from "../../wizard/test-generation.ts";
 import type { AskId, DrivenAgent, GateId, WizardUI } from "../wizard-ui.ts";
 import type { WizardStore } from "./store.ts";
 
@@ -44,6 +46,14 @@ export class InkUI implements WizardUI {
 
   setAgentChoices(agents: readonly RetellAgent[] | null): void {
     this.store.setAgentChoices(agents);
+  }
+
+  setGeneration(progress: GenerationProgress | null): void {
+    this.store.setGeneration(progress);
+  }
+
+  setGate(gate: TestGate | null): void {
+    this.store.setGate(gate);
   }
 
   takeLoginPaste(): string | null {

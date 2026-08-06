@@ -38,7 +38,8 @@ If this folder holds no voice agent, egma asks once for the folder your prompts
 are in — teams often keep them apart — looks there, and otherwise says plainly
 that you should run it where your agent is defined.
 
-Then it connects that agent, so egma can reach it. See below.
+Then it connects that agent so egma can reach it, writes a first suite of tests
+for it, and puts them on egma when you say so. See below.
 
 ## Signing in
 
@@ -197,6 +198,55 @@ Name a persona only when the situation needs a particular kind of person on the
 other end; leave `personas` out and the default one applies. `version:` is
 absent until `pull` or `push` writes it.
 
+## Your first suite of tests
+
+The wizard asks one question before it writes anything: do you already have
+test cases written down — a spreadsheet, a document, a page of notes? Drop a
+path and your own coding agent turns each one into a test file first. egma
+reads that file itself and hands the whole of it over inside the task, so
+nothing goes looking on your disk; the file has to be inside the folder you ran
+egma in, and `.env` files are never read. Press `[n]` and egma writes the whole
+suite itself.
+
+Then your coding agent writes tests into `egma/tests/`, grounded in what your
+provider is actually running and in what it found in your repository. They
+arrive one file at a time, with what is still to come beside them:
+
+```
+◼ quoted-a-price          written
+▶ lost-the-order-number   writing…
+◻ open-on-sunday
+
+Progress: 2/12
+```
+
+Twelve tests, each with at least one expected behavior. A test with none can
+never fail, so egma will not upload one — it says which file and why, and
+leaves the file exactly where it is for you to fix.
+
+Then one keystroke:
+
+```
+12 tests generated · suite "first-suite"
+
+  › quoted-a-price          default persona
+    lost-the-order-number   default persona
+    open-on-sunday          somebody-in-a-hurry
+    … 9 more (↑↓ browse · e opens in $EDITOR)
+
+Run these against order-line over retell-1 (voice)?
+
+[enter] run   [e] edit first   [q] quit
+```
+
+`[e]` opens the highlighted file in your `$EDITOR` — egma hands the terminal
+over and takes it back — and returns you here. `[q]` closes the wizard with
+every file still in your repository, ready for `egma push` when you have read
+them. `[enter]` pushes them and carries on.
+
+It is a pause to scan, not a review. The tests are code in your repository
+either way, and code is reviewed in a pull request.
+
 ## Keeping the folder and egma in step
 
 ```
@@ -249,8 +299,9 @@ They are markdown files inside this package, under `skills/`. They are sent as
 part of the task, at the moment the task is sent. Nothing is installed on your
 machine, nothing is downloaded, and nothing is written to your repository.
 
-Today there are two: one on finding a voice agent in a repository nobody has
-described, and one on what a Retell voice agent looks like from the inside.
+Today there are three: one on finding a voice agent in a repository nobody has
+described, one on what a Retell voice agent looks like from the inside, and one
+on writing a test file that says something worth checking.
 
 ## How it reaches your coding agent
 
@@ -300,6 +351,10 @@ egma push [options]      Upload the tests in it. Refuses, naming names, when
                        holds more than one.
   --repo-prompt <path> With connect: the prompt file in this repository, so
                        egma can say whether it and Retell have drifted apart.
+  --existing-tests <path>
+                       With the wizard: test cases you already have written
+                       down, inside this folder. They are turned into test
+                       files before egma writes any of its own.
   --agent <name>       With init: what to call the voice agent this
                        folder's tests are for.
   --connection <name>  With init: what to call the way egma reaches it.
@@ -318,6 +373,8 @@ Environment:
                        nothing new.
   EGMA_RETELL_AGENT_ID Which Retell agent, same as --retell-agent.
   EGMA_RETELL_URL      The Retell to talk to. Default: https://api.retellai.com
+  EGMA_EXISTING_TESTS  Your existing test cases, same as --existing-tests.
+  VISUAL, EDITOR       What e opens a generated test in, at the gate.
 ```
 
 `Ctrl-C` stops a run at any point. The agent, and anything the agent started,

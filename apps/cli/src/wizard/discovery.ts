@@ -100,6 +100,13 @@ export function statusLineFor(marker: Marker): string | null {
       return marker.reason === ""
         ? `${FAILURE_MARK} Your coding agent stopped, and did not say why.`
         : `${FAILURE_MARK} ${marker.reason}`;
+    // Markers a later step asks for. An agent that writes one here has said
+    // something this step never asked about: it is kept in the log like every
+    // other marker, and it is not a line about finding a voice agent.
+    case "plan":
+    case "writing":
+    case "wrote":
+      return null;
   }
 }
 
@@ -210,6 +217,21 @@ function reportFor(facts: Facts): ExitReport {
 }
 
 /**
+ * How the step ended, and everything the agent reported while it ran.
+ *
+ * The report is what the wizard would close on; the facts are what the steps
+ * after this one are grounded in. They travel together because a fact that
+ * only reached the screen is a fact the next step cannot use.
+ */
+export type Discovered = {
+  readonly report: ExitReport;
+  readonly facts: Facts;
+};
+
+/** Nothing was reported, for every ending that is not a find. */
+const NO_FACTS: Facts = new Map<string, string>();
+
+/**
  * One look in one folder, and the ending it forces.
  *
  * `null` is the one answer that is not an ending: the agent looked, there is
@@ -217,35 +239,41 @@ function reportFor(facts: Facts): ExitReport {
  * makes are this same shape, so neither can grow an ending the other does not
  * have.
  */
-async function lookIn(options: DiscoveryOptions): Promise<ExitReport | null> {
+async function lookIn(options: DiscoveryOptions): Promise<Discovered | null> {
   const { ui, launch, log, signal } = options;
 
   ui.taskStarted();
   const outcome = await discoverIn(options);
   ui.taskFinished();
 
+  const ending = (report: ExitReport): Discovered => ({ report, facts: NO_FACTS });
+
   switch (outcome.kind) {
     case "found":
       ui.setSummary(summaryCard(outcome.facts));
-      return reportFor(outcome.facts);
+      return { report: reportFor(outcome.facts), facts: outcome.facts };
     case "nothing-found":
       return null;
     case "aborted":
-      return { kind: "coding-agent-stopped", drivenAgentName: launch.name, reason: outcome.reason };
+      return ending({
+        kind: "coding-agent-stopped",
+        drivenAgentName: launch.name,
+        reason: outcome.reason,
+      });
     case "failed":
       // A failure is the one time the agent's own output is worth reading, so
       // it is the one time the developer is told where it is.
       ui.pushStatus(`What ${launch.name} printed is in ${log.file}`);
-      return { kind: "failed", reason: outcome.reason };
+      return ending({ kind: "failed", reason: outcome.reason });
     case "interrupted":
-      return stopReport(signal, launch.name);
+      return ending(stopReport(signal, launch.name));
     case "unreachable":
-      return { kind: "no-coding-agent" };
+      return ending({ kind: "no-coding-agent" });
     case "needs-login":
-      return {
+      return ending({
         kind: "failed",
         reason: `${outcome.drivenAgentName} is not logged in, and egma could not hand you to its login. Log in to it, then run egma again.`,
-      };
+      });
   }
 }
 
@@ -253,7 +281,9 @@ async function lookIn(options: DiscoveryOptions): Promise<ExitReport | null> {
  * The whole step: look here, ask once if there is nothing, look there, or say
  * plainly that this is the wrong folder.
  */
-export async function findTheAgent(options: DiscoveryOptions): Promise<ExitReport> {
+export async function findTheAgent(options: DiscoveryOptions): Promise<Discovered> {
+  const nothingHere: Discovered = { report: { kind: "no-agent-context" }, facts: NO_FACTS };
+
   const here = await lookIn(options);
   if (here !== null) return here;
 
@@ -262,16 +292,18 @@ export async function findTheAgent(options: DiscoveryOptions): Promise<ExitRepor
   // it is asked once. A developer who closes the wizard instead of answering has
   // answered too, so the wait ends with the signal and not only with a keystroke.
   const pointer = await untilAborted(options.ui.waitForAnswer("prompts-pointer"), options.signal);
-  if (options.signal.aborted) return stopReport(options.signal, options.launch.name);
+  if (options.signal.aborted) {
+    return { report: stopReport(options.signal, options.launch.name), facts: NO_FACTS };
+  }
   if (pointer === undefined || pointer === null || pointer.trim() === "") {
-    return { kind: "no-agent-context" };
+    return nothingHere;
   }
 
   const where = path.resolve(options.cwd, pointer.trim());
   if (!(await isFolder(where))) {
     options.ui.pushStatus(`${ACTION_MARK} There is no folder at ${pointer.trim()}.`);
-    return { kind: "no-agent-context" };
+    return nothingHere;
   }
 
-  return (await lookIn({ ...options, cwd: where })) ?? { kind: "no-agent-context" };
+  return (await lookIn({ ...options, cwd: where })) ?? nothingHere;
 }

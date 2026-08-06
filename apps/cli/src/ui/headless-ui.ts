@@ -18,6 +18,8 @@ import { loginLines, type LoginPrompt } from "../platform/login.ts";
 import type { RetellAgent } from "../retell/client.ts";
 import { keyAskLines, type KeyAsk } from "../retell/connect.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
+import type { TestGate } from "../wizard/gate.ts";
+import type { GenerationProgress } from "../wizard/test-generation.ts";
 import type { AskId, DrivenAgent, GateId, WizardUI } from "./wizard-ui.ts";
 
 export type HeadlessRecord = {
@@ -30,6 +32,10 @@ export type HeadlessRecord = {
   agentChoices: RetellAgent[];
   statuses: string[];
   summary: string;
+  /** Every test the coding agent said it had written, in the order it said so. */
+  written: string[];
+  /** The list that waited on one keystroke, when one did. */
+  gate: TestGate | null;
   exit: ExitReport | null;
   gatesOpened: GateId[];
   asked: AskId[];
@@ -51,6 +57,8 @@ export class HeadlessUI implements WizardUI {
     agentChoices: [],
     statuses: [],
     summary: "",
+    written: [],
+    gate: null,
     exit: null,
     gatesOpened: [],
     asked: [],
@@ -126,6 +134,29 @@ export class HeadlessUI implements WizardUI {
 
   taskFinished(): void {
     this.write("The task is over.");
+  }
+
+  /**
+   * A pane cannot be drawn where there is no screen, so what is printed is the
+   * one thing that is news: a file that has just landed. Every other change is
+   * the same list said again, and a run with nobody watching does not need it
+   * said twice.
+   */
+  setGeneration(progress: GenerationProgress | null): void {
+    if (progress === null) return;
+    for (const test of progress.tests) {
+      if (test.state !== "written" || this.record.written.includes(test.name)) continue;
+      this.record.written.push(test.name);
+      this.write(`written: ${test.name}`);
+    }
+  }
+
+  setGate(gate: TestGate | null): void {
+    if (gate === null) return;
+    this.record.gate = gate;
+    for (const row of gate.rows) this.write(`test: ${row.name} ${row.persona}`);
+    for (const held of gate.heldBack) this.write(`held-back: ${held.shown} ${held.reason}`);
+    this.write(`tests: ${gate.rows.length}`);
   }
 
   pushStatus(line: string): void {

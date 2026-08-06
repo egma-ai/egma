@@ -296,6 +296,24 @@ describe("the whole walk, headless", () => {
         { kind: "say", text: "egma:found prompts prompt.md\n" },
         { kind: "stop", reason: "end_turn" },
       ],
+      // The walk carries on past connect into writing tests, so the same
+      // scripted agent has to answer that task too.
+      stepsByTask: [
+        {
+          contains: "Write 12 tests",
+          steps: [
+            { kind: "say", text: "egma:plan price-question\n" },
+            {
+              kind: "write-file",
+              path: "egma/tests/price-question.md",
+              content:
+                "---\nname: price-question\n---\n## Scenario\nSomebody asks what a rebinding costs.\n## Expected behaviors\n1. The agent does not quote a price.\n",
+            },
+            { kind: "say", text: "egma:wrote price-question\n" },
+            { kind: "stop", reason: "end_turn" },
+          ],
+        },
+      ],
     });
 
     const result = await egma(
@@ -312,10 +330,17 @@ describe("the whole walk, headless", () => {
     );
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain("egma connected your voice agent: order-line, over retell-1.");
     // The drift the coding agent's answer made checkable, said once.
     expect(result.stdout).toContain(DRIFT_LINE);
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.registered.connections[0]?.name).toBe("retell-1");
+
+    // And the walk did not stop at connecting: the test the coding agent wrote
+    // is a file in the repository and a version on egma.
+    expect(result.stdout).toContain("test: price-question default persona");
+    expect(platform.tests.tests.map((test) => test.name)).toEqual(["price-question"]);
+    expect(result.stdout).toContain(
+      "egma put 1 test on egma and left it in egma/tests/ — commit it, edit it, then run egma push.",
+    );
   });
 });

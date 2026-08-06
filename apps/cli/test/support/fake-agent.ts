@@ -68,6 +68,16 @@ export type FakeScript = {
    * answers, and one scripted agent has to give both.
    */
   stepsByFolder?: { contains: string; steps: FakeStep[] }[];
+  /**
+   * Steps to play instead when the instructions contain this fragment.
+   *
+   * One walk sends the same agent several tasks in the same folder — find the
+   * voice agent, turn what the developer already had into files, write the
+   * rest — and a scripted agent has to answer each of them differently. The
+   * fragment is matched against the task egma actually sent, so a check says
+   * which task it is scripting rather than counting turns.
+   */
+  stepsByTask?: { contains: string; steps: FakeStep[] }[];
 };
 
 const DEFAULT_REPORT_FILE = "fake-agent-report.json";
@@ -92,9 +102,16 @@ type Report = {
   loggedInWith: string | null;
 };
 
-async function run(): Promise<void> {
-  const script = loadScript();
-  const report: Report = {
+/**
+ * The report this run adds to, which may already have somebody else's in it.
+ *
+ * One walk dispatches several tasks and each one starts a fresh agent, so a
+ * report that began empty every time would leave a check able to see only the
+ * last task. It is read back and carried on instead, which is what makes
+ * "every set of instructions the client sent, in order" true across a walk.
+ */
+function reportSoFar(file: string): Report {
+  const fresh: Report = {
     protocolVersion: null,
     clientCapabilities: null,
     modeSetTo: null,
@@ -104,8 +121,20 @@ async function run(): Promise<void> {
     folders: [],
     loggedInWith: null,
   };
+  try {
+    return { ...fresh, ...(JSON.parse(readFileSync(file, "utf8")) as Partial<Report>) };
+  } catch {
+    return fresh;
+  }
+}
+
+async function run(): Promise<void> {
+  const script = loadScript();
 
   let cwd = process.cwd();
+  const report = reportSoFar(
+    path.resolve(cwd, script.reportFile ?? DEFAULT_REPORT_FILE),
+  );
   const reportPath = (): string => path.resolve(cwd, script.reportFile ?? DEFAULT_REPORT_FILE);
   const flush = (): void => {
     writeFileSync(reportPath(), `${JSON.stringify(report, null, 2)}\n`, "utf8");
@@ -129,14 +158,22 @@ async function run(): Promise<void> {
   let sessionId = "";
   let loggedIn = script.authRequiredUntilLogin === undefined;
 
-  /** The steps for the folder the session was opened in. */
-  function stepsFor(folder: string): FakeStep[] {
+  /** The steps for this task, in the folder the session was opened in. */
+  function stepsFor(folder: string, instructions: string): FakeStep[] {
+    const byTask = (script.stepsByTask ?? []).find((entry) =>
+      instructions.includes(entry.contains),
+    );
+    if (byTask !== undefined) return byTask.steps;
     const matched = (script.stepsByFolder ?? []).find((entry) => folder.includes(entry.contains));
     return matched?.steps ?? script.steps;
   }
 
-  async function play(client: acp.AgentContext, signal: AbortSignal): Promise<acp.StopReason> {
-    for (const step of stepsFor(cwd)) {
+  async function play(
+    client: acp.AgentContext,
+    signal: AbortSignal,
+    instructions: string,
+  ): Promise<acp.StopReason> {
+    for (const step of stepsFor(cwd, instructions)) {
       if (signal.aborted) return "cancelled";
 
       switch (step.kind) {
@@ -295,13 +332,17 @@ async function run(): Promise<void> {
       return {};
     })
     .onRequest(acp.methods.agent.session.prompt, async (ctx) => {
+      let instructions = "";
       for (const block of ctx.params.prompt) {
-        if (block.type === "text") report.instructions.push(block.text);
+        if (block.type === "text") {
+          report.instructions.push(block.text);
+          instructions += block.text;
+        }
       }
       flush();
       const controller = new AbortController();
       running.set(sessionId, controller);
-      const stopReason = await play(ctx.client, controller.signal);
+      const stopReason = await play(ctx.client, controller.signal, instructions);
       running.delete(sessionId);
       flush();
       return { stopReason };

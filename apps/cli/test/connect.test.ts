@@ -123,7 +123,7 @@ class ScriptedUI extends HeadlessUI {
 async function run(options: RunOptions) {
   const ui = new ScriptedUI(options);
 
-  const report = await connectStep({
+  const { report } = await connectStep({
     ui,
     platform: { url: platform.url, credentialsFile: workspace.credentialsFile },
     cwd: workspace.dir,

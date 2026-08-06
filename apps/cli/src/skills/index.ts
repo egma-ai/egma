@@ -16,9 +16,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 /** One skill, named by its file. */
-export type SkillName = "context-finding" | "retell";
+export type SkillName = "context-finding" | "retell" | "writing-tests";
 
-export const SKILL_NAMES: readonly SkillName[] = ["context-finding", "retell"];
+export const SKILL_NAMES: readonly SkillName[] = ["context-finding", "retell", "writing-tests"];
 
 /** Where the packaged skill files live, relative to the package root. */
 export const SKILLS_DIRECTORY = "skills";

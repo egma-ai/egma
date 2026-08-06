@@ -34,6 +34,25 @@ describe("a marker line", () => {
       kind: "none",
       reason: "Nothing here looks like a voice agent.",
     });
+    expect(markerIn("egma:plan one-thing, another-thing")).toEqual({
+      kind: "plan",
+      names: ["one-thing", "another-thing"],
+    });
+    expect(markerIn("egma:writing one-thing")).toEqual({ kind: "writing", name: "one-thing" });
+    expect(markerIn("egma:wrote one-thing")).toEqual({ kind: "wrote", name: "one-thing" });
+    // An agent that answers with the file rather than the name has said the
+    // same thing, and is read as having said it.
+    expect(markerIn("egma:wrote egma/tests/one-thing.md")).toEqual({
+      kind: "wrote",
+      name: "one-thing",
+    });
+    expect(markerIn("egma:wrote one-thing (3 expected behaviors)")).toEqual({
+      kind: "wrote",
+      name: "one-thing",
+    });
+    expect(markerIn("egma:plan")).toBeNull();
+    expect(markerIn("egma:wrote")).toBeNull();
+
     expect(markerIn("egma:abort I cannot read this folder.")).toEqual({
       kind: "abort",
       reason: "I cannot read this folder.",

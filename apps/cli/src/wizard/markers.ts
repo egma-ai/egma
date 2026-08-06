@@ -14,6 +14,14 @@
  *   egma:none   <reason>        the agent looked and there is nothing to report
  *   egma:abort  <reason>        the agent cannot go on
  *
+ * Three more belong to a step that writes files rather than reads them. They
+ * are the same grammar and they are read by the same parser, because a step
+ * that had a marker syntax of its own would be a second thing to learn:
+ *
+ *   egma:plan    <name>, <name> every test it means to write, said once, first
+ *   egma:writing <name>         it has started on this one
+ *   egma:wrote   <name>         this one is on disk
+ *
  * `abort` is enforced here rather than trusted to the agent: egma reads the
  * line, ends the task itself, and does not wait for the agent to agree that it
  * has finished.
@@ -30,7 +38,11 @@ export type Marker =
   | { readonly kind: "note"; readonly text: string }
   | { readonly kind: "found"; readonly field: string; readonly value: string }
   | { readonly kind: "none"; readonly reason: string }
-  | { readonly kind: "abort"; readonly reason: string };
+  | { readonly kind: "abort"; readonly reason: string }
+  /** Everything the agent means to write, named before it writes any of it. */
+  | { readonly kind: "plan"; readonly names: readonly string[] }
+  | { readonly kind: "writing"; readonly name: string }
+  | { readonly kind: "wrote"; readonly name: string };
 
 /** What one line of the agent's output turned out to be. */
 export type ParsedLine =
@@ -64,6 +76,22 @@ function undecorate(line: string): string {
   return text;
 }
 
+/**
+ * The test a `writing` or `wrote` line is about.
+ *
+ * The marker asks for a name and an agent that has just written a file often
+ * gives the file instead, sometimes with a word of explanation after it. Both
+ * say the same thing, so both are read: the first word is taken, a path is
+ * reduced to its own last part, and `.md` comes off the end. A name egma
+ * cannot make sense of is no marker at all.
+ */
+function testNameIn(rest: string): string | null {
+  const first = rest.split(/\s/)[0] ?? "";
+  const bare = first.replaceAll(/^[("'`]+|[)"'`,;:]+$/gu, "");
+  const last = (bare.split(/[/\\]/).pop() ?? "").replace(/\.md$/iu, "");
+  return last === "" ? null : last;
+}
+
 /** The marker on this line, or `null` when the line is not one. */
 export function markerIn(line: string): Marker | null {
   const text = undecorate(line);
@@ -88,6 +116,21 @@ export function markerIn(line: string): Marker | null {
       const value = rest.slice(gap).trim();
       if (field === "" || value === "") return null;
       return { kind: "found", field, value };
+    }
+    case "plan": {
+      const names = rest
+        .split(/[,;]/u)
+        .map((entry) => testNameIn(entry.trim()))
+        .filter((name): name is string => name !== null);
+      return names.length === 0 ? null : { kind: "plan", names };
+    }
+    case "writing": {
+      const name = testNameIn(rest);
+      return name === null ? null : { kind: "writing", name };
+    }
+    case "wrote": {
+      const name = testNameIn(rest);
+      return name === null ? null : { kind: "wrote", name };
     }
     default:
       return null;

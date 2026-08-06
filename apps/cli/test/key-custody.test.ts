@@ -108,6 +108,24 @@ describe("a whole run, swept afterwards", () => {
         { kind: "grumble", text: "the adapter is talking to itself\n" },
         { kind: "stop", reason: "end_turn" },
       ],
+      // The sweep is worth more the further the run gets, so the run goes all
+      // the way: the tests are written, pushed, and swept with everything else.
+      stepsByTask: [
+        {
+          contains: "Write 12 tests",
+          steps: [
+            {
+              kind: "write-file",
+              path: "egma/tests/price-question.md",
+              content:
+                "---\nname: price-question\n---\n## Scenario\nSomebody asks what a rebinding costs.\n## Expected behaviors\n1. The agent does not quote a price.\n",
+            },
+            { kind: "say", text: "egma:wrote price-question\n" },
+            { kind: "grumble", text: "still talking to itself\n" },
+            { kind: "stop", reason: "end_turn" },
+          ],
+        },
+      ],
     });
 
     const printed: string[] = [];
@@ -125,7 +143,7 @@ describe("a whole run, swept afterwards", () => {
       retell: { url: retell.url },
     });
 
-    expect(report.kind).toBe("connected");
+    expect(report.kind).toBe("tests-pushed");
 
     // The key really did reach the two places it is meant to reach, so what
     // follows is a sweep of a run that worked rather than one that did nothing.

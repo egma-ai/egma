@@ -74,6 +74,15 @@ export type PushReport = {
 export type PushOptions = {
   readonly signedIn: SignedIn;
   readonly paths: FolderPaths;
+  /**
+   * The files to upload, absolute, when the caller has already decided which.
+   * The whole folder when it is left out, which is what the verb does.
+   *
+   * The wizard is the caller that names them: it has just put a list of tests
+   * on screen and had one keystroke agreed to that list, so what it uploads is
+   * that list and not whatever else happens to be in the folder.
+   */
+  readonly only?: readonly string[];
   readonly fetchImpl?: Fetch;
 };
 
@@ -114,7 +123,9 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
   const { signedIn, paths, fetchImpl } = options;
   const extra = fetchImpl === undefined ? [] : ([fetchImpl] as const);
 
-  const held = await readFolderTests(paths);
+  const inTheFolder = await readFolderTests(paths);
+  const wanted = options.only === undefined ? null : new Set(options.only);
+  const held = wanted === null ? inTheFolder : inTheFolder.filter((file) => wanted.has(file.file));
   if (held.length === 0) {
     return { conflicts: [], uploadedNothing: true, tests: [], turnedAway: [] };
   }

@@ -21,6 +21,9 @@ export type ScreenId =
   | "prompts-pointer"
   | "retell-key"
   | "retell-agent"
+  | "existing-tests"
+  | "generating"
+  | "gate"
   | "task";
 
 /** An interruption drawn over the flow. The stack is empty in the walk. */

@@ -32,6 +32,14 @@ export type ExitReport =
       readonly agentName: string;
       readonly connectionName: string;
     }
+  /** The tests are on egma, and they are files in the repository as well. */
+  | { readonly kind: "tests-pushed"; readonly count: number }
+  /**
+   * The developer read the list and closed the wizard. Nothing was uploaded and
+   * nothing was taken away: the files are theirs, in their repository, and the
+   * line has to say where.
+   */
+  | { readonly kind: "tests-kept"; readonly count: number }
   /** Nothing here looks like a voice agent, and the pointer did not help. */
   | { readonly kind: "no-agent-context" }
   /** There is no coding agent on this machine for egma to drive. */
@@ -54,6 +62,9 @@ function oneLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+/** Where the files are, said the same way in both endings that mention them. */
+const TESTS_FOLDER = "egma/tests/";
+
 function foundLine(framework: string | null, prompts: string | null): string {
   const facts: string[] = [];
   if (framework !== null) facts.push(framework);
@@ -68,6 +79,14 @@ export function buildExitLine(report: ExitReport): string {
       return foundLine(report.framework, report.prompts);
     case "connected":
       return `egma connected your voice agent: ${report.agentName}, over ${report.connectionName}.`;
+    case "tests-pushed":
+      return report.count === 1
+        ? `egma put 1 test on egma and left it in ${TESTS_FOLDER} — commit it, edit it, then run egma push.`
+        : `egma put ${report.count} tests on egma and left them in ${TESTS_FOLDER} — commit them, edit them, then run egma push.`;
+    case "tests-kept":
+      return report.count === 1
+        ? `Nothing was uploaded. Your test is in ${TESTS_FOLDER} — read it, then run egma push.`
+        : `Nothing was uploaded. Your ${report.count} tests are in ${TESTS_FOLDER} — read them, then run egma push.`;
     case "no-agent-context":
       return "egma found no voice agent to test. Run egma again where your agent is defined.";
     case "no-coding-agent":
