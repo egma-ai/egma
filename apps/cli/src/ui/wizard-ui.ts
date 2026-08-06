@@ -14,9 +14,17 @@ import type { LoginPrompt } from "../platform/login.ts";
 import type { RetellAgent } from "../retell/client.ts";
 import type { KeyAsk } from "../retell/connect.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
+import type { TestGate } from "../wizard/gate.ts";
+import type { GenerationProgress } from "../wizard/test-generation.ts";
 
-/** A point the flow waits at until the developer has moved past it. */
-export type GateId = "begin";
+/**
+ * A point the flow waits at until the developer has moved past it.
+ *
+ * `run-tests` is the gate over generated tests, and it is a gate rather than a
+ * question for the same reason `begin` is: what is being given is agreement,
+ * and a developer who does not agree closes the wizard instead of answering.
+ */
+export type GateId = "begin" | "run-tests";
 
 /**
  * A point the flow waits at for something only the developer knows.
@@ -26,7 +34,11 @@ export type GateId = "begin";
  * reads a keystroke, so this is still not a prompt method — the screen owns
  * every key, and a developer who answers nothing answers `null`.
  */
-export type AskId = "prompts-pointer" | "retell-key" | "retell-agent";
+export type AskId =
+  | "prompts-pointer"
+  | "retell-key"
+  | "retell-agent"
+  | "existing-tests";
 
 /** The coding agent egma is driving. */
 export type DrivenAgent = { readonly id: string; readonly name: string };
@@ -94,6 +106,25 @@ export interface WizardUI {
 
   /** The task is over, however it ended. */
   taskFinished(): void;
+
+  /**
+   * How far the coding agent has got through writing test files, or `null`
+   * when it is not writing any.
+   *
+   * A write and not a question. The flow says what has been written, what is
+   * being written and what is still to come; whether that is drawn as a pane
+   * that fills in or printed as one line per file is the UI's business.
+   */
+  setGeneration(progress: GenerationProgress | null): void;
+
+  /**
+   * The tests waiting on one keystroke, or `null` when none are.
+   *
+   * Setting it is what opens the `run-tests` gate's screen. Nothing here reads
+   * a keystroke: the screen owns every key, including the one that opens a file
+   * in an editor, which the flow never sees at all.
+   */
+  setGate(gate: TestGate | null): void;
 
   /** One line describing something the driven agent did. */
   pushStatus(line: string): void;

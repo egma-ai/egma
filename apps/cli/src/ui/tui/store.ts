@@ -17,6 +17,8 @@ import type { LoginPrompt } from "../../platform/login.ts";
 import type { RetellAgent } from "../../retell/client.ts";
 import type { KeyAsk } from "../../retell/connect.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
+import type { TestGate } from "../../wizard/gate.ts";
+import type { GenerationProgress } from "../../wizard/test-generation.ts";
 import type { AskId, DrivenAgent, GateId } from "../wizard-ui.ts";
 
 /** The screens of the walk, in order. */
@@ -33,12 +35,18 @@ export const WALK_SCREENS: Sequence = [
   // Never reached with one agent on the account, because the flow only opens
   // this question when there is a choice to make.
   { id: "retell-agent", show: (state) => state.asking === "retell-agent" },
+  { id: "existing-tests", show: (state) => state.asking === "existing-tests" },
+  // The list, while it is waiting on the one keystroke it exists for.
+  { id: "gate", show: (state) => state.gate !== null },
+  // The files arriving, one at a time, while they arrive.
+  { id: "generating", show: (state) => state.generation !== null },
   { id: "task" },
 ];
 
 /** The condition each gate waits for. */
 const GATE_CONDITIONS: Readonly<Record<GateId, (state: WizardState) => boolean>> = {
   begin: (state) => state.begun,
+  "run-tests": (state) => state.agreedToRun,
 };
 
 type Gate = {
@@ -154,6 +162,14 @@ export class WizardStore {
     this.change({ agentChoices });
   }
 
+  setGeneration(generation: GenerationProgress | null): void {
+    this.change({ generation });
+  }
+
+  setGate(gate: TestGate | null): void {
+    this.change(gate === null ? { gate, editorProblem: null } : { gate, gateAt: 0 });
+  }
+
   /** Hands over what was typed back, and forgets it, so it is acted on once. */
   takeLoginPaste(): string | null {
     const typed = this.pastedLogin;
@@ -188,6 +204,25 @@ export class WizardStore {
   begin(): void {
     if (this.state.begun) return;
     this.change({ begun: true });
+  }
+
+  /** The keystroke over the test list. Opens the `run-tests` gate. */
+  runTests(): void {
+    if (this.state.agreedToRun) return;
+    this.change({ agreedToRun: true });
+  }
+
+  /** Move the gate's selection, kept inside the list however far it is pushed. */
+  moveGate(by: number): void {
+    const rows = this.state.gate?.rows.length ?? 0;
+    if (rows === 0) return;
+    const at = Math.min(Math.max(this.state.gateAt + by, 0), rows - 1);
+    this.change({ gateAt: at, editorProblem: null });
+  }
+
+  /** Why the last attempt to open an editor did not open one, or `null`. */
+  setEditorProblem(editorProblem: string | null): void {
+    this.change({ editorProblem });
   }
 
   /** What the developer is typing back at the login screen, as they type it. */

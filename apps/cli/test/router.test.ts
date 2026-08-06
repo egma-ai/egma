@@ -10,6 +10,73 @@ describe("which screen is on", () => {
     expect(store.activeScreen).toBe("intro");
     store.begin();
     expect(store.activeScreen).toBe("task");
+
+    // The two screens the generate step writes: the files arriving, and the
+    // list waiting on one keystroke. Neither is navigated to.
+    store.setGeneration({ what: "generating", tests: [], total: 12 });
+    expect(store.activeScreen).toBe("generating");
+
+    store.setGate({
+      rows: [
+        {
+          name: "price-question",
+          persona: "default persona",
+          shown: "egma/tests/price-question.md",
+          file: "/tmp/egma/tests/price-question.md",
+        },
+      ],
+      heldBack: [],
+      agentName: "order-line",
+      connectionName: "retell-1",
+      modality: "voice",
+      suite: "first-suite",
+    });
+    // The list is the thing to deal with, even while the pane is still set.
+    expect(store.activeScreen).toBe("gate");
+
+    store.setGate(null);
+    store.setGeneration(null);
+    expect(store.activeScreen).toBe("task");
+  });
+
+  it("parks the flow over the tests until the developer says run them", async () => {
+    const store = new WizardStore();
+    let past = false;
+    void store.getGate("run-tests").then(() => {
+      past = true;
+    });
+
+    await Promise.resolve();
+    expect(past).toBe(false);
+
+    store.runTests();
+    await store.getGate("run-tests");
+    expect(past).toBe(true);
+  });
+
+  it("keeps the gate's selection inside the list, however far it is pushed", () => {
+    const store = new WizardStore();
+    const row = (name: string) => ({
+      name,
+      persona: "default persona",
+      shown: `egma/tests/${name}.md`,
+      file: `/tmp/egma/tests/${name}.md`,
+    });
+    store.setGate({
+      rows: [row("one"), row("two")],
+      heldBack: [],
+      agentName: "order-line",
+      connectionName: "retell-1",
+      modality: "voice",
+      suite: "first-suite",
+    });
+
+    expect(store.snapshot.gateAt).toBe(0);
+    store.moveGate(-1);
+    expect(store.snapshot.gateAt).toBe(0);
+    store.moveGate(1);
+    store.moveGate(1);
+    expect(store.snapshot.gateAt).toBe(1);
   });
 
   it("parks the flow until the developer opens the gate", async () => {

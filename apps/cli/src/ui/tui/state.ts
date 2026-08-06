@@ -10,6 +10,8 @@ import type { LoginPrompt } from "../../platform/login.ts";
 import type { RetellAgent } from "../../retell/client.ts";
 import type { KeyAsk } from "../../retell/connect.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
+import type { TestGate } from "../../wizard/gate.ts";
+import type { GenerationProgress } from "../../wizard/test-generation.ts";
 import type { AskId, DrivenAgent } from "../wizard-ui.ts";
 
 export type WizardState = {
@@ -34,10 +36,20 @@ export type WizardState = {
   readonly agentChoices: readonly RetellAgent[] | null;
   /** The developer has read the intro and said go. */
   readonly begun: boolean;
+  /** The developer has read the test list and said run them. */
+  readonly agreedToRun: boolean;
   readonly running: boolean;
   readonly finished: boolean;
   /** The question the flow is parked on, or `null` when it is not parked. */
   readonly asking: AskId | null;
+  /** How far the coding agent has got through writing test files. */
+  readonly generation: GenerationProgress | null;
+  /** The tests waiting on one keystroke, or `null` when none are. */
+  readonly gate: TestGate | null;
+  /** Which row of the gate's list the keys act on. */
+  readonly gateAt: number;
+  /** What the gate screen has to say about the last attempt to open an editor. */
+  readonly editorProblem: string | null;
   readonly statuses: readonly string[];
   readonly summary: string;
   readonly exit: ExitReport | null;
@@ -53,9 +65,14 @@ export function emptyState(): WizardState {
     keyAsk: null,
     agentChoices: null,
     begun: false,
+    agreedToRun: false,
     running: false,
     finished: false,
     asking: null,
+    generation: null,
+    gate: null,
+    gateAt: 0,
+    editorProblem: null,
     statuses: [],
     summary: "",
     exit: null,

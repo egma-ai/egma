@@ -432,6 +432,29 @@ describe("egma push", () => {
     expect(platform.tests.tests).toHaveLength(0);
   });
 
+  /**
+   * A file egma cannot read is still the developer's file. It is named and left
+   * alone, and the folder's other tests are not forfeit over it — a verb that
+   * ended on the first broken file would be the one that most needs saying.
+   */
+  it("names a file it cannot read, and uploads the tests it can", async () => {
+    await makeFolder();
+    await writeTest(
+      "good.md",
+      ["---", "name: good", "---", "## Scenario", "Something happens.", "## Expected behaviors", "1. It is handled."].join("\n"),
+    );
+    const broken = ["---", "name: half-written", "personas: [never-closed", "---", "## Scenario", "x"].join("\n");
+    await writeTest("half-written.md", broken);
+
+    const result = await egma(["push"]);
+
+    expect(valuesOf(result.stdout, "turned-away")).toEqual(["half-written"]);
+    expect(factOf(result.stdout, "reason")).toContain("half-written.md, line 2");
+    expect(platform.tests.tests.map((test) => test.name)).toEqual(["good"]);
+    // Untouched, byte for byte, so the developer can see what they wrote.
+    expect(await readTest("half-written.md")).toBe(broken);
+  });
+
   it("refuses when egma has moved, names exactly the tests that moved, and uploads nothing", async () => {
     for (const name of ["first", "second", "third"]) {
       platform.tests.add({ name, scenario: `${name} happens`, expectedBehaviors: ["b"] });

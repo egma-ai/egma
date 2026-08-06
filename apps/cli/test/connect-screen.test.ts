@@ -86,6 +86,23 @@ async function wizard(): Promise<TerminalRun> {
       { kind: "say", text: "egma:found framework retell-sdk\n" },
       { kind: "stop", reason: "end_turn" },
     ],
+    // These checks are about the key screen, and the walk carries on past it
+    // into writing tests. One file is enough for the run to reach its ending.
+    stepsByTask: [
+      {
+        contains: "Write 12 tests",
+        steps: [
+          {
+            kind: "write-file",
+            path: "egma/tests/price-question.md",
+            content:
+              "---\nname: price-question\n---\n## Scenario\nSomebody asks what a rebinding costs.\n## Expected behaviors\n1. The agent does not quote a price.\n",
+          },
+          { kind: "say", text: "egma:wrote price-question\n" },
+          { kind: "stop", reason: "end_turn" },
+        ],
+      },
+    ],
   });
 
   const run = runInTerminal({
@@ -141,7 +158,15 @@ describe("the key screen", () => {
     expect(typing).not.toContain(KEY.slice(0, 8));
 
     run.write("\r");
-    await showing(run, "order-line");
+
+    // The walk carries on to the one question the generate step asks. It is
+    // answered here so the run reaches its own ending rather than the
+    // teardown's.
+    await showing(run, "Do you already have test cases", "[n] none");
+    run.write("n");
+
+    await showing(run, "price-question", "[enter] run", "[q] quit");
+    run.write("\r");
 
     const exited = await run.exited;
     expect(exited).toBe(0);
@@ -149,10 +174,13 @@ describe("the key screen", () => {
     // Not on the last screen, not in scrollback, and not in a single byte the
     // command wrote — escape sequences included.
     expect(run.screen()).not.toContain(KEY);
-    expect(run.scrollback()).toContain("egma connected your voice agent: order-line, over retell-1.");
+    expect(run.scrollback()).toContain("egma put 1 test on egma");
     expect(run.scrollback()).not.toContain(KEY);
     expect(run.raw()).not.toContain(KEY);
 
+    // The one agent on the account was named on screen along the way, with
+    // nothing to answer about it.
+    expect(run.raw()).toContain("order-line");
     expect(platform.registered.sealed).toEqual([KEY]);
   });
 });
@@ -215,11 +243,15 @@ describe("the picker", () => {
     await showing(run, "\u203a after-hours");
     run.write("\r");
 
+    // Past the one question the generate step asks, and past its gate.
+    await showing(run, "Do you already have test cases", "[n] none");
+    run.write("n");
+    await showing(run, "price-question", "[enter] run");
+    run.write("\r");
+
     const exited = await run.exited;
     expect(exited).toBe(0);
-    expect(run.scrollback()).toContain(
-      "egma connected your voice agent: after-hours, over retell-1.",
-    );
+    expect(run.scrollback()).toContain("egma put 1 test on egma");
     expect(run.raw()).not.toContain(KEY);
 
     // The one that was highlighted is the one that was registered.

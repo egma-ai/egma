@@ -73,6 +73,9 @@ export const VERBS = ["login", "connect", "init", "pull", "push"] as const;
  */
 export const RETELL_URL_VARIABLE = "EGMA_RETELL_URL";
 
+/** The test cases a headless walk would have been pointed at. */
+export const EXISTING_TESTS_VARIABLE = "EGMA_EXISTING_TESTS";
+
 export type Verb = (typeof VERBS)[number];
 
 export type Invocation = {
@@ -92,6 +95,8 @@ export type Invocation = {
   readonly retellAgentId: string | null;
   /** `--repo-prompt`: the repository's prompt, to compare the provider's with. */
   readonly repoPrompt: string | null;
+  /** `--existing-tests`: the test cases the developer already had written down. */
+  readonly existingTests: string | null;
   /** What `egma init` should write into the folder's config file. */
   readonly agentName: string | null;
   readonly connectionName: string | null;
@@ -119,6 +124,7 @@ export function parseArgs(argv: readonly string[]): Invocation {
   let force = false;
   let retellAgentId: string | null = null;
   let repoPrompt: string | null = null;
+  let existingTests: string | null = null;
   let agentName: string | null = null;
   let connectionName: string | null = null;
   let suiteName: string | null = null;
@@ -140,6 +146,7 @@ export function parseArgs(argv: readonly string[]): Invocation {
     else if (argument === "--force") force = true;
     else if (argument === "--retell-agent") retellAgentId = argv[(index += 1)] ?? null;
     else if (argument === "--repo-prompt") repoPrompt = argv[(index += 1)] ?? null;
+    else if (argument === "--existing-tests") existingTests = argv[(index += 1)] ?? null;
     else if (argument === "--agent") agentName = argv[(index += 1)] ?? null;
     else if (argument === "--connection") connectionName = argv[(index += 1)] ?? null;
     else if (argument === "--suite") suiteName = argv[(index += 1)] ?? null;
@@ -158,6 +165,7 @@ export function parseArgs(argv: readonly string[]): Invocation {
     force,
     retellAgentId,
     repoPrompt,
+    existingTests,
     agentName,
     connectionName,
     suiteName,
@@ -195,6 +203,10 @@ export function helpText(): string {
     "                       holds more than one.",
     "  --repo-prompt <path> With connect: the prompt file in this repository, so",
     "                       egma can say whether it and Retell have drifted apart.",
+    "  --existing-tests <path>",
+    "                       With the wizard: test cases you already have written",
+    "                       down, inside this folder. They are turned into test",
+    "                       files before egma writes any of its own.",
     "  --agent <name>       With init: what to call the voice agent this",
     "                       folder's tests are for.",
     "  --connection <name>  With init: what to call the way egma reaches it.",
@@ -213,6 +225,8 @@ export function helpText(): string {
     "                       needs nothing new.",
     `  ${AGENT_VARIABLE} Which Retell agent, same as --retell-agent.`,
     `  ${RETELL_URL_VARIABLE}      The Retell to talk to. Default: ${RETELL_API}`,
+    `  ${EXISTING_TESTS_VARIABLE}  Your existing test cases, same as --existing-tests.`,
+    "  VISUAL, EDITOR       What e opens a generated test in, at the gate.",
     "",
     "What egma login prints, one fact per line:",
     "  url, code, approve_url, browser, waiting, status, credentials",
@@ -276,8 +290,14 @@ function launchFrom(invocation: Invocation): DrivenAgentLaunch {
 /** What the whole walk answers with, which is not what `egma login` answers. */
 function walkExitCode(report: ExitReport): number {
   switch (report.kind) {
+    // The files are written either way, and the developer decided what happens
+    // to them. Pressing `q` over the list is the run finishing; pressing Ctrl-C
+    // over it leaves the same files and is still an interruption to a shell.
+    case "tests-kept":
+      return report.stopped ? 130 : 0;
     case "found-agent":
     case "connected":
+    case "tests-pushed":
     case "quit":
     // egma did everything it could here: it named what is missing and handed
     // over words that work without it. That is the run finishing, not failing.
@@ -309,11 +329,14 @@ function retellReach(env: NodeJS.ProcessEnv): { readonly url: string } | undefin
  * be reading it for keystrokes, and a flag that says "nobody is watching" must
  * not change where a secret comes from.
  */
+/** The answers a run with nobody watching can be given in advance. */
+type Held = "retell-key" | "retell-agent" | "existing-tests";
+
 function headlessAnswers(
   invocation: Invocation,
   env: NodeJS.ProcessEnv,
-): Partial<Record<"retell-key" | "retell-agent", string>> {
-  const answers: Partial<Record<"retell-key" | "retell-agent", string>> = {};
+): Partial<Record<Held, string>> {
+  const answers: Partial<Record<Held, string>> = {};
   for (const variable of KEY_VARIABLES) {
     const held = env[variable];
     if (typeof held === "string" && held.trim() !== "") {
@@ -323,6 +346,12 @@ function headlessAnswers(
   }
   const named = (invocation.retellAgentId ?? env[AGENT_VARIABLE] ?? "").trim();
   if (named !== "") answers["retell-agent"] = named;
+
+  // Prior work is knowledge and not consent, so a run with nobody watching is
+  // pointed at it in the command or it has none — exactly as the pointer to a
+  // repository's prompts is.
+  const material = (invocation.existingTests ?? env[EXISTING_TESTS_VARIABLE] ?? "").trim();
+  if (material !== "") answers["existing-tests"] = material;
   return answers;
 }
 

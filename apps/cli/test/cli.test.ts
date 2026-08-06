@@ -81,6 +81,8 @@ describe("the egma command", () => {
     expect(help.code).toBe(0);
     expect(help.stdout).toContain("Usage:");
     expect(help.stdout).toContain("--coding-agent <id>");
+    // The one answer a run with nobody watching cannot be asked for.
+    expect(help.stdout).toContain("--existing-tests <path>");
 
     // The test seam is not product surface, so it is not offered.
     expect(help.stdout).not.toContain("-- <command>");

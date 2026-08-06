@@ -11,7 +11,9 @@
  * provider, once for a body to egma. Nothing here writes it anywhere.
  */
 
+import type { Registered } from "../platform/agents.ts";
 import { readCredentials } from "../platform/credentials.ts";
+import type { RetellConfig } from "../retell/client.ts";
 import { RetellKey } from "../retell/key.ts";
 import {
   connect,
@@ -65,19 +67,38 @@ function reportFor(outcome: ConnectOutcome, signal: AbortSignal): ExitReport {
 }
 
 /**
+ * How the step ended, and what it registered when it ended well.
+ *
+ * `connected` is `null` for every ending that is not one, so a step after this
+ * cannot read a registration that never happened. What it carries is what the
+ * next step is grounded in: the agent and connection egma now holds, and the
+ * configuration the provider is actually running.
+ */
+export type Connected = {
+  readonly report: ExitReport;
+  readonly connected: {
+    readonly registered: Registered;
+    readonly config: RetellConfig;
+  } | null;
+};
+
+/**
  * Connects, or answers with the line the wizard should close on.
  *
  * Unlike login, every ending here is an ending: past this point egma has no
  * agent to test, so there is nothing for the walk to carry on into.
  */
-export async function connectStep(options: ConnectStepOptions): Promise<ExitReport> {
+export async function connectStep(options: ConnectStepOptions): Promise<Connected> {
   const { ui, signal } = options;
 
   const held = await readCredentials(options.platform.credentialsFile);
   if (held === null) {
     return {
-      kind: "failed",
-      reason: "this machine is not signed in to egma. Run egma login, then try again.",
+      report: {
+        kind: "failed",
+        reason: "this machine is not signed in to egma. Run egma login, then try again.",
+      },
+      connected: null,
     };
   }
 
@@ -115,7 +136,11 @@ export async function connectStep(options: ConnectStepOptions): Promise<ExitRepo
     },
   });
 
-  if (outcome.kind === "connected") {
+  if (outcome.kind !== "connected") {
+    return { report: reportFor(outcome, signal), connected: null };
+  }
+
+  {
     const { registered, config } = outcome;
     // One agent on the account is confirmed here rather than asked about: the
     // developer reads which one egma took, inside the flow, with nothing to
@@ -127,7 +152,10 @@ export async function connectStep(options: ConnectStepOptions): Promise<ExitRepo
     );
     // Shown, never blocking, and only when both halves were really read.
     if (outcome.drift === "differs") ui.pushStatus(DRIFT_LINE);
-  }
 
-  return reportFor(outcome, signal);
+    return {
+      report: reportFor(outcome, signal),
+      connected: { registered, config },
+    };
+  }
 }

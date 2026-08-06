@@ -16,7 +16,7 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "smoke": "node smoke/real-claude-code.ts && node smoke/real-claude-code-fence.ts && node smoke/real-claude-code-discovery.ts",
+    "smoke": "node smoke/real-claude-code.ts && node smoke/real-claude-code-fence.ts && node smoke/real-claude-code-discovery.ts && node smoke/real-claude-code-generation.ts",
     "smoke:platform": "node smoke/real-platform-login.ts",
     "smoke:retell": "node smoke/real-retell-connect.ts"
   },

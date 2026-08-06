@@ -24,6 +24,15 @@ export const RETELL_FIXTURE_REPO = fileURLToPath(
   new URL("../fixtures/retell-agent", import.meta.url),
 );
 
+/**
+ * Test cases somebody had written down before egma existed, committed so CI
+ * has some. A spreadsheet export and a page of notes, both invented, both
+ * about the bookbinding workshop that does not exist.
+ */
+export const EXISTING_TESTS_FIXTURES = fileURLToPath(
+  new URL("../fixtures/existing-tests", import.meta.url),
+);
+
 /** The stand-in browser a workspace wraps in a command of its own. */
 export const APPROVING_BROWSER = fileURLToPath(
   new URL("./approving-browser.ts", import.meta.url),
@@ -58,6 +67,27 @@ export type Workspace = {
    * address egma hands it into.
    */
   browser(): Promise<{ readonly command: string; readonly opened: string }>;
+  /**
+   * A stand-in editor to point `EDITOR` at: it writes every argument it was
+   * given into `opened`, adds one line to the last of them, and leaves. A real
+   * editor owns the terminal for as long as a person is in it; this one owns it
+   * for as long as two writes take, which is all a check needs to prove that
+   * egma handed it over and took it back.
+   *
+   * Every argument, because `$EDITOR` is a command line and not a command:
+   * `code --wait` and `emacs -nw` are both ordinary settings, and an editor
+   * that only ever read `$1` could not tell a wizard that splits them from one
+   * that hands the whole line to a shell.
+   *
+   * `alternateScreen` makes it a vim rather than a nano: it takes the whole
+   * terminal, paints over the wizard, and gives it back on the way out. What
+   * that proves is that the wizard is drawn again afterwards rather than left
+   * as whatever the editor put there.
+   */
+  editor(
+    line: string,
+    options?: { readonly alternateScreen?: boolean },
+  ): Promise<{ readonly command: string; readonly opened: string }>;
   /** Writes a script and answers the path to it. */
   script(script: FakeScript): Promise<string>;
   /** How egma would be told to start the fake agent with that script. */
@@ -102,6 +132,7 @@ export async function makeWorkspace(
   const credentialsFile = path.join(egmaFolder, "credentials");
 
   let scripts = 0;
+  let editors = 0;
   return {
     dir,
     egmaFolder,
@@ -141,6 +172,41 @@ export async function makeWorkspace(
       await writeFile(
         command,
         `#!/bin/sh\nexec '${process.execPath}' '${APPROVING_BROWSER}' "$@"\n`,
+        { encoding: "utf8", mode: 0o755 },
+      );
+      await chmod(command, 0o755);
+      return { command, opened };
+    },
+    async editor(line, options) {
+      editors += 1;
+      const command = path.join(dir, `stand-in-editor-${editors}`);
+      const opened = path.join(dir, `files-opened-${editors}.txt`);
+      const takesTheScreen = options?.alternateScreen === true;
+      await writeFile(
+        command,
+        [
+          "#!/bin/sh",
+          // The alternate screen, entered and left the way vim does it, with
+          // something painted over the wizard in between.
+          ...(takesTheScreen
+            ? [
+                "printf '\\033[?1049h\\033[H\\033[2J' > /dev/tty 2>/dev/null || true",
+                "printf 'STAND-IN EDITOR HAS THE SCREEN\\n' > /dev/tty 2>/dev/null || true",
+              ]
+            : []),
+          // Every argument, in the order egma passed them, and the last of them
+          // is the file: that is the one contract `$EDITOR` has.
+          'last=""',
+          "for argument in \"$@\"; do",
+          `  printf '%s\\n' "$argument" >> '${opened}'`,
+          '  last="$argument"',
+          "done",
+          `printf '%s\\n' '${line.replaceAll("'", "'\\''")}' >> "$last"`,
+          ...(takesTheScreen
+            ? ["printf '\\033[?1049l' > /dev/tty 2>/dev/null || true"]
+            : []),
+          "",
+        ].join("\n"),
         { encoding: "utf8", mode: 0o755 },
       );
       await chmod(command, 0o755);

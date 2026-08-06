@@ -2,20 +2,22 @@
  * The walk: what the wizard actually does, once, from start to exit line.
  *
  * The flow never draws anything and never reads a keystroke: it pushes state at
- * the UI and parks on a gate. Two steps so far — sign this machine in, then find
- * the voice agent — and the shape of the second is deliberate, because every
- * intelligent step after it is the same shape: skills plus a task, dispatched to
- * the developer's own coding agent, with every action it takes shown as it
- * happens.
+ * the UI and parks on a gate. Four steps — sign this machine in, find the voice
+ * agent, reach it, and write the tests that put it under pressure — and the
+ * shape of the last three is deliberately one shape: skills plus a task,
+ * dispatched to the developer's own coding agent, with every action it takes
+ * shown as it happens.
  */
 
 import type { DrivenAgentLaunch } from "../acp/registry.ts";
+import { signedInAt } from "../platform/signed-in.ts";
 import type { ConnectOptions } from "../retell/connect.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
 import { connectStep } from "./connect-step.ts";
 import { findTheAgent } from "./discovery.ts";
 import { openDrivenAgentLog, type DrivenAgentLog } from "./driven-agent-log.ts";
 import type { ExitReport } from "./exit-line.ts";
+import { generateStep } from "./generate-step.ts";
 import { logInStep, type PlatformAccess } from "./login-step.ts";
 import { stopReport, untilAborted } from "./stop.ts";
 
@@ -34,6 +36,8 @@ export type WalkOptions = {
   readonly platform?: PlatformAccess;
   /** Where Retell is. Retell's own address when omitted. */
   readonly retell?: ConnectOptions["retell"];
+  /** How many tests a first suite holds. egma's own default when omitted. */
+  readonly howManyTests?: number;
 };
 
 /** Runs the walk and returns the line the wizard will leave behind. */
@@ -69,20 +73,41 @@ export async function walk(options: WalkOptions): Promise<ExitReport> {
   // an egma to register on and an agent to register: a run that only drives a
   // coding agent has neither, and asking it for a provider key would be asking
   // for a secret nothing was going to use.
-  if (found.kind !== "found-agent" || options.platform === undefined) {
-    ui.setExit(found);
-    return found;
+  if (found.report.kind !== "found-agent" || options.platform === undefined) {
+    ui.setExit(found.report);
+    return found.report;
   }
 
-  const report = await connectStep({
+  const connected = await connectStep({
     ui,
     platform: options.platform,
     cwd,
     // What the coding agent said about where the words live, carried forward
     // so the two prompts can be compared once the provider's is in hand.
-    repoPrompts: found.prompts,
+    repoPrompts: found.report.prompts,
     signal,
     retell: options.retell,
+  });
+
+  // Nothing after this can name what a test is about, so a connect that did not
+  // connect is where the walk stops.
+  const signedIn = await signedInAt(options.platform);
+  if (connected.connected === null || signedIn === null) {
+    ui.setExit(connected.report);
+    return connected.report;
+  }
+
+  const report = await generateStep({
+    ui,
+    launch,
+    cwd,
+    signal,
+    log,
+    signedIn,
+    registered: connected.connected.registered,
+    config: connected.connected.config,
+    facts: found.facts,
+    ...(options.howManyTests === undefined ? {} : { howMany: options.howManyTests }),
   });
   ui.setExit(report);
   return report;
