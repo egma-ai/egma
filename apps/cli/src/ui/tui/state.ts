@@ -8,13 +8,12 @@
 
 import type { LoginPrompt } from "../../platform/login.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
-import type { DrivenAgent } from "../wizard-ui.ts";
+import type { AskId, DrivenAgent } from "../wizard-ui.ts";
 
 export type WizardState = {
   readonly drivenAgent: DrivenAgent | null;
   /** Where the coding agent's own output is kept, for a screen that tails it. */
   readonly drivenAgentLog: string | null;
-  readonly taskFile: string | null;
   /** What has to be approved in a browser, while it still has to be. */
   readonly login: LoginPrompt | null;
   /** What the developer is typing back at the login screen, so far. */
@@ -25,6 +24,8 @@ export type WizardState = {
   readonly begun: boolean;
   readonly running: boolean;
   readonly finished: boolean;
+  /** The question the flow is parked on, or `null` when it is not parked. */
+  readonly asking: AskId | null;
   readonly statuses: readonly string[];
   readonly summary: string;
   readonly exit: ExitReport | null;
@@ -34,13 +35,13 @@ export function emptyState(): WizardState {
   return {
     drivenAgent: null,
     drivenAgentLog: null,
-    taskFile: null,
     login: null,
     loginTyping: "",
     loginCopied: false,
     begun: false,
     running: false,
     finished: false,
+    asking: null,
     statuses: [],
     summary: "",
     exit: null,

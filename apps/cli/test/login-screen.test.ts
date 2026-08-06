@@ -46,9 +46,12 @@ async function wizard(options: {
   readonly cols?: number;
   readonly rows?: number;
 }) {
+  // Past login the walk goes straight on to finding the agent, so the scripted
+  // agent answers that step. What it reports is the step's business and is
+  // checked where that step is; here it only has to be an ending.
   const script = await workspace.script({
     steps: [
-      { kind: "say", text: "It is a package manifest." },
+      { kind: "say", text: "egma:found framework retell-sdk\n" },
       { kind: "stop", reason: "end_turn" },
     ],
   });
@@ -197,7 +200,7 @@ describe("the login screen", () => {
       // and the run ends on the one line the wizard leaves in scrollback.
       expect(await terminal.exited).toBe(0);
       expect(terminal.scrollback().trim()).toBe(
-        "node read package.json for egma. Nothing in this folder was changed.",
+        "egma found your voice agent: retell-sdk.",
       );
       expect(platform.device.keys).toHaveLength(1);
     } finally {
@@ -215,7 +218,7 @@ describe("the login screen", () => {
 
       expect(await terminal.exited).toBe(0);
       expect(terminal.scrollback().trim()).toBe(
-        "node read package.json for egma. Nothing in this folder was changed.",
+        "egma found your voice agent: retell-sdk.",
       );
 
       // A key was minted and kept, and it is the one this egma issued.

@@ -24,8 +24,9 @@ import { runPullCommand } from "./commands/pull.ts";
 import { runPushCommand } from "./commands/push.ts";
 import { resolvePlatformAccess, UnusableUrlError } from "./platform/credentials.ts";
 import { HeadlessUI } from "./ui/headless-ui.ts";
-import { buildExitLine, type ExitReport } from "./wizard/exit-line.ts";
+import { buildExitLine, buildExitNotice, type ExitReport } from "./wizard/exit-line.ts";
 import type { PlatformAccess } from "./wizard/login-step.ts";
+import { pasteFallbackMessage } from "./wizard/no-coding-agent.ts";
 import type { StopReason } from "./wizard/stop.ts";
 
 /**
@@ -76,12 +77,9 @@ export type Invocation = {
   readonly connectionName: string | null;
   readonly suiteName: string | null;
   /**
-   * A test seam, not product surface: `--file` and `-- <command>` let a test
-   * pin the file and start a scripted agent in place of a real one. Neither is
-   * documented, and neither is stable.
+   * A test seam, not product surface: `-- <command>` starts a scripted agent in
+   * place of a real one. It is not documented and it is not stable.
    */
-  readonly file: string | null;
-  /** A command to start as the coding agent, in place of a registry lookup. */
   readonly drivenAgentCommand: readonly string[];
   readonly unknown: readonly string[];
 };
@@ -102,7 +100,6 @@ export function parseArgs(argv: readonly string[]): Invocation {
   let agentName: string | null = null;
   let connectionName: string | null = null;
   let suiteName: string | null = null;
-  let file: string | null = null;
   let drivenAgentCommand: string[] = [];
   const unknown: string[] = [];
 
@@ -122,7 +119,6 @@ export function parseArgs(argv: readonly string[]): Invocation {
     else if (argument === "--agent") agentName = argv[(index += 1)] ?? null;
     else if (argument === "--connection") connectionName = argv[(index += 1)] ?? null;
     else if (argument === "--suite") suiteName = argv[(index += 1)] ?? null;
-    else if (argument === "--file") file = argv[(index += 1)] ?? null;
     else if (verb === null && isVerb(argument)) verb = argument;
     else unknown.push(argument);
   }
@@ -139,7 +135,6 @@ export function parseArgs(argv: readonly string[]): Invocation {
     agentName,
     connectionName,
     suiteName,
-    file,
     drivenAgentCommand,
     unknown,
   };
@@ -232,11 +227,18 @@ function launchFrom(invocation: Invocation): DrivenAgentLaunch {
 /** What the whole walk answers with, which is not what `egma login` answers. */
 function walkExitCode(report: ExitReport): number {
   switch (report.kind) {
-    case "task-done":
+    case "found-agent":
     case "quit":
+    // egma did everything it could here: it named what is missing and handed
+    // over words that work without it. That is the run finishing, not failing.
+    case "no-coding-agent":
       return 0;
     case "interrupted":
       return 130;
+    case "no-agent-context":
+    // The coding agent stopped the work itself. Nothing was found, and the run
+    // did not do what it set out to do.
+    case "coding-agent-stopped":
     case "failed":
       return 1;
   }
@@ -245,7 +247,6 @@ function walkExitCode(report: ExitReport): number {
 async function runHeadless(
   launch: DrivenAgentLaunch,
   cwd: string,
-  file: string | null,
   platform: PlatformAccess,
 ): Promise<number> {
   const controller = new AbortController();
@@ -257,14 +258,9 @@ async function runHeadless(
   const { walk } = await wizardMachinery();
   const ui = new HeadlessUI({ write: (line) => process.stdout.write(`${line}\n`) });
   try {
-    const report = await walk({
-      ui,
-      launch,
-      cwd,
-      signal: controller.signal,
-      platform,
-      ...(file === null ? {} : { file }),
-    });
+    const report = await walk({ ui, launch, cwd, signal: controller.signal, platform });
+    const notice = buildExitNotice(report);
+    if (notice !== null) process.stdout.write(`${notice}\n\n`);
     process.stdout.write(`${buildExitLine(report)}\n`);
     return walkExitCode(report);
   } finally {
@@ -276,7 +272,6 @@ async function runHeadless(
 async function runWizard(
   launch: DrivenAgentLaunch,
   cwd: string,
-  file: string | null,
   platform: PlatformAccess,
 ): Promise<number> {
   const { startTui, walk } = await wizardMachinery();
@@ -290,14 +285,7 @@ async function runWizard(
   process.on("SIGTERM", onSignal);
 
   try {
-    const report = await walk({
-      ui: tui.ui,
-      launch,
-      cwd,
-      signal: controller.signal,
-      platform,
-      ...(file === null ? {} : { file }),
-    });
+    const report = await walk({ ui: tui.ui, launch, cwd, signal: controller.signal, platform });
     tui.close(report);
     return walkExitCode(report);
   } catch (error) {
@@ -441,14 +429,15 @@ export async function main(argv: readonly string[]): Promise<void> {
     launch = launchFrom(invocation);
   } catch (error) {
     if (error instanceof UnlaunchableDrivenAgentError) {
-      process.stderr.write(`${error.message}\n`);
-      process.exitCode = 1;
+      // There is no coding agent here for egma to drive, so there is nothing to
+      // open a wizard for. The developer gets the words that work anyway.
+      process.stdout.write(`${error.message}\n\n${pasteFallbackMessage()}\n`);
       return;
     }
     throw error;
   }
 
   process.exitCode = invocation.headless
-    ? await runHeadless(launch, cwd, invocation.file, access)
-    : await runWizard(launch, cwd, invocation.file, access);
+    ? await runHeadless(launch, cwd, access)
+    : await runWizard(launch, cwd, access);
 }

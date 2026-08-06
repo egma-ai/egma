@@ -1,0 +1,16 @@
+{
+  "name": "quillfeather-bindery-line",
+  "version": "1.4.0",
+  "private": true,
+  "description": "The voice agent that answers the order line for Quillfeather Bindery, a made-up bookbinding workshop.",
+  "type": "module",
+  "main": "src/server.ts",
+  "scripts": {
+    "start": "node src/server.ts",
+    "deploy": "node scripts/deploy.ts"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "retell-sdk": "^4.14.0"
+  }
+}

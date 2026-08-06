@@ -25,7 +25,11 @@ import type { DrivenAgentLaunch } from "./registry.ts";
 /** How the one task ended. */
 export type DriveResult =
   | { readonly kind: "done"; readonly summary: string }
+  /** The agent said it could not go on, and egma ended the task on that word. */
+  | { readonly kind: "aborted"; readonly reason: string }
   | { readonly kind: "interrupted" }
+  /** egma could not start this coding agent, or it does not speak the protocol. */
+  | { readonly kind: "unreachable"; readonly reason: string }
   | { readonly kind: "needs-login"; readonly drivenAgentName: string }
   | { readonly kind: "failed"; readonly reason: string };
 
@@ -38,6 +42,15 @@ export type DriveOptions = {
   readonly signal: AbortSignal;
   /** Where the agent's own noise goes. Omit to drop it. */
   readonly logStderr?: (chunk: string) => void;
+  /**
+   * Sees the coding agent's own words as they arrive, in order. Answer a reason
+   * to end the task now, or `null` to let it carry on. This is where a step
+   * enforces its own abort: egma stops on the word, rather than waiting for the
+   * agent to agree that it has finished.
+   */
+  readonly watch?: (text: string) => string | null;
+  /** Told when the coding agent has to log in before egma can drive it. */
+  readonly onLogin?: (drivenAgentName: string) => void;
 };
 
 /** JSON-RPC code the protocol reserves for "this agent is not logged in". */
@@ -83,6 +96,16 @@ class DrivenAgentProcess {
   }
 }
 
+/**
+ * Why the agent never got as far as speaking the protocol.
+ *
+ * A command that is not on this machine, and a command that is but exits
+ * immediately, look the same from here and mean the same thing: there is no
+ * coding agent at the other end of this. It is held rather than thrown because
+ * it happens off to one side of the request egma is waiting on.
+ */
+type Startup = { failure: string | null };
+
 function start(launch: DrivenAgentLaunch, cwd: string, logStderr?: (chunk: string) => void) {
   const child = spawn(launch.command, [...launch.args], {
     cwd,
@@ -96,7 +119,15 @@ function start(launch: DrivenAgentLaunch, cwd: string, logStderr?: (chunk: strin
   child.stderr?.setEncoding("utf8");
   child.stderr?.on("data", (chunk: string) => logStderr?.(chunk));
 
-  return { child, handle: new DrivenAgentProcess(child) };
+  const startup: Startup = { failure: null };
+  child.once("error", (error: Error) => {
+    startup.failure ??= error.message;
+  });
+  child.once("exit", (code) => {
+    startup.failure ??= `it stopped straight away${code === null ? "" : ` (exit ${code})`}`;
+  });
+
+  return { child, handle: new DrivenAgentProcess(child), startup };
 }
 
 /**
@@ -170,6 +201,29 @@ function isAuthRequired(error: unknown): boolean {
   return error instanceof acp.RequestError && error.code === AUTH_REQUIRED;
 }
 
+/**
+ * The login egma can hand the developer to.
+ *
+ * A coding agent advertises how it wants to be logged in. Some of those ways
+ * are the agent's own — it opens its own browser page, or runs its own
+ * command — and those are the ones egma can hand off to and then carry on from.
+ * A method that asks for an environment variable is not a handoff: egma would
+ * have to collect a secret it has no business holding, so it is left alone and
+ * the developer is told to log in themselves.
+ */
+function ownLoginMethod(response: acp.InitializeResponse): string | null {
+  for (const method of response.authMethods ?? []) {
+    const kind = (method as { type?: string }).type;
+    if (kind === undefined || kind === "terminal") return method.id;
+  }
+  return null;
+}
+
+/** What one prompt turn came to. */
+type TurnOutcome =
+  | { readonly kind: "spoken"; readonly text: string }
+  | { readonly kind: "aborted"; readonly reason: string };
+
 function reasonFrom(error: unknown): string {
   if (error instanceof Error && error.message !== "") return error.message;
   return String(error);
@@ -181,8 +235,11 @@ export async function driveOneTask(options: DriveOptions): Promise<DriveResult> 
 
   if (signal.aborted) return { kind: "interrupted" };
 
-  const { child, handle } = start(launch, cwd, options.logStderr);
+  const { child, handle, startup } = start(launch, cwd, options.logStderr);
 
+  // Once the agent has answered `initialize` it is reachable, whatever happens
+  // afterwards. Before that, every failure means the same thing to a developer.
+  let reached = false;
   let interrupted = false;
   const onAbort = (): void => {
     interrupted = true;
@@ -202,7 +259,7 @@ export async function driveOneTask(options: DriveOptions): Promise<DriveResult> 
       Readable.toWeb(stdout) as ReadableStream<Uint8Array>,
     );
 
-    const summary = await acp
+    const outcome = await acp
       .client({ name: "egma" })
       .onRequest(acp.methods.client.session.requestPermission, (ctx) =>
         permissionHandler(ui)(ctx.params),
@@ -214,7 +271,7 @@ export async function driveOneTask(options: DriveOptions): Promise<DriveResult> 
         writeTextFileHandler(cwd, ui)(ctx.params),
       )
       .connectWith(stream, async (ctx) => {
-        await ctx.request(acp.methods.agent.initialize, {
+        const greeting = await ctx.request(acp.methods.agent.initialize, {
           protocolVersion: acp.PROTOCOL_VERSION,
           clientCapabilities: {
             // Reading and writing through egma is what puts the fence in the
@@ -222,6 +279,7 @@ export async function driveOneTask(options: DriveOptions): Promise<DriveResult> 
             fs: { readTextFile: true, writeTextFile: true },
           },
         });
+        reached = true;
 
         const meta = sessionMetaFor(launch.id);
         const request: acp.NewSessionRequest = {
@@ -230,35 +288,71 @@ export async function driveOneTask(options: DriveOptions): Promise<DriveResult> 
           ...(meta === null ? {} : { _meta: meta }),
         };
 
-        return ctx.buildSession(request).withSession(async (session) => {
-          // The first belt: start in the most permissive mode the agent offers,
-          // so most requests are never raised at all.
-          const mode = zeroPromptMode(session.modes);
-          if (mode !== null) {
-            await ctx.request(acp.methods.agent.session.setMode, {
-              sessionId: session.sessionId,
-              modeId: mode,
-            });
-          }
+        const runTask = async (): Promise<TurnOutcome> =>
+          ctx.buildSession(request).withSession(async (session) => {
+            // The first belt: start in the most permissive mode the agent
+            // offers, so most requests are never raised at all.
+            const mode = zeroPromptMode(session.modes);
+            if (mode !== null) {
+              await ctx.request(acp.methods.agent.session.setMode, {
+                sessionId: session.sessionId,
+                modeId: mode,
+              });
+            }
 
-          const turn = session.prompt(instructions);
-          turn.catch(() => undefined);
+            const turn = session.prompt(instructions);
+            turn.catch(() => undefined);
 
-          const actions = new ActionStream(cwd);
-          let spoken = "";
-          for (;;) {
-            const message = await session.nextUpdate();
-            if (message.kind === "stop") return spoken.trim();
-            for (const line of actions.lines(message.update)) ui.pushStatus(line);
-            spoken += drivenAgentTextIn(message.update);
-          }
-        });
+            const actions = new ActionStream(cwd);
+            let spoken = "";
+            for (;;) {
+              const message = await session.nextUpdate();
+              if (message.kind === "stop") return { kind: "spoken", text: spoken.trim() };
+
+              for (const line of actions.lines(message.update)) ui.pushStatus(line);
+
+              const said = drivenAgentTextIn(message.update);
+              if (said === "") continue;
+              spoken += said;
+
+              const reason = options.watch?.(said) ?? null;
+              if (reason === null) continue;
+              // egma ends the turn itself rather than asking the agent to stop
+              // and hoping. The cancel is a courtesy to the agent; the task is
+              // over either way.
+              await ctx
+                .notify(acp.methods.agent.session.cancel, { sessionId: session.sessionId })
+                .catch(() => undefined);
+              return { kind: "aborted", reason };
+            }
+          });
+
+        try {
+          return await runTask();
+        } catch (error) {
+          // A cold machine answers the first session with "log in first". That
+          // is the agent's own login to run, not egma's, so egma asks it to run
+          // it and then carries straight on with the same task.
+          if (!isAuthRequired(error)) throw error;
+          const method = ownLoginMethod(greeting);
+          if (method === null) throw error;
+          options.onLogin?.(launch.name);
+          await ctx.request(acp.methods.agent.authenticate, { methodId: method });
+          return await runTask();
+        }
       });
 
     if (interrupted) return { kind: "interrupted" };
-    return { kind: "done", summary };
+    if (outcome.kind === "aborted") return { kind: "aborted", reason: outcome.reason };
+    return { kind: "done", summary: outcome.text };
   } catch (error) {
     if (interrupted) return { kind: "interrupted" };
+    if (!reached) {
+      return {
+        kind: "unreachable",
+        reason: startup.failure ?? reasonFrom(error),
+      };
+    }
     if (isAuthRequired(error)) return { kind: "needs-login", drivenAgentName: launch.name };
     return { kind: "failed", reason: reasonFrom(error) };
   } finally {
