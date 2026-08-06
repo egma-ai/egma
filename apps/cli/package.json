@@ -1,0 +1,32 @@
+{
+  "name": "egma-cli",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The egma wizard and client: npx egma walks a developer to their first run.",
+  "license": "Apache-2.0",
+  "bin": {
+    "egma": "./dist/bin.js"
+  },
+  "files": ["dist", "NOTICE", "README.md"],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "smoke": "node smoke/real-claude-code.ts && node smoke/real-claude-code-fence.ts"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^1.3.0",
+    "ink": "^7.1.1",
+    "react": "^19.2.8"
+  },
+  "devDependencies": {
+    "@agentclientprotocol/claude-agent-acp": "^0.65.0",
+    "@types/react": "^19.2.2",
+    "@xterm/headless": "^6.0.0",
+    "node-pty": "^1.1.0"
+  }
+}
