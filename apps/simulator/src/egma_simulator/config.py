@@ -16,6 +16,7 @@ simulation, and never guessed at.
 
 from __future__ import annotations
 
+import math
 import os
 import socket
 from dataclasses import dataclass, field
@@ -66,6 +67,19 @@ def _seconds(name: str, fallback: float, *, allow_zero: bool = False) -> float:
         raise ValueError(
             f"{name} must be a number of seconds, got {raw!r}"
         ) from None
+    if not math.isfinite(value):
+        # `float()` reads "nan", "inf" and "-inf", and the range check
+        # below cannot catch the first two: every comparison against nan
+        # is False, and +inf is greater than zero, so both would be taken
+        # as a duration. What they would then buy is silence — an
+        # infinite heartbeat interval never beats again, so the control
+        # plane sees an orphan while the simulation is conducting fine,
+        # and an infinite report deadline retries one report until the
+        # process ends, holding a capacity slot nothing will free. Both
+        # are worse than not starting.
+        raise ValueError(
+            f"{name} must be a finite number of seconds, got {raw!r}"
+        )
     if value < 0 or (value == 0 and not allow_zero):
         wanted = "zero or more" if allow_zero else "more than zero"
         raise ValueError(f"{name} must be {wanted}, got {raw}")

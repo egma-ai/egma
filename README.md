@@ -101,7 +101,9 @@ The workbench prints one JSON line per observation — queued, the claim, each
 heartbeat, each reported event — which is a simulation going queued → claimed →
 running → completed in front of you. Chat exchanges finish in seconds; the
 voice fixture leaves a real `.wav` on the volume with one speaker per channel.
-`http://localhost:8085/workbench/records` is the same thing as JSON.
+`http://localhost:8085/workbench/records` is the same thing as JSON, and is
+published to this machine only — the workbench asks nobody who they are, so
+handing it to a network would hand over queueing and cancelling work too.
 
 `docker compose up` starts no workbench. This is a dev and demo affair, which
 is why it lives in a file you have to ask for by name.

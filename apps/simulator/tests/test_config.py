@@ -132,6 +132,45 @@ def test_a_negative_duration_is_refused_by_name(env):
         SimulatorConfig.from_env()
 
 
+DURATION_VARIABLES = [
+    "EGMA_SIMULATOR_HEARTBEAT_SECONDS",
+    "EGMA_SIMULATOR_CLAIM_WAIT_SECONDS",
+    "EGMA_SIMULATOR_REPORT_DEADLINE_SECONDS",
+]
+"""Every variable read as a duration — all of them through one helper."""
+
+
+@pytest.mark.parametrize("variable", DURATION_VARIABLES)
+@pytest.mark.parametrize("written", ["nan", "inf", "-inf", "Infinity", "NaN"])
+def test_a_duration_that_is_not_finite_is_refused_by_name(env, variable, written):
+    """The numbers that read as numbers and behave as neither.
+
+    ``float()`` accepts every one of these, and the range check cannot
+    see two of them: every comparison against nan is False, and +inf is
+    greater than zero, so both would be taken for a duration. What they
+    would buy is silence rather than an error — an infinite heartbeat
+    interval never beats again, so a simulation going along fine looks
+    orphaned to the control plane, and an infinite report deadline
+    retries one report until the process ends, holding a capacity slot
+    nothing will ever free.
+    """
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv(variable, written)
+
+    with pytest.raises(ValueError, match=variable):
+        SimulatorConfig.from_env()
+
+
+@pytest.mark.parametrize("written", ["nan", "inf", "-inf"])
+def test_a_capacity_that_is_not_finite_is_refused_by_name(env, written):
+    """The other numeric variable, which `int()` turns down on its own."""
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv("EGMA_SIMULATOR_CAPACITY", written)
+
+    with pytest.raises(ValueError, match="EGMA_SIMULATOR_CAPACITY"):
+        SimulatorConfig.from_env()
+
+
 def test_an_unknown_log_level_is_refused_by_name(env):
     """Caught here rather than in logging setup, which names no variable."""
     env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
