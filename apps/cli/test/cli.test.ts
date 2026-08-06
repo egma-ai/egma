@@ -3,7 +3,7 @@
  */
 
 import { execFile, spawn } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
@@ -82,8 +82,7 @@ describe("the egma command", () => {
     expect(help.stdout).toContain("Usage:");
     expect(help.stdout).toContain("--coding-agent <id>");
 
-    // The two test seams are not product surface, so they are not offered.
-    expect(help.stdout).not.toContain("--file");
+    // The test seam is not product surface, so it is not offered.
     expect(help.stdout).not.toContain("-- <command>");
 
     const version = await egma(["--version"], workspace);
@@ -109,7 +108,7 @@ describe("the egma command", () => {
     expect(result.stdout).toBe("");
   });
 
-  it("drives the whole task and ends with the one exit line", async () => {
+  it("drives the whole step and ends with the one exit line", async () => {
     const script = await workspace.script({
       steps: [
         {
@@ -119,8 +118,14 @@ describe("the egma command", () => {
           locations: [{ path: "package.json" }],
         },
         { kind: "read-file", path: "package.json", recordAs: "manifest" },
-        { kind: "write-file", path: "notes.txt", content: "a package manifest\n" },
-        { kind: "say", text: "It is a package manifest." },
+        {
+          kind: "say",
+          text: [
+            "egma:found framework retell-sdk",
+            "egma:found prompts prompts/order-line.md",
+            "",
+          ].join("\n"),
+        },
         { kind: "stop", reason: "end_turn" },
       ],
     });
@@ -133,46 +138,64 @@ describe("the egma command", () => {
     expect(result.code).toBe(0);
     const lines = result.stdout.trimEnd().split("\n");
     expect(lines).toContain("◆ Read package.json");
+    expect(lines).toContain("┊ Framework  retell-sdk");
     expect(lines.at(-1)).toBe(
-      `${path.basename(process.execPath)} read package.json for egma. Nothing in this folder was changed.`,
-    );
-    expect(await readFile(path.join(workspace.dir, "notes.txt"), "utf8")).toBe(
-      "a package manifest\n",
+      "egma found your voice agent: retell-sdk, prompts in prompts/order-line.md.",
     );
   });
 
-  it("keeps the two seams working that the tests themselves are driven by", async () => {
-    // `--file` and `-- <command>` are how a test pins the file and starts a
-    // scripted agent. They are not offered in the help text, and they are not
-    // stable, but everything offline rides on them — so they are checked.
-    await writeFile(path.join(workspace.dir, "NOTES.md"), "just some notes\n", "utf8");
-    const script = await workspace.script({
-      steps: [
-        { kind: "say", text: "It is a notes file." },
-        { kind: "stop", reason: "end_turn" },
-      ],
-    });
-
+  it("prints what to paste, and exits cleanly, with no coding agent to drive", async () => {
     const result = await egma(
       [
         "--headless",
         "--cwd",
         workspace.dir,
-        "--file",
-        "NOTES.md",
         "--",
-        process.execPath,
-        FAKE_AGENT,
-        script,
+        path.join(workspace.dir, "no-such-coding-agent"),
       ],
       workspace,
     );
 
     expect(result.code).toBe(0);
-    // The named file won over the one the folder would have chosen.
-    expect(result.stdout).toContain("Task: read NOTES.md and say what it is");
+    expect(result.stdout).toContain("Open the coding agent you use, and paste this into it:");
+    expect(result.stdout).toContain("Find the voice agent in this repository");
+    expect(result.stdout.trimEnd().split("\n").at(-1)).toContain(
+      "no coding agent on this machine",
+    );
+    // A message, not a crash.
+    expect(result.stderr).toBe("");
+  });
+
+  it("prints the same message when the registry names an agent it cannot start", async () => {
+    const result = await egma(
+      ["--headless", "--cwd", workspace.dir, "--coding-agent", "not-a-real-agent"],
+      workspace,
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("not-a-real-agent");
+    expect(result.stdout).toContain("Open the coding agent you use, and paste this into it:");
+  });
+
+  it("keeps the seam working that the tests themselves are driven by", async () => {
+    // `-- <command>` is how a test starts a scripted agent in place of a real
+    // one. It is not offered in the help text and it is not stable, but
+    // everything offline rides on it — so it is checked.
+    const script = await workspace.script({
+      steps: [
+        { kind: "say", text: "egma:none There is no voice agent here.\n" },
+        { kind: "stop", reason: "end_turn" },
+      ],
+    });
+
+    const result = await egma(
+      ["--headless", "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+      workspace,
+    );
+
+    expect(result.code).toBe(1);
     expect(result.stdout.trimEnd().split("\n").at(-1)).toBe(
-      `${path.basename(process.execPath)} read NOTES.md for egma. Nothing in this folder was changed.`,
+      "egma found no voice agent to test. Run egma again where your agent is defined.",
     );
   });
 

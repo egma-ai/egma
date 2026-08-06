@@ -7,7 +7,7 @@
 
 import type { LoginPrompt } from "../../platform/login.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
-import type { DrivenAgent, GateId, WizardUI } from "../wizard-ui.ts";
+import type { AskId, DrivenAgent, GateId, WizardUI } from "../wizard-ui.ts";
 import type { WizardStore } from "./store.ts";
 
 export class InkUI implements WizardUI {
@@ -32,10 +32,6 @@ export class InkUI implements WizardUI {
     this.store.setDrivenAgentLog(file);
   }
 
-  setTaskFile(file: string): void {
-    this.store.setTaskFile(file);
-  }
-
   setLogin(prompt: LoginPrompt | null): void {
     this.store.setLogin(prompt);
   }
@@ -46,6 +42,10 @@ export class InkUI implements WizardUI {
 
   waitForGate(gate: GateId): Promise<void> {
     return this.store.getGate(gate);
+  }
+
+  waitForAnswer(ask: AskId): Promise<string | null> {
+    return this.store.ask(ask);
   }
 
   taskStarted(): void {

@@ -16,6 +16,16 @@ import type { ExitReport } from "../wizard/exit-line.ts";
 /** A point the flow waits at until the developer has moved past it. */
 export type GateId = "begin";
 
+/**
+ * A point the flow waits at for something only the developer knows.
+ *
+ * It is the same gate pattern, carrying a value: the flow parks, a screen
+ * collects the answer, the gate opens. Nothing here draws and nothing here
+ * reads a keystroke, so this is still not a prompt method — the screen owns
+ * every key, and a developer who answers nothing answers `null`.
+ */
+export type AskId = "prompts-pointer";
+
 /** The coding agent egma is driving. */
 export type DrivenAgent = { readonly id: string; readonly name: string };
 
@@ -25,9 +35,6 @@ export interface WizardUI {
 
   /** Where the coding agent's own output is being kept for this run. */
   setDrivenAgentLog(file: string): void;
-
-  /** Name the file the one task is about. */
-  setTaskFile(file: string): void;
 
   /**
    * What login is waiting to be approved, or `null` once it no longer is.
@@ -54,6 +61,12 @@ export interface WizardUI {
    * no, and there is no answer for this method to return.
    */
   waitForGate(gate: GateId): Promise<void>;
+
+  /**
+   * Park until the developer has answered, or said they have no answer. `null`
+   * is a real answer and the flow must handle it.
+   */
+  waitForAnswer(ask: AskId): Promise<string | null>;
 
   /** The coding agent has been started and the task is under way. */
   taskStarted(): void;

@@ -11,6 +11,7 @@ import { useInput, useStdout } from "ink";
 import { copyLink } from "../../platform/clipboard.ts";
 import { IntroScreen } from "./screens/IntroScreen.tsx";
 import { LoginScreen } from "./screens/LoginScreen.tsx";
+import { PromptsPointerScreen } from "./screens/PromptsPointerScreen.tsx";
 import { TaskScreen } from "./screens/TaskScreen.tsx";
 import type { WizardStore } from "./store.ts";
 
@@ -50,6 +51,13 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
         onType={(typed) => store.typeLogin(typed)}
         onSubmit={() => store.submitLogin()}
         onQuit={onQuit}
+      />
+    );
+  }
+  if (screen === "prompts-pointer") {
+    return (
+      <PromptsPointerScreen
+        onAnswer={(pointer) => store.answer("prompts-pointer", pointer)}
       />
     );
   }

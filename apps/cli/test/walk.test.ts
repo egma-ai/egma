@@ -59,7 +59,7 @@ describe("one task, driven on a scripted agent", () => {
   it("negotiates, sets the mode that stops questions, works, and leaves one line", async () => {
     const script = await workspace.script({
       steps: [
-        { kind: "say", text: "Let me look at that file." },
+        { kind: "say", text: "Let me look at that file.\n" },
         {
           kind: "tool-call",
           id: "t1",
@@ -69,8 +69,7 @@ describe("one task, driven on a scripted agent", () => {
         },
         { kind: "read-file", path: "package.json", recordAs: "manifest" },
         { kind: "tool-call-update", id: "t1", status: "completed" },
-        { kind: "write-file", path: "notes.txt", content: "a package manifest\n" },
-        { kind: "say", text: "It is a package manifest." },
+        { kind: "say", text: "egma:found framework retell-sdk\n" },
         { kind: "stop", reason: "end_turn" },
       ],
     });
@@ -83,19 +82,8 @@ describe("one task, driven on a scripted agent", () => {
       signal: new AbortController().signal,
     });
 
-    expect(report).toEqual({
-      kind: "task-done",
-      drivenAgentName: "Fake Agent",
-      file: "package.json",
-    });
-    expect(buildExitLine(report)).toBe(
-      "Fake Agent read package.json for egma. Nothing in this folder was changed.",
-    );
-
-    // The file the agent was told to write is the one that landed.
-    expect(await readFile(path.join(workspace.dir, "notes.txt"), "utf8")).toBe(
-      "a package manifest\n",
-    );
+    expect(report).toEqual({ kind: "found-agent", framework: "retell-sdk", prompts: null });
+    expect(buildExitLine(report)).toBe("egma found your voice agent: retell-sdk.");
 
     const observed = await reportIn(workspace);
     expect(observed.protocolVersion).toBeGreaterThan(0);
@@ -103,9 +91,11 @@ describe("one task, driven on a scripted agent", () => {
     expect(observed.clientCapabilities?.fs).toEqual({ readTextFile: true, writeTextFile: true });
     expect(observed.observations["manifest"]).toEqual({ read: MANIFEST.length });
 
-    // Every action the agent took was shown, and its own words were kept.
+    // Every action the agent took was shown, and the fact it reported is on the
+    // card, while the words around it are not.
     expect(ui.record.statuses).toContain("◆ Read package.json");
-    expect(ui.record.summary).toContain("It is a package manifest.");
+    expect(ui.record.summary).toContain("Framework  retell-sdk");
+    expect(ui.record.summary).not.toContain("Let me look at that file.");
   });
 
   it("approves what the agent asks for, so the developer is never interrupted", async () => {
@@ -252,7 +242,7 @@ describe("one task, driven on a scripted agent", () => {
     const script = await workspace.script({
       steps: [
         { kind: "grumble", text: "warning: the adapter is talking to itself" },
-        { kind: "say", text: "It is a package manifest." },
+        { kind: "say", text: "egma:found framework retell-sdk\n" },
         { kind: "grumble", text: "warning: and again on the way out" },
         { kind: "stop", reason: "end_turn" },
       ],

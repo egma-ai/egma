@@ -43,6 +43,19 @@ describe("keys as data", () => {
     expect(pressed).toEqual(["begin", "quit"]);
   });
 
+  /**
+   * A terminal that has not been taken into raw mode yet turns the carriage
+   * return Enter sends into a line feed, and the renderer calls only the first
+   * of those `return`. The developer pressed one key. So did the test.
+   */
+  it("takes Enter whichever byte the terminal sent for it", () => {
+    pressed.length = 0;
+    expect(dispatchKey(bindings, "\r", {})).toBe(true);
+    expect(dispatchKey(bindings, "\n", {})).toBe(true);
+    expect(dispatchKey(bindings, "", { return: true })).toBe(true);
+    expect(pressed).toEqual(["begin", "begin", "begin"]);
+  });
+
   it("builds the hint bar from the same list, so the two cannot drift", () => {
     const ordered: KeyBinding[] = [
       { ...(bindings[0] as KeyBinding), priority: 0 },

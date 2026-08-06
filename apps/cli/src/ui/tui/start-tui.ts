@@ -13,7 +13,7 @@ import { createElement } from "react";
 
 import { render } from "ink";
 
-import { buildExitLine, type ExitReport } from "../../wizard/exit-line.ts";
+import { buildExitLine, buildExitNotice, type ExitReport } from "../../wizard/exit-line.ts";
 import type { StopReason } from "../../wizard/stop.ts";
 import type { WizardUI } from "../wizard-ui.ts";
 import { App } from "./App.tsx";
@@ -57,6 +57,8 @@ export function startTui(options: StartTuiOptions): TuiHandle {
     closed = true;
     instance.unmount();
     leaveAlternateScreen(stdout);
+    const notice = buildExitNotice(report);
+    if (notice !== null) stdout.write(`${notice}\n\n`);
     stdout.write(`${buildExitLine(report)}\n`);
   };
 

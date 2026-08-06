@@ -63,10 +63,25 @@ export function defaultPriority(match: KeyMatch | readonly KeyMatch[]): number {
   return DEFAULT_PRIORITY[first as string] ?? 15;
 }
 
+/**
+ * Enter, whichever byte the terminal sent for it.
+ *
+ * A terminal in its ordinary line-by-line mode turns the carriage return that
+ * Enter sends into a line feed, and the renderer only calls a carriage return
+ * `return`. The two are the same key, and the moment they differ is exactly the
+ * moment a developer presses Enter: the first frame is on screen a beat before
+ * the renderer takes the terminal into raw mode, and a keystroke in that beat
+ * arrives as a line feed. Reading only `key.return` drops it, and the wizard
+ * sits there looking as though it did not hear.
+ */
+export function isEnter(input: string, key: KeyState): boolean {
+  return key.return === true || input === "\r" || input === "\n";
+}
+
 export function matchesKey(match: KeyMatch, input: string, key: KeyState): boolean {
   switch (match) {
     case "return":
-      return key.return === true;
+      return isEnter(input, key);
     case "escape":
       return key.escape === true;
     case "space":

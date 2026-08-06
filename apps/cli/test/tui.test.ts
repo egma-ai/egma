@@ -5,21 +5,46 @@
  * reads both of its screens, so the promise about scrollback is checked as a
  * terminal fact rather than as an intention. Still no model and still no human:
  * the agent is the scripted one and the keystrokes are written by the test.
+ *
+ * Every wait here asks for **everything** the assertions after it will read,
+ * and reads the screen that satisfied the wait. A frame arrives in chunks, so
+ * waiting for its first line and then asserting on its last is a race that
+ * the machine wins whenever it is busy — which is what made this file flaky.
  */
 
 import process from "node:process";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { runInTerminal } from "./support/pty.ts";
-import {
-  CLI_ENTRY,
-  FAKE_AGENT,
-  MANIFEST,
-  makeWorkspace,
-  waitUntil,
-  type Workspace,
-} from "./support/workspace.ts";
+import { runInTerminal, type TerminalRun } from "./support/pty.ts";
+import { CLI_ENTRY, FAKE_AGENT, MANIFEST, makeWorkspace, type Workspace } from "./support/workspace.ts";
+
+// A real subprocess, a real terminal and a test run using every core: the
+// budget is generous so that only a broken wizard can reach it.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
+
+/**
+ * Waits until the screen holds every one of these, and answers that screen.
+ *
+ * The screen is captured at the moment the condition held, so a redraw that
+ * starts immediately afterwards cannot take a line back out from under the
+ * assertions.
+ */
+async function showing(terminal: TerminalRun, ...parts: readonly string[]): Promise<string> {
+  let held = "";
+  const shown = await terminal.waitFor(() => {
+    const screen = terminal.screen();
+    if (!parts.every((part) => screen.includes(part))) return false;
+    held = screen;
+    return true;
+  });
+  if (!shown) {
+    throw new Error(
+      `the terminal never showed all of: ${parts.join(" | ")}\n\nlast screen:\n${terminal.screen()}`,
+    );
+  }
+  return held;
+}
 
 describe("the wizard on a real terminal", () => {
   let workspace: Workspace;
@@ -39,9 +64,9 @@ describe("the wizard on a real terminal", () => {
       steps: [
         { kind: "tool-call", id: "t1", title: "Read", locations: [{ path: "package.json" }] },
         { kind: "read-file", path: "package.json", recordAs: "manifest" },
+        { kind: "say", text: "egma:found framework retell-sdk\n" },
         // A real agent takes seconds; this is long enough to watch it work.
         { kind: "wait", ms: 750 },
-        { kind: "say", text: "It is a package manifest." },
         { kind: "stop", reason: "end_turn" },
       ],
     });
@@ -54,13 +79,14 @@ describe("the wizard on a real terminal", () => {
     });
 
     try {
-      expect(await waitUntil(() => terminal.screen().includes("read package.json"))).toBe(true);
-
       // The intro says what is about to happen and what the keystroke means.
-      const intro = terminal.screen();
-      expect(intro).toContain("This is the first check that egma can drive your own coding agent");
-      expect(intro).toContain("[enter] begin");
-      expect(intro).toContain("[q] quit");
+      const intro = await showing(
+        terminal,
+        "egma is about to find your voice agent",
+        "where its prompts live",
+        "[enter] begin",
+        "[q] quit",
+      );
       expect(intro.indexOf("[enter] begin")).toBeLessThan(intro.indexOf("[q] quit"));
 
       // It is drawn on the alternate screen, so scrollback is still untouched.
@@ -68,17 +94,84 @@ describe("the wizard on a real terminal", () => {
 
       terminal.write("\r");
 
-      expect(await waitUntil(() => terminal.screen().includes("Read package.json"))).toBe(true);
+      // Every action the agent takes, and every fact it reports, lands on
+      // screen while it works.
+      await showing(terminal, "Read package.json", "┊ Framework  retell-sdk");
 
       const code = await terminal.exited;
       expect(code).toBe(0);
 
       // Everything the wizard drew is gone. One line is left, and it is plain.
       const left = terminal.scrollback().trim();
-      expect(left).toBe(
-        "node read package.json for egma. Nothing in this folder was changed.",
-      );
+      expect(left).toBe("egma found your voice agent: retell-sdk.");
       expect(left.split("\n")).toHaveLength(1);
+    } finally {
+      terminal.kill();
+    }
+  });
+
+  it("asks once for the prompts when the folder holds no voice agent", async () => {
+    const script = await workspace.script({
+      steps: [
+        { kind: "say", text: "egma:none There is no voice agent in this folder.\n" },
+        { kind: "stop", reason: "end_turn" },
+      ],
+    });
+
+    const terminal = runInTerminal({
+      command: process.execPath,
+      args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+      cwd: workspace.dir,
+      env: workspace.env(),
+    });
+
+    try {
+      await showing(terminal, "egma is about to find your voice agent", "[enter] begin");
+      terminal.write("\r");
+
+      await showing(
+        terminal,
+        "Nothing in this folder looks like a voice agent",
+        "[enter] look there",
+        "[esc] nowhere else",
+      );
+
+      // The developer has nowhere to point egma at, and says so.
+      terminal.write("");
+
+      expect(await terminal.exited).toBe(1);
+      expect(terminal.scrollback().trim()).toBe(
+        "egma found no voice agent to test. Run egma again where your agent is defined.",
+      );
+    } finally {
+      terminal.kill();
+    }
+  });
+
+  it("stops rather than hangs when Ctrl-C lands on that question", async () => {
+    const script = await workspace.script({
+      steps: [
+        { kind: "say", text: "egma:none There is no voice agent in this folder.\n" },
+        { kind: "stop", reason: "end_turn" },
+      ],
+    });
+
+    const terminal = runInTerminal({
+      command: process.execPath,
+      args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+      cwd: workspace.dir,
+      env: workspace.env(),
+    });
+
+    try {
+      await showing(terminal, "egma is about to find", "[enter] begin");
+      terminal.write("\r");
+      await showing(terminal, "Nothing in this folder looks like a voice agent", "[esc] nowhere else");
+
+      terminal.write("");
+
+      expect(await terminal.exited).toBe(130);
+      expect(terminal.scrollback().trim()).toContain("stopped before the task finished");
     } finally {
       terminal.kill();
     }
@@ -95,9 +188,7 @@ describe("the wizard on a real terminal", () => {
     });
 
     try {
-      expect(
-        await waitUntil(() => terminal.screen().includes("This is the first check")),
-      ).toBe(true);
+      await showing(terminal, "egma is about to find", "[q] quit");
 
       terminal.write("q");
 
@@ -126,11 +217,9 @@ describe("the wizard on a real terminal", () => {
     });
 
     try {
-      expect(
-        await waitUntil(() => terminal.screen().includes("This is the first check")),
-      ).toBe(true);
+      await showing(terminal, "egma is about to find", "[enter] begin");
       terminal.write("\r");
-      expect(await waitUntil(() => terminal.screen().includes("Thinking about it"))).toBe(true);
+      await showing(terminal, "Thinking about it");
 
       terminal.write("");
 

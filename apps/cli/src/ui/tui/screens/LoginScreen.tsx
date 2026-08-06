@@ -14,7 +14,7 @@
 
 import { Box, Text, useInput, useStdout } from "ink";
 
-import { dispatchKey, hintBar, type KeyBinding } from "../keybindings.ts";
+import { dispatchKey, hintBar, isEnter, type KeyBinding } from "../keybindings.ts";
 import type { WizardState } from "../state.ts";
 import { addressFits, columnsNeeded } from "../width.ts";
 
@@ -65,8 +65,10 @@ export function LoginScreen({
       return;
     }
     // Once something is on the line, every character belongs to it. Enter sends
-    // it; escape clears it and gives the keys back.
-    if (state.loginTyping !== "" && !key.return) {
+    // it; escape clears it and gives the keys back. Enter is read the one way
+    // it is read everywhere, so a line feed sends the line as a carriage return
+    // does.
+    if (state.loginTyping !== "" && !isEnter(input, key)) {
       onType(state.loginTyping + input);
       return;
     }

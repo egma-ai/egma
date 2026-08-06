@@ -17,11 +17,26 @@ is how CI runs it.
 
 ## What it does today
 
-This is the first working slice. `npx egma` signs this machine in to egma, then
-starts the coding agent you already have, gives it one small task — read a file
-in this folder and say what it is — and shows you every action it takes while it
-works. That proves the path the rest of the product runs on: egma drives your
-own agent, on your own machine, with your own login.
+<!-- The facts are FACTS in src/wizard/facts.ts, which is the source of truth; keep this sentence in step. -->
+
+`npx egma` signs this machine in to egma, then finds your voice agent. It starts
+the coding agent you already have, hands it egma's own notes on how voice agents
+are built, and has it read this folder and report which framework runs it, where
+its prompts live, where its tools are defined, how it reaches production, and
+where its identifier is written down. Every action it takes appears on screen
+while it works, and the facts it finds arrive one line at a time.
+
+The task tells your coding agent to change nothing, and any file whose name
+starts with `.env` is refused when the agent goes through egma for it. Both are
+real, and neither is a lock: your coding agent runs its own commands, and a
+command that writes is one egma shows you rather than one egma stops. That is
+the trade — you see everything, as it happens.
+
+Your code and your prompts never leave this machine.
+
+If this folder holds no voice agent, egma asks once for the folder your prompts
+are in — teams often keep them apart — looks there, and otherwise says plainly
+that you should run it where your agent is defined.
 
 ## Signing in
 
@@ -76,6 +91,15 @@ EGMA_URL=http://localhost:3000 npx egma
 or `--url`. It is kept beside the key after the first login, so later commands
 find it without being told again.
 
+## The notes egma hands your coding agent
+
+They are markdown files inside this package, under `skills/`. They are sent as
+part of the task, at the moment the task is sent. Nothing is installed on your
+machine, nothing is downloaded, and nothing is written to your repository.
+
+Today there are two: one on finding a voice agent in a repository nobody has
+described, and one on what a Retell voice agent looks like from the inside.
+
 ## How it reaches your coding agent
 
 Over the [Agent Client Protocol](https://agentclientprotocol.com). The agent runs
@@ -128,9 +152,13 @@ is shut down before egma exits.
 
 ## Requirements
 
-Node 22 or newer. A coding agent installed and logged in — Claude Code and
-Codex both work, as does any agent in the protocol registry that ships as a
-package.
+Node 22 or newer. A coding agent installed — Claude Code and Codex both work,
+as does any agent in the protocol registry that ships as a package.
+
+You do not have to be logged in to it first. If it asks egma to log in, egma
+hands you to that agent's own login and carries on where it left off. And if
+there is no coding agent here for egma to drive at all, it prints the words to
+paste into whichever one you do use, and stops.
 
 ## Licence
 

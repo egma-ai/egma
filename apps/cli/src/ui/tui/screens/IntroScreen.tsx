@@ -9,6 +9,7 @@
 
 import { Box, Text, useInput } from "ink";
 
+import { FACTS } from "../../../wizard/facts.ts";
 import { dispatchKey, hintBar, type KeyBinding } from "../keybindings.ts";
 import type { WizardState } from "../state.ts";
 
@@ -28,19 +29,23 @@ export function IntroScreen({ state, onBegin, onQuit }: IntroScreenProps) {
     dispatchKey(bindings, input, key);
   });
 
-  const drivenAgentName = state.drivenAgent?.name ?? "your coding agent";
-  const file = state.taskFile ?? "one file";
+  const drivenAgentName = state.drivenAgent?.name ?? "your own coding agent";
 
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
       <Text bold>egma</Text>
       <Box height={1} />
-      <Text>This is the first check that egma can drive your own coding agent.</Text>
+      <Text>egma is about to find your voice agent.</Text>
       <Box height={1} />
-      <Text>
-        {`egma will ask ${drivenAgentName} to read ${file} in this folder and say what it is.`}
-      </Text>
-      <Text>Nothing here is changed. Your code stays on this machine.</Text>
+      <Text>{`It reads this folder with ${drivenAgentName}, here on this machine, and reports:`}</Text>
+      <Box height={1} />
+      {/* The facts themselves are FACTS in wizard/facts.ts, so this promise
+          cannot fall behind what the step actually brings back. */}
+      {FACTS.map((fact) => (
+        <Text key={fact.name}> {fact.phrase}</Text>
+      ))}
+      <Box height={1} />
+      <Text>egma tells it to change nothing. Your code stays on this machine.</Text>
       <Box height={1} />
       <Text>Every action your coding agent takes appears below as it happens.</Text>
       <Box height={1} />
