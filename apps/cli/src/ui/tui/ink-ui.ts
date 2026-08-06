@@ -8,6 +8,7 @@
 import type { LoginPrompt } from "../../platform/login.ts";
 import type { RetellAgent } from "../../retell/client.ts";
 import type { KeyAsk } from "../../retell/connect.ts";
+import type { Detection } from "../../wizard/detection.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
 import type { TestGate } from "../../wizard/gate.ts";
 import type { GenerationProgress } from "../../wizard/test-generation.ts";
@@ -34,6 +35,10 @@ export class InkUI implements WizardUI {
 
   setDrivenAgentLog(file: string): void {
     this.store.setDrivenAgentLog(file);
+  }
+
+  setDetection(detection: Detection | null): void {
+    this.store.setDetection(detection);
   }
 
   setLogin(prompt: LoginPrompt | null): void {

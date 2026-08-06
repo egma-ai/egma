@@ -1,0 +1,278 @@
+/**
+ * The words egma uses, taught while the files land — and never in the way.
+ *
+ * Two things have to be true of the pane and the second is the harder one. It
+ * has to teach the glossary's own vocabulary, because a developer who leaves
+ * the wizard calling a run a batch will not find anything egma answers to. And
+ * it has to cost nothing: the flow must not wait on it, be paced by it, or end
+ * differently because it was drawn. So the same suite is written twice — once
+ * with the pane on a real terminal and once with no screen at all — and what
+ * comes out is compared.
+ */
+
+import path from "node:path";
+import process from "node:process";
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { LEARN_CARDS, CARD_WIDTH, cardAt } from "../src/wizard/teaching.ts";
+import { HeadlessUI } from "../src/ui/headless-ui.ts";
+import { buildExitLine } from "../src/wizard/exit-line.ts";
+import { walk } from "../src/wizard/walk.ts";
+import type { FakeStep } from "./support/fake-agent.ts";
+import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
+import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
+import { bannedWordsIn } from "./support/glossary.ts";
+import { runInTerminal, showing } from "./support/pty.ts";
+import {
+  CLI_ENTRY,
+  FAKE_AGENT,
+  RETELL_FIXTURE_REPO,
+  makeWorkspace,
+  type Workspace,
+} from "./support/workspace.ts";
+
+vi.setConfig({ testTimeout: 90_000, hookTimeout: 60_000 });
+
+const KEY = "key_44a0d7c1e6b39f28510d";
+
+const ACCOUNT: FakeRetellScript = {
+  keys: [KEY],
+  agents: [
+    {
+      agent_id: "agent_quillfeather_order_line",
+      agent_name: "order-line",
+      response_engine: { type: "retell-llm", llm_id: "llm_quillfeather" },
+    },
+  ],
+  llms: [{ llm_id: "llm_quillfeather", general_prompt: "Answer the order line.\n" }],
+};
+
+/** The fragment only the write-the-tests task has, whatever it asks for. */
+const GENERATE_TASK = "## The words the agent is running on";
+
+const NAMES = ["open-on-sunday", "lost-the-order-number", "wants-it-by-friday"];
+
+function fileFor(name: string): string {
+  return [
+    "---",
+    `name: ${name}`,
+    "---",
+    "## Scenario",
+    `Somebody rings the order line about ${name.replaceAll("-", " ")}.`,
+    "## Expected behaviors",
+    "1. The agent says the workshop's name.",
+    "",
+  ].join("\n");
+}
+
+function writes(name: string): FakeStep[] {
+  return [
+    { kind: "say", text: `egma:writing ${name}\n` },
+    { kind: "write-file", path: `egma/tests/${name}.md`, content: fileFor(name) },
+    { kind: "say", text: `egma:wrote ${name}\n` },
+  ];
+}
+
+/**
+ * The one script both runs use.
+ *
+ * It waits between files so that the pane is on screen long enough to be read —
+ * and for well under the time one card stays up, which is what makes "the timer
+ * never fired" a fact about this run rather than a hope.
+ */
+function scriptFor(workspace: Workspace): Promise<string> {
+  return workspace.script({
+    steps: [
+      { kind: "say", text: "egma:found framework retell-sdk\n" },
+      { kind: "stop", reason: "end_turn" },
+    ],
+    stepsByTask: [
+      {
+        contains: GENERATE_TASK,
+        steps: [
+          { kind: "say", text: `egma:plan ${NAMES.join(", ")}\n` },
+          ...NAMES.flatMap((name) => [
+            { kind: "wait", ms: 500 } as FakeStep,
+            ...writes(name),
+          ]),
+          { kind: "stop", reason: "end_turn" },
+        ],
+      },
+    ],
+  });
+}
+
+let platform: Platform;
+let retell: FakeRetell;
+let workspace: Workspace;
+
+beforeEach(async () => {
+  platform = await startPlatform();
+  retell = await startFakeRetell(ACCOUNT);
+  workspace = await makeWorkspace({}, { from: RETELL_FIXTURE_REPO });
+  await workspace.signIn(platform.url, platform.device.mint());
+});
+
+afterEach(async () => {
+  await retell.close();
+  await platform.close();
+  await workspace.remove();
+});
+
+describe("the deck", () => {
+  it("says what egma means, in egma's own words", () => {
+    const said = LEARN_CARDS.flatMap((card) => [card.heading, ...card.lines]).join(" ");
+
+    // The glossary's spine: a test is executed as simulations inside a run, a
+    // metric measures, a grader judges, and a verdict is one of four.
+    expect(said).toContain("expected behaviors");
+    expect(said).toContain("One execution of a selection of");
+    expect(said).toContain("One test executed once inside a");
+    expect(said).toContain("A metric measures");
+    expect(said).toContain("A grader judges");
+    expect(said).toContain("passed, failed, skipped,");
+    expect(said).toContain("errored");
+
+    // And none of the words the glossary bans, which is the half that matters:
+    // a card teaching a near synonym teaches a developer to ask for something
+    // egma does not answer to.
+    //
+    // It is the same list the skills are held to, and it is that list rather
+    // than a shorter one written to fit the cards — a guard shaped around the
+    // text it guards proves only that somebody read the text once. The deck
+    // takes no carve-out at all: the one the skills take is for a file format,
+    // and a card is prose from the first word to the last.
+    expect(bannedWordsIn(said)).toEqual([]);
+  });
+
+  it("is written to the width of the pane, so nothing rewraps it", () => {
+    for (const card of LEARN_CARDS) {
+      expect(card.heading.length, card.heading).toBeLessThanOrEqual(CARD_WIDTH);
+      for (const line of card.lines) {
+        expect(line.length, line).toBeLessThanOrEqual(CARD_WIDTH);
+      }
+    }
+  });
+
+  it("never runs out, however long the writing takes", () => {
+    expect(cardAt(0)).toBe(LEARN_CARDS[0]);
+    expect(cardAt(LEARN_CARDS.length)).toBe(LEARN_CARDS[0]);
+    expect(cardAt(LEARN_CARDS.length * 4 + 2)).toBe(LEARN_CARDS[2]);
+  });
+});
+
+describe("the pane, while the files land", () => {
+  it("is drawn beside them, and the walk ends exactly as it does without it", async () => {
+    const script = await scriptFor(workspace);
+
+    const terminal = runInTerminal({
+      command: process.execPath,
+      args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+      cwd: workspace.dir,
+      env: workspace.env({ EGMA_URL: platform.url, EGMA_RETELL_URL: retell.url }),
+      cols: 100,
+    });
+
+    try {
+      await showing(terminal, "egma is about to find", "[enter] begin");
+      terminal.write("\r");
+
+      await showing(terminal, "Paste your Retell API key");
+      terminal.write(`${KEY}\r`);
+
+      await showing(terminal, "Do you already have test cases");
+      terminal.write("n");
+
+      // The first card is up, beside the list it is meant to fill the wait of.
+      const pane = await showing(
+        terminal,
+        "Writing tests for your voice agent.",
+        "A test",
+        "One situation to put your agent",
+        "Progress:",
+      );
+      expect(pane).toContain("behaviors that say what should");
+
+      await showing(terminal, "3 tests generated", "[enter] run");
+      terminal.write("\r");
+
+      expect(await terminal.exited).toBe(0);
+      const drawn = terminal.raw();
+
+      // The timer never fired: the second card was never on screen, so nothing
+      // about this run waited on the deck turning.
+      expect(drawn).not.toContain("The synthetic person on the");
+      expect(drawn).not.toContain("A persona");
+
+      /* the same walk, with no screen at all */
+
+      const elsewhere = await startPlatform();
+      const second = await makeWorkspace({}, { from: RETELL_FIXTURE_REPO });
+      try {
+        await second.signIn(elsewhere.url, elsewhere.device.mint());
+        const ui = new HeadlessUI({ answers: { "retell-key": KEY } });
+        const report = await walk({
+          ui,
+          launch: second.launch(await scriptFor(second)),
+          cwd: second.dir,
+          signal: new AbortController().signal,
+          platform: { url: elsewhere.url, credentialsFile: second.credentialsFile },
+          retell: { url: retell.url },
+        });
+
+        expect(buildExitLine(report)).toBe(
+          "egma put 3 tests on egma and left them in egma/tests/ — commit them, edit them, then run egma push.",
+        );
+        // Byte for byte the same ending, and the same tests on egma either way.
+        expect(terminal.scrollback().trim()).toBe(buildExitLine(report));
+        expect(elsewhere.tests.tests.map((test) => test.name).sort()).toEqual(
+          platform.tests.tests.map((test) => test.name).sort(),
+        );
+        expect(platform.tests.tests.map((test) => test.name).sort()).toEqual([...NAMES].sort());
+      } finally {
+        await elsewhere.close();
+        await second.remove();
+      }
+    } finally {
+      await terminal.kill();
+    }
+  });
+
+  it("gives the whole width to the files when the terminal is too narrow for both", async () => {
+    const script = await scriptFor(workspace);
+
+    const terminal = runInTerminal({
+      command: process.execPath,
+      args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+      cwd: workspace.dir,
+      env: workspace.env({ EGMA_URL: platform.url, EGMA_RETELL_URL: retell.url }),
+      cols: 64,
+    });
+
+    try {
+      await showing(terminal, "[enter] begin");
+      terminal.write("\r");
+      await showing(terminal, "Paste your Retell API key");
+      terminal.write(`${KEY}\r`);
+      await showing(terminal, "Do you already have test cases");
+      terminal.write("n");
+
+      const narrow = await showing(
+        terminal,
+        "Writing tests for your voice agent.",
+        "open-on-sunday",
+        "Progress:",
+      );
+      // The work is on screen whole; the teaching is what gives way.
+      expect(narrow).not.toContain("One situation to put your agent");
+
+      await showing(terminal, "[enter] run");
+      terminal.write("\r");
+      expect(await terminal.exited).toBe(0);
+      expect(path.basename(workspace.dir).startsWith("egma-cli-")).toBe(true);
+    } finally {
+      await terminal.kill();
+    }
+  });
+});

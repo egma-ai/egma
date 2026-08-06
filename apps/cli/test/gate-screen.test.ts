@@ -276,10 +276,12 @@ describe("the files arriving", () => {
     run.write("");
 
     // The poller is a timer, so a wizard that left it running would never leave.
-    // It does leave, on its own answer, with one honest line behind it.
+    // It does leave, on its own answer, with one honest line behind it — and the
+    // line counts the file the agent had already written, because a folder a
+    // developer was never told about is a half-truth.
     expect(await run.exited).toBe(130);
     expect(run.scrollback().trim()).toBe(
-      "egma stopped before the task finished, and shut node down.",
+      "egma stopped before the task finished, and shut node down. Your 1 test is in egma/tests/.",
     );
 
     // And what the agent had already written is still the developer's.

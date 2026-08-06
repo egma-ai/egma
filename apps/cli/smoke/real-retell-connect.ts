@@ -7,10 +7,11 @@
  * field names, the two halves an agent is really in.
  *
  * **It is read-only, and the read-only-ness is enforced rather than promised.**
- * Retell is not reached directly: everything goes through a gate started here
- * that forwards the listing and the reads behind it and refuses everything
- * else, so a change that made the CLI write could not do it through this check. The account belongs to
- * somebody and the agents on it answer real telephone numbers.
+ * Retell is not reached directly: everything goes through the gate in
+ * `support/retell-gate.ts`, started here, which forwards the listing and the
+ * reads behind it and refuses everything else — so a change that made the CLI
+ * write could not do it through this check. The account belongs to somebody and
+ * the agents on it answer real telephone numbers.
  *
  * The platform side is the fixture, so nothing is written to a real egma
  * either. What lands there is asserted; the account is never named in what this
@@ -32,16 +33,14 @@
  */
 
 import { spawn } from "node:child_process";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { RETELL_API } from "../src/retell/client.ts";
 import { startPlatform, type Platform } from "../test/support/fixture-platform/index.ts";
+import { openGate, type Gate } from "./support/retell-gate.ts";
 
 const CLI_ENTRY = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 
@@ -102,99 +101,6 @@ function nothingWasVerified(strict: boolean): void {
     say("  with a failure instead.");
   }
   say(RULE);
-}
-
-/* ── the read-only gate ──────────────────────────────────────────────── */
-
-/** Exactly what this check is allowed to ask Retell for. */
-const ALLOWED: readonly { method: string; path: RegExp }[] = [
-  { method: "POST", path: /^\/v2\/list-agents$/u },
-  { method: "GET", path: /^\/get-agent\/[^/]+$/u },
-  { method: "GET", path: /^\/get-chat-agent\/[^/]+$/u },
-  { method: "GET", path: /^\/get-retell-llm\/[^/]+$/u },
-  { method: "GET", path: /^\/get-conversation-flow\/[^/]+$/u },
-];
-
-type Gate = {
-  readonly url: string;
-  /** How many reads were forwarded, by path shape. */
-  readonly forwarded: string[];
-  /** Anything the gate turned away. One entry here fails the whole run. */
-  readonly refused: string[];
-  /** What Retell answered, exactly, keyed by path — for a byte-for-byte check. */
-  answered(path: string): string | undefined;
-  close(): Promise<void>;
-};
-
-/**
- * A gate in front of Retell that forwards reads and refuses everything else.
- *
- * It is what makes "read-only" a property of this run rather than a promise
- * about the code: a request to create, update or delete never leaves this
- * machine, whatever the CLI asks for.
- */
-async function openGate(): Promise<Gate> {
-  const forwarded: string[] = [];
-  const refused: string[] = [];
-  const answers = new Map<string, string>();
-
-  const server: Server = createServer(
-    (incoming: IncomingMessage, outgoing: ServerResponse) => {
-      void (async () => {
-        const chunks: Buffer[] = [];
-        for await (const chunk of incoming) chunks.push(chunk as Buffer);
-        const raw = Buffer.concat(chunks).toString("utf8");
-
-        const at = new URL(incoming.url ?? "/", "http://gate.invalid");
-        const method = incoming.method ?? "GET";
-        const allowed = ALLOWED.some(
-          (rule) => rule.method === method && rule.path.test(at.pathname),
-        );
-
-        if (!allowed) {
-          refused.push(`${method} ${at.pathname}`);
-          outgoing.writeHead(403, { "content-type": "application/json" });
-          outgoing.end(JSON.stringify({ error_message: "this check is read-only" }));
-          return;
-        }
-
-        const answer = await fetch(`${RETELL_API}${at.pathname}${at.search}`, {
-          method,
-          headers: {
-            authorization: incoming.headers.authorization ?? "",
-            ...(raw === "" ? {} : { "content-type": "application/json" }),
-          },
-          ...(raw === "" ? {} : { body: raw }),
-        });
-        const body = await answer.text();
-
-        // The shape, never the identifier: which reads were made is worth
-        // printing, and whose agents they were is not.
-        forwarded.push(`${method} ${at.pathname.replace(/^(\/get-[a-z-]+)\/.+$/u, "$1/…")}`);
-        if (answer.ok) answers.set(at.pathname, body);
-
-        outgoing.writeHead(answer.status, { "content-type": "application/json" });
-        outgoing.end(body);
-      })();
-    },
-  );
-
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address() as AddressInfo;
-
-  return {
-    url: `http://127.0.0.1:${address.port}`,
-    forwarded,
-    refused,
-    answered: (at) => answers.get(at),
-    async close() {
-      await new Promise<void>((resolve) => {
-        server.close(() => resolve());
-      });
-    },
-  };
 }
 
 /* ── running the command ─────────────────────────────────────────────── */
