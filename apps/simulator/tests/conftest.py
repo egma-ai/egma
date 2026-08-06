@@ -122,7 +122,12 @@ class SimulatorProcess:
     stdout_path: Path
     stderr_path: Path
     wal_dir: Path
+    blob_dir: Path
     extra_env: dict[str, str] = field(default_factory=dict)
+
+    def blob(self, reference: str) -> bytes:
+        """What a reported reference actually resolves to on disk."""
+        return (self.blob_dir / reference).read_bytes()
 
     def output(self) -> str:
         return (
@@ -161,6 +166,7 @@ def start_simulator(
         stdout_path = tmp_path / f"simulator-{len(started)}.out"
         stderr_path = tmp_path / f"simulator-{len(started)}.err"
         wal_dir = tmp_path / f"wal-{len(started)}"
+        blob_dir = tmp_path / f"blobs-{len(started)}"
         env = os.environ | {
             "EGMA_SIMULATOR_CONTROL_PLANE_URL": workbench.base_url,
             "EGMA_SIMULATOR_CLAIMANT": claimant,
@@ -168,6 +174,7 @@ def start_simulator(
             "EGMA_SIMULATOR_HEARTBEAT_SECONDS": str(HEARTBEAT_SECONDS),
             "EGMA_SIMULATOR_CLAIM_WAIT_SECONDS": "2",
             "EGMA_SIMULATOR_WAL_DIR": str(wal_dir),
+            "EGMA_SIMULATOR_BLOB_DIR": str(blob_dir),
             "EGMA_SIMULATOR_LOG_LEVEL": log_level,
         }
         with open(stdout_path, "wb") as stdout, open(stderr_path, "wb") as stderr:
@@ -182,6 +189,7 @@ def start_simulator(
             stdout_path=stdout_path,
             stderr_path=stderr_path,
             wal_dir=wal_dir,
+            blob_dir=blob_dir,
         )
         started.append(simulator)
         return simulator
@@ -252,6 +260,61 @@ def scripted_spec(
         "persona": {
             "traits": {"personality": personality, "language": "en-US"}
         },
+        "scenario": {"instructions": scenario},
+        "limits": {
+            "max_duration_seconds": max_duration_seconds,
+            "max_turns": max_turns,
+        },
+    }
+
+
+def loopback_spec(
+    simulation_id: str,
+    *,
+    scenario: str = "State the first point. State the second point.",
+    personality: str = "Terse test person; sticks to the script.",
+    voice: dict | None = None,
+    greeting: str | None = None,
+    replies: list[str] | None = None,
+    ends_after_replies: bool = False,
+    answer_delay_seconds: float = 0.0,
+    sample_rate_hz: int | None = None,
+    provider_reference: str | None = None,
+    max_turns: int = 60,
+    max_duration_seconds: int = 600,
+    credentials: dict | None = None,
+) -> dict:
+    """One voice spec against the loopback counterpart.
+
+    Deliberately the same shape as :func:`scripted_spec`: the two differ by
+    modality and connection type and by nothing else, which is what makes
+    "the same test over chat and over voice" a comparison rather than two
+    unrelated stories.
+    """
+    config: dict = {"answer_delay_seconds": answer_delay_seconds}
+    if greeting is not None:
+        config["greeting"] = greeting
+    if replies is not None:
+        config["replies"] = replies
+    if ends_after_replies:
+        config["ends_after_replies"] = True
+    if sample_rate_hz is not None:
+        config["sample_rate_hz"] = sample_rate_hz
+    if provider_reference is not None:
+        config["provider_reference"] = provider_reference
+    traits: dict = {"personality": personality, "language": "en-US"}
+    if voice is not None:
+        traits["voice"] = voice
+    return {
+        "contract_version": 1,
+        "simulation_id": simulation_id,
+        "modality": "voice",
+        "connection": {
+            "type": "loopback",
+            "config": config,
+            "credentials": credentials,
+        },
+        "persona": {"traits": traits},
         "scenario": {"instructions": scenario},
         "limits": {
             "max_duration_seconds": max_duration_seconds,

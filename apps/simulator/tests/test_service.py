@@ -57,6 +57,7 @@ def a_service(tmp_path, capacity: int = 2) -> SimulatorService:
         claim_wait_seconds=1.0,
         report_deadline_seconds=1.0,
         wal_dir=tmp_path,
+        blob_dir=tmp_path / "blobs",
         log_level="INFO",
     )
     return SimulatorService(config, secrets=SecretRegistry())

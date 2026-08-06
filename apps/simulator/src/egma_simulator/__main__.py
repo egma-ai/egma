@@ -28,6 +28,27 @@ def _configure_logging(level: str, registry: SecretRegistry) -> None:
     root = logging.getLogger()
     root.setLevel(level.upper())
     root.addHandler(handler)
+    _gather_loguru(level)
+
+
+def _gather_loguru(level: str) -> None:
+    """Bring the voice legs' logging under the same roof as everything else.
+
+    Pipecat logs through loguru, which writes to stderr on its own and so
+    would miss both the configured level and the credential filter — and a
+    filter with a way around it is not one. Every loguru record is handed
+    to the standard library instead; the level numbers already agree.
+    """
+    from loguru import logger as loguru_logger
+
+    def hand_over(message: object) -> None:
+        record = message.record  # type: ignore[attr-defined]
+        logging.getLogger(record["name"]).log(
+            record["level"].no, record["message"]
+        )
+
+    loguru_logger.remove()
+    loguru_logger.add(hand_over, level=level.upper())
 
 
 async def _run() -> None:

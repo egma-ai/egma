@@ -24,11 +24,13 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
+from .blob import BlobStore, FilesystemBlobStore
 from .client import ClaimFailure, ControlPlaneClient, HeartbeatFailure
 from .config import SimulatorConfig
 from .contract import ContractViolation
 from .model import build_model_client
 from .persona import Persona
+from .pipeline import assemble
 from .plugs import plug_for
 from .redaction import SecretRegistry
 from .reporting import Reporter, moment
@@ -125,12 +127,14 @@ class RunningSimulation:
         client: ControlPlaneClient,
         config: SimulatorConfig,
         secrets: SecretRegistry,
+        blobs: BlobStore,
     ) -> None:
         self.simulation_id = spec.simulation_id
         self._spec = spec
         self._client = client
         self._config = config
         self._secrets = secrets
+        self._blobs = blobs
         self._reporter = Reporter(
             client,
             spec.simulation_id,
@@ -168,16 +172,12 @@ class RunningSimulation:
         reporter = self._reporter
         reporter.running()
         try:
-            # The plug is the one component that knows the platform; the
-            # claim loop already guaranteed one exists for this type, and
-            # its constructor validating the connection config is part of
-            # conducting — a bad config is an honest failure, not a crash.
-            plug_factory = plug_for(self._spec.connection_type)
-            assert plug_factory is not None, "accepted a spec with no plug"
-            plug = plug_factory(
-                modality=self._spec.modality,
-                config=self._spec.connection_config,
-                credentials=self._spec.credentials,
+            # One pipeline per simulation, built from its own spec: the plug
+            # that knows the platform, and — for voice — the speech legs
+            # around it. Assembling is validation, so a connection config the
+            # plug does not understand is an honest failure, not a crash.
+            assembled = assemble(
+                self._spec, blobs=self._blobs, on_timing=self._on_timing
             )
             model = build_model_client(self._config, self._spec)
             try:
@@ -187,7 +187,7 @@ class RunningSimulation:
                         scenario_instructions=self._spec.scenario_instructions,
                         model=model,
                     ),
-                    plug=plug,
+                    plug=assembled.plug,
                     max_turns=self._spec.limits.max_turns,
                     max_duration_seconds=self._spec.limits.max_duration_seconds,
                     on_turn=self._on_turn,
@@ -196,6 +196,9 @@ class RunningSimulation:
                     name=f"sim:{self.simulation_id}",
                 )
             finally:
+                # The walk closed the pipeline on its way out, whatever
+                # happened, so whatever was recorded is measured by now.
+                reporter.audio = assembled.audio
                 await model.close()
         except asyncio.CancelledError:
             # The service itself is being torn down mid-walk. Reporting a
@@ -280,6 +283,7 @@ class SimulatorService:
     def __init__(self, config: SimulatorConfig, *, secrets: SecretRegistry) -> None:
         self._config = config
         self._secrets = secrets
+        self._blobs = FilesystemBlobStore(config.blob_dir)
 
     async def run(self) -> None:
         """Claim and conduct until cancelled. Cancellation is the only exit."""
@@ -394,5 +398,6 @@ class SimulatorService:
             client=client,
             config=self._config,
             secrets=self._secrets,
+            blobs=self._blobs,
         )
         await simulation.run()
