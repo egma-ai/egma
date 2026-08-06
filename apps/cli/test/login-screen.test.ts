@@ -6,24 +6,33 @@
  * are checked as terminal facts: the address on its own line, the copy key
  * really copying it, and a terminal too narrow for it getting a way out rather
  * than an address broken across two lines.
+ *
+ * Every wait here asks for **everything** the assertions after it will read,
+ * and reads the screen that satisfied the wait. This screen arrives after a
+ * redraw — the intro is on the alternate screen first — and it arrives in
+ * chunks, so waiting for the code and then asserting on the hint bar is a race
+ * that the machine wins whenever it is busy.
  */
 
 import process from "node:process";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { copySequence } from "../src/platform/clipboard.ts";
 import { columnsNeeded } from "../src/ui/tui/width.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
-import { runInTerminal, type TerminalRun } from "./support/pty.ts";
+import { runInTerminal, showing, showingIn, type TerminalRun } from "./support/pty.ts";
 import {
   CLI_ENTRY,
   FAKE_AGENT,
   MANIFEST,
   makeWorkspace,
-  waitUntil,
   type Workspace,
 } from "./support/workspace.ts";
+
+// A real subprocess, a real terminal and a test run using every core: the
+// budget is generous so that only a broken wizard can reach it.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 let platform: Platform;
 let workspace: Workspace;
@@ -92,16 +101,34 @@ function codeOn(screen: string): string {
 }
 
 /**
- * Wait until the whole login screen is drawn, not merely the first line of it.
+ * The intro, and the keystroke that opens the walk.
  *
- * The hint bar is the last thing on the screen, so a screen carrying both the
- * code and the hints is a finished frame rather than half of one.
+ * Login is the second screen, so nothing about it can be waited for until the
+ * first one has been answered. The hint bar is what is waited for: it is the
+ * last line the intro draws, and it is the one line short enough to survive
+ * the narrow terminal one check here runs in without being wrapped.
  */
-async function drawn(terminal: { screen(): string }): Promise<boolean> {
-  return waitUntil(() => {
-    const screen = terminal.screen();
-    return screen.includes("Code:") && screen.includes("[q] quit");
-  });
+async function past(terminal: TerminalRun): Promise<void> {
+  await showing(terminal, "[enter] begin", "[q] quit");
+  terminal.write("\r");
+}
+
+/** This screen's own hints, which no other screen in the walk offers. */
+const LOGIN_HINTS = ["[c] copy link", "[enter] paste a link back"] as const;
+
+/**
+ * Waits for the whole login screen, and for anything else asked for.
+ *
+ * The hint bar is this screen's own and is the last line it draws, so a screen
+ * carrying it whole is a finished login frame. `[q] quit` is not that marker:
+ * the intro carries it too, so a half-painted repaint over the intro would
+ * satisfy it while the address was still in flight.
+ */
+async function loginScreen(
+  terminal: TerminalRun,
+  ...parts: readonly string[]
+): Promise<string> {
+  return showing(terminal, "Code:", ...LOGIN_HINTS, ...parts);
 }
 
 /**
@@ -112,9 +139,7 @@ async function drawn(terminal: { screen(): string }): Promise<boolean> {
  * run ends here, and the line it leaves says exactly that.
  */
 async function declineTheKey(terminal: TerminalRun): Promise<void> {
-  expect(await waitUntil(() => terminal.screen().includes("Paste your Retell API key"))).toBe(
-    true,
-  );
+  await showing(terminal, "Paste your Retell API key");
   terminal.write("");
   expect(await terminal.exited).toBe(1);
   expect(terminal.scrollback().trim()).toBe(
@@ -139,11 +164,11 @@ describe("the login screen", () => {
 
     try {
       // The intro comes first, and the consent keystroke opens the walk.
-      expect(await waitUntil(() => terminal.screen().includes("[enter] begin"))).toBe(true);
-      terminal.write("\r");
+      await past(terminal);
 
-      expect(await drawn(terminal)).toBe(true);
-      const screen = terminal.screen();
+      // The browser opening repaints the first line of this screen, so the
+      // sentence it repaints to is waited for rather than the one before it.
+      const screen = await loginScreen(terminal, platform.url, "Approve this code");
       const code = codeOn(screen);
       expect(code).not.toBe("");
 
@@ -153,18 +178,15 @@ describe("the login screen", () => {
       const ownLine = linesInside(screen).find((line) => line.startsWith(platform.url));
       expect(ownLine).toBe(approveUrl);
 
-      expect(screen).toContain("[c] copy link");
-      expect(screen).toContain("Approve this code");
-
       // Pressing it asks the terminal itself to copy, which is what reaches the
       // clipboard of a laptop with an SSH connection open to somewhere else.
       terminal.write("c");
-      expect(await waitUntil(() => terminal.raw().includes(copySequence(approveUrl)))).toBe(
-        true,
-      );
-      expect(await waitUntil(() => terminal.screen().includes("Copied."))).toBe(true);
+      expect(
+        await terminal.waitFor(() => terminal.raw().includes(copySequence(approveUrl))),
+      ).toBe(true);
+      await showing(terminal, "Copied.");
     } finally {
-      terminal.kill();
+      await terminal.kill();
     }
   });
 
@@ -176,11 +198,19 @@ describe("the login screen", () => {
     const terminal = await wizard({ browser, cols: 40, rows: 40 });
 
     try {
-      expect(await waitUntil(() => terminal.screen().includes("[enter] begin"))).toBe(true);
-      terminal.write("\r");
-      expect(await drawn(terminal)).toBe(true);
+      await past(terminal);
 
-      const screen = terminal.screen();
+      // Waited for whole, because what is asserted below is what is *missing*
+      // from it — and a frame that is still arriving is missing everything.
+      // Every line of this screen is wrapped, so it is read run together.
+      const screen = await showingIn(
+        terminal,
+        asOneLine,
+        "Code:",
+        ...LOGIN_HINTS,
+        "The address needs",
+        "columns and this terminal has 40",
+      );
       const approveUrl = `${platform.url}/device?user_code=${codeOn(screen)}`;
       expect(asOneLine(screen)).toContain(
         `The address needs ${columnsNeeded(approveUrl)} columns and this terminal has 40`,
@@ -194,7 +224,7 @@ describe("the login screen", () => {
         platform.url.replaceAll(/\s+/gu, ""),
       );
     } finally {
-      terminal.kill();
+      await terminal.kill();
     }
   });
 
@@ -205,11 +235,9 @@ describe("the login screen", () => {
     const terminal = await wizard({ browser, cols: 120 });
 
     try {
-      expect(await waitUntil(() => terminal.screen().includes("[enter] begin"))).toBe(true);
-      terminal.write("\r");
-      expect(await drawn(terminal)).toBe(true);
+      await past(terminal);
 
-      const code = codeOn(terminal.screen());
+      const code = codeOn(await loginScreen(terminal, platform.url));
       // Approved in a browser on another machine, and then pasted back here.
       expect(platform.device.approve(code)).toBe(true);
       terminal.write(`${platform.url}/device?user_code=${code}\r`);
@@ -219,7 +247,7 @@ describe("the login screen", () => {
       await declineTheKey(terminal);
       expect(platform.device.keys).toHaveLength(1);
     } finally {
-      terminal.kill();
+      await terminal.kill();
     }
   });
 
@@ -228,15 +256,14 @@ describe("the login screen", () => {
     const terminal = await wizard({ browser, does: "approve", cols: 120 });
 
     try {
-      expect(await waitUntil(() => terminal.screen().includes("[enter] begin"))).toBe(true);
-      terminal.write("\r");
+      await past(terminal);
 
       await declineTheKey(terminal);
 
       // A key was minted and kept, and it is the one this egma issued.
       expect(platform.device.keys).toHaveLength(1);
     } finally {
-      terminal.kill();
+      await terminal.kill();
     }
   });
 
@@ -245,20 +272,21 @@ describe("the login screen", () => {
     const terminal = await wizard({ browser, cols: 120 });
 
     try {
-      expect(await waitUntil(() => terminal.screen().includes("[enter] begin"))).toBe(true);
-      terminal.write("\r");
-      expect(await drawn(terminal)).toBe(true);
+      await past(terminal);
+
+      // Waited for whole: a frame that is half drawn says none of these words
+      // because it says almost nothing, and would pass without proving a thing.
+      const shown = await loginScreen(terminal, platform.url, "Approve this code");
 
       // A new account signs up in that browser page and gets everything it
       // needs there. The terminal names none of it — locked rule.
-      const shown = terminal.screen();
       for (const banned of ["organization", "organisation", "project", "tenant"]) {
         expect(new RegExp(`\\b${banned}`, "iu").test(shown), `the screen says "${banned}"`).toBe(
           false,
         );
       }
     } finally {
-      terminal.kill();
+      await terminal.kill();
     }
   });
 });

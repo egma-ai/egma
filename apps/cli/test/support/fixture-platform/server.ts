@@ -27,7 +27,7 @@ export type FixtureRequest = {
   readonly body: Record<string, unknown> | null;
   /** The body, when it arrived form-encoded, as RFC 8628's token request does. */
   readonly form: URLSearchParams | null;
-  /** What the `:named` parts of the route's path matched. */
+  /** What the route's `:name` segments matched, for a resource named by id. */
   readonly params: Readonly<Record<string, string>>;
 };
 
@@ -41,32 +41,31 @@ export type FixtureAnswer = {
 export type Route = {
   readonly method: string;
   /**
-   * The path this route answers on. A segment written `:name` matches one
-   * segment and arrives as `params.name` — which is what lets a resource with
-   * an identifier in its address be served here at all.
+   * The path this route serves. A segment written `:name` matches any one
+   * segment and arrives at the handler in `params` — which is how a resource
+   * named by its own id is reached, exactly as the real API names one.
    */
   readonly path: string;
   handle(request: FixtureRequest): FixtureAnswer;
 };
 
-/** What the route's path matched, or `null` when it did not match. */
-export function matchPath(
-  pattern: string,
-  pathname: string,
-): Record<string, string> | null {
+/** What a route's path matched, or `null` when it did not match at all. */
+function matchPath(pattern: string, pathname: string): Record<string, string> | null {
+  if (!pattern.includes(":")) return pattern === pathname ? {} : null;
+
   const wanted = pattern.split("/");
   const given = pathname.split("/");
   if (wanted.length !== given.length) return null;
 
   const params: Record<string, string> = {};
-  for (const [at, part] of wanted.entries()) {
+  for (const [at, segment] of wanted.entries()) {
     const here = given[at] as string;
-    if (part.startsWith(":")) {
+    if (segment.startsWith(":")) {
       if (here === "") return null;
-      params[part.slice(1)] = decodeURIComponent(here);
+      params[segment.slice(1)] = decodeURIComponent(here);
       continue;
     }
-    if (part !== here) return null;
+    if (segment !== here) return null;
   }
   return params;
 }
@@ -111,17 +110,24 @@ export async function startFixturePlatform(
       const raw = await readBody(incoming);
       const type = incoming.headers["content-type"] ?? "";
 
-      let params: Record<string, string> | null = null;
-      const route = routes.find((candidate) => {
-        if (candidate.method !== incoming.method) return false;
-        params = matchPath(candidate.path, at.pathname);
-        return params !== null;
-      });
+      // Exact paths first, so a literal route is never shadowed by a pattern
+      // that happens to have the same shape.
+      let matched: { route: Route; params: Record<string, string> } | null = null;
+      for (const candidate of routes) {
+        if (candidate.method !== incoming.method) continue;
+        const params = matchPath(candidate.path, at.pathname);
+        if (params === null) continue;
+        if (!candidate.path.includes(":")) {
+          matched = { route: candidate, params };
+          break;
+        }
+        matched ??= { route: candidate, params };
+      }
 
       const answer: FixtureAnswer =
-        route === undefined
+        matched === null
           ? { status: 404, body: { error: "not_found", message: `nothing serves ${at.pathname}` } }
-          : route.handle({
+          : matched.route.handle({
               method: incoming.method ?? "GET",
               url: at,
               headers: incoming.headers as Record<string, string | undefined>,
@@ -132,7 +138,7 @@ export async function startFixturePlatform(
               form: type.includes("application/x-www-form-urlencoded")
                 ? new URLSearchParams(raw)
                 : null,
-              params: params ?? {},
+              params: matched.params,
             });
 
       records.push({

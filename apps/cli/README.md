@@ -164,6 +164,85 @@ status: connected
 6 no key given   7 not signed in to egma   130 stopped part way
 ```
 
+## Your tests are files in your repository
+
+```
+egma/
+  config.yaml     what this folder points at — names and ids
+  tests/          one markdown file per test
+```
+
+`egma init` makes it. Everything in it is committed: nothing secret ever lands
+here, so there are no gitignore lines to write and none to forget. Your tests
+are code your team reviews in pull requests.
+
+One test is one file:
+
+```markdown
+---
+name: missed-appointment-reschedule
+personas: [impatient-caller]
+version: tstv_01K…
+---
+## Scenario
+The caller missed yesterday's appointment and wants to
+reschedule this week. They are short on time and irritated.
+## Expected behaviors
+1. The agent acknowledges the missed appointment without blame.
+2. The agent offers at least two concrete alternative slots.
+3. The agent confirms the new booking before ending the call.
+```
+
+Name a persona only when the situation needs a particular kind of person on the
+other end; leave `personas` out and the default one applies. `version:` is
+absent until `pull` or `push` writes it.
+
+## Keeping the folder and egma in step
+
+```
+egma pull     writes egma's current versions into your files
+egma push     uploads yours
+```
+
+Sync is a verb you run. Nothing syncs in the background, because two things
+saving over each other silently is how this goes wrong everywhere it has been
+tried.
+
+Each file remembers the version it was last synced at. `push` compares that
+with what egma currently holds, and **refuses when egma has moved on**, naming
+every test that moved:
+
+```
+conflict: missed-appointment-reschedule
+file: egma/tests/missed-appointment-reschedule.md
+uploaded: nothing
+status: refused
+```
+
+Nothing is merged and nothing is uploaded. Run `egma pull`, look at what your
+teammate changed in the dashboard, then push again. A push that goes through
+creates a new version on egma — the old one is never overwritten, so results
+from last week still say what they ran — and writes the new version id back
+into your files.
+
+`egma push` also relays egma's own refusals. A test with no expected behaviors
+cannot ever fail, so egma will not store one, and the reason you see is egma's
+own words.
+
+All three verbs print one fact per line and answer with a number you can branch
+on, so a coding agent can run them and act on what comes back without anybody
+reading the screen:
+
+```
+url, folder, and then one line per test: what happened to it, the file,
+and the version the file now pins.
+
+0 done   1 no egma folder here   2 not signed in
+4 egma did not answer, or refused
+5 push refused: egma has moved on, pull first
+6 egma turned a test away at its door   130 stopped part way
+```
+
 ## The notes egma hands your coding agent
 
 They are markdown files inside this package, under `skills/`. They are sent as
@@ -203,6 +282,11 @@ egma login [options]     Sign this machine in. No questions, plain lines.
 egma connect [options]   Register your voice agent and a way to reach it.
                          The key comes in on standard input or from the
                          environment, never as an argument.
+egma init [options]      Make the egma folder this repository's tests live
+                         in. Safe to run again.
+egma pull [options]      Write egma's current test versions into it.
+egma push [options]      Upload the tests in it. Refuses, naming names, when
+                         egma has moved on since your last pull.
 
   --coding-agent <id>  Which coding agent to drive, named as the agent
                        registry names it. Default: claude-acp
@@ -216,6 +300,10 @@ egma connect [options]   Register your voice agent and a way to reach it.
                        holds more than one.
   --repo-prompt <path> With connect: the prompt file in this repository, so
                        egma can say whether it and Retell have drifted apart.
+  --agent <name>       With init: what to call the voice agent this
+                       folder's tests are for.
+  --connection <name>  With init: what to call the way egma reaches it.
+  --suite <name>       With init: what to call this folder's test suite.
   --headless           Run with no terminal and no keystroke: plain lines,
                        and the task taken as already agreed to.
   -h, --help           Print this.

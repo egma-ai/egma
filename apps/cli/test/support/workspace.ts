@@ -162,7 +162,11 @@ export async function makeWorkspace(
       };
     },
     async remove() {
-      await rm(dir, { recursive: true, force: true });
+      // A command that has just been stopped can still have a file open in
+      // here, and a directory gaining an entry while it is being walked is a
+      // removal that fails rather than one that waits. Retried, because a
+      // throwaway folder failing to go away must never fail somebody's check.
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     },
   };
 }

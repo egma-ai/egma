@@ -63,6 +63,11 @@ function normalize(code: string): string {
 export type DeviceControls = {
   /** What a person clicking Approve in a browser does. */
   approve(code: string): boolean;
+  /**
+   * A key this instance is to treat as one of its own, for a check that starts
+   * from a machine that is already signed in rather than from a login.
+   */
+  accept(key: string): void;
   deny(code: string): boolean;
   /** What time passing does. */
   expire(code: string): boolean;
@@ -268,6 +273,9 @@ export function deviceRoutes(origin: () => string): {
         if (authorization === undefined || authorization.state !== "pending") return false;
         authorization.state = "approved";
         return true;
+      },
+      accept(key) {
+        if (!keys.includes(key)) keys.push(key);
       },
       deny(code) {
         const authorization = find(code);
