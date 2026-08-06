@@ -29,10 +29,11 @@ import { runInitCommand } from "./commands/init.ts";
 import { runLoginCommand } from "./commands/login.ts";
 import { runPullCommand } from "./commands/pull.ts";
 import { runPushCommand } from "./commands/push.ts";
+import { runRunCommand } from "./commands/run.ts";
 import { resolvePlatformAccess, UnusableUrlError } from "./platform/credentials.ts";
 import { RETELL_API } from "./retell/client.ts";
 import { HeadlessUI } from "./ui/headless-ui.ts";
-import { buildExitLine, buildExitNotice, type ExitReport } from "./wizard/exit-line.ts";
+import { buildExitNotice, exitLines, type ExitReport } from "./wizard/exit-line.ts";
 import type { PlatformAccess } from "./wizard/login-step.ts";
 import { pasteFallbackMessage } from "./wizard/no-coding-agent.ts";
 import type { StopReason } from "./wizard/stop.ts";
@@ -63,7 +64,7 @@ async function wizardMachinery(): Promise<{
  * because a verb is what a coding agent types and a coding agent has no
  * keystroke to give.
  */
-export const VERBS = ["login", "connect", "init", "pull", "push"] as const;
+export const VERBS = ["login", "connect", "init", "pull", "push", "run"] as const;
 
 /**
  * The Retell the CLI talks to, for a check that stands one in.
@@ -83,11 +84,19 @@ export type Invocation = {
   /** The developer has said, in the command, to run with nobody watching. */
   readonly headless: boolean;
   readonly drivenAgentId: string;
+  /**
+   * The developer said which coding agent this is, rather than taking the
+   * default. It matters for one thing: what egma calls the agent it drove, and
+   * therefore where it would put a skill for it.
+   */
+  readonly drivenAgentNamed: boolean;
   readonly cwd: string | null;
   /** `--url`: which egma to talk to, when it is not egma's own. */
   readonly url: string | null;
   /** `--force`: do the work again even though it has been done. */
   readonly force: boolean;
+  /** `--no-follow`: with run, start it and return without waiting. */
+  readonly noFollow: boolean;
   /** `--retell-agent`: which agent, when the account holds several. */
   readonly retellAgentId: string | null;
   /** `--repo-prompt`: the repository's prompt, to compare the provider's with. */
@@ -116,9 +125,11 @@ export function parseArgs(argv: readonly string[]): Invocation {
   let verb: Verb | null = null;
   let headless = false;
   let drivenAgentId = DEFAULT_DRIVEN_AGENT_ID;
+  let drivenAgentNamed = false;
   let cwd: string | null = null;
   let url: string | null = null;
   let force = false;
+  let noFollow = false;
   let retellAgentId: string | null = null;
   let repoPrompt: string | null = null;
   let existingTests: string | null = null;
@@ -137,10 +148,17 @@ export function parseArgs(argv: readonly string[]): Invocation {
     if (argument === "-h" || argument === "--help") help = true;
     else if (argument === "-v" || argument === "--version") version = true;
     else if (argument === "--headless") headless = true;
-    else if (argument === "--coding-agent") drivenAgentId = argv[(index += 1)] ?? drivenAgentId;
+    else if (argument === "--coding-agent") {
+      const named = argv[(index += 1)];
+      if (named !== undefined) {
+        drivenAgentId = named;
+        drivenAgentNamed = true;
+      }
+    }
     else if (argument === "--cwd") cwd = argv[(index += 1)] ?? null;
     else if (argument === "--url") url = argv[(index += 1)] ?? null;
     else if (argument === "--force") force = true;
+    else if (argument === "--no-follow") noFollow = true;
     else if (argument === "--retell-agent") retellAgentId = argv[(index += 1)] ?? null;
     else if (argument === "--repo-prompt") repoPrompt = argv[(index += 1)] ?? null;
     else if (argument === "--existing-tests") existingTests = argv[(index += 1)] ?? null;
@@ -157,9 +175,11 @@ export function parseArgs(argv: readonly string[]): Invocation {
     verb,
     headless,
     drivenAgentId,
+    drivenAgentNamed,
     cwd,
     url,
     force,
+    noFollow,
     retellAgentId,
     repoPrompt,
     existingTests,
@@ -186,6 +206,8 @@ export function helpText(): string {
     "  egma pull [options]      Write egma's current test versions into it.",
     "  egma push [options]      Upload the tests in it. Refuses, naming names,",
     "                           when egma has moved on since your last pull.",
+    "  egma run [options]       Run this folder's tests, pinning the version of",
+    "                           each. Follows the run and prints every change.",
     "",
     "Options:",
     "  --coding-agent <id>  Which coding agent to drive, named as the agent",
@@ -196,6 +218,8 @@ export function helpText(): string {
     "                       does the same for a whole shell.",
     "  --force              With login: sign in again even when this machine",
     "                       already holds a key.",
+    "  --no-follow          With run: start the run and return at once, without",
+    "                       waiting for a verdict. The run carries on on egma.",
     "  --retell-agent <id>  With connect: which agent, when the Retell account",
     "                       holds more than one.",
     "  --repo-prompt <path> With connect: the prompt file in this repository, so",
@@ -254,6 +278,19 @@ export function helpText(): string {
     "  5 push refused: egma has moved on, pull first",
     "  6 egma turned a test away at its door   130 stopped part way",
     "",
+    "What egma run prints, one fact per line:",
+    "  url, folder, agent, connection, one pin: line per test version it pinned,",
+    "  run, tests, simulations, results, then one simulation: line per change,",
+    "  one verdict: line per verdict, first-verdict: once, and the four counts",
+    "  passed, failed, skipped, errored, plus pending and simulations.",
+    "",
+    "What egma run answers with:",
+    "  0 the run finished and nothing failed or errored",
+    "  1 nothing here to run   2 not signed in   3 a test failed",
+    "  4 egma did not answer, or refused",
+    "  5 egma would not start the run, and said why",
+    "  6 a simulation errored, so nothing concluded   130 stopped part way",
+    "",
     `The agent registry was mirrored on ${REGISTRY_SNAPSHOT_MIRRORED_ON}.`,
   ].join("\n");
 }
@@ -278,8 +315,15 @@ function launchFrom(invocation: Invocation): DrivenAgentLaunch {
   const [command, ...args] = invocation.drivenAgentCommand;
   if (command !== undefined) {
     // egma was told a command, not an agent, so the command is all it can
-    // honestly call the thing.
-    return { id: "named-command", name: path.basename(command), command, args, env: {} };
+    // honestly call the thing — unless the developer also said which agent it
+    // is, in which case that is what it is and egma may act on it.
+    return {
+      id: invocation.drivenAgentNamed ? invocation.drivenAgentId : "named-command",
+      name: path.basename(command),
+      command,
+      args,
+      env: {},
+    };
   }
   return launchForId(invocation.drivenAgentId);
 }
@@ -293,6 +337,9 @@ function walkExitCode(report: ExitReport): number {
     // Both decisions are the run finishing.
     case "tests-pushed":
     case "tests-kept":
+    // The run is going and the developer has what they need to watch it. That
+    // the suite is not finished is the design, not an incomplete run.
+    case "run-started":
     case "quit":
     // egma did everything it could here: it named what is missing and handed
     // over words that work without it. That is the run finishing, not failing.
@@ -380,7 +427,7 @@ async function runHeadless(
     });
     const notice = buildExitNotice(report);
     if (notice !== null) process.stdout.write(`${notice}\n\n`);
-    process.stdout.write(`${buildExitLine(report)}\n`);
+    process.stdout.write(`${exitLines(report).join("\n")}\n`);
     return walkExitCode(report);
   } finally {
     process.off("SIGINT", onSignal);
@@ -432,7 +479,7 @@ async function runWizard(
  * rather than leaving half a folder behind.
  */
 async function runFolderVerb(
-  verb: "init" | "pull" | "push",
+  verb: "init" | "pull" | "push" | "run",
   invocation: Invocation,
   access: PlatformAccess,
 ): Promise<number> {
@@ -457,6 +504,13 @@ async function runFolderVerb(
           connection: invocation.connectionName,
           suite: invocation.suiteName,
         },
+      });
+    }
+    if (verb === "run") {
+      return await runRunCommand({
+        ...options,
+        noFollow: invocation.noFollow,
+        signal: controller.signal,
       });
     }
     return verb === "pull" ? await runPullCommand(options) : await runPushCommand(options);
@@ -570,7 +624,12 @@ export async function main(argv: readonly string[]): Promise<void> {
     process.exitCode = await runConnect(invocation, access);
     return;
   }
-  if (invocation.verb === "init" || invocation.verb === "pull" || invocation.verb === "push") {
+  if (
+    invocation.verb === "init" ||
+    invocation.verb === "pull" ||
+    invocation.verb === "push" ||
+    invocation.verb === "run"
+  ) {
     process.exitCode = await runFolderVerb(invocation.verb, invocation, access);
     return;
   }

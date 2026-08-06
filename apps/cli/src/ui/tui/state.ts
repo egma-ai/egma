@@ -9,6 +9,8 @@
 import type { LoginPrompt } from "../../platform/login.ts";
 import type { RetellAgent } from "../../retell/client.ts";
 import type { KeyAsk } from "../../retell/connect.ts";
+import type { RunView } from "../../run/view.ts";
+import type { SkillPlaces } from "../../skills/install.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
 import type { TestGate } from "../../wizard/gate.ts";
 import type { GenerationProgress } from "../../wizard/test-generation.ts";
@@ -50,6 +52,10 @@ export type WizardState = {
   readonly gateAt: number;
   /** What the gate screen has to say about the last attempt to open an editor. */
   readonly editorProblem: string | null;
+  /** The run, as it stands, or `null` when none is going. */
+  readonly run: RunView | null;
+  /** Where the skill would go, while the offer is open, or `null`. */
+  readonly skillPlaces: SkillPlaces | null;
   readonly statuses: readonly string[];
   readonly summary: string;
   readonly exit: ExitReport | null;
@@ -73,6 +79,8 @@ export function emptyState(): WizardState {
     gate: null,
     gateAt: 0,
     editorProblem: null,
+    run: null,
+    skillPlaces: null,
     statuses: [],
     summary: "",
     exit: null,

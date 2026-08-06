@@ -9,11 +9,22 @@
 import { agentRoutes, type AgentControls } from "./agents.ts";
 import { controlRoutes } from "./controls.ts";
 import { deviceRoutes, type DeviceControls } from "./device.ts";
+import { runControlRoutes, runRoutes, type RunControls } from "./runs.ts";
 import { startFixturePlatform, type FixturePlatform } from "./server.ts";
 import { testRoutes, type TestControls } from "./tests.ts";
 
 export type { AgentControls } from "./agents.ts";
 export type { DeviceControls } from "./device.ts";
+export type {
+  AdvanceStep,
+  RunControls,
+  RunStatus,
+  SeededRun,
+  SeededSimulation,
+  SimulationStatus,
+  Verdict,
+} from "./runs.ts";
+export { noAdapterMessage } from "./runs.ts";
 export type { FixturePlatform, Observation } from "./server.ts";
 export type { SeedTest, SeededTest, TestControls } from "./tests.ts";
 
@@ -24,6 +35,8 @@ export type Platform = FixturePlatform & {
   readonly registered: AgentControls;
   /** What somebody authoring in the dashboard would do, done directly. */
   readonly tests: TestControls;
+  /** What the simulator would do to a run, done directly and in any order. */
+  readonly running: RunControls;
   /**
    * Sign a machine in without a login: the key is treated as one this instance
    * minted, exactly as a key collected at the end of a device flow is.
@@ -35,6 +48,7 @@ export async function startPlatform(): Promise<Platform> {
   let device!: DeviceControls;
   let registered!: AgentControls;
   let tests!: TestControls;
+  let running!: RunControls;
 
   const platform = await startFixturePlatform((origin) => {
     const deviceGroup = deviceRoutes(origin);
@@ -50,7 +64,25 @@ export async function startPlatform(): Promise<Platform> {
     const testGroup = testRoutes({ holdsKey });
     tests = testGroup.controls;
 
-    return [deviceGroup.group, agentGroup.group, testGroup.group, controlRoutes(() => device)];
+    // A run reads the other two groups rather than holding copies of what they
+    // hold: a version it pins is the version the test group issued, and the
+    // connection it executes over is the one the agent group registered.
+    const runGroup = runRoutes({
+      holdsKey,
+      origin,
+      versionById: testGroup.versionById,
+      connectionById: agentGroup.connectionById,
+    });
+    running = runGroup.controls;
+
+    return [
+      deviceGroup.group,
+      agentGroup.group,
+      testGroup.group,
+      runGroup.group,
+      controlRoutes(() => device),
+      runControlRoutes(() => running),
+    ];
   });
 
   return {
@@ -58,6 +90,7 @@ export async function startPlatform(): Promise<Platform> {
     device,
     registered,
     tests,
+    running,
     signedInWith(key) {
       device.accept(key);
     },

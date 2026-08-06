@@ -8,6 +8,8 @@
 import type { LoginPrompt } from "../../platform/login.ts";
 import type { RetellAgent } from "../../retell/client.ts";
 import type { KeyAsk } from "../../retell/connect.ts";
+import type { RunView } from "../../run/view.ts";
+import type { SkillPlaces } from "../../skills/install.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
 import type { TestGate } from "../../wizard/gate.ts";
 import type { GenerationProgress } from "../../wizard/test-generation.ts";
@@ -54,6 +56,14 @@ export class InkUI implements WizardUI {
 
   setGate(gate: TestGate | null): void {
     this.store.setGate(gate);
+  }
+
+  setRun(run: RunView | null): void {
+    this.store.setRun(run);
+  }
+
+  setSkillPlaces(places: SkillPlaces | null): void {
+    this.store.setSkillPlaces(places);
   }
 
   takeLoginPaste(): string | null {

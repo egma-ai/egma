@@ -25,6 +25,7 @@ import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { walk } from "../src/wizard/walk.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
+import { gradeEveryRun } from "./support/grading.ts";
 import {
   CLI_ENTRY,
   MANIFEST,
@@ -134,16 +135,27 @@ describe("a whole run, swept afterwards", () => {
       answers: { "retell-key": KEY },
     });
 
-    const report = await walk({
-      ui,
-      launch: workspace.launch(script),
-      cwd: workspace.dir,
-      signal: new AbortController().signal,
-      platform: { url: platform.url, credentialsFile: workspace.credentialsFile },
-      retell: { url: retell.url },
-    });
+    // The walk ends in a run, and a run ends when verdicts arrive. The sweep
+    // is worth more the further the run gets, so the fixture is given the one
+    // thing a platform with a simulator attached has.
+    const grading = gradeEveryRun(platform);
+    let report;
+    try {
+      report = await walk({
+        ui,
+        launch: workspace.launch(script),
+        cwd: workspace.dir,
+        signal: new AbortController().signal,
+        platform: { url: platform.url, credentialsFile: workspace.credentialsFile },
+        retell: { url: retell.url },
+        home: path.join(workspace.dir, "pretend-home"),
+        runPollMs: 20,
+      });
+    } finally {
+      grading.stop();
+    }
 
-    expect(report.kind).toBe("tests-pushed");
+    expect(report.kind).toBe("run-started");
 
     // The key really did reach the two places it is meant to reach, so what
     // follows is a sweep of a run that worked rather than one that did nothing.

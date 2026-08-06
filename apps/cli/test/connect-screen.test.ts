@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
+import { gradeEveryRun } from "./support/grading.ts";
 import { runInTerminal, showing, type TerminalRun } from "./support/pty.ts";
 import {
   CLI_ENTRY,
@@ -166,15 +167,19 @@ describe("the key screen", () => {
     run.write("n");
 
     await showing(run, "price-question", "[enter] run", "[q] quit");
+    // The walk carries on into the run it starts, and a run ends when verdicts
+    // arrive — so the fixture is given something that judges what is queued.
+    const grading = gradeEveryRun(platform);
     run.write("\r");
 
     const exited = await run.exited;
+    grading.stop();
     expect(exited).toBe(0);
 
     // Not on the last screen, not in scrollback, and not in a single byte the
     // command wrote — escape sequences included.
     expect(run.screen()).not.toContain(KEY);
-    expect(run.scrollback()).toContain("egma put 1 test on egma");
+    expect(run.scrollback()).toContain("✓ Your first run is live");
     expect(run.scrollback()).not.toContain(KEY);
     expect(run.raw()).not.toContain(KEY);
 
@@ -247,11 +252,13 @@ describe("the picker", () => {
     await showing(run, "Do you already have test cases", "[n] none");
     run.write("n");
     await showing(run, "price-question", "[enter] run");
+    const grading = gradeEveryRun(platform);
     run.write("\r");
 
     const exited = await run.exited;
+    grading.stop();
     expect(exited).toBe(0);
-    expect(run.scrollback()).toContain("egma put 1 test on egma");
+    expect(run.scrollback()).toContain("✓ Your first run is live");
     expect(run.raw()).not.toContain(KEY);
 
     // The one that was highlighted is the one that was registered.

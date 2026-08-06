@@ -30,6 +30,30 @@ export function skillFile(name: SkillName): string {
   return fileURLToPath(new URL(`../../${SKILLS_DIRECTORY}/${name}.md`, import.meta.url));
 }
 
+/**
+ * The one skill egma offers to *install* rather than to send.
+ *
+ * It ships as `skills/egma/SKILL.md` — a directory and a file name, rather
+ * than one flat markdown file like the sent ones — because that is the shape a
+ * coding agent reads a skill in, and the install is a copy of this file to the
+ * same file name somewhere else. Keeping it in that shape here means the thing
+ * that ships is the thing that lands.
+ */
+export const INSTALLABLE_SKILL_PATH = `${SKILLS_DIRECTORY}/egma/SKILL.md`;
+
+/** Where the installable skill is, wherever this package is running from. */
+export function installableSkillFile(): string {
+  return fileURLToPath(new URL(`../../${INSTALLABLE_SKILL_PATH}`, import.meta.url));
+}
+
+let installable: string | null = null;
+
+/** Its content, read from the package. */
+export function installableSkill(): string {
+  installable ??= readFileSync(installableSkillFile(), "utf8").trimEnd();
+  return installable;
+}
+
 /** A skill's content, read from the package. */
 export function skill(name: SkillName): string {
   const held = cache.get(name);

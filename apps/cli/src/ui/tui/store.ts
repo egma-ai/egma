@@ -16,6 +16,8 @@ import { emptyState, type WizardState } from "./state.ts";
 import type { LoginPrompt } from "../../platform/login.ts";
 import type { RetellAgent } from "../../retell/client.ts";
 import type { KeyAsk } from "../../retell/connect.ts";
+import type { RunView } from "../../run/view.ts";
+import type { SkillPlaces } from "../../skills/install.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
 import type { TestGate } from "../../wizard/gate.ts";
 import type { GenerationProgress } from "../../wizard/test-generation.ts";
@@ -36,10 +38,16 @@ export const WALK_SCREENS: Sequence = [
   // this question when there is a choice to make.
   { id: "retell-agent", show: (state) => state.asking === "retell-agent" },
   { id: "existing-tests", show: (state) => state.asking === "existing-tests" },
+  // The last question the wizard asks, over the run screen it interrupts: the
+  // run keeps moving underneath while the developer decides.
+  { id: "skills-offer", show: (state) => state.asking === "skills-offer" },
   // The list, while it is waiting on the one keystroke it exists for.
   { id: "gate", show: (state) => state.gate !== null },
   // The files arriving, one at a time, while they arrive.
   { id: "generating", show: (state) => state.generation !== null },
+  // The run, from the moment it is created until the wizard closes. It never
+  // completes on this screen: the wizard leaves and the suite carries on.
+  { id: "run", show: (state) => state.run !== null },
   { id: "task" },
 ];
 
@@ -168,6 +176,14 @@ export class WizardStore {
 
   setGate(gate: TestGate | null): void {
     this.change(gate === null ? { gate, editorProblem: null } : { gate, gateAt: 0 });
+  }
+
+  setRun(run: RunView | null): void {
+    this.change({ run });
+  }
+
+  setSkillPlaces(skillPlaces: SkillPlaces | null): void {
+    this.change({ skillPlaces });
   }
 
   /** Hands over what was typed back, and forgets it, so it is acted on once. */

@@ -12,9 +12,39 @@
  * One ending needs more than a line: the developer has to copy something. That
  * arrives as a notice printed above the line, never instead of it, so the line
  * is still the last thing in scrollback and still selects whole.
+ *
+ * The ending the whole walk is for needs more than a line for a different
+ * reason: there are three separate things a developer takes away from it — the
+ * address their results are at, where their tests now live, and the sentence
+ * they hand their coding agent. Each is a thing somebody copies, so each is on
+ * a line of its own with nothing else on it and no decoration around it. A
+ * terminal's triple-click takes a line; anything sharing that line with an
+ * address comes with it.
  */
 
+import {
+  installedLine,
+  skippedLine,
+  type SkillScope,
+} from "../skills/install.ts";
 import { pasteFallbackMessage } from "./no-coding-agent.ts";
+
+/**
+ * What the developer said to the skill offer, and what egma did about it.
+ *
+ * `not-offered` is a real answer: egma knows where two coding agents keep
+ * their skills, and it will not write a file into a directory an agent it does
+ * not know may never read.
+ */
+export type SkillOutcome =
+  | {
+      readonly kind: "installed";
+      readonly scope: SkillScope;
+      readonly file: string;
+      readonly drivenAgentName: string;
+    }
+  | { readonly kind: "skipped"; readonly drivenAgentName: string }
+  | { readonly kind: "not-offered" };
 
 /** Why the wizard stopped, and what it can honestly say about it. */
 export type ExitReport =
@@ -34,6 +64,21 @@ export type ExitReport =
     }
   /** The tests are on egma, and they are files in the repository as well. */
   | { readonly kind: "tests-pushed"; readonly count: number }
+  /**
+   * The whole walk, done: the tests are on egma, a run of them is going, and
+   * verdicts have started arriving. The wizard does not wait for the rest —
+   * the run is on the platform and carries on without a terminal.
+   */
+  | {
+      readonly kind: "run-started";
+      /** Where a person opens what happened. No token ever rides it. */
+      readonly resultsUrl: string;
+      /** How many simulations had a verdict when the wizard closed. */
+      readonly graded: number;
+      readonly total: number;
+      /** What became of the skill offer, so skipping is never silent. */
+      readonly skill: SkillOutcome;
+    }
   /**
    * The developer read the list and closed the wizard. Nothing was uploaded and
    * nothing was taken away: the files are theirs, in their repository, and the
@@ -73,10 +118,37 @@ function foundLine(framework: string | null, prompts: string | null): string {
   return `egma found your voice agent: ${facts.join(", ")}.`;
 }
 
+/** The headline of the ending the walk exists for. */
+function runStartedLine(graded: number, total: number): string {
+  if (graded === 0) {
+    return `✓ Your first run is live — ${total} ${total === 1 ? "simulation" : "simulations"}, none graded yet.`;
+  }
+  if (graded >= total) {
+    return `✓ Your first run is live — all ${total} graded.`;
+  }
+  return `✓ Your first run is live — ${graded} of ${total} graded so far.`;
+}
+
+/** Where the tests are now, and what to do to them next. */
+const TESTS_ARE_CODE = `Tests are code now: ${TESTS_FOLDER} (committed). Edit them, then egma push.`;
+
+/**
+ * The sentence a developer hands their coding agent.
+ *
+ * It is one line and it is the whole handoff: where to read what this
+ * repository points at, and where to find every verb from there. A developer
+ * who installed the skill does not need it; a developer who skipped does, and
+ * the line costs the first one nothing.
+ */
+const HAND_YOUR_AGENT =
+  'Hand your coding agent this: "Read egma/config.yaml, then egma --help — you can pull, push, and trigger runs from here."';
+
 export function buildExitLine(report: ExitReport): string {
   switch (report.kind) {
     case "found-agent":
       return foundLine(report.framework, report.prompts);
+    case "run-started":
+      return runStartedLine(report.graded, report.total);
     case "connected":
       return `egma connected your voice agent: ${report.agentName}, over ${report.connectionName}.`;
     case "tests-pushed":
@@ -107,12 +179,49 @@ export function buildExitLine(report: ExitReport): string {
 }
 
 /**
+ * Everything that survives the wizard, in the order it is printed.
+ *
+ * Every ending but one is a single line and comes back as one. The ending the
+ * walk is for is a short block, and its shape is the promise: a headline, the
+ * results address alone on its line, and then the two sentences a developer
+ * takes with them. The blank lines between them are the only decoration, and
+ * they are there so that no line has anything beside it.
+ */
+export function exitLines(report: ExitReport): readonly string[] {
+  if (report.kind !== "run-started") return [buildExitLine(report)];
+  return [
+    buildExitLine(report),
+    "",
+    // Alone, undecorated, and with no query on it. A person opens this and the
+    // browser they approved this machine in is already signed in — which is
+    // exactly why no token has to ride the address, and none ever does.
+    report.resultsUrl,
+    "",
+    TESTS_ARE_CODE,
+    HAND_YOUR_AGENT,
+  ];
+}
+
+/**
  * What is printed above the exit line, or `null` when the line says it all.
  *
- * The only ending that needs one is the machine with no coding agent on it: a
- * message is the whole answer there, and a message the developer cannot copy is
- * not one.
+ * Two endings need one. A machine with no coding agent on it needs the words to
+ * paste elsewhere — a message is the whole answer there, and a message the
+ * developer cannot copy is not one. And a walk that reached the skill offer has
+ * to say what became of it: **the offer is never silent in either direction**,
+ * so an install says where the file went and a skip says that nothing was
+ * written, and both survive the screen the wizard drew them on.
  */
 export function buildExitNotice(report: ExitReport): string | null {
-  return report.kind === "no-coding-agent" ? pasteFallbackMessage() : null;
+  if (report.kind === "no-coding-agent") return pasteFallbackMessage();
+  if (report.kind !== "run-started") return null;
+
+  switch (report.skill.kind) {
+    case "installed":
+      return installedLine(report.skill.scope, report.skill.file, report.skill.drivenAgentName);
+    case "skipped":
+      return skippedLine(report.skill.drivenAgentName);
+    case "not-offered":
+      return null;
+  }
 }

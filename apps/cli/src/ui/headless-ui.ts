@@ -17,6 +17,9 @@
 import { loginLines, type LoginPrompt } from "../platform/login.ts";
 import type { RetellAgent } from "../retell/client.ts";
 import { keyAskLines, type KeyAsk } from "../retell/connect.ts";
+import { simulationLine } from "../run/lines.ts";
+import type { RunView } from "../run/view.ts";
+import type { SkillPlaces } from "../skills/install.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
 import type { TestGate } from "../wizard/gate.ts";
 import type { GenerationProgress } from "../wizard/test-generation.ts";
@@ -36,6 +39,10 @@ export type HeadlessRecord = {
   written: string[];
   /** The list that waited on one keystroke, when one did. */
   gate: TestGate | null;
+  /** The run, as it stood the last time the flow said anything about it. */
+  run: RunView | null;
+  /** Where the skill was offered, when it was offered. */
+  skillPlaces: SkillPlaces | null;
   exit: ExitReport | null;
   gatesOpened: GateId[];
   asked: AskId[];
@@ -59,6 +66,8 @@ export class HeadlessUI implements WizardUI {
     summary: "",
     written: [],
     gate: null,
+    run: null,
+    skillPlaces: null,
     exit: null,
     gatesOpened: [],
     asked: [],
@@ -157,6 +166,39 @@ export class HeadlessUI implements WizardUI {
     for (const row of gate.rows) this.write(`test: ${row.name} ${row.persona}`);
     for (const held of gate.heldBack) this.write(`held-back: ${held.shown} ${held.reason}`);
     this.write(`tests: ${gate.rows.length}`);
+  }
+
+  /**
+   * A list cannot be drawn where there is no screen, so what is printed is the
+   * one thing that is news: a simulation that has moved since the last look.
+   *
+   * The lines are the same ones `egma run` prints, from the same place, so the
+   * two promptless surfaces cannot drift apart.
+   */
+  setRun(run: RunView | null): void {
+    if (run === null) return;
+    const before = new Map(
+      (this.record.run?.rows ?? []).map((row) => [row.id, row] as const),
+    );
+    for (const row of run.rows) {
+      const held = before.get(row.id);
+      if (held !== undefined && held.status === row.status && held.verdict === row.verdict) {
+        continue;
+      }
+      this.write(simulationLine(row));
+      if (row.verdict !== null && held?.verdict !== row.verdict) {
+        this.write(`verdict: ${row.name} ${row.persona} ${row.verdict}`);
+        if (row.first) this.write(`first-verdict: ${row.name} ${row.persona} ${row.verdict}`);
+      }
+    }
+    this.record.run = run;
+  }
+
+  setSkillPlaces(places: SkillPlaces | null): void {
+    if (places === null) return;
+    this.record.skillPlaces = places;
+    this.write(`skill_project: ${places.project}`);
+    this.write(`skill_global: ${places.global}`);
   }
 
   pushStatus(line: string): void {

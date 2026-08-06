@@ -84,6 +84,16 @@ describe("the egma command", () => {
     // The one answer a run with nobody watching cannot be asked for.
     expect(help.stdout).toContain("--existing-tests <path>");
 
+    // Every verb, and for the run verb the two things a coding agent has to
+    // know before it can act on one: how to start a run without waiting, and
+    // what each number it answers with means.
+    for (const verb of ["egma login", "egma connect", "egma init", "egma pull", "egma push"]) {
+      expect(help.stdout, verb).toContain(verb);
+    }
+    expect(help.stdout).toContain("egma run [options]");
+    expect(help.stdout).toContain("--no-follow");
+    expect(help.stdout).toContain("What egma run answers with:");
+
     // The test seam is not product surface, so it is not offered.
     expect(help.stdout).not.toContain("-- <command>");
 

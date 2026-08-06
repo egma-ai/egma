@@ -24,6 +24,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
+import { gradeEveryRun } from "./support/grading.ts";
 import { runInTerminal, showing, type TerminalRun } from "./support/pty.ts";
 import {
   CLI_ENTRY,
@@ -161,6 +162,25 @@ async function toTheGate(
 /** What the list waits on, and the shape it waits in. */
 const GATE_HINTS = ["[enter] run", "[e] edit first", "[q] quit"] as const;
 
+/**
+ * Enter at the gate, and out the other side of the run it starts.
+ *
+ * The gate is not the end of the walk any more: enter pushes the list and
+ * starts a run over it, and the wizard leaves once a first verdict has landed.
+ * Nothing here conducts a simulation, so the fixture is given something that
+ * judges what the run queues.
+ *
+ * No skill is offered on this walk, because the coding agent is a command
+ * rather than an agent egma has a skill convention for — which is why these
+ * checks end at the run and not at a question about skills.
+ */
+async function enterAndLeave(run: TerminalRun): Promise<void> {
+  const grading = gradeEveryRun(platform);
+  run.write("\r");
+  await run.exited;
+  grading.stop();
+}
+
 async function testsInFolder(): Promise<string[]> {
   return (await readdir(path.join(workspace.dir, "egma", "tests"))).sort();
 }
@@ -262,11 +282,14 @@ describe("the gate", () => {
     const run = await toTheGate();
     await showing(run, "5 tests generated", ...GATE_HINTS);
 
-    run.write("\r");
+    await enterAndLeave(run);
 
     expect(await run.exited).toBe(0);
-    expect(run.scrollback().trim()).toBe(
-      "egma put 5 tests on egma and left them in egma/tests/ — commit them, edit them, then run egma push.",
+    // Enter is the end of the gate and the start of the run: the line left
+    // behind is about the run, and it names where the files are anyway.
+    expect(run.scrollback()).toContain("✓ Your first run is live");
+    expect(run.scrollback()).toContain(
+      "Tests are code now: egma/tests/ (committed). Edit them, then egma push.",
     );
 
     // On the platform, and pinned in the files, which is what makes the next
@@ -329,7 +352,7 @@ describe("the gate", () => {
     // of the promise: the terminal was handed over and taken back.
     await showing(run, "5 tests generated", ...GATE_HINTS);
 
-    run.write("\r");
+    await enterAndLeave(run);
     expect(await run.exited).toBe(0);
 
     // What the developer's editor wrote is what egma uploaded.
@@ -346,7 +369,7 @@ describe("the gate", () => {
     await showing(run, "No editor is set. Set $EDITOR", ...GATE_HINTS);
 
     // Nothing was opened and nothing was lost: the list is still waiting.
-    run.write("\r");
+    await enterAndLeave(run);
     expect(await run.exited).toBe(0);
     expect(platform.tests.tests).toHaveLength(5);
   });

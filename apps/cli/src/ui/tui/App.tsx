@@ -18,6 +18,8 @@ import { LoginScreen } from "./screens/LoginScreen.tsx";
 import { PromptsPointerScreen } from "./screens/PromptsPointerScreen.tsx";
 import { RetellAgentScreen } from "./screens/RetellAgentScreen.tsx";
 import { RetellKeyScreen } from "./screens/RetellKeyScreen.tsx";
+import { RunScreen } from "./screens/RunScreen.tsx";
+import { SkillsOfferScreen } from "./screens/SkillsOfferScreen.tsx";
 import { TaskScreen } from "./screens/TaskScreen.tsx";
 import type { WizardStore } from "./store.ts";
 
@@ -106,6 +108,17 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
   }
   if (screen === "generating" && state.generation !== null) {
     return <GeneratingScreen progress={state.generation} />;
+  }
+  if (screen === "skills-offer" && state.skillPlaces !== null) {
+    return (
+      <SkillsOfferScreen
+        places={state.skillPlaces}
+        onAnswer={(choice) => store.answer("skills-offer", choice)}
+      />
+    );
+  }
+  if (screen === "run" && state.run !== null) {
+    return <RunScreen run={state.run} />;
   }
   return <TaskScreen state={state} />;
 }

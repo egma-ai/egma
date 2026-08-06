@@ -309,9 +309,22 @@ export type AgentControls = {
   readonly projectsNamed: readonly (string | null)[];
 };
 
+/**
+ * One connection, as the run endpoints need it: which agent it reaches, and
+ * what egma would have to speak to conduct a simulation over it.
+ */
+export type ConnectionLookup = (connectionId: string) => {
+  readonly id: string;
+  readonly agentId: string;
+  readonly type: string;
+  readonly modality: string;
+} | null;
+
 export function agentRoutes(knowsKey: (key: string) => boolean): {
   readonly group: RouteGroup;
   readonly controls: AgentControls;
+  /** How a run resolves the connection it will execute over. */
+  readonly connectionById: ConnectionLookup;
 } {
   const agents: StoredAgent[] = [];
   const connections: StoredConnection[] = [];
@@ -522,5 +535,20 @@ export function agentRoutes(knowsKey: (key: string) => boolean): {
     ],
   };
 
-  return { group, controls: { agents, connections, sealed, projectsNamed } };
+  const connectionById: ConnectionLookup = (connectionId) => {
+    const held = connections.find((one) => one.id === connectionId);
+    if (held === undefined) return null;
+    return {
+      id: held.id,
+      agentId: held.agentId,
+      type: held.type,
+      modality: held.modality,
+    };
+  };
+
+  return {
+    group,
+    controls: { agents, connections, sealed, projectsNamed },
+    connectionById,
+  };
 }
