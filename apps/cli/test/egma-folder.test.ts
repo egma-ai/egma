@@ -7,7 +7,7 @@
  * two verbs. Both are cheaper to hold here than through a subprocess.
  */
 
-import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -16,6 +16,7 @@ import {
   createEgmaFolder,
   folderPathsIn,
   parseConfig,
+  readFolder,
   readFolderTests,
   serializeConfig,
   updateConfig,
@@ -452,6 +453,38 @@ describe("the egma folder", () => {
     expect(found.map((entry) => entry.shown)).toEqual([
       "egma/tests/a.md",
       "egma/tests/b.md",
+    ]);
+  });
+
+  /**
+   * One broken file out of twelve used to end whatever was reading the folder,
+   * which threw away the eleven good ones at the moment they mattered most —
+   * right after a coding agent had spent two minutes writing them.
+   */
+  it("carries a file it cannot read rather than throwing over it", async () => {
+    const folder = await createEgmaFolder({ repository: workspace.dir });
+    await writeFile(path.join(folder.paths.tests, "good.md"), GENERATED, "utf8");
+    await writeFile(
+      path.join(folder.paths.tests, "half-written.md"),
+      "---\nname: half-written\npersonas: [never-closed\n---\n## Scenario\nx\n",
+      "utf8",
+    );
+    // A directory that happens to end in `.md` is a file egma cannot read too.
+    await mkdir(path.join(folder.paths.tests, "a-folder.md"), { recursive: true });
+
+    const read = await readFolder(folder.paths);
+
+    expect(read.found.map((entry) => entry.shown)).toEqual(["egma/tests/good.md"]);
+    expect(read.unreadable.map((entry) => entry.shown)).toEqual([
+      "egma/tests/a-folder.md",
+      "egma/tests/half-written.md",
+    ]);
+    // The reader's own words, which say where in the file to look.
+    expect(read.unreadable[1]?.reason).toContain("half-written.md, line 2");
+
+    // And the reader that only wants tests answers the tests, as it always did.
+    expect((await readFolderTests(folder.paths)).map((entry) => entry.shown)).toEqual([
+      "egma/tests/good.md",
     ]);
   });
 

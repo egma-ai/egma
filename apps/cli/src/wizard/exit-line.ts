@@ -35,11 +35,18 @@ export type ExitReport =
   /** The tests are on egma, and they are files in the repository as well. */
   | { readonly kind: "tests-pushed"; readonly count: number }
   /**
-   * The developer read the list and closed the wizard. Nothing was uploaded and
+   * The developer read the list and did not run them. Nothing was uploaded and
    * nothing was taken away: the files are theirs, in their repository, and the
    * line has to say where.
+   *
+   * `stopped` is Ctrl-C rather than `q`. At this screen the two are the same
+   * decision — nothing is running, the files are written, and the list is
+   * offering `q` beside them — so both leave the same files and the same
+   * sentence about where they are. It is kept apart only because a shell reads
+   * an interruption as an interruption, and a run somebody stopped must not
+   * answer a shell as though it finished.
    */
-  | { readonly kind: "tests-kept"; readonly count: number }
+  | { readonly kind: "tests-kept"; readonly count: number; readonly stopped: boolean }
   /** Nothing here looks like a voice agent, and the pointer did not help. */
   | { readonly kind: "no-agent-context" }
   /** There is no coding agent on this machine for egma to drive. */
@@ -83,10 +90,13 @@ export function buildExitLine(report: ExitReport): string {
       return report.count === 1
         ? `egma put 1 test on egma and left it in ${TESTS_FOLDER} — commit it, edit it, then run egma push.`
         : `egma put ${report.count} tests on egma and left them in ${TESTS_FOLDER} — commit them, edit them, then run egma push.`;
-    case "tests-kept":
-      return report.count === 1
-        ? `Nothing was uploaded. Your test is in ${TESTS_FOLDER} — read it, then run egma push.`
-        : `Nothing was uploaded. Your ${report.count} tests are in ${TESTS_FOLDER} — read them, then run egma push.`;
+    case "tests-kept": {
+      const where =
+        report.count === 1
+          ? `Your test is in ${TESTS_FOLDER} — read it, then run egma push.`
+          : `Your ${report.count} tests are in ${TESTS_FOLDER} — read them, then run egma push.`;
+      return report.stopped ? `egma stopped. ${where}` : `Nothing was uploaded. ${where}`;
+    }
     case "no-agent-context":
       return "egma found no voice agent to test. Run egma again where your agent is defined.";
     case "no-coding-agent":

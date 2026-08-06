@@ -200,28 +200,76 @@ export type FolderTest = {
 };
 
 /**
- * Every test file in the folder, in file-name order so that two runs of the
- * same command report the same thing in the same order.
+ * A file in `egma/tests/` that egma could not turn into a test, and why.
+ *
+ * The folder is written by people and by coding agents, and both of them write
+ * a broken file sometimes: frontmatter with a list that never closes its
+ * bracket is the ordinary one. One such file used to end whatever was reading
+ * the folder, which meant one bad file out of twelve threw away the eleven good
+ * ones. So it is carried instead of thrown, and every reader says what it will
+ * do about it — because a file egma cannot read is still the developer's file
+ * and still has to be named.
  */
-export async function readFolderTests(paths: FolderPaths): Promise<readonly FolderTest[]> {
+export type UnreadableTest = {
+  /** Absolute. */
+  readonly file: string;
+  /** As `egma/tests/…` reads in a report. */
+  readonly shown: string;
+  /** In the reader's own words, which say where in the file the problem is. */
+  readonly reason: string;
+};
+
+/** What is in the folder: the tests, and the files that are not one. */
+export type FolderContents = {
+  readonly found: readonly FolderTest[];
+  readonly unreadable: readonly UnreadableTest[];
+};
+
+/**
+ * Everything in the folder, in file-name order so that two runs of the same
+ * command report the same thing in the same order.
+ *
+ * Nothing here throws on one file. A folder is read at the end of a long run —
+ * after a coding agent has spent two minutes writing into it — and an exception
+ * at that moment loses every good file along with the bad one.
+ */
+export async function readFolder(paths: FolderPaths): Promise<FolderContents> {
   let names: string[];
   try {
     names = await readdir(paths.tests);
   } catch {
-    return [];
+    return { found: [], unreadable: [] };
   }
 
   const found: FolderTest[] = [];
+  const unreadable: UnreadableTest[] = [];
   for (const name of names.filter((entry) => entry.endsWith(".md")).sort()) {
     const file = path.join(paths.tests, name);
-    const document = await readFile(file, "utf8");
-    found.push({
-      file,
-      shown: `${FOLDER_NAME}/${TESTS_FOLDER_NAME}/${name}`,
-      test: parseTestFile(document, name, name.replace(/\.md$/u, "")),
-    });
+    const shown = `${FOLDER_NAME}/${TESTS_FOLDER_NAME}/${name}`;
+    try {
+      const document = await readFile(file, "utf8");
+      found.push({
+        file,
+        shown,
+        test: parseTestFile(document, name, name.replace(/\.md$/u, "")),
+      });
+    } catch (problem) {
+      unreadable.push({
+        file,
+        shown,
+        reason: problem instanceof Error ? problem.message : String(problem),
+      });
+    }
   }
-  return found;
+  return { found, unreadable };
+}
+
+/**
+ * Every test file in the folder. The files that are not a test are left out,
+ * and a caller that has to name them reads the folder itself.
+ */
+export async function readFolderTests(paths: FolderPaths): Promise<readonly FolderTest[]> {
+  return (await readFolder(paths)).found;
 }
 
 /**
