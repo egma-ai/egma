@@ -13,8 +13,8 @@ completions. Those refusals are what the plug's failure paths are tested
 against.
 
 It also records every call it served, so a test can assert the plug drove
-the whole session lifecycle — opened once, delivered in order, ended at the
-platform — rather than only that a transcript came out.
+the whole exchange — opened once, delivered in order, ended at the platform
+— rather than only that a transcript came out.
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ class RetellStub:
     has to survive it."""
 
     calls: list[dict] = field(default_factory=list)
-    """Every request served, in order — the session lifecycle on the record."""
+    """Every request served, in order — the whole exchange on the record."""
 
     chats: dict[str, dict] = field(default_factory=dict)
 

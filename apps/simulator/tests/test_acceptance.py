@@ -1,9 +1,11 @@
 """What the simulator promises, proved black-box at the contract seam.
 
 The workbench offers specs; a real simulator process claims, conducts,
-heartbeats and reports; every assertion below reads only what the
-workbench recorded. Nothing inspects the simulator — that is the point:
-what the records show is all the control plane will ever know.
+heartbeats and reports; the assertions below read what the workbench
+recorded — and, where a platform stands on the other side of the exchange,
+what that platform saw on its own wire. Nothing reaches inside the
+simulator — that is the point: what the records show is all the control
+plane will ever know.
 
 Every exchange here is a real conversation: the persona on the scripted
 model client, the agent played by the scripted counterpart plug. Nothing
@@ -14,12 +16,12 @@ scripted one, which is why none of it can flake.
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import datetime
 
 from conftest import (
     HEARTBEAT_SECONDS,
     all_terminal,
+    assert_kept_secret,
     events_for,
     has_terminal,
     heartbeats_for,
@@ -548,12 +550,7 @@ async def test_a_retell_chat_spec_conducts_a_multi_turn_exchange(
     ]
 
     simulator.stop()
-    assert sentinel not in json.dumps(records), "a report carried the key"
-    assert sentinel not in simulator.output(), "a log line carried the key"
-    wal_bytes = b"".join(
-        path.read_bytes() for path in simulator.wal_dir.glob("*.jsonl")
-    )
-    assert sentinel.encode() not in wal_bytes, "the write-ahead log carried the key"
+    assert_kept_secret(sentinel, records=records, simulator=simulator)
 
 
 async def test_a_retell_key_the_platform_refuses_fails_honestly_and_silently(
@@ -581,12 +578,7 @@ async def test_a_retell_key_the_platform_refuses_fails_honestly_and_silently(
     assert events_for(records, "sim-retell-badkey", "turn") == []
 
     simulator.stop()
-    assert sentinel not in json.dumps(records), "a failure report carried the key"
-    assert sentinel not in simulator.output(), "a failure log carried the key"
-    wal_bytes = b"".join(
-        path.read_bytes() for path in simulator.wal_dir.glob("*.jsonl")
-    )
-    assert sentinel.encode() not in wal_bytes, "the write-ahead log carried the key"
+    assert_kept_secret(sentinel, records=records, simulator=simulator)
 
 
 async def test_a_platform_that_says_the_key_back_still_leaks_nothing(
@@ -611,12 +603,7 @@ async def test_a_platform_that_says_the_key_back_still_leaks_nothing(
     assert terminal_event_for(records, "sim-retell-echoed")["status"] == "failed"
 
     simulator.stop()
-    assert sentinel not in json.dumps(records), "a report repeated the key"
-    assert sentinel not in simulator.output(), "a log line repeated the key"
-    wal_bytes = b"".join(
-        path.read_bytes() for path in simulator.wal_dir.glob("*.jsonl")
-    )
-    assert sentinel.encode() not in wal_bytes, "the write-ahead log repeated the key"
+    assert_kept_secret(sentinel, records=records, simulator=simulator)
 
 
 async def test_a_retell_endpoint_that_answers_nowhere_fails_honestly(
@@ -642,8 +629,7 @@ async def test_a_retell_endpoint_that_answers_nowhere_fails_honestly(
     assert "127.0.0.1:1" in terminal["reason"], terminal["reason"]
 
     simulator.stop()
-    assert sentinel not in json.dumps(records)
-    assert sentinel not in simulator.output()
+    assert_kept_secret(sentinel, records=records, simulator=simulator)
 
 
 async def test_credentials_never_appear_in_logs_or_reports(
@@ -665,16 +651,4 @@ async def test_credentials_never_appear_in_logs_or_reports(
     assert terminal["status"] == "completed"
 
     simulator.stop()
-
-    everything_recorded = json.dumps(records)
-    assert sentinel not in everything_recorded, "a report carried the credential"
-
-    output = simulator.output()
-    assert output, "expected the simulator to have logged something"
-    assert sentinel not in output, "a log line carried the credential"
-
-    wal_bytes = b"".join(
-        path.read_bytes() for path in simulator.wal_dir.glob("*.jsonl")
-    )
-    assert wal_bytes, "expected write-ahead log entries"
-    assert sentinel.encode() not in wal_bytes, "the WAL carried the credential"
+    assert_kept_secret(sentinel, records=records, simulator=simulator)

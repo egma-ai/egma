@@ -50,19 +50,18 @@ from . import AgentReply, PlugError
 DEFAULT_BASE_URL = "https://api.retellai.com"
 """Retell's own API, where a connection with no base URL is reached."""
 
-END_TOOL_NAMES = frozenset({"end_call", "end_chat"})
-"""What a Retell agent's ending tool invokes under. ``end_call`` is the
-built-in one, named for voice and kept as-is for chat; ``end_chat`` is what
-an agent whose tool was renamed after the thing it does invokes. An agent
-carrying neither never ends an exchange itself, and the simulation's limits
-are what end it — deliberately, and never as the agent failing."""
+END_TOOL_NAMES = frozenset({"end_call"})
+"""What a Retell agent's ending tool invokes under: the built-in one, named
+for voice and kept as-is for chat. An agent carrying no such tool never ends
+an exchange itself, and the simulation's limits end it instead —
+deliberately, and never as the agent failing."""
 
 TIMEOUT_SECONDS = 60.0
 """The most one Retell call may take. Generous because a completion waits
 on the agent's own model, and anything past it is a platform that has
 stopped answering rather than one thinking."""
 
-QUOTED_FROM_A_REFUSAL = 200
+QUOTED_REFUSAL_CHARS = 200
 """How much of a refusal's body is quoted into the reason: enough to carry
 the platform's own words about what was wrong, short of pasting a page."""
 
@@ -185,7 +184,7 @@ class RetellChat:
 
     def _quotable(self, told: str) -> str:
         """The platform's own words, minus the key, short enough to read."""
-        return told.replace(self._api_key, REDACTED)[:QUOTED_FROM_A_REFUSAL]
+        return told.replace(self._api_key, REDACTED)[:QUOTED_REFUSAL_CHARS]
 
     async def _call(self, method: str, path: str, payload: dict) -> dict:
         """One Retell call, or a refusal saying what happened without the key."""

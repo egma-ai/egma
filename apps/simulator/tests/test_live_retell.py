@@ -23,12 +23,12 @@ platform is not visible from inside egma.
 
 from __future__ import annotations
 
-import json
 import os
 
 import aiohttp
 import pytest
 from conftest import (
+    assert_kept_secret,
     events_for,
     has_terminal,
     retell_spec,
@@ -96,14 +96,9 @@ async def test_the_persona_conducts_a_real_conversation_with_a_retell_agent(
     simulator.stop()
 
     # The credential conducted the whole exchange and appears nowhere.
-    assert API_KEY not in json.dumps(records), "a report carried the key"
-    assert API_KEY not in simulator.output(), "a log line carried the key"
-    wal_bytes = b"".join(
-        path.read_bytes() for path in simulator.wal_dir.glob("*.jsonl")
-    )
-    assert API_KEY.encode() not in wal_bytes, "the write-ahead log carried the key"
+    assert_kept_secret(API_KEY, records=records, simulator=simulator)
 
-    # And the session was really torn down at the platform, which only the
+    # And the exchange was really ended at the platform, which only the
     # platform can say.
     assert await _chat_status(chat_id) == "ended"
 

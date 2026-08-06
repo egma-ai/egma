@@ -230,11 +230,43 @@ def load_fixture_spec(name: str) -> dict:
         return json.load(handle)
 
 
+A_SCENARIO = "State the first point. State the second point."
+"""Two sentences, so the scripted persona speaks twice and then concludes."""
+
+A_PERSONALITY = "Terse test person; sticks to the script."
+
+
+def a_spec(
+    simulation_id: str,
+    *,
+    connection: dict,
+    scenario: str,
+    personality: str,
+    max_turns: int,
+    max_duration_seconds: int,
+) -> dict:
+    """The envelope every spec shares: one persona, one scenario, one set of
+    walls, one chat. What differs between two specs is the connection block,
+    which is exactly the difference the plug seam exists to absorb."""
+    return {
+        "contract_version": 1,
+        "simulation_id": simulation_id,
+        "modality": "chat",
+        "connection": connection,
+        "persona": {"traits": {"personality": personality, "language": "en-US"}},
+        "scenario": {"instructions": scenario},
+        "limits": {
+            "max_duration_seconds": max_duration_seconds,
+            "max_turns": max_turns,
+        },
+    }
+
+
 def scripted_spec(
     simulation_id: str,
     *,
-    scenario: str = "State the first point. State the second point.",
-    personality: str = "Terse test person; sticks to the script.",
+    scenario: str = A_SCENARIO,
+    personality: str = A_PERSONALITY,
     greeting: str | None = None,
     replies: list[str] | None = None,
     ends_after_replies: bool = False,
@@ -258,24 +290,18 @@ def scripted_spec(
         config["ends_after_replies"] = True
     if provider_reference is not None:
         config["provider_reference"] = provider_reference
-    return {
-        "contract_version": 1,
-        "simulation_id": simulation_id,
-        "modality": "chat",
-        "connection": {
+    return a_spec(
+        simulation_id,
+        connection={
             "type": "scripted",
             "config": config,
             "credentials": credentials,
         },
-        "persona": {
-            "traits": {"personality": personality, "language": "en-US"}
-        },
-        "scenario": {"instructions": scenario},
-        "limits": {
-            "max_duration_seconds": max_duration_seconds,
-            "max_turns": max_turns,
-        },
-    }
+        scenario=scenario,
+        personality=personality,
+        max_turns=max_turns,
+        max_duration_seconds=max_duration_seconds,
+    )
 
 
 def retell_spec(
@@ -284,8 +310,8 @@ def retell_spec(
     base_url: str,
     api_key: str,
     agent_id: str = "agent_stubbed_0001",
-    scenario: str = "State the first point. State the second point.",
-    personality: str = "Terse test person; sticks to the script.",
+    scenario: str = A_SCENARIO,
+    personality: str = A_PERSONALITY,
     max_turns: int = 60,
     max_duration_seconds: int = 600,
 ) -> dict:
@@ -296,22 +322,45 @@ def retell_spec(
     credentials — plus the base URL, which is what lets the exchange land on
     a Retell-shaped stub instead of the platform itself.
     """
-    return {
-        "contract_version": 1,
-        "simulation_id": simulation_id,
-        "modality": "chat",
-        "connection": {
+    return a_spec(
+        simulation_id,
+        connection={
             "type": "retell",
             "config": {"retellAgentId": agent_id, "baseUrl": base_url},
             "credentials": {"apiKey": api_key},
         },
-        "persona": {"traits": {"personality": personality, "language": "en-US"}},
-        "scenario": {"instructions": scenario},
-        "limits": {
-            "max_duration_seconds": max_duration_seconds,
-            "max_turns": max_turns,
-        },
-    }
+        scenario=scenario,
+        personality=personality,
+        max_turns=max_turns,
+        max_duration_seconds=max_duration_seconds,
+    )
+
+
+def assert_kept_secret(
+    secret: str, *, records: list[dict], simulator: SimulatorProcess
+) -> None:
+    """A planted credential is in none of the three places it could surface.
+
+    The reports the control plane holds, every byte the process wrote, and
+    the write-ahead log on disk — all three, every time, because a secret
+    kept out of two of them is still a leaked secret. Each place is checked
+    to be non-empty first: scanning nothing always passes.
+
+    Call it once the simulator has stopped, so its output is all there.
+    """
+    assert secret not in json.dumps(records), "a report carried the credential"
+
+    output = simulator.output()
+    assert output, "expected the simulator to have logged something"
+    assert secret not in output, "a log line carried the credential"
+
+    wal_bytes = b"".join(
+        path.read_bytes() for path in simulator.wal_dir.glob("*.jsonl")
+    )
+    assert wal_bytes, "expected write-ahead log entries"
+    assert secret.encode() not in wal_bytes, (
+        "the write-ahead log carried the credential"
+    )
 
 
 # -- Record readers: the acceptance suite's entire vocabulary -----------------

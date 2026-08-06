@@ -1,7 +1,7 @@
 """The Retell chat plug against a Retell-shaped server.
 
 The plug is the one component that speaks a platform's wire protocol, so
-what is pinned here is the wire: the session opened once, a turn delivered
+what is pinned here is the wire: the chat opened once, a turn delivered
 per persona turn with the agent's own words coming back, the agent's ending
 read from its end-tool invocation, and the chat ended at the platform
 afterwards. The counterpart is a real HTTP server shaped like Retell's chat
@@ -63,9 +63,9 @@ async def test_the_plug_opens_delivers_and_ends_one_chat(start_retell_stub):
     )
     await plug.close()
 
-    # The whole session lifecycle, from the platform's own side: one chat
-    # opened against the configured agent, both turns delivered in order,
-    # the chat ended rather than left ongoing.
+    # The whole exchange, from the platform's own side: one chat opened
+    # against the configured agent, both turns delivered in order, the chat
+    # ended rather than left ongoing.
     stub = running.stub
     assert [call["endpoint"] for call in stub.calls] == [
         "create-chat",
