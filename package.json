@@ -15,7 +15,8 @@
     "db:up": "docker compose up -d --wait postgres clickhouse",
     "db:down": "docker compose down",
     "db:generate": "pnpm --filter @egma/db generate",
-    "test": "pnpm db:up && vitest run",
+    "test": "pnpm db:up && vitest run && pnpm test:simulator",
+    "test:simulator": "pnpm --filter @egma/simulator test",
     "test:watch": "vitest"
   },
   "devDependencies": {
