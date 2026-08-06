@@ -77,6 +77,8 @@ export function LoginScreen({
   const shown = state.statuses.slice(-VISIBLE_STATUS_LINES);
 
   return (
+    // The border and paddingX below are counted in `FRAMING_COLUMNS`, which is
+    // what decides whether the address fits. Changing either changes that.
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
       <Text bold>egma</Text>
       <Box height={1} />

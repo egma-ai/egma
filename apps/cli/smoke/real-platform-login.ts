@@ -201,7 +201,7 @@ async function theWizard(instance: Instance, page: Page): Promise<void> {
     say(screen);
     say("");
 
-    const code = /Code: ([0-9A-Z-]+)/u.exec(screen)?.[1] ?? "";
+    const code = /Code: (\S+)/u.exec(screen)?.[1] ?? "";
     const approveUrl =
       screen
         .split("\n")

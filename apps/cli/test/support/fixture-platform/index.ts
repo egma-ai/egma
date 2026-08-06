@@ -1,7 +1,7 @@
 /**
  * A whole fixture platform, ready to point a CLI at.
  *
- * One call starts an HTTP server speaking egma's public API, hands back the
+ * One function starts an HTTP server speaking egma's public API, hands back the
  * address to point at and the controls a test drives it with. Adding the next
  * part of the API is adding a group beside `deviceRoutes` here.
  */

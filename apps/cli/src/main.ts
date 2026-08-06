@@ -18,7 +18,7 @@ import {
   type DrivenAgentLaunch,
 } from "./acp/registry.ts";
 import { runLoginCommand } from "./commands/login.ts";
-import { credentialsFileIn, readCredentials, resolvePlatformUrl } from "./platform/credentials.ts";
+import { resolvePlatformAccess, UnusableUrlError } from "./platform/credentials.ts";
 import { HeadlessUI } from "./ui/headless-ui.ts";
 import { startTui } from "./ui/tui/start-tui.ts";
 import { buildExitLine, type ExitReport } from "./wizard/exit-line.ts";
@@ -131,12 +131,17 @@ export function helpText(): string {
     "  -h, --help           Print this.",
     "  -v, --version        Print the version.",
     "",
+    "Environment:",
+    "  EGMA_URL             The egma to talk to, for a whole shell. Same as --url.",
+    "  EGMA_HOME            The folder egma keeps this machine's key in.",
+    "                       Default: ~/.egma",
+    "",
     "What egma login prints, one fact per line:",
     "  url, code, approve_url, browser, waiting, status, credentials",
     "",
     "What egma login answers with:",
-    "  0 signed in   2 denied   3 the code ran out   4 egma did not answer",
-    "  130 stopped part way",
+    "  0 signed in   2 denied   3 the code ran out",
+    "  4 egma did not answer, or refused   130 stopped part way",
     "",
     `The agent registry was mirrored on ${REGISTRY_SNAPSHOT_MIRRORED_ON}.`,
   ].join("\n");
@@ -168,7 +173,8 @@ function launchFrom(invocation: Invocation): DrivenAgentLaunch {
   return launchForId(invocation.drivenAgentId);
 }
 
-function exitCodeFor(report: ExitReport): number {
+/** What the whole walk answers with, which is not what `egma login` answers. */
+function walkExitCode(report: ExitReport): number {
   switch (report.kind) {
     case "task-done":
     case "quit":
@@ -178,25 +184,6 @@ function exitCodeFor(report: ExitReport): number {
     case "failed":
       return 1;
   }
-}
-
-/**
- * Which egma this run signs in to, and where the key it gets is kept.
- *
- * Resolved once, here, so the wizard and every verb read the same answer from
- * the same three places in the same order.
- */
-async function platformFor(invocation: Invocation): Promise<PlatformAccess> {
-  const credentialsFile = credentialsFileIn(process.env);
-  const stored = await readCredentials(credentialsFile);
-  return {
-    url: resolvePlatformUrl({
-      flag: invocation.url,
-      env: process.env.EGMA_URL,
-      stored: stored?.url ?? null,
-    }),
-    credentialsFile,
-  };
 }
 
 async function runHeadless(
@@ -222,7 +209,7 @@ async function runHeadless(
       ...(file === null ? {} : { file }),
     });
     process.stdout.write(`${buildExitLine(report)}\n`);
-    return exitCodeFor(report);
+    return walkExitCode(report);
   } finally {
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
@@ -254,7 +241,7 @@ async function runWizard(
       ...(file === null ? {} : { file }),
     });
     tui.close(report);
-    return exitCodeFor(report);
+    return walkExitCode(report);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     tui.close({ kind: "failed", reason });
@@ -266,7 +253,7 @@ async function runWizard(
 }
 
 /** The login verb: no terminal needed, no keystroke taken, no question asked. */
-async function runLogin(invocation: Invocation): Promise<number> {
+async function runLogin(invocation: Invocation, access: PlatformAccess): Promise<number> {
   const controller = new AbortController();
   const onSignal = (): void => controller.abort("interrupt");
   process.on("SIGINT", onSignal);
@@ -274,7 +261,7 @@ async function runLogin(invocation: Invocation): Promise<number> {
 
   try {
     return await runLoginCommand({
-      url: invocation.url,
+      access,
       force: invocation.force,
       env: process.env,
       signal: controller.signal,
@@ -306,10 +293,25 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
 
+  // Which egma, resolved once for every path below, and refused here when the
+  // address a developer named is not one. A bad address is turned away before
+  // anything is started on it rather than after.
+  let access: PlatformAccess;
+  try {
+    access = await resolvePlatformAccess({ env: process.env, flag: invocation.url });
+  } catch (error) {
+    if (error instanceof UnusableUrlError) {
+      process.stderr.write(`${error.message}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    throw error;
+  }
+
   // A verb needs no terminal and takes no keystroke: it drives no coding agent,
   // so there is nothing for a keystroke to agree to.
   if (invocation.verb === "login") {
-    process.exitCode = await runLogin(invocation);
+    process.exitCode = await runLogin(invocation, access);
     return;
   }
 
@@ -338,9 +340,7 @@ export async function main(argv: readonly string[]): Promise<void> {
     throw error;
   }
 
-  const platform = await platformFor(invocation);
-
   process.exitCode = invocation.headless
-    ? await runHeadless(launch, cwd, invocation.file, platform)
-    : await runWizard(launch, cwd, invocation.file, platform);
+    ? await runHeadless(launch, cwd, invocation.file, access)
+    : await runWizard(launch, cwd, invocation.file, access);
 }

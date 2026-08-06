@@ -77,9 +77,15 @@ async function wizard(options: {
   });
 }
 
-/** The code the terminal is showing, read off its screen. */
+/**
+ * The code the terminal is showing, read off its screen.
+ *
+ * Whatever is on that line is the code. What shape egma issues codes in is the
+ * instance's business and is asserted where the instance is — baking it in here
+ * would make this screen check fail the day the codes get a character longer.
+ */
 function codeOn(screen: string): string {
-  return /Code: ([A-Z]{4}-[A-Z]{4})/u.exec(screen)?.[1] ?? "";
+  return /Code: (\S+)/u.exec(screen)?.[1] ?? "";
 }
 
 /**
@@ -122,7 +128,7 @@ describe("the login screen", () => {
 
       // The address is on a line of its own, whole, with nothing else on it —
       // which is what makes a triple-click select an address that works.
-      const approveUrl = `${platform.url}/device/approve?user_code=${encodeURIComponent(code)}`;
+      const approveUrl = `${platform.url}/device?user_code=${encodeURIComponent(code)}`;
       const ownLine = linesInside(screen).find((line) => line.startsWith(platform.url));
       expect(ownLine).toBe(approveUrl);
 
@@ -154,7 +160,7 @@ describe("the login screen", () => {
       expect(await drawn(terminal)).toBe(true);
 
       const screen = terminal.screen();
-      const approveUrl = `${platform.url}/device/approve?user_code=${codeOn(screen)}`;
+      const approveUrl = `${platform.url}/device?user_code=${codeOn(screen)}`;
       expect(asOneLine(screen)).toContain(
         `The address needs ${columnsNeeded(approveUrl)} columns and this terminal has 40`,
       );
@@ -185,7 +191,7 @@ describe("the login screen", () => {
       const code = codeOn(terminal.screen());
       // Approved in a browser on another machine, and then pasted back here.
       expect(platform.device.approve(code)).toBe(true);
-      terminal.write(`${platform.url}/device/approve?user_code=${code}\r`);
+      terminal.write(`${platform.url}/device?user_code=${code}\r`);
 
       // The walk carried on: login is behind, the coding agent is being driven,
       // and the run ends on the one line the wizard leaves in scrollback.

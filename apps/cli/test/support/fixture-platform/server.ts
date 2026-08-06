@@ -25,7 +25,7 @@ export type FixtureRequest = {
   readonly headers: Record<string, string | undefined>;
   /** The body, when it arrived as JSON. */
   readonly body: Record<string, unknown> | null;
-  /** The body, when it arrived form-encoded, as RFC 8628's token call does. */
+  /** The body, when it arrived form-encoded, as RFC 8628's token request does. */
   readonly form: URLSearchParams | null;
 };
 

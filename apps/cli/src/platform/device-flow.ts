@@ -37,7 +37,32 @@ export type Collection =
   | { readonly kind: "refused"; readonly reason: string };
 
 /** The one thing this module needs from the world, so a test can stand in. */
-export type Caller = typeof fetch;
+export type Fetch = typeof fetch;
+
+/**
+ * What egma says about a refusal, in egma's own words.
+ *
+ * RFC 8628 carries an `error_description` beside the code, and none of it is
+ * ever repeated at a terminal. Two reasons, and either alone would be enough.
+ * It is written for whoever built the client rather than for whoever is sitting
+ * at it. And egma's own descriptions name what a terminal never names — what
+ * was set up for a new account is settled in the browser page and said nowhere
+ * out here — so relaying them would break that rule from the far end of an
+ * HTTP request, where no reading of this code could see it.
+ *
+ * So the code is switched on and the sentence is egma's. The instance's own
+ * words are read and dropped.
+ */
+export function refusalFor(code: string): string {
+  switch (code) {
+    case "invalid_grant":
+      return "egma would not mint a key for this login. Start again from the terminal.";
+    case "unsupported_grant_type":
+      return "egma did not understand this login request. Update egma, then try again.";
+    default:
+      return "egma refused this login. Start again from the terminal, and check the address if it happens again.";
+  }
+}
 
 /** A message a developer can act on, from a failure they cannot read. */
 export class PlatformUnreachableError extends Error {
@@ -54,8 +79,17 @@ async function bodyOf(response: Response): Promise<Record<string, unknown>> {
   return (await response.json().catch(() => ({}))) as Record<string, unknown>;
 }
 
+/**
+ * A string off the wire, with nothing in it a terminal would obey.
+ *
+ * Everything here ends up drawn on a screen, and a terminal reads a control
+ * character as an instruction rather than as text: an address carrying an
+ * escape sequence could move the cursor, clear the screen, or redraw what egma
+ * just said. They are taken out at the one edge that reads the wire, so nothing
+ * below here has to remember.
+ */
 function text(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
+  return typeof value === "string" ? value.replaceAll(/[\p{Cc}\p{Cf}]/gu, "").trim() : "";
 }
 
 function seconds(value: unknown, fallback: number): number {
@@ -72,11 +106,11 @@ function seconds(value: unknown, fallback: number): number {
  */
 export async function startDeviceAuthorization(
   url: string,
-  call: Caller = fetch,
+  fetchImpl: Fetch = fetch,
 ): Promise<DeviceGrant> {
   let response: Response;
   try {
-    response = await call(`${url}/api/device/code`, {
+    response = await fetchImpl(`${url}/api/device/code`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ client_id: DEVICE_CLIENT_ID }),
@@ -86,9 +120,10 @@ export async function startDeviceAuthorization(
   }
 
   if (!response.ok) {
-    const said = text((await bodyOf(response)).message);
+    // What the instance said about it is read and dropped, for the reason
+    // `refusalFor` gives: the words a terminal says are egma's own.
     throw new Error(
-      `egma at ${url} refused to start a login${said === "" ? "" : `: ${said}`}`,
+      `egma at ${url} would not start a login (${response.status}). Check the address, and that this egma is up to date.`,
     );
   }
 
@@ -118,16 +153,16 @@ export async function startDeviceAuthorization(
  *
  * The refusals are the protocol's own vocabulary, and each one means something
  * different to the person at the terminal: still waiting, polling too fast,
- * told no, and out of time are four outcomes and not one failure.
+ * told no, and out of time are four endings and not one failure.
  */
 export async function collectKey(
   url: string,
   deviceCode: string,
-  call: Caller = fetch,
+  fetchImpl: Fetch = fetch,
 ): Promise<Collection> {
   let response: Response;
   try {
-    response = await call(`${url}/api/device/token`, {
+    response = await fetchImpl(`${url}/api/device/token`, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -145,7 +180,10 @@ export async function collectKey(
   if (response.ok) {
     const key = text(body.access_token);
     if (key === "") {
-      return { kind: "refused", reason: "egma minted no key for this login" };
+      return {
+        kind: "refused",
+        reason: "egma minted no key for this login. Start again from the terminal.",
+      };
     }
     return { kind: "key", key };
   }
@@ -159,13 +197,8 @@ export async function collectKey(
       return { kind: "denied" };
     case "expired_token":
       return { kind: "expired" };
-    default: {
-      const said = text(body.error_description) || text(body.message);
-      return {
-        kind: "refused",
-        reason: said === "" ? `egma refused this login (${response.status})` : said,
-      };
-    }
+    default:
+      return { kind: "refused", reason: refusalFor(text(body.error)) };
   }
 }
 

@@ -2,10 +2,15 @@
  * The device-flow endpoints of the fixture platform.
  *
  * This is the contract the CLI is built against, written down as something that
- * runs: the three calls a terminal makes to sign a machine in, and the one call
+ * runs: the three requests a terminal makes to sign a machine in, and the one
  * it makes afterwards to prove the key works. It answers exactly what the real
  * instance answers, including which refusal goes with which state, because a
  * fixture that is kinder than the real thing is a fixture that hides bugs.
+ *
+ * Every answer here is pinned to `apps/api/test/device-flow.test.ts`, which is
+ * the same contract asserted against the real API: an eight-character code, an
+ * address of the shape `/device?user_code=…`, and `expired_token` — not
+ * `invalid_grant` — for a device code that was spent or never issued.
  *
  * Approving is a control, not a contract. On a real instance a person approves
  * in a browser; here a test says so directly, which is what lets the whole of
@@ -24,18 +29,31 @@ type Authorization = {
   collected: boolean;
 };
 
+/** An answer a test has asked the next token request to be given. */
+type TokenAnswer = { readonly error: string; readonly said: string };
+
 export type DeviceState = {
   /** Every key this fixture has minted, newest last. */
   readonly keys: string[];
   /** Set to make the next collection answer `slow_down` once. */
   slowDownOnce: boolean;
+  /** How long the terminal is told to leave between two collections. */
+  intervalSeconds: number;
+  /** What the next collection answers, whatever state the code is in. */
+  nextAnswer: TokenAnswer | null;
 };
 
-const ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
+/**
+ * The characters a code is made of. Eight of them, upper case, letters and
+ * digits — the shape `apps/api/test/device-flow.test.ts` pins on the real one.
+ */
+const ALPHABET = "BCDFGHJKLMNPQRSTVWXZ0123456789";
+const CODE_LENGTH = 8;
 
 function userCode(): string {
-  const letters = [...randomBytes(8)].map((byte) => ALPHABET[byte % ALPHABET.length]);
-  return `${letters.slice(0, 4).join("")}-${letters.slice(4).join("")}`;
+  return [...randomBytes(CODE_LENGTH)]
+    .map((byte) => ALPHABET[byte % ALPHABET.length])
+    .join("");
 }
 
 function normalize(code: string): string {
@@ -49,6 +67,18 @@ export type DeviceControls = {
   /** What time passing does. */
   expire(code: string): boolean;
   slowDownOnce(): void;
+  /** What the instance tells the terminal its pace is. Zero by default. */
+  pollEvery(seconds: number): void;
+  /**
+   * Make the next collection answer this, whatever state the code is in.
+   *
+   * The real instance answers `invalid_grant` for states a fixture cannot
+   * reach — an account switched off between approving and collecting, a
+   * project that went away — and each of those answers carries a description
+   * written for whoever built the client. A test that wants to see what the
+   * terminal does with one says so here, with the instance's own words.
+   */
+  answerTokenWith(error: string, said: string): void;
   readonly keys: readonly string[];
 };
 
@@ -59,7 +89,13 @@ export function deviceRoutes(origin: () => string): {
   const byDeviceCode = new Map<string, Authorization>();
   const byUserCode = new Map<string, Authorization>();
   const keys: string[] = [];
-  const state: DeviceState = { keys, slowDownOnce: false };
+  const state: DeviceState = {
+    keys,
+    slowDownOnce: false,
+    // Nothing here waits on a person, so by default nothing here waits at all.
+    intervalSeconds: 0,
+    nextAnswer: null,
+  };
 
   const find = (code: string): Authorization | undefined =>
     byUserCode.get(normalize(code));
@@ -82,7 +118,9 @@ export function deviceRoutes(origin: () => string): {
           byDeviceCode.set(deviceCode, authorization);
           byUserCode.set(normalize(code), authorization);
 
-          const approveUrl = `${origin()}/device/approve?user_code=${encodeURIComponent(code)}`;
+          // The address the real instance hands back: its own `/device` page,
+          // with the code already in the field.
+          const approveUrl = `${origin()}/device?user_code=${encodeURIComponent(code)}`;
           return {
             status: 200,
             body: {
@@ -91,8 +129,7 @@ export function deviceRoutes(origin: () => string): {
               verification_uri: `${origin()}/device`,
               verification_uri_complete: approveUrl,
               expires_in: 900,
-              // Nothing here waits on a person, so nothing here waits at all.
-              interval: 0,
+              interval: state.intervalSeconds,
             },
           };
         },
@@ -112,11 +149,19 @@ export function deviceRoutes(origin: () => string): {
             };
           }
 
+          if (state.nextAnswer !== null) {
+            const { error, said } = state.nextAnswer;
+            state.nextAnswer = null;
+            return { status: 400, body: { error, error_description: said } };
+          }
+
           const authorization = byDeviceCode.get(form.get("device_code") ?? "");
           if (authorization === undefined || authorization.collected) {
+            // A code that was spent and a code nobody was ever given are the
+            // same answer on the real instance, and it is `expired_token`.
             return {
               status: 400,
-              body: { error: "invalid_grant", error_description: "no such device code" },
+              body: { error: "expired_token", error_description: "this authorization is over" },
             };
           }
 
@@ -171,7 +216,7 @@ export function deviceRoutes(origin: () => string): {
         // terminal shows is an address that answers, exactly as it is on a real
         // instance — a link that 404s is not a link a check can trust.
         method: "GET",
-        path: "/device/approve",
+        path: "/device",
         handle: (request) => {
           const asked = request.url.searchParams.get("user_code") ?? "";
           const authorization = find(asked);
@@ -230,6 +275,12 @@ export function deviceRoutes(origin: () => string): {
       },
       slowDownOnce() {
         state.slowDownOnce = true;
+      },
+      pollEvery(seconds) {
+        state.intervalSeconds = seconds;
+      },
+      answerTokenWith(error, said) {
+        state.nextAnswer = { error, said };
       },
       keys,
     },

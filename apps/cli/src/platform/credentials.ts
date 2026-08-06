@@ -12,9 +12,13 @@
  * writing the credentials of the person running them.
  */
 
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import process from "node:process";
+
+import { isWebAddress } from "./address.ts";
 
 /** The egma a command talks to when nothing says otherwise. */
 export const DEFAULT_PLATFORM_URL = "https://app.egma.ai";
@@ -83,28 +87,62 @@ export async function readCredentials(file: string): Promise<Credentials | null>
   }
 }
 
+export type WriteOptions = {
+  /** Where a folder egma could not lock down is said out loud. */
+  readonly warn?: (line: string) => void;
+};
+
 /**
  * Write the key, owner-readable and no wider.
  *
- * The mode is set after the write as well as during it, because the mode a
- * file is created with is narrowed by the process umask but never widened by
- * it — and a file that already existed keeps whatever mode it had.
+ * The key is written to a fresh file beside the target and renamed over it,
+ * which is the only way to be sure of the mode it lands with. `writeFile` with
+ * a mode applies that mode when it *creates* a file and never afterwards, so
+ * writing straight at the target would put the key inside whatever was already
+ * there, keeping whatever that was readable by — and if the target is a symlink
+ * it would put the key wherever the link points. A rename replaces the name
+ * itself, symlink and all, and it either happened or it did not, so no reader
+ * ever sees half a file.
+ *
+ * The new file is created with `wx`, so it is this run's file or nothing.
  */
 export async function writeCredentials(
   file: string,
   credentials: Credentials,
+  options: WriteOptions = {},
 ): Promise<void> {
+  const warn = options.warn ?? ((line: string) => void process.stderr.write(`${line}\n`));
+
   const folder = path.dirname(file);
   await mkdir(folder, { recursive: true, mode: FOLDER_MODE });
-  await chmod(folder, FOLDER_MODE).catch(() => undefined);
+  try {
+    await chmod(folder, FOLDER_MODE);
+  } catch {
+    // A folder egma cannot narrow is not a reason to fail a login that worked —
+    // but it is a reason to say so, because the developer is about to hold a
+    // key in a place other people on this machine can look into.
+    warn(
+      `egma could not make ${folder} readable by you alone. The key is written, and anybody who can read that folder can read it.`,
+    );
+  }
 
   const document = `${JSON.stringify(
     { url: tidyUrl(credentials.url), key: credentials.key },
     null,
     2,
   )}\n`;
-  await writeFile(file, document, { encoding: "utf8", mode: FILE_MODE });
-  await chmod(file, FILE_MODE);
+
+  const fresh = path.join(folder, `.credentials-${process.pid}-${randomBytes(6).toString("hex")}`);
+  await writeFile(fresh, document, { encoding: "utf8", mode: FILE_MODE, flag: "wx" });
+  try {
+    // The umask can only narrow what a file is created with, never widen it, so
+    // this is the one that makes 0600 true rather than 0600-or-less.
+    await chmod(fresh, FILE_MODE);
+    await rename(fresh, file);
+  } catch (cause) {
+    await rm(fresh, { force: true });
+    throw cause;
+  }
 }
 
 export type PlatformChoice = {
@@ -116,6 +154,16 @@ export type PlatformChoice = {
   readonly stored?: string | null;
 };
 
+/** What a developer is told when the address they named is not one. */
+export class UnusableUrlError extends Error {
+  constructor(where: string, given: string) {
+    super(
+      `${where} is ${given}, and egma cannot talk to that. Give a whole address that starts with http:// or https://.`,
+    );
+    this.name = "UnusableUrlError";
+  }
+}
+
 /**
  * Which egma this command talks to.
  *
@@ -123,11 +171,56 @@ export type PlatformChoice = {
  * environment, then what login already stored, then egma's own address. The
  * order is what makes "set it once" true — after a first login against a
  * self-hosted instance, every later command finds it without being told again.
+ *
+ * An address a person typed is checked here, at the edge that takes it, and a
+ * bad one is refused by name rather than carried into the flow — because the
+ * next thing that happens to it is that a browser is started on it. What login
+ * stored is only ever an address that already passed this, so a file somebody
+ * edited by hand is stepped over rather than made into a refusal on every
+ * command afterwards.
  */
 export function resolvePlatformUrl(choice: PlatformChoice): string {
-  for (const candidate of [choice.flag, choice.env, choice.stored]) {
+  const named: readonly [string, string | null | undefined][] = [
+    ["--url", choice.flag],
+    ["EGMA_URL", choice.env],
+  ];
+  for (const [where, candidate] of named) {
     const tidy = typeof candidate === "string" ? tidyUrl(candidate) : "";
-    if (tidy !== "") return tidy;
+    if (tidy === "") continue;
+    if (!isWebAddress(tidy)) throw new UnusableUrlError(where, tidy);
+    return tidy;
   }
+
+  const stored = typeof choice.stored === "string" ? tidyUrl(choice.stored) : "";
+  if (stored !== "" && isWebAddress(stored)) return stored;
   return DEFAULT_PLATFORM_URL;
+}
+
+/** Which egma a run signs in to, and where the key it gets is kept. */
+export type PlatformAccess = {
+  readonly url: string;
+  readonly credentialsFile: string;
+};
+
+/**
+ * Resolved once, in one place, so the wizard and every verb read the same
+ * answer from the same three places in the same order. Two copies of this would
+ * be two answers to "which egma is this", and the one that is wrong would be
+ * the one that wrote the key.
+ */
+export async function resolvePlatformAccess(choice: {
+  readonly env: NodeJS.ProcessEnv;
+  /** `--url`, when one was given. */
+  readonly flag: string | null;
+}): Promise<PlatformAccess> {
+  const credentialsFile = credentialsFileIn(choice.env);
+  const stored = await readCredentials(credentialsFile);
+  return {
+    url: resolvePlatformUrl({
+      flag: choice.flag,
+      env: choice.env.EGMA_URL,
+      stored: stored?.url ?? null,
+    }),
+    credentialsFile,
+  };
 }

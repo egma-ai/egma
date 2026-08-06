@@ -39,19 +39,23 @@ signs a machine in.
 
 ```
 url: https://app.egma.ai
-code: WDJB-MJHT
-approve_url: https://app.egma.ai/device?user_code=WDJB-MJHT
+code: WDJBMJHT
+approve_url: https://app.egma.ai/device?user_code=WDJBMJHT
 browser: opened
 waiting: for this code to be approved in a browser
 status: stored
 credentials: /home/you/.egma/credentials
 
-0 signed in   2 denied   3 the code ran out   4 egma did not answer
-130 stopped part way
+0 signed in   2 denied   3 the code ran out
+4 egma did not answer, or refused   130 stopped part way
 ```
 
 The key is written to `~/.egma/credentials`, readable only by you, together with
-the address it belongs to.
+the address it belongs to. Set `EGMA_HOME` to keep it somewhere else — it names
+the folder itself, not a home to put `.egma` inside.
+
+Already signed in? `egma login` says so and does nothing. Pass `--force` to sign
+in again and replace the key this machine holds.
 
 ### On a machine with no browser
 
@@ -112,6 +116,11 @@ egma login [options]     Sign this machine in. No questions, plain lines.
                        and the task taken as already agreed to.
   -h, --help           Print this.
   -v, --version        Print the version.
+
+Environment:
+  EGMA_URL             The egma to talk to, for a whole shell. Same as --url.
+  EGMA_HOME            The folder egma keeps this machine's key in.
+                       Default: ~/.egma
 ```
 
 `Ctrl-C` stops a run at any point. The agent, and anything the agent started,

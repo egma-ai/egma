@@ -10,7 +10,7 @@
  * and this UI answers it on their behalf.
  */
 
-import type { LoginPrompt } from "../platform/login.ts";
+import { loginLines, type LoginPrompt } from "../platform/login.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
 import type { DrivenAgent, GateId, WizardUI } from "./wizard-ui.ts";
 
@@ -72,9 +72,9 @@ export class HeadlessUI implements WizardUI {
   setLogin(prompt: LoginPrompt | null): void {
     if (prompt === null) return;
     this.record.logins.push(prompt);
-    this.write(`code: ${prompt.userCode}`);
-    this.write(`approve_url: ${prompt.url}`);
-    this.write(`browser: ${prompt.browserOpened ? "opened" : "not-opened"}`);
+    // The same lines `egma login` prints, from the same place, so the two
+    // promptless surfaces cannot drift apart.
+    for (const line of loginLines(prompt)) this.write(line);
   }
 
   /** Nobody is at this keyboard, so nothing is ever pasted at it. */

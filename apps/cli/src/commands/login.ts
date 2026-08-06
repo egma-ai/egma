@@ -13,12 +13,8 @@
  */
 
 import { openInBrowser } from "../platform/browser.ts";
-import {
-  credentialsFileIn,
-  readCredentials,
-  resolvePlatformUrl,
-} from "../platform/credentials.ts";
-import { logIn, type LoginOutcome } from "../platform/login.ts";
+import type { PlatformAccess } from "../platform/credentials.ts";
+import { logIn, loginLines, type LoginResult } from "../platform/login.ts";
 
 /** What each ending means to whoever ran the command. */
 export const LOGIN_EXIT = {
@@ -28,15 +24,22 @@ export const LOGIN_EXIT = {
   denied: 2,
   /** Nobody approved it before the code ran out. */
   expired: 3,
-  /** egma did not answer, or refused. */
+  /**
+   * egma did not answer, or answered and would not do it.
+   *
+   * One number for both, because both mean the same thing to whoever ran the
+   * command: nothing is going to come of asking this egma again the same way,
+   * and a person has to look. The `status:` line tells the two apart for
+   * anything that reads rather than branches.
+   */
   unreachable: 4,
   /** Stopped part way through. */
   interrupted: 130,
 } as const;
 
 export type LoginCommandOptions = {
-  /** `--url`, when one was given. */
-  readonly url: string | null;
+  /** Which egma, and where the key goes. Resolved once, by the caller. */
+  readonly access: PlatformAccess;
   /** Mint a key even when this machine already holds one. */
   readonly force: boolean;
   readonly env: NodeJS.ProcessEnv;
@@ -45,8 +48,8 @@ export type LoginCommandOptions = {
   readonly fail: (line: string) => void;
 };
 
-function exitCodeFor(outcome: LoginOutcome): number {
-  switch (outcome.kind) {
+function loginExitCode(result: LoginResult): number {
+  switch (result.kind) {
     case "stored":
     case "already-stored":
       return LOGIN_EXIT.stored;
@@ -63,35 +66,27 @@ function exitCodeFor(outcome: LoginOutcome): number {
 }
 
 export async function runLoginCommand(options: LoginCommandOptions): Promise<number> {
-  const credentialsFile = credentialsFileIn(options.env);
-  const stored = await readCredentials(credentialsFile);
-  const url = resolvePlatformUrl({
-    flag: options.url,
-    env: options.env.EGMA_URL,
-    stored: stored?.url ?? null,
-  });
+  const { url, credentialsFile } = options.access;
 
   options.out(`url: ${url}`);
 
-  const outcome = await logIn({
+  const result = await logIn({
     url,
     credentialsFile,
     force: options.force,
     signal: options.signal,
     onPrompt: (prompt) => {
-      options.out(`code: ${prompt.userCode}`);
-      options.out(`approve_url: ${prompt.url}`);
-      options.out(`browser: ${prompt.browserOpened ? "opened" : "not-opened"}`);
-      options.out("waiting: for this code to be approved in a browser");
+      for (const line of loginLines(prompt)) options.out(line);
     },
     say: (line) => options.out(`note: ${line}`),
-    openBrowser: (address) => openInBrowser(address, options.env),
+    openBrowser: (address) =>
+      openInBrowser(address, { instanceUrl: url, env: options.env }),
   });
 
-  switch (outcome.kind) {
+  switch (result.kind) {
     case "stored":
     case "already-stored":
-      options.out(`status: ${outcome.kind}`);
+      options.out(`status: ${result.kind}`);
       options.out(`credentials: ${credentialsFile}`);
       break;
     case "denied":
@@ -108,11 +103,11 @@ export async function runLoginCommand(options: LoginCommandOptions): Promise<num
       break;
     case "unreachable":
     case "refused":
-      options.out(`status: ${outcome.kind}`);
-      options.out(`reason: ${outcome.reason}`);
-      options.fail(outcome.reason);
+      options.out(`status: ${result.kind}`);
+      options.out(`reason: ${result.reason}`);
+      options.fail(result.reason);
       break;
   }
 
-  return exitCodeFor(outcome);
+  return loginExitCode(result);
 }

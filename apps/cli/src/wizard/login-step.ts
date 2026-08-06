@@ -12,16 +12,14 @@
  */
 
 import { openInBrowser } from "../platform/browser.ts";
+import type { PlatformAccess as ResolvedPlatform } from "../platform/credentials.ts";
 import { logIn, type LogInOptions } from "../platform/login.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
 import type { ExitReport } from "./exit-line.ts";
 import { stopReport } from "./stop.ts";
 
 /** How the wizard reaches egma, and where the key it gets is kept. */
-export type PlatformAccess = {
-  /** The egma being logged in to, already resolved from flag, env or file. */
-  readonly url: string;
-  readonly credentialsFile: string;
+export type PlatformAccess = ResolvedPlatform & {
   /** Starts a browser. The developer's own opener when omitted. */
   readonly openBrowser?: LogInOptions["openBrowser"];
 };
@@ -39,26 +37,28 @@ export async function logInStep(
   ui: WizardUI,
   signal: AbortSignal,
 ): Promise<ExitReport | null> {
-  const outcome = await logIn({
+  const result = await logIn({
     url: platform.url,
     credentialsFile: platform.credentialsFile,
     signal,
     onPrompt: (prompt) => ui.setLogin(prompt),
     say: (line) => ui.pushStatus(line),
     paste: () => ui.takeLoginPaste(),
-    openBrowser: platform.openBrowser ?? ((url) => openInBrowser(url)),
+    openBrowser:
+      platform.openBrowser ??
+      ((url) => openInBrowser(url, { instanceUrl: platform.url })),
   });
 
   ui.setLogin(null);
 
-  switch (outcome.kind) {
+  switch (result.kind) {
     case "stored":
-      ui.pushStatus(`Signed in to ${outcome.url}.`);
+      ui.pushStatus(`Signed in to ${result.url}.`);
       return null;
     case "already-stored":
       // Nothing was approved and nothing needed to be: this machine already
       // holds a key for this egma, so login is a step that costs no time.
-      ui.pushStatus(`Already signed in to ${outcome.url}.`);
+      ui.pushStatus(`Already signed in to ${result.url}.`);
       return null;
     case "denied":
       return { kind: "failed", reason: "the login was denied in the browser." };
@@ -71,6 +71,6 @@ export async function logInStep(
       return stopReport(signal, null);
     case "unreachable":
     case "refused":
-      return { kind: "failed", reason: outcome.reason };
+      return { kind: "failed", reason: result.reason };
   }
 }

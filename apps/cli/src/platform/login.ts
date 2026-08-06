@@ -23,7 +23,7 @@ import {
   normalizeUserCode,
   startDeviceAuthorization,
   PlatformUnreachableError,
-  type Caller,
+  type Fetch,
 } from "./device-flow.ts";
 
 /** What the developer has to approve, and where. */
@@ -35,7 +35,24 @@ export type LoginPrompt = {
   readonly browserOpened: boolean;
 };
 
-export type LoginOutcome =
+/**
+ * The prompt as plain lines, one fact per line.
+ *
+ * Written once and read by both surfaces that print rather than draw — the
+ * headless wizard and `egma login`. Two copies of these four lines would drift,
+ * and a coding agent reading `browser:` from one of them and not the other is a
+ * bug nobody would think to look for.
+ */
+export function loginLines(prompt: LoginPrompt): readonly string[] {
+  return [
+    `code: ${prompt.userCode}`,
+    `approve_url: ${prompt.url}`,
+    `browser: ${prompt.browserOpened ? "opened" : "not-opened"}`,
+    "waiting: for this code to be approved in a browser",
+  ];
+}
+
+export type LoginResult =
   | { readonly kind: "stored"; readonly url: string; readonly key: string }
   | { readonly kind: "already-stored"; readonly url: string; readonly key: string }
   | { readonly kind: "denied" }
@@ -60,7 +77,7 @@ export type LogInOptions = {
   readonly paste?: () => string | null;
   /** Starts a browser on the address. Answers whether one started. */
   readonly openBrowser?: (url: string) => Promise<boolean>;
-  readonly call?: Caller;
+  readonly fetchImpl?: Fetch;
   readonly sleep?: (ms: number) => Promise<void>;
   readonly now?: () => number;
 };
@@ -73,9 +90,19 @@ const NOTHING = (): void => undefined;
  * The instance sets how often it may be asked for a key, and that is measured
  * in seconds. A developer who has just come back from a browser and pasted the
  * address should not sit through the rest of one, so the wait is slept in
- * slices and ends early the moment anything arrives.
+ * slices and ends early the moment the code on screen arrives.
  */
 const LOOK_UP_EVERY_MS = 100;
+
+/**
+ * What `slow_down` costs, in milliseconds.
+ *
+ * RFC 8628 sets both halves of this and neither is egma's to choose: five
+ * seconds, and for this request *and every one after it*. An interval that
+ * sprang back to what it was on the next answer would earn the same `slow_down`
+ * for as long as the login lasted.
+ */
+const SLOW_DOWN_MS = 5_000;
 
 function pause(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -95,23 +122,55 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-/** Waits out the interval, or ends early with whatever was pasted. */
-async function waitOrPaste(
-  waitMs: number,
-  sleep: (ms: number) => Promise<void>,
-  paste: (() => string | null) | undefined,
-  signal: AbortSignal,
-): Promise<string | null> {
-  let left = waitMs;
+type Wait = {
+  readonly waitMs: number;
+  readonly sleep: (ms: number) => Promise<void>;
+  readonly paste: (() => string | null) | undefined;
+  readonly say: (line: string) => void;
+  /** The code this terminal is waiting on, tidied for comparing. */
+  readonly waitingFor: string;
+  /** The same code as it is written on the screen, for saying back. */
+  readonly shownAs: string;
+  readonly signal: AbortSignal;
+};
+
+/**
+ * Waits out the interval, and ends early only for the code on this screen.
+ *
+ * Pasting is read here rather than by the caller because what a paste means is
+ * a question about the wait. The code on screen means "I have approved it, look
+ * now" and cuts the wait short. Anything else — a sentence, half an address,
+ * somebody else's code — is answered on screen and changes nothing: the pace
+ * belongs to the instance, and a keyboard must not be able to turn a wrong
+ * paste into a request. Otherwise a developer holding a paste key would make
+ * egma ask for a key as fast as they could type.
+ */
+async function waitForPace(wait: Wait): Promise<void> {
+  let left = wait.waitMs;
   for (;;) {
-    if (signal.aborted) return null;
+    if (wait.signal.aborted) return;
 
-    const typed = paste?.() ?? null;
-    if (typed !== null && typed.trim() !== "") return typed;
+    const typed = wait.paste?.() ?? null;
+    if (typed !== null && typed.trim() !== "") {
+      const code = codeFromPaste(typed);
+      if (code === null) {
+        wait.say("That is not an egma code or an approval address. Paste the whole line.");
+      } else if (code !== wait.waitingFor) {
+        wait.say(
+          `That code is ${code}, and this terminal is waiting on ${wait.shownAs}. Approve the one on this screen.`,
+        );
+      } else {
+        // The developer has been to a browser and come back, so the answer is
+        // asked for now rather than at the next tick. That is the whole point
+        // of pasting it back on a machine that could not open one itself.
+        wait.say("Checking that one now.");
+        return;
+      }
+    }
 
-    if (left <= 0) return null;
-    const slice = paste === undefined ? left : Math.min(left, LOOK_UP_EVERY_MS);
-    await sleep(slice);
+    if (left <= 0) return;
+    const slice = wait.paste === undefined ? left : Math.min(left, LOOK_UP_EVERY_MS);
+    await wait.sleep(slice);
     left -= slice;
   }
 }
@@ -123,11 +182,11 @@ async function waitOrPaste(
  * something different to whoever asked — a denial is not a fault, an expired
  * code is not a denial, and an instance that never answered is neither.
  */
-export async function logIn(options: LogInOptions): Promise<LoginOutcome> {
+export async function logIn(options: LogInOptions): Promise<LoginResult> {
   const say = options.say ?? NOTHING;
   const sleep = options.sleep ?? ((ms: number) => pause(ms, options.signal));
   const now = options.now ?? Date.now;
-  const call = options.call ?? fetch;
+  const fetchImpl = options.fetchImpl ?? fetch;
 
   const held = await readCredentials(options.credentialsFile);
   if (options.force !== true && held !== null && held.url === options.url) {
@@ -136,7 +195,7 @@ export async function logIn(options: LogInOptions): Promise<LoginOutcome> {
 
   let grant;
   try {
-    grant = await startDeviceAuthorization(options.url, call);
+    grant = await startDeviceAuthorization(options.url, fetchImpl);
   } catch (cause) {
     if (cause instanceof PlatformUnreachableError) {
       return { kind: "unreachable", reason: cause.message };
@@ -161,31 +220,13 @@ export async function logIn(options: LogInOptions): Promise<LoginOutcome> {
   const waitingFor = normalizeUserCode(grant.userCode);
   const givesUpAt = now() + grant.expiresInSeconds * 1000;
   let waitMs = grant.intervalSeconds * 1000;
-  let pasted: string | null = null;
 
   for (;;) {
     if (options.signal.aborted) return { kind: "interrupted" };
 
-    if (pasted !== null) {
-      const code = codeFromPaste(pasted);
-      if (code === null) {
-        say("That is not an egma code or an approval address. Paste the whole line.");
-      } else if (code !== waitingFor) {
-        say(
-          `That code is ${code}, and this terminal is waiting on ${grant.userCode}. Approve the one on this screen.`,
-        );
-      } else {
-        // The developer has been to a browser and come back, so the answer is
-        // asked for now rather than at the next tick. That is the whole point
-        // of pasting it back on a machine that could not open one itself.
-        say("Checking that one now.");
-      }
-      pasted = null;
-    }
-
     let collected;
     try {
-      collected = await collectKey(options.url, grant.deviceCode, call);
+      collected = await collectKey(options.url, grant.deviceCode, fetchImpl);
     } catch (cause) {
       if (cause instanceof PlatformUnreachableError) {
         return { kind: "unreachable", reason: cause.message };
@@ -207,16 +248,25 @@ export async function logIn(options: LogInOptions): Promise<LoginOutcome> {
         return { kind: "refused", reason: collected.reason };
       case "slow-down":
         // The instance sets the pace, and it has just said this one is too
-        // fast. Anything other than backing off gets the same answer forever.
-        waitMs = Math.max(waitMs, grant.intervalSeconds * 1000) + 1000;
+        // fast. The new pace is kept for the rest of the login: an interval
+        // that sprang back would earn the same answer at the next poll.
+        waitMs += SLOW_DOWN_MS;
         break;
       case "waiting":
-        waitMs = grant.intervalSeconds * 1000;
+        // Nobody has answered yet, and the pace is whatever it already was.
         break;
     }
 
     if (now() > givesUpAt) return { kind: "expired" };
-    pasted = await waitOrPaste(waitMs, sleep, options.paste, options.signal);
+    await waitForPace({
+      waitMs,
+      sleep,
+      paste: options.paste,
+      say,
+      waitingFor,
+      shownAs: grant.userCode,
+      signal: options.signal,
+    });
     if (options.signal.aborted) return { kind: "interrupted" };
   }
 }
