@@ -3,15 +3,19 @@
  *
  * Every gate opens straight away and every line is written as plain text. This
  * is what the offline tests drive, and it is what `--headless` gives a
- * developer whose terminal cannot draw a UI. It is the same flow either way —
- * there is no second code path.
+ * developer who has said in the command itself that they want a run with
+ * nobody watching. It is the same flow either way — there is no second code
+ * path. Because every gate opens itself, nothing here may ever be reached
+ * without that word from the developer: the gate is where consent is given,
+ * and this UI answers it on their behalf.
  */
 
 import type { ExitReport } from "../wizard/exit-line.ts";
 import type { DrivenAgent, GateId, WizardUI } from "./wizard-ui.ts";
 
 export type HeadlessRecord = {
-  agent: DrivenAgent | null;
+  drivenAgent: DrivenAgent | null;
+  drivenAgentLog: string | null;
   taskFile: string | null;
   statuses: string[];
   summary: string;
@@ -26,7 +30,8 @@ export type HeadlessOptions = {
 
 export class HeadlessUI implements WizardUI {
   readonly record: HeadlessRecord = {
-    agent: null,
+    drivenAgent: null,
+    drivenAgentLog: null,
     taskFile: null,
     statuses: [],
     summary: "",
@@ -47,9 +52,13 @@ export class HeadlessUI implements WizardUI {
     success: (message: string): void => this.write(message),
   };
 
-  setAgent(agent: DrivenAgent | null): void {
-    this.record.agent = agent;
-    if (agent !== null) this.write(`Agent: ${agent.name}`);
+  setDrivenAgent(drivenAgent: DrivenAgent | null): void {
+    this.record.drivenAgent = drivenAgent;
+    if (drivenAgent !== null) this.write(`Coding agent: ${drivenAgent.name}`);
+  }
+
+  setDrivenAgentLog(file: string): void {
+    this.record.drivenAgentLog = file;
   }
 
   setTaskFile(file: string): void {
@@ -63,7 +72,7 @@ export class HeadlessUI implements WizardUI {
   }
 
   taskStarted(): void {
-    this.write("Starting the agent.");
+    this.write("Starting the coding agent.");
   }
 
   taskFinished(): void {

@@ -11,11 +11,11 @@ import path from "node:path";
 import process from "node:process";
 
 import {
-  DEFAULT_AGENT_ID,
+  DEFAULT_DRIVEN_AGENT_ID,
   REGISTRY_SNAPSHOT_MIRRORED_ON,
-  UnlaunchableAgentError,
+  UnlaunchableDrivenAgentError,
   launchForId,
-  type AgentLaunch,
+  type DrivenAgentLaunch,
 } from "./acp/registry.ts";
 import { HeadlessUI } from "./ui/headless-ui.ts";
 import { startTui } from "./ui/tui/start-tui.ts";
@@ -26,12 +26,18 @@ import { walk } from "./wizard/walk.ts";
 export type Invocation = {
   readonly help: boolean;
   readonly version: boolean;
+  /** The developer has said, in the command, to run with nobody watching. */
   readonly headless: boolean;
-  readonly agentId: string;
+  readonly drivenAgentId: string;
   readonly cwd: string | null;
+  /**
+   * A test seam, not product surface: `--file` and `-- <command>` let a test
+   * pin the file and start a scripted agent in place of a real one. Neither is
+   * documented, and neither is stable.
+   */
   readonly file: string | null;
-  /** A command to start as the agent, in place of a registry lookup. */
-  readonly agentCommand: readonly string[];
+  /** A command to start as the coding agent, in place of a registry lookup. */
+  readonly drivenAgentCommand: readonly string[];
   readonly unknown: readonly string[];
 };
 
@@ -39,28 +45,28 @@ export function parseArgs(argv: readonly string[]): Invocation {
   let help = false;
   let version = false;
   let headless = false;
-  let agentId = DEFAULT_AGENT_ID;
+  let drivenAgentId = DEFAULT_DRIVEN_AGENT_ID;
   let cwd: string | null = null;
   let file: string | null = null;
-  let agentCommand: string[] = [];
+  let drivenAgentCommand: string[] = [];
   const unknown: string[] = [];
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index] as string;
     if (argument === "--") {
-      agentCommand = argv.slice(index + 1) as string[];
+      drivenAgentCommand = argv.slice(index + 1) as string[];
       break;
     }
     if (argument === "-h" || argument === "--help") help = true;
     else if (argument === "-v" || argument === "--version") version = true;
     else if (argument === "--headless") headless = true;
-    else if (argument === "--agent") agentId = argv[(index += 1)] ?? agentId;
+    else if (argument === "--coding-agent") drivenAgentId = argv[(index += 1)] ?? drivenAgentId;
     else if (argument === "--cwd") cwd = argv[(index += 1)] ?? null;
     else if (argument === "--file") file = argv[(index += 1)] ?? null;
     else unknown.push(argument);
   }
 
-  return { help, version, headless, agentId, cwd, file, agentCommand, unknown };
+  return { help, version, headless, drivenAgentId, cwd, file, drivenAgentCommand, unknown };
 }
 
 export function helpText(): string {
@@ -68,21 +74,29 @@ export function helpText(): string {
     "egma — walk from a voice agent to graded results.",
     "",
     "Usage:",
-    "  egma [options] [-- <command> [args...]]",
+    "  egma [options]",
     "",
     "Options:",
-    "  --agent <id>    Which coding agent to drive, named as the agent registry",
-    `                  names it. Default: ${DEFAULT_AGENT_ID}`,
-    "  --file <path>   The file the agent is asked to read.",
-    "  --cwd <path>    The folder to work in. Default: this folder.",
-    "  --headless      Run without the terminal UI and print plain lines.",
-    "  -h, --help      Print this.",
-    "  -v, --version   Print the version.",
-    "",
-    "  -- <command>    Start this command as the coding agent, instead of looking",
-    "                  one up in the agent registry.",
+    "  --coding-agent <id>  Which coding agent to drive, named as the agent",
+    `                       registry names it. Default: ${DEFAULT_DRIVEN_AGENT_ID}`,
+    "  --cwd <path>         The folder to work in. Default: this folder.",
+    "  --headless           Run with no terminal and no keystroke: plain lines,",
+    "                       and the task taken as already agreed to.",
+    "  -h, --help           Print this.",
+    "  -v, --version        Print the version.",
     "",
     `The agent registry was mirrored on ${REGISTRY_SNAPSHOT_MIRRORED_ON}.`,
+  ].join("\n");
+}
+
+/** What a developer is told when the wizard has no terminal to run in. */
+export function noTerminalRefusal(): string {
+  return [
+    "egma's wizard needs a terminal it can draw on and read one keystroke from, and this is not one. Nothing was started.",
+    "",
+    "That keystroke is how you agree to egma driving your coding agent, so egma will not drive it without one.",
+    "",
+    "Run egma --headless to say here and now that you agree, and to get plain lines instead of a wizard. Run egma --help for the rest.",
   ].join("\n");
 }
 
@@ -91,14 +105,14 @@ export function version(): string {
   return (JSON.parse(manifest) as { version?: string }).version ?? "0.0.0";
 }
 
-function launchFrom(invocation: Invocation): AgentLaunch {
-  const [command, ...args] = invocation.agentCommand;
+function launchFrom(invocation: Invocation): DrivenAgentLaunch {
+  const [command, ...args] = invocation.drivenAgentCommand;
   if (command !== undefined) {
     // egma was told a command, not an agent, so the command is all it can
     // honestly call the thing.
     return { id: "named-command", name: path.basename(command), command, args, env: {} };
   }
-  return launchForId(invocation.agentId);
+  return launchForId(invocation.drivenAgentId);
 }
 
 function exitCodeFor(report: ExitReport): number {
@@ -113,7 +127,11 @@ function exitCodeFor(report: ExitReport): number {
   }
 }
 
-async function runHeadless(launch: AgentLaunch, cwd: string, file: string | null): Promise<number> {
+async function runHeadless(
+  launch: DrivenAgentLaunch,
+  cwd: string,
+  file: string | null,
+): Promise<number> {
   const controller = new AbortController();
   const stop = (reason: StopReason): void => controller.abort(reason);
   const onSignal = (): void => stop("interrupt");
@@ -137,7 +155,11 @@ async function runHeadless(launch: AgentLaunch, cwd: string, file: string | null
   }
 }
 
-async function runWizard(launch: AgentLaunch, cwd: string, file: string | null): Promise<number> {
+async function runWizard(
+  launch: DrivenAgentLaunch,
+  cwd: string,
+  file: string | null,
+): Promise<number> {
   const controller = new AbortController();
   const tui = startTui({ stop: (reason) => controller.abort(reason) });
 
@@ -186,13 +208,24 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
 
+  // The wizard earns consent with one keystroke, and a terminal that cannot
+  // deliver one cannot give it. Falling back to a run nobody agreed to would
+  // drive the developer's coding agent because a pipe was on the end of the
+  // command, so egma refuses and names the flag that means "I agree".
+  const drawable = process.stdout.isTTY === true && process.stdin.isTTY === true;
+  if (!invocation.headless && !drawable) {
+    process.stderr.write(`${noTerminalRefusal()}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
   const cwd = path.resolve(invocation.cwd ?? process.cwd());
 
-  let launch: AgentLaunch;
+  let launch: DrivenAgentLaunch;
   try {
     launch = launchFrom(invocation);
   } catch (error) {
-    if (error instanceof UnlaunchableAgentError) {
+    if (error instanceof UnlaunchableDrivenAgentError) {
       process.stderr.write(`${error.message}\n`);
       process.exitCode = 1;
       return;
@@ -200,11 +233,7 @@ export async function main(argv: readonly string[]): Promise<void> {
     throw error;
   }
 
-  // A terminal that cannot deliver a keystroke cannot run the wizard, so the
-  // same walk runs as plain lines rather than as a UI nobody can answer.
-  const drawable = process.stdout.isTTY === true && process.stdin.isTTY === true;
-  process.exitCode =
-    invocation.headless || !drawable
-      ? await runHeadless(launch, cwd, invocation.file)
-      : await runWizard(launch, cwd, invocation.file);
+  process.exitCode = invocation.headless
+    ? await runHeadless(launch, cwd, invocation.file)
+    : await runWizard(launch, cwd, invocation.file);
 }

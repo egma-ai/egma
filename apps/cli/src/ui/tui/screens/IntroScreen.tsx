@@ -9,7 +9,7 @@
 
 import { Box, Text, useInput } from "ink";
 
-import { dispatchKey, hintsFor, type KeyBinding } from "../keybindings.ts";
+import { dispatchKey, hintBar, type KeyBinding } from "../keybindings.ts";
 import type { WizardState } from "../state.ts";
 
 export type IntroScreenProps = {
@@ -28,7 +28,7 @@ export function IntroScreen({ state, onBegin, onQuit }: IntroScreenProps) {
     dispatchKey(bindings, input, key);
   });
 
-  const agentName = state.agent?.name ?? "your coding agent";
+  const drivenAgentName = state.drivenAgent?.name ?? "your coding agent";
   const file = state.taskFile ?? "one file";
 
   return (
@@ -38,17 +38,13 @@ export function IntroScreen({ state, onBegin, onQuit }: IntroScreenProps) {
       <Text>This is the first check that egma can drive your own coding agent.</Text>
       <Box height={1} />
       <Text>
-        {`egma will ask ${agentName} to read ${file} in this folder and say what it is.`}
+        {`egma will ask ${drivenAgentName} to read ${file} in this folder and say what it is.`}
       </Text>
       <Text>Nothing here is changed. Your code stays on this machine.</Text>
       <Box height={1} />
-      <Text>Every action the agent takes appears below as it happens.</Text>
+      <Text>Every action your coding agent takes appears below as it happens.</Text>
       <Box height={1} />
-      <Text dimColor>
-        {hintsFor(bindings)
-          .map((hint) => `[${hint.label}] ${hint.action}`)
-          .join("        ")}
-      </Text>
+      <Text dimColor>{hintBar(bindings)}</Text>
     </Box>
   );
 }

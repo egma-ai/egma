@@ -14,10 +14,10 @@ import snapshot from "./registry-snapshot.json" with { type: "json" };
 /** Mirrored from https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json on 2026-08-05. */
 export const REGISTRY_SNAPSHOT_MIRRORED_ON = "2026-08-05";
 
-/** The agent egma drives when the developer names none. */
-export const DEFAULT_AGENT_ID = "claude-acp";
+/** The coding agent egma drives when the developer names none. */
+export const DEFAULT_DRIVEN_AGENT_ID = "claude-acp";
 
-export type RegistryAgent = {
+export type RegistryEntry = {
   readonly id: string;
   readonly name: string;
   readonly description?: string;
@@ -28,13 +28,13 @@ export type RegistryAgent = {
   };
 };
 
-export type AgentRegistry = {
+export type DrivenAgentRegistry = {
   readonly version: string;
-  readonly agents: readonly RegistryAgent[];
+  readonly agents: readonly RegistryEntry[];
 };
 
-/** How to start one agent as a subprocess that speaks the protocol over stdio. */
-export type AgentLaunch = {
+/** How to start one coding agent as a subprocess that speaks the protocol. */
+export type DrivenAgentLaunch = {
   readonly id: string;
   readonly name: string;
   readonly command: string;
@@ -42,12 +42,15 @@ export type AgentLaunch = {
   readonly env: Readonly<Record<string, string>>;
 };
 
-export function registry(): AgentRegistry {
-  return snapshot as AgentRegistry;
+export function registry(): DrivenAgentRegistry {
+  return snapshot as DrivenAgentRegistry;
 }
 
-export function findAgent(id: string, from: AgentRegistry = registry()): RegistryAgent | null {
-  return from.agents.find((agent) => agent.id === id) ?? null;
+export function findDrivenAgent(
+  id: string,
+  from: DrivenAgentRegistry = registry(),
+): RegistryEntry | null {
+  return from.agents.find((entry) => entry.id === id) ?? null;
 }
 
 /**
@@ -66,7 +69,7 @@ function packageRunner(kind: "npx" | "uvx"): string {
   return process.platform === "win32" ? "npx.cmd" : "npx";
 }
 
-export class UnlaunchableAgentError extends Error {}
+export class UnlaunchableDrivenAgentError extends Error {}
 
 /**
  * Turn a registry entry into a command egma can spawn.
@@ -75,42 +78,45 @@ export class UnlaunchableAgentError extends Error {}
  * downloadable binary needs egma to fetch, verify and unpack a release, which
  * it does not do yet — so it is refused by name rather than half-started.
  */
-export function launchFor(agent: RegistryAgent): AgentLaunch {
-  const env = ZERO_PROMPT_ENV[agent.id] ?? {};
-  const npx = agent.distribution?.npx;
+export function launchFor(entry: RegistryEntry): DrivenAgentLaunch {
+  const env = ZERO_PROMPT_ENV[entry.id] ?? {};
+  const npx = entry.distribution?.npx;
   if (npx) {
     return {
-      id: agent.id,
-      name: agent.name,
+      id: entry.id,
+      name: entry.name,
       command: packageRunner("npx"),
       args: ["--yes", npx.package, ...(npx.args ?? [])],
       env,
     };
   }
 
-  const uvx = agent.distribution?.uvx;
+  const uvx = entry.distribution?.uvx;
   if (uvx) {
     return {
-      id: agent.id,
-      name: agent.name,
+      id: entry.id,
+      name: entry.name,
       command: packageRunner("uvx"),
       args: [uvx.package, ...(uvx.args ?? [])],
       env,
     };
   }
 
-  throw new UnlaunchableAgentError(
-    `egma cannot start ${agent.name} yet: the agent registry ships it as a downloadable binary, and egma only starts agents published as packages.`,
+  throw new UnlaunchableDrivenAgentError(
+    `egma cannot start ${entry.name} yet: the agent registry ships it as a downloadable binary, and egma only starts agents published as packages.`,
   );
 }
 
 /** The launch for a registry id, or a plain-words error naming what went wrong. */
-export function launchForId(id: string, from: AgentRegistry = registry()): AgentLaunch {
-  const agent = findAgent(id, from);
-  if (agent === null) {
-    throw new UnlaunchableAgentError(
-      `egma does not know an agent called "${id}". The agents it knows come from the protocol registry mirrored on ${REGISTRY_SNAPSHOT_MIRRORED_ON}.`,
+export function launchForId(
+  id: string,
+  from: DrivenAgentRegistry = registry(),
+): DrivenAgentLaunch {
+  const entry = findDrivenAgent(id, from);
+  if (entry === null) {
+    throw new UnlaunchableDrivenAgentError(
+      `egma does not know a coding agent called "${id}". The ones it knows come from the protocol registry mirrored on ${REGISTRY_SNAPSHOT_MIRRORED_ON}.`,
     );
   }
-  return launchFor(agent);
+  return launchFor(entry);
 }

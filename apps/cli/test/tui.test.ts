@@ -15,12 +15,11 @@ import { runInTerminal } from "./support/pty.ts";
 import {
   CLI_ENTRY,
   FAKE_AGENT,
+  MANIFEST,
   makeWorkspace,
   waitUntil,
   type Workspace,
 } from "./support/workspace.ts";
-
-const MANIFEST = JSON.stringify({ name: "customer-repo", version: "1.0.0" }, null, 2);
 
 describe("the wizard on a real terminal", () => {
   let workspace: Workspace;

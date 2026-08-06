@@ -1,29 +1,33 @@
 /**
- * What the agent is doing, line by line, while it does it.
+ * What the coding agent is doing, line by line, while it does it.
  *
- * egma approves everything the agent asks for, so this screen is the developer's
- * protection: nothing happens off-screen.
+ * egma approves everything the agent asks for, so this screen is the
+ * developer's protection: nothing happens off-screen.
  */
 
 import { Box, Text } from "ink";
 
+import { ACTION_MARK } from "../../../wizard/status.ts";
 import type { WizardState } from "../state.ts";
 
-export type RunScreenProps = { readonly state: WizardState };
+export type TaskScreenProps = { readonly state: WizardState };
 
 /** Kept short so the newest work is always the thing being read. */
 const VISIBLE_STATUS_LINES = 12;
 
-export function RunScreen({ state }: RunScreenProps) {
-  const agentName = state.agent?.name ?? "the agent";
+export function TaskScreen({ state }: TaskScreenProps) {
+  const drivenAgentName = state.drivenAgent?.name ?? "not named yet";
   const shown = state.statuses.slice(-VISIBLE_STATUS_LINES);
 
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
       <Text bold>egma</Text>
       <Box height={1} />
+      <Text>{`Coding agent: ${drivenAgentName}`}</Text>
       <Text>
-        {state.finished ? `${agentName} has finished.` : `${agentName} is working.`}
+        {state.finished
+          ? "Your coding agent has finished."
+          : "Your coding agent is working."}
       </Text>
       <Box height={1} />
       <Box flexDirection="column">
@@ -31,7 +35,7 @@ export function RunScreen({ state }: RunScreenProps) {
           <Text dimColor>Waiting for the first action.</Text>
         ) : (
           shown.map((line, index) => (
-            <Text key={`${index}-${line}`} dimColor={!line.startsWith("◆")}>
+            <Text key={`${index}-${line}`} dimColor={!line.startsWith(ACTION_MARK)}>
               {line}
             </Text>
           ))

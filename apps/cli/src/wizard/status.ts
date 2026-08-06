@@ -109,8 +109,8 @@ export class ActionStream {
   }
 }
 
-/** The agent's own words in an update, for the summary — not for the stream. */
-export function agentTextIn(update: SessionUpdate): string {
+/** The coding agent's own words, for the summary — not for the stream. */
+export function drivenAgentTextIn(update: SessionUpdate): string {
   if (update.sessionUpdate !== "agent_message_chunk") return "";
   return update.content.type === "text" ? update.content.text : "";
 }

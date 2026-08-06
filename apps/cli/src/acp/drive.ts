@@ -16,21 +16,21 @@ import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 
 import type { WizardUI } from "../ui/wizard-ui.ts";
-import { ActionStream, agentTextIn } from "../wizard/status.ts";
-import { FENCE_MESSAGE, fenceStatusLine, fencedPathIn, isFenced } from "./fence.ts";
+import { ActionStream, drivenAgentTextIn } from "../wizard/status.ts";
+import { FENCE_MESSAGE, fenceStatusLine, fencedReferenceIn, isFenced } from "./fence.ts";
 import { sessionMetaFor } from "./hardening.ts";
 import { zeroPromptMode } from "./modes.ts";
-import type { AgentLaunch } from "./registry.ts";
+import type { DrivenAgentLaunch } from "./registry.ts";
 
 /** How the one task ended. */
-export type TaskOutcome =
+export type DriveResult =
   | { readonly kind: "done"; readonly summary: string }
   | { readonly kind: "interrupted" }
-  | { readonly kind: "needs-login"; readonly agentName: string }
+  | { readonly kind: "needs-login"; readonly drivenAgentName: string }
   | { readonly kind: "failed"; readonly reason: string };
 
 export type DriveOptions = {
-  readonly launch: AgentLaunch;
+  readonly launch: DrivenAgentLaunch;
   readonly cwd: string;
   readonly instructions: string;
   readonly ui: WizardUI;
@@ -46,7 +46,7 @@ const AUTH_REQUIRED = -32000;
 /** How long a shut-down agent gets to leave before it is killed outright. */
 const SHUTDOWN_GRACE_MS = 2_000;
 
-class AgentProcess {
+class DrivenAgentProcess {
   private killed = false;
   private readonly child: ChildProcess;
 
@@ -83,7 +83,7 @@ class AgentProcess {
   }
 }
 
-function start(launch: AgentLaunch, cwd: string, logStderr?: (chunk: string) => void) {
+function start(launch: DrivenAgentLaunch, cwd: string, logStderr?: (chunk: string) => void) {
   const child = spawn(launch.command, [...launch.args], {
     cwd,
     stdio: ["pipe", "pipe", "pipe"],
@@ -96,15 +96,22 @@ function start(launch: AgentLaunch, cwd: string, logStderr?: (chunk: string) => 
   child.stderr?.setEncoding("utf8");
   child.stderr?.on("data", (chunk: string) => logStderr?.(chunk));
 
-  return { child, handle: new AgentProcess(child) };
+  return { child, handle: new DrivenAgentProcess(child) };
+}
+
+/**
+ * The fence, at the one place both file methods reach it: the developer is
+ * told, and the agent is sent elsewhere with the same words either way.
+ */
+function refuseFencedFile(target: string, ui: WizardUI): void {
+  if (!isFenced(target)) return;
+  ui.pushStatus(fenceStatusLine(path.basename(target)));
+  throw new acp.RequestError(-32602, FENCE_MESSAGE);
 }
 
 function readTextFileHandler(cwd: string, ui: WizardUI) {
   return async (params: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse> => {
-    if (isFenced(params.path)) {
-      ui.pushStatus(fenceStatusLine(path.basename(params.path)));
-      throw new acp.RequestError(-32602, FENCE_MESSAGE);
-    }
+    refuseFencedFile(params.path, ui);
     const target = path.resolve(cwd, params.path);
     const whole = await readFile(target, "utf8");
     const line = params.line ?? null;
@@ -120,10 +127,7 @@ function readTextFileHandler(cwd: string, ui: WizardUI) {
 
 function writeTextFileHandler(cwd: string, ui: WizardUI) {
   return async (params: acp.WriteTextFileRequest): Promise<acp.WriteTextFileResponse> => {
-    if (isFenced(params.path)) {
-      ui.pushStatus(fenceStatusLine(path.basename(params.path)));
-      throw new acp.RequestError(-32602, FENCE_MESSAGE);
-    }
+    refuseFencedFile(params.path, ui);
     await writeFile(path.resolve(cwd, params.path), params.content, "utf8");
     return {};
   };
@@ -139,11 +143,11 @@ function writeTextFileHandler(cwd: string, ui: WizardUI) {
  */
 function permissionHandler(ui: WizardUI) {
   return (params: acp.RequestPermissionRequest): acp.RequestPermissionResponse => {
-    const fenced = fencedPathIn(params.toolCall);
+    const fenced = fencedReferenceIn(params.toolCall);
     const options = params.options;
 
     if (fenced !== null) {
-      ui.pushStatus(fenceStatusLine(path.basename(fenced)));
+      ui.pushStatus(fenceStatusLine(fenced));
       const refusal =
         options.find((option) => option.kind === "reject_once") ??
         options.find((option) => option.kind === "reject_always");
@@ -172,7 +176,7 @@ function reasonFrom(error: unknown): string {
 }
 
 /** Runs one task on the agent and returns how it ended. Never throws. */
-export async function driveOneTask(options: DriveOptions): Promise<TaskOutcome> {
+export async function driveOneTask(options: DriveOptions): Promise<DriveResult> {
   const { launch, cwd, instructions, ui, signal } = options;
 
   if (signal.aborted) return { kind: "interrupted" };
@@ -246,7 +250,7 @@ export async function driveOneTask(options: DriveOptions): Promise<TaskOutcome> 
             const message = await session.nextUpdate();
             if (message.kind === "stop") return spoken.trim();
             for (const line of actions.lines(message.update)) ui.pushStatus(line);
-            spoken += agentTextIn(message.update);
+            spoken += drivenAgentTextIn(message.update);
           }
         });
       });
@@ -255,7 +259,7 @@ export async function driveOneTask(options: DriveOptions): Promise<TaskOutcome> 
     return { kind: "done", summary };
   } catch (error) {
     if (interrupted) return { kind: "interrupted" };
-    if (isAuthRequired(error)) return { kind: "needs-login", agentName: launch.name };
+    if (isAuthRequired(error)) return { kind: "needs-login", drivenAgentName: launch.name };
     return { kind: "failed", reason: reasonFrom(error) };
   } finally {
     signal.removeEventListener("abort", onAbort);

@@ -15,12 +15,15 @@ import type { ExitReport } from "../wizard/exit-line.ts";
 /** A point the flow waits at until the developer has moved past it. */
 export type GateId = "begin";
 
-/** The agent egma is driving. */
+/** The coding agent egma is driving. */
 export type DrivenAgent = { readonly id: string; readonly name: string };
 
 export interface WizardUI {
-  /** Name the agent egma will drive, as soon as it is known. */
-  setAgent(agent: DrivenAgent | null): void;
+  /** Name the coding agent egma will drive, as soon as it is known. */
+  setDrivenAgent(drivenAgent: DrivenAgent | null): void;
+
+  /** Where the coding agent's own output is being kept for this run. */
+  setDrivenAgentLog(file: string): void;
 
   /** Name the file the one task is about. */
   setTaskFile(file: string): void;
@@ -32,7 +35,7 @@ export interface WizardUI {
    */
   waitForGate(gate: GateId): Promise<void>;
 
-  /** The agent has been started and the task is under way. */
+  /** The coding agent has been started and the task is under way. */
   taskStarted(): void;
 
   /** The task is over, however it ended. */
@@ -41,7 +44,7 @@ export interface WizardUI {
   /** One line describing something the driven agent did. */
   pushStatus(line: string): void;
 
-  /** The agent's own account of what it found. */
+  /** The coding agent's own account of what it found. */
   setSummary(text: string): void;
 
   /** What the wizard will leave behind when it closes. */

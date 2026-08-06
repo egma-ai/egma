@@ -41,6 +41,8 @@ export type FakeStep =
     }
   | { kind: "read-file"; path: string; recordAs: string }
   | { kind: "write-file"; path: string; content: string; recordAs?: string }
+  /** Noise on standard error, the way a real agent writes its own progress. */
+  | { kind: "grumble"; text: string }
   | { kind: "wait"; ms: number }
   | { kind: "stop"; reason: acp.StopReason };
 
@@ -203,6 +205,10 @@ async function run(): Promise<void> {
           flush();
           break;
         }
+
+        case "grumble":
+          process.stderr.write(`${step.text}\n`);
+          break;
 
         case "wait":
           await new Promise((resolve) => setTimeout(resolve, step.ms));

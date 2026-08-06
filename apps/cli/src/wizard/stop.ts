@@ -14,8 +14,10 @@ export function stopReasonOf(signal: AbortSignal): StopReason {
   return signal.reason === "quit" ? "quit" : "interrupt";
 }
 
-export function stopReport(signal: AbortSignal, agentName: string | null): ExitReport {
-  return stopReasonOf(signal) === "quit" ? { kind: "quit" } : { kind: "interrupted", agentName };
+export function stopReport(signal: AbortSignal, drivenAgentName: string | null): ExitReport {
+  return stopReasonOf(signal) === "quit"
+    ? { kind: "quit" }
+    : { kind: "interrupted", drivenAgentName };
 }
 
 /** Settles when `work` settles, or as soon as the signal aborts. */

@@ -9,10 +9,13 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import type { AgentLaunch } from "../../src/acp/registry.ts";
+import type { DrivenAgentLaunch } from "../../src/acp/registry.ts";
 import type { FakeScript } from "./fake-agent.ts";
 
 export const FAKE_AGENT = fileURLToPath(new URL("./fake-agent.ts", import.meta.url));
+
+/** The file a workspace is given so the walk has something to read. */
+export const MANIFEST = JSON.stringify({ name: "customer-repo", version: "1.0.0" }, null, 2);
 
 export const CLI_ENTRY = fileURLToPath(new URL("../../dist/bin.js", import.meta.url));
 
@@ -25,7 +28,7 @@ export type Workspace = {
   /** Writes a script and answers the path to it. */
   script(script: FakeScript): Promise<string>;
   /** How egma would be told to start the fake agent with that script. */
-  launch(scriptPath: string): AgentLaunch;
+  launch(scriptPath: string): DrivenAgentLaunch;
   remove(): Promise<void>;
 };
 

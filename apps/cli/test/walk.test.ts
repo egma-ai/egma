@@ -6,7 +6,7 @@
  * files landed, what they say, and the line left behind.
  */
 
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -14,9 +14,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { buildExitLine } from "../src/wizard/exit-line.ts";
 import { walk } from "../src/wizard/walk.ts";
-import { isAlive, makeWorkspace, waitUntil, type Workspace } from "./support/workspace.ts";
-
-const MANIFEST = JSON.stringify({ name: "customer-repo", version: "1.0.0" }, null, 2);
+import {
+  MANIFEST,
+  isAlive,
+  makeWorkspace,
+  waitUntil,
+  type Workspace,
+} from "./support/workspace.ts";
 
 type Report = {
   protocolVersion: number | null;
@@ -81,7 +85,7 @@ describe("one task, driven on a scripted agent", () => {
 
     expect(report).toEqual({
       kind: "task-done",
-      agentName: "Fake Agent",
+      drivenAgentName: "Fake Agent",
       file: "package.json",
     });
     expect(buildExitLine(report)).toBe(
@@ -173,6 +177,115 @@ describe("one task, driven on a scripted agent", () => {
     expect(ui.record.statuses.filter((line) => line.includes("fenced off")).length).toBe(3);
   });
 
+  it("refuses a shell command that reaches for .env, which names no path at all", async () => {
+    const script = await workspace.script({
+      steps: [
+        {
+          kind: "ask-permission",
+          id: "t1",
+          title: "Run a command",
+          toolKind: "execute",
+          rawInput: { command: "cat .env" },
+          recordAs: "catEnv",
+        },
+        {
+          kind: "ask-permission",
+          id: "t2",
+          title: "Run a command",
+          toolKind: "execute",
+          rawInput: { command: "grep KEY .env.local" },
+          recordAs: "grepEnv",
+        },
+        {
+          kind: "ask-permission",
+          id: "t3",
+          title: "Run a command",
+          toolKind: "execute",
+          rawInput: { command: "grep", args: ["-n", "KEY", ".env.production"] },
+          recordAs: "argsEnv",
+        },
+        {
+          kind: "ask-permission",
+          id: "t4",
+          title: "Run a command",
+          toolKind: "execute",
+          rawInput: { tool: { input: { terminal: { command: "head -n 1 /tmp/repo/.env" } } } },
+          recordAs: "nestedEnv",
+        },
+        {
+          kind: "ask-permission",
+          id: "t5",
+          title: "Run a command",
+          toolKind: "execute",
+          rawInput: { command: "node -e 'console.log(process.env.PORT)'" },
+          recordAs: "harmless",
+        },
+        { kind: "stop", reason: "end_turn" },
+      ],
+    });
+
+    const ui = new HeadlessUI();
+    await walk({
+      ui,
+      launch: workspace.launch(script),
+      cwd: workspace.dir,
+      signal: new AbortController().signal,
+    });
+
+    const observed = await reportIn(workspace);
+    expect(observed.observations["catEnv"]).toBe("reject");
+    expect(observed.observations["grepEnv"]).toBe("reject");
+    expect(observed.observations["argsEnv"]).toBe("reject");
+    expect(observed.observations["nestedEnv"]).toBe("reject");
+
+    // The fence stops at the fence: a command that only mentions the word runs.
+    expect(observed.observations["harmless"]).toBe("allow");
+
+    // The developer was told which file each refusal was about.
+    expect(ui.record.statuses).toContain(
+      "Refused: .env is fenced off from your coding agent. It was told to look elsewhere.",
+    );
+    expect(ui.record.statuses.filter((line) => line.includes("fenced off")).length).toBe(4);
+  });
+
+  it("keeps the agent's own output in a file, rather than dropping it", async () => {
+    const script = await workspace.script({
+      steps: [
+        { kind: "grumble", text: "warning: the adapter is talking to itself" },
+        { kind: "say", text: "It is a package manifest." },
+        { kind: "grumble", text: "warning: and again on the way out" },
+        { kind: "stop", reason: "end_turn" },
+      ],
+    });
+
+    const ui = new HeadlessUI();
+    await walk({
+      ui,
+      launch: workspace.launch(script),
+      cwd: workspace.dir,
+      signal: new AbortController().signal,
+    });
+
+    const logFile = ui.record.drivenAgentLog;
+    expect(logFile).not.toBeNull();
+
+    const kept = async (): Promise<string> => {
+      try {
+        return await readFile(logFile as string, "utf8");
+      } catch {
+        return "";
+      }
+    };
+
+    try {
+      // The last chunk can still be in flight when the walk returns.
+      expect(await waitUntil(async () => (await kept()).includes("on the way out"))).toBe(true);
+      expect(await kept()).toContain("warning: the adapter is talking to itself");
+    } finally {
+      await rm(logFile as string, { force: true });
+    }
+  });
+
   it("stops cleanly part way through, leaving no agent behind", async () => {
     const script = await workspace.script({
       spawnChild: true,
@@ -204,7 +317,7 @@ describe("one task, driven on a scripted agent", () => {
     controller.abort("interrupt");
     const report = await running;
 
-    expect(report).toEqual({ kind: "interrupted", agentName: "Fake Agent" });
+    expect(report).toEqual({ kind: "interrupted", drivenAgentName: "Fake Agent" });
     expect(buildExitLine(report)).toBe(
       "egma stopped before the task finished, and shut Fake Agent down.",
     );

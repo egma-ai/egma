@@ -23,8 +23,12 @@ export class InkUI implements WizardUI {
     success: (message: string): void => this.store.pushStatus(message),
   };
 
-  setAgent(agent: DrivenAgent | null): void {
-    this.store.setAgent(agent);
+  setDrivenAgent(drivenAgent: DrivenAgent | null): void {
+    this.store.setDrivenAgent(drivenAgent);
+  }
+
+  setDrivenAgentLog(file: string): void {
+    this.store.setDrivenAgentLog(file);
   }
 
   setTaskFile(file: string): void {

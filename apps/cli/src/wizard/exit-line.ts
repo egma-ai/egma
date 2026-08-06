@@ -12,21 +12,21 @@
 
 /** Why the wizard stopped, and what it can honestly say about it. */
 export type ExitReport =
-  | { readonly kind: "task-done"; readonly agentName: string; readonly file: string }
+  | { readonly kind: "task-done"; readonly drivenAgentName: string; readonly file: string }
   | { readonly kind: "quit" }
-  | { readonly kind: "interrupted"; readonly agentName: string | null }
+  | { readonly kind: "interrupted"; readonly drivenAgentName: string | null }
   | { readonly kind: "failed"; readonly reason: string };
 
 export function buildExitLine(report: ExitReport): string {
   switch (report.kind) {
     case "task-done":
-      return `${report.agentName} read ${report.file} for egma. Nothing in this folder was changed.`;
+      return `${report.drivenAgentName} read ${report.file} for egma. Nothing in this folder was changed.`;
     case "quit":
       return "egma closed. Nothing ran.";
     case "interrupted":
-      return report.agentName === null
+      return report.drivenAgentName === null
         ? "egma stopped before the task finished."
-        : `egma stopped before the task finished, and shut ${report.agentName} down.`;
+        : `egma stopped before the task finished, and shut ${report.drivenAgentName} down.`;
     case "failed":
       return `egma could not finish: ${report.reason}`;
   }

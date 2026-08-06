@@ -3,7 +3,7 @@
  */
 
 import { execFile, spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   CLI_ENTRY,
   FAKE_AGENT,
+  MANIFEST,
   PRETEND_OLD_NODE,
   isAlive,
   makeWorkspace,
@@ -21,8 +22,6 @@ import {
 } from "./support/workspace.ts";
 
 const run = promisify(execFile);
-
-const MANIFEST = JSON.stringify({ name: "customer-repo", version: "1.0.0" }, null, 2);
 
 async function egma(
   args: readonly string[],
@@ -74,7 +73,11 @@ describe("the egma command", () => {
     const help = await egma(["--help"], workspace.dir);
     expect(help.code).toBe(0);
     expect(help.stdout).toContain("Usage:");
-    expect(help.stdout).toContain("--agent <id>");
+    expect(help.stdout).toContain("--coding-agent <id>");
+
+    // The two test seams are not product surface, so they are not offered.
+    expect(help.stdout).not.toContain("--file");
+    expect(help.stdout).not.toContain("-- <command>");
 
     const version = await egma(["--version"], workspace.dir);
     expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
@@ -84,6 +87,19 @@ describe("the egma command", () => {
     const result = await egma(["--turbo"], workspace.dir);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("--turbo");
+  });
+
+  it("refuses to run the wizard where there is no terminal to agree in", async () => {
+    // Not a terminal: this is `npx egma | tee log`, where the keystroke that
+    // means yes can never be pressed.
+    const result = await egma(["--cwd", workspace.dir], workspace.dir);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("needs a terminal");
+    expect(result.stderr).toContain("--headless");
+    expect(result.stderr).toContain("--help");
+    // Nothing was driven: no agent was started, and nothing was said about one.
+    expect(result.stdout).toBe("");
   });
 
   it("drives the whole task and ends with the one exit line", async () => {
@@ -115,6 +131,41 @@ describe("the egma command", () => {
     );
     expect(await readFile(path.join(workspace.dir, "notes.txt"), "utf8")).toBe(
       "a package manifest\n",
+    );
+  });
+
+  it("keeps the two seams working that the tests themselves are driven by", async () => {
+    // `--file` and `-- <command>` are how a test pins the file and starts a
+    // scripted agent. They are not offered in the help text, and they are not
+    // stable, but everything offline rides on them — so they are checked.
+    await writeFile(path.join(workspace.dir, "NOTES.md"), "just some notes\n", "utf8");
+    const script = await workspace.script({
+      steps: [
+        { kind: "say", text: "It is a notes file." },
+        { kind: "stop", reason: "end_turn" },
+      ],
+    });
+
+    const result = await egma(
+      [
+        "--headless",
+        "--cwd",
+        workspace.dir,
+        "--file",
+        "NOTES.md",
+        "--",
+        process.execPath,
+        FAKE_AGENT,
+        script,
+      ],
+      workspace.dir,
+    );
+
+    expect(result.code).toBe(0);
+    // The named file won over the one the folder would have chosen.
+    expect(result.stdout).toContain("Task: read NOTES.md and say what it is");
+    expect(result.stdout.trimEnd().split("\n").at(-1)).toBe(
+      `${path.basename(process.execPath)} read NOTES.md for egma. Nothing in this folder was changed.`,
     );
   });
 

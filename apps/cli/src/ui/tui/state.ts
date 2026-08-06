@@ -10,7 +10,9 @@ import type { ExitReport } from "../../wizard/exit-line.ts";
 import type { DrivenAgent } from "../wizard-ui.ts";
 
 export type WizardState = {
-  readonly agent: DrivenAgent | null;
+  readonly drivenAgent: DrivenAgent | null;
+  /** Where the coding agent's own output is kept, for a screen that tails it. */
+  readonly drivenAgentLog: string | null;
   readonly taskFile: string | null;
   /** The developer has read the intro and said go. */
   readonly begun: boolean;
@@ -23,7 +25,8 @@ export type WizardState = {
 
 export function emptyState(): WizardState {
   return {
-    agent: null,
+    drivenAgent: null,
+    drivenAgentLog: null,
     taskFile: null,
     begun: false,
     running: false,

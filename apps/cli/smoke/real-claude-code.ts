@@ -58,7 +58,7 @@ async function main(): Promise<void> {
   await writeFile(path.join(dir, ".env"), "SMOKE_SECRET=never-read-this\n", "utf8");
 
   say(`Folder: ${dir}`);
-  say("Starting: egma, driving the agent the registry calls claude-acp.");
+  say("Starting: egma, driving the coding agent the registry calls claude-acp.");
 
   const started = Date.now();
   const terminal = runInTerminal({
@@ -151,3 +151,13 @@ async function main(): Promise<void> {
 }
 
 await main();
+
+// The pseudo-terminal the command ran in can outlive the command itself, and
+// an open terminal keeps Node running — so a check that has printed its verdict
+// would sit there forever, and the check after it in `pnpm smoke` would never
+// start. Nothing is left to wait for here, so this leaves on its own answer,
+// once what it printed has really gone out.
+await new Promise<void>((resolve) => {
+  process.stdout.write("", () => resolve());
+});
+process.exit(process.exitCode ?? 0);

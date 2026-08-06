@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  DEFAULT_AGENT_ID,
-  UnlaunchableAgentError,
-  findAgent,
+  DEFAULT_DRIVEN_AGENT_ID,
+  UnlaunchableDrivenAgentError,
+  findDrivenAgent,
   launchFor,
   launchForId,
   registry,
@@ -11,13 +11,13 @@ import {
 
 describe("the mirrored agent registry", () => {
   it("carries the agents egma drives, so no launch table is written by hand", () => {
-    expect(findAgent(DEFAULT_AGENT_ID)).not.toBeNull();
-    expect(findAgent("codex-acp")).not.toBeNull();
+    expect(findDrivenAgent(DEFAULT_DRIVEN_AGENT_ID)).not.toBeNull();
+    expect(findDrivenAgent("codex-acp")).not.toBeNull();
     expect(registry().agents.length).toBeGreaterThan(10);
   });
 
   it("starts a published agent with the package the registry names", () => {
-    const launch = launchForId(DEFAULT_AGENT_ID);
+    const launch = launchForId(DEFAULT_DRIVEN_AGENT_ID);
 
     expect(launch.command).toMatch(/^npx/);
     expect(launch.args.join(" ")).toContain("@agentclientprotocol/claude-agent-acp");
@@ -28,7 +28,7 @@ describe("the mirrored agent registry", () => {
   });
 
   it("refuses an agent it has never heard of, by name", () => {
-    expect(() => launchForId("no-such-agent")).toThrow(UnlaunchableAgentError);
+    expect(() => launchForId("no-such-agent")).toThrow(UnlaunchableDrivenAgentError);
     expect(() => launchForId("no-such-agent")).toThrow(/no-such-agent/);
   });
 

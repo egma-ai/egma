@@ -9,7 +9,7 @@ describe("which screen is on", () => {
 
     expect(store.activeScreen).toBe("intro");
     store.begin();
-    expect(store.activeScreen).toBe("run");
+    expect(store.activeScreen).toBe("task");
   });
 
   it("parks the flow until the developer opens the gate", async () => {

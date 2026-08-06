@@ -10,6 +10,11 @@ Run it in your repository. It opens a terminal wizard, tells you what it is
 about to do, and starts on one keystroke. When it closes, your terminal has one
 plain line in it and nothing else.
 
+That keystroke is how you agree to egma driving your coding agent, so egma needs
+a real terminal to ask in. Piped or redirected, it refuses and says so. Pass
+`--headless` to agree in the command itself and get plain lines instead — that
+is how CI runs it.
+
 ## What it does today
 
 This is the first working slice. `npx egma` starts the coding agent you already
@@ -43,18 +48,15 @@ still needs.
 ## Options
 
 ```
-egma [options] [-- <command> [args...]]
+egma [options]
 
-  --agent <id>    Which coding agent to drive, named as the agent registry
-                  names it. Default: claude-acp
-  --file <path>   The file the agent is asked to read.
-  --cwd <path>    The folder to work in. Default: this folder.
-  --headless      Run without the terminal UI and print plain lines.
-  -h, --help      Print this.
-  -v, --version   Print the version.
-
-  -- <command>    Start this command as the coding agent, instead of looking
-                  one up in the agent registry.
+  --coding-agent <id>  Which coding agent to drive, named as the agent
+                       registry names it. Default: claude-acp
+  --cwd <path>         The folder to work in. Default: this folder.
+  --headless           Run with no terminal and no keystroke: plain lines,
+                       and the task taken as already agreed to.
+  -h, --help           Print this.
+  -v, --version        Print the version.
 ```
 
 `Ctrl-C` stops a run at any point. The agent, and anything the agent started,

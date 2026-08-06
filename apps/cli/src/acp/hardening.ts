@@ -16,15 +16,25 @@
  */
 
 /**
- * File patterns the agent must refuse itself, in the shape Claude Code writes
- * permission rules: a bare name for the working folder, and the `//` form for
- * an absolute path anywhere on the machine.
+ * What the agent must refuse itself, in the shape Claude Code writes permission
+ * rules. Two kinds, because an agent reaches a file two ways.
+ *
+ * By path, for the file tools: a bare name for the working folder, and the `//`
+ * form for an absolute path anywhere on the machine.
+ *
+ * By the text of the command, for the terminal. `cat .env` carries no path
+ * field for a path rule to read, so the rule matches the command itself: a
+ * wildcard with no space in front of it binds nowhere, so `Bash(*.env*)` refuses
+ * any command with `.env` anywhere in it, in any of the pieces a compound
+ * command is split into. It refuses more than it must — a command that only
+ * mentions `process.env` is refused too — and that is the side to be wrong on.
  */
 const CLAUDE_DENY_RULES = [
   "Read(.env)",
   "Read(.env.*)",
   "Read(//**/.env)",
   "Read(//**/.env.*)",
+  "Bash(*.env*)",
 ];
 
 const SESSION_META: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
@@ -34,6 +44,6 @@ const SESSION_META: Readonly<Record<string, Readonly<Record<string, unknown>>>> 
 };
 
 /** What to attach to `session/new` for this agent, or `null` for none. */
-export function sessionMetaFor(agentId: string): Readonly<Record<string, unknown>> | null {
-  return SESSION_META[agentId] ?? null;
+export function sessionMetaFor(drivenAgentId: string): Readonly<Record<string, unknown>> | null {
+  return SESSION_META[drivenAgentId] ?? null;
 }

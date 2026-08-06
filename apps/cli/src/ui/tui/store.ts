@@ -19,7 +19,7 @@ import type { DrivenAgent, GateId } from "../wizard-ui.ts";
 /** The screens of the walk, in order. */
 export const WALK_SCREENS: Sequence = [
   { id: "intro", isComplete: (state) => state.begun },
-  { id: "run" },
+  { id: "task" },
 ];
 
 /** The condition each gate waits for. */
@@ -79,8 +79,12 @@ export class WizardStore {
 
   // ── The flow's writes ────────────────────────────────────────────────
 
-  setAgent(agent: DrivenAgent | null): void {
-    this.change({ agent });
+  setDrivenAgent(drivenAgent: DrivenAgent | null): void {
+    this.change({ drivenAgent });
+  }
+
+  setDrivenAgentLog(drivenAgentLog: string): void {
+    this.change({ drivenAgentLog });
   }
 
   setTaskFile(taskFile: string): void {

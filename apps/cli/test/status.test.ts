@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ActionStream, agentTextIn } from "../src/wizard/status.ts";
+import { ActionStream, drivenAgentTextIn } from "../src/wizard/status.ts";
 
 const CWD = "/repo";
 
@@ -98,6 +98,6 @@ describe("what the developer is shown while the agent works", () => {
     } as const;
 
     expect(actions.lines(update)).toEqual([]);
-    expect(agentTextIn(update)).toBe("It is a package manifest.");
+    expect(drivenAgentTextIn(update)).toBe("It is a package manifest.");
   });
 });

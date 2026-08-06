@@ -9,7 +9,7 @@ import { useSyncExternalStore } from "react";
 import { useInput } from "ink";
 
 import { IntroScreen } from "./screens/IntroScreen.tsx";
-import { RunScreen } from "./screens/RunScreen.tsx";
+import { TaskScreen } from "./screens/TaskScreen.tsx";
 import type { WizardStore } from "./store.ts";
 
 export type AppProps = {
@@ -33,5 +33,5 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
   if (screen === "intro") {
     return <IntroScreen state={state} onBegin={() => store.begin()} onQuit={onQuit} />;
   }
-  return <RunScreen state={state} />;
+  return <TaskScreen state={state} />;
 }

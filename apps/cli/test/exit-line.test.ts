@@ -5,10 +5,10 @@ import { buildExitLine } from "../src/wizard/exit-line.ts";
 describe("the exit line", () => {
   it("is always exactly one line, with nothing to select around", () => {
     const reports = [
-      { kind: "task-done", agentName: "Claude Agent", file: "package.json" },
+      { kind: "task-done", drivenAgentName: "Claude Agent", file: "package.json" },
       { kind: "quit" },
-      { kind: "interrupted", agentName: "Claude Agent" },
-      { kind: "interrupted", agentName: null },
+      { kind: "interrupted", drivenAgentName: "Claude Agent" },
+      { kind: "interrupted", drivenAgentName: null },
       { kind: "failed", reason: "the agent stopped talking" },
     ] as const;
 
@@ -24,10 +24,10 @@ describe("the exit line", () => {
 
   it("says what happened, in words", () => {
     expect(
-      buildExitLine({ kind: "task-done", agentName: "Claude Agent", file: "package.json" }),
+      buildExitLine({ kind: "task-done", drivenAgentName: "Claude Agent", file: "package.json" }),
     ).toBe("Claude Agent read package.json for egma. Nothing in this folder was changed.");
 
-    expect(buildExitLine({ kind: "interrupted", agentName: "Claude Agent" })).toContain(
+    expect(buildExitLine({ kind: "interrupted", drivenAgentName: "Claude Agent" })).toContain(
       "stopped before the task finished",
     );
 
