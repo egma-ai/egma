@@ -121,6 +121,11 @@ class ControlPlaneClient:
                 if response.status in (200, 202, 204):
                     return
                 text = await response.text()
+                # A 4xx says the document is wrong, and the same bytes will
+                # be wrong next time — except for the two that say "not now":
+                # a timeout and a rate limit both mean try again.
+                if response.status in (408, 429):
+                    raise TransientReportFailure(f"{response.status}: {text}")
                 if 400 <= response.status < 500:
                     raise ReportRejected(f"{response.status}: {text}")
                 raise TransientReportFailure(f"{response.status}: {text}")

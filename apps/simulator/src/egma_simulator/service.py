@@ -117,7 +117,12 @@ class RunningSimulation:
         self._client = client
         self._config = config
         self._secrets = secrets
-        self._reporter = Reporter(client, self.simulation_id, config.wal_dir)
+        self._reporter = Reporter(
+            client,
+            self.simulation_id,
+            config.wal_dir,
+            delivery_deadline_seconds=config.report_deadline_seconds,
+        )
         self._controls = PipeControls()
         self._first_human_at: float | None = None
         self._first_latency_reported = False

@@ -13,6 +13,8 @@ import socket
 from dataclasses import dataclass
 from pathlib import Path
 
+from .reporting import DELIVERY_DEADLINE_SECONDS
+
 
 def _positive_seconds(name: str, fallback: float) -> float:
     raw = os.environ.get(name)
@@ -53,6 +55,9 @@ class SimulatorConfig:
     claim_wait_seconds: float
     """How long one claim request is willing to hang before asking again."""
 
+    report_deadline_seconds: float
+    """How long one report keeps being resent before the WAL becomes its only record."""
+
     echo_turn_seconds: float
     """Pacing between echo turns. Zero conducts as fast as the pipe carries."""
 
@@ -88,6 +93,9 @@ class SimulatorConfig:
             ),
             claim_wait_seconds=_positive_seconds(
                 "EGMA_SIMULATOR_CLAIM_WAIT_SECONDS", 30.0
+            ),
+            report_deadline_seconds=_positive_seconds(
+                "EGMA_SIMULATOR_REPORT_DEADLINE_SECONDS", DELIVERY_DEADLINE_SECONDS
             ),
             echo_turn_seconds=_nonnegative_seconds(
                 "EGMA_SIMULATOR_ECHO_TURN_SECONDS", 0.0

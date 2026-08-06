@@ -175,6 +175,19 @@ def start_simulator(
         simulator.stop()
 
 
+@pytest.fixture
+def quick_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Collapse delivery backoff so retry behavior can be tested in milliseconds.
+
+    Only the waiting is shortened. The attempt sequence, the deadline
+    arithmetic, and what is given up on are exactly the production ones.
+    """
+    from egma_simulator import reporting
+
+    monkeypatch.setattr(reporting, "FIRST_BACKOFF_SECONDS", 0.001)
+    monkeypatch.setattr(reporting, "MAX_BACKOFF_SECONDS", 0.005)
+
+
 def load_fixture_spec(name: str) -> dict:
     with open(
         contract_dir() / "fixtures" / "spec" / "valid" / name, encoding="utf-8"
