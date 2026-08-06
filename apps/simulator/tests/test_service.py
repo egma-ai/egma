@@ -179,6 +179,38 @@ async def test_a_claim_failure_that_never_changes_is_said_once_not_forever(
     assert client.attempts >= 25, "the loop kept trying, quietly"
 
 
+async def test_an_outage_that_speaks_again_counts_from_when_it_began(
+    tmp_path, caplog, monkeypatch
+):
+    """"After N attempts" means since the failure started, not since it last spoke.
+
+    Nobody reads a number in a log line and mentally scopes it to the
+    window it was counted in. With the repeat interval collapsed to
+    nothing, every attempt after the first speaks up, and each one has to
+    have counted every attempt before it.
+    """
+    monkeypatch.setattr(service_module, "CLAIM_RETRY_SECONDS", 0.001)
+    monkeypatch.setattr(service_module, "REPEATED_CLAIM_FAILURE_SECONDS", 0.0)
+    caplog.set_level(logging.DEBUG, logger="egma_simulator.service")
+    service = a_service(tmp_path)
+    client = RefusingClient(attempts_wanted=6)
+
+    claiming = asyncio.create_task(
+        service._claim_forever(client, RecordingExecutor(capacity=2))
+    )
+    await client.enough.wait()
+    claiming.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await claiming
+
+    counted = [
+        int(record.args[0])
+        for record in caplog.records
+        if record.levelno == logging.WARNING and "still not landing" in record.msg
+    ]
+    assert counted[:5] == [2, 3, 4, 5, 6], counted
+
+
 def test_the_typed_spec_reads_what_the_document_says():
     spec = SimulationSpec.from_document(
         scripted_spec("sim-typed", scenario="Hello there.", max_turns=7)

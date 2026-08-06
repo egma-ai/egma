@@ -32,11 +32,11 @@ def _text(name: str, fallback: str | None = None) -> str | None:
     """A variable's value, where blank means absent.
 
     Compose passes an unset optional through as an empty string rather
-    than leaving it out, which is what lets every entry in the compose
-    file carry its own ``${VAR:-}`` default. So "" and "never set" have to
-    mean the same thing here: otherwise a blank model base URL would
-    become a base URL of nothing, and the first request would go nowhere
-    with no idea why.
+    than leaving it out, which is what lets a compose entry carry a
+    ``${VAR:-}`` default at all. So "" and "never set" have to mean the
+    same thing here: otherwise a blank model base URL would become a base
+    URL of nothing, and the first request would go nowhere with no idea
+    why.
     """
     raw = os.environ.get(name)
     if raw is None or not raw.strip():

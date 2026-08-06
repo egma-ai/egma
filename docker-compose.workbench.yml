@@ -11,8 +11,10 @@
 #
 # It adds one container — the workbench, a fake control plane speaking the
 # same contract from the spec fixtures already inside the image — and
-# points the simulator at it instead of the API. Both are the same image,
-# so this builds nothing extra.
+# points the simulator at it instead of the API. The workbench names the
+# same Dockerfile as the simulator, so Compose builds it a second time and
+# tags a second image; every step of that second build is a cache hit on
+# the first, and nothing is installed or downloaded twice.
 #
 # Naming the two services is what keeps Postgres, ClickHouse, the API and
 # the web application out of it: the simulator's dependency on the API is

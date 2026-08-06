@@ -295,7 +295,13 @@ class SimulatorService:
         self._secrets = secrets
         self._blobs = FilesystemBlobStore(config.blob_dir)
         self._last_claim_failure: str | None = None
-        self._claim_failure_since = 0.0
+        # Two clocks, because they answer two questions. One is how long
+        # this failure has been going on, which is what the operator wants
+        # to hear; the other is when it was last said, which is only what
+        # paces the repeats. Sharing one made the count restart every time
+        # it spoke, while the sentence read as a total.
+        self._claim_failure_began = 0.0
+        self._claim_failure_said_at = 0.0
         self._claim_failure_count = 0
 
     async def run(self) -> None:
@@ -363,22 +369,27 @@ class SimulatorService:
         now = asyncio.get_running_loop().time()
         if failure != self._last_claim_failure:
             self._last_claim_failure = failure
-            self._claim_failure_since = now
+            self._claim_failure_began = now
+            self._claim_failure_said_at = now
             self._claim_failure_count = 1
             logger.warning("claim did not land: %s", failure)
             return
 
+        # The count is every attempt since this failure began, not since it
+        # was last mentioned: "after 300 attempts" has to mean what an
+        # operator reads it to mean, and the elapsed time is said beside it
+        # so neither number has to be inferred from the other.
         self._claim_failure_count += 1
-        if now - self._claim_failure_since < REPEATED_CLAIM_FAILURE_SECONDS:
+        if now - self._claim_failure_said_at < REPEATED_CLAIM_FAILURE_SECONDS:
             logger.debug("claim did not land: %s", failure)
             return
         logger.warning(
-            "claim still not landing after %d attempts: %s",
+            "claim still not landing after %d attempts over %.0fs: %s",
             self._claim_failure_count,
+            now - self._claim_failure_began,
             failure,
         )
-        self._claim_failure_since = now
-        self._claim_failure_count = 0
+        self._claim_failure_said_at = now
 
     def _accept(self, documents: list, executor: Executor) -> None:
         """Take what fits and can be understood; refuse the rest out loud.
