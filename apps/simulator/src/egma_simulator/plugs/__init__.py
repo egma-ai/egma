@@ -92,6 +92,22 @@ walk turns an exception into a simulation that reports ``failed`` with the
 exception's message as the reason, so word messages for the person who
 reads the record — and keep credentials out of them.
 
+A ``PlugError`` also carries **which of the contract's failed endings**
+the refusal deserves. They are named in :mod:`egma_simulator.contract`,
+where the contract's vocabulary lives, and the default is the right
+answer nearly always:
+
+- ``ERROR`` (the default) — the simulator hit a fault it could not
+  conduct through: config it cannot use, a platform refusing, a way in
+  that is not there.
+- ``NOT_ANSWERED`` — the simulator reached out and nothing came on the
+  line. A phone that rang out or was engaged; never a fault, and never
+  the agent's doing.
+- ``AGENT_NEVER_JOINED`` — the way in opened and no agent turned up.
+
+None of the three is ever graded as the agent failing: each of them
+means the exchange did not happen, so there is nothing to grade.
+
 A cancel directive or a tripped limit cancels the in-flight ``open`` or
 ``deliver`` (an ``asyncio.CancelledError`` inside the plug): let it
 propagate, and rely on ``close()`` for teardown.
@@ -120,6 +136,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
+
+from ..contract import ERROR
 
 
 @dataclass(frozen=True)
@@ -157,7 +175,25 @@ class AgentSpeech:
 
 class PlugError(Exception):
     """A plug refusing config it does not understand, a modality it cannot
-    speak, or a platform interaction that failed in a way it can name."""
+    speak, or a platform interaction that failed in a way it can name.
+
+    ``ending`` is which failed ending the record should carry. It is
+    :data:`ERROR` unless a plug says otherwise, because a plug that has
+    nothing to say about the difference has hit a fault.
+    """
+
+    def __init__(self, message: str, *, ending: str = ERROR) -> None:
+        super().__init__(message)
+        self.ending = ending
+
+
+def failed_ending(fault: BaseException) -> str:
+    """Which of the contract's failed endings one fault deserves.
+
+    The one place the question is answered, so that a plug naming an
+    honest ending and a fault nobody named go through the same door.
+    """
+    return fault.ending if isinstance(fault, PlugError) else ERROR
 
 
 class PlatformPlug(Protocol):
@@ -211,11 +247,13 @@ def plug_for(connection_type: str) -> PlugFactory | None:
     import and one line, and the diff that adds it touches nothing else.
     """
     from .loopback import LoopbackCounterpart
+    from .phone import PhoneCall
     from .retell import RetellChat
     from .scripted import ScriptedCounterpart
 
     return {
         "loopback": LoopbackCounterpart,
+        "phone": PhoneCall,
         "retell": RetellChat,
         "scripted": ScriptedCounterpart,
     }.get(connection_type)

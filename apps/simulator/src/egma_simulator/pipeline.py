@@ -88,6 +88,22 @@ RECORDING_NAME = "dual-channel.wav"
 TEARDOWN_SECONDS = 10.0
 """How long a torn-down pipeline may take to finish before it is cancelled."""
 
+HEARD_NOTHING_SECONDS = 20.0
+"""How long a listening leg may hold a whole turn of audio and say nothing
+about it before the turn counts as one that carried no words.
+
+A streaming transcriber that finds no words in a stretch of audio pushes
+no frame at all — there is no empty transcript, only silence — so a turn
+waiting for one waits forever, and the simulation runs to its duration
+limit with nothing on the record saying why. Phone calls make that
+ordinary: hold music, a line left open, a room with a television in it.
+
+It is a backstop and not a turn-taking rule, which is why it is generous
+and why it is the only wait in this file measured in time rather than in
+frames. The scripted pair answers every turn it is given, so no
+deterministic exchange ever reaches it.
+"""
+
 PERSONA_CHANNEL = 0
 AGENT_CHANNEL = 1
 """Who is on which channel of a recording. The transcript's two labels in
@@ -456,14 +472,21 @@ class VoicePipeline:
                 VADUserStoppedSpeakingFrame(),
             ]
         )
-        await self._reach(self._sink.heard)
+        if not await self._reach(self._sink.heard, within=HEARD_NOTHING_SECONDS):
+            logger.info(
+                "the listening leg found no words in a turn of audio; the "
+                "turn is recorded as one that carried none"
+            )
+            return ""
         return self._sink.words_heard
 
     async def _measure(self, measure: str, seconds: float) -> None:
         if self._on_timing is not None:
             await self._on_timing(measure, seconds * 1000)
 
-    async def _reach(self, event: asyncio.Event) -> None:
+    async def _reach(
+        self, event: asyncio.Event, *, within: float | None = None
+    ) -> bool:
         """Wait for one point in the pipeline, or say plainly what stopped it.
 
         Racing the wait against the pipeline's own task is what stops a
@@ -472,6 +495,9 @@ class VoicePipeline:
         leg that refused this turn is raced the same way and for the same
         reason, and its refusal is quoted rather than summarised: what a
         provider says about a key or a plan is the whole diagnosis.
+
+        ``within`` gives up rather than raising, answering ``False``. Only
+        one caller uses it, and :data:`HEARD_NOTHING_SECONDS` says why.
         """
         if self._running is None:
             raise PipelineGone("the voice pipeline was driven before it was opened")
@@ -481,6 +507,7 @@ class VoicePipeline:
             done, _pending = await asyncio.wait(
                 {waiting, faulted, self._running},
                 return_when=asyncio.FIRST_COMPLETED,
+                timeout=within,
             )
         finally:
             for unfinished in (waiting, faulted):
@@ -489,9 +516,11 @@ class VoicePipeline:
                     with contextlib.suppress(asyncio.CancelledError):
                         await unfinished
         if waiting in done:
-            return
+            return True
         if faulted in done:
             raise SpeechFault(f"a speech leg refused this turn: {self._fault}")
+        if not done:
+            return False
         raise PipelineGone("the voice pipeline ended before the turn did")
 
     def _before_turn(self) -> None:
