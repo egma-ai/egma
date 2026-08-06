@@ -4,6 +4,11 @@ The workbench offers specs; a real simulator process claims, conducts,
 heartbeats and reports; every assertion below reads only what the
 workbench recorded. Nothing inspects the simulator — that is the point:
 what the records show is all the control plane will ever know.
+
+Every exchange here is a real conversation: the persona on the scripted
+model client, the agent played by the scripted counterpart plug. Nothing
+in this suite reaches a network beyond loopback or a model beyond the
+scripted one, which is why none of it can flake.
 """
 
 from __future__ import annotations
@@ -15,64 +20,98 @@ from datetime import datetime
 from conftest import (
     HEARTBEAT_SECONDS,
     all_terminal,
-    chat_spec,
     events_for,
     has_terminal,
     heartbeats_for,
+    load_fixture_spec,
+    scripted_spec,
     status_events_for,
     terminal_event_for,
 )
 
+from egma_simulator.model import GOODBYE
 
-async def test_a_simulation_walks_the_whole_pipe(workbench, start_simulator):
-    """Claim, heartbeat, running, turns, completed — in that order, on record."""
-    spec = chat_spec("sim-walk-001")
+LONG_SCENARIO = " ".join(f"Sentence number {n}." for n in range(1, 41))
+
+
+async def test_a_scripted_persona_converses_with_the_scripted_counterpart(
+    workbench, start_simulator
+):
+    """The whole exchange, turn for turn, timestamped, on the record."""
+    spec = scripted_spec(
+        "sim-chat-001",
+        scenario=(
+            "I need to move my Tuesday cleaning to Thursday. "
+            "My name is Margaret Hale."
+        ),
+        greeting="Lakeside Dental, how can I help?",
+        replies=[
+            "Of course — could I take your name?",
+            "Done: you are moved to Thursday at half past two.",
+        ],
+        provider_reference="scripted-accept-1",
+    )
     await workbench.offer(spec)
     start_simulator(workbench)
 
-    records = await workbench.wait_for(has_terminal("sim-walk-001"))
+    records = await workbench.wait_for(has_terminal("sim-chat-001"))
 
     claims = [
         record
         for record in records
-        if record["kind"] == "claim" and "sim-walk-001" in record["granted"]
+        if record["kind"] == "claim" and "sim-chat-001" in record["granted"]
     ]
     assert len(claims) == 1
-    assert claims[0]["claimant"] == "sim-under-test"
-    assert claims[0]["capacity"] >= 1
+    assert len(heartbeats_for(records, "sim-chat-001")) >= 1
 
-    assert len(heartbeats_for(records, "sim-walk-001")) >= 1
-
-    statuses = status_events_for(records, "sim-walk-001")
+    statuses = status_events_for(records, "sim-chat-001")
     assert statuses[0] == "running"
     assert statuses[-1] == "completed"
 
-    turns = events_for(records, "sim-walk-001", "turn")
-    assert len(turns) >= 2
-    assert turns[0]["speaker"] == "human"
-    assert turns[1]["speaker"] == "agent"
-    assert turns[1]["text"] == turns[0]["text"]
+    # The transcript, turn for turn: the greeting, the persona's scenario
+    # sentence by sentence against the counterpart's scripted answers, and
+    # the persona's concluding goodbye.
+    turns = events_for(records, "sim-chat-001", "turn")
+    assert [(turn["speaker"], turn["text"]) for turn in turns] == [
+        ("agent", "Lakeside Dental, how can I help?"),
+        ("human", "I need to move my Tuesday cleaning to Thursday."),
+        ("agent", "Of course — could I take your name?"),
+        ("human", "My name is Margaret Hale."),
+        ("agent", "Done: you are moved to Thursday at half past two."),
+        ("human", GOODBYE),
+    ]
 
-    terminal = terminal_event_for(records, "sim-walk-001")
+    # Timestamped, and in order: every turn carries its moment, and the
+    # moments never run backwards.
+    started_ats = [datetime.fromisoformat(turn["started_at"]) for turn in turns]
+    assert started_ats == sorted(started_ats)
+
+    terminal = terminal_event_for(records, "sim-chat-001")
     facts = terminal["facts"]
     assert facts["ending"] == "persona_concluded"
     assert facts["turn_count"] == len(turns)
     assert facts["audio"] is None
-    started = datetime.fromisoformat(facts["started_at"])
-    ended = datetime.fromisoformat(facts["ended_at"])
-    assert ended >= started
+    assert facts["provider_reference"] == "scripted-accept-1"
+    assert (
+        datetime.fromisoformat(facts["ended_at"])
+        >= datetime.fromisoformat(facts["started_at"])
+    )
 
-    assert len(events_for(records, "sim-walk-001", "timing")) >= 1
+    # Measured, not judged: the first answer's latency, and one
+    # measurement per answered turn.
+    timings = events_for(records, "sim-chat-001", "timing")
+    measures = [event["measure"] for event in timings]
+    assert measures.count("first_response_latency") == 1
+    assert measures.count("turn_response_latency") == 2
 
-    # The workbench refused nothing: every document the simulator sent
-    # validated against the report schema.
+    # The workbench refused nothing: every document validated.
     assert [record for record in records if record["kind"] == "refusal"] == []
 
     # And the record's own order tells the story: claimed before running,
     # running before any turn, every turn before completed.
     def first_seq(kind: str, status: str | None = None) -> int:
         for record in records:
-            if record["kind"] == "report" and record["simulation_id"] == "sim-walk-001":
+            if record["kind"] == "report" and record["simulation_id"] == "sim-chat-001":
                 event = record["event"]
                 if event["kind"] == kind and (
                     status is None or event.get("status") == status
@@ -80,24 +119,152 @@ async def test_a_simulation_walks_the_whole_pipe(workbench, start_simulator):
                     return record["seq"]
         raise AssertionError(f"no {kind}/{status} on record")
 
-    claim_seq = claims[0]["seq"]
-    assert claim_seq < first_seq("status", "running")
+    assert claims[0]["seq"] < first_seq("status", "running")
     assert first_seq("status", "running") < first_seq("turn")
     assert first_seq("turn") < first_seq("status", "completed")
 
 
-async def test_a_cancel_directive_stops_a_simulation_mid_walk(
+async def test_two_golden_fixture_specs_conduct_two_visibly_different_exchanges(
+    workbench, start_simulator
+):
+    """Different persona traits and scenarios, different conversations —
+    with no code change: both walks come off fixture files alone."""
+    flustered = load_fixture_spec("chat-scripted-flustered.json")
+    hurried = load_fixture_spec("chat-scripted-hurried.json")
+    await workbench.offer(flustered)
+    await workbench.offer(hurried)
+    start_simulator(workbench)
+
+    ids = [flustered["simulation_id"], hurried["simulation_id"]]
+    records = await workbench.wait_for(all_terminal(ids))
+
+    transcripts = {
+        simulation_id: [
+            (turn["speaker"], turn["text"])
+            for turn in events_for(records, simulation_id, "turn")
+        ]
+        for simulation_id in ids
+    }
+    for simulation_id, transcript in transcripts.items():
+        assert len(transcript) >= 3, simulation_id
+
+    # Visibly different: neither side of one conversation appears in the
+    # other. The persona's turns differ because the scenarios do; the
+    # agent's because each fixture scripts its own counterpart.
+    human = {
+        simulation_id: {text for speaker, text in transcript if speaker == "human"}
+        for simulation_id, transcript in transcripts.items()
+    }
+    agent = {
+        simulation_id: {text for speaker, text in transcript if speaker == "agent"}
+        for simulation_id, transcript in transcripts.items()
+    }
+    assert human[ids[0]].isdisjoint(human[ids[1]] - {GOODBYE})
+    assert agent[ids[0]].isdisjoint(agent[ids[1]])
+
+    # And they end differently too: one persona concludes, the other's
+    # counterpart ends the exchange itself.
+    endings = {
+        terminal_event_for(records, simulation_id)["facts"]["ending"]
+        for simulation_id in ids
+    }
+    assert endings == {"persona_concluded", "agent_ended"}
+
+
+async def test_every_ending_reason_is_reachable_and_reported_distinctly(
+    workbench, start_simulator
+):
+    """Concluded, agent-ended, and both limits — four endings, four
+    distinguishable records (the cancel directive's is pinned separately)."""
+    concluded = scripted_spec(
+        "sim-end-concluded",
+        scenario="Only one thing today.",
+        replies=["Noted."],
+    )
+    agent_ended = scripted_spec(
+        "sim-end-agent",
+        scenario=LONG_SCENARIO,
+        replies=["We are all done here, goodbye now."],
+        ends_after_replies=True,
+    )
+    by_turns = scripted_spec(
+        "sim-end-turns",
+        scenario=LONG_SCENARIO,
+        max_turns=4,
+    )
+    by_duration = scripted_spec(
+        "sim-end-duration",
+        scenario=LONG_SCENARIO,
+        turn_seconds=0.2,
+        max_duration_seconds=1,
+        max_turns=200,
+    )
+    for spec in (concluded, agent_ended, by_turns, by_duration):
+        await workbench.offer(spec)
+    start_simulator(workbench, capacity=4)
+
+    records = await workbench.wait_for(
+        all_terminal(
+            ["sim-end-concluded", "sim-end-agent", "sim-end-turns", "sim-end-duration"]
+        ),
+        within_seconds=60,
+    )
+
+    def terminal(simulation_id: str) -> tuple[str, str, str | None]:
+        event = terminal_event_for(records, simulation_id)
+        return event["status"], event["facts"]["ending"], event["reason"]
+
+    assert terminal("sim-end-concluded") == (
+        "completed",
+        "persona_concluded",
+        "the persona concluded the scenario",
+    )
+    assert terminal("sim-end-agent") == (
+        "completed",
+        "agent_ended",
+        "the agent ended the exchange",
+    )
+    assert terminal("sim-end-turns") == (
+        "completed",
+        "limit_reached",
+        "the turn limit (4 turns) tripped",
+    )
+    assert terminal("sim-end-duration") == (
+        "completed",
+        "limit_reached",
+        "the duration limit (1s) tripped",
+    )
+
+    # Distinct on the record: same ending enum for the two limits, and the
+    # reason is what tells them apart — so the reasons must all differ.
+    reasons = [
+        terminal(simulation_id)[2]
+        for simulation_id in (
+            "sim-end-concluded",
+            "sim-end-agent",
+            "sim-end-turns",
+            "sim-end-duration",
+        )
+    ]
+    assert len(set(reasons)) == 4
+
+    # The clipped walk really was clipped where the limit says.
+    assert len(events_for(records, "sim-end-turns", "turn")) == 4
+
+
+async def test_a_cancel_directive_stops_a_simulation_mid_exchange(
     workbench, start_simulator
 ):
     """The directive travels on a heartbeat answer; the simulation reports canceled."""
-    spec = chat_spec(
+    spec = scripted_spec(
         "sim-cancel-001",
-        instructions=" ".join(f"Sentence number {n}." for n in range(1, 41)),
+        scenario=LONG_SCENARIO,
+        turn_seconds=0.15,
         max_turns=200,
         max_duration_seconds=600,
     )
     await workbench.offer(spec)
-    start_simulator(workbench, pacing_seconds=0.15)
+    start_simulator(workbench)
 
     await workbench.wait_for(
         lambda records: len(events_for(records, "sim-cancel-001", "turn")) >= 2
@@ -110,7 +277,7 @@ async def test_a_cancel_directive_stops_a_simulation_mid_walk(
     assert terminal["facts"]["ending"] == "canceled"
 
     turns = events_for(records, "sim-cancel-001", "turn")
-    assert len(turns) < 80, "the walk was not stopped"
+    assert len(turns) < 80, "the exchange was not stopped"
     assert terminal["facts"]["turn_count"] == len(turns)
     assert "completed" not in status_events_for(records, "sim-cancel-001")
 
@@ -125,13 +292,14 @@ async def test_capacity_caps_simulations_in_flight(workbench, start_simulator):
     simulation_ids = [f"sim-cap-{n:03d}" for n in range(4)]
     for simulation_id in simulation_ids:
         await workbench.offer(
-            chat_spec(
+            scripted_spec(
                 simulation_id,
-                instructions="One. Two. Three. Four.",
+                scenario="One. Two. Three. Four.",
+                turn_seconds=0.1,
                 max_turns=200,
             )
         )
-    start_simulator(workbench, capacity=2, pacing_seconds=0.1)
+    start_simulator(workbench, capacity=2)
 
     records = await workbench.wait_for(
         all_terminal(simulation_ids), within_seconds=60
@@ -166,15 +334,16 @@ async def test_capacity_caps_simulations_in_flight(workbench, start_simulator):
 async def test_a_killed_simulator_just_stops_heartbeating(
     workbench, start_simulator
 ):
-    """SIGKILL mid-walk: heartbeats stop and nothing terminal is ever reported."""
-    spec = chat_spec(
+    """SIGKILL mid-exchange: heartbeats stop and nothing terminal is ever reported."""
+    spec = scripted_spec(
         "sim-kill-001",
-        instructions=" ".join(f"Sentence number {n}." for n in range(1, 41)),
+        scenario=LONG_SCENARIO,
+        turn_seconds=0.15,
         max_turns=200,
         max_duration_seconds=600,
     )
     await workbench.offer(spec)
-    simulator = start_simulator(workbench, pacing_seconds=0.15)
+    simulator = start_simulator(workbench)
 
     await workbench.wait_for(
         lambda records: "running" in status_events_for(records, "sim-kill-001")
@@ -206,7 +375,7 @@ async def test_a_killed_simulator_just_stops_heartbeating(
 async def test_an_over_granting_control_plane_does_not_take_the_simulator_down(
     over_granting_workbench, start_simulator
 ):
-    """The runtime's own cap, with the workbench's clamping out of the way.
+    """The simulator's own cap, with the workbench's clamping out of the way.
 
     A well-behaved control plane never hands out more than was asked for,
     which is exactly why the capacity test above cannot prove this: it is
@@ -217,9 +386,14 @@ async def test_an_over_granting_control_plane_does_not_take_the_simulator_down(
     accepted = [f"sim-flood-{n:03d}" for n in range(2)]
     for n in range(6):
         await workbench.offer(
-            chat_spec(f"sim-flood-{n:03d}", instructions="One. Two.", max_turns=200)
+            scripted_spec(
+                f"sim-flood-{n:03d}",
+                scenario="One. Two.",
+                turn_seconds=0.1,
+                max_turns=200,
+            )
         )
-    start_simulator(workbench, capacity=2, pacing_seconds=0.1)
+    start_simulator(workbench, capacity=2)
 
     records = await workbench.wait_for(all_terminal(accepted), within_seconds=60)
 
@@ -238,7 +412,7 @@ async def test_an_over_granting_control_plane_does_not_take_the_simulator_down(
             most_seen = max(most_seen, in_flight)
         elif record["event"]["status"] in ("completed", "failed", "canceled"):
             in_flight -= 1
-    assert most_seen <= 2, f"the runtime overloaded: {most_seen} in flight"
+    assert most_seen <= 2, f"the simulator overloaded: {most_seen} in flight"
 
     # It is still alive and still claiming after the bad answer.
     claims_before = len([r for r in records if r["kind"] == "claim"])
@@ -247,12 +421,46 @@ async def test_an_over_granting_control_plane_does_not_take_the_simulator_down(
     assert len([r for r in later if r["kind"] == "claim"]) > claims_before
 
 
+async def test_a_spec_naming_an_unknown_connection_type_is_refused_out_loud(
+    workbench, start_simulator
+):
+    """No plug, no exchange, no report — and the simulator carries on."""
+    unplugged = scripted_spec("sim-unplugged-001")
+    unplugged["connection"]["type"] = "retell"
+    await workbench.offer(unplugged)
+    simulator = start_simulator(workbench)
+
+    # A spec offered after the refusal still conducts: one spec the
+    # simulator cannot serve does not cost the ones it can.
+    await asyncio.sleep(HEARTBEAT_SECONDS * 2)
+    await workbench.offer(scripted_spec("sim-plugged-001", scenario="One thing."))
+    records = await workbench.wait_for(has_terminal("sim-plugged-001"))
+
+    assert terminal_event_for(records, "sim-plugged-001")["status"] == "completed"
+
+    # The refused spec was never conducted and never reported on: the row
+    # is the control plane's sweep to account for.
+    unplugged_reports = [
+        record
+        for record in records
+        if record["kind"] in ("report", "refusal")
+        and record["simulation_id"] == "sim-unplugged-001"
+    ]
+    assert unplugged_reports == []
+    assert "no platform plug" in simulator.output()
+
+
 async def test_credentials_never_appear_in_logs_or_reports(
     workbench, start_simulator
 ):
-    """A sentinel credential goes in; no byte of output or record carries it."""
+    """A sentinel credential goes in; no byte of output or record carries it.
+
+    The scripted counterpart takes no credentials — a real plug does — so
+    the sentinel rides the spec exactly the way a platform key will, and
+    the walk completes around it.
+    """
     sentinel = "SENTINEL-do-not-log-4f9c2b7e8a1d"
-    spec = chat_spec("sim-secret-001", api_key=sentinel)
+    spec = scripted_spec("sim-secret-001", credentials={"apiKey": sentinel})
     await workbench.offer(spec)
     simulator = start_simulator(workbench, log_level="DEBUG")
 

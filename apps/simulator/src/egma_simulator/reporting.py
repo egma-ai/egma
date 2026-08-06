@@ -90,6 +90,9 @@ class Reporter:
         self._sender: asyncio.Task | None = None
         self.abandoned = False
         """Set once delivery has given up; from then on the WAL is the record."""
+        self.provider_reference: str | None = None
+        """The platform's own identifier for the exchange, once the plug
+        offers one; rides the terminal facts."""
 
     def _mint_event_id(self) -> str:
         self._sequence += 1
@@ -250,7 +253,7 @@ class Reporter:
             "ended_at": moment(),
             "turn_count": self.turn_count,
             "audio": None,
-            "provider_reference": None,
+            "provider_reference": self.provider_reference,
         }
 
     def completed(self, ending: str, reason: str | None = None) -> None:

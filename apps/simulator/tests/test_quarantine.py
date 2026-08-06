@@ -28,7 +28,6 @@ SOURCE_ROOT = APP_ROOT / "src" / "egma_simulator"
 ALLOWED_DEPENDENCIES = {
     "aiohttp",  # the outbound HTTP client, and the workbench's server
     "jsonschema",  # holds every document to the contract, both directions
-    "pipecat-ai",  # the pipeline a simulation walks
     "rfc3339-validator",  # so the schemas' date-time format is really checked
 }
 
@@ -83,7 +82,7 @@ def test_the_dependency_list_stays_short_and_declared():
 def test_no_module_imports_anything_from_outside_the_app():
     """Third-party imports are the declared ones; everything else is stdlib."""
     # The distribution names above are not always the module names.
-    allowed_modules = {"aiohttp", "jsonschema", "pipecat", "loguru"}
+    allowed_modules = {"aiohttp", "jsonschema"}
     permitted = allowed_modules | set(sys.stdlib_module_names) | {"egma_simulator"}
 
     offenders: dict[str, set[str]] = {}

@@ -86,8 +86,9 @@ the happy one is covered against the API instead, where it costs milliseconds.
 ```
 apps/api        Fastify API. Applies migrations on boot, then serves.
 apps/simulator  The Python service that conducts simulations: claims specs
-                from the control plane, walks each through a Pipecat
-                pipeline, reports what happened. Ships with the workbench,
+                from the control plane, conducts each as a persona
+                conversing with the agent under test through a platform
+                plug, reports what happened. Ships with the workbench,
                 a dev-only fake control plane. Own toolchain (uv); see its
                 README.
 apps/web        Next.js web application: signup, sign-in, invitations, and
