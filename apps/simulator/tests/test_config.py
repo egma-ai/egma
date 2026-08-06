@@ -280,6 +280,36 @@ def test_the_speech_provider_keys_are_read_and_kept_out_of_the_repr(env):
     assert "elevenlabs_key_under_test" not in repr(config)
 
 
+def test_every_speech_key_is_registered_for_redaction_at_startup(env):
+    """A key kept out of logs by discipline is a key that leaks one day.
+
+    The live tests plant real provider keys and scan every byte the
+    process wrote, but CI never runs them — so the wiring that makes that
+    scan pass is proved here, with no network and no account: configure
+    both providers, ask for the registry a starting simulator builds, and
+    require that it rewrites both keys.
+    """
+    from egma_simulator.__main__ import secrets_of
+
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv("EGMA_SIMULATOR_STT_PROVIDER", "deepgram")
+    env.setenv("EGMA_SIMULATOR_DEEPGRAM_API_KEY", "SENTINEL-deepgram-3f8a1c")
+    env.setenv("EGMA_SIMULATOR_TTS_PROVIDER", "elevenlabs")
+    env.setenv("EGMA_SIMULATOR_ELEVENLABS_API_KEY", "SENTINEL-elevenlabs-9d2b7e")
+
+    registry = secrets_of(SimulatorConfig.from_env())
+
+    # The shape a provider's own refusal arrives in: the library quotes
+    # the request it made, key and all, and this is what rewrites it.
+    scrubbed = registry.redact(
+        "ElevenLabs API error for xi-api-key SENTINEL-elevenlabs-9d2b7e; "
+        "deepgram token SENTINEL-deepgram-3f8a1c was rejected"
+    )
+    assert "SENTINEL-elevenlabs-9d2b7e" not in scrubbed
+    assert "SENTINEL-deepgram-3f8a1c" not in scrubbed
+    assert scrubbed.count("[redacted]") == 2
+
+
 def test_one_real_leg_does_not_drag_the_other_along(env):
     """The two legs are chosen apart: a real mouth with scripted ears is a
     configuration somebody will want, and it needs one key, not two."""

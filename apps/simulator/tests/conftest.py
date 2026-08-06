@@ -439,6 +439,34 @@ def loopback_spec(
     return spec
 
 
+def credential(*names: str) -> str:
+    """The first of these environment variables that carries a value.
+
+    The opt-in tests read a ``TEST_``-prefixed name first, so a machine can
+    keep the credentials it tests with apart from the ones it works with,
+    and fall back to the provider's own plain name.
+    """
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def words_of(said: str) -> set[str]:
+    """The words of one turn, as a transcriber would have to have heard them.
+
+    Real transcription is not a codec: it capitalises, punctuates, and
+    sometimes hears "Thursday" as "thursday". So a live comparison is on
+    words rather than on strings, and what is asserted is that most of
+    them survived — which is what "these words were really heard" can
+    honestly mean.
+    """
+    return {
+        word.strip(".,!?;:").lower() for word in said.split() if word.strip(".,!?;:")
+    }
+
+
 def assert_one_speaker_to_a_channel(
     recording: bytes, turns: list[tuple[str, str]]
 ) -> None:

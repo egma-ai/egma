@@ -13,45 +13,39 @@ line, so what the persona says in a real voice is what comes back for
 real ears to read, and the whole round trip is provable without dialling
 anybody.
 
+Each leg is also proved on its own — ``test_live_elevenlabs.py`` and
+``test_live_deepgram.py`` — so a failure there names one provider. This
+one is the pair working together, which neither of those can show.
+
 It is opt-in because CI holds no provider account. With no credentials in
 the environment it skips — visibly, never failing, never waiting on
 anybody::
 
-    set -a; source ~/.egma-voice.env; set +a
+    DEEPGRAM_API_KEY=... ELEVENLABS_API_KEY=... \\
     uv run pytest tests/test_live_speech.py -v
 
 ``TEST_DEEPGRAM_API_KEY`` and ``TEST_ELEVENLABS_API_KEY`` are read first,
-for a machine that keeps its test credentials apart; a provider's own
-environment file names them plainly, and those names are read too.
+for a machine that keeps its test credentials apart from its working ones.
 """
 
 from __future__ import annotations
 
-import os
-
 import pytest
 from conftest import (
     assert_kept_secret,
+    credential,
     events_for,
     has_terminal,
     loopback_spec,
     terminal_event_for,
+    words_of,
 )
 
 from egma_simulator.pipeline import AGENT_CHANNEL, PERSONA_CHANNEL, channels_of
 from egma_simulator.speech import decode_speech
 
-
-def _credential(*names: str) -> str:
-    for name in names:
-        value = os.environ.get(name, "").strip()
-        if value:
-            return value
-    return ""
-
-
-DEEPGRAM_API_KEY = _credential("TEST_DEEPGRAM_API_KEY", "DEEPGRAM_API_KEY")
-ELEVENLABS_API_KEY = _credential("TEST_ELEVENLABS_API_KEY", "ELEVENLABS_API_KEY")
+DEEPGRAM_API_KEY = credential("TEST_DEEPGRAM_API_KEY", "DEEPGRAM_API_KEY")
+ELEVENLABS_API_KEY = credential("TEST_ELEVENLABS_API_KEY", "ELEVENLABS_API_KEY")
 
 pytestmark = pytest.mark.skipif(
     not (DEEPGRAM_API_KEY and ELEVENLABS_API_KEY),
@@ -73,20 +67,6 @@ pays a real provider by the word."""
 # all day. Wide enough for a websocket handshake and two syntheses.
 MAX_TURNS = 8
 MAX_DURATION_SECONDS = 90
-
-
-def words_of(said: str) -> set[str]:
-    """The words of one turn, as a transcriber would have to have heard them.
-
-    Real transcription is not a codec: it capitalises, punctuates, and
-    sometimes hears "Thursday" as "thursday". So the comparison below is
-    on words rather than on strings, and the assertion is that most of
-    them survived — which is what "the transcript came from real
-    transcription" can honestly mean.
-    """
-    return {
-        word.strip(".,!?;:").lower() for word in said.split() if word.strip(".,!?;:")
-    }
 
 
 async def test_a_real_voice_speaks_and_real_ears_read_it_back(

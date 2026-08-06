@@ -431,6 +431,20 @@ REAL_PAIR = SpeechProviders(
 assembled pipeline can be inspected here without a network or an account."""
 
 
+def voice_on_the_leg(legs: SpeechLegs) -> str:
+    """The voice the speaking leg will really ask its provider for.
+
+    Read off the leg itself rather than off the bookkeeping beside it: a
+    leg built with one voice while the record says another is exactly the
+    regression worth catching, and only the leg can be asked. A scripted
+    leg keeps it as the persona's voice; a provider's service keeps it in
+    the settings it was constructed with.
+    """
+    if isinstance(legs.tts, ScriptedTTS):
+        return legs.tts.voice.voice_id
+    return str(legs.tts._settings.voice)
+
+
 @asynccontextmanager
 async def assembled_with(providers: SpeechProviders, tmp_path: Path, **overrides):
     """One assembled voice pipeline, given back after it has been read.
@@ -453,10 +467,13 @@ async def test_a_deployment_that_configures_nothing_gets_the_scripted_pair(
 ):
     """The default everywhere: CI, the free local demo, and any deployment
     that sets no provider variable."""
-    async with assembled_with(SCRIPTED_PAIR, tmp_path) as assembled:
+    async with assembled_with(
+        SCRIPTED_PAIR, tmp_path, voice={"voiceId": "warm-alto-2"}
+    ) as assembled:
         legs = assembled.voice.legs
         assert isinstance(legs.tts, ScriptedTTS)
         assert isinstance(legs.stt, ScriptedSTT)
+        assert voice_on_the_leg(legs) == "warm-alto-2"
 
 
 async def test_naming_the_providers_puts_their_stock_services_in_the_slots(
@@ -495,6 +512,7 @@ async def test_a_real_voice_named_in_the_traits_is_the_one_that_speaks(
         tmp_path,
         voice={"provider": "elevenlabs", "voiceId": "brisk-tenor-7", "speed": 1.15},
     ) as assembled:
+        assert voice_on_the_leg(assembled.voice.legs) == "brisk-tenor-7"
         spoke_with = assembled.voice.speaking_voice
         assert (spoke_with.voice_id, spoke_with.speed) == ("brisk-tenor-7", 1.15)
 
@@ -507,6 +525,7 @@ async def test_a_voice_authored_for_nobody_in_particular_is_still_honored(
     async with assembled_with(
         REAL_PAIR, tmp_path, voice={"voiceId": "brisk-tenor-7"}
     ) as assembled:
+        assert voice_on_the_leg(assembled.voice.legs) == "brisk-tenor-7"
         assert assembled.voice.speaking_voice.voice_id == "brisk-tenor-7"
 
 
@@ -524,7 +543,8 @@ async def test_a_persona_with_no_voice_of_this_providers_gets_the_default_englis
     """Speaking with a sensible default beats failing on a timbre."""
     overrides = {} if traits_voice is None else {"voice": traits_voice}
     async with assembled_with(REAL_PAIR, tmp_path, **overrides) as assembled:
-        assert assembled.voice.speaking_voice.voice_id == DEFAULT_ENGLISH_VOICE_ID, why
+        assert voice_on_the_leg(assembled.voice.legs) == DEFAULT_ENGLISH_VOICE_ID, why
+        assert assembled.voice.speaking_voice.voice_id == DEFAULT_ENGLISH_VOICE_ID
 
 
 async def test_only_a_streaming_transcriber_asks_for_a_pause_after_a_turn(

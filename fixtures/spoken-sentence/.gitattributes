@@ -1,0 +1,2 @@
+# Audio bytes. Nothing may normalise them.
+*.wav -text -diff
