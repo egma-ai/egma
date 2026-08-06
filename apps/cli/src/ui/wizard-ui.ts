@@ -11,6 +11,8 @@
  */
 
 import type { LoginPrompt } from "../platform/login.ts";
+import type { RetellAgent } from "../retell/client.ts";
+import type { KeyAsk } from "../retell/connect.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
 
 /** A point the flow waits at until the developer has moved past it. */
@@ -24,7 +26,7 @@ export type GateId = "begin";
  * reads a keystroke, so this is still not a prompt method — the screen owns
  * every key, and a developer who answers nothing answers `null`.
  */
-export type AskId = "prompts-pointer";
+export type AskId = "prompts-pointer" | "retell-key" | "retell-agent";
 
 /** The coding agent egma is driving. */
 export type DrivenAgent = { readonly id: string; readonly name: string };
@@ -54,6 +56,25 @@ export interface WizardUI {
    * with nobody at the keyboard answers `null` forever.
    */
   takeLoginPaste(): string | null;
+
+  /**
+   * What egma needs handed to it before it can reach the developer's provider,
+   * or `null` once it no longer needs it.
+   *
+   * A write and not a question, exactly as `setLogin` is. The flow says what
+   * is wanted and what happens to it; whether that is drawn in a box with the
+   * characters hidden or printed as two plain lines is the UI's business.
+   */
+  setKeyAsk(ask: KeyAsk | null): void;
+
+  /**
+   * The agents found on the provider's account, while a choice among them is
+   * open, or `null` when there is no choice to make.
+   *
+   * Set only when there is more than one: one agent is not a choice, and a
+   * screen that never appears is how a flow asks nothing.
+   */
+  setAgentChoices(agents: readonly RetellAgent[] | null): void;
 
   /**
    * Park until the developer has let the flow past this point. A gate that the

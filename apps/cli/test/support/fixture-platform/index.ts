@@ -6,11 +6,13 @@
  * part of the API is adding a group beside the ones here.
  */
 
+import { agentRoutes, type AgentControls } from "./agents.ts";
 import { controlRoutes } from "./controls.ts";
 import { deviceRoutes, type DeviceControls } from "./device.ts";
 import { startFixturePlatform, type FixturePlatform } from "./server.ts";
 import { testRoutes, type TestControls } from "./tests.ts";
 
+export type { AgentControls } from "./agents.ts";
 export type { DeviceControls } from "./device.ts";
 export type { FixturePlatform, Observation } from "./server.ts";
 export type { SeedTest, SeededTest, TestControls } from "./tests.ts";
@@ -18,6 +20,8 @@ export type { SeedTest, SeededTest, TestControls } from "./tests.ts";
 export type Platform = FixturePlatform & {
   /** What a person in a browser would do, done directly. */
   readonly device: DeviceControls;
+  /** What was registered, and what the platform was handed to seal. */
+  readonly registered: AgentControls;
   /** What somebody authoring in the dashboard would do, done directly. */
   readonly tests: TestControls;
   /**
@@ -29,21 +33,30 @@ export type Platform = FixturePlatform & {
 
 export async function startPlatform(): Promise<Platform> {
   let device!: DeviceControls;
+  let registered!: AgentControls;
   let tests!: TestControls;
 
   const platform = await startFixturePlatform((origin) => {
     const deviceGroup = deviceRoutes(origin);
     device = deviceGroup.controls;
 
-    const testGroup = testRoutes({ holdsKey: (key) => device.keys.includes(key) });
+    // Which customer this is comes from the key, so every group that writes
+    // asks the same question of the same list of minted keys.
+    const holdsKey = (key: string): boolean => device.keys.includes(key);
+
+    const agentGroup = agentRoutes(holdsKey);
+    registered = agentGroup.controls;
+
+    const testGroup = testRoutes({ holdsKey });
     tests = testGroup.controls;
 
-    return [deviceGroup.group, testGroup.group, controlRoutes(() => device)];
+    return [deviceGroup.group, agentGroup.group, testGroup.group, controlRoutes(() => device)];
   });
 
   return {
     ...platform,
     device,
+    registered,
     tests,
     signedInWith(key) {
       device.accept(key);

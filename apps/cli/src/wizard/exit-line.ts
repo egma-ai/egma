@@ -23,6 +23,15 @@ export type ExitReport =
       readonly framework: string | null;
       readonly prompts: string | null;
     }
+  /**
+   * The agent and a way to reach it are on egma. The walk got past everything
+   * that has to happen before a test can name what it is about.
+   */
+  | {
+      readonly kind: "connected";
+      readonly agentName: string;
+      readonly connectionName: string;
+    }
   /** Nothing here looks like a voice agent, and the pointer did not help. */
   | { readonly kind: "no-agent-context" }
   /** There is no coding agent on this machine for egma to drive. */
@@ -57,6 +66,8 @@ export function buildExitLine(report: ExitReport): string {
   switch (report.kind) {
     case "found-agent":
       return foundLine(report.framework, report.prompts);
+    case "connected":
+      return `egma connected your voice agent: ${report.agentName}, over ${report.connectionName}.`;
     case "no-agent-context":
       return "egma found no voice agent to test. Run egma again where your agent is defined.";
     case "no-coding-agent":

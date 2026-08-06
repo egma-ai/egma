@@ -12,6 +12,8 @@ import { copyLink } from "../../platform/clipboard.ts";
 import { IntroScreen } from "./screens/IntroScreen.tsx";
 import { LoginScreen } from "./screens/LoginScreen.tsx";
 import { PromptsPointerScreen } from "./screens/PromptsPointerScreen.tsx";
+import { RetellAgentScreen } from "./screens/RetellAgentScreen.tsx";
+import { RetellKeyScreen } from "./screens/RetellKeyScreen.tsx";
 import { TaskScreen } from "./screens/TaskScreen.tsx";
 import type { WizardStore } from "./store.ts";
 
@@ -59,6 +61,16 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
       <PromptsPointerScreen
         onAnswer={(pointer) => store.answer("prompts-pointer", pointer)}
       />
+    );
+  }
+  if (screen === "retell-key") {
+    return (
+      <RetellKeyScreen state={state} onAnswer={(key) => store.answer("retell-key", key)} />
+    );
+  }
+  if (screen === "retell-agent") {
+    return (
+      <RetellAgentScreen state={state} onAnswer={(id) => store.answer("retell-agent", id)} />
     );
   }
   return <TaskScreen state={state} />;

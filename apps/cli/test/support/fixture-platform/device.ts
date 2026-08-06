@@ -84,6 +84,14 @@ export type DeviceControls = {
    * terminal does with one says so here, with the instance's own words.
    */
   answerTokenWith(error: string, said: string): void;
+  /**
+   * A key this fixture will accept, without walking the whole login.
+   *
+   * What a login leaves behind, produced directly. It is a control and not a
+   * contract: checks about what a *signed-in* machine can do should not have
+   * to drive a browser first, and the real instance has no such door.
+   */
+  mint(): string;
   readonly keys: readonly string[];
 };
 
@@ -289,6 +297,11 @@ export function deviceRoutes(origin: () => string): {
       },
       answerTokenWith(error, said) {
         state.nextAnswer = { error, said };
+      },
+      mint() {
+        const key = `egma_sk_${randomBytes(24).toString("hex")}`;
+        keys.push(key);
+        return key;
       },
       keys,
     },

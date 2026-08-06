@@ -1,0 +1,133 @@
+/**
+ * The wizard's connect step: the same flow the headless verb runs, on a screen.
+ *
+ * Everything the developer sees is pushed at the UI and everything they type
+ * comes back through a gate carrying a value, so this step owns no drawing and
+ * no keystroke. That is what lets it be one step in the walk and one command at
+ * the same time.
+ *
+ * The key never touches this module's own state. It arrives from the screen,
+ * goes into the flow, and the flow reads it twice — once for a header to the
+ * provider, once for a body to egma. Nothing here writes it anywhere.
+ */
+
+import { readCredentials } from "../platform/credentials.ts";
+import { RetellKey } from "../retell/key.ts";
+import {
+  connect,
+  CUSTODY_LINE,
+  KEY_ASK_LINE,
+  type ConnectOptions,
+  type ConnectOutcome,
+} from "../retell/connect.ts";
+import { DRIFT_LINE } from "../retell/prompt-drift.ts";
+import type { WizardUI } from "../ui/wizard-ui.ts";
+import type { ExitReport } from "./exit-line.ts";
+import type { PlatformAccess } from "./login-step.ts";
+import { ACTION_MARK, DETAIL_MARK } from "./status.ts";
+import { stopReport, untilAborted } from "./stop.ts";
+
+export type ConnectStepOptions = {
+  readonly ui: WizardUI;
+  readonly platform: PlatformAccess;
+  /** The folder the repository's prompt is looked for in. */
+  readonly cwd: string;
+  /** Where the find-the-agent step said the prompts live. */
+  readonly repoPrompts: string | null;
+  readonly signal: AbortSignal;
+  /** Where Retell is. Retell's own address when omitted. */
+  readonly retell?: ConnectOptions["retell"];
+  readonly fetchImpl?: ConnectOptions["fetchImpl"];
+};
+
+/** The line the wizard closes on, for every way this step can end. */
+function reportFor(outcome: ConnectOutcome, signal: AbortSignal): ExitReport {
+  switch (outcome.kind) {
+    case "connected":
+      return {
+        kind: "connected",
+        agentName: outcome.registered.agent.name,
+        connectionName: outcome.registered.connection.name,
+      };
+    case "no-key":
+      return { kind: "failed", reason: "no Retell key was given, so there is nothing to test." };
+    case "invalid-key":
+      return { kind: "failed", reason: "Retell would not take that key." };
+    case "no-agents":
+      return { kind: "failed", reason: "there are no agents on that Retell account." };
+    case "unchosen":
+      return { kind: "failed", reason: "nobody said which Retell agent to test." };
+    case "interrupted":
+      return stopReport(signal, null);
+    case "failed":
+      return { kind: "failed", reason: outcome.reason };
+  }
+}
+
+/**
+ * Connects, or answers with the line the wizard should close on.
+ *
+ * Unlike login, every ending here is an ending: past this point egma has no
+ * agent to test, so there is nothing for the walk to carry on into.
+ */
+export async function connectStep(options: ConnectStepOptions): Promise<ExitReport> {
+  const { ui, signal } = options;
+
+  const held = await readCredentials(options.platform.credentialsFile);
+  if (held === null) {
+    return {
+      kind: "failed",
+      reason: "this machine is not signed in to egma. Run egma login, then try again.",
+    };
+  }
+
+  // What went wrong last time, so the screen that asks again can say it above
+  // the box rather than leaving the developer to guess what changed.
+  let problem: string | null = null;
+
+  const outcome = await connect({
+    platform: { url: held.url, key: held.key },
+    cwd: options.cwd,
+    repoPrompts: options.repoPrompts,
+    signal,
+    retell: options.retell,
+    fetchImpl: options.fetchImpl,
+    say: (line) => {
+      problem = line;
+      ui.pushStatus(line);
+    },
+    // Both waits are wired to the stop signal, because both park on a person.
+    // A screen waiting for a keystroke that will never come is the one place a
+    // wizard can hang forever, and Ctrl-C at the key box is exactly where a
+    // developer who has decided not to hand a key over presses it.
+    askForKey: async () => {
+      ui.setKeyAsk({ asking: KEY_ASK_LINE, custody: CUSTODY_LINE, problem });
+      const typed = await untilAborted(ui.waitForAnswer("retell-key"), signal);
+      ui.setKeyAsk(null);
+      problem = null;
+      return RetellKey.from(typed);
+    },
+    chooseAgent: async (agents) => {
+      ui.setAgentChoices(agents);
+      const chosen = await untilAborted(ui.waitForAnswer("retell-agent"), signal);
+      ui.setAgentChoices(null);
+      return chosen ?? null;
+    },
+  });
+
+  if (outcome.kind === "connected") {
+    const { registered, config } = outcome;
+    // One agent on the account is confirmed here rather than asked about: the
+    // developer reads which one egma took, inside the flow, with nothing to
+    // answer.
+    ui.pushStatus(`${ACTION_MARK} Retell agent ${config.name}`);
+    ui.pushStatus(`${DETAIL_MARK} ${config.agentId}`);
+    ui.pushStatus(
+      `${ACTION_MARK} ${registered.agent.name} is on egma, reachable over ${registered.connection.name} (retell ${registered.connection.modality}).`,
+    );
+    // Shown, never blocking, and only when both halves were really read.
+    if (outcome.drift === "differs") ui.pushStatus(DRIFT_LINE);
+  }
+
+  return reportFor(outcome, signal);
+}

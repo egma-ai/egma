@@ -131,6 +131,22 @@ async function loginScreen(
   return showing(terminal, "Code:", ...LOGIN_HINTS, ...parts);
 }
 
+/**
+ * Runs the walk out past login and stops it where the next secret is asked for.
+ *
+ * Past the coding agent the walk asks for a provider key, which this file has
+ * no business supplying — it is about the browser step. Declining it is how the
+ * run ends here, and the line it leaves says exactly that.
+ */
+async function declineTheKey(terminal: TerminalRun): Promise<void> {
+  await showing(terminal, "Paste your Retell API key");
+  terminal.write("");
+  expect(await terminal.exited).toBe(1);
+  expect(terminal.scrollback().trim()).toBe(
+    "egma could not finish: no Retell key was given, so there is nothing to test.",
+  );
+}
+
 /** What is written inside the box, one line per line, without the box. */
 function linesInside(screen: string): string[] {
   return screen.split("\n").map((line) => line.replaceAll("│", "").trim());
@@ -226,12 +242,9 @@ describe("the login screen", () => {
       expect(platform.device.approve(code)).toBe(true);
       terminal.write(`${platform.url}/device?user_code=${code}\r`);
 
-      // The walk carried on: login is behind, the coding agent is being driven,
-      // and the run ends on the one line the wizard leaves in scrollback.
-      expect(await terminal.exited).toBe(0);
-      expect(terminal.scrollback().trim()).toBe(
-        "egma found your voice agent: retell-sdk.",
-      );
+      // The walk carried on: login is behind and the coding agent is being
+      // driven. It is checked to the end of the step this file is about.
+      await declineTheKey(terminal);
       expect(platform.device.keys).toHaveLength(1);
     } finally {
       await terminal.kill();
@@ -245,10 +258,7 @@ describe("the login screen", () => {
     try {
       await past(terminal);
 
-      expect(await terminal.exited).toBe(0);
-      expect(terminal.scrollback().trim()).toBe(
-        "egma found your voice agent: retell-sdk.",
-      );
+      await declineTheKey(terminal);
 
       // A key was minted and kept, and it is the one this egma issued.
       expect(platform.device.keys).toHaveLength(1);

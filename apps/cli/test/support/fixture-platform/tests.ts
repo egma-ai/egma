@@ -28,8 +28,11 @@
  * body and a read may filter by one; neither has to, and the CLI never does.
  */
 
-import { newId } from "@egma/ids";
-
+// The platform's own identifier generator, reached the way the other checks
+// that cross a package reach one: by path. `@egma/ids` is a name only the test
+// runner knows how to resolve, and the smoke checks run this fixture under
+// plain node, where a name nothing has installed is a name that does not exist.
+import { newId } from "../../../../../packages/ids/src/index.ts";
 import type { FixtureAnswer, FixtureRequest, RouteGroup } from "./server.ts";
 
 /** One version of a test, frozen the moment it was written. */

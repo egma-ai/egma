@@ -75,12 +75,20 @@ describe("the wizard on a real terminal", () => {
       // screen while it works.
       await showing(terminal, "Read package.json", "┊ Framework  retell-sdk");
 
+      // The walk goes on to the one secret it needs. This check is about the
+      // screens before it, so the key is declined here and the ending is the
+      // honest one that follows.
+      await showing(terminal, "Paste your Retell API key");
+      terminal.write("");
+
       const code = await terminal.exited;
-      expect(code).toBe(0);
+      expect(code).toBe(1);
 
       // Everything the wizard drew is gone. One line is left, and it is plain.
       const left = terminal.scrollback().trim();
-      expect(left).toBe("egma found your voice agent: retell-sdk.");
+      expect(left).toBe(
+        "egma could not finish: no Retell key was given, so there is nothing to test.",
+      );
       expect(left.split("\n")).toHaveLength(1);
     } finally {
       await terminal.kill();

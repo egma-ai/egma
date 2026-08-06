@@ -38,6 +38,8 @@ If this folder holds no voice agent, egma asks once for the folder your prompts
 are in — teams often keep them apart — looks there, and otherwise says plainly
 that you should run it where your agent is defined.
 
+Then it connects that agent, so egma can reach it. See below.
+
 ## Signing in
 
 egma shows a short code and opens your browser on a page that already has it in
@@ -81,6 +83,86 @@ it in a browser over there, then paste it back — the whole address, the
 
 If your terminal is too narrow to show the address whole, egma says how much
 wider it needs to be instead of drawing an address that breaks across two lines.
+
+### Your own instance
+
+```
+EGMA_URL=http://localhost:3000 npx egma
+```
+
+or `--url`. It is kept beside the key after the first login, so later commands
+find it without being told again.
+
+## Connecting your voice agent
+
+Finding your agent in the repository is not the same as being able to reach it,
+so the next thing egma asks for is a Retell API key. It is typed as dots, and
+the screen says what happens to it before you type it:
+
+```
+◇ Paste your Retell API key (Retell dashboard → Settings → API keys).
+  It is sent to egma and stored encrypted. It never lands in a file here.
+  › ●●●●●●●●●●●●●●●●
+```
+
+That sentence is the whole promise, and it is enforced rather than intended.
+The key is held in memory, sent in one header to Retell and in one body to egma,
+which seals it. It is written to no file, printed in no line, kept in no log,
+and never passed as a command argument — arguments are readable by every
+process on your machine and are kept in your shell history.
+
+egma checks the key by listing the agents on the account. A key Retell will not
+take, and a key for an account with no agents on it, are told apart by name and
+each is worth one more try. One agent on the account is shown for confirmation
+with nothing to answer; several get a list to choose from.
+
+The agent's configuration — its prompt, its voice, its tools — is pulled and
+registered on egma, together with a connection for reaching it. **What Retell
+answered is kept exactly as it answered it**, beside what egma read out of it,
+so a field egma has no place for today is still there tomorrow.
+
+If your repository keeps a prompt of its own and it differs from what Retell is
+running, egma says so in one line and carries on. It never blocks: being out of
+step is not an error, and the line names which of the two your tests will be
+grounded in.
+
+```
+egma connect
+```
+
+is the same thing with nobody watching. The key comes in on standard input or
+out of the environment, never as an argument:
+
+```
+cat retell-key.txt | egma connect
+EGMA_RETELL_API_KEY=… egma connect
+```
+
+`RETELL_API_KEY` is read too, so an environment that already has one needs
+nothing new. With several agents on the account it lists them and refuses to
+guess; name one with `--retell-agent`.
+
+```
+url: https://app.egma.ai
+retell_agents: 1
+retell_agent_id: agent_…
+retell_response_engine: retell-llm
+prompt_characters: 2140
+tools: 7
+agent_id: agt_01K…
+agent_name: order-line
+connection_id: con_01K…
+connection_name: retell-1
+connection_type: retell
+connection_modality: voice
+drift: no
+grounded_in: retell
+status: connected
+
+0 connected   2 the key was refused   3 no agents on that account
+4 Retell or egma did not answer, or refused   5 several agents, none named
+6 no key given   7 not signed in to egma   130 stopped part way
+```
 
 ## Your tests are files in your repository
 
@@ -161,15 +243,6 @@ and the version the file now pins.
 6 egma turned a test away at its door   130 stopped part way
 ```
 
-### Your own instance
-
-```
-EGMA_URL=http://localhost:3000 npx egma
-```
-
-or `--url`. It is kept beside the key after the first login, so later commands
-find it without being told again.
-
 ## The notes egma hands your coding agent
 
 They are markdown files inside this package, under `skills/`. They are sent as
@@ -206,6 +279,9 @@ still needs.
 ```
 egma [options]           The wizard.
 egma login [options]     Sign this machine in. No questions, plain lines.
+egma connect [options]   Register your voice agent and a way to reach it.
+                         The key comes in on standard input or from the
+                         environment, never as an argument.
 egma init [options]      Make the egma folder this repository's tests live
                          in. Safe to run again.
 egma pull [options]      Write egma's current test versions into it.
@@ -220,6 +296,10 @@ egma push [options]      Upload the tests in it. Refuses, naming names, when
                        does the same for a whole shell.
   --force              With login: sign in again even when this machine
                        already holds a key.
+  --retell-agent <id>  With connect: which agent, when the Retell account
+                       holds more than one.
+  --repo-prompt <path> With connect: the prompt file in this repository, so
+                       egma can say whether it and Retell have drifted apart.
   --agent <name>       With init: what to call the voice agent this
                        folder's tests are for.
   --connection <name>  With init: what to call the way egma reaches it.
@@ -233,6 +313,11 @@ Environment:
   EGMA_URL             The egma to talk to, for a whole shell. Same as --url.
   EGMA_HOME            The folder egma keeps this machine's key in.
                        Default: ~/.egma
+  EGMA_RETELL_API_KEY  Your Retell key, for egma connect. RETELL_API_KEY is
+                       read too, so an environment that already has one needs
+                       nothing new.
+  EGMA_RETELL_AGENT_ID Which Retell agent, same as --retell-agent.
+  EGMA_RETELL_URL      The Retell to talk to. Default: https://api.retellai.com
 ```
 
 `Ctrl-C` stops a run at any point. The agent, and anything the agent started,
