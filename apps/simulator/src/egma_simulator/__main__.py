@@ -13,6 +13,7 @@ import asyncio
 import logging
 import signal
 import sys
+import traceback
 
 from .config import SimulatorConfig
 from .redaction import RedactingFilter, SecretRegistry
@@ -28,6 +29,38 @@ def _configure_logging(level: str, registry: SecretRegistry) -> None:
     root = logging.getLogger()
     root.setLevel(level.upper())
     root.addHandler(handler)
+    _gather_loguru(level)
+
+
+def _gather_loguru(level: str) -> None:
+    """Bring the voice legs' logging under the same roof as everything else.
+
+    Pipecat logs through loguru, which writes to stderr on its own and so
+    would miss both the configured level and the credential filter — and a
+    filter with a way around it is not one. Every loguru record is handed
+    to the standard library instead; the level numbers already agree.
+
+    A traceback is rendered into the message rather than handed along as
+    ``exc_info``, because the filter scrubs a record's message and nothing
+    else: passed the other way, a credential inside an exception would go
+    out unscrubbed. This way the diagnostic survives and is scrubbed.
+    """
+    from loguru import logger as loguru_logger
+
+    def hand_over(message) -> None:
+        record = message.record
+        text = record["message"]
+        failure = record["exception"]
+        if failure is not None:
+            text += "\n" + "".join(
+                traceback.format_exception(
+                    failure.type, failure.value, failure.traceback
+                )
+            )
+        logging.getLogger(record["name"]).log(record["level"].no, text)
+
+    loguru_logger.remove()
+    loguru_logger.add(hand_over, level=level.upper())
 
 
 async def _run() -> None:

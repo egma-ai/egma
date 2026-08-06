@@ -1,0 +1,39 @@
+{
+  "contract_version": 1,
+  "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWEV",
+  "modality": "voice",
+  "connection": {
+    "type": "loopback",
+    "config": {
+      "greeting": "Thanks for calling, this is the billing line.",
+      "replies": [
+        "I can see the duplicate charge on that order. One moment while I reverse it.",
+        "The reversal is through. Your confirmation number is RC four four one seven.",
+        "You are welcome. The confirmation is on its way to your email too. Goodbye."
+      ],
+      "ends_after_replies": true,
+      "answer_delay_seconds": 0.4,
+      "sample_rate_hz": 8000,
+      "provider_reference": "loopback-voice-hurried-1"
+    },
+    "credentials": null
+  },
+  "persona": {
+    "traits": {
+      "personality": "Dev, 34, calling from a train platform. In a hurry, talks over slow answers, background noise comes and goes.",
+      "language": "en-GB",
+      "voice": {
+        "provider": "elevenlabs",
+        "voiceId": "brisk-tenor-7",
+        "speed": 1.15
+      }
+    }
+  },
+  "scenario": {
+    "instructions": "My card was charged twice for the same order this morning. I need the duplicate charge reversed and a confirmation number before my train arrives. Please be quick about it."
+  },
+  "limits": {
+    "max_duration_seconds": 300,
+    "max_turns": 40
+  }
+}

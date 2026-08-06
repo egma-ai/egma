@@ -56,6 +56,11 @@ class SimulatorConfig:
     wal_dir: Path
     """Where report documents are written before they are sent."""
 
+    blob_dir: Path
+    """Where recordings land, for the filesystem-backed blob store — the
+    default one, so a first voice simulation needs no object storage
+    running. A report carries only the reference."""
+
     log_level: str
 
     model_provider: str = "scripted"
@@ -122,6 +127,9 @@ class SimulatorConfig:
             ),
             wal_dir=Path(
                 os.environ.get("EGMA_SIMULATOR_WAL_DIR", ".egma-simulator/wal")
+            ),
+            blob_dir=Path(
+                os.environ.get("EGMA_SIMULATOR_BLOB_DIR", ".egma-simulator/blobs")
             ),
             log_level=os.environ.get("EGMA_SIMULATOR_LOG_LEVEL", "INFO"),
             model_provider=provider,

@@ -124,7 +124,12 @@ class SimulatorProcess:
     stdout_path: Path
     stderr_path: Path
     wal_dir: Path
+    blob_dir: Path
     extra_env: dict[str, str] = field(default_factory=dict)
+
+    def blob(self, reference: str) -> bytes:
+        """What a reported reference actually resolves to on disk."""
+        return (self.blob_dir / reference).read_bytes()
 
     def output(self) -> str:
         return (
@@ -163,13 +168,24 @@ def start_simulator(
         stdout_path = tmp_path / f"simulator-{len(started)}.out"
         stderr_path = tmp_path / f"simulator-{len(started)}.err"
         wal_dir = tmp_path / f"wal-{len(started)}"
+        blob_dir = tmp_path / f"blobs-{len(started)}"
+        # Empty, and pointed at by the two variables a tokenizer corpus is
+        # ever looked up through. The simulator promises it needs no such
+        # corpus and fetches none; a child that quietly grew a need for
+        # one would find this machine's cache and pass, which is exactly
+        # the regression this starves. See the package docstring.
+        starved = tmp_path / f"no-corpus-{len(started)}"
+        starved.mkdir(exist_ok=True)
         env = os.environ | {
+            "NLTK_DATA": str(starved),
+            "HOME": str(starved),
             "EGMA_SIMULATOR_CONTROL_PLANE_URL": workbench.base_url,
             "EGMA_SIMULATOR_CLAIMANT": claimant,
             "EGMA_SIMULATOR_CAPACITY": str(capacity),
             "EGMA_SIMULATOR_HEARTBEAT_SECONDS": str(HEARTBEAT_SECONDS),
             "EGMA_SIMULATOR_CLAIM_WAIT_SECONDS": "2",
             "EGMA_SIMULATOR_WAL_DIR": str(wal_dir),
+            "EGMA_SIMULATOR_BLOB_DIR": str(blob_dir),
             "EGMA_SIMULATOR_LOG_LEVEL": log_level,
         }
         with open(stdout_path, "wb") as stdout, open(stderr_path, "wb") as stderr:
@@ -184,6 +200,7 @@ def start_simulator(
             stdout_path=stdout_path,
             stderr_path=stderr_path,
             wal_dir=wal_dir,
+            blob_dir=blob_dir,
         )
         started.append(simulator)
         return simulator
@@ -244,14 +261,16 @@ def a_spec(
     personality: str,
     max_turns: int,
     max_duration_seconds: int,
+    modality: str = "chat",
 ) -> dict:
     """The envelope every spec shares: one persona, one scenario, one set of
-    walls, one chat. What differs between two specs is the connection block,
-    which is exactly the difference the plug seam exists to absorb."""
+    walls, one exchange. What differs between two specs is the connection
+    block and the modality, which is exactly the difference the plug seam
+    exists to absorb."""
     return {
         "contract_version": 1,
         "simulation_id": simulation_id,
-        "modality": "chat",
+        "modality": modality,
         "connection": connection,
         "persona": {"traits": {"personality": personality, "language": "en-US"}},
         "scenario": {"instructions": scenario},
@@ -361,6 +380,81 @@ def assert_kept_secret(
     assert secret.encode() not in wal_bytes, (
         "the write-ahead log carried the credential"
     )
+
+
+def loopback_spec(
+    simulation_id: str,
+    *,
+    scenario: str = A_SCENARIO,
+    personality: str = A_PERSONALITY,
+    voice: dict | None = None,
+    greeting: str | None = None,
+    replies: list[str] | None = None,
+    ends_after_replies: bool = False,
+    answer_delay_seconds: float = 0.0,
+    sample_rate_hz: int | None = None,
+    provider_reference: str | None = None,
+    max_turns: int = 60,
+    max_duration_seconds: int = 600,
+    credentials: dict | None = None,
+) -> dict:
+    """One voice spec against the loopback counterpart.
+
+    Deliberately the same shape as :func:`scripted_spec`: the two differ by
+    modality and connection type and by nothing else, which is what makes
+    "the same test over chat and over voice" a comparison rather than two
+    unrelated stories.
+    """
+    config: dict = {"answer_delay_seconds": answer_delay_seconds}
+    if greeting is not None:
+        config["greeting"] = greeting
+    if replies is not None:
+        config["replies"] = replies
+    if ends_after_replies:
+        config["ends_after_replies"] = True
+    if sample_rate_hz is not None:
+        config["sample_rate_hz"] = sample_rate_hz
+    if provider_reference is not None:
+        config["provider_reference"] = provider_reference
+    spec = a_spec(
+        simulation_id,
+        modality="voice",
+        connection={
+            "type": "loopback",
+            "config": config,
+            "credentials": credentials,
+        },
+        scenario=scenario,
+        personality=personality,
+        max_turns=max_turns,
+        max_duration_seconds=max_duration_seconds,
+    )
+    if voice is not None:
+        spec["persona"]["traits"]["voice"] = voice
+    return spec
+
+
+def assert_one_speaker_to_a_channel(
+    recording: bytes, turns: list[tuple[str, str]]
+) -> None:
+    """Each turn is on its own speaker's channel and on neither other one.
+
+    The recording is read the only way a listener could read it — the
+    samples of each channel, transcribed — so this says what a person
+    would hear, not what the simulator believed it wrote.
+    """
+    from egma_simulator.pipeline import channels_of
+    from egma_simulator.speech import decode_speech
+
+    persona_audio, agent_audio, band = channels_of(recording)
+    said = {
+        "human": decode_speech(persona_audio, band),
+        "agent": decode_speech(agent_audio, band),
+    }
+    for speaker, text in turns:
+        other = "agent" if speaker == "human" else "human"
+        assert text in said[speaker], (speaker, text)
+        assert text not in said[other], (speaker, text)
 
 
 # -- Record readers: the acceptance suite's entire vocabulary -----------------

@@ -22,10 +22,12 @@ from conftest import (
     HEARTBEAT_SECONDS,
     all_terminal,
     assert_kept_secret,
+    assert_one_speaker_to_a_channel,
     events_for,
     has_terminal,
     heartbeats_for,
     load_fixture_spec,
+    loopback_spec,
     retell_spec,
     scripted_spec,
     status_events_for,
@@ -33,6 +35,8 @@ from conftest import (
 )
 
 from egma_simulator.model import GOODBYE
+from egma_simulator.pipeline import channels_of
+from egma_simulator.speech import decode_speech
 
 LONG_SCENARIO = " ".join(f"Sentence number {n}." for n in range(1, 41))
 
@@ -632,6 +636,206 @@ async def test_a_retell_endpoint_that_answers_nowhere_fails_honestly(
     assert_kept_secret(sentinel, records=records, simulator=simulator)
 
 
+async def test_a_voice_spec_reports_a_whole_exchange_and_its_audio(
+    workbench, start_simulator
+):
+    """What a voice simulation owes its record, read back off the record.
+
+    A golden fixture goes in — no code path is chosen for it here — and
+    what comes out is a transcript, an ending, the band the audio was
+    actually carried at, and a reference to a recording. The recording is
+    then opened and both channels are listened to.
+    """
+    spec = load_fixture_spec("voice-loopback.json")
+    simulation_id = spec["simulation_id"]
+    await workbench.offer(spec)
+    simulator = start_simulator(workbench)
+
+    records = await workbench.wait_for(has_terminal(simulation_id))
+
+    # Voice adds facts to a report and no new shape to carry them: the
+    # contract already had somewhere to put audio, and every document
+    # below went through both sides' validation untouched.
+    assert [record for record in records if record["kind"] == "refusal"] == []
+    assert status_events_for(records, simulation_id) == ["running", "completed"]
+    turns = events_for(records, simulation_id, "turn")
+    spoken = [(turn["speaker"], turn["text"]) for turn in turns]
+    assert spoken[0] == ("agent", spec["connection"]["config"]["greeting"])
+    assert [speaker for speaker, _ in spoken] == [
+        "agent",
+        "human",
+        "agent",
+        "human",
+        "agent",
+        "human",
+        "agent",
+    ]
+
+    terminal = terminal_event_for(records, simulation_id)
+    facts = terminal["facts"]
+    assert facts["ending"] == "agent_ended"
+    assert terminal["reason"] == "the agent ended the exchange"
+    assert facts["turn_count"] == len(turns)
+    assert facts["provider_reference"] == "loopback-voice-hurried-1"
+
+    # The band is measured at execution. The fixture's connection asks for
+    # 8 kHz, the counterpart carries it, and what the record keeps is the
+    # band that flowed — never a number copied out of an editable config.
+    audio = facts["audio"]
+    assert audio["measured_sample_rate_hz"] == 8000
+
+    # The reference is a reference: no bytes on the wire, and it resolves.
+    assert "://" not in audio["recording"]
+    recording = simulator.blob(audio["recording"])
+    assert channels_of(recording)[2] == audio["measured_sample_rate_hz"]
+
+    # Each channel is one speaker, proved by listening to it: what channel
+    # 0 says is what the persona said, and what channel 1 says is what the
+    # agent said — every turn of the transcript, on its own side, and on
+    # neither of the other's.
+    assert_one_speaker_to_a_channel(recording, spoken)
+
+
+async def test_a_voice_simulation_reports_a_measurement_for_every_turn(
+    workbench, start_simulator
+):
+    """Metrics measure and graders judge: the runtime reports the numbers
+    for every simulation, in the order they happened, and judges none."""
+    spec = loopback_spec(
+        "sim-voice-measures",
+        scenario="First point. Second point.",
+        greeting="Front desk, hello.",
+        replies=["Certainly.", "Done."],
+        answer_delay_seconds=0.3,
+    )
+    await workbench.offer(spec)
+    start_simulator(workbench)
+
+    records = await workbench.wait_for(has_terminal("sim-voice-measures"))
+
+    timings = events_for(records, "sim-voice-measures", "timing")
+    measures = [event["measure"] for event in timings]
+    assert measures.count("time_to_first_word") == 3
+    assert measures.count("agent_speech_duration") == 3
+    assert measures.count("persona_speech_duration") == 2
+    # The wall-clock measures every simulation reports are still there:
+    # voice adds measurements, it does not replace them.
+    assert measures.count("first_response_latency") == 1
+    assert measures.count("turn_response_latency") == 2
+
+    # Every agent turn was quiet for as long as the counterpart waits.
+    quiet = [
+        event["milliseconds"]
+        for event in timings
+        if event["measure"] == "time_to_first_word"
+    ]
+    assert quiet == [300.0, 300.0, 300.0]
+
+    # Monotonically ordered: no measurement is stamped before the one the
+    # simulator reported ahead of it.
+    stamped = [datetime.fromisoformat(event["at"]) for event in timings]
+    assert stamped == sorted(stamped)
+
+
+async def test_two_voice_simulations_at_once_keep_their_audio_apart(
+    workbench, start_simulator
+):
+    """A pipeline is one simulation's, and so is its recording.
+
+    Voice brings a second pipeline into the same process, which is where a
+    shared leg or a shared buffer would show up as one simulation's words
+    on another's channel.
+    """
+    ids = ["sim-voice-a", "sim-voice-b"]
+    await workbench.offer(
+        loopback_spec(
+            "sim-voice-a",
+            scenario="Ask about the invoice.",
+            replies=["The invoice is on its way."],
+        )
+    )
+    await workbench.offer(
+        loopback_spec(
+            "sim-voice-b",
+            scenario="Ask about the delivery.",
+            replies=["The delivery lands on Friday."],
+        )
+    )
+    simulator = start_simulator(workbench, capacity=2)
+
+    records = await workbench.wait_for(all_terminal(ids))
+
+    recordings = {}
+    for simulation_id in ids:
+        facts = terminal_event_for(records, simulation_id)["facts"]
+        assert facts["audio"] is not None, simulation_id
+        persona_audio, agent_audio, band = channels_of(
+            simulator.blob(facts["audio"]["recording"])
+        )
+        recordings[simulation_id] = (
+            decode_speech(persona_audio, band),
+            decode_speech(agent_audio, band),
+        )
+
+    assert "The invoice is on its way." in recordings["sim-voice-a"][1]
+    assert "The delivery lands on Friday." in recordings["sim-voice-b"][1]
+    assert "delivery" not in recordings["sim-voice-a"][1]
+    assert "invoice" not in recordings["sim-voice-b"][1]
+    assert "Ask about the invoice." in recordings["sim-voice-a"][0]
+    assert "Ask about the delivery." in recordings["sim-voice-b"][0]
+
+
+async def test_one_scenario_over_chat_and_over_voice_is_one_transcript(
+    workbench, start_simulator
+):
+    """The diagnostic the modality split exists for.
+
+    Same persona, same scenario, same script — one exchanged as text, one
+    spoken and transcribed through the speech legs. The persona brain is
+    one component for both, so the two transcripts are the same, and a
+    difference between them could only ever be the speech stack.
+    """
+    scenario = "First point. Second point."
+    script = ["Certainly.", "Done."]
+    greeting = "Front desk, hello."
+    await workbench.offer(
+        scripted_spec(
+            "sim-same-chat",
+            scenario=scenario,
+            greeting=greeting,
+            replies=script,
+        )
+    )
+    await workbench.offer(
+        loopback_spec(
+            "sim-same-voice",
+            scenario=scenario,
+            greeting=greeting,
+            replies=script,
+        )
+    )
+    start_simulator(workbench, capacity=2)
+
+    records = await workbench.wait_for(
+        all_terminal(["sim-same-chat", "sim-same-voice"])
+    )
+
+    def transcript(simulation_id: str) -> list[tuple[str, str]]:
+        return [
+            (turn["speaker"], turn["text"])
+            for turn in events_for(records, simulation_id, "turn")
+        ]
+
+    assert transcript("sim-same-chat") == transcript("sim-same-voice")
+
+    # And the record still tells them apart where it should: only one of
+    # them has audio to account for.
+    chat = terminal_event_for(records, "sim-same-chat")["facts"]
+    voice = terminal_event_for(records, "sim-same-voice")["facts"]
+    assert chat["audio"] is None
+    assert voice["audio"]["measured_sample_rate_hz"] == 16000
+
+
 async def test_credentials_never_appear_in_logs_or_reports(
     workbench, start_simulator
 ):
@@ -652,3 +856,41 @@ async def test_credentials_never_appear_in_logs_or_reports(
 
     simulator.stop()
     assert_kept_secret(sentinel, records=records, simulator=simulator)
+
+
+async def test_a_voice_simulation_lets_no_credential_out_either(
+    workbench, start_simulator
+):
+    """The same sentinel, through the modality that emits the most.
+
+    A voice simulation writes bytes a chat one never does — a whole
+    recording — and speaks through a library that logs on its own, so
+    everything it emits is scanned here too: the reported records, every
+    byte of the child's output, the write-ahead log, and the recording.
+    """
+    sentinel = "SENTINEL-do-not-log-9a71c3e5b2f4"
+    spec = loopback_spec(
+        "sim-voice-secret",
+        scenario="First point. Second point.",
+        greeting="Front desk, hello.",
+        replies=["Certainly.", "Done."],
+        credentials={"apiKey": sentinel},
+    )
+    await workbench.offer(spec)
+    simulator = start_simulator(workbench, log_level="DEBUG")
+
+    records = await workbench.wait_for(has_terminal("sim-voice-secret"))
+    terminal = terminal_event_for(records, "sim-voice-secret")
+    assert terminal["status"] == "completed"
+    recording = simulator.blob(terminal["facts"]["audio"]["recording"])
+
+    simulator.stop()
+    assert_kept_secret(sentinel, records=records, simulator=simulator)
+
+    assert recording, "expected a recording to have been written"
+    assert sentinel.encode() not in recording, "the recording carried the credential"
+    # And not spoken into it either — a credential read aloud would be in
+    # the samples rather than in the file's bytes.
+    for channel in channels_of(recording)[:2]:
+        spoken = decode_speech(channel, channels_of(recording)[2])
+        assert sentinel not in spoken, "the credential was spoken into the audio"

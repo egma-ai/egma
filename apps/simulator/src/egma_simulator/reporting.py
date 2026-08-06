@@ -93,6 +93,10 @@ class Reporter:
         self.provider_reference: str | None = None
         """The platform's own identifier for the exchange, once the plug
         offers one; rides the terminal facts."""
+        self.audio: dict | None = None
+        """The contract's audio block — the band measured at execution and
+        the recording's reference — for a voice simulation; ``None`` for a
+        chat one, where there is no audio to measure."""
 
     def _mint_event_id(self) -> str:
         self._sequence += 1
@@ -252,7 +256,7 @@ class Reporter:
             "started_at": self.started_at,
             "ended_at": moment(),
             "turn_count": self.turn_count,
-            "audio": None,
+            "audio": self.audio,
             "provider_reference": self.provider_reference,
         }
 

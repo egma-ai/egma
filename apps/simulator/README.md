@@ -10,7 +10,7 @@ imports monorepo code: the versioned JSON contract in
 egma, which is also what lets this one app be Python inside a TypeScript
 monorepo.
 
-Three seams shape the inside, and each exists to be swapped without
+Four seams shape the inside, and each exists to be swapped without
 touching the others:
 
 - **The persona brain** (`persona.py`) — one component for every modality,
@@ -23,19 +23,51 @@ touching the others:
   any provider, selected purely by configuration.
 - **The platform plugs** (`plugs/`) — one component per connection type
   that alone knows how to reach and exchange turns with that platform.
-  Everything else is plug-blind. The scripted counterpart — a fake
-  platform whose agent answers from a script — is the first plug, and the
-  reason the whole loop runs with no account and no network. `retell` is
-  the first real one: it speaks Retell's chat API, driven entirely by the
-  spec's connection block, and adding it changed nothing outside
-  `plugs/`. To write the next, read the `plugs/__init__.py` docstring; it
-  is the entire brief.
+  Everything else is plug-blind. Two fake platforms ship as the first
+  plugs — the scripted counterpart, whose agent answers from a script over
+  chat, and the loopback counterpart, which answers the same script in
+  audio — and they are why the whole loop runs with no account and no
+  network. `retell` is the first real one: it speaks Retell's chat API,
+  driven entirely by the spec's connection block, and adding it changed
+  nothing outside `plugs/`. To write the next, read the
+  `plugs/__init__.py` docstring; it is the entire brief.
+- **The speech legs** (`speech.py`) — a voice simulation is a chat one
+  with two more legs: the persona's words spoken into audio, the agent's
+  audio read back into words. Both sit in the pipeline exactly where a
+  real provider's service would, so the shape one must fit is settled —
+  but nothing selects a real one yet, and the assembly builds the
+  deterministic pair. That pair is what CI speaks and listens with: no
+  model, no network, no downloaded corpus, and the same words out that
+  went in. A live provider, and the switch that picks it, land together.
 
-The speech legs — STT, TTS, the dual-channel recording, the measured audio
-band — arrive with the voice plug work; a chat exchange needs none of
-them. A spec naming a connection type the simulator holds no plug for is
-refused out loud at claim time and reported not at all: the row stays the
-control plane's to sweep.
+One pipeline is assembled per simulation from its own spec and torn down
+after (`pipeline.py`). Modality selects the legs and nothing else: a chat
+simulation is the plug and the brain, and a voice one is the same plug and
+the same brain with the speech legs between them, recording as they go. A
+spec naming a connection type the simulator holds no plug for is refused
+out loud at claim time and reported not at all: the row stays the control
+plane's to sweep.
+
+## What a voice simulation reports
+
+The same transcript, ending and measurements a chat simulation reports,
+plus what only audio can owe:
+
+- **The measured band.** Connections declare a band; platforms carry what
+  they can. What the record keeps is the band the audio actually flowed
+  at, stamped at execution — connections are editable and unversioned, so
+  a band copied from one would let a later edit rewrite what an old result
+  meant. 8 kHz telephony and 48 kHz WebRTC are different units: scores
+  across them are not comparable.
+- **A dual-channel recording**, the persona on channel 0 and the agent on
+  channel 1, so either side can be heard alone when a transcript looks
+  wrong. It is written through the blob seam (`blob.py`) — an interface
+  with a filesystem-backed default, so a first voice simulation needs no
+  object storage running — and the report carries only the reference,
+  never the bytes and never a URL.
+- **Per-turn measurements**, all read from the audio itself rather than
+  from a clock: `time_to_first_word` (how long the agent was quiet before
+  speaking), `agent_speech_duration` and `persona_speech_duration`.
 
 ## How it runs
 
@@ -81,10 +113,12 @@ uv run egma-simulator
 The workbench prints one JSON line per observation — queued, the claim,
 each heartbeat, each reported event — which is a simulation going
 queued → claimed → running → completed, live. The two `scripted` fixtures
-conduct whole conversations; the `retell` fixture really does dial Retell
-and fails at the door, because the key in a fixture is a placeholder; the
-`phone` fixture is refused with a clear log line, honestly, until its plug
-lands.
+conduct whole exchanges over chat and the `loopback` one conducts a spoken
+one, leaving a real `.wav` under `EGMA_SIMULATOR_BLOB_DIR` that you can
+open and listen to a channel at a time; the `retell` fixture really does
+dial Retell and fails at the door, because the key in a fixture is a
+placeholder; the `phone` fixture is refused with a clear log line,
+honestly, until its plug lands.
 `GET /workbench/records` returns the same as JSON;
 `POST /workbench/simulations/<id>/cancel` flags a cancel directive for the
 next heartbeat; `POST /workbench/specs` queues another spec while
@@ -119,6 +153,7 @@ Everything arrives as environment variables.
 | `EGMA_SIMULATOR_MODEL_NAME` | (required for `openai`) | Which model to ask for. |
 | `EGMA_SIMULATOR_MODEL_API_KEY` | (required for `openai`) | The provider key. Never logged. |
 | `EGMA_SIMULATOR_WAL_DIR` | `.egma-simulator/wal` | Where report documents land before sending. |
+| `EGMA_SIMULATOR_BLOB_DIR` | `.egma-simulator/blobs` | Where recordings land, for the filesystem-backed blob store. |
 | `EGMA_SIMULATOR_LOG_LEVEL` | `INFO` | The usual levels. |
 | `EGMA_SIMULATION_CONTRACT_DIR` | auto-located | The contract package, when the repo layout isn't around it. |
 
@@ -137,11 +172,20 @@ two fixture specs conduct two visibly different conversations; every
 ending is reached and told apart, both limits included; cancel stops an
 exchange mid-flight; capacity holds under load; a SIGKILLed simulator
 stays honestly silent; and a planted credential appears in no log, report,
-or write-ahead log. The whole suite runs on the scripted model client —
-nothing can flake on a live model. `tests/test_contract_fixtures.py`
-validates the golden fixtures in `packages/simulation-contract` from the
-Python side — the other half of the drift guarantee the TypeScript suite
-holds.
+or write-ahead log.
+
+Voice is proved the same way, off the same records: a voice fixture yields
+a transcript, an ending, a band that is the one measured rather than the
+one configured, and a reference — which is then opened, and each channel
+transcribed, to show one speaker to a channel. One scenario run over chat
+and over voice produces one transcript, which is the diagnostic the
+modality split exists for.
+
+The whole suite runs on the scripted model client and the deterministic
+speech legs — no model, no provider, no network, so nothing can flake.
+`tests/test_contract_fixtures.py` validates the golden fixtures in
+`packages/simulation-contract` from the Python side — the other half of
+the drift guarantee the TypeScript suite holds.
 
 The `retell` plug converses with `tests/retell_stub.py`: a real local HTTP
 server shaped like Retell's chat API, so proving the plug speaks the
@@ -173,8 +217,14 @@ src/egma_simulator/
                   deciding the exchange is concluded.
   model.py        The model-client seam: scripted (CI) and OpenAI-compatible.
   plugs/          The platform-plug seam. Its __init__ docstring is the
-                  plug author's whole brief; scripted.py is CI's platform
-                  and retell.py the first real one.
+                  plug author's whole brief; scripted.py chats,
+                  loopback.py speaks, and retell.py is the first real
+                  platform.
+  pipeline.py     One pipeline per simulation, built from its spec: which
+                  legs the modality selects, and what the audio measured.
+  speech.py       The speech legs, and the deterministic pair CI speaks
+                  and listens with — no corpus, no provider, no network.
+  blob.py         Where a recording is written and what a report points at.
   walk.py         One simulation's exchange: the turn loop, limits, cancel
                   delivery, and how each walk names its ending.
   reporting.py    Event minting, the write-ahead log, ordered delivery.
