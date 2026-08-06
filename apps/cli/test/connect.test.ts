@@ -250,6 +250,21 @@ describe("one agent, and several", () => {
     expect(connection?.config).toEqual({ retellAgentId: "agent_0002" });
   });
 
+  it("follows the listing's pages, so an account bigger than one page is whole", async () => {
+    // Retell answers a page at a time and says where the next one starts.
+    retell = await startFakeRetell({ ...THREE_AGENTS, pageSize: 1 });
+
+    const { ui } = await run({ keys: [KEY], agent: "agent_0003" });
+
+    expect(ui.record.agentChoices.map((agent) => agent.id)).toEqual([
+      "agent_0001",
+      "agent_0002",
+      "agent_0003",
+    ]);
+    // One request for each page, and one more that said there were no others.
+    expect(retell.requests.filter((asked) => asked.path === "/v2/list-agents")).toHaveLength(3);
+  });
+
   it("ends plainly when several are offered and none is chosen", async () => {
     retell = await startFakeRetell(THREE_AGENTS);
 

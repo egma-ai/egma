@@ -54,6 +54,11 @@ export type FakeRetellScript = {
   readonly agents: readonly FakeAgent[];
   readonly llms?: readonly FakeLlm[];
   readonly flows?: readonly FakeFlow[];
+  /**
+   * How many agents one listing answers with, so following pages can be
+   * checked. The whole account in one answer when omitted.
+   */
+  readonly pageSize?: number;
   /** Answer every request with this status and body instead. */
   readonly refuseWith?: { readonly status: number; readonly body: unknown };
 };
@@ -152,15 +157,23 @@ export async function startFakeRetell(script: FakeRetellScript): Promise<FakeRet
         }
 
         if (incoming.method === "POST" && at.pathname === "/v2/list-agents") {
+          // Retell pages its listing: a caller reads `items`, then asks again
+          // with `pagination_key` for as long as `has_more` is true.
+          const size = script.pageSize ?? script.agents.length;
+          const from = Number(at.searchParams.get("pagination_key") ?? "0");
+          const page = size < 1 ? script.agents : script.agents.slice(from, from + size);
+          const next = from + page.length;
+
           send(200, {
-            items: script.agents.map((agent) => ({
+            items: page.map((agent) => ({
               agent_id: agent.agent_id,
               agent_name: agent.agent_name ?? "",
               channel: agent.channel ?? "voice",
               tags: {},
               user_modified_timestamp: 1_700_000_000_000,
             })),
-            has_more: false,
+            has_more: next < script.agents.length,
+            ...(next < script.agents.length ? { pagination_key: String(next) } : {}),
           });
           return;
         }
