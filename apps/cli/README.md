@@ -19,12 +19,12 @@ is how CI runs it.
 
 <!-- The facts are FACTS in src/wizard/facts.ts, which is the source of truth; keep this sentence in step. -->
 
-`npx egma` finds your voice agent. It starts the coding agent you already have,
-hands it egma's own notes on how voice agents are built, and has it read this
-folder and report which framework runs it, where its prompts live, where its
-tools are defined, how it reaches production, and where its identifier is
-written down. Every action it takes appears on screen while it works, and the
-facts it finds arrive one line at a time.
+`npx egma` signs this machine in to egma, then finds your voice agent. It starts
+the coding agent you already have, hands it egma's own notes on how voice agents
+are built, and has it read this folder and report which framework runs it, where
+its prompts live, where its tools are defined, how it reaches production, and
+where its identifier is written down. Every action it takes appears on screen
+while it works, and the facts it finds arrive one line at a time.
 
 The task tells your coding agent to change nothing, and any file whose name
 starts with `.env` is refused when the agent goes through egma for it. Both are
@@ -37,6 +37,59 @@ Your code and your prompts never leave this machine.
 If this folder holds no voice agent, egma asks once for the folder your prompts
 are in — teams often keep them apart — looks there, and otherwise says plainly
 that you should run it where your agent is defined.
+
+## Signing in
+
+egma shows a short code and opens your browser on a page that already has it in
+the field. You approve it there — signing up first if you are new — and egma
+collects a key of its own. No secret is ever typed into the terminal.
+
+```
+egma login
+```
+
+is the same thing with nobody watching: it asks nothing, prints one fact per
+line, and exits with a number you can branch on. That is how a coding agent
+signs a machine in.
+
+```
+url: https://app.egma.ai
+code: WDJBMJHT
+approve_url: https://app.egma.ai/device?user_code=WDJBMJHT
+browser: opened
+waiting: for this code to be approved in a browser
+status: stored
+credentials: /home/you/.egma/credentials
+
+0 signed in   2 denied   3 the code ran out
+4 egma did not answer, or refused   130 stopped part way
+```
+
+The key is written to `~/.egma/credentials`, readable only by you, together with
+the address it belongs to. Set `EGMA_HOME` to keep it somewhere else — it names
+the folder itself, not a home to put `.egma` inside.
+
+Already signed in? `egma login` says so and does nothing. Pass `--force` to sign
+in again and replace the key this machine holds.
+
+### On a machine with no browser
+
+Over SSH, on a devbox, in a container: press `[c]` and egma asks your terminal
+to put the address on the clipboard of the machine your keyboard is on. Approve
+it in a browser over there, then paste it back — the whole address, the
+`?user_code=…` part of it, or just the code. All three work.
+
+If your terminal is too narrow to show the address whole, egma says how much
+wider it needs to be instead of drawing an address that breaks across two lines.
+
+### Your own instance
+
+```
+EGMA_URL=http://localhost:3000 npx egma
+```
+
+or `--url`. It is kept beside the key after the first login, so later commands
+find it without being told again.
 
 ## The notes egma hands your coding agent
 
@@ -72,15 +125,26 @@ still needs.
 ## Options
 
 ```
-egma [options]
+egma [options]           The wizard.
+egma login [options]     Sign this machine in. No questions, plain lines.
 
   --coding-agent <id>  Which coding agent to drive, named as the agent
                        registry names it. Default: claude-acp
   --cwd <path>         The folder to work in. Default: this folder.
+  --url <address>      The egma to talk to, for a self-hosted one. Kept
+                       after the first login, so it is set once. EGMA_URL
+                       does the same for a whole shell.
+  --force              With login: sign in again even when this machine
+                       already holds a key.
   --headless           Run with no terminal and no keystroke: plain lines,
                        and the task taken as already agreed to.
   -h, --help           Print this.
   -v, --version        Print the version.
+
+Environment:
+  EGMA_URL             The egma to talk to, for a whole shell. Same as --url.
+  EGMA_HOME            The folder egma keeps this machine's key in.
+                       Default: ~/.egma
 ```
 
 `Ctrl-C` stops a run at any point. The agent, and anything the agent started,

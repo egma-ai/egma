@@ -25,10 +25,13 @@ const run = promisify(execFile);
 
 async function egma(
   args: readonly string[],
-  cwd: string,
+  workspace: Workspace,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   try {
-    const { stdout, stderr } = await run(process.execPath, [CLI_ENTRY, ...args], { cwd });
+    const { stdout, stderr } = await run(process.execPath, [CLI_ENTRY, ...args], {
+      cwd: workspace.dir,
+      env: workspace.env(),
+    });
     return { stdout, stderr, code: 0 };
   } catch (error) {
     const failure = error as { stdout?: string; stderr?: string; code?: number };
@@ -41,6 +44,10 @@ describe("the egma command", () => {
 
   beforeEach(async () => {
     workspace = await makeWorkspace({ "package.json": MANIFEST });
+    // These checks are about driving a coding agent, so the machine they run on
+    // is already signed in and login costs them nothing. Login itself is proved
+    // in the checks that are about login.
+    await workspace.signIn("https://egma.invalid");
   });
 
   afterEach(async () => {
@@ -52,7 +59,7 @@ describe("the egma command", () => {
       const child = spawn(
         process.execPath,
         ["--import", PRETEND_OLD_NODE, CLI_ENTRY, "--help"],
-        { cwd: workspace.dir },
+        { cwd: workspace.dir, env: workspace.env() },
       );
       let stderr = "";
       child.stderr.setEncoding("utf8");
@@ -70,7 +77,7 @@ describe("the egma command", () => {
   });
 
   it("prints what it can do, and what version it is", async () => {
-    const help = await egma(["--help"], workspace.dir);
+    const help = await egma(["--help"], workspace);
     expect(help.code).toBe(0);
     expect(help.stdout).toContain("Usage:");
     expect(help.stdout).toContain("--coding-agent <id>");
@@ -78,12 +85,12 @@ describe("the egma command", () => {
     // The test seam is not product surface, so it is not offered.
     expect(help.stdout).not.toContain("-- <command>");
 
-    const version = await egma(["--version"], workspace.dir);
+    const version = await egma(["--version"], workspace);
     expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
   });
 
   it("says so when handed an option it does not know", async () => {
-    const result = await egma(["--turbo"], workspace.dir);
+    const result = await egma(["--turbo"], workspace);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("--turbo");
   });
@@ -91,7 +98,7 @@ describe("the egma command", () => {
   it("refuses to run the wizard where there is no terminal to agree in", async () => {
     // Not a terminal: this is `npx egma | tee log`, where the keystroke that
     // means yes can never be pressed.
-    const result = await egma(["--cwd", workspace.dir], workspace.dir);
+    const result = await egma(["--cwd", workspace.dir], workspace);
 
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("needs a terminal");
@@ -125,7 +132,7 @@ describe("the egma command", () => {
 
     const result = await egma(
       ["--headless", "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
-      workspace.dir,
+      workspace,
     );
 
     expect(result.code).toBe(0);
@@ -146,7 +153,7 @@ describe("the egma command", () => {
         "--",
         path.join(workspace.dir, "no-such-coding-agent"),
       ],
-      workspace.dir,
+      workspace,
     );
 
     expect(result.code).toBe(0);
@@ -162,7 +169,7 @@ describe("the egma command", () => {
   it("prints the same message when the registry names an agent it cannot start", async () => {
     const result = await egma(
       ["--headless", "--cwd", workspace.dir, "--coding-agent", "not-a-real-agent"],
-      workspace.dir,
+      workspace,
     );
 
     expect(result.code).toBe(0);
@@ -183,7 +190,7 @@ describe("the egma command", () => {
 
     const result = await egma(
       ["--headless", "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
-      workspace.dir,
+      workspace,
     );
 
     expect(result.code).toBe(1);
@@ -205,7 +212,7 @@ describe("the egma command", () => {
     const child = spawn(
       process.execPath,
       [CLI_ENTRY, "--headless", "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
-      { cwd: workspace.dir },
+      { cwd: workspace.dir, env: workspace.env() },
     );
     let stdout = "";
     child.stdout.setEncoding("utf8");

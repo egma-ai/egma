@@ -14,12 +14,14 @@
  * the branch it takes when a developer has nothing to add.
  */
 
+import { loginLines, type LoginPrompt } from "../platform/login.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
 import type { AskId, DrivenAgent, GateId, WizardUI } from "./wizard-ui.ts";
 
 export type HeadlessRecord = {
   drivenAgent: DrivenAgent | null;
   drivenAgentLog: string | null;
+  logins: LoginPrompt[];
   statuses: string[];
   summary: string;
   exit: ExitReport | null;
@@ -38,6 +40,7 @@ export class HeadlessUI implements WizardUI {
   readonly record: HeadlessRecord = {
     drivenAgent: null,
     drivenAgentLog: null,
+    logins: [],
     statuses: [],
     summary: "",
     exit: null,
@@ -67,6 +70,19 @@ export class HeadlessUI implements WizardUI {
 
   setDrivenAgentLog(file: string): void {
     this.record.drivenAgentLog = file;
+  }
+
+  setLogin(prompt: LoginPrompt | null): void {
+    if (prompt === null) return;
+    this.record.logins.push(prompt);
+    // The same lines `egma login` prints, from the same place, so the two
+    // promptless surfaces cannot drift apart.
+    for (const line of loginLines(prompt)) this.write(line);
+  }
+
+  /** Nobody is at this keyboard, so nothing is ever pasted at it. */
+  takeLoginPaste(): string | null {
+    return null;
   }
 
   waitForGate(gate: GateId): Promise<void> {

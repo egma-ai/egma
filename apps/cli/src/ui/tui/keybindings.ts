@@ -74,7 +74,7 @@ export function defaultPriority(match: KeyMatch | readonly KeyMatch[]): number {
  * arrives as a line feed. Reading only `key.return` drops it, and the wizard
  * sits there looking as though it did not hear.
  */
-function isEnter(input: string, key: KeyState): boolean {
+export function isEnter(input: string, key: KeyState): boolean {
   return key.return === true || input === "\r" || input === "\n";
 }
 

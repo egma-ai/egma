@@ -5,6 +5,7 @@
  * asks — the screens read the store and own every keystroke.
  */
 
+import type { LoginPrompt } from "../../platform/login.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
 import type { AskId, DrivenAgent, GateId, WizardUI } from "../wizard-ui.ts";
 import type { WizardStore } from "./store.ts";
@@ -29,6 +30,14 @@ export class InkUI implements WizardUI {
 
   setDrivenAgentLog(file: string): void {
     this.store.setDrivenAgentLog(file);
+  }
+
+  setLogin(prompt: LoginPrompt | null): void {
+    this.store.setLogin(prompt);
+  }
+
+  takeLoginPaste(): string | null {
+    return this.store.takeLoginPaste();
   }
 
   waitForGate(gate: GateId): Promise<void> {
