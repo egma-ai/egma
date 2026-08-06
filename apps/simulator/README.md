@@ -25,9 +25,11 @@ touching the others:
   that alone knows how to reach and exchange turns with that platform.
   Everything else is plug-blind. The scripted counterpart — a fake
   platform whose agent answers from a script — is the first plug, and the
-  reason the whole loop runs with no account and no network. To write a
-  plug for a real platform, read the `plugs/__init__.py` docstring; it is
-  the entire brief.
+  reason the whole loop runs with no account and no network. `retell` is
+  the first real one: it speaks Retell's chat API, driven entirely by the
+  spec's connection block, and adding it changed nothing outside
+  `plugs/`. To write the next, read the `plugs/__init__.py` docstring; it
+  is the entire brief.
 
 The speech legs — STT, TTS, the dual-channel recording, the measured audio
 band — arrive with the voice plug work; a chat exchange needs none of
@@ -79,8 +81,10 @@ uv run egma-simulator
 The workbench prints one JSON line per observation — queued, the claim,
 each heartbeat, each reported event — which is a simulation going
 queued → claimed → running → completed, live. The two `scripted` fixtures
-conduct whole conversations; the `retell` and `phone` fixtures are refused
-with a clear log line, honestly, until their plugs land.
+conduct whole conversations; the `retell` fixture really does dial Retell
+and fails at the door, because the key in a fixture is a placeholder; the
+`phone` fixture is refused with a clear log line, honestly, until its plug
+lands.
 `GET /workbench/records` returns the same as JSON;
 `POST /workbench/simulations/<id>/cancel` flags a cancel directive for the
 next heartbeat; `POST /workbench/specs` queues another spec while
@@ -139,6 +143,23 @@ validates the golden fixtures in `packages/simulation-contract` from the
 Python side — the other half of the drift guarantee the TypeScript suite
 holds.
 
+The `retell` plug converses with `tests/retell_stub.py`: a real local HTTP
+server shaped like Retell's chat API, so proving the plug speaks the
+protocol needs no account, no key and no network — failure paths included,
+where a refused key and an endpoint nobody answers each end the simulation
+`failed` with an honest reason and no leaked secret.
+
+One real conversation with a real Retell chat agent is opt-in, and skips
+when the environment is silent, so nothing in CI waits on an account:
+
+```bash
+TEST_RETELL_API_KEY=key_... \
+TEST_RETELL_AGENT_ID=agent_... \
+uv run --frozen pytest tests/test_live_retell.py -v
+```
+
+`TEST_RETELL_BASE_URL` points that test somewhere other than Retell.
+
 ## Layout
 
 ```
@@ -152,7 +173,8 @@ src/egma_simulator/
                   deciding the exchange is concluded.
   model.py        The model-client seam: scripted (CI) and OpenAI-compatible.
   plugs/          The platform-plug seam. Its __init__ docstring is the
-                  plug author's whole brief; scripted.py is the first plug.
+                  plug author's whole brief; scripted.py is CI's platform
+                  and retell.py the first real one.
   walk.py         One simulation's exchange: the turn loop, limits, cancel
                   delivery, and how each walk names its ending.
   reporting.py    Event minting, the write-ahead log, ordered delivery.

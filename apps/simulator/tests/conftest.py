@@ -10,18 +10,20 @@ process. The rig here is exactly that wiring.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import signal
 import subprocess
 import sys
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import aiohttp
 import pytest
 from aiohttp import web
+from retell_stub import RetellStub, RunningStub, serving
 
 from egma_simulator.contract import contract_dir
 from egma_simulator.workbench.app import WorkbenchState, build_app
@@ -193,6 +195,22 @@ def start_simulator(
 
 
 @pytest.fixture
+async def start_retell_stub() -> AsyncIterator[Callable[..., Awaitable[RunningStub]]]:
+    """Start Retell-shaped stubs on loopback; each stops when the test ends.
+
+    The keyword arguments are :class:`RetellStub`'s script — the key it
+    honors, the greeting, the replies, whether the agent ends the exchange
+    itself.
+    """
+    async with contextlib.AsyncExitStack() as stack:
+
+        async def start(**script: object) -> RunningStub:
+            return await stack.enter_async_context(serving(RetellStub(**script)))
+
+        yield start
+
+
+@pytest.fixture
 def quick_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     """Collapse delivery backoff so retry behavior can be tested in milliseconds.
 
@@ -212,11 +230,43 @@ def load_fixture_spec(name: str) -> dict:
         return json.load(handle)
 
 
+A_SCENARIO = "State the first point. State the second point."
+"""Two sentences, so the scripted persona speaks twice and then concludes."""
+
+A_PERSONALITY = "Terse test person; sticks to the script."
+
+
+def a_spec(
+    simulation_id: str,
+    *,
+    connection: dict,
+    scenario: str,
+    personality: str,
+    max_turns: int,
+    max_duration_seconds: int,
+) -> dict:
+    """The envelope every spec shares: one persona, one scenario, one set of
+    walls, one chat. What differs between two specs is the connection block,
+    which is exactly the difference the plug seam exists to absorb."""
+    return {
+        "contract_version": 1,
+        "simulation_id": simulation_id,
+        "modality": "chat",
+        "connection": connection,
+        "persona": {"traits": {"personality": personality, "language": "en-US"}},
+        "scenario": {"instructions": scenario},
+        "limits": {
+            "max_duration_seconds": max_duration_seconds,
+            "max_turns": max_turns,
+        },
+    }
+
+
 def scripted_spec(
     simulation_id: str,
     *,
-    scenario: str = "State the first point. State the second point.",
-    personality: str = "Terse test person; sticks to the script.",
+    scenario: str = A_SCENARIO,
+    personality: str = A_PERSONALITY,
     greeting: str | None = None,
     replies: list[str] | None = None,
     ends_after_replies: bool = False,
@@ -240,24 +290,77 @@ def scripted_spec(
         config["ends_after_replies"] = True
     if provider_reference is not None:
         config["provider_reference"] = provider_reference
-    return {
-        "contract_version": 1,
-        "simulation_id": simulation_id,
-        "modality": "chat",
-        "connection": {
+    return a_spec(
+        simulation_id,
+        connection={
             "type": "scripted",
             "config": config,
             "credentials": credentials,
         },
-        "persona": {
-            "traits": {"personality": personality, "language": "en-US"}
+        scenario=scenario,
+        personality=personality,
+        max_turns=max_turns,
+        max_duration_seconds=max_duration_seconds,
+    )
+
+
+def retell_spec(
+    simulation_id: str,
+    *,
+    base_url: str,
+    api_key: str,
+    agent_id: str = "agent_stubbed_0001",
+    scenario: str = A_SCENARIO,
+    personality: str = A_PERSONALITY,
+    max_turns: int = 60,
+    max_duration_seconds: int = 600,
+) -> dict:
+    """One spec against a Retell chat connection, pointed wherever asked.
+
+    The connection block is exactly what the control plane stores for a
+    ``retell`` connection — the agent id in the config, the key in the
+    credentials — plus the base URL, which is what lets the exchange land on
+    a Retell-shaped stub instead of the platform itself.
+    """
+    return a_spec(
+        simulation_id,
+        connection={
+            "type": "retell",
+            "config": {"retellAgentId": agent_id, "baseUrl": base_url},
+            "credentials": {"apiKey": api_key},
         },
-        "scenario": {"instructions": scenario},
-        "limits": {
-            "max_duration_seconds": max_duration_seconds,
-            "max_turns": max_turns,
-        },
-    }
+        scenario=scenario,
+        personality=personality,
+        max_turns=max_turns,
+        max_duration_seconds=max_duration_seconds,
+    )
+
+
+def assert_kept_secret(
+    secret: str, *, records: list[dict], simulator: SimulatorProcess
+) -> None:
+    """A planted credential is in none of the three places it could surface.
+
+    The reports the control plane holds, every byte the process wrote, and
+    the write-ahead log on disk — all three, every time, because a secret
+    kept out of two of them is still a leaked secret. Each place is checked
+    to be non-empty first: scanning nothing always passes.
+
+    Call it once the simulator has stopped, so its output is all there.
+    """
+    assert secret not in json.dumps(records), "a report carried the credential"
+
+    output = simulator.output()
+    assert output, "expected the simulator to have logged something"
+    assert secret not in output, "a log line carried the credential"
+
+    wal_bytes = b"".join(
+        path.read_bytes() for path in simulator.wal_dir.glob("*.jsonl")
+    )
+    assert wal_bytes, "expected write-ahead log entries"
+    assert secret.encode() not in wal_bytes, (
+        "the write-ahead log carried the credential"
+    )
 
 
 # -- Record readers: the acceptance suite's entire vocabulary -----------------

@@ -1,9 +1,11 @@
 """What the simulator promises, proved black-box at the contract seam.
 
 The workbench offers specs; a real simulator process claims, conducts,
-heartbeats and reports; every assertion below reads only what the
-workbench recorded. Nothing inspects the simulator — that is the point:
-what the records show is all the control plane will ever know.
+heartbeats and reports; the assertions below read what the workbench
+recorded — and, where a platform stands on the other side of the exchange,
+what that platform saw on its own wire. Nothing reaches inside the
+simulator — that is the point: what the records show is all the control
+plane will ever know.
 
 Every exchange here is a real conversation: the persona on the scripted
 model client, the agent played by the scripted counterpart plug. Nothing
@@ -14,16 +16,17 @@ scripted one, which is why none of it can flake.
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import datetime
 
 from conftest import (
     HEARTBEAT_SECONDS,
     all_terminal,
+    assert_kept_secret,
     events_for,
     has_terminal,
     heartbeats_for,
     load_fixture_spec,
+    retell_spec,
     scripted_spec,
     status_events_for,
     terminal_event_for,
@@ -426,7 +429,7 @@ async def test_a_spec_naming_an_unknown_connection_type_is_refused_out_loud(
 ):
     """No plug, no exchange, no report — and the simulator carries on."""
     unplugged = scripted_spec("sim-unplugged-001")
-    unplugged["connection"]["type"] = "retell"
+    unplugged["connection"]["type"] = "a-platform-with-no-plug-yet"
     await workbench.offer(unplugged)
     simulator = start_simulator(workbench)
 
@@ -478,6 +481,157 @@ async def test_a_plug_refusal_is_an_honest_failure_on_the_record(
     assert [record for record in records if record["kind"] == "refusal"] == []
 
 
+async def test_a_retell_chat_spec_conducts_a_multi_turn_exchange(
+    workbench, start_simulator, start_retell_stub
+):
+    """The first real platform, black-box: a spec carrying a Retell chat
+    connection block goes in, and a multi-turn transcript against a
+    Retell-shaped platform comes back — with the credential used and never
+    written down anywhere.
+
+    Nothing outside the plug knows this exchange is any different from the
+    scripted one, which is the whole extensibility claim.
+    """
+    sentinel = "SENTINEL-retell-key-c1d4e7f0a3b6"
+    running = await start_retell_stub(
+        api_key=sentinel,
+        greeting="Lakeside Dental, how can I help?",
+        replies=[
+            "Of course — could I take your name?",
+            "Done: Thursday at half past two.",
+        ],
+    )
+    spec = retell_spec(
+        "sim-retell-001",
+        base_url=running.base_url,
+        api_key=sentinel,
+        agent_id="agent_lakeside_chat",
+        scenario=(
+            "I need to move my Tuesday cleaning to Thursday. "
+            "My name is Margaret Hale."
+        ),
+    )
+    await workbench.offer(spec)
+    simulator = start_simulator(workbench, log_level="DEBUG")
+
+    records = await workbench.wait_for(has_terminal("sim-retell-001"))
+
+    turns = events_for(records, "sim-retell-001", "turn")
+    assert [(turn["speaker"], turn["text"]) for turn in turns] == [
+        ("agent", "Lakeside Dental, how can I help?"),
+        ("human", "I need to move my Tuesday cleaning to Thursday."),
+        ("agent", "Of course — could I take your name?"),
+        ("human", "My name is Margaret Hale."),
+        ("agent", "Done: Thursday at half past two."),
+        ("human", GOODBYE),
+    ]
+
+    terminal = terminal_event_for(records, "sim-retell-001")
+    assert terminal["status"] == "completed"
+    assert terminal["facts"]["ending"] == "persona_concluded"
+    assert terminal["facts"]["turn_count"] == len(turns)
+    # The join to the platform's own telemetry is Retell's chat id.
+    assert terminal["facts"]["provider_reference"] == running.stub.chat_ids()[0]
+
+    # And the platform's side of the same story: one chat opened against the
+    # agent the connection block named, the persona's turns delivered in
+    # order, the chat ended rather than left ongoing.
+    stub = running.stub
+    assert [call["endpoint"] for call in stub.calls] == [
+        "create-chat",
+        "create-chat-completion",
+        "create-chat-completion",
+        "end-chat",
+    ]
+    assert stub.calls[0]["agent_id"] == "agent_lakeside_chat"
+    assert stub.delivered() == [
+        "I need to move my Tuesday cleaning to Thursday.",
+        "My name is Margaret Hale.",
+    ]
+
+    simulator.stop()
+    assert_kept_secret(sentinel, records=records, simulator=simulator)
+
+
+async def test_a_retell_key_the_platform_refuses_fails_honestly_and_silently(
+    workbench, start_simulator, start_retell_stub
+):
+    """The failure path a wrong credential takes: the simulation ends failed
+    with a reason naming what the platform said, and the key appears
+    nowhere — not in the report, not in a log line, not in the log on disk."""
+    sentinel = "SENTINEL-retell-key-wrong-8e2a5c9f"
+    running = await start_retell_stub(api_key="the-only-key-this-stub-honors")
+    spec = retell_spec(
+        "sim-retell-badkey", base_url=running.base_url, api_key=sentinel
+    )
+    await workbench.offer(spec)
+    simulator = start_simulator(workbench, log_level="DEBUG")
+
+    records = await workbench.wait_for(has_terminal("sim-retell-badkey"))
+
+    assert status_events_for(records, "sim-retell-badkey") == ["running", "failed"]
+    terminal = terminal_event_for(records, "sim-retell-badkey")
+    assert terminal["facts"]["ending"] == "error"
+    assert terminal["facts"]["turn_count"] == 0
+    assert "401" in terminal["reason"], terminal["reason"]
+    # Nothing was conducted: no exchange happened off the record.
+    assert events_for(records, "sim-retell-badkey", "turn") == []
+
+    simulator.stop()
+    assert_kept_secret(sentinel, records=records, simulator=simulator)
+
+
+async def test_a_platform_that_says_the_key_back_still_leaks_nothing(
+    workbench, start_simulator, start_retell_stub
+):
+    """The reason a plug gives carries the platform's own words, and a
+    careless platform's own words can include the key it was just given.
+    The plug is what has to survive that: nothing downstream — not the
+    report, not the log line, not the traceback under it — may repeat a
+    secret because somebody else did first."""
+    sentinel = "SENTINEL-retell-key-echoed-3d6f0b21"
+    running = await start_retell_stub(
+        api_key="the-only-key-this-stub-honors", echo_key_in_refusal=True
+    )
+    spec = retell_spec(
+        "sim-retell-echoed", base_url=running.base_url, api_key=sentinel
+    )
+    await workbench.offer(spec)
+    simulator = start_simulator(workbench, log_level="DEBUG")
+
+    records = await workbench.wait_for(has_terminal("sim-retell-echoed"))
+    assert terminal_event_for(records, "sim-retell-echoed")["status"] == "failed"
+
+    simulator.stop()
+    assert_kept_secret(sentinel, records=records, simulator=simulator)
+
+
+async def test_a_retell_endpoint_that_answers_nowhere_fails_honestly(
+    workbench, start_simulator
+):
+    """The other absence: nothing listening at all. Same honesty, same
+    silence about the key."""
+    sentinel = "SENTINEL-retell-key-unreachable-77b1"
+    spec = retell_spec(
+        "sim-retell-nowhere",
+        base_url="http://127.0.0.1:1",
+        api_key=sentinel,
+    )
+    await workbench.offer(spec)
+    simulator = start_simulator(workbench, log_level="DEBUG")
+
+    records = await workbench.wait_for(has_terminal("sim-retell-nowhere"))
+
+    terminal = terminal_event_for(records, "sim-retell-nowhere")
+    assert terminal["status"] == "failed"
+    assert terminal["facts"]["ending"] == "error"
+    assert "unreachable" in terminal["reason"], terminal["reason"]
+    assert "127.0.0.1:1" in terminal["reason"], terminal["reason"]
+
+    simulator.stop()
+    assert_kept_secret(sentinel, records=records, simulator=simulator)
+
+
 async def test_credentials_never_appear_in_logs_or_reports(
     workbench, start_simulator
 ):
@@ -497,16 +651,4 @@ async def test_credentials_never_appear_in_logs_or_reports(
     assert terminal["status"] == "completed"
 
     simulator.stop()
-
-    everything_recorded = json.dumps(records)
-    assert sentinel not in everything_recorded, "a report carried the credential"
-
-    output = simulator.output()
-    assert output, "expected the simulator to have logged something"
-    assert sentinel not in output, "a log line carried the credential"
-
-    wal_bytes = b"".join(
-        path.read_bytes() for path in simulator.wal_dir.glob("*.jsonl")
-    )
-    assert wal_bytes, "expected write-ahead log entries"
-    assert sentinel.encode() not in wal_bytes, "the WAL carried the credential"
+    assert_kept_secret(sentinel, records=records, simulator=simulator)
