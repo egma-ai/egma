@@ -30,11 +30,13 @@ touching the others:
   network. To write a plug for a real platform, read the
   `plugs/__init__.py` docstring; it is the entire brief.
 - **The speech legs** (`speech.py`) — a voice simulation is a chat one
-  with two more legs: the persona's words spoken by a text-to-speech
-  service, the agent's audio read by a speech-to-text one. Both sit behind
-  Pipecat's own service base classes, so a real provider is another
-  subclass chosen by configuration. CI runs on a deterministic pair
-  instead: no model, no network, and the same words out that went in.
+  with two more legs: the persona's words spoken into audio, the agent's
+  audio read back into words. Both sit in the pipeline exactly where a
+  real provider's service would, so the shape one must fit is settled —
+  but nothing selects a real one yet, and the assembly builds the
+  deterministic pair. That pair is what CI speaks and listens with: no
+  model, no network, no downloaded corpus, and the same words out that
+  went in. A live provider, and the switch that picks it, land together.
 
 One pipeline is assembled per simulation from its own spec and torn down
 after (`pipeline.py`). Modality selects the legs and nothing else: a chat
@@ -109,11 +111,10 @@ uv run egma-simulator
 The workbench prints one JSON line per observation — queued, the claim,
 each heartbeat, each reported event — which is a simulation going
 queued → claimed → running → completed, live. The two `scripted` fixtures
-conduct whole conversations over chat and the `loopback` one conducts a
-spoken one, leaving a real `.wav` under `EGMA_SIMULATOR_BLOB_DIR` that you
-can open and listen to a channel at a time; the `retell` and `phone`
-fixtures are refused with a clear log line, honestly, until their plugs
-land.
+conduct whole exchanges over chat and the `loopback` one conducts a spoken
+one, leaving a real `.wav` under `EGMA_SIMULATOR_BLOB_DIR` that you can
+open and listen to a channel at a time; the `retell` and `phone` fixtures
+are refused with a clear log line, honestly, until their plugs land.
 `GET /workbench/records` returns the same as JSON;
 `POST /workbench/simulations/<id>/cancel` flags a cancel directive for the
 next heartbeat; `POST /workbench/specs` queues another spec while
@@ -199,8 +200,8 @@ src/egma_simulator/
                   loopback.py speaks.
   pipeline.py     One pipeline per simulation, built from its spec: which
                   legs the modality selects, and what the audio measured.
-  speech.py       The speech legs behind Pipecat's service classes, and
-                  the deterministic pair CI speaks and listens with.
+  speech.py       The speech legs, and the deterministic pair CI speaks
+                  and listens with — no corpus, no provider, no network.
   blob.py         Where a recording is written and what a report points at.
   walk.py         One simulation's exchange: the turn loop, limits, cancel
                   delivery, and how each walk names its ending.

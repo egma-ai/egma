@@ -30,7 +30,7 @@ from typing import Protocol
 
 PLAIN_SEGMENT = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 _UNSAFE_IN_A_SEGMENT = re.compile(r"[^A-Za-z0-9._-]")
-_READABLE_PREFIX_LIMIT = 64
+_READABLE_PREFIX_CHARS = 64
 
 
 class BlobStore(Protocol):
@@ -55,7 +55,7 @@ def _confined_segment(segment: str) -> str:
     if PLAIN_SEGMENT.match(segment):
         return segment
     digest = hashlib.sha256(segment.encode()).hexdigest()[:16]
-    readable = _UNSAFE_IN_A_SEGMENT.sub("_", segment)[:_READABLE_PREFIX_LIMIT]
+    readable = _UNSAFE_IN_A_SEGMENT.sub("_", segment)[:_READABLE_PREFIX_CHARS]
     return f"{readable}-{digest}"
 
 

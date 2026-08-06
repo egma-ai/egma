@@ -13,7 +13,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from conftest import loopback_spec, scripted_spec
+from conftest import (
+    assert_one_speaker_to_a_channel,
+    loopback_spec,
+    scripted_spec,
+)
 
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.model import GOODBYE, ScriptedModel
@@ -30,6 +34,7 @@ from egma_simulator.plugs import PlugError
 from egma_simulator.spec import SimulationSpec
 from egma_simulator.speech import (
     DEFAULT_VOICE_ID,
+    SAMPLES_PER_BYTE,
     decode_speech,
     duration_seconds,
     encode_speech,
@@ -100,10 +105,10 @@ def test_speech_is_read_out_of_the_samples_wherever_it_starts():
 
 def test_quiet_and_length_are_measured_from_the_audio():
     spoken = silence(0.25, 16000) + encode_speech("abcd", 16000)
+    four_bytes_spoken = 4 * SAMPLES_PER_BYTE / 16000
     assert leading_silence_seconds(spoken, 16000) == pytest.approx(0.25)
-    # Four bytes at 240 samples each, after a quarter second of quiet.
-    assert duration_seconds(spoken, 16000) == pytest.approx(0.25 + 4 * 240 / 16000)
-    assert spoken_seconds(spoken, 16000) == pytest.approx(4 * 240 / 16000)
+    assert duration_seconds(spoken, 16000) == pytest.approx(0.25 + four_bytes_spoken)
+    assert spoken_seconds(spoken, 16000) == pytest.approx(four_bytes_spoken)
 
 
 def test_the_persona_voice_comes_from_the_authored_traits():
@@ -180,23 +185,15 @@ async def test_the_recording_holds_each_speaker_on_their_own_channel(
     assert audio is not None
 
     recording = (tmp_path / audio["recording"]).read_bytes()
-    persona_audio, agent_audio, band = channels_of(recording)
-    assert band == audio["measured_sample_rate_hz"]
+    assert channels_of(recording)[2] == audio["measured_sample_rate_hz"]
 
-    said = {
-        "human": decode_speech(persona_audio, band),
-        "agent": decode_speech(agent_audio, band),
-    }
-    # Every turn that was carried appears on its own speaker's channel and
-    # on neither of the other's. The persona's concluding goodbye is not
-    # among them: the walk ends on it without handing it to the platform,
-    # so it was never spoken and the recording does not pretend it was.
-    for speaker, text in turns:
-        if text == GOODBYE:
-            continue
-        other = "agent" if speaker == "human" else "human"
-        assert text in said[speaker], (speaker, text)
-        assert text not in said[other], (speaker, text)
+    # Every turn that was carried is on its own speaker's channel and on
+    # neither of the other's. The persona's concluding goodbye is not among
+    # them: the walk ends on it without handing it to the platform, so it
+    # was never spoken and the recording does not pretend it was.
+    carried = [(speaker, text) for speaker, text in turns if text != GOODBYE]
+    assert len(carried) == len(turns) - 1
+    assert_one_speaker_to_a_channel(recording, carried)
 
 
 async def test_every_turn_is_measured_and_the_measures_never_run_backwards(
@@ -284,6 +281,86 @@ async def test_an_exchange_the_agent_ends_still_leaves_a_recording(
     assert conducted.ending == "agent_ended"
     assert assembled.audio is not None
     assert (tmp_path / assembled.audio["recording"]).exists()
+
+
+async def test_the_speech_legs_need_no_corpus_and_no_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The hermetic promise, held where it could quietly break.
+
+    The library under the speaking leg splits sentences with a tokenizer
+    corpus it fetches on demand, which in a suite that must need no
+    network is a bug waiting for the first machine with a cold cache. The
+    simulator never splits sentences, so the corpus is never opened — and
+    the way to keep that true is to make any attempt raise here.
+
+    What the assertions below watch is the recording, not an exception.
+    A leg that reaches for the corpus and cannot have it does not raise
+    out to here — the frame that was being processed is abandoned and the
+    error is logged — so the symptom is a persona turn that the transcript
+    shows and the audio does not. The turn also carries several sentences
+    on purpose: a single sentence never reaches the tokenizer whatever the
+    leg is built on, so a one-sentence turn would pass while the promise
+    was broken.
+    """
+    import nltk
+    import pipecat.utils.string
+
+    def starved(*_args: object, **_kwargs: object):
+        raise LookupError("no tokenizer corpus, and none is meant to be needed")
+
+    monkeypatch.setattr(pipecat.utils.string, "sent_tokenize", starved)
+    monkeypatch.setattr(nltk.data, "load", starved)
+    monkeypatch.setattr(nltk.data, "find", starved)
+
+    # And the fetch is already gone, so a cold machine reaches no further
+    # than a warm one does.
+    assert nltk.download("punkt_tab", quiet=True) is False
+
+    spoken = "First sentence. Second sentence. And a third one after that."
+    assembled = assemble(
+        spec_for(replies=["Noted."]), blobs=FilesystemBlobStore(tmp_path)
+    )
+    plug = assembled.plug
+    await plug.open()
+    try:
+        answer = await plug.deliver(spoken)
+    finally:
+        await plug.close()
+
+    assert answer.text == "Noted."
+    assert assembled.audio is not None
+    assert_one_speaker_to_a_channel(
+        (tmp_path / assembled.audio["recording"]).read_bytes(),
+        [("human", spoken), ("agent", "Noted.")],
+    )
+
+
+async def test_the_speaking_leg_is_built_with_the_authored_voice(
+    tmp_path: Path,
+):
+    """The pipeline is assembled from this simulation's own spec, and the
+    persona's voice is part of that spec — so the leg that just spoke a
+    whole exchange is the one holding the authored voice."""
+    _conducted, _turns, _measures, assembled = await voice_walk(
+        tmp_path,
+        scenario="One point.",
+        replies=["Noted."],
+        voice={"provider": "elevenlabs", "voiceId": "brisk-tenor-7", "speed": 1.15},
+    )
+    assert assembled.voice is not None
+    spoke_with = assembled.voice.speaking_voice
+    assert (spoke_with.voice_id, spoke_with.provider, spoke_with.speed) == (
+        "brisk-tenor-7",
+        "elevenlabs",
+        1.15,
+    )
+
+    # A persona authored with no voice still speaks, with the default one.
+    _c, _t, _m, plain = await voice_walk(
+        tmp_path, scenario="One point.", replies=["Noted."]
+    )
+    assert plain.voice.speaking_voice.voice_id == DEFAULT_VOICE_ID
 
 
 def test_a_chat_spec_assembles_no_speech_legs_and_no_audio(tmp_path: Path):

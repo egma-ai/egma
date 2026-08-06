@@ -167,7 +167,16 @@ def start_simulator(
         stderr_path = tmp_path / f"simulator-{len(started)}.err"
         wal_dir = tmp_path / f"wal-{len(started)}"
         blob_dir = tmp_path / f"blobs-{len(started)}"
+        # Empty, and pointed at by the two variables a tokenizer corpus is
+        # ever looked up through. The simulator promises it needs no such
+        # corpus and fetches none; a child that quietly grew a need for
+        # one would find this machine's cache and pass, which is exactly
+        # the regression this starves. See the package docstring.
+        starved = tmp_path / f"no-corpus-{len(started)}"
+        starved.mkdir(exist_ok=True)
         env = os.environ | {
+            "NLTK_DATA": str(starved),
+            "HOME": str(starved),
             "EGMA_SIMULATOR_CONTROL_PLANE_URL": workbench.base_url,
             "EGMA_SIMULATOR_CLAIMANT": claimant,
             "EGMA_SIMULATOR_CAPACITY": str(capacity),
@@ -321,6 +330,29 @@ def loopback_spec(
             "max_turns": max_turns,
         },
     }
+
+
+def assert_one_speaker_to_a_channel(
+    recording: bytes, turns: list[tuple[str, str]]
+) -> None:
+    """Each turn is on its own speaker's channel and on neither other one.
+
+    The recording is read the only way a listener could read it — the
+    samples of each channel, transcribed — so this says what a person
+    would hear, not what the simulator believed it wrote.
+    """
+    from egma_simulator.pipeline import channels_of
+    from egma_simulator.speech import decode_speech
+
+    persona_audio, agent_audio, band = channels_of(recording)
+    said = {
+        "human": decode_speech(persona_audio, band),
+        "agent": decode_speech(agent_audio, band),
+    }
+    for speaker, text in turns:
+        other = "agent" if speaker == "human" else "human"
+        assert text in said[speaker], (speaker, text)
+        assert text not in said[other], (speaker, text)
 
 
 # -- Record readers: the acceptance suite's entire vocabulary -----------------

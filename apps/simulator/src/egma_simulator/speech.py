@@ -6,13 +6,23 @@ these are what carry them: a text-to-speech leg giving the persona a
 voice, and a speech-to-text leg turning what comes back into the
 transcript's ``agent`` turns.
 
-Both legs sit behind Pipecat's own service base classes, which is the
-whole point of them being here: a real provider — Cartesia or ElevenLabs
-speaking, Deepgram or Whisper listening — is another subclass of the same
-two classes, selected by configuration, and nothing above this file
-changes when one arrives. What CI runs on instead is the scripted pair
-below: no model, no network, and the same words out of the STT that went
-into the TTS, every time.
+Both legs are ordinary Pipecat frame processors, in the two places a
+real provider's service would sit — Cartesia or ElevenLabs speaking,
+Deepgram or Whisper listening — so the shape a provider must fit is
+already settled, and the pipeline that is assembled around them does not
+change when one arrives. The listening leg goes further and is a Pipecat
+STT service, the very class a real one subclasses; the speaking leg
+deliberately is not, and :class:`ScriptedTTS` says why.
+
+**There is no way to select a real provider today**: the assembly builds
+the scripted pair below, and nothing chooses between them. The switch
+lands with the first real provider, together with the extra that installs
+it and a way to test it; writing it now would be a code path nobody could
+exercise.
+
+What CI runs on is the scripted pair: no model, no network, no corpus
+to download, and the same words out of the listening leg that went into
+the speaking one.
 
 **The scripted codec.** Scripted speech is real PCM — 16-bit signed
 little-endian mono, at whatever band the transport carries — and it is
@@ -38,14 +48,16 @@ from typing import Any
 
 from pipecat.frames.frames import (
     Frame,
+    InterimTranscriptionFrame,
+    TextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import STTSettings, TTSSettings
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import STTService
-from pipecat.services.tts_service import TTSService
 from pipecat.utils.time import time_now_iso8601
 
 SAMPLE_WIDTH_BYTES = 2
@@ -184,35 +196,58 @@ def decode_speech(pcm: bytes, sample_rate_hz: int) -> str:
 # -- The legs ----------------------------------------------------------------
 
 
-class ScriptedTTS(TTSService):
+class ScriptedTTS(FrameProcessor):
     """The persona's voice, deterministically.
 
     Holds the voice the persona was authored with the way a real service
     holds a provider voice id — the exchange is what proves the leg was
     assembled from this simulation's own spec.
+
+    **Why this one is not built on Pipecat's TTS service, when the
+    listening leg is built on Pipecat's STT service.** That base class
+    regroups whatever it is given back into sentences, and it does the
+    grouping with NLTK, whose corpus is fetched from the internet the
+    first time it is wanted. On a machine without that corpus the
+    grouping raises, the turn's audio is dropped, and the recording
+    quietly loses a persona turn while the transcript still shows it —
+    found by starving a run of the corpus and reading the channels back.
+    There is no way to hand that base class a different grouper.
+
+    So this leg is a plain frame processor emitting exactly the frames the
+    base class emits, in the same place in the chain. A real provider is
+    still an ordinary Pipecat TTS service dropped into that same place —
+    what it is not is *this* leg's base class, and CI needs no corpus and
+    no network to speak.
     """
 
     def __init__(self, *, voice: PersonaVoice, sample_rate_hz: int) -> None:
-        super().__init__(
-            sample_rate=sample_rate_hz,
-            settings=TTSSettings(model=None, voice=voice.voice_id, language=None),
-        )
+        super().__init__()
         self.voice = voice
+        self.sample_rate_hz = sample_rate_hz
 
-    def can_generate_metrics(self) -> bool:
-        return False
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        # A transcription is a text frame travelling the other way — the
+        # agent's words on their way to the persona, never something to
+        # speak. The service base class draws the same line.
+        if isinstance(frame, TextFrame) and not isinstance(
+            frame, TranscriptionFrame | InterimTranscriptionFrame
+        ):
+            await self._speak(frame.text)
+        await self.push_frame(frame, direction)
 
-    async def run_tts(
-        self, text: str, context_id: str
-    ) -> AsyncGenerator[Frame | None, None]:
-        del context_id
-        yield TTSStartedFrame()
-        yield TTSAudioRawFrame(
-            audio=encode_speech(text, self.sample_rate),
-            sample_rate=self.sample_rate,
-            num_channels=1,
+    async def _speak(self, text: str) -> None:
+        if not text:
+            return
+        await self.push_frame(TTSStartedFrame())
+        await self.push_frame(
+            TTSAudioRawFrame(
+                audio=encode_speech(text, self.sample_rate_hz),
+                sample_rate=self.sample_rate_hz,
+                num_channels=1,
+            )
         )
-        yield TTSStoppedFrame()
+        await self.push_frame(TTSStoppedFrame())
 
 
 class ScriptedSTT(STTService):

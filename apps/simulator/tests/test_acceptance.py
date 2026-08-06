@@ -20,6 +20,7 @@ from datetime import datetime
 from conftest import (
     HEARTBEAT_SECONDS,
     all_terminal,
+    assert_one_speaker_to_a_channel,
     events_for,
     has_terminal,
     heartbeats_for,
@@ -481,7 +482,7 @@ async def test_a_plug_refusal_is_an_honest_failure_on_the_record(
     assert [record for record in records if record["kind"] == "refusal"] == []
 
 
-async def test_a_voice_spec_reports_a_whole_conversation_and_its_audio(
+async def test_a_voice_spec_reports_a_whole_exchange_and_its_audio(
     workbench, start_simulator
 ):
     """What a voice simulation owes its record, read back off the record.
@@ -532,21 +533,13 @@ async def test_a_voice_spec_reports_a_whole_conversation_and_its_audio(
     # The reference is a reference: no bytes on the wire, and it resolves.
     assert "://" not in audio["recording"]
     recording = simulator.blob(audio["recording"])
-    persona_audio, agent_audio, recorded_band = channels_of(recording)
-    assert recorded_band == audio["measured_sample_rate_hz"]
+    assert channels_of(recording)[2] == audio["measured_sample_rate_hz"]
 
     # Each channel is one speaker, proved by listening to it: what channel
     # 0 says is what the persona said, and what channel 1 says is what the
     # agent said — every turn of the transcript, on its own side, and on
     # neither of the other's.
-    said = {
-        "human": decode_speech(persona_audio, recorded_band),
-        "agent": decode_speech(agent_audio, recorded_band),
-    }
-    for speaker, text in spoken:
-        other = "agent" if speaker == "human" else "human"
-        assert text in said[speaker], (speaker, text)
-        assert text not in said[other], (speaker, text)
+    assert_one_speaker_to_a_channel(recording, spoken)
 
 
 async def test_a_voice_simulation_reports_a_measurement_for_every_turn(
@@ -638,7 +631,7 @@ async def test_two_voice_simulations_at_once_keep_their_audio_apart(
     assert "Ask about the delivery." in recordings["sim-voice-b"][0]
 
 
-async def test_one_scenario_over_chat_and_over_voice_is_one_conversation(
+async def test_one_scenario_over_chat_and_over_voice_is_one_transcript(
     workbench, start_simulator
 ):
     """The diagnostic the modality split exists for.
@@ -721,3 +714,52 @@ async def test_credentials_never_appear_in_logs_or_reports(
     )
     assert wal_bytes, "expected write-ahead log entries"
     assert sentinel.encode() not in wal_bytes, "the WAL carried the credential"
+
+
+async def test_a_voice_simulation_lets_no_credential_out_either(
+    workbench, start_simulator
+):
+    """The same sentinel, through the modality that emits the most.
+
+    A voice simulation writes bytes a chat one never does — a whole
+    recording — and speaks through a library that logs on its own, so
+    everything it emits is scanned here too: the reported records, every
+    byte of the child's output, the write-ahead log, and the recording.
+    """
+    sentinel = "SENTINEL-do-not-log-9a71c3e5b2f4"
+    spec = loopback_spec(
+        "sim-voice-secret",
+        scenario="First point. Second point.",
+        greeting="Front desk, hello.",
+        replies=["Certainly.", "Done."],
+        credentials={"apiKey": sentinel},
+    )
+    await workbench.offer(spec)
+    simulator = start_simulator(workbench, log_level="DEBUG")
+
+    records = await workbench.wait_for(has_terminal("sim-voice-secret"))
+    terminal = terminal_event_for(records, "sim-voice-secret")
+    assert terminal["status"] == "completed"
+    recording = simulator.blob(terminal["facts"]["audio"]["recording"])
+
+    simulator.stop()
+
+    assert sentinel not in json.dumps(records), "a report carried the credential"
+
+    output = simulator.output()
+    assert output, "expected the simulator to have logged something"
+    assert sentinel not in output, "a log line carried the credential"
+
+    wal_bytes = b"".join(
+        path.read_bytes() for path in simulator.wal_dir.glob("*.jsonl")
+    )
+    assert wal_bytes, "expected write-ahead log entries"
+    assert sentinel.encode() not in wal_bytes, "the WAL carried the credential"
+
+    assert recording, "expected a recording to have been written"
+    assert sentinel.encode() not in recording, "the recording carried the credential"
+    # And not spoken into it either — a credential read aloud would be in
+    # the samples rather than in the file's bytes.
+    for channel in channels_of(recording)[:2]:
+        spoken = decode_speech(channel, channels_of(recording)[2])
+        assert sentinel not in spoken, "the credential was spoken into the audio"

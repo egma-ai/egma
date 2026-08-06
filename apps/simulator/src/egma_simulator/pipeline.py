@@ -7,11 +7,11 @@ plug and the persona brain, and a voice simulation is the same plug and
 the same brain with speech legs between them. The brain is one component
 for every modality, forever — it never learns which of these it is in.
 
-The voice legs are Pipecat's: the persona's words are spoken by a
-text-to-speech service, the agent's audio is transcribed by a
-speech-to-text service, and both directions run through Pipecat's own
-audio buffer, which is what keeps the two speakers in step and gives the
-recording a channel each. Turn-taking is deliberately *not* Pipecat's
+The voice legs run on Pipecat: the persona's words are spoken into audio
+by one processor, the agent's audio is read back into words by another,
+and both directions pass through Pipecat's own audio buffer, which is
+what keeps the two speakers in step and gives the recording a channel
+each. Turn-taking is deliberately *not* Pipecat's
 here: the walk owns it, because limits, cancellation and the transcript
 are the walk's business and are the same for chat. So the pipeline is
 driven a turn at a time, and every wait below is for a specific frame
@@ -32,7 +32,6 @@ import logging
 import sys
 import wave
 from array import array
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from pipecat.frames.frames import (
@@ -72,10 +71,9 @@ from .speech import (
     spoken_seconds,
     voice_from_traits,
 )
+from .walk import OnTiming
 
 logger = logging.getLogger(__name__)
-
-OnTiming = Callable[[str, float], Awaitable[None]]
 
 RECORDING_NAME = "dual-channel.wav"
 """What one simulation's recording is called inside its own blob key."""
@@ -87,6 +85,16 @@ PERSONA_CHANNEL = 0
 AGENT_CHANNEL = 1
 """Who is on which channel of a recording. The transcript's two labels in
 the transcript's own order, so the file needs no legend to be read."""
+
+
+class PipelineGone(RuntimeError):
+    """The pipeline stopped while a turn was still being driven through it.
+
+    Deliberately not a ``PlugError``: that word names a platform refusing
+    or failing, and this is machinery inside the simulator going wrong.
+    The walk reports either as a failed simulation, and the reason on the
+    record is what tells a reader which of the two happened.
+    """
 
 
 @dataclass(frozen=True)
@@ -170,7 +178,10 @@ class _TurnSink(FrameProcessor):
         self.started = asyncio.Event()
         self.spoken = asyncio.Event()
         self.heard = asyncio.Event()
-        self.transcript = ""
+        self.words_heard = ""
+        """What the transcriber made of the agent's last turn. One turn's
+        words — the transcript is the whole record, and that is the
+        reporter's."""
         self._persona_audio = bytearray()
 
     def before_speaking(self) -> None:
@@ -179,7 +190,7 @@ class _TurnSink(FrameProcessor):
 
     def before_hearing(self) -> None:
         self.heard.clear()
-        self.transcript = ""
+        self.words_heard = ""
 
     def spoken_audio(self) -> bytes:
         return bytes(self._persona_audio)
@@ -193,7 +204,7 @@ class _TurnSink(FrameProcessor):
         elif isinstance(frame, LLMFullResponseEndFrame):
             self.spoken.set()
         elif isinstance(frame, TranscriptionFrame):
-            self.transcript = frame.text
+            self.words_heard = frame.text
             self.heard.set()
         await self.push_frame(frame, direction)
 
@@ -280,6 +291,12 @@ class VoicePipeline:
     def provider_reference(self) -> str | None:
         return self._transport.provider_reference
 
+    @property
+    def speaking_voice(self) -> PersonaVoice:
+        """The voice the speaking leg was built with — read back off the
+        leg itself, so what this answers is what the persona spoke with."""
+        return self._tts.voice
+
     async def open(self) -> str | None:
         await self._runner.add_workers(self._worker)
         self._running = asyncio.create_task(
@@ -348,7 +365,7 @@ class VoicePipeline:
             )
         )
         await self._reach(self._sink.heard)
-        return self._sink.transcript
+        return self._sink.words_heard
 
     async def _measure(self, measure: str, seconds: float) -> None:
         if self._on_timing is not None:
@@ -362,7 +379,7 @@ class VoicePipeline:
         from becoming a simulation that hangs until its duration limit.
         """
         if self._running is None:
-            raise PlugError("the voice pipeline was driven before it was opened")
+            raise PipelineGone("the voice pipeline was driven before it was opened")
         waiting = asyncio.ensure_future(event.wait())
         try:
             done, _pending = await asyncio.wait(
@@ -374,7 +391,7 @@ class VoicePipeline:
                 with contextlib.suppress(asyncio.CancelledError):
                     await waiting
         if waiting not in done:
-            raise PlugError("the voice pipeline ended before the turn did")
+            raise PipelineGone("the voice pipeline ended before the turn did")
 
     async def _finish(self) -> None:
         """Stop recording, write what was heard, and end the pipeline.
@@ -430,25 +447,23 @@ def dual_channel_wav(
     transcript labels them, so each side can be heard alone when a
     transcript looks wrong. The two tracks come from the pipeline's audio
     buffer, which holds each speaker's audio and keeps the pair the same
-    length; the shorter one is padded with quiet so a file is never half a
-    conversation long. On a transport carrying audio in real time the
-    buffer's quiet is the other side's clock; a counterpart that answers
-    faster than real time — the loopback does — leaves a file that is each
-    side in order rather than a faithful clock.
+    length; the shorter one is padded with quiet so a file never runs out
+    halfway through the exchange. On a transport carrying audio in real
+    time the buffer's quiet is the other side's clock; a counterpart that
+    answers faster than real time — the loopback does — leaves a file that
+    is each side in order rather than a faithful clock.
     """
     frames = max(len(persona_audio), len(agent_audio)) // SAMPLE_WIDTH_BYTES
     interleaved = array("h", bytes(frames * 2 * SAMPLE_WIDTH_BYTES))
-    interleaved[PERSONA_CHANNEL::2] = _channel(persona_audio, frames)
-    interleaved[AGENT_CHANNEL::2] = _channel(agent_audio, frames)
-    if sys.byteorder != "little":
-        interleaved.byteswap()
+    interleaved[PERSONA_CHANNEL::2] = _samples(persona_audio, frames)
+    interleaved[AGENT_CHANNEL::2] = _samples(agent_audio, frames)
 
     written = io.BytesIO()
     with wave.open(written, "wb") as out:
         out.setnchannels(2)
         out.setsampwidth(SAMPLE_WIDTH_BYTES)
         out.setframerate(sample_rate_hz)
-        out.writeframes(interleaved.tobytes())
+        out.writeframes(_as_pcm(interleaved))
     return written.getvalue()
 
 
@@ -458,21 +473,35 @@ def channels_of(wav_bytes: bytes) -> tuple[bytes, bytes, int]:
         if recording.getnchannels() != 2:
             raise ValueError("the recording is not dual-channel")
         sample_rate_hz = recording.getframerate()
-        interleaved = array("h")
-        interleaved.frombytes(recording.readframes(recording.getnframes()))
-    if sys.byteorder != "little":
-        interleaved.byteswap()
+        interleaved = _samples(
+            recording.readframes(recording.getnframes()), recording.getnframes() * 2
+        )
     return (
-        interleaved[PERSONA_CHANNEL::2].tobytes(),
-        interleaved[AGENT_CHANNEL::2].tobytes(),
+        _as_pcm(interleaved[PERSONA_CHANNEL::2]),
+        _as_pcm(interleaved[AGENT_CHANNEL::2]),
         sample_rate_hz,
     )
 
 
-def _channel(pcm: bytes, frames: int) -> array:
+def _samples(pcm: bytes, frames: int) -> array:
+    """PCM read as signed 16-bit samples, padded with quiet to ``frames``.
+
+    ``array`` holds samples in this machine's byte order while PCM is
+    always little-endian, so the two agree only on a little-endian
+    machine and a swap is what makes them agree anywhere else.
+    """
     samples = array("h")
     samples.frombytes(pcm[: frames * SAMPLE_WIDTH_BYTES])
     if sys.byteorder != "little":
         samples.byteswap()
     samples.extend([0] * (frames - len(samples)))
     return samples
+
+
+def _as_pcm(samples: array) -> bytes:
+    """Signed 16-bit samples written back out as little-endian PCM."""
+    if sys.byteorder == "little":
+        return samples.tobytes()
+    little_endian = array("h", samples)
+    little_endian.byteswap()
+    return little_endian.tobytes()

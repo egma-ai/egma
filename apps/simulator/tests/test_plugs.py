@@ -17,7 +17,7 @@ import pytest
 from egma_simulator.plugs import AgentReply, PlugError, Utterance, plug_for
 from egma_simulator.plugs.loopback import FALLBACK_REPLY as SPOKEN_FALLBACK
 from egma_simulator.plugs.loopback import (
-    SUPPORTED_BANDS,
+    SUPPORTED_BANDS_HZ,
     LoopbackCounterpart,
     negotiated_band,
 )
@@ -179,7 +179,7 @@ def test_the_counterpart_carries_the_band_it_can_not_the_one_asked_for(
     simulation stamps is the second number."""
     assert negotiated_band(asked_for) == carried
     assert loopback({"sample_rate_hz": asked_for}).sample_rate_hz == carried
-    assert carried in SUPPORTED_BANDS
+    assert carried in SUPPORTED_BANDS_HZ
 
 
 async def test_the_loopback_counterpart_speaks_at_the_band_it_carries():

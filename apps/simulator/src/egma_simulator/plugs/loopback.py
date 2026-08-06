@@ -8,7 +8,7 @@ the same script, the same endings, the same refusal of config it does not
 know, exchanged as sound instead of text.
 
 It is not a shortcut around the seam. It implements the same voice plug
-surface a phone or a web-call transport will, which is what makes the
+surface a phone or a browser transport will, which is what makes the
 acceptance suite's voice walks representative of the ones that follow.
 
 Its config keys, like every plug's, are its own:
@@ -23,9 +23,9 @@ Its config keys, like every plug's, are its own:
   falls back to a fixed holding line forever.
 - ``answer_delay_seconds`` (number ≥ 0, default 0) — how long the agent is
   quiet before it starts speaking. It is rendered into the answer's own
-  audio, where a real call carries it and where time-to-first-word is
-  measured from, rather than slept through: CI then measures the same
-  quantity a live call would without waiting for it.
+  audio, where a live exchange carries it and where time-to-first-word
+  is measured from, rather than slept through: CI then measures the
+  same quantity a live exchange would without waiting for it.
 - ``sample_rate_hz`` (integer, default 16000) — the band the connection
   asks for. The counterpart carries the nearest band it supports at or
   below it, exactly as a real platform negotiates down to what it can
@@ -45,7 +45,7 @@ from . import AgentSpeech, PlugError, Utterance
 FALLBACK_REPLY = "Is there anything else I can help you with?"
 """What the agent says once its script is spent but the exchange holds."""
 
-SUPPORTED_BANDS = (8000, 16000, 48000)
+SUPPORTED_BANDS_HZ = (8000, 16000, 48000)
 """Telephony, wideband, and full-band WebRTC — what this platform can carry."""
 
 DEFAULT_BAND_HZ = 16000
@@ -62,8 +62,8 @@ _KNOWN_KEYS = {
 
 def negotiated_band(asked_for: int) -> int:
     """The band this platform will actually carry for an asked-for one."""
-    supported = [band for band in SUPPORTED_BANDS if band <= asked_for]
-    return max(supported) if supported else min(SUPPORTED_BANDS)
+    supported = [band for band in SUPPORTED_BANDS_HZ if band <= asked_for]
+    return max(supported) if supported else min(SUPPORTED_BANDS_HZ)
 
 
 class LoopbackCounterpart:
