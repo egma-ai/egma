@@ -16,7 +16,8 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "smoke": "node smoke/real-claude-code.ts && node smoke/real-claude-code-fence.ts"
+    "smoke": "node smoke/real-claude-code.ts && node smoke/real-claude-code-fence.ts",
+    "smoke:platform": "node smoke/real-platform-login.ts"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.3.0",

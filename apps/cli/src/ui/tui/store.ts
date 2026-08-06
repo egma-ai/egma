@@ -13,12 +13,17 @@
 
 import { WizardRouter, type ScreenName, type Sequence } from "./router.ts";
 import { emptyState, type WizardState } from "./state.ts";
+import type { LoginPrompt } from "../../platform/login.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
 import type { DrivenAgent, GateId } from "../wizard-ui.ts";
 
 /** The screens of the walk, in order. */
 export const WALK_SCREENS: Sequence = [
   { id: "intro", isComplete: (state) => state.begun },
+  // Login shows only while there is something to approve, and stops showing the
+  // moment there is not — which is the router working the flow out from state
+  // rather than the flow navigating anywhere.
+  { id: "login", show: (state) => state.login !== null },
   { id: "task" },
 ];
 
@@ -41,6 +46,8 @@ export class WizardStore {
   private state: WizardState = emptyState();
   private readonly listeners = new Set<() => void>();
   private readonly gates = new Map<GateId, Gate>();
+  /** What the login screen has handed over and the flow has not taken yet. */
+  private pastedLogin: string | null = null;
 
   readonly router: WizardRouter;
 
@@ -91,6 +98,21 @@ export class WizardStore {
     this.change({ taskFile });
   }
 
+  setLogin(login: LoginPrompt | null): void {
+    this.change(
+      login === null
+        ? { login, loginTyping: "", loginCopied: false }
+        : { login },
+    );
+  }
+
+  /** Hands over what was typed back, and forgets it, so it is acted on once. */
+  takeLoginPaste(): string | null {
+    const typed = this.pastedLogin;
+    this.pastedLogin = null;
+    return typed;
+  }
+
   taskStarted(): void {
     this.change({ running: true });
   }
@@ -118,6 +140,24 @@ export class WizardStore {
   begin(): void {
     if (this.state.begun) return;
     this.change({ begun: true });
+  }
+
+  /** What the developer is typing back at the login screen, as they type it. */
+  typeLogin(loginTyping: string): void {
+    this.change({ loginTyping });
+  }
+
+  /** Hand what was typed to the flow, and clear the line it was typed on. */
+  submitLogin(): void {
+    const typed = this.state.loginTyping.trim();
+    if (typed === "") return;
+    this.pastedLogin = typed;
+    this.change({ loginTyping: "" });
+  }
+
+  /** The address has been put on the clipboard, and the screen may say so. */
+  linkCopied(): void {
+    this.change({ loginCopied: true });
   }
 
   private change(patch: Partial<WizardState>): void {
