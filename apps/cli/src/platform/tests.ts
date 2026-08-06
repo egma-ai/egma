@@ -1,0 +1,285 @@
+/**
+ * The tests on the platform, over egma's public HTTP API.
+ *
+ * The platform is the versioned store and the folder is a working copy, so this
+ * module reads two things and writes two things: the tests as they currently
+ * stand, one frozen version by its own id, a new test, and an edit to one.
+ *
+ * **Authored things are never overwritten.** An edit does not change a version;
+ * it creates the next one and moves the pointer, so a run that pinned the old
+ * one still says exactly what it executed. That is why a write carries the
+ * version the writer last saw: the platform compares it against what is current
+ * and refuses when the two have parted, which is the whole of the refusal rule
+ * and it is enforced there rather than here. This end checks first only so that
+ * a push that is going to be refused is refused before it has written anything.
+ *
+ * Two shapes of answer are values rather than exceptions, because both are
+ * ordinary things that happen to somebody working in a team: the platform has
+ * moved on, and the platform turned a test away at its door. Everything else —
+ * an instance that did not answer, a key that is not one — is thrown, because
+ * nothing further up can do anything sensible with it.
+ */
+
+import { PlatformUnreachableError, type Fetch } from "./device-flow.ts";
+import type { SignedIn } from "./signed-in.ts";
+
+/** A test as the platform currently has it. */
+export type PlatformTest = {
+  readonly id: string;
+  readonly name: string;
+  /** The current version's own id — what a file pins and a run pins. */
+  readonly versionId: string;
+  readonly version: number;
+  readonly scenario: string;
+  readonly expectedBehaviors: readonly string[];
+  /** By name, in the order they were authored. */
+  readonly personas: readonly string[];
+};
+
+/** One frozen version, and whether the test has since moved past it. */
+export type PlatformTestVersion = {
+  readonly id: string;
+  readonly testId: string;
+  readonly testName: string;
+  readonly version: number;
+  /** False once a later version exists. */
+  readonly current: boolean;
+};
+
+/** What a write came back with. */
+export type WriteAnswer =
+  | { readonly kind: "written"; readonly test: PlatformTest }
+  /** The platform has moved since the version this write named. */
+  | {
+      readonly kind: "moved";
+      readonly testName: string;
+      readonly currentVersionId: string;
+    }
+  /** The platform turned the test away at its door, in its own words. */
+  | { readonly kind: "turned-away"; readonly reason: string };
+
+/** An answer egma asked for and did not get. */
+export class PlatformRefusedError extends Error {
+  readonly status: number;
+
+  constructor(status: number, said: string) {
+    super(said);
+    this.name = "PlatformRefusedError";
+    this.status = status;
+  }
+}
+
+function text(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function textList(value: unknown): readonly string[] {
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+}
+
+/**
+ * The personas a version names, by name.
+ *
+ * A file says `personas: [impatient-caller]`, because a folder a team reviews
+ * cannot be a folder of identifiers. So the wire carries names in both
+ * directions and the platform is what resolves them.
+ */
+function personaNames(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (typeof entry === "string") return [entry];
+    if (typeof entry === "object" && entry !== null) {
+      const name = text((entry as Record<string, unknown>).name);
+      return name === "" ? [] : [name];
+    }
+    return [];
+  });
+}
+
+function testFrom(body: Record<string, unknown>): PlatformTest {
+  return {
+    id: text(body.id),
+    name: text(body.name),
+    versionId: text(body.version_id),
+    version: typeof body.version === "number" ? body.version : 0,
+    scenario: text(body.scenario),
+    expectedBehaviors: textList(body.expected_behaviors),
+    personas: personaNames(body.personas),
+  };
+}
+
+async function bodyOf(response: Response): Promise<Record<string, unknown>> {
+  return (await response.json().catch(() => ({}))) as Record<string, unknown>;
+}
+
+/** What the platform said about a refusal, or egma's own words for a silence. */
+function saidBy(body: Record<string, unknown>, status: number): string {
+  const message = text(body.message).trim();
+  return message === "" ? `egma answered ${status} and said nothing about it` : message;
+}
+
+type Call = {
+  readonly signedIn: SignedIn;
+  readonly path: string;
+  readonly method?: string;
+  readonly body?: unknown;
+  readonly fetchImpl?: Fetch;
+};
+
+async function ask(call: Call): Promise<{ response: Response; body: Record<string, unknown> }> {
+  const fetchImpl = call.fetchImpl ?? fetch;
+  const address = `${call.signedIn.url}${call.path}`;
+
+  let response: Response;
+  try {
+    response = await fetchImpl(address, {
+      method: call.method ?? "GET",
+      headers: {
+        authorization: `Bearer ${call.signedIn.key}`,
+        ...(call.body === undefined ? {} : { "content-type": "application/json" }),
+      },
+      ...(call.body === undefined ? {} : { body: JSON.stringify(call.body) }),
+    });
+  } catch (cause) {
+    throw new PlatformUnreachableError(call.signedIn.url, cause);
+  }
+
+  return { response, body: await bodyOf(response) };
+}
+
+/** Everything the credential reaches, newest first, following every page. */
+export async function listTests(
+  signedIn: SignedIn,
+  fetchImpl?: Fetch,
+): Promise<readonly PlatformTest[]> {
+  const found: PlatformTest[] = [];
+  let cursor: string | null = null;
+
+  for (;;) {
+    const at: string =
+      cursor === null ? "/api/tests" : `/api/tests?cursor=${encodeURIComponent(cursor)}`;
+    const { response, body } = await ask({
+      signedIn,
+      path: at,
+      ...(fetchImpl === undefined ? {} : { fetchImpl }),
+    });
+    if (!response.ok) throw new PlatformRefusedError(response.status, saidBy(body, response.status));
+
+    for (const entry of Array.isArray(body.tests) ? body.tests : []) {
+      if (typeof entry === "object" && entry !== null) {
+        found.push(testFrom(entry as Record<string, unknown>));
+      }
+    }
+
+    const next = text(body.next_cursor);
+    if (next === "") return found;
+    cursor = next;
+  }
+}
+
+/**
+ * One version by its own id — how a pinned file says which test it is a draft
+ * of, and how a stale pin is told from one the platform has never heard of.
+ */
+export async function getTestVersion(
+  signedIn: SignedIn,
+  versionId: string,
+  fetchImpl?: Fetch,
+): Promise<PlatformTestVersion | null> {
+  const { response, body } = await ask({
+    signedIn,
+    path: `/api/test-versions/${encodeURIComponent(versionId)}`,
+    ...(fetchImpl === undefined ? {} : { fetchImpl }),
+  });
+
+  if (response.status === 404) return null;
+  if (!response.ok) throw new PlatformRefusedError(response.status, saidBy(body, response.status));
+
+  return {
+    id: text(body.id),
+    testId: text(body.test_id),
+    testName: text(body.test_name),
+    version: typeof body.version === "number" ? body.version : 0,
+    current: body.current === true,
+  };
+}
+
+/** What a write says about one test. */
+export type TestInput = {
+  readonly name: string;
+  readonly scenario: string;
+  readonly expectedBehaviors: readonly string[];
+  /** By name. Empty takes the default persona. */
+  readonly personas: readonly string[];
+};
+
+function writeBody(input: TestInput): Record<string, unknown> {
+  return {
+    name: input.name,
+    scenario: input.scenario,
+    expected_behaviors: [...input.expectedBehaviors],
+    personas: [...input.personas],
+  };
+}
+
+function answerFor(
+  status: number,
+  body: Record<string, unknown>,
+): WriteAnswer | null {
+  if (status === 409) {
+    return {
+      kind: "moved",
+      testName: text((body.test as Record<string, unknown> | undefined)?.name) || text(body.name),
+      currentVersionId: text(body.current_version_id),
+    };
+  }
+  if (status === 422) return { kind: "turned-away", reason: saidBy(body, status) };
+  return null;
+}
+
+export async function createTest(
+  signedIn: SignedIn,
+  input: TestInput,
+  fetchImpl?: Fetch,
+): Promise<WriteAnswer> {
+  const { response, body } = await ask({
+    signedIn,
+    path: "/api/tests",
+    method: "POST",
+    body: writeBody(input),
+    ...(fetchImpl === undefined ? {} : { fetchImpl }),
+  });
+
+  const expected = answerFor(response.status, body);
+  if (expected !== null) return expected;
+  if (!response.ok) throw new PlatformRefusedError(response.status, saidBy(body, response.status));
+  return { kind: "written", test: testFrom(body) };
+}
+
+/**
+ * Edit one test, saying which version this edit was written against.
+ *
+ * `expectedVersionId` is the whole refusal rule on the wire. The platform
+ * compares it against what is current and answers `moved` when they differ, so
+ * a teammate's dashboard edit cannot be lost by a push that started before it.
+ */
+export async function editTest(
+  signedIn: SignedIn,
+  testId: string,
+  expectedVersionId: string,
+  input: TestInput,
+  fetchImpl?: Fetch,
+): Promise<WriteAnswer> {
+  const { response, body } = await ask({
+    signedIn,
+    path: `/api/tests/${encodeURIComponent(testId)}`,
+    method: "PATCH",
+    body: { ...writeBody(input), expected_version_id: expectedVersionId },
+    ...(fetchImpl === undefined ? {} : { fetchImpl }),
+  });
+
+  const expected = answerFor(response.status, body);
+  if (expected !== null) return expected;
+  if (!response.ok) throw new PlatformRefusedError(response.status, saidBy(body, response.status));
+  return { kind: "written", test: testFrom(body) };
+}

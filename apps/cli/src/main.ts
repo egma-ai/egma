@@ -17,21 +17,44 @@ import {
   launchForId,
   type DrivenAgentLaunch,
 } from "./acp/registry.ts";
+import type { FolderCommandOptions } from "./commands/folder-verbs.ts";
+import { runInitCommand } from "./commands/init.ts";
 import { runLoginCommand } from "./commands/login.ts";
+import { runPullCommand } from "./commands/pull.ts";
+import { runPushCommand } from "./commands/push.ts";
 import { resolvePlatformAccess, UnusableUrlError } from "./platform/credentials.ts";
 import { HeadlessUI } from "./ui/headless-ui.ts";
-import { startTui } from "./ui/tui/start-tui.ts";
 import { buildExitLine, type ExitReport } from "./wizard/exit-line.ts";
 import type { PlatformAccess } from "./wizard/login-step.ts";
 import type { StopReason } from "./wizard/stop.ts";
-import { walk } from "./wizard/walk.ts";
+
+/**
+ * The wizard's machinery arrives through a dynamic import, and the verbs never
+ * ask for it.
+ *
+ * A terminal renderer and a protocol client are the two most expensive things
+ * this package loads, and a headless verb uses neither — it prints lines and
+ * talks to egma over HTTP. Loading them anyway put a quarter of a second in
+ * front of every `egma login`, `egma pull` and `egma push`, which is time a
+ * coding agent driving the product pays on every single call.
+ */
+async function wizardMachinery(): Promise<{
+  readonly startTui: typeof import("./ui/tui/start-tui.ts").startTui;
+  readonly walk: typeof import("./wizard/walk.ts").walk;
+}> {
+  const [{ startTui }, { walk }] = await Promise.all([
+    import("./ui/tui/start-tui.ts"),
+    import("./wizard/walk.ts"),
+  ]);
+  return { startTui, walk };
+}
 
 /**
  * The verbs. A bare `egma` runs the wizard; naming one runs it headlessly,
  * because a verb is what a coding agent types and a coding agent has no
  * keystroke to give.
  */
-export const VERBS = ["login"] as const;
+export const VERBS = ["login", "init", "pull", "push"] as const;
 
 export type Verb = (typeof VERBS)[number];
 
@@ -48,6 +71,10 @@ export type Invocation = {
   readonly url: string | null;
   /** `--force`: do the work again even though it has been done. */
   readonly force: boolean;
+  /** What `egma init` should write into the folder's config file. */
+  readonly agentName: string | null;
+  readonly connectionName: string | null;
+  readonly suiteName: string | null;
   /**
    * A test seam, not product surface: `--file` and `-- <command>` let a test
    * pin the file and start a scripted agent in place of a real one. Neither is
@@ -72,6 +99,9 @@ export function parseArgs(argv: readonly string[]): Invocation {
   let cwd: string | null = null;
   let url: string | null = null;
   let force = false;
+  let agentName: string | null = null;
+  let connectionName: string | null = null;
+  let suiteName: string | null = null;
   let file: string | null = null;
   let drivenAgentCommand: string[] = [];
   const unknown: string[] = [];
@@ -89,6 +119,9 @@ export function parseArgs(argv: readonly string[]): Invocation {
     else if (argument === "--cwd") cwd = argv[(index += 1)] ?? null;
     else if (argument === "--url") url = argv[(index += 1)] ?? null;
     else if (argument === "--force") force = true;
+    else if (argument === "--agent") agentName = argv[(index += 1)] ?? null;
+    else if (argument === "--connection") connectionName = argv[(index += 1)] ?? null;
+    else if (argument === "--suite") suiteName = argv[(index += 1)] ?? null;
     else if (argument === "--file") file = argv[(index += 1)] ?? null;
     else if (verb === null && isVerb(argument)) verb = argument;
     else unknown.push(argument);
@@ -103,6 +136,9 @@ export function parseArgs(argv: readonly string[]): Invocation {
     cwd,
     url,
     force,
+    agentName,
+    connectionName,
+    suiteName,
     file,
     drivenAgentCommand,
     unknown,
@@ -116,6 +152,11 @@ export function helpText(): string {
     "Usage:",
     "  egma [options]           The wizard.",
     "  egma login [options]     Sign this machine in. No questions, plain lines.",
+    "  egma init [options]      Make the egma folder this repository's tests",
+    "                           live in. Safe to run again.",
+    "  egma pull [options]      Write egma's current test versions into it.",
+    "  egma push [options]      Upload the tests in it. Refuses, naming names,",
+    "                           when egma has moved on since your last pull.",
     "",
     "Options:",
     "  --coding-agent <id>  Which coding agent to drive, named as the agent",
@@ -126,6 +167,10 @@ export function helpText(): string {
     "                       does the same for a whole shell.",
     "  --force              With login: sign in again even when this machine",
     "                       already holds a key.",
+    "  --agent <name>       With init: what to call the voice agent this",
+    "                       folder's tests are for.",
+    "  --connection <name>  With init: what to call the way egma reaches it.",
+    "  --suite <name>       With init: what to call this folder's test suite.",
     "  --headless           Run with no terminal and no keystroke: plain lines,",
     "                       and the task taken as already agreed to.",
     "  -h, --help           Print this.",
@@ -142,6 +187,17 @@ export function helpText(): string {
     "What egma login answers with:",
     "  0 signed in   2 denied   3 the code ran out",
     "  4 egma did not answer, or refused   130 stopped part way",
+    "",
+    "What egma init, pull and push print, one fact per line:",
+    "  url, folder, and then one line per test: what happened to it, the file,",
+    "  and the version the file now pins. push names every conflicting test on",
+    "  its own conflict: line.",
+    "",
+    "What egma init, pull and push answer with:",
+    "  0 done   1 no egma folder here   2 not signed in",
+    "  4 egma did not answer, or refused",
+    "  5 push refused: egma has moved on, pull first",
+    "  6 egma turned a test away at its door   130 stopped part way",
     "",
     `The agent registry was mirrored on ${REGISTRY_SNAPSHOT_MIRRORED_ON}.`,
   ].join("\n");
@@ -198,6 +254,7 @@ async function runHeadless(
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
 
+  const { walk } = await wizardMachinery();
   const ui = new HeadlessUI({ write: (line) => process.stdout.write(`${line}\n`) });
   try {
     const report = await walk({
@@ -222,6 +279,7 @@ async function runWizard(
   file: string | null,
   platform: PlatformAccess,
 ): Promise<number> {
+  const { startTui, walk } = await wizardMachinery();
   const controller = new AbortController();
   const tui = startTui({ stop: (reason) => controller.abort(reason) });
 
@@ -246,6 +304,48 @@ async function runWizard(
     const reason = error instanceof Error ? error.message : String(error);
     tui.close({ kind: "failed", reason });
     return 1;
+  } finally {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+  }
+}
+
+/**
+ * The folder verbs: no terminal needed, no keystroke taken, no question asked.
+ *
+ * One runner for the three of them, because what they share is everything a
+ * caller sees — where they work, where they print, and that a signal stops them
+ * rather than leaving half a folder behind.
+ */
+async function runFolderVerb(
+  verb: "init" | "pull" | "push",
+  invocation: Invocation,
+  access: PlatformAccess,
+): Promise<number> {
+  const controller = new AbortController();
+  const onSignal = (): void => controller.abort("interrupt");
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+
+  const options: FolderCommandOptions = {
+    access,
+    cwd: path.resolve(invocation.cwd ?? process.cwd()),
+    out: (line) => void process.stdout.write(`${line}\n`),
+    fail: (line) => void process.stderr.write(`${line}\n`),
+  };
+
+  try {
+    if (verb === "init") {
+      return await runInitCommand({
+        ...options,
+        names: {
+          agent: invocation.agentName,
+          connection: invocation.connectionName,
+          suite: invocation.suiteName,
+        },
+      });
+    }
+    return verb === "pull" ? await runPullCommand(options) : await runPushCommand(options);
   } finally {
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
@@ -312,6 +412,14 @@ export async function main(argv: readonly string[]): Promise<void> {
   // so there is nothing for a keystroke to agree to.
   if (invocation.verb === "login") {
     process.exitCode = await runLogin(invocation, access);
+    return;
+  }
+  if (
+    invocation.verb === "init" ||
+    invocation.verb === "pull" ||
+    invocation.verb === "push"
+  ) {
+    process.exitCode = await runFolderVerb(invocation.verb, invocation, access);
     return;
   }
 
