@@ -11,7 +11,7 @@ You need Docker with Compose. Nothing else.
 docker compose up
 ```
 
-That starts four services and applies both schemas. Nobody runs a migration
+That starts five services and applies both schemas. Nobody runs a migration
 step, because there isn't one — the API applies its migrations while it boots.
 
 | Service | URL |
@@ -20,6 +20,7 @@ step, because there isn't one — the API applies its migrations while it boots.
 | API | http://localhost:3100 |
 | Postgres | `postgres://egma:egma@localhost:5433/egma` |
 | ClickHouse | `http://egma:egma@localhost:8124/egma` |
+| Simulator | none — it only dials out |
 
 Open http://localhost:3101 and sign up. Your organization and your first project
 are created together, and you become their admin. On a fresh instance the first
@@ -48,6 +49,62 @@ bring the services back up — Compose reads it on top with no further arguments
 It is an override rather than the default because a container may not raise its
 limit past the daemon's own, so a host with a low hard `nofile` would not start
 at all.
+
+## The simulator, and why it publishes nothing
+
+The fifth service conducts simulations: it takes a persona and a scenario and
+holds a real conversation with the agent under test, then reports the
+transcript, the measurements and how it ended.
+
+**It claims its work rather than being sent it.** It asks the control plane for
+what it has room for, keeps a heartbeat going while it conducts, and posts what
+happened as it happens. Every arrow points out, so there is no `ports:` on that
+service and no inbound network surface to think about — adding a second
+simulator is copying the entry, and the two distribute work between themselves
+with nothing in front of them.
+
+**One volume, `simulator-data`, holds what a report can only point at.**
+Recordings of voice simulations land there, and so does the write-ahead log,
+which is the only record of a report that never got through. Both survive the
+container being restarted, replaced or rebuilt; only `docker compose down -v`
+removes them, and that is what it is for.
+
+Everything else is environment, and `.env.example` names each one with its
+default. Two are worth knowing about before anything else:
+
+- **`EGMA_SIMULATOR_MODEL_PROVIDER` decides where the persona's words come
+  from.** The default, `scripted`, walks the scenario deterministically and
+  needs no account at all. Set it to `openai` — with `EGMA_SIMULATOR_MODEL_NAME`
+  and `EGMA_SIMULATOR_MODEL_API_KEY`, and `EGMA_SIMULATOR_MODEL_BASE_URL` for
+  anything OpenAI-compatible — and the persona improvises instead.
+- **`EGMA_SIMULATOR_CAPACITY` is how many conversations happen at once.** The
+  simulator claims only what it can hold, so a big run degrades into a queue
+  rather than into overload.
+
+Anything set to something it cannot use stops the container on its first line,
+naming the variable. A wrongly mounted volume is caught the same way, rather
+than by losing the first recording.
+
+### Watching one without a control plane
+
+The endpoints the simulator dials are still being built, so there is nothing to
+trigger a run with yet. To see the machinery work anyway, start it against the
+**workbench** — a fake control plane that speaks the same contract from spec
+fixtures, with no database anywhere:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.workbench.yml \
+  up --build simulator workbench
+```
+
+The workbench prints one JSON line per observation — queued, the claim, each
+heartbeat, each reported event — which is a simulation going queued → claimed →
+running → completed in front of you. Chat exchanges finish in seconds; the
+voice fixture leaves a real `.wav` on the volume with one speaker per channel.
+`http://localhost:8085/workbench/records` is the same thing as JSON.
+
+`docker compose up` starts no workbench. This is a dev and demo affair, which
+is why it lives in a file you have to ask for by name.
 
 ## Working on it
 
