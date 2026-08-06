@@ -1,11 +1,16 @@
 """The simulator's side of the wire: three outbound calls, nothing inbound.
 
-Per ADR-0005 the simulator pulls. It claims work with a capacity
-declaration on a request the control plane may hold open, heartbeats each
-running simulation and receives directives on the answers, and posts report
-documents as events happen. In development and test the other end is the
-workbench; when the real claim API lands in the control plane, nothing
-here changes — that is the point of the contract.
+The simulator pulls its own work rather than being sent it. It claims
+simulations with a capacity declaration, on a request the control plane may
+hold open until there is something to give; it heartbeats each running
+simulation and receives any directive on the answer; and it posts report
+documents as events happen. Every arrow points out, so the simulator needs
+no inbound network surface at all — which is what makes it one more
+container that only dials out.
+
+In development and test the other end is the workbench. Nothing here knows
+the difference, and nothing here changes when the real control plane
+answers instead: both ends speak the contract, not each other.
 """
 
 from __future__ import annotations
@@ -15,6 +20,21 @@ import logging
 import aiohttp
 
 logger = logging.getLogger(__name__)
+
+# What "the call did not get through" is actually made of. `TimeoutError` is
+# the one that surprises: aiohttp enforces `ClientTimeout(total=...)` with a
+# bare `TimeoutError`, which is an `OSError` — *not* an `aiohttp.ClientError`.
+# Catching only `ClientError` therefore misses the single most likely failure
+# a control plane has, and lets it escape as an exception nothing above
+# this module is written to expect.
+UNREACHABLE = (aiohttp.ClientError, TimeoutError)
+
+# A claim is meant to hang while the queue is empty, so its timeout has to
+# outlast the hold the control plane was asked for, with room to spare.
+CLAIM_TIMEOUT_MARGIN_SECONDS = 15.0
+
+# Everything else answers promptly or is broken.
+BRISK_TIMEOUT_SECONDS = 10.0
 
 
 class ClaimFailure(Exception):
@@ -43,11 +63,10 @@ class ControlPlaneClient:
         claim_wait_seconds: float,
     ) -> None:
         self._base_url = base_url.rstrip("/")
-        # The claim request is meant to hang while the queue is empty; its
-        # timeout must outlast the server's hold, with margin. Everything
-        # else answers promptly or is broken.
-        self._claim_timeout = aiohttp.ClientTimeout(total=claim_wait_seconds + 15)
-        self._brisk_timeout = aiohttp.ClientTimeout(total=10)
+        self._claim_timeout = aiohttp.ClientTimeout(
+            total=claim_wait_seconds + CLAIM_TIMEOUT_MARGIN_SECONDS
+        )
+        self._brisk_timeout = aiohttp.ClientTimeout(total=BRISK_TIMEOUT_SECONDS)
         self._session: aiohttp.ClientSession | None = None
 
     async def __aenter__(self) -> ControlPlaneClient:
@@ -77,7 +96,7 @@ class ControlPlaneClient:
                         f"claim answered {response.status}: {await response.text()}"
                     )
                 body = await response.json()
-        except aiohttp.ClientError as error:
+        except UNREACHABLE as error:
             raise ClaimFailure(f"claim did not get through: {error!r}") from error
 
         specs = body.get("specs") if isinstance(body, dict) else None
@@ -99,7 +118,7 @@ class ControlPlaneClient:
                         f"{await response.text()}"
                     )
                 body = await response.json()
-        except aiohttp.ClientError as error:
+        except UNREACHABLE as error:
             raise HeartbeatFailure(
                 f"heartbeat did not get through: {error!r}"
             ) from error
@@ -129,5 +148,5 @@ class ControlPlaneClient:
                 if 400 <= response.status < 500:
                     raise ReportRejected(f"{response.status}: {text}")
                 raise TransientReportFailure(f"{response.status}: {text}")
-        except aiohttp.ClientError as error:
+        except UNREACHABLE as error:
             raise TransientReportFailure(f"{error!r}") from error

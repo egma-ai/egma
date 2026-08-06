@@ -8,8 +8,8 @@ suite asserts against nothing else, and a person watching the log watches
 a simulation go queued → claimed → running → completed.
 
 When the real claim API lands in the control plane, the workbench retires
-from the critical path and stays what it already is: the runtime
-developer's local rig.
+from the critical path and stays what it already is: the local rig for
+whoever is working on the simulator.
 """
 
 from __future__ import annotations
@@ -34,8 +34,15 @@ class RefusedReport(Exception):
 class WorkbenchState:
     """The queue of specs, the cancel flags, and the record of everything."""
 
-    def __init__(self, *, hold_seconds: float) -> None:
+    def __init__(self, *, hold_seconds: float, over_grant: int = 0) -> None:
         self._hold_seconds = hold_seconds
+        self._over_grant = over_grant
+        """How many specs past the declared capacity a claim answers with.
+
+        Zero is a well-behaved control plane. Anything else is the
+        workbench misbehaving on purpose, so the simulator's own cap can be
+        tested rather than the workbench's arithmetic standing in for it.
+        """
         self._queued: dict[str, dict] = {}
         self._claimed: dict[str, dict] = {}
         self._cancel_flags: set[str] = set()
@@ -68,7 +75,9 @@ class WorkbenchState:
             while True:
                 granted = [
                     self._queued.pop(simulation_id)
-                    for simulation_id in list(self._queued)[:capacity]
+                    for simulation_id in list(self._queued)[
+                        : capacity + self._over_grant
+                    ]
                 ]
                 if granted:
                     for spec in granted:

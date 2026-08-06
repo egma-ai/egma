@@ -1,12 +1,20 @@
 """The standing service: claim, conduct, heartbeat, report, repeat.
 
-Dispatch per ADR-0005. One long-poll claim loop asks for exactly as much
-work as the executor has room for; each claimed spec becomes one running
-simulation — a conduct task walking the pipe and a heartbeat task beating
-every few seconds, with cancel directives honored on the beat's answer.
-The executor is deliberately a seam: today it runs simulations as asyncio
-tasks in this process, and a process- or container-per-simulation executor
-replaces it without the claim loop noticing.
+One long-poll claim loop asks the control plane for exactly as much work as
+the executor has room for. Each claimed spec becomes one running simulation
+— a task walking the pipe, and a task beating every few seconds — and a
+cancel directive arriving on a beat's answer stops the walk at that beat.
+Every arrow points out: the simulator is never dialled into.
+
+The executor is deliberately a seam. Today it runs each simulation as one
+asyncio task in this process; a process- or container-per-simulation
+executor implements the same handful of methods and the claim loop never
+learns the difference.
+
+Nothing here may take the whole service down. A control plane that is slow,
+broken, or answering nonsense is an ordinary Tuesday, and the loops below
+are written so that the worst it costs is the work in flight — never the
+simulator itself, and never a capacity slot that no longer comes back.
 """
 
 from __future__ import annotations
@@ -18,28 +26,31 @@ from typing import Protocol
 
 from .client import ClaimFailure, ControlPlaneClient, HeartbeatFailure
 from .config import SimulatorConfig
-from .contract import ContractViolation, validate_spec
+from .contract import ContractViolation
 from .pipe import Conducted, PipeControls, conduct
 from .redaction import SecretRegistry
 from .reporting import Reporter, moment
+from .spec import SimulationSpec
 
 logger = logging.getLogger(__name__)
+
+CLAIM_RETRY_SECONDS = 1.0
 
 
 class Executor(Protocol):
     """The seam between claiming work and running it.
 
     ``free_capacity`` is what the next claim declares; ``submit`` accepts a
-    claimed spec and returns without waiting for it; ``wait_for_room`` parks
-    the claim loop while the executor is full; ``cancel_all`` and ``drain``
-    are teardown. An executor that runs simulations in processes or
-    containers implements this same surface.
+    spec and returns without waiting for it; ``wait_for_room`` parks the
+    claim loop while the executor is full; ``cancel_all`` and ``drain`` are
+    teardown. An executor that runs simulations in processes or containers
+    implements this same surface and nothing above it changes.
     """
 
     @property
     def free_capacity(self) -> int: ...
 
-    def submit(self, spec: dict) -> None: ...
+    def submit(self, spec: SimulationSpec) -> None: ...
 
     async def wait_for_room(self) -> None: ...
 
@@ -51,14 +62,14 @@ class Executor(Protocol):
 class AsyncioExecutor:
     """Runs each simulation as one asyncio task inside this process.
 
-    The v1 executor, per the spec's flagged deviation from per-simulation
-    containers: a testing platform's failure domain is forgiving, and the
-    seam means heavier executors can replace this without touching the
-    claim loop.
+    The first executor, and the simplest thing that honors the seam: a
+    testing platform's failure domain is forgiving, and per-simulation
+    containers would tax exactly the self-hosted deployment where adoption
+    lives. Heavier executors can replace this without touching the loop.
     """
 
     def __init__(
-        self, capacity: int, *, start: Callable[[dict], Awaitable[None]]
+        self, capacity: int, *, start: Callable[[SimulationSpec], Awaitable[None]]
     ) -> None:
         self._capacity = capacity
         self._start = start
@@ -70,11 +81,11 @@ class AsyncioExecutor:
     def free_capacity(self) -> int:
         return self._capacity - len(self._running)
 
-    def submit(self, spec: dict) -> None:
+    def submit(self, spec: SimulationSpec) -> None:
         if self.free_capacity < 1:
             raise RuntimeError("submit called with no free capacity")
         task = asyncio.create_task(
-            self._start(spec), name=f"simulation:{spec.get('simulation_id')}"
+            self._start(spec), name=f"simulation:{spec.simulation_id}"
         )
         self._running.add(task)
         task.add_done_callback(self._finished)
@@ -106,20 +117,20 @@ class RunningSimulation:
 
     def __init__(
         self,
-        spec: dict,
+        spec: SimulationSpec,
         *,
         client: ControlPlaneClient,
         config: SimulatorConfig,
         secrets: SecretRegistry,
     ) -> None:
-        self.simulation_id: str = spec["simulation_id"]
+        self.simulation_id = spec.simulation_id
         self._spec = spec
         self._client = client
         self._config = config
         self._secrets = secrets
         self._reporter = Reporter(
             client,
-            self.simulation_id,
+            spec.simulation_id,
             config.wal_dir,
             delivery_deadline_seconds=config.report_deadline_seconds,
         )
@@ -141,27 +152,23 @@ class RunningSimulation:
                 await heartbeat
             except asyncio.CancelledError:
                 pass
+            except Exception:
+                # The beat is already over and its own loop logged why.
+                # Raising here would skip closing the reporter, which is
+                # what gets the terminal event onto the wire.
+                logger.exception(
+                    "the heartbeat for %s ended badly", self.simulation_id
+                )
             await self._reporter.close()
 
     async def _conduct_and_report(self) -> None:
         reporter = self._reporter
         reporter.running()
         try:
-            validate_spec(self._spec)
-        except ContractViolation as violation:
-            logger.error(
-                "refusing %s: claimed spec does not speak the contract (%s)",
-                self.simulation_id,
-                "; ".join(violation.complaints),
-            )
-            reporter.failed("error", "claimed spec failed contract validation")
-            return
-
-        try:
             conducted = await conduct(
-                scenario_instructions=self._spec["scenario"]["instructions"],
-                max_turns=self._spec["limits"]["max_turns"],
-                max_duration_seconds=self._spec["limits"]["max_duration_seconds"],
+                scenario_instructions=self._spec.scenario_instructions,
+                max_turns=self._spec.limits.max_turns,
+                max_duration_seconds=self._spec.limits.max_duration_seconds,
                 pacing_seconds=self._config.echo_turn_seconds,
                 on_turn=self._on_turn,
                 controls=self._controls,
@@ -169,8 +176,9 @@ class RunningSimulation:
             )
         except asyncio.CancelledError:
             # The service itself is being torn down mid-walk. Reporting a
-            # terminal state now would be a guess; the orphan sweep exists
-            # to make this honest. Say nothing and let the heartbeats stop.
+            # terminal state now would be a guess; a simulation whose
+            # simulator vanished is answered by the control plane noticing
+            # the heartbeats stop. Say nothing.
             raise
         except Exception as fault:
             reason = self._secrets.redact(f"{type(fault).__name__}: {fault}")
@@ -211,25 +219,36 @@ class RunningSimulation:
                     self.simulation_id, self._config.claimant
                 )
             except HeartbeatFailure as failure:
-                # A missed beat is the control plane's signal, not ours to
-                # invent meaning for. Keep conducting, keep trying.
+                # A missed beat is the control plane's signal to read, not
+                # ours to invent meaning for. Keep conducting, keep trying.
                 logger.warning(
                     "heartbeat for %s did not land: %s", self.simulation_id, failure
                 )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Ending this loop would leave the walk running with no way
+                # to ever hear a cancel directive. Nothing is worth that.
+                logger.exception(
+                    "heartbeat for %s hit an unexpected fault", self.simulation_id
+                )
             else:
-                if directive == "cancel":
-                    logger.info(
-                        "cancel directive for %s; stopping at this beat",
-                        self.simulation_id,
-                    )
-                    await self._controls.request_cancel()
-                elif directive is not None:
-                    logger.warning(
-                        "unknown directive %r for %s ignored",
-                        directive,
-                        self.simulation_id,
-                    )
+                await self._honor(directive)
             await asyncio.sleep(self._config.heartbeat_seconds)
+
+    async def _honor(self, directive: str | None) -> None:
+        if directive is None:
+            return
+        if directive == "cancel":
+            logger.info(
+                "cancel directive for %s; stopping at this beat",
+                self.simulation_id,
+            )
+            await self._controls.request_cancel()
+            return
+        logger.warning(
+            "unknown directive %r for %s ignored", directive, self.simulation_id
+        )
 
 
 class SimulatorService:
@@ -238,12 +257,9 @@ class SimulatorService:
     def __init__(self, config: SimulatorConfig, *, secrets: SecretRegistry) -> None:
         self._config = config
         self._secrets = secrets
-        self._stopping = asyncio.Event()
-
-    def stop(self) -> None:
-        self._stopping.set()
 
     async def run(self) -> None:
+        """Claim and conduct until cancelled. Cancellation is the only exit."""
         config = self._config
         async with ControlPlaneClient(
             config.control_plane_url,
@@ -260,17 +276,17 @@ class SimulatorService:
                 config.capacity,
             )
             try:
-                await self._claim_until_stopped(client, executor)
+                await self._claim_forever(client, executor)
             finally:
                 executor.cancel_all()
                 await executor.drain()
 
-    async def _claim_until_stopped(
+    async def _claim_forever(
         self, client: ControlPlaneClient, executor: Executor
     ) -> None:
-        while not self._stopping.is_set():
+        while True:
             if executor.free_capacity < 1:
-                await self._wait_for_room_or_stop(executor)
+                await executor.wait_for_room()
                 continue
 
             try:
@@ -279,30 +295,65 @@ class SimulatorService:
                 )
             except ClaimFailure as failure:
                 logger.warning("claim did not land: %s", failure)
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(CLAIM_RETRY_SECONDS)
+                continue
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Whatever went wrong, it is not worth the simulations
+                # currently in flight, which is what ending this loop would
+                # cost them.
+                logger.exception("the claim loop hit an unexpected fault")
+                await asyncio.sleep(CLAIM_RETRY_SECONDS)
                 continue
 
-            for spec in specs:
-                if not isinstance(spec, dict) or not spec.get("simulation_id"):
-                    logger.error(
-                        "claim answer carried a spec with no simulation_id; dropped"
-                    )
-                    continue
-                connection = spec.get("connection")
-                if isinstance(connection, dict):
-                    self._secrets.register(connection.get("credentials"))
-                executor.submit(spec)
+            self._accept(specs, executor)
 
-    async def _wait_for_room_or_stop(self, executor: Executor) -> None:
-        stop_waiter = asyncio.create_task(self._stopping.wait())
-        room_waiter = asyncio.create_task(executor.wait_for_room())
-        _, pending = await asyncio.wait(
-            {stop_waiter, room_waiter}, return_when=asyncio.FIRST_COMPLETED
-        )
-        for waiter in pending:
-            waiter.cancel()
+    def _accept(self, documents: list, executor: Executor) -> None:
+        """Take what fits and can be understood; refuse the rest out loud.
 
-    async def _conduct_one(self, spec: dict, client: ControlPlaneClient) -> None:
+        The claim declared how much room there was, but the answer is the
+        control plane's to compose, and a simulator that trusted it blindly
+        would overload on a bad answer. Anything past capacity is left
+        alone: it stays claimed at the control plane, whose sweep is what
+        notices a claimed simulation nobody is beating for. Overloading, or
+        dying on the surprise, would both be worse than being one queue
+        deep for a while.
+        """
+        for position, document in enumerate(documents):
+            if executor.free_capacity < 1:
+                logger.error(
+                    "claim answer carried %d spec(s) past the %d declared; "
+                    "leaving %d unconducted",
+                    len(documents) - position,
+                    self._config.capacity,
+                    len(documents) - position,
+                )
+                return
+
+            try:
+                spec = SimulationSpec.from_document(document)
+            except ContractViolation as violation:
+                # Refusing to conduct is not a simulation that went wrong,
+                # and reporting one would be a claim about a conversation
+                # that never started. Say nothing to the control plane and
+                # let its sweep account for the row it thinks is claimed.
+                logger.error(
+                    "refusing a claimed spec that does not speak the "
+                    "contract: %s",
+                    "; ".join(violation.complaints),
+                )
+                continue
+            except (KeyError, TypeError) as malformed:
+                logger.error("refusing an unreadable claimed spec: %r", malformed)
+                continue
+
+            self._secrets.register(spec.credentials)
+            executor.submit(spec)
+
+    async def _conduct_one(
+        self, spec: SimulationSpec, client: ControlPlaneClient
+    ) -> None:
         simulation = RunningSimulation(
             spec,
             client=client,

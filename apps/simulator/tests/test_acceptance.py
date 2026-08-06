@@ -1,4 +1,4 @@
-"""The ticket's criteria, black-box at the contract seam.
+"""What the simulator promises, proved black-box at the contract seam.
 
 The workbench offers specs; a real simulator process claims, conducts,
 heartbeats and reports; every assertion below reads only what the
@@ -9,6 +9,7 @@ what the records show is all the control plane will ever know.
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime
 
 from conftest import (
@@ -202,6 +203,50 @@ async def test_a_killed_simulator_just_stops_heartbeating(
     )
 
 
+async def test_an_over_granting_control_plane_does_not_take_the_simulator_down(
+    over_granting_workbench, start_simulator
+):
+    """The runtime's own cap, with the workbench's clamping out of the way.
+
+    A well-behaved control plane never hands out more than was asked for,
+    which is exactly why the capacity test above cannot prove this: it is
+    the workbench's arithmetic holding the line there, not the simulator's.
+    Here the workbench over-grants on purpose.
+    """
+    workbench = over_granting_workbench
+    accepted = [f"sim-flood-{n:03d}" for n in range(2)]
+    for n in range(6):
+        await workbench.offer(
+            chat_spec(f"sim-flood-{n:03d}", instructions="One. Two.", max_turns=200)
+        )
+    start_simulator(workbench, capacity=2, pacing_seconds=0.1)
+
+    records = await workbench.wait_for(all_terminal(accepted), within_seconds=60)
+
+    # It survived: the two it could hold ran to completion.
+    for simulation_id in accepted:
+        assert terminal_event_for(records, simulation_id)["status"] == "completed"
+
+    # And it never exceeded its own capacity, whatever it was handed.
+    in_flight = 0
+    most_seen = 0
+    for record in records:
+        if record["kind"] != "report" or record["event"]["kind"] != "status":
+            continue
+        if record["event"]["status"] == "running":
+            in_flight += 1
+            most_seen = max(most_seen, in_flight)
+        elif record["event"]["status"] in ("completed", "failed", "canceled"):
+            in_flight -= 1
+    assert most_seen <= 2, f"the runtime overloaded: {most_seen} in flight"
+
+    # It is still alive and still claiming after the bad answer.
+    claims_before = len([r for r in records if r["kind"] == "claim"])
+    await asyncio.sleep(HEARTBEAT_SECONDS * 5)
+    later = await workbench.records()
+    assert len([r for r in later if r["kind"] == "claim"]) > claims_before
+
+
 async def test_credentials_never_appear_in_logs_or_reports(
     workbench, start_simulator
 ):
@@ -216,8 +261,6 @@ async def test_credentials_never_appear_in_logs_or_reports(
     assert terminal["status"] == "completed"
 
     simulator.stop()
-
-    import json
 
     everything_recorded = json.dumps(records)
     assert sentinel not in everything_recorded, "a report carried the credential"

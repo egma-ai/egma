@@ -39,25 +39,26 @@ class Workbench:
     base_url: str
     state: WorkbenchState
 
+    session: aiohttp.ClientSession
+
     async def offer(self, spec: dict) -> None:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{self.base_url}/workbench/specs", json=spec
-            ) as response:
-                assert response.status == 204, await response.text()
+        async with self.session.post(
+            f"{self.base_url}/workbench/specs", json=spec
+        ) as response:
+            assert response.status == 204, await response.text()
 
     async def cancel(self, simulation_id: str) -> None:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{self.base_url}/workbench/simulations/{simulation_id}/cancel"
-            ) as response:
-                assert response.status == 204, await response.text()
+        async with self.session.post(
+            f"{self.base_url}/workbench/simulations/{simulation_id}/cancel"
+        ) as response:
+            assert response.status == 204, await response.text()
 
     async def records(self) -> list[dict]:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{self.base_url}/workbench/records") as response:
-                assert response.status == 200, await response.text()
-                body = await response.json()
+        async with self.session.get(
+            f"{self.base_url}/workbench/records"
+        ) as response:
+            assert response.status == 200, await response.text()
+            body = await response.json()
         return body["records"]
 
     async def wait_for(
@@ -81,18 +82,36 @@ class Workbench:
         return records
 
 
-@pytest.fixture
-async def workbench() -> AsyncIterator[Workbench]:
-    state = WorkbenchState(hold_seconds=CLAIM_HOLD_SECONDS)
+async def _serve_workbench(state: WorkbenchState) -> AsyncIterator[Workbench]:
     runner = web.AppRunner(build_app(state))
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
     port = runner.addresses[0][1]
     try:
-        yield Workbench(base_url=f"http://127.0.0.1:{port}", state=state)
+        async with aiohttp.ClientSession() as session:
+            yield Workbench(
+                base_url=f"http://127.0.0.1:{port}", state=state, session=session
+            )
     finally:
         await runner.cleanup()
+
+
+@pytest.fixture
+async def workbench() -> AsyncIterator[Workbench]:
+    async for running in _serve_workbench(
+        WorkbenchState(hold_seconds=CLAIM_HOLD_SECONDS)
+    ):
+        yield running
+
+
+@pytest.fixture
+async def over_granting_workbench() -> AsyncIterator[Workbench]:
+    """A control plane that hands out more than the simulator asked for."""
+    async for running in _serve_workbench(
+        WorkbenchState(hold_seconds=CLAIM_HOLD_SECONDS, over_grant=3)
+    ):
+        yield running
 
 
 @dataclass

@@ -72,6 +72,7 @@ Everything arrives as environment variables.
 | `EGMA_SIMULATOR_CLAIMANT` | `egma-simulator-<host>-<pid>` | The name stamped on claims. |
 | `EGMA_SIMULATOR_HEARTBEAT_SECONDS` | `5` | Beat interval per running simulation. |
 | `EGMA_SIMULATOR_CLAIM_WAIT_SECONDS` | `30` | How long one claim request may hang. |
+| `EGMA_SIMULATOR_REPORT_DEADLINE_SECONDS` | `120` | How long one report is resent before the log on disk becomes its only record. |
 | `EGMA_SIMULATOR_ECHO_TURN_SECONDS` | `0` | Pacing between echo turns, for watching. |
 | `EGMA_SIMULATOR_WAL_DIR` | `.egma-simulator/wal` | Where report documents land before sending. |
 | `EGMA_SIMULATOR_LOG_LEVEL` | `INFO` | `DEBUG` opens up Pipecat's internals too. |

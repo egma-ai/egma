@@ -6,7 +6,7 @@ scenario's instructions, sentence by sentence — and an echo stands where
 the agent under test will stand once the platform plugs land. No model, no
 network, no audio: what this pipe proves is that a claimed spec becomes a
 running Pipecat pipeline whose turns are observed, limited, cancelable, and
-reported as they happen. The caller brain and the real plugs replace the
+reported as they happen. The persona brain and the real plugs replace the
 processors here without touching anything outside this module.
 
 Built on the current Pipecat surface (``PipelineWorker``/``WorkerRunner``);
@@ -104,7 +104,7 @@ def persona_script(instructions: str) -> list[str]:
     """The persona's turns, derived deterministically from the scenario.
 
     Sentence by sentence: the same spec conducts the same conversation
-    every time, which is the property the caller brain must keep when it
+    every time, which is the property the persona brain must keep when it
     replaces this.
     """
     sentences = [

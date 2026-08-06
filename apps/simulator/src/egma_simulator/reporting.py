@@ -123,6 +123,23 @@ class Reporter:
             try:
                 if not self.abandoned:
                     await self._deliver(serialized)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # This task is the queue's only consumer, and nothing
+                # restarts it. Letting anything unexpected end it would
+                # leave every later event with no one to take it: the
+                # queue's join() would never return, close() would hang,
+                # and the simulation would hold its capacity slot for the
+                # life of the process. Delivery is allowed to fail; the
+                # sender is not allowed to die.
+                self.abandoned = True
+                logger.exception(
+                    "the report sender for %s hit a fault; the events are "
+                    "in %s and nothing further will be sent",
+                    self.simulation_id,
+                    self._wal_path,
+                )
             finally:
                 self._queue.task_done()
 

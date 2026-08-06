@@ -74,45 +74,59 @@ def _load_schema(filename: str) -> dict:
         return json.load(handle)
 
 
+SCHEMA_OF = {
+    "spec": SPEC_SCHEMA_FILENAME,
+    "report": REPORT_SCHEMA_FILENAME,
+}
+
+
 @cache
+def validator(direction: str) -> Draft202012Validator:
+    """The compiled validator for one direction, built once per process.
+
+    Compiling is part of the guarantee: a schema that is not valid
+    2020-12 fails here, at import of the first document, rather than
+    quietly accepting everything.
+    """
+    schema = _load_schema(SCHEMA_OF[direction])
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema, format_checker=FormatChecker())
+
+
 def spec_validator() -> Draft202012Validator:
-    """The compiled spec-direction validator, built once per process."""
-    schema = _load_schema(SPEC_SCHEMA_FILENAME)
-    Draft202012Validator.check_schema(schema)
-    return Draft202012Validator(schema, format_checker=FormatChecker())
+    return validator("spec")
 
 
-@cache
 def report_validator() -> Draft202012Validator:
-    """The compiled report-direction validator, built once per process."""
-    schema = _load_schema(REPORT_SCHEMA_FILENAME)
-    Draft202012Validator.check_schema(schema)
-    return Draft202012Validator(schema, format_checker=FormatChecker())
+    return validator("report")
 
 
-def _complaints(validator: Draft202012Validator, document: object) -> list[str]:
+def _complaints(direction: str, document: object) -> list[str]:
     def flatten(errors) -> list[str]:
         flat: list[str] = []
         for error in errors:
             if error.context:
                 flat.extend(flatten(error.context))
             else:
-                place = "/" + "/".join(str(part) for part in error.absolute_path)
+                place = "".join(f"/{part}" for part in error.absolute_path)
                 flat.append(f"{place}: {error.message}")
         return flat
 
-    return flatten(validator.iter_errors(document))
+    return flatten(validator(direction).iter_errors(document))
+
+
+def validate(direction: str, document: object) -> None:
+    """Refuse a document that does not speak the contract in its direction."""
+    complaints = _complaints(direction, document)
+    if complaints:
+        raise ContractViolation(direction, complaints)
 
 
 def validate_spec(document: object) -> None:
     """Refuse a claimed spec that does not speak the contract."""
-    complaints = _complaints(spec_validator(), document)
-    if complaints:
-        raise ContractViolation("spec", complaints)
+    validate("spec", document)
 
 
 def validate_report(document: object) -> None:
     """Refuse an outgoing report that does not speak the contract."""
-    complaints = _complaints(report_validator(), document)
-    if complaints:
-        raise ContractViolation("report", complaints)
+    validate("report", document)

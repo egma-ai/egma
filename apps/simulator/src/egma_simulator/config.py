@@ -16,23 +16,15 @@ from pathlib import Path
 from .reporting import DELIVERY_DEADLINE_SECONDS
 
 
-def _positive_seconds(name: str, fallback: float) -> float:
+def _seconds(name: str, fallback: float, *, allow_zero: bool = False) -> float:
+    """A duration from the environment, refused rather than guessed at."""
     raw = os.environ.get(name)
     if raw is None or raw == "":
         return fallback
     value = float(raw)
-    if value <= 0:
-        raise ValueError(f"{name} must be positive, got {raw}")
-    return value
-
-
-def _nonnegative_seconds(name: str, fallback: float) -> float:
-    raw = os.environ.get(name)
-    if raw is None or raw == "":
-        return fallback
-    value = float(raw)
-    if value < 0:
-        raise ValueError(f"{name} must not be negative, got {raw}")
+    if value < 0 or (value == 0 and not allow_zero):
+        wanted = "zero or more" if allow_zero else "more than zero"
+        raise ValueError(f"{name} must be {wanted}, got {raw}")
     return value
 
 
@@ -88,17 +80,13 @@ class SimulatorConfig:
                 f"egma-simulator-{socket.gethostname()}-{os.getpid()}",
             ),
             capacity=capacity,
-            heartbeat_seconds=_positive_seconds(
-                "EGMA_SIMULATOR_HEARTBEAT_SECONDS", 5.0
-            ),
-            claim_wait_seconds=_positive_seconds(
-                "EGMA_SIMULATOR_CLAIM_WAIT_SECONDS", 30.0
-            ),
-            report_deadline_seconds=_positive_seconds(
+            heartbeat_seconds=_seconds("EGMA_SIMULATOR_HEARTBEAT_SECONDS", 5.0),
+            claim_wait_seconds=_seconds("EGMA_SIMULATOR_CLAIM_WAIT_SECONDS", 30.0),
+            report_deadline_seconds=_seconds(
                 "EGMA_SIMULATOR_REPORT_DEADLINE_SECONDS", DELIVERY_DEADLINE_SECONDS
             ),
-            echo_turn_seconds=_nonnegative_seconds(
-                "EGMA_SIMULATOR_ECHO_TURN_SECONDS", 0.0
+            echo_turn_seconds=_seconds(
+                "EGMA_SIMULATOR_ECHO_TURN_SECONDS", 0.0, allow_zero=True
             ),
             wal_dir=Path(
                 os.environ.get("EGMA_SIMULATOR_WAL_DIR", ".egma-simulator/wal")
