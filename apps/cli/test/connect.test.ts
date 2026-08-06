@@ -11,7 +11,7 @@
  * answered.
  */
 
-import { writeFile } from "node:fs/promises";
+import { rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -287,6 +287,18 @@ describe("one agent, and several", () => {
     // A custom model is the customer's own service, so Retell holds no prompt.
     expect(platform.registered.agents[0]?.pulled?.prompt).toBeNull();
   });
+
+  it("reads a chat agent at the address Retell keeps chat agents at", async () => {
+    retell = await startFakeRetell(THREE_AGENTS);
+
+    await run({ keys: [KEY], agent: "agent_0003" });
+
+    // One listing answers with both kinds and each is then read at its own
+    // address. Knocking on the other one answers nothing on a real account,
+    // and the developer would be told their agent had gone away.
+    expect(retell.requests.map((asked) => asked.path)).toContain("/get-chat-agent/agent_0003");
+    expect(retell.requests.map((asked) => asked.path)).not.toContain("/get-agent/agent_0003");
+  });
 });
 
 describe("what lands on the platform", () => {
@@ -414,16 +426,72 @@ describe("the drift line", () => {
   it("reads the file out of a sentence that names it, and reads no environment file", async () => {
     retell = await startFakeRetell(ONE_AGENT);
     await withRepoPrompt("Something else entirely.\n");
-    await writeFile(path.join(workspace.dir, ".env"), "SECRET=shhh\n", "utf8");
+    // The fenced file is made to hold exactly what Retell runs, so a run that
+    // read it would answer "the same" and say nothing. The line being said is
+    // therefore proof that this file was stepped over and the next word read.
+    await writeFile(path.join(workspace.dir, ".env"), PROMPT, "utf8");
 
     const { ui } = await run({
       keys: [KEY],
       repoPrompts: ".env, prompt.md (pushed to Retell by scripts/deploy.ts)",
     });
 
-    // The prompt was found in the sentence, so the line is shown; the fenced
-    // file was stepped over rather than read.
     expect(ui.record.statuses).toContain(DRIFT_LINE);
+  });
+
+  /**
+   * A file above the repository, holding words that are not Retell's.
+   *
+   * Its contents differ on purpose: a run that reaches it says the drift line,
+   * and a run that refuses it says nothing. So silence in these checks is proof
+   * the file was never opened, rather than proof of a comparison that agreed.
+   */
+  async function fileAboveTheRepo(): Promise<string> {
+    const above = path.join(
+      path.dirname(workspace.dir),
+      `outside-${path.basename(workspace.dir)}.md`,
+    );
+    await writeFile(above, "Words from somewhere egma was never invited.\n", "utf8");
+    return above;
+  }
+
+  it("reads nothing a link points at outside the repository, whatever it is called", async () => {
+    retell = await startFakeRetell(ONE_AGENT);
+    // Two links inside the folder with innocent names: one to a file above it,
+    // one to the fenced file beside it. A link is not a way around either rule.
+    const above = await fileAboveTheRepo();
+    await writeFile(path.join(workspace.dir, ".env.production"), "PROMPT=not this one\n", "utf8");
+    await symlink(above, path.join(workspace.dir, "linked-prompt.md"));
+    await symlink(path.join(workspace.dir, ".env.production"), path.join(workspace.dir, "notes.md"));
+
+    try {
+      const { ui, report } = await run({
+        keys: [KEY],
+        repoPrompts: "linked-prompt.md and notes.md",
+      });
+
+      expect(ui.record.statuses).not.toContain(DRIFT_LINE);
+      // Never blocking, here as everywhere: refusing to read is not failing.
+      expect(report.kind).toBe("connected");
+    } finally {
+      await rm(above, { force: true });
+    }
+  });
+
+  it("reads nothing outside the repository, named plainly or climbed out to", async () => {
+    retell = await startFakeRetell(ONE_AGENT);
+    const above = await fileAboveTheRepo();
+
+    try {
+      const { ui } = await run({
+        keys: [KEY],
+        repoPrompts: `${above} ../${path.basename(above)}`,
+      });
+
+      expect(ui.record.statuses).not.toContain(DRIFT_LINE);
+    } finally {
+      await rm(above, { force: true });
+    }
   });
 });
 

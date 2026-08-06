@@ -25,7 +25,7 @@ import type { WizardUI } from "../ui/wizard-ui.ts";
 import type { ExitReport } from "./exit-line.ts";
 import type { PlatformAccess } from "./login-step.ts";
 import { ACTION_MARK, DETAIL_MARK } from "./status.ts";
-import { stopReport } from "./stop.ts";
+import { stopReport, untilAborted } from "./stop.ts";
 
 export type ConnectStepOptions = {
   readonly ui: WizardUI;
@@ -96,18 +96,22 @@ export async function connectStep(options: ConnectStepOptions): Promise<ExitRepo
       problem = line;
       ui.pushStatus(line);
     },
+    // Both waits are wired to the stop signal, because both park on a person.
+    // A screen waiting for a keystroke that will never come is the one place a
+    // wizard can hang forever, and Ctrl-C at the key box is exactly where a
+    // developer who has decided not to hand a key over presses it.
     askForKey: async () => {
       ui.setKeyAsk({ asking: KEY_ASK_LINE, custody: CUSTODY_LINE, problem });
-      const typed = await ui.waitForAnswer("retell-key");
+      const typed = await untilAborted(ui.waitForAnswer("retell-key"), signal);
       ui.setKeyAsk(null);
       problem = null;
       return RetellKey.from(typed);
     },
     chooseAgent: async (agents) => {
       ui.setAgentChoices(agents);
-      const chosen = await ui.waitForAnswer("retell-agent");
+      const chosen = await untilAborted(ui.waitForAnswer("retell-agent"), signal);
       ui.setAgentChoices(null);
-      return chosen;
+      return chosen ?? null;
     },
   });
 

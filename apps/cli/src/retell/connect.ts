@@ -303,8 +303,9 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
 
   // Shown, never blocking: the drift is worked out after everything that
   // matters is already written, so a slow or unreadable file cannot cost the
-  // developer the connection.
-  const compared = await compareWithRepo({
+  // developer the connection. One word comes back and nothing else does — the
+  // repository's own words stay in the folder they were read from.
+  const drift = await compareWithRepo({
     cwd: options.cwd,
     said: options.repoPrompts,
     running: config.prompt,
@@ -314,7 +315,7 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
     kind: "connected",
     registered: written.registered,
     config,
-    drift: compared.drift,
+    drift,
     onTheAccount: agents.length,
   };
 }

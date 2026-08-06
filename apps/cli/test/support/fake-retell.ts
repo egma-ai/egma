@@ -3,9 +3,14 @@
  *
  * The CLI talks to Retell over plain HTTP, so that is the seam a check stands
  * in at: a server on this machine answering `/v2/list-agents`, `/get-agent/…`,
- * `/get-retell-llm/…` and `/get-conversation-flow/…` with the fields the SDK's
- * own types name. Nothing in CI ever reaches the real Retell, and no real key
- * exists anywhere near these checks.
+ * `/get-chat-agent/…`, `/get-retell-llm/…` and `/get-conversation-flow/…` with
+ * the fields the SDK's own types name. Nothing in CI ever reaches the real
+ * Retell, and no real key exists anywhere near these checks.
+ *
+ * It is exactly as strict as Retell is, and never kinder. An agent is served
+ * only at the address for its own kind, a required field is always sent, and a
+ * key it does not know is refused — because a fake that forgives what the real
+ * one refuses is a fake that lets a broken client pass.
  *
  * It records what it was asked, including which key was offered, so a check can
  * assert that the key reached the one place it is supposed to reach.
@@ -21,7 +26,7 @@ export type FakeAgentRow = {
   readonly channel?: "voice" | "chat";
 };
 
-/** What `/get-agent/:id` answers, and what the engine behind it holds. */
+/** What `/get-agent/:id` or `/get-chat-agent/:id` answers, and what its engine holds. */
 export type FakeAgent = {
   readonly agent_id: string;
   readonly agent_name?: string;
@@ -98,6 +103,7 @@ function agentBody(agent: FakeAgent): Record<string, unknown> {
 function llmBody(llm: FakeLlm): Record<string, unknown> {
   return {
     llm_id: llm.llm_id,
+    version: 0,
     general_prompt: llm.general_prompt ?? null,
     general_tools: llm.general_tools ?? [],
     last_modification_timestamp: 1_700_000_000_000,
@@ -112,6 +118,7 @@ function flowBody(flow: FakeFlow): Record<string, unknown> {
     global_prompt: flow.global_prompt ?? null,
     tools: flow.tools ?? [],
     nodes: [],
+    last_modification_timestamp: 1_700_000_000_000,
     ...(flow.extra ?? {}),
   };
 }
@@ -178,9 +185,18 @@ export async function startFakeRetell(script: FakeRetellScript): Promise<FakeRet
           return;
         }
 
-        if (incoming.method === "GET" && at.pathname.startsWith("/get-agent/")) {
-          const id = decodeURIComponent(at.pathname.slice("/get-agent/".length));
-          const agent = script.agents.find((held) => held.agent_id === id);
+        // Two addresses, one for each kind of agent, and neither answers for
+        // the other — which is how a client that knocks on the wrong door is
+        // caught here rather than on somebody's real account.
+        for (const [prefix, channel] of [
+          ["/get-agent/", "voice"],
+          ["/get-chat-agent/", "chat"],
+        ] as const) {
+          if (incoming.method !== "GET" || !at.pathname.startsWith(prefix)) continue;
+          const id = decodeURIComponent(at.pathname.slice(prefix.length));
+          const agent = script.agents.find(
+            (held) => held.agent_id === id && (held.channel ?? "voice") === channel,
+          );
           if (agent === undefined) {
             send(404, { error_message: "agent not found" });
             return;

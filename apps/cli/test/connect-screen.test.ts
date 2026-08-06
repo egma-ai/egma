@@ -16,8 +16,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
-import { runInTerminal, type TerminalRun } from "./support/pty.ts";
-import { CLI_ENTRY, FAKE_AGENT, MANIFEST, makeWorkspace, type Workspace } from "./support/workspace.ts";
+import { runInTerminal, showing, type TerminalRun } from "./support/pty.ts";
+import {
+  CLI_ENTRY,
+  FAKE_AGENT,
+  MANIFEST,
+  NO_RETELL,
+  makeWorkspace,
+  type Workspace,
+} from "./support/workspace.ts";
 
 // A real subprocess, a real terminal and a test run using every core: the
 // budget is generous so that only a broken wizard can reach it.
@@ -58,7 +65,10 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  terminal?.kill();
+  // Waited for: the command is still writing its log into the folder that is
+  // about to be removed, and a folder gaining an entry while it is walked is a
+  // folder that will not go away.
+  await terminal?.kill();
   terminal = undefined;
   await retell?.close();
   retell = undefined;
@@ -66,22 +76,8 @@ afterEach(async () => {
   await workspace.remove();
 });
 
-/** Waits until the screen holds every one of these, and answers that screen. */
-async function showing(run: TerminalRun, ...parts: readonly string[]): Promise<string> {
-  let held = "";
-  const shown = await run.waitFor(() => {
-    const screen = run.screen();
-    if (!parts.every((part) => screen.includes(part))) return false;
-    held = screen;
-    return true;
-  });
-  if (!shown) {
-    throw new Error(
-      `the terminal never showed all of: ${parts.join(" | ")}\n\nlast screen:\n${run.screen()}`,
-    );
-  }
-  return held;
-}
+/** This screen's own hints, and the last line it draws. */
+const KEY_HINTS = ["[enter] connect", "[esc] skip"] as const;
 
 /** The wizard, past the intro, with a scripted coding agent that finds one fact. */
 async function wizard(): Promise<TerminalRun> {
@@ -106,13 +102,13 @@ async function wizard(): Promise<TerminalRun> {
     cwd: workspace.dir,
     env: workspace.env({
       EGMA_URL: platform.url,
-      EGMA_RETELL_URL: retell?.url ?? "http://127.0.0.1:1",
+      EGMA_RETELL_URL: retell?.url ?? NO_RETELL,
     }),
     cols: 100,
   });
   terminal = run;
 
-  await showing(run, "[enter] begin");
+  await showing(run, "[enter] begin", "[q] quit");
   run.write("\r");
   return run;
 }
@@ -122,16 +118,21 @@ describe("the key screen", () => {
     retell = await startFakeRetell(ONE_AGENT);
     const run = await wizard();
 
+    // Waited for whole, down to the last line this screen draws: what is
+    // asserted below is what the screen does *not* say, and a frame that is
+    // still arriving says nothing at all.
     const asking = await showing(
       run,
       "Paste your Retell API key",
       "It is sent to egma and stored encrypted. It never lands in a file here.",
+      ...KEY_HINTS,
     );
     // Nothing is on the line before anything is typed.
     expect(asking).not.toContain("●");
 
     run.write(KEY);
-    const typing = await showing(run, "●●●●●●●●●●");
+    // Every dot the key is worth, because the count is what is asserted.
+    const typing = await showing(run, "●".repeat(KEY.length));
 
     // The characters are on screen as dots and as nothing else — not the key,
     // and not the first few characters of it either.
@@ -156,6 +157,38 @@ describe("the key screen", () => {
   });
 });
 
+describe("stopping at the key screen", () => {
+  it("comes down cleanly on Ctrl-C, leaving one honest line and no key", async () => {
+    retell = await startFakeRetell(ONE_AGENT);
+    const run = await wizard();
+
+    await showing(
+      run,
+      "Paste your Retell API key",
+      "It is sent to egma and stored encrypted. It never lands in a file here.",
+      ...KEY_HINTS,
+    );
+    // Half a key typed, and then stopped: the characters exist only inside the
+    // screen at this moment, which is the moment worth checking.
+    run.write(KEY.slice(0, 10));
+    await showing(run, "●".repeat(10));
+
+    run.write("\u0003");
+
+    // The command is gone of its own accord rather than left for the teardown,
+    // and it said what happened on the way out.
+    expect(await run.exited).toBe(130);
+    expect(run.scrollback().trim()).toContain("stopped");
+    expect(run.scrollback()).not.toContain("●");
+    expect(run.raw()).not.toContain(KEY.slice(0, 10));
+
+    // Nothing was written: a run stopped at the key screen has connected
+    // nothing, whatever it had already been given.
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.registered.sealed).toEqual([]);
+  });
+});
+
 describe("the picker", () => {
   it("appears only when there is a choice, and connects the one chosen", async () => {
     retell = await startFakeRetell(TWO_AGENTS);
@@ -167,9 +200,14 @@ describe("the picker", () => {
     // than as a character nobody can see.
     run.write(`${KEY}\n`);
 
-    const choosing = await showing(run, "That key reaches 2 agents", "order-line", "after-hours");
-    expect(choosing).toContain("agent_0001");
-    expect(choosing).toContain("agent_0002");
+    const choosing = await showing(
+      run,
+      "That key reaches 2 agents",
+      "order-line",
+      "after-hours",
+      "agent_0001",
+      "agent_0002",
+    );
     expect(choosing).not.toContain(KEY);
 
     // Down one — the escape sequence a real terminal sends — then take it.

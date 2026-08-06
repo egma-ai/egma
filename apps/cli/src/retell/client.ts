@@ -296,6 +296,20 @@ function wordsIn(
 }
 
 /**
+ * Where one agent's own document is.
+ *
+ * One listing answers with both kinds of agent, and each kind is then read at
+ * its own address: Retell serves a chat agent from `/get-chat-agent/` and
+ * answers `/get-agent/` for it with nothing. Which kind this is comes from the
+ * listing, so the right door is known before it is knocked on — asking the
+ * wrong one would tell a developer their agent had gone away.
+ */
+function agentPath(agent: RetellAgent): string {
+  const id = encodeURIComponent(agent.id);
+  return agent.modality === "chat" ? `/get-chat-agent/${id}` : `/get-agent/${id}`;
+}
+
+/**
  * One agent's whole configuration, in both halves and in both forms.
  *
  * `modality` comes from the listing rather than from the agent document,
@@ -308,10 +322,7 @@ export async function pullAgent(
 ): Promise<PulledConfig> {
   let answer: Answer;
   try {
-    answer = await ask(key, reach, {
-      method: "GET",
-      path: `/get-agent/${encodeURIComponent(agent.id)}`,
-    });
+    answer = await ask(key, reach, { method: "GET", path: agentPath(agent) });
   } catch (cause) {
     if (cause instanceof RetellUnreachableError) {
       return { kind: "unreachable", reason: cause.message };

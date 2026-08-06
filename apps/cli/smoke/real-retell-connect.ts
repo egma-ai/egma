@@ -8,8 +8,8 @@
  *
  * **It is read-only, and the read-only-ness is enforced rather than promised.**
  * Retell is not reached directly: everything goes through a gate started here
- * that forwards four reads and refuses everything else, so a change that made
- * the CLI write could not do it through this check. The account belongs to
+ * that forwards the listing and the reads behind it and refuses everything
+ * else, so a change that made the CLI write could not do it through this check. The account belongs to
  * somebody and the agents on it answer real telephone numbers.
  *
  * The platform side is the fixture, so nothing is written to a real egma
@@ -47,6 +47,12 @@ const CLI_ENTRY = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 
 /** The one committed name for the key this check runs against. */
 const KEY_VARIABLE = "RETELL_API_KEY";
+
+/**
+ * The other names the command would read a key from, taken out of its
+ * environment so that the key this check holds is the key the command uses.
+ */
+const OTHER_KEY_VARIABLES = ["EGMA_RETELL_API_KEY"] as const;
 
 /** The switch that turns a skip into a failure. */
 const STRICT_VARIABLE = "EGMA_SMOKE_REQUIRE_TARGET";
@@ -104,6 +110,7 @@ function nothingWasVerified(strict: boolean): void {
 const ALLOWED: readonly { method: string; path: RegExp }[] = [
   { method: "POST", path: /^\/v2\/list-agents$/u },
   { method: "GET", path: /^\/get-agent\/[^/]+$/u },
+  { method: "GET", path: /^\/get-chat-agent\/[^/]+$/u },
   { method: "GET", path: /^\/get-retell-llm\/[^/]+$/u },
   { method: "GET", path: /^\/get-conversation-flow\/[^/]+$/u },
 ];
@@ -308,6 +315,11 @@ async function main(): Promise<void> {
       [KEY_VARIABLE]: key.trim(),
     };
     delete env.EGMA_RETELL_AGENT_ID;
+    // The command reads EGMA_RETELL_API_KEY before RETELL_API_KEY, so a shell
+    // holding both would have it run on a key this check never saw — and every
+    // sentence below about where that key did not appear would be about the
+    // wrong string. One key, held here, used there.
+    for (const other of OTHER_KEY_VARIABLES) delete env[other];
 
     say("Starting: the built egma connect, against a real Retell account.");
     say("Reads only: list agents, retrieve an agent, retrieve its response engine.");
@@ -395,9 +407,14 @@ async function main(): Promise<void> {
     const agentDocument = documents.find((one) => one.of === "agent")?.body ?? "";
     const engineDocument = documents.find((one) => one.of === "response-engine")?.body;
 
+    // Retell keeps voice agents and chat agents at two addresses, so what was
+    // stored is compared with what came back from the one this agent is at.
+    const agentAddress =
+      result.connection_modality === "chat"
+        ? `/get-chat-agent/${result.retell_agent_id ?? ""}`
+        : `/get-agent/${result.retell_agent_id ?? ""}`;
     check(
-      agentDocument !== "" &&
-        agentDocument === gate.answered(`/get-agent/${result.retell_agent_id ?? ""}`),
+      agentDocument !== "" && agentDocument === gate.answered(agentAddress),
       `the agent Retell answered with was stored byte for byte (${agentDocument.length} bytes)`,
     );
     check(
