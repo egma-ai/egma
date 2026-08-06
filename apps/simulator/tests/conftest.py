@@ -10,18 +10,20 @@ process. The rig here is exactly that wiring.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import signal
 import subprocess
 import sys
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import aiohttp
 import pytest
 from aiohttp import web
+from retell_stub import RetellStub, RunningStub, serving
 
 from egma_simulator.contract import contract_dir
 from egma_simulator.workbench.app import WorkbenchState, build_app
@@ -193,6 +195,22 @@ def start_simulator(
 
 
 @pytest.fixture
+async def start_retell_stub() -> AsyncIterator[Callable[..., Awaitable[RunningStub]]]:
+    """Start Retell-shaped stubs on loopback; each stops when the test ends.
+
+    The keyword arguments are :class:`RetellStub`'s script — the key it
+    honors, the greeting, the replies, whether the agent ends the exchange
+    itself.
+    """
+    async with contextlib.AsyncExitStack() as stack:
+
+        async def start(**script: object) -> RunningStub:
+            return await stack.enter_async_context(serving(RetellStub(**script)))
+
+        yield start
+
+
+@pytest.fixture
 def quick_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     """Collapse delivery backoff so retry behavior can be tested in milliseconds.
 
@@ -252,6 +270,42 @@ def scripted_spec(
         "persona": {
             "traits": {"personality": personality, "language": "en-US"}
         },
+        "scenario": {"instructions": scenario},
+        "limits": {
+            "max_duration_seconds": max_duration_seconds,
+            "max_turns": max_turns,
+        },
+    }
+
+
+def retell_spec(
+    simulation_id: str,
+    *,
+    base_url: str,
+    api_key: str,
+    agent_id: str = "agent_stubbed_0001",
+    scenario: str = "State the first point. State the second point.",
+    personality: str = "Terse test person; sticks to the script.",
+    max_turns: int = 60,
+    max_duration_seconds: int = 600,
+) -> dict:
+    """One spec against a Retell chat connection, pointed wherever asked.
+
+    The connection block is exactly what the control plane stores for a
+    ``retell`` connection — the agent id in the config, the key in the
+    credentials — plus the base URL, which is what lets the exchange land on
+    a Retell-shaped stub instead of the platform itself.
+    """
+    return {
+        "contract_version": 1,
+        "simulation_id": simulation_id,
+        "modality": "chat",
+        "connection": {
+            "type": "retell",
+            "config": {"retellAgentId": agent_id, "baseUrl": base_url},
+            "credentials": {"apiKey": api_key},
+        },
+        "persona": {"traits": {"personality": personality, "language": "en-US"}},
         "scenario": {"instructions": scenario},
         "limits": {
             "max_duration_seconds": max_duration_seconds,

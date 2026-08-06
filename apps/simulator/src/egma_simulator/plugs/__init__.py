@@ -138,8 +138,10 @@ def plug_for(connection_type: str) -> PlugFactory | None:
     The registry is deliberately a literal here: adding a platform is one
     import and one line, and the diff that adds it touches nothing else.
     """
+    from .retell import RetellChat
     from .scripted import ScriptedCounterpart
 
     return {
+        "retell": RetellChat,
         "scripted": ScriptedCounterpart,
     }.get(connection_type)

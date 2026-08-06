@@ -113,7 +113,7 @@ def test_a_spec_naming_an_unplugged_connection_type_is_refused(tmp_path, caplog)
     executor = RecordingExecutor(capacity=4)
 
     unplugged = scripted_spec("sim-unplugged")
-    unplugged["connection"]["type"] = "retell"
+    unplugged["connection"]["type"] = "a-platform-with-no-plug-yet"
     good = scripted_spec("sim-plugged")
 
     service._accept([unplugged, good], executor)
