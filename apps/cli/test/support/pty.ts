@@ -19,7 +19,12 @@
  * `waitFor` closes both gaps. It is told when a chunk has been *parsed* rather
  * than when it arrived, and it checks the condition then — so a test waits for
  * everything it is about to assert, in one condition, and reads the screen that
- * satisfied it.
+ * satisfied it. `showing` is the way to spell that, and every check here uses
+ * it rather than polling a screen on a timer.
+ *
+ * `kill` waits for the command to actually be gone. A test removes the folder
+ * the command was running in as soon as it returns, and a process still writing
+ * its log into a folder being deleted is a folder that will not delete.
  */
 
 import { chmodSync, existsSync } from "node:fs";
@@ -68,7 +73,8 @@ export type TerminalRun = {
    * parsed onto the screen. `false` means the budget ran out first.
    */
   waitFor(condition: () => boolean, timeoutMs?: number): Promise<boolean>;
-  kill(): void;
+  /** Stops the command and settles once it is gone and its last words are read. */
+  kill(): Promise<void>;
   /** The exit code, once everything the command wrote is on the screen. */
   exited: Promise<number>;
 };
@@ -152,10 +158,12 @@ export function runInTerminal(options: {
     });
 
   let settle!: (code: number) => void;
+  let gone = false;
   const finished = new Promise<number>((resolve) => {
     settle = resolve;
   });
   child.onExit(({ exitCode }) => {
+    gone = true;
     settle(exitCode);
     tell();
   });
@@ -185,13 +193,64 @@ export function runInTerminal(options: {
     raw: () => raw,
     waitFor,
     write: (input) => child.write(input),
-    kill: () => {
-      try {
-        child.kill();
-      } catch {
-        // Already gone.
+    async kill() {
+      // Asked once, then insisted upon. A command that is shutting a coding
+      // agent down of its own accord is given a moment to finish doing it.
+      for (const signal of ["SIGHUP", "SIGKILL"]) {
+        if (gone) break;
+        try {
+          child.kill(signal);
+        } catch {
+          break;
+        }
+        if (await waitFor(() => gone, 2_000)) break;
       }
+      // And its last words are on the screen before anything reads the screen
+      // or removes the folder it was running in.
+      await waitFor(() => unparsed === 0, 2_000);
     },
     exited,
   };
+}
+
+/**
+ * Waits until the screen, read the given way, holds every one of these, and
+ * answers the screen itself.
+ *
+ * The screen is captured at the moment the condition held, so a redraw that
+ * starts immediately afterwards cannot take a line back out from under the
+ * assertions. Ask for **everything** the assertions after it will read: waiting
+ * for a frame's first line and then asserting on its last is a race the machine
+ * wins whenever it is busy.
+ *
+ * `read` is there for a terminal too narrow to hold a line whole. Every line of
+ * such a screen is wrapped, so a phrase is looked for in the screen run
+ * together rather than line by line.
+ */
+export async function showingIn(
+  terminal: TerminalRun,
+  read: (screen: string) => string,
+  ...parts: readonly string[]
+): Promise<string> {
+  let held = "";
+  const shown = await terminal.waitFor(() => {
+    const screen = terminal.screen();
+    if (!parts.every((part) => read(screen).includes(part))) return false;
+    held = screen;
+    return true;
+  });
+  if (!shown) {
+    throw new Error(
+      `the terminal never showed all of: ${parts.join(" | ")}\n\nlast screen:\n${terminal.screen()}`,
+    );
+  }
+  return held;
+}
+
+/** The same, reading the screen as it is drawn. */
+export async function showing(
+  terminal: TerminalRun,
+  ...parts: readonly string[]
+): Promise<string> {
+  return showingIn(terminal, (screen) => screen, ...parts);
 }
