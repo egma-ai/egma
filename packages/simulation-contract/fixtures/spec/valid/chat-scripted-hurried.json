@@ -1,0 +1,37 @@
+{
+  "contract_version": 1,
+  "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWEU",
+  "modality": "chat",
+  "connection": {
+    "type": "scripted",
+    "config": {
+      "replies": [
+        "I can see the duplicate charge on that order — one moment while I reverse it.",
+        "The reversal is through. Your confirmation number is RC-4417-DUP.",
+        "You are welcome — the confirmation is on its way to your email too. Goodbye."
+      ],
+      "ends_after_replies": true,
+      "turn_seconds": 0,
+      "provider_reference": "scripted-chat-hurried-1"
+    },
+    "credentials": null
+  },
+  "persona": {
+    "traits": {
+      "personality": "Dev, 34, messaging from a train platform. In a hurry, fires off short messages, expects quick answers.",
+      "language": "en-GB",
+      "voice": {
+        "provider": "elevenlabs",
+        "voiceId": "brisk-tenor-7",
+        "speed": 1.15
+      }
+    }
+  },
+  "scenario": {
+    "instructions": "My card was charged twice for the same order this morning. I need the duplicate charge reversed and a confirmation number before my train arrives. Please be quick about it."
+  },
+  "limits": {
+    "max_duration_seconds": 300,
+    "max_turns": 40
+  }
+}

@@ -27,10 +27,13 @@ from typing import Protocol
 from .client import ClaimFailure, ControlPlaneClient, HeartbeatFailure
 from .config import SimulatorConfig
 from .contract import ContractViolation
-from .pipe import Conducted, PipeControls, conduct
+from .model import build_model_client
+from .persona import Persona
+from .plugs import plug_for
 from .redaction import SecretRegistry
 from .reporting import Reporter, moment
 from .spec import SimulationSpec
+from .walk import Conducted, WalkControls, conduct
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +137,7 @@ class RunningSimulation:
             config.wal_dir,
             delivery_deadline_seconds=config.report_deadline_seconds,
         )
-        self._controls = PipeControls()
+        self._controls = WalkControls()
         self._first_human_at: float | None = None
         self._first_latency_reported = False
 
@@ -165,15 +168,35 @@ class RunningSimulation:
         reporter = self._reporter
         reporter.running()
         try:
-            conducted = await conduct(
-                scenario_instructions=self._spec.scenario_instructions,
-                max_turns=self._spec.limits.max_turns,
-                max_duration_seconds=self._spec.limits.max_duration_seconds,
-                pacing_seconds=self._config.echo_turn_seconds,
-                on_turn=self._on_turn,
-                controls=self._controls,
-                name=f"sim:{self.simulation_id}",
+            # The plug is the one component that knows the platform; the
+            # claim loop already guaranteed one exists for this type, and
+            # its constructor validating the connection config is part of
+            # conducting — a bad config is an honest failure, not a crash.
+            plug_factory = plug_for(self._spec.connection_type)
+            assert plug_factory is not None, "accepted a spec with no plug"
+            plug = plug_factory(
+                modality=self._spec.modality,
+                config=self._spec.connection_config,
+                credentials=self._spec.credentials,
             )
+            model = build_model_client(self._config, self._spec)
+            try:
+                conducted = await conduct(
+                    persona=Persona(
+                        traits=self._spec.persona_traits,
+                        scenario_instructions=self._spec.scenario_instructions,
+                        model=model,
+                    ),
+                    plug=plug,
+                    max_turns=self._spec.limits.max_turns,
+                    max_duration_seconds=self._spec.limits.max_duration_seconds,
+                    on_turn=self._on_turn,
+                    on_timing=self._on_timing,
+                    controls=self._controls,
+                    name=f"sim:{self.simulation_id}",
+                )
+            finally:
+                await model.close()
         except asyncio.CancelledError:
             # The service itself is being torn down mid-walk. Reporting a
             # terminal state now would be a guess; a simulation whose
@@ -189,14 +212,11 @@ class RunningSimulation:
         self._report_terminal(conducted)
 
     def _report_terminal(self, conducted: Conducted) -> None:
+        self._reporter.provider_reference = conducted.provider_reference
         if conducted.status == "canceled":
             self._reporter.canceled("cancel directive on heartbeat")
-        elif conducted.ending == "limit_reached":
-            self._reporter.completed(
-                "limit_reached", "a limit from the spec tripped"
-            )
         else:
-            self._reporter.completed(conducted.ending)
+            self._reporter.completed(conducted.ending, conducted.reason)
 
     async def _on_turn(self, speaker: str, text: str) -> None:
         self._reporter.turn(speaker, text, started_at=moment())
@@ -211,6 +231,9 @@ class RunningSimulation:
             self._first_latency_reported = True
             elapsed_ms = (loop.time() - self._first_human_at) * 1000
             self._reporter.timing("first_response_latency", elapsed_ms)
+
+    async def _on_timing(self, measure: str, milliseconds: float) -> None:
+        self._reporter.timing(measure, milliseconds)
 
     async def _heartbeat_forever(self) -> None:
         while True:
@@ -244,7 +267,7 @@ class RunningSimulation:
                 "cancel directive for %s; stopping at this beat",
                 self.simulation_id,
             )
-            await self._controls.request_cancel()
+            self._controls.request_cancel()
             return
         logger.warning(
             "unknown directive %r for %s ignored", directive, self.simulation_id
@@ -346,6 +369,18 @@ class SimulatorService:
                 continue
             except (KeyError, TypeError) as malformed:
                 logger.error("refusing an unreadable claimed spec: %r", malformed)
+                continue
+
+            if plug_for(spec.connection_type) is None:
+                # Same shape as a contract refusal: conducting is not
+                # possible, so nothing is reported and the control plane's
+                # sweep accounts for the row it thinks is claimed.
+                logger.error(
+                    "refusing claimed spec %s: no platform plug for "
+                    "connection type %r",
+                    spec.simulation_id,
+                    spec.connection_type,
+                )
                 continue
 
             self._secrets.register(spec.credentials)

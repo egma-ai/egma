@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from conftest import chat_spec
+from conftest import scripted_spec
 
 from egma_simulator.config import SimulatorConfig
 from egma_simulator.redaction import SecretRegistry
@@ -56,7 +56,6 @@ def a_service(tmp_path, capacity: int = 2) -> SimulatorService:
         heartbeat_seconds=5.0,
         claim_wait_seconds=1.0,
         report_deadline_seconds=1.0,
-        echo_turn_seconds=0.0,
         wal_dir=tmp_path,
         log_level="INFO",
     )
@@ -67,7 +66,7 @@ def test_an_over_granting_answer_is_clamped_not_raised_on(tmp_path, caplog):
     """The surplus is refused; nothing in flight is disturbed."""
     service = a_service(tmp_path, capacity=2)
     executor = RecordingExecutor(capacity=2)
-    documents = [chat_spec(f"sim-over-{n}") for n in range(5)]
+    documents = [scripted_spec(f"sim-over-{n}") for n in range(5)]
 
     service._accept(documents, executor)  # must not raise
 
@@ -85,10 +84,10 @@ def test_a_spec_that_does_not_speak_the_contract_never_becomes_a_simulation(
     service = a_service(tmp_path, capacity=4)
     executor = RecordingExecutor(capacity=4)
 
-    broken = chat_spec("sim-broken")
+    broken = scripted_spec("sim-broken")
     del broken["limits"]
     unreadable = {"contract_version": 1}
-    good = chat_spec("sim-good")
+    good = scripted_spec("sim-good")
 
     service._accept([broken, unreadable, good], executor)
 
@@ -101,26 +100,44 @@ def test_a_spec_that_does_not_speak_the_contract_never_becomes_a_simulation(
 def test_credentials_from_an_accepted_spec_are_registered_for_redaction(tmp_path):
     service = a_service(tmp_path)
     executor = RecordingExecutor(capacity=2)
-    service._accept([chat_spec("sim-secret", api_key="hunter2-not-real")], executor)
+    service._accept(
+        [scripted_spec("sim-secret", credentials={"apiKey": "hunter2-not-real"})],
+        executor,
+    )
     assert service._secrets.redact("saw hunter2-not-real here") == "saw [redacted] here"
+
+
+def test_a_spec_naming_an_unplugged_connection_type_is_refused(tmp_path, caplog):
+    """No plug for the type: the claim is refused out loud, nothing reported."""
+    service = a_service(tmp_path, capacity=4)
+    executor = RecordingExecutor(capacity=4)
+
+    unplugged = scripted_spec("sim-unplugged")
+    unplugged["connection"]["type"] = "retell"
+    good = scripted_spec("sim-plugged")
+
+    service._accept([unplugged, good], executor)
+
+    assert [spec.simulation_id for spec in executor.accepted] == ["sim-plugged"]
+    assert "no platform plug" in caplog.text
 
 
 def test_the_typed_spec_reads_what_the_document_says():
     spec = SimulationSpec.from_document(
-        chat_spec("sim-typed", instructions="Hello there.", max_turns=7)
+        scripted_spec("sim-typed", scenario="Hello there.", max_turns=7)
     )
     assert spec.simulation_id == "sim-typed"
     assert spec.modality == "chat"
     assert spec.scenario_instructions == "Hello there."
     assert spec.limits.max_turns == 7
-    assert spec.connection_type == "retell"
+    assert spec.connection_type == "scripted"
     assert spec.persona_traits["language"] == "en-US"
 
 
 def test_the_typed_spec_refuses_a_document_that_breaks_the_contract():
     from egma_simulator.contract import ContractViolation
 
-    broken = chat_spec("sim-bad")
+    broken = scripted_spec("sim-bad")
     broken["modality"] = "telepathy"
     with pytest.raises(ContractViolation):
         SimulationSpec.from_document(broken)

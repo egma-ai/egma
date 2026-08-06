@@ -155,7 +155,6 @@ def start_simulator(
         workbench: Workbench,
         *,
         capacity: int = 2,
-        pacing_seconds: float = 0.0,
         log_level: str = "INFO",
         claimant: str = "sim-under-test",
     ) -> SimulatorProcess:
@@ -168,7 +167,6 @@ def start_simulator(
             "EGMA_SIMULATOR_CAPACITY": str(capacity),
             "EGMA_SIMULATOR_HEARTBEAT_SECONDS": str(HEARTBEAT_SECONDS),
             "EGMA_SIMULATOR_CLAIM_WAIT_SECONDS": "2",
-            "EGMA_SIMULATOR_ECHO_TURN_SECONDS": str(pacing_seconds),
             "EGMA_SIMULATOR_WAL_DIR": str(wal_dir),
             "EGMA_SIMULATOR_LOG_LEVEL": log_level,
         }
@@ -214,26 +212,52 @@ def load_fixture_spec(name: str) -> dict:
         return json.load(handle)
 
 
-def chat_spec(
+def scripted_spec(
     simulation_id: str,
     *,
-    instructions: str | None = None,
-    max_turns: int | None = None,
-    max_duration_seconds: int | None = None,
-    api_key: str | None = None,
+    scenario: str = "State the first point. State the second point.",
+    personality: str = "Terse test person; sticks to the script.",
+    greeting: str | None = None,
+    replies: list[str] | None = None,
+    ends_after_replies: bool = False,
+    turn_seconds: float = 0.0,
+    provider_reference: str | None = None,
+    max_turns: int = 60,
+    max_duration_seconds: int = 600,
+    credentials: dict | None = None,
 ) -> dict:
-    """The chat fixture spec, re-identified for one test's simulation."""
-    spec = load_fixture_spec("chat-retell.json")
-    spec["simulation_id"] = simulation_id
-    if instructions is not None:
-        spec["scenario"]["instructions"] = instructions
-    if max_turns is not None:
-        spec["limits"]["max_turns"] = max_turns
-    if max_duration_seconds is not None:
-        spec["limits"]["max_duration_seconds"] = max_duration_seconds
-    if api_key is not None:
-        spec["connection"]["credentials"]["apiKey"] = api_key
-    return spec
+    """One spec against the scripted counterpart, the whole suite's staple.
+
+    The persona's turns derive from ``scenario`` (sentence by sentence, then
+    a concluding goodbye); the agent's from the plug config built here.
+    """
+    config: dict = {"turn_seconds": turn_seconds}
+    if greeting is not None:
+        config["greeting"] = greeting
+    if replies is not None:
+        config["replies"] = replies
+    if ends_after_replies:
+        config["ends_after_replies"] = True
+    if provider_reference is not None:
+        config["provider_reference"] = provider_reference
+    return {
+        "contract_version": 1,
+        "simulation_id": simulation_id,
+        "modality": "chat",
+        "connection": {
+            "type": "scripted",
+            "config": config,
+            "credentials": credentials,
+        },
+        "persona": {
+            "traits": {"personality": personality, "language": "en-US"}
+        },
+        "scenario": {"instructions": scenario},
+        "limits": {
+            "max_duration_seconds": max_duration_seconds,
+            "max_turns": max_turns,
+        },
+    }
 
 
 # -- Record readers: the acceptance suite's entire vocabulary -----------------

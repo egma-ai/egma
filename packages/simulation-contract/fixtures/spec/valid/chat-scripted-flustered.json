@@ -1,0 +1,37 @@
+{
+  "contract_version": 1,
+  "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWET",
+  "modality": "chat",
+  "connection": {
+    "type": "scripted",
+    "config": {
+      "greeting": "Lakeside Dental scheduling, good afternoon. How can I help?",
+      "replies": [
+        "Of course, we can move that for you. Could I take your full name, please?",
+        "Thank you, Margaret. I can see your Tuesday cleaning — that same week I have Thursday at half past two or four o'clock.",
+        "All done: your cleaning is moved to Thursday at half past two. Is there anything else?"
+      ],
+      "turn_seconds": 0,
+      "provider_reference": "scripted-chat-flustered-1"
+    },
+    "credentials": null
+  },
+  "persona": {
+    "traits": {
+      "personality": "Margaret, 68, retired schoolteacher. Polite but easily flustered; asks for things to be repeated and apologises for it.",
+      "language": "en-US",
+      "voice": {
+        "provider": "cartesia",
+        "voiceId": "warm-alto-2",
+        "speed": 0.9
+      }
+    }
+  },
+  "scenario": {
+    "instructions": "I booked a cleaning for next Tuesday but I need to move it to Thursday that same week. My name is Margaret Hale, sorry to be a bother. The half past two slot would suit me nicely."
+  },
+  "limits": {
+    "max_duration_seconds": 600,
+    "max_turns": 60
+  }
+}

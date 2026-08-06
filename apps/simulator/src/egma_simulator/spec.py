@@ -49,10 +49,9 @@ class SimulationSpec:
     persona_traits: dict[str, Any]
     """The persona's authored traits, passed through opaquely.
 
-    Nothing reads these yet: today's pipe echoes rather than thinking, so
-    there is no system prompt to compose them into. They are carried here
-    because they are part of the spec, and the persona brain is what
-    consumes them.
+    What a persona is made of is authoring's business: the persona brain
+    composes the whole block into its system prompt verbatim, and nothing
+    in the simulator picks favourites among the keys.
     """
 
     connection_type: str

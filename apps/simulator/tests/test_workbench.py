@@ -6,7 +6,7 @@ import asyncio
 import json
 
 import aiohttp
-from conftest import chat_spec
+from conftest import scripted_spec
 
 
 async def test_a_claim_waits_and_is_answered_the_moment_a_spec_arrives(workbench):
@@ -27,7 +27,7 @@ async def test_a_claim_waits_and_is_answered_the_moment_a_spec_arrives(workbench
         # A spec arriving mid-hold is granted without waiting out the hold.
         pending = asyncio.create_task(claim())
         await asyncio.sleep(0.1)
-        await workbench.offer(chat_spec("sim-wb-arrival"))
+        await workbench.offer(scripted_spec("sim-wb-arrival"))
         answer = await asyncio.wait_for(pending, timeout=2)
         assert [spec["simulation_id"] for spec in answer["specs"]] == [
             "sim-wb-arrival"
@@ -36,7 +36,7 @@ async def test_a_claim_waits_and_is_answered_the_moment_a_spec_arrives(workbench
 
 async def test_a_claim_never_grants_more_than_the_declared_capacity(workbench):
     for n in range(3):
-        await workbench.offer(chat_spec(f"sim-wb-cap-{n}"))
+        await workbench.offer(scripted_spec(f"sim-wb-cap-{n}"))
     async with aiohttp.ClientSession() as session:
         async with session.post(
             f"{workbench.base_url}/v1/claims",
@@ -49,7 +49,7 @@ async def test_a_claim_never_grants_more_than_the_declared_capacity(workbench):
 
 
 async def test_the_workbench_refuses_a_spec_that_breaks_the_contract(workbench):
-    broken = chat_spec("sim-wb-broken")
+    broken = scripted_spec("sim-wb-broken")
     del broken["limits"]
     async with aiohttp.ClientSession() as session:
         async with session.post(
@@ -60,16 +60,16 @@ async def test_the_workbench_refuses_a_spec_that_breaks_the_contract(workbench):
 
 
 async def test_offering_the_same_simulation_twice_is_refused(workbench):
-    await workbench.offer(chat_spec("sim-wb-dup"))
+    await workbench.offer(scripted_spec("sim-wb-dup"))
     async with aiohttp.ClientSession() as session:
         async with session.post(
-            f"{workbench.base_url}/workbench/specs", json=chat_spec("sim-wb-dup")
+            f"{workbench.base_url}/workbench/specs", json=scripted_spec("sim-wb-dup")
         ) as response:
             assert response.status == 409
 
 
 async def test_an_invalid_report_is_refused_and_the_refusal_is_a_record(workbench):
-    await workbench.offer(chat_spec("sim-wb-refuse"))
+    await workbench.offer(scripted_spec("sim-wb-refuse"))
     async with aiohttp.ClientSession() as session:
         await session.post(
             f"{workbench.base_url}/v1/claims",
@@ -114,7 +114,7 @@ async def test_a_report_for_an_unknown_simulation_is_not_found(workbench):
 
 
 async def test_a_cancel_directive_rides_the_next_heartbeat_answer(workbench):
-    await workbench.offer(chat_spec("sim-wb-cancel"))
+    await workbench.offer(scripted_spec("sim-wb-cancel"))
     async with aiohttp.ClientSession() as session:
         await session.post(
             f"{workbench.base_url}/v1/claims",
