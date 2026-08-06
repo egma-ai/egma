@@ -10,6 +10,7 @@ the suite cannot flake.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
@@ -33,8 +34,13 @@ from egma_simulator.pipeline import (
 from egma_simulator.plugs import PlugError
 from egma_simulator.spec import SimulationSpec
 from egma_simulator.speech import (
+    DEFAULT_ENGLISH_VOICE_ID,
     DEFAULT_VOICE_ID,
     SAMPLES_PER_BYTE,
+    SCRIPTED_PAIR,
+    ScriptedSTT,
+    ScriptedTTS,
+    SpeechProviders,
     decode_speech,
     duration_seconds,
     encode_speech,
@@ -361,6 +367,184 @@ async def test_the_speaking_leg_is_built_with_the_authored_voice(
         tmp_path, scenario="One point.", replies=["Noted."]
     )
     assert plain.voice.speaking_voice.voice_id == DEFAULT_VOICE_ID
+
+
+async def test_a_counterpart_that_echoes_hands_back_what_it_heard(
+    tmp_path: Path,
+):
+    """The echo test line: the agent side is whatever the persona said.
+
+    Nothing else can prove real speech legs without dialling somebody —
+    a scripted script speaks the test codec, which no real transcriber
+    can read. Here, with the scripted pair on both ends, the proof is
+    exact: every agent turn is the persona turn before it.
+    """
+    _conducted, turns, _measures, assembled = await voice_walk(
+        tmp_path,
+        scenario="First point. Second point.",
+        echoes_what_it_hears=True,
+    )
+    said = [(speaker, text) for speaker, text in turns]
+    assert said[:4] == [
+        ("human", "First point."),
+        ("agent", "First point."),
+        ("human", "Second point."),
+        ("agent", "Second point."),
+    ]
+
+    # Both channels carry both spoken turns — which is what an echo is,
+    # and the one exchange where a speaker's words are meant to be on the
+    # other channel too.
+    assert assembled.audio is not None
+    persona_audio, agent_audio, band = channels_of(
+        (tmp_path / assembled.audio["recording"]).read_bytes()
+    )
+    for channel in (persona_audio, agent_audio):
+        heard = decode_speech(channel, band)
+        assert "First point." in heard
+        assert "Second point." in heard
+
+
+def test_a_counterpart_cannot_both_echo_and_read_a_script(tmp_path: Path):
+    with pytest.raises(PlugError, match="echoes_what_it_hears"):
+        assemble(
+            spec_for(echoes_what_it_hears=True, replies=["Certainly."]),
+            blobs=FilesystemBlobStore(tmp_path),
+        )
+
+
+# -- Which legs, and whose voice ---------------------------------------------
+
+
+REAL_PAIR = SpeechProviders(
+    stt="deepgram",
+    tts="elevenlabs",
+    deepgram_api_key="deepgram-key-for-assembly-only",
+    elevenlabs_api_key="elevenlabs-key-for-assembly-only",
+)
+"""Both providers named. Building legs is not connecting to them, so an
+assembled pipeline can be inspected here without a network or an account."""
+
+
+@asynccontextmanager
+async def assembled_with(providers: SpeechProviders, tmp_path: Path, **overrides):
+    """One assembled voice pipeline, given back after it has been read.
+
+    Nothing is opened: a leg is built here and reaches its provider only
+    when an exchange starts, which is what lets the whole of this section
+    run with no network and no account.
+    """
+    assembled = assemble(
+        spec_for(**overrides), blobs=FilesystemBlobStore(tmp_path), speech=providers
+    )
+    try:
+        yield assembled
+    finally:
+        await assembled.plug.close()
+
+
+async def test_a_deployment_that_configures_nothing_gets_the_scripted_pair(
+    tmp_path: Path,
+):
+    """The default everywhere: CI, the free local demo, and any deployment
+    that sets no provider variable."""
+    async with assembled_with(SCRIPTED_PAIR, tmp_path) as assembled:
+        legs = assembled.voice.legs
+        assert isinstance(legs.tts, ScriptedTTS)
+        assert isinstance(legs.stt, ScriptedSTT)
+
+
+async def test_naming_the_providers_puts_their_stock_services_in_the_slots(
+    tmp_path: Path,
+):
+    """Configuration alone selects them — the spec is the same one the
+    scripted pair conducts, and no code above assembly changed."""
+    from pipecat.services.deepgram.stt import DeepgramSTTService
+    from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
+
+    async with assembled_with(REAL_PAIR, tmp_path) as assembled:
+        legs = assembled.voice.legs
+        assert isinstance(legs.tts, ElevenLabsHttpTTSService)
+        assert isinstance(legs.stt, DeepgramSTTService)
+
+
+async def test_each_leg_is_chosen_on_its_own(tmp_path: Path):
+    """A real mouth with scripted ears is a configuration somebody will
+    want, and it costs one key rather than two."""
+    from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
+
+    providers = SpeechProviders(
+        tts="elevenlabs", elevenlabs_api_key="elevenlabs-key-for-assembly-only"
+    )
+    async with assembled_with(providers, tmp_path) as assembled:
+        legs = assembled.voice.legs
+        assert isinstance(legs.tts, ElevenLabsHttpTTSService)
+        assert isinstance(legs.stt, ScriptedSTT)
+
+
+async def test_a_real_voice_named_in_the_traits_is_the_one_that_speaks(
+    tmp_path: Path,
+):
+    async with assembled_with(
+        REAL_PAIR,
+        tmp_path,
+        voice={"provider": "elevenlabs", "voiceId": "brisk-tenor-7", "speed": 1.15},
+    ) as assembled:
+        spoke_with = assembled.voice.speaking_voice
+        assert (spoke_with.voice_id, spoke_with.speed) == ("brisk-tenor-7", 1.15)
+
+
+async def test_a_voice_authored_for_nobody_in_particular_is_still_honored(
+    tmp_path: Path,
+):
+    """Traits naming a voice and no provider are authoring for whichever
+    deployment runs them, so the id is used as written."""
+    async with assembled_with(
+        REAL_PAIR, tmp_path, voice={"voiceId": "brisk-tenor-7"}
+    ) as assembled:
+        assert assembled.voice.speaking_voice.voice_id == "brisk-tenor-7"
+
+
+@pytest.mark.parametrize(
+    ("traits_voice", "why"),
+    [
+        (None, "a persona authored with no voice at all"),
+        ({"speed": 1.1}, "a voice block naming no voice"),
+        (TRAITS_VOICE, "a voice belonging to a provider this is not"),
+    ],
+)
+async def test_a_persona_with_no_voice_of_this_providers_gets_the_default_english(
+    tmp_path: Path, traits_voice: dict | None, why: str
+):
+    """Speaking with a sensible default beats failing on a timbre."""
+    overrides = {} if traits_voice is None else {"voice": traits_voice}
+    async with assembled_with(REAL_PAIR, tmp_path, **overrides) as assembled:
+        assert assembled.voice.speaking_voice.voice_id == DEFAULT_ENGLISH_VOICE_ID, why
+
+
+async def test_an_unconfigured_voice_exchange_connects_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Half the hermeticity guard: with nothing configured, no socket is
+    ever connected — the whole exchange is conducted with connecting
+    starved. The other half, that no provider library is so much as
+    imported, is in the quarantine suite, where a fresh process can say
+    it."""
+    import socket
+
+    def starved(*_args: object, **_kwargs: object):
+        raise AssertionError("the scripted pair reached for the network")
+
+    monkeypatch.setattr(socket.socket, "connect", starved)
+    monkeypatch.setattr(socket.socket, "connect_ex", starved)
+
+    conducted, turns, _measures, assembled = await voice_walk(
+        tmp_path, scenario="One point.", replies=["Noted."]
+    )
+
+    assert conducted.status == "completed"
+    assert ("agent", "Noted.") in turns
+    assert assembled.audio is not None
 
 
 def test_a_chat_spec_assembles_no_speech_legs_and_no_audio(tmp_path: Path):

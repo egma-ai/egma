@@ -136,6 +136,26 @@ EGMA_SIMULATOR_CONTROL_PLANE_URL=http://127.0.0.1:8085 \
 uv run egma-simulator
 ```
 
+To hear a real voice instead of the test tone, name the speech providers.
+The `.wav` the `loopback` fixture leaves behind is then genuinely spoken
+audio on one channel, and the transcript's agent turns are what a real
+transcriber made of the other. Each leg is chosen on its own, so a real
+voice with scripted ears is one variable:
+
+```bash
+EGMA_SIMULATOR_TTS_PROVIDER=elevenlabs \
+EGMA_SIMULATOR_ELEVENLABS_API_KEY=... \
+EGMA_SIMULATOR_STT_PROVIDER=deepgram \
+EGMA_SIMULATOR_DEEPGRAM_API_KEY=... \
+EGMA_SIMULATOR_CONTROL_PLANE_URL=http://127.0.0.1:8085 \
+uv run egma-simulator
+```
+
+Which voice the persona speaks with comes from its own authored traits —
+a `voice` block naming a `voiceId` — and a persona naming none speaks
+with a default English voice. Setting neither variable leaves everything
+exactly as it was: the scripted pair, no account, no network.
+
 ## Configuration
 
 Everything arrives as environment variables.
@@ -153,6 +173,10 @@ Everything arrives as environment variables.
 | `EGMA_SIMULATOR_MODEL_BASE_URL` | `https://api.openai.com/v1` | The provider, for `openai` — any OpenAI-compatible endpoint. |
 | `EGMA_SIMULATOR_MODEL_NAME` | (required for `openai`) | Which model to ask for. |
 | `EGMA_SIMULATOR_MODEL_API_KEY` | (required for `openai`) | The provider key. Never logged. |
+| `EGMA_SIMULATOR_STT_PROVIDER` | `scripted` | What the persona hears with, in a voice simulation: `scripted` or `deepgram`. |
+| `EGMA_SIMULATOR_DEEPGRAM_API_KEY` | (required for `deepgram`) | The provider key. Never logged. |
+| `EGMA_SIMULATOR_TTS_PROVIDER` | `scripted` | What the persona speaks with: `scripted` or `elevenlabs`. |
+| `EGMA_SIMULATOR_ELEVENLABS_API_KEY` | (required for `elevenlabs`) | The provider key. Never logged. |
 | `EGMA_SIMULATOR_WAL_DIR` | `.egma-simulator/wal` | Where report documents land before sending. |
 | `EGMA_SIMULATOR_BLOB_DIR` | `.egma-simulator/blobs` | Where recordings land, for the filesystem-backed blob store. |
 | `EGMA_SIMULATOR_LOG_LEVEL` | `INFO` | The usual levels: `CRITICAL`, `ERROR`, `WARNING`, `INFO`, `DEBUG`. |

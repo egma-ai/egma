@@ -213,6 +213,86 @@ def test_the_openai_provider_names_what_it_is_missing(env, supplied, missing):
         SimulatorConfig.from_env()
 
 
+def test_the_speech_legs_are_scripted_until_a_provider_is_named(env):
+    """The pair CI and the free local demo run on, with nothing set."""
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+
+    config = SimulatorConfig.from_env()
+
+    assert config.stt_provider == "scripted"
+    assert config.tts_provider == "scripted"
+    assert config.deepgram_api_key is None
+    assert config.elevenlabs_api_key is None
+
+
+@pytest.mark.parametrize(
+    "variable", ["EGMA_SIMULATOR_STT_PROVIDER", "EGMA_SIMULATOR_TTS_PROVIDER"]
+)
+def test_an_unknown_speech_provider_is_refused_by_name(env, variable):
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv(variable, "lip-reading")
+
+    with pytest.raises(ValueError, match=variable):
+        SimulatorConfig.from_env()
+
+
+@pytest.mark.parametrize(
+    ("provider_variable", "provider", "key_variable"),
+    [
+        (
+            "EGMA_SIMULATOR_STT_PROVIDER",
+            "deepgram",
+            "EGMA_SIMULATOR_DEEPGRAM_API_KEY",
+        ),
+        (
+            "EGMA_SIMULATOR_TTS_PROVIDER",
+            "elevenlabs",
+            "EGMA_SIMULATOR_ELEVENLABS_API_KEY",
+        ),
+    ],
+)
+def test_a_speech_provider_with_no_key_names_the_key_it_wants(
+    env, provider_variable, provider, key_variable
+):
+    """Naming a provider is what makes its key required — and the refusal
+    says which variable to set, at startup, before anything is claimed."""
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv(provider_variable, provider)
+
+    with pytest.raises(ValueError, match=key_variable):
+        SimulatorConfig.from_env()
+
+
+def test_the_speech_provider_keys_are_read_and_kept_out_of_the_repr(env):
+    """They are credentials, so they travel like one: never in a printed
+    config, and registered for redaction wherever one is printed anyway."""
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv("EGMA_SIMULATOR_STT_PROVIDER", "deepgram")
+    env.setenv("EGMA_SIMULATOR_DEEPGRAM_API_KEY", "deepgram_key_under_test")
+    env.setenv("EGMA_SIMULATOR_TTS_PROVIDER", "elevenlabs")
+    env.setenv("EGMA_SIMULATOR_ELEVENLABS_API_KEY", "elevenlabs_key_under_test")
+
+    config = SimulatorConfig.from_env()
+
+    assert config.deepgram_api_key == "deepgram_key_under_test"
+    assert config.elevenlabs_api_key == "elevenlabs_key_under_test"
+    assert "deepgram_key_under_test" not in repr(config)
+    assert "elevenlabs_key_under_test" not in repr(config)
+
+
+def test_one_real_leg_does_not_drag_the_other_along(env):
+    """The two legs are chosen apart: a real mouth with scripted ears is a
+    configuration somebody will want, and it needs one key, not two."""
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv("EGMA_SIMULATOR_TTS_PROVIDER", "elevenlabs")
+    env.setenv("EGMA_SIMULATOR_ELEVENLABS_API_KEY", "elevenlabs_key_under_test")
+
+    config = SimulatorConfig.from_env()
+
+    assert (config.stt_provider, config.tts_provider) == ("scripted", "elevenlabs")
+    assert config.deepgram_api_key is None
+
+
 @pytest.mark.parametrize(
     "variable", ["EGMA_SIMULATOR_BLOB_DIR", "EGMA_SIMULATOR_WAL_DIR"]
 )

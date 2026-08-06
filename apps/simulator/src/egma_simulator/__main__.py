@@ -65,10 +65,16 @@ def _gather_loguru(level: str) -> None:
 
 async def _run(config: SimulatorConfig) -> None:
     registry = SecretRegistry()
-    # The model key and the service token are configuration rather than a
-    # spec's credentials, but they are secrets all the same, and the same
-    # filter keeps them out of logs.
-    for secret in (config.model_api_key, config.service_token):
+    # The model key, the speech-provider keys and the service token are
+    # configuration rather than a spec's credentials, but they are secrets
+    # all the same, and the same filter keeps them out of logs — which
+    # matters most for the speech legs, whose library logs plenty on its
+    # own and would happily print a refusal with the key in it.
+    for secret in (
+        config.model_api_key,
+        config.service_token,
+        *config.speech_secrets,
+    ):
         if secret is not None:
             registry.register(secret)
     _configure_logging(config.log_level, registry)

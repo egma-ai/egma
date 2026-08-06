@@ -157,6 +157,16 @@ services:
       EGMA_SIMULATOR_MODEL_NAME: ${EGMA_SIMULATOR_MODEL_NAME:-}
       EGMA_SIMULATOR_MODEL_API_KEY: ${EGMA_SIMULATOR_MODEL_API_KEY:-}
       EGMA_SIMULATOR_MODEL_BASE_URL: ${EGMA_SIMULATOR_MODEL_BASE_URL:-}
+      # What the persona hears and speaks with in a voice simulation. Both
+      # default to `scripted`, which needs no account and no network — a
+      # first voice simulation costs nothing — and each is chosen on its
+      # own. Naming `deepgram` or `elevenlabs` makes that provider's key
+      # required, and the simulator says so at startup rather than failing
+      # every voice simulation it later claims.
+      EGMA_SIMULATOR_STT_PROVIDER: ${EGMA_SIMULATOR_STT_PROVIDER:-scripted}
+      EGMA_SIMULATOR_DEEPGRAM_API_KEY: ${EGMA_SIMULATOR_DEEPGRAM_API_KEY:-}
+      EGMA_SIMULATOR_TTS_PROVIDER: ${EGMA_SIMULATOR_TTS_PROVIDER:-scripted}
+      EGMA_SIMULATOR_ELEVENLABS_API_KEY: ${EGMA_SIMULATOR_ELEVENLABS_API_KEY:-}
       # The volume below, and the two things kept on it. Recordings are
       # what a report can only point at, and the write-ahead log is the
       # only record of a report that never got through — losing either to

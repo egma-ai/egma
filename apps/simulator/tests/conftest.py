@@ -393,6 +393,7 @@ def loopback_spec(
     greeting: str | None = None,
     replies: list[str] | None = None,
     ends_after_replies: bool = False,
+    echoes_what_it_hears: bool = False,
     answer_delay_seconds: float = 0.0,
     sample_rate_hz: int | None = None,
     provider_reference: str | None = None,
@@ -414,6 +415,8 @@ def loopback_spec(
         config["replies"] = replies
     if ends_after_replies:
         config["ends_after_replies"] = True
+    if echoes_what_it_hears:
+        config["echoes_what_it_hears"] = True
     if sample_rate_hz is not None:
         config["sample_rate_hz"] = sample_rate_hz
     if provider_reference is not None:

@@ -7,22 +7,21 @@ voice, and a speech-to-text leg turning what comes back into the
 transcript's ``agent`` turns.
 
 Both legs are ordinary Pipecat frame processors, in the two places a
-real provider's service would sit — Cartesia or ElevenLabs speaking,
-Deepgram or Whisper listening — so the shape a provider must fit is
-already settled, and the pipeline that is assembled around them does not
-change when one arrives. The listening leg goes further and is a Pipecat
-STT service, the very class a real one subclasses; the speaking leg
-deliberately is not, and :class:`ScriptedTTS` says why.
+real provider's service sits — ElevenLabs speaking, Deepgram listening —
+so the pipeline assembled around them is the same pipeline either way.
+The listening leg goes further and is a Pipecat STT service, the very
+class a real one subclasses; the speaking leg deliberately is not, and
+:class:`ScriptedTTS` says why.
 
-**There is no way to select a real provider today**: the assembly builds
-the scripted pair below, and nothing chooses between them. The switch
-lands with the first real provider, together with the extra that installs
-it and a way to test it; writing it now would be a code path nobody could
-exercise.
+**Which pair is used is configuration, read at pipeline assembly and
+nowhere else** — see :class:`SpeechProviders`. Each leg is chosen on its
+own, because a real mouth with scripted ears is a configuration somebody
+will want. Nothing else in the simulator learns which pair it got: a plug
+still exchanges audio, and the persona brain still writes text.
 
-What CI runs on is the scripted pair: no model, no network, no corpus
-to download, and the same words out of the listening leg that went into
-the speaking one.
+What CI runs on, and any deployment that sets nothing, is the scripted
+pair: no account, no network, no corpus to download, and the same words
+out of the listening leg that went into the speaking one.
 
 **The scripted codec.** Scripted speech is real PCM — 16-bit signed
 little-endian mono, at whatever band the transport carries — and it is
@@ -39,12 +38,14 @@ carry, 8 kHz telephony, still holds them.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import math
 import struct
-from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from dataclasses import dataclass, field
 from functools import cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pipecat.frames.frames import (
     Frame,
@@ -60,6 +61,11 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import STTService
 from pipecat.utils.time import time_now_iso8601
 
+if TYPE_CHECKING:
+    from .config import SimulatorConfig
+
+logger = logging.getLogger(__name__)
+
 SAMPLE_WIDTH_BYTES = 2
 """16-bit signed little-endian, the one sample format the simulator carries."""
 
@@ -72,6 +78,22 @@ TONE_AMPLITUDE = 8000
 
 DEFAULT_VOICE_ID = "egma-scripted-voice"
 """What a persona authored with no voice block speaks with."""
+
+DEFAULT_ENGLISH_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
+"""The English voice a persona speaks with when its traits name none.
+
+ElevenLabs' own long-standing default from their shared library, so every
+account has it. A persona is authored for its behavior far more often
+than for its timbre, and one that named no voice must still be able to
+call: silence is not a sensible default."""
+
+LISTENING_READY_SECONDS = 15.0
+"""How long a listening leg may take to become able to hear.
+
+A streaming transcriber opens its connection in the background and
+*silently drops* audio handed to it before that connection is up. The
+first thing a voice exchange does is hand it the agent's greeting, so
+without this wait the first turn of a real call would vanish."""
 
 
 @dataclass(frozen=True)
@@ -269,3 +291,204 @@ class ScriptedSTT(STTService):
             user_id="",
             timestamp=time_now_iso8601(),
         )
+
+
+# -- Choosing a pair ---------------------------------------------------------
+
+
+class SpeechFault(RuntimeError):
+    """A speech leg could not be built, or could not be made able to hear.
+
+    Deliberately not a ``PlugError``: that word names a platform refusing,
+    and this is the persona's own mouth or ears. Either way the walk
+    reports a failed simulation, and the reason on the record is what
+    tells a reader which of the two happened.
+    """
+
+
+@dataclass(frozen=True)
+class SpeechProviders:
+    """Which pair of legs a voice pipeline is assembled with.
+
+    Configuration, and the whole of it: everything that differs between a
+    scripted exchange and one carried by real providers is in these four
+    values, they are read once at assembly, and nothing above assembly
+    ever sees them. The default is the scripted pair, which is what makes
+    "a deployment that sets nothing behaves exactly as it did" true by
+    construction rather than by remembering.
+    """
+
+    stt: str = "scripted"
+    tts: str = "scripted"
+    deepgram_api_key: str | None = field(default=None, repr=False)
+    elevenlabs_api_key: str | None = field(default=None, repr=False)
+
+    @classmethod
+    def from_config(cls, config: SimulatorConfig) -> SpeechProviders:
+        return cls(
+            stt=config.stt_provider,
+            tts=config.tts_provider,
+            deepgram_api_key=config.deepgram_api_key,
+            elevenlabs_api_key=config.elevenlabs_api_key,
+        )
+
+
+SCRIPTED_PAIR = SpeechProviders()
+"""The pair a pipeline is assembled with when nothing is configured."""
+
+
+@dataclass
+class SpeechLegs:
+    """One simulation's mouth and ears, and how to finish with them."""
+
+    stt: FrameProcessor
+    tts: FrameProcessor
+
+    voice: PersonaVoice
+    """The voice the speaking leg was really built with — the authored one
+    where it could be honored, the default English one where it could
+    not. What this says is what the persona speaks with."""
+
+    listening: Callable[[], Awaitable[None]] | None = None
+    """Waits until the listening leg can hear, for a leg that connects."""
+
+    closers: tuple[Callable[[], Awaitable[None]], ...] = ()
+    """What a leg holds open beyond the pipeline's own teardown."""
+
+    async def ready(self) -> None:
+        """Block until a turn handed to these legs would really be carried."""
+        if self.listening is None:
+            return
+        try:
+            await asyncio.wait_for(self.listening(), timeout=LISTENING_READY_SECONDS)
+        except TimeoutError as never_ready:
+            raise SpeechFault(
+                "the listening leg did not connect within "
+                f"{LISTENING_READY_SECONDS:.0f}s; nothing said would have been "
+                "heard"
+            ) from never_ready
+
+    async def aclose(self) -> None:
+        """Release whatever the legs hold. Safe from every state, always
+        called — a pipeline that was never opened still built its legs."""
+        for close in self.closers:
+            try:
+                await close()
+            except Exception:
+                logger.exception("a speech leg did not close cleanly")
+
+
+def build_legs(
+    providers: SpeechProviders, *, voice: PersonaVoice, sample_rate_hz: int
+) -> SpeechLegs:
+    """The pair this simulation speaks and listens with.
+
+    Building is not connecting: a real leg constructs its client here and
+    reaches the provider only once the exchange opens, so assembling a
+    pipeline stays the validation step it has always been.
+    """
+    speaking, spoken_with, closers = _mouth(providers, voice, sample_rate_hz)
+    listening_leg, listening = _ears(providers, sample_rate_hz)
+    return SpeechLegs(
+        stt=listening_leg,
+        tts=speaking,
+        voice=spoken_with,
+        listening=listening,
+        closers=closers,
+    )
+
+
+def _mouth(
+    providers: SpeechProviders, voice: PersonaVoice, sample_rate_hz: int
+) -> tuple[FrameProcessor, PersonaVoice, tuple[Callable[[], Awaitable[None]], ...]]:
+    if providers.tts != "elevenlabs":
+        return ScriptedTTS(voice=voice, sample_rate_hz=sample_rate_hz), voice, ()
+
+    # Imported here and not at the top of the file: an unconfigured
+    # simulator must not pay for a provider it will not use, and a
+    # dependency that is never imported is a dependency that cannot
+    # reach the network on its own. The quarantine suite holds this.
+    import aiohttp
+    from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
+    from pipecat.services.tts_service import TextAggregationMode
+
+    if not providers.elevenlabs_api_key:
+        raise SpeechFault("the elevenlabs speaking leg was chosen without a key")
+
+    spoken_with = _voice_from(voice, provider="elevenlabs")
+    settings = ElevenLabsHttpTTSService.Settings(voice=spoken_with.voice_id)
+    if spoken_with.speed is not None:
+        settings.speed = spoken_with.speed
+    session = aiohttp.ClientSession()
+    leg = ElevenLabsHttpTTSService(
+        api_key=providers.elevenlabs_api_key,
+        aiohttp_session=session,
+        sample_rate=sample_rate_hz,
+        settings=settings,
+        # One persona turn is one whole thing to say. The default is to
+        # regroup text into sentences, which is done with a tokenizer
+        # corpus fetched from the internet — the download this package
+        # disarms — and a turn is already the unit here, so there is
+        # nothing to regroup and nothing to fetch.
+        text_aggregation_mode=TextAggregationMode.TOKEN,
+    )
+    return leg, spoken_with, (session.close,)
+
+
+def _ears(
+    providers: SpeechProviders, sample_rate_hz: int
+) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None]:
+    if providers.stt != "deepgram":
+        return ScriptedSTT(sample_rate_hz=sample_rate_hz), None
+
+    from pipecat.services.deepgram.stt import DeepgramSTTService
+
+    if not providers.deepgram_api_key:
+        raise SpeechFault("the deepgram listening leg was chosen without a key")
+
+    leg = DeepgramSTTService(
+        api_key=providers.deepgram_api_key, sample_rate=sample_rate_hz
+    )
+
+    async def connected() -> None:
+        # The service opens its websocket in a background task and drops
+        # audio handed to it before that finishes, saying nothing. The
+        # flag it sets when the connection can accept audio is the one
+        # the service waits on itself when it reconnects; there is no
+        # public way to ask. A pipecat release that renames it must be
+        # noticed here, loudly, rather than by first turns going missing.
+        connection_ready = getattr(leg, "_connection_ready", None)
+        if connection_ready is None:
+            raise SpeechFault(
+                "this pipecat release no longer says when the deepgram leg "
+                "is connected; a turn spoken before it is would be lost"
+            )
+        await connection_ready.wait()
+
+    return leg, connected
+
+
+def _voice_from(voice: PersonaVoice, *, provider: str) -> PersonaVoice:
+    """The voice one provider can really speak with.
+
+    A voice id belongs to the provider it was authored for. A persona
+    naming this provider's voice — or naming a voice without saying whose
+    it is — is honored. One naming another provider's voice is authoring
+    for a deployment this is not, and the sensible default speaks instead:
+    the alternative is a simulation that fails on a timbre.
+    """
+    authored = voice.provider
+    if voice.voice_id != DEFAULT_VOICE_ID and authored in (None, provider):
+        return PersonaVoice(
+            voice_id=voice.voice_id, provider=provider, speed=voice.speed
+        )
+    if authored not in (None, provider):
+        logger.info(
+            "the persona's voice was authored for %s and this simulation "
+            "speaks through %s; the default English voice speaks",
+            authored,
+            provider,
+        )
+    return PersonaVoice(
+        voice_id=DEFAULT_ENGLISH_VOICE_ID, provider=provider, speed=voice.speed
+    )
