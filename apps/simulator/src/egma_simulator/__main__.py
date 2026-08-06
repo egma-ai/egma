@@ -63,13 +63,14 @@ def _gather_loguru(level: str) -> None:
     loguru_logger.add(hand_over, level=level.upper())
 
 
-async def _run() -> None:
+async def _run(config: SimulatorConfig) -> None:
     registry = SecretRegistry()
-    config = SimulatorConfig.from_env()
-    # The model key is configuration rather than a spec's credential, but it
-    # is a secret all the same, and the same filter keeps it out of logs.
-    if config.model_api_key is not None:
-        registry.register(config.model_api_key)
+    # The model key and the service token are configuration rather than a
+    # spec's credentials, but they are secrets all the same, and the same
+    # filter keeps them out of logs.
+    for secret in (config.model_api_key, config.service_token):
+        if secret is not None:
+            registry.register(secret)
     _configure_logging(config.log_level, registry)
 
     service = SimulatorService(config, secrets=registry)
@@ -86,7 +87,18 @@ async def _run() -> None:
 
 
 def main() -> None:
-    asyncio.run(_run())
+    try:
+        config = SimulatorConfig.from_env()
+    except ValueError as misconfigured:
+        # A container that cannot start says one thing, and it is the
+        # sentence naming the variable to fix. A traceback down through
+        # the standard library would bury it under frames nobody deploying
+        # this can act on — and this is written before logging is
+        # configured, because configuring it is one of the things that
+        # could have gone wrong.
+        print(f"egma-simulator cannot start: {misconfigured}", file=sys.stderr)
+        raise SystemExit(1) from None
+    asyncio.run(_run(config))
 
 
 if __name__ == "__main__":
