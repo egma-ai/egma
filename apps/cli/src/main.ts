@@ -122,6 +122,9 @@ function exitCodeFor(report: ExitReport): number {
     case "interrupted":
       return 130;
     case "no-agent-context":
+    // The coding agent stopped the work itself. Nothing was found, and the run
+    // did not do what it set out to do.
+    case "coding-agent-stopped":
     case "failed":
       return 1;
   }

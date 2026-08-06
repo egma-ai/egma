@@ -28,6 +28,8 @@ export type FakeStep =
       title: string;
       toolKind?: acp.ToolKind;
       locations?: Location[];
+      /** The arguments the call carries — a terminal call's command lives here. */
+      rawInput?: Record<string, unknown>;
     }
   | { kind: "tool-call-update"; id: string; status: acp.ToolCallStatus; title?: string }
   | {
@@ -158,6 +160,7 @@ async function run(): Promise<void> {
               kind: step.toolKind ?? "read",
               status: "in_progress",
               locations: step.locations ?? [],
+              ...(step.rawInput === undefined ? {} : { rawInput: step.rawInput }),
             },
           });
           break;

@@ -48,6 +48,28 @@ describe("a marker line", () => {
     expect(markerIn("EGMA:FOUND framework retell-sdk")).toEqual(wanted);
   });
 
+  it("survives bold, which is the decoration a model reaches for most", () => {
+    const wanted = { kind: "found", field: "framework", value: "retell-sdk" };
+    // Only the marker's own name in bold: the commonest shape of all.
+    expect(markerIn("**egma:found** framework retell-sdk")).toEqual(wanted);
+    expect(markerIn("__egma:found__ framework retell-sdk")).toEqual(wanted);
+    // The whole line in bold.
+    expect(markerIn("**egma:found framework retell-sdk**")).toEqual(wanted);
+    expect(markerIn("- **egma:found framework retell-sdk**")).toEqual(wanted);
+    expect(markerIn("**`egma:found framework retell-sdk`**")).toEqual(wanted);
+    expect(markerIn("**egma:note** Reading package.json")).toEqual({
+      kind: "note",
+      text: "Reading package.json",
+    });
+
+    // And a value made of asterisks is not cut short by its own glob.
+    expect(markerIn("**egma:found tools src/**/*.ts (2 definitions)**")).toEqual({
+      kind: "found",
+      field: "tools",
+      value: "src/**/*.ts (2 definitions)",
+    });
+  });
+
   it("is not a marker just because the word appears", () => {
     expect(markerIn("I will report this with egma:found when I know.")).toBeNull();
     expect(markerIn("egma:invented framework retell-sdk")).toBeNull();
@@ -80,11 +102,52 @@ describe("markers arriving in pieces", () => {
     ]);
   });
 
+  it("reads a marker welded to a word, which is where a line ending belongs", () => {
+    const stream = new MarkerStream();
+
+    // No punctuation between them, and still the only reading that makes sense.
+    expect(stream.push("Reading the manifestegma:found framework retell-sdk\n")).toEqual([
+      { kind: "prose", text: "Reading the manifest" },
+      { kind: "marker", marker: { kind: "found", field: "framework", value: "retell-sdk" } },
+    ]);
+  });
+
   it("leaves a marker alone when somebody is only talking about one", () => {
     const stream = new MarkerStream();
 
     expect(stream.push("I will report this with egma:found when I know.\n")).toEqual([
       { kind: "prose", text: "I will report this with egma:found when I know." },
+    ]);
+  });
+
+  /**
+   * The shapes a model writes when it is explaining the format rather than
+   * using it. Each one is a sentence with a marker inside it, and reading any
+   * of them as a fact invents the rest of the sentence as its value.
+   */
+  it("leaves a marker inside a sentence alone, whatever is wrapped around it", () => {
+    const prose = [
+      "I will use the format (egma:found framework retell-sdk) for each fact.",
+      "Use `egma:found framework retell-sdk` when you know it.",
+      'The line reads "egma:found framework retell-sdk" and nothing else.',
+      "Write it as [egma:found framework retell-sdk] on its own line.",
+      "The marker is *egma:found framework retell-sdk* in this example.",
+      "One line each: 'egma:found framework retell-sdk' is the shape.",
+    ];
+
+    for (const line of prose) {
+      const stream = new MarkerStream();
+      expect(stream.push(`${line}\n`), line).toEqual([{ kind: "prose", text: line }]);
+    }
+  });
+
+  it("reads a bold marker welded to the line before it", () => {
+    const stream = new MarkerStream();
+
+    expect(stream.push("egma:note Reading the manifest.")).toEqual([]);
+    expect(stream.push("**egma:found** framework retell-sdk\n")).toEqual([
+      { kind: "marker", marker: { kind: "note", text: "Reading the manifest." } },
+      { kind: "marker", marker: { kind: "found", field: "framework", value: "retell-sdk" } },
     ]);
   });
 

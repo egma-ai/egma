@@ -41,8 +41,22 @@ export type ParsedLine =
 /** Leading decoration a model adds when it thinks it is formatting a list. */
 const DECORATION = /^(?:[-*+>]\s+|\d+[.)]\s+)*/;
 
+/** The whole line in bold: `**egma:found framework retell-sdk**`. */
+const WHOLE_BOLD = /^(\*\*|__)([\s\S]+)\1$/;
+
+/** Only the marker's own name in bold: `**egma:found** framework retell-sdk`. */
+const LEADING_BOLD = /^(\*\*|__)([\s\S]+?)\1/;
+
 function undecorate(line: string): string {
   let text = line.trim().replace(DECORATION, "").trim();
+
+  // Bold is what a model reaches for when it is told to write a bare line and
+  // cannot help itself. The whole line is tried first, so a value holding an
+  // asterisk — `src/**/*.ts` is a good value — is not cut short by its own
+  // glob.
+  const bold = WHOLE_BOLD.exec(text) ?? LEADING_BOLD.exec(text);
+  if (bold !== null) text = `${bold[2] as string}${text.slice(bold[0].length)}`.trim();
+
   // A model that has been told "no code fence" often reaches for inline code.
   if (text.startsWith("`") && text.endsWith("`") && text.length > 1) {
     text = text.slice(1, -1).trim();
@@ -86,12 +100,22 @@ export function markerIn(line: string): Marker | null {
  * An agent's words arrive in pieces, and the piece before a marker sometimes
  * ends without the line ending that was meant to follow it — so a line of prose
  * and the marker after it become one line, and the marker is lost. A marker
- * pressed straight against a word with no space is never how anyone writes a
- * sentence, so it is read as the line break that went missing. A marker with a
- * space in front of it is left alone: that is somebody talking about markers,
- * and talking about one does not make one.
+ * pressed straight against the end of a sentence is never how anyone writes
+ * one, so it is read as the line break that went missing.
+ *
+ * The split fires only where a lost line ending is the plausible explanation:
+ * after a word character, a full stop or a comma. It never fires after a
+ * backtick, a bracket, a quote or an asterisk, because those are how a person
+ * writes *about* a marker — `` `egma:found framework retell-sdk` `` in a
+ * sentence is somebody explaining the format, and splitting there turns the
+ * rest of their sentence into a fact egma never found. A marker with a space
+ * in front of it is left alone for the same reason.
+ *
+ * What may sit between the two is the decoration the next line would have
+ * carried anyway: a model that writes `**egma:found** …` writes it that way
+ * whether or not the line ending survived.
  */
-const WELDED_MARKER = /(?<=\S)(?=egma:)/gi;
+const WELDED_MARKER = /(?<=[\w.,])(?=(?:\*\*|__|`)?egma:)/gi;
 
 /**
  * The agent's words as they arrive, split into markers and everything else.

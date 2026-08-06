@@ -8,6 +8,12 @@ const EVERY_ENDING: readonly ExitReport[] = [
   { kind: "found-agent", framework: null, prompts: null },
   { kind: "no-agent-context" },
   { kind: "no-coding-agent" },
+  {
+    kind: "coding-agent-stopped",
+    drivenAgentName: "Claude Agent",
+    reason: "I cannot read this repository.",
+  },
+  { kind: "coding-agent-stopped", drivenAgentName: "Claude Agent", reason: "" },
   { kind: "quit" },
   { kind: "interrupted", drivenAgentName: "Claude Agent" },
   { kind: "interrupted", drivenAgentName: null },
@@ -44,6 +50,27 @@ describe("the exit line", () => {
     );
 
     expect(buildExitLine({ kind: "failed", reason: "no answer" })).toContain("no answer");
+  });
+
+  /**
+   * A coding agent that stopped is not a folder that held nothing. Telling the
+   * second story for the first says egma looked and found no voice agent, when
+   * what happened is that nobody ever looked.
+   */
+  it("says a stop was a stop, and whose it was", () => {
+    expect(
+      buildExitLine({
+        kind: "coding-agent-stopped",
+        drivenAgentName: "Claude Agent",
+        reason: "I cannot read this repository.",
+      }),
+    ).toBe(
+      "Claude Agent stopped before it found your voice agent: I cannot read this repository.",
+    );
+
+    expect(
+      buildExitLine({ kind: "coding-agent-stopped", drivenAgentName: "Claude Agent", reason: "" }),
+    ).toBe("Claude Agent stopped before it found your voice agent, and did not say why.");
   });
 
   it("prints something to copy only when the developer has to copy something", () => {

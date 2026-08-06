@@ -27,9 +27,23 @@ export type ExitReport =
   | { readonly kind: "no-agent-context" }
   /** There is no coding agent on this machine for egma to drive. */
   | { readonly kind: "no-coding-agent" }
+  /**
+   * The coding agent stopped the work itself and said why. It is not the same
+   * as finding nothing, and saying it was would put words in the agent's mouth.
+   */
+  | {
+      readonly kind: "coding-agent-stopped";
+      readonly drivenAgentName: string;
+      readonly reason: string;
+    }
   | { readonly kind: "quit" }
   | { readonly kind: "interrupted"; readonly drivenAgentName: string | null }
   | { readonly kind: "failed"; readonly reason: string };
+
+/** One line means one line, whatever shape the reason arrived in. */
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
 
 function foundLine(framework: string | null, prompts: string | null): string {
   const facts: string[] = [];
@@ -47,6 +61,10 @@ export function buildExitLine(report: ExitReport): string {
       return "egma found no voice agent to test. Run egma again where your agent is defined.";
     case "no-coding-agent":
       return "egma found no coding agent on this machine that it can drive, so it printed what to paste into yours instead.";
+    case "coding-agent-stopped":
+      return oneLine(report.reason) === ""
+        ? `${report.drivenAgentName} stopped before it found your voice agent, and did not say why.`
+        : `${report.drivenAgentName} stopped before it found your voice agent: ${oneLine(report.reason)}`;
     case "quit":
       return "egma closed. Nothing ran.";
     case "interrupted":
@@ -54,7 +72,7 @@ export function buildExitLine(report: ExitReport): string {
         ? "egma stopped before the task finished."
         : `egma stopped before the task finished, and shut ${report.drivenAgentName} down.`;
     case "failed":
-      return `egma could not finish: ${report.reason}`;
+      return `egma could not finish: ${oneLine(report.reason)}`;
   }
 }
 

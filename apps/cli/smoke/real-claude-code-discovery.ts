@@ -10,6 +10,17 @@
  * is never written down here. Its path is redacted from everything printed, so
  * the output of a passing run can be pasted anywhere.
  *
+ * With that variable unset there is nothing to look in, so the check verifies
+ * nothing and says so loudly rather than exiting quietly on a zero — a skip
+ * that reads like a pass is worse than no check at all. Where a skip must be a
+ * failure instead, run it strictly:
+ *
+ *   node apps/cli/smoke/real-claude-code-discovery.ts --require-target
+ *   EGMA_SMOKE_REQUIRE_TARGET=1 node apps/cli/smoke/real-claude-code-discovery.ts
+ *
+ * Either one turns an unset target into a non-zero exit. That is what CI, and
+ * `pnpm smoke` on a machine that is supposed to have a target, should use.
+ *
  * Run it with: node apps/cli/smoke/real-claude-code-discovery.ts
  * It needs Claude Code logged in, and the network the first time.
  */
@@ -19,36 +30,96 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { FACTS } from "../src/wizard/facts.ts";
+import { DETAIL_MARK } from "../src/wizard/status.ts";
+
 const CLI_ENTRY = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 
 /** The one committed name for the repository this check runs against. */
 const TARGET_VARIABLE = "EGMA_E2E_TARGET_REPO";
 
+/** The switch that turns a skip into a failure. */
+const STRICT_VARIABLE = "EGMA_SMOKE_REQUIRE_TARGET";
+const STRICT_FLAG = "--require-target";
+
 /** npx may have to fetch the adapter the first time, so this is generous. */
 const TIMEOUT_MS = 6 * 60_000;
+
+const RULE = "─".repeat(58);
 
 function say(message: string): void {
   process.stdout.write(`${message}\n`);
 }
 
-/** What the target repository is called, replaced everywhere by what it is. */
+/** Whether an unset target must end this run with a failure. */
+function requiresTarget(): boolean {
+  if (process.argv.includes(STRICT_FLAG)) return true;
+  const set = (process.env[STRICT_VARIABLE] ?? "").trim().toLowerCase();
+  return set !== "" && set !== "0" && set !== "false" && set !== "no";
+}
+
+/**
+ * What is printed when there is no repository to look in.
+ *
+ * It is loud on purpose. This check sits inside `pnpm smoke`, and a line of
+ * polite prose between two passing checks is read as a third passing check.
+ */
+function nothingWasVerified(strict: boolean): void {
+  const headline = strict
+    ? "FAILED — nothing was verified, and this run required a target"
+    : "SKIPPED — nothing was verified";
+
+  say(RULE);
+  say(`  ${headline}`);
+  say(RULE);
+  say(`  ${TARGET_VARIABLE} is not set, so no repository was read, no coding`);
+  say("  agent was started, and nothing at all was checked.");
+  say("");
+  say(`  Set ${TARGET_VARIABLE} to the folder a real voice agent is`);
+  say("  checked out in, then run this again.");
+  if (!strict) {
+    say("");
+    say("  Where a skip must not look like a pass — CI, or a machine that is");
+    say(`  supposed to have a target — run this with ${STRICT_FLAG}, or with`);
+    say(`  ${STRICT_VARIABLE}=1, and an unset target ends the run`);
+    say("  with a failure instead.");
+  }
+  say(RULE);
+}
+
+/** The shortest piece of a path still worth hiding. */
+const TELLING = 8;
+
+/**
+ * What the target repository is called, replaced everywhere by what it is.
+ *
+ * Every cut-short form of the path counts too. egma trims a long command to
+ * fit one status line, and half a path is still the path. It hides more than
+ * it strictly has to, which is the right way round: a redaction that takes an
+ * unrelated folder with it costs a reader nothing, and one that stops a
+ * character short costs the name this check exists not to print.
+ */
 function redactor(target: string): (text: string) => string {
-  const parts = [target, path.resolve(target), path.basename(target)].filter(
-    (part) => part.length > 2,
+  const names = [target, path.resolve(target), path.basename(target)].filter(
+    (name) => name.length > 2,
   );
-  const ordered = [...new Set(parts)].sort((left, right) => right.length - left.length);
-  return (text) =>
-    ordered.reduce((held, part) => held.split(part).join("<target repo>"), text);
+
+  const parts = new Set<string>();
+  for (const name of names) {
+    parts.add(name);
+    for (let end = name.length - 1; end >= TELLING; end -= 1) parts.add(name.slice(0, end));
+  }
+
+  const ordered = [...parts].sort((left, right) => right.length - left.length);
+  return (text) => ordered.reduce((held, part) => held.split(part).join("<target repo>"), text);
 }
 
 async function main(): Promise<void> {
   const target = process.env[TARGET_VARIABLE];
   if (target === undefined || target.trim() === "") {
-    say(`${TARGET_VARIABLE} is not set, so there is no repository to look in.`);
-    say("");
-    say("This check drives real Claude Code over a real voice agent's repository.");
-    say(`Set ${TARGET_VARIABLE} to the folder that repository is checked out in,`);
-    say("then run this again. Nothing was started.");
+    const strict = requiresTarget();
+    nothingWasVerified(strict);
+    if (strict) process.exitCode = 1;
     return;
   }
 
@@ -92,9 +163,13 @@ async function main(): Promise<void> {
     say(redact(stderr).trimEnd());
   }
 
-  const facts = lines.filter((line) => line.startsWith("┊ "));
-  const prompts = facts.find((line) => line.startsWith("┊ Prompts"));
-  const framework = facts.find((line) => line.startsWith("┊ Framework"));
+  // A detail line is not a fact — a command egma showed under a terminal
+  // action starts the same way — so the facts are counted by their own names.
+  const facts = lines.filter((line) =>
+    FACTS.some((fact) => line.startsWith(`${DETAIL_MARK} ${fact.label}`)),
+  );
+  const prompts = facts.find((line) => line.startsWith(`${DETAIL_MARK} Prompts`));
+  const framework = facts.find((line) => line.startsWith(`${DETAIL_MARK} Framework`));
 
   say("");
   say("── check ─────────────────────────────────────────────────");

@@ -13,6 +13,8 @@ Read the repository. Report facts. Change nothing.
 
 ## The facts egma needs
 
+<!-- The names in this table are FACTS in src/wizard/facts.ts, which is the source of truth; keep the two in step. -->
+
 | Fact | What it means |
 |---|---|
 | `framework` | The library or platform that runs the voice agent |

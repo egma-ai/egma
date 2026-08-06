@@ -17,15 +17,22 @@ is how CI runs it.
 
 ## What it does today
 
+<!-- The facts are FACTS in src/wizard/facts.ts, which is the source of truth; keep this sentence in step. -->
+
 `npx egma` finds your voice agent. It starts the coding agent you already have,
 hands it egma's own notes on how voice agents are built, and has it read this
-folder and report four things: which framework runs your voice agent, where its
-prompts live, where its tools are defined, and how it reaches production. Every
-action it takes appears on screen while it works, and the facts it finds arrive
-one line at a time.
+folder and report which framework runs it, where its prompts live, where its
+tools are defined, how it reaches production, and where its identifier is
+written down. Every action it takes appears on screen while it works, and the
+facts it finds arrive one line at a time.
 
-Nothing is changed and nothing is written. Your code and your prompts never
-leave this machine.
+The task tells your coding agent to change nothing, and any file whose name
+starts with `.env` is refused when the agent goes through egma for it. Both are
+real, and neither is a lock: your coding agent runs its own commands, and a
+command that writes is one egma shows you rather than one egma stops. That is
+the trade — you see everything, as it happens.
+
+Your code and your prompts never leave this machine.
 
 If this folder holds no voice agent, egma asks once for the folder your prompts
 are in — teams often keep them apart — looks there, and otherwise says plainly

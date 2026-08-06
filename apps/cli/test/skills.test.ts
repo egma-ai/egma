@@ -17,24 +17,55 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 import { SKILL_NAMES, instructionsWith, skill, skillFile } from "../src/skills/index.ts";
+import { FACTS } from "../src/wizard/facts.ts";
+import { pasteFallbackMessage } from "../src/wizard/no-coding-agent.ts";
 
 const run = promisify(execFile);
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
-/** The words the glossary bans, in the shapes that would slip past a reader. */
+/**
+ * The words the glossary bans, in the shapes that would slip past a reader.
+ *
+ * This is the whole banned list, not a sample of it: a skill is text egma puts
+ * in front of a coding agent, and a word egma will not say on a screen is a
+ * word it will not say to a model either.
+ *
+ * Two kinds of entry are left out on purpose, and both are carve-outs the
+ * glossary itself makes rather than gaps.
+ *
+ *   The bans the glossary qualifies — `result` as an entity, `metric` for
+ *   scoring logic, `check` as a name for a grader — cannot be told apart from
+ *   their ordinary English by a regular expression, and a guard that fires on
+ *   "check the manifest" is a guard somebody turns off.
+ *
+ *   `session` is banned for an exchange and right for two seams: a signed-in
+ *   browser session, and the protocol's own name for its connection to a
+ *   driven coding agent. Neither belongs in a skill, so the word is banned
+ *   here in full — the carve-out lives in the code that speaks the protocol.
+ */
 const BANNED = [
   /\beval\b/i,
   /\bevaluations?\b/i,
   /\bevaluators?\b/i,
+  /\bscorers?\b/i,
+  /\bassertions?\b/i,
   /\bcalls?\b/i,
   /\bcallers?\b/i,
   /\bconversations?\b/i,
   /\bdigital humans?\b/i,
+  /\bsimulants?\b/i,
+  /\bvirtual humans?\b/i,
+  /\bsynthetic users?\b/i,
+  /\bdigital twins?\b/i,
   /\bscenarios?\b/i,
   /\bsessions?\b/i,
   /\btrials?\b/i,
+  /\battempts?\b/i,
+  /\biterations?\b/i,
   /\bexperiments?\b/i,
+  /\bbatch(?:es)?\b/i,
+  /\bexpected outcomes?\b/i,
 ];
 
 describe("egma's skills", () => {
@@ -56,6 +87,28 @@ describe("egma's skills", () => {
     expect(finding).toContain("egma:note");
     expect(finding).toContain("egma:none");
     expect(finding).toContain("egma:abort");
+  });
+
+  /**
+   * The facts are prose in three places — this skill, the README, and the
+   * message for a machine with no coding agent on it — and code in one. The
+   * code is the source of truth; this is what keeps the prose from drifting
+   * away from it without anybody noticing.
+   */
+  it("ask for the facts egma reads back, in the words egma reads them", () => {
+    // Prose is wrapped to a width, and a phrase does not stop meaning what it
+    // means because a line ending landed in the middle of it.
+    const unwrapped = (text: string): string => text.replace(/\s+/g, " ");
+
+    const finding = skill("context-finding");
+    const readme = unwrapped(readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8"));
+    const pasted = unwrapped(pasteFallbackMessage());
+
+    for (const fact of FACTS) {
+      expect(finding, fact.name).toContain(`\`${fact.name}\``);
+      expect(readme, fact.name).toContain(fact.phrase);
+      expect(pasted, fact.name).toContain(fact.phrase);
+    }
   });
 
   it("say what a Retell voice agent looks like, both ways round", () => {

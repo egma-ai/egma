@@ -9,6 +9,7 @@
 
 import { Box, Text, useInput } from "ink";
 
+import { FACTS } from "../../../wizard/facts.ts";
 import { dispatchKey, hintBar, type KeyBinding } from "../keybindings.ts";
 import type { WizardState } from "../state.ts";
 
@@ -38,12 +39,13 @@ export function IntroScreen({ state, onBegin, onQuit }: IntroScreenProps) {
       <Box height={1} />
       <Text>{`It reads this folder with ${drivenAgentName}, here on this machine, and reports:`}</Text>
       <Box height={1} />
-      <Text> which framework runs your voice agent</Text>
-      <Text> where its prompts live</Text>
-      <Text> where its tools are defined</Text>
-      <Text> how it reaches production</Text>
+      {/* The facts themselves are FACTS in wizard/facts.ts, so this promise
+          cannot fall behind what the step actually brings back. */}
+      {FACTS.map((fact) => (
+        <Text key={fact.name}> {fact.phrase}</Text>
+      ))}
       <Box height={1} />
-      <Text>Nothing here is changed. Your code stays on this machine.</Text>
+      <Text>egma tells it to change nothing. Your code stays on this machine.</Text>
       <Box height={1} />
       <Text>Every action your coding agent takes appears below as it happens.</Text>
       <Box height={1} />

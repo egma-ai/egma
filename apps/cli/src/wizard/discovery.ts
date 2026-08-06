@@ -24,28 +24,25 @@ import { instructionsWith } from "../skills/index.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
 import type { DrivenAgentLog } from "./driven-agent-log.ts";
 import type { ExitReport } from "./exit-line.ts";
+import { FACTS, LABEL_WIDTH, labelFor } from "./facts.ts";
 import { MarkerStream, type Marker, type ParsedLine } from "./markers.ts";
-import { ACTION_MARK, DETAIL_MARK } from "./status.ts";
+import { ACTION_MARK, DETAIL_MARK, FAILURE_MARK } from "./status.ts";
 import { stopReport, untilAborted } from "./stop.ts";
-
-/** The facts the step exists to bring back, and what they are called on screen. */
-const FIELDS = [
-  ["framework", "Framework"],
-  ["prompts", "Prompts"],
-  ["tools", "Tools"],
-  ["deploy", "Deploy"],
-  ["agent-id", "Agent id"],
-] as const;
-
-const LABEL_WIDTH = Math.max(...FIELDS.map(([, label]) => label.length));
 
 /** What the coding agent reported, keyed by field name. */
 export type Facts = ReadonlyMap<string, string>;
 
 export type DiscoveryOutcome =
   | { readonly kind: "found"; readonly facts: Facts }
-  /** The agent looked and there is no voice agent in this folder. */
+  /**
+   * The agent looked and there is no voice agent in this folder. Whether it
+   * said so with `egma:none` or simply reported no facts makes no difference
+   * to what happens next, so the two are one outcome. What the agent said is
+   * on the screen and in the log either way.
+   */
   | { readonly kind: "nothing-found" }
+  /** The agent stopped the work itself, and said why. */
+  | { readonly kind: "aborted"; readonly reason: string }
   | { readonly kind: "interrupted" }
   | { readonly kind: "unreachable" }
   | { readonly kind: "needs-login"; readonly drivenAgentName: string }
@@ -80,11 +77,14 @@ export function discoveryInstructions(where: string): string {
   return instructionsWith(["context-finding", "retell"], discoveryTask(where));
 }
 
-function labelFor(field: string): string | null {
-  return FIELDS.find(([name]) => name === field)?.[1] ?? null;
-}
-
-/** The status line one marker is worth, or `null` when it is not for the screen. */
+/**
+ * The status line one marker is worth, or `null` when it is not for the screen.
+ *
+ * Every action egma takes is shown, and an agent saying it found nothing or
+ * cannot go on is the most important thing it will say all run. Both therefore
+ * reach the screen in the agent's own words: a stop is marked as the failure it
+ * is, an empty answer as the quiet note it is.
+ */
 export function statusLineFor(marker: Marker): string | null {
   switch (marker.kind) {
     case "note":
@@ -95,8 +95,11 @@ export function statusLineFor(marker: Marker): string | null {
       return `${DETAIL_MARK} ${label.padEnd(LABEL_WIDTH)}  ${marker.value}`;
     }
     case "none":
+      return marker.reason === "" ? null : `${DETAIL_MARK} ${marker.reason}`;
     case "abort":
-      return null;
+      return marker.reason === ""
+        ? `${FAILURE_MARK} Your coding agent stopped, and did not say why.`
+        : `${FAILURE_MARK} ${marker.reason}`;
   }
 }
 
@@ -107,10 +110,10 @@ export function statusLineFor(marker: Marker): string | null {
  */
 export function summaryCard(facts: Facts): string {
   const lines = ["Your voice agent"];
-  for (const [field, label] of FIELDS) {
-    const value = facts.get(field);
+  for (const fact of FACTS) {
+    const value = facts.get(fact.name);
     if (value === undefined) continue;
-    lines.push(`  ${label.padEnd(LABEL_WIDTH)}  ${value}`);
+    lines.push(`  ${fact.label.padEnd(LABEL_WIDTH)}  ${value}`);
   }
   return lines.join("\n");
 }
@@ -132,7 +135,6 @@ export async function discoverIn(options: DiscoveryOptions): Promise<DiscoveryOu
 
   const facts = new Map<string, string>();
   const markers = new MarkerStream();
-  let reportedNothing = false;
 
   /** Reads whole lines: facts are kept, markers are shown, prose is logged. */
   const take = (lines: readonly ParsedLine[]): string | null => {
@@ -144,13 +146,13 @@ export async function discoverIn(options: DiscoveryOptions): Promise<DiscoveryOu
       }
       const marker = line.marker;
       if (marker.kind === "found") facts.set(marker.field, marker.value);
-      if (marker.kind === "none") reportedNothing = true;
       if (marker.kind === "abort") abort = marker.reason;
+      // Every marker is kept where the developer can find it afterwards —
+      // including a fact this step never asked for, which is still something
+      // the agent said. The screen gets the ones that are worth a line.
+      log.write(`${JSON.stringify(marker)}\n`);
       const status = statusLineFor(marker);
-      // A fact this step never asked for is still something the agent said, so
-      // it is kept where the developer can find it rather than dropped.
-      if (status === null) log.write(`${JSON.stringify(marker)}\n`);
-      else ui.pushStatus(status);
+      if (status !== null) ui.pushStatus(status);
     }
     return abort;
   };
@@ -181,16 +183,15 @@ export async function discoverIn(options: DiscoveryOptions): Promise<DiscoveryOu
     case "failed":
       return { kind: "failed", reason: result.reason };
     case "aborted":
-      // The agent stopping itself is not the same as finding nothing, but if it
-      // reported facts before it stopped they are still facts.
-      return isAFind(facts) ? { kind: "found", facts } : { kind: "nothing-found" };
+      // The agent stopping itself is not the same as finding nothing, and must
+      // never be told as if it were. If it reported facts before it stopped,
+      // those are still facts.
+      if (isAFind(facts)) return { kind: "found", facts };
+      return { kind: "aborted", reason: result.reason };
     case "done":
-      if (reportedNothing && !isAFind(facts)) return { kind: "nothing-found" };
       return isAFind(facts) ? { kind: "found", facts } : { kind: "nothing-found" };
   }
 }
-
-export type FindOptions = DiscoveryOptions;
 
 async function isFolder(candidate: string): Promise<boolean> {
   try {
@@ -208,13 +209,36 @@ function reportFor(facts: Facts): ExitReport {
   };
 }
 
-function endFor(
-  outcome: Exclude<DiscoveryOutcome, { kind: "found" } | { kind: "nothing-found" }>,
-  options: FindOptions,
-): ExitReport {
+/**
+ * One look in one folder, and the ending it forces.
+ *
+ * `null` is the one answer that is not an ending: the agent looked, there is
+ * nothing here, and the walk has somewhere else to try. Both looks the step
+ * makes are this same shape, so neither can grow an ending the other does not
+ * have.
+ */
+async function lookIn(options: DiscoveryOptions): Promise<ExitReport | null> {
+  const { ui, launch, log, signal } = options;
+
+  ui.taskStarted();
+  const outcome = await discoverIn(options);
+  ui.taskFinished();
+
   switch (outcome.kind) {
+    case "found":
+      ui.setSummary(summaryCard(outcome.facts));
+      return reportFor(outcome.facts);
+    case "nothing-found":
+      return null;
+    case "aborted":
+      return { kind: "coding-agent-stopped", drivenAgentName: launch.name, reason: outcome.reason };
+    case "failed":
+      // A failure is the one time the agent's own output is worth reading, so
+      // it is the one time the developer is told where it is.
+      ui.pushStatus(`What ${launch.name} printed is in ${log.file}`);
+      return { kind: "failed", reason: outcome.reason };
     case "interrupted":
-      return stopReport(options.signal, options.launch.name);
+      return stopReport(signal, launch.name);
     case "unreachable":
       return { kind: "no-coding-agent" };
     case "needs-login":
@@ -222,8 +246,6 @@ function endFor(
         kind: "failed",
         reason: `${outcome.drivenAgentName} is not logged in, and egma could not hand you to its login. Log in to it, then run egma again.`,
       };
-    case "failed":
-      return { kind: "failed", reason: outcome.reason };
   }
 }
 
@@ -231,29 +253,15 @@ function endFor(
  * The whole step: look here, ask once if there is nothing, look there, or say
  * plainly that this is the wrong folder.
  */
-export async function findTheAgent(options: FindOptions): Promise<ExitReport> {
-  const { ui, log } = options;
-
-  ui.taskStarted();
-  const here = await discoverIn(options);
-  ui.taskFinished();
-
-  if (here.kind === "found") {
-    ui.setSummary(summaryCard(here.facts));
-    return reportFor(here.facts);
-  }
-  if (here.kind !== "nothing-found") {
-    // A failure is the one time the agent's own output is worth reading, so it
-    // is the one time the developer is told where it is.
-    if (here.kind === "failed") ui.pushStatus(`What ${options.launch.name} printed is in ${log.file}`);
-    return endFor(here, options);
-  }
+export async function findTheAgent(options: DiscoveryOptions): Promise<ExitReport> {
+  const here = await lookIn(options);
+  if (here !== null) return here;
 
   // Teams keep prompts in a repository of their own, so one folder saying no is
   // not an answer about the team. This is the only question the step asks, and
   // it is asked once. A developer who closes the wizard instead of answering has
   // answered too, so the wait ends with the signal and not only with a keystroke.
-  const pointer = await untilAborted(ui.waitForAnswer("prompts-pointer"), options.signal);
+  const pointer = await untilAborted(options.ui.waitForAnswer("prompts-pointer"), options.signal);
   if (options.signal.aborted) return stopReport(options.signal, options.launch.name);
   if (pointer === undefined || pointer === null || pointer.trim() === "") {
     return { kind: "no-agent-context" };
@@ -261,19 +269,9 @@ export async function findTheAgent(options: FindOptions): Promise<ExitReport> {
 
   const where = path.resolve(options.cwd, pointer.trim());
   if (!(await isFolder(where))) {
-    ui.pushStatus(`${ACTION_MARK} There is no folder at ${pointer.trim()}.`);
+    options.ui.pushStatus(`${ACTION_MARK} There is no folder at ${pointer.trim()}.`);
     return { kind: "no-agent-context" };
   }
 
-  ui.taskStarted();
-  const there = await discoverIn({ ...options, cwd: where });
-  ui.taskFinished();
-
-  if (there.kind === "found") {
-    ui.setSummary(summaryCard(there.facts));
-    return reportFor(there.facts);
-  }
-  if (there.kind === "nothing-found") return { kind: "no-agent-context" };
-  if (there.kind === "failed") ui.pushStatus(`What ${options.launch.name} printed is in ${log.file}`);
-  return endFor(there, options);
+  return (await lookIn({ ...options, cwd: where })) ?? { kind: "no-agent-context" };
 }

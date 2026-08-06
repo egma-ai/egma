@@ -301,9 +301,75 @@ describe("finding the voice agent", () => {
     });
 
     // egma did not wait out the minute, and the step after the abort never ran.
-    expect(report).toEqual({ kind: "no-agent-context" });
     expect(await filesUnder(repo.dir)).not.toContain("never-written.txt");
     expect((await observed()).observations["afterAbort"]).toBeUndefined();
+
+    // A stop is a stop. It is never told as an empty folder, so nobody is
+    // asked to point egma somewhere else and nobody is told there is no voice
+    // agent here — neither of which the agent said.
+    expect(report).toEqual({
+      kind: "coding-agent-stopped",
+      drivenAgentName: "Fake Agent",
+      reason: "This repository is not one I can read.",
+    });
+    expect(ui.record.asked).toEqual([]);
+    expect(buildExitLine(report)).toBe(
+      "Fake Agent stopped before it found your voice agent: This repository is not one I can read.",
+    );
+
+    // And the reason was on screen while it happened, not only at the end.
+    expect(ui.record.statuses).toContain("✗ This repository is not one I can read.");
+  });
+
+  it("shows the agent's own words when it looked and found nothing", async () => {
+    const empty = await makeWorkspace({ "README.md": "# nothing here yet\n" });
+
+    try {
+      const script = await scratch.script({ reportFile: reportFile(), steps: REPORTS_NOTHING });
+
+      const ui = new HeadlessUI();
+      await walk({
+        ui,
+        launch: scratch.launch(script),
+        cwd: empty.dir,
+        signal: new AbortController().signal,
+      });
+
+      // Every action is streamed, and "I found nothing" is the most important
+      // thing this agent said all run.
+      expect(ui.record.statuses).toContain("┊ There is no voice agent in this folder.");
+    } finally {
+      await empty.remove();
+    }
+  });
+
+  it("names the command in a terminal line, which says nothing without one", async () => {
+    const script = await scratch.script({
+      reportFile: reportFile(),
+      steps: [
+        {
+          kind: "tool-call",
+          id: "t1",
+          title: "Terminal",
+          toolKind: "execute",
+          rawInput: { command: "rg -l retell-sdk src", description: "Look for the SDK" },
+        },
+        { kind: "tool-call-update", id: "t1", status: "completed" },
+        says("egma:found framework retell-sdk"),
+        { kind: "stop", reason: "end_turn" },
+      ],
+    });
+
+    const ui = new HeadlessUI();
+    await walk({
+      ui,
+      launch: scratch.launch(script),
+      cwd: repo.dir,
+      signal: new AbortController().signal,
+    });
+
+    expect(ui.record.statuses).toContain("◆ Terminal ┊ rg -l retell-sdk src");
+    expect(ui.record.statuses).not.toContain("◆ Terminal");
   });
 
   it("keeps the agent's prose in the log and off the screen", async () => {

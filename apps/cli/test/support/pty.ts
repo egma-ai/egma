@@ -8,6 +8,18 @@
  * output to a headless terminal emulator, and lets a test read either screen:
  * the alternate one the wizard draws on, or the ordinary one whose contents are
  * what a developer scrolls back through.
+ *
+ * A frame does not arrive whole. A pseudo-terminal hands its output over in
+ * chunks of about a kilobyte, and one drawn screen is several of those, so a
+ * test that polls the screen on a timer can read a frame that is half painted:
+ * the first line of the wizard is there and the rest of it is still in flight.
+ * The emulator parses each chunk asynchronously as well, so even a chunk that
+ * has arrived may not be on the screen yet.
+ *
+ * `waitFor` closes both gaps. It is told when a chunk has been *parsed* rather
+ * than when it arrived, and it checks the condition then — so a test waits for
+ * everything it is about to assert, in one condition, and reads the screen that
+ * satisfied it.
  */
 
 import { chmodSync, existsSync } from "node:fs";
@@ -51,9 +63,25 @@ export type TerminalRun = {
   write(input: string): void;
   /** Everything the command has written, escape codes and all. */
   raw(): string;
+  /**
+   * Settles as soon as the condition holds, checked every time a chunk has been
+   * parsed onto the screen. `false` means the budget ran out first.
+   */
+  waitFor(condition: () => boolean, timeoutMs?: number): Promise<boolean>;
   kill(): void;
+  /** The exit code, once everything the command wrote is on the screen. */
   exited: Promise<number>;
 };
+
+/**
+ * How long a condition is given.
+ *
+ * Generous on purpose: this is a real subprocess starting a real Node runtime
+ * inside a test run that is using every core, so the honest budget is one that
+ * cannot be reached by a machine merely being busy. A test that is going to
+ * fail still fails at once, because the condition is checked on every chunk.
+ */
+const WAIT_BUDGET_MS = 20_000;
 
 export function runInTerminal(options: {
   readonly command: string;
@@ -83,16 +111,62 @@ export function runInTerminal(options: {
     env: env as Record<string, string>,
   });
 
+  /** Told every time the screen has changed, not every time bytes arrived. */
+  const watchers = new Set<() => void>();
+  const tell = (): void => {
+    for (const watcher of [...watchers]) watcher();
+  };
+
+  /** Chunks the emulator has been handed and has not parsed yet. */
+  let unparsed = 0;
+
   child.onData((chunk) => {
     raw += chunk;
-    terminal.write(chunk);
+    unparsed += 1;
+    terminal.write(chunk, () => {
+      unparsed -= 1;
+      tell();
+    });
   });
 
+  const waitFor = (condition: () => boolean, timeoutMs = WAIT_BUDGET_MS): Promise<boolean> =>
+    new Promise<boolean>((resolve) => {
+      let done = false;
+      const finish = (held: boolean): void => {
+        if (done) return;
+        done = true;
+        watchers.delete(check);
+        clearInterval(tick);
+        clearTimeout(budget);
+        resolve(held);
+      };
+      function check(): void {
+        if (condition()) finish(true);
+      }
+      // A backstop for a condition that does not depend on the screen at all;
+      // the chunk callbacks are what make this prompt.
+      const tick = setInterval(check, 100);
+      const budget = setTimeout(() => finish(false), timeoutMs);
+      watchers.add(check);
+      check();
+    });
+
   let settle!: (code: number) => void;
-  const exited = new Promise<number>((resolve) => {
+  const finished = new Promise<number>((resolve) => {
     settle = resolve;
   });
-  child.onExit(({ exitCode }) => settle(exitCode));
+  child.onExit(({ exitCode }) => {
+    settle(exitCode);
+    tell();
+  });
+
+  // A command's last words can still be inside the emulator when it exits, and
+  // scrollback is the thing tests read afterwards. So the code arrives once the
+  // screen is caught up with it.
+  const exited = finished.then(async (code) => {
+    await waitFor(() => unparsed === 0, 5_000);
+    return code;
+  });
 
   const readBuffer = (buffer: IBuffer): string => {
     const lines: string[] = [];
@@ -109,6 +183,7 @@ export function runInTerminal(options: {
     screen: () => readBuffer(terminal.buffer.active),
     scrollback: () => readBuffer(terminal.buffer.normal),
     raw: () => raw,
+    waitFor,
     write: (input) => child.write(input),
     kill: () => {
       try {
