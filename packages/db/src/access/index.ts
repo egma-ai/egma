@@ -61,11 +61,13 @@ export {
   NotPermittedError,
   PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
+  RunWriteRefusedError,
   TestMovedOnError,
   TraceStoreRefusedError,
   UnprocessableInputError,
   UnreadableTraceQueryError,
   type AgentWriteRefusal,
+  type RunWriteRefusal,
   type TestNamingPersona,
 } from "./errors.ts";
 
@@ -243,6 +245,7 @@ export {
   failSimulation,
   getRun,
   getSimulation,
+  listRunEvents,
   listRuns,
   listSimulations,
   markSimulationCanceled,
@@ -251,10 +254,13 @@ export {
   startSimulation,
   sweepOrphanedSimulations,
   type CompletedEndingReason,
+  type ConductedSimulation,
   type ConnectionSnapshot,
   type FailedEndingReason,
   type NewRun,
   type Run,
+  type RunEvent,
+  type RunEventPage,
   type RunPage,
   type Simulation,
   type SimulationFailure,
@@ -262,8 +268,10 @@ export {
   type StartedRun,
 } from "./runs.ts";
 export type {
+  RunEventKind,
   RunStatus,
   RunTrigger,
   SimulationEndingReason,
   SimulationStatus,
+  Verdict,
 } from "../schema/runs.ts";

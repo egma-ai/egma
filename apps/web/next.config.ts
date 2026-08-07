@@ -60,6 +60,8 @@ const config: NextConfig = {
           source: "/api/test-versions/:path*",
           destination: `${api}/api/test-versions/:path*`,
         },
+        { source: "/api/runs", destination: `${api}/api/runs` },
+        { source: "/api/runs/:path*", destination: `${api}/api/runs/:path*` },
         // The public v1 contract, forwarded whole rather than read-endpoint by
         // read-endpoint. `/v1/traces` is one path answering two things — the
         // OTLP door on POST, the list on GET — and a proxy forwards paths, not

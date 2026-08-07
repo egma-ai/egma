@@ -115,6 +115,10 @@ const CONTEXT_REQUIRING = [
   "listPendingInvitations",
   "listPersonas",
   "listProjects",
+  // Everything that has changed about one run since a point, in the order it
+  // changed. The read a follower resumes from after a crash, and the reason
+  // the events are a record rather than a rendering of the mutable rows.
+  "listRunEvents",
   "listRuns",
   "listSimulations",
   "listTests",
@@ -166,6 +170,13 @@ const VALUES = [
   "NotPermittedError",
   "PersonaNamedByTestsError",
   "ProjectOutsideOrganizationError",
+  // A run turned away, carrying which rule turned it away: a connection
+  // nobody can see, one that is not on the agent that was named, a type no
+  // simulator adapter has shipped for, a selection that cannot be conducted,
+  // and a cancel that arrived after the run had already finished. Five rules,
+  // four codes between them, and a sentence apiece — which is why the reason
+  // travels as a value rather than being read back out of the prose.
+  "RunWriteRefusedError",
   // An edit refused because somebody moved the test since it was written. It
   // carries both versions and the test's identity, because the caller's next
   // move is to go and read the test as it now stands.

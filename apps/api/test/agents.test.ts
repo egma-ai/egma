@@ -7,8 +7,14 @@ import {
 import { newId } from "@egma/ids";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { cookiesFrom, createApi, type TestApi } from "./support/api.ts";
-import { mintKey, signUp, type Customer } from "./support/traces.ts";
+import { createApi, type TestApi } from "./support/api.ts";
+import {
+  colleagueOf,
+  contextFor,
+  mintKey,
+  signUp,
+  type Customer,
+} from "./support/traces.ts";
 
 /**
  * What a developer's `connect` can count on.
@@ -32,56 +38,6 @@ let api: TestApi;
 afterEach(async () => {
   await api?.close();
 });
-
-/**
- * A colleague at a named role, added the way the product adds one, holding a
- * key of their own. A key carries no role — it acts at its creator's current
- * one — so minting it through the product is what makes the role real here.
- */
-async function colleagueOf(
-  host: Customer,
-  email: string,
-  role: Role,
-): Promise<Customer> {
-  const invited = await api.app.inject({
-    method: "POST",
-    url: "/api/invitations",
-    headers: { cookie: host.cookie },
-    payload: { email, role },
-  });
-  expect(invited.statusCode, invited.body).toBe(201);
-
-  const link = (invited.json() as { accept_url: string }).accept_url;
-  const joined = await api.app.inject({
-    method: "POST",
-    url: "/api/signup",
-    payload: {
-      email,
-      password: "a-long-enough-password",
-      invitationToken: new URL(link).searchParams.get("token"),
-    },
-  });
-  expect(joined.statusCode, joined.body).toBe(201);
-
-  const cookie = cookiesFrom(joined.headers["set-cookie"]);
-  return {
-    userId: (joined.json() as { userId: string }).userId,
-    organizationId: host.organizationId,
-    projectId: host.projectId,
-    cookie,
-    secret: await mintKey(api.app, cookie, `${role} key`),
-  };
-}
-
-function contextFor(person: Customer, role: Role): AuthContext {
-  return {
-    userId: person.userId,
-    organizationId: person.organizationId,
-    projectId: person.projectId,
-    role,
-    via: "session",
-  };
-}
 
 function withKey(secret: string): Record<string, string> {
   return { authorization: `Bearer ${secret}` };
@@ -841,7 +797,7 @@ describe("what each role may do here", () => {
   it("lets a viewer read agents and every way of reaching them", async () => {
     api = await createApi("agents_viewer_reads");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const vic = await colleagueOf(ada, "vic@acme.example", "viewer");
+    const vic = await colleagueOf(api.app, ada, "vic@acme.example", "viewer");
 
     const registered = await post(
       "/api/agents",
@@ -864,7 +820,7 @@ describe("what each role may do here", () => {
   it("refuses a viewer every write in this group", async () => {
     api = await createApi("agents_viewer_writes_nothing");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const vic = await colleagueOf(ada, "vic@acme.example", "viewer");
+    const vic = await colleagueOf(api.app, ada, "vic@acme.example", "viewer");
 
     const registered = await post(
       "/api/agents",
@@ -899,7 +855,7 @@ describe("what each role may do here", () => {
   it("lets a member register and attach with their own key", async () => {
     api = await createApi("agents_member_writes");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const mia = await colleagueOf(ada, "mia@acme.example", "member");
+    const mia = await colleagueOf(api.app, ada, "mia@acme.example", "member");
 
     const registered = await post(
       "/api/agents",

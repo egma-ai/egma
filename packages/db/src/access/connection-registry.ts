@@ -61,6 +61,18 @@ export type ConnectionDescriptor = {
   readonly config: Readonly<Record<string, ConfigGate>>;
   readonly credentials: CredentialRule;
   /**
+   * Whether the simulator holds an adapter for this type — whether egma can
+   * actually conduct a conversation over it.
+   *
+   * A type can be registered before anything can run over it: a customer can
+   * describe how to reach their agent while the adapter that reaches it is
+   * still being written. So this is a fact about the shipped simulator, kept
+   * here beside the rest of what the type is, and it is what refuses a run at
+   * creation instead of leaving it queued forever for a conductor that does
+   * not exist. It flips to `true` in the same commit as the adapter.
+   */
+  readonly simulatorAdapter: boolean;
+  /**
    * Which config key holds the vendor's own name for the agent, for the types
    * that have one — and absent for the types that do not.
    *
@@ -117,11 +129,15 @@ export const CONNECTION_REGISTRY: Readonly<
     credentials: { required: true, fields: ["apiKey"], hintField: "apiKey" },
     // The provider's own agent id: the first vendor to carry a reuse rule.
     reuseKey: "retellAgentId",
+    simulatorAdapter: true,
   },
   phone: {
     modalities: ["voice"],
     topology: "egma-dials-in",
     config: { phoneNumber: e164PhoneNumber },
+    // Nothing dials yet: a customer may register the number they want called,
+    // and a run over it is refused at creation until the adapter lands.
+    simulatorAdapter: false,
     // No reuse rule, deliberately: a number is where egma dials, not who
     // answers, and two agents can legitimately share one. Registering the
     // same number twice creates twice, and the name check is what stops a
@@ -135,6 +151,31 @@ export const CONNECTION_REGISTRY: Readonly<
     },
   },
 };
+
+/** The types something can actually conduct a run over today. */
+export function conductableConnectionTypes(): readonly ConnectionType[] {
+  return CONNECTION_TYPES.filter(
+    (type) => CONNECTION_REGISTRY[type].simulatorAdapter,
+  );
+}
+
+/**
+ * What a run over a type nothing can conduct is told.
+ *
+ * The wording is the platform's own and a client relays it word for word to
+ * whoever is reading a terminal, so it says all of it in one place: what is
+ * missing, why egma would rather refuse now than queue something forever, and
+ * the move that works today. The list of types comes off the registry rather
+ * than out of the sentence, so it can never name an adapter that has not
+ * shipped or miss one that has.
+ */
+export function noSimulatorAdapterMessage(type: string): string {
+  return (
+    `egma has no simulator adapter for a ${type} connection yet, ` +
+    `so it will not start a run it cannot conduct. Run these tests over a ` +
+    `connection egma conducts today: ${conductableConnectionTypes().join(", ")}.`
+  );
+}
 
 /** The descriptor, or a refusal naming what egma actually supports. */
 export function descriptorOf(type: string): ConnectionDescriptor {
