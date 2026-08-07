@@ -57,6 +57,13 @@
       "when": 1785973105567,
       "tag": "0007_runs",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786088011281,
+      "tag": "0008_simulation_test_pin",
+      "breakpoints": true
     }
   ]
 }

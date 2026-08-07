@@ -264,3 +264,163 @@ describe("the persona rename (0005)", () => {
     ).rejects.toThrow(/persona_id_prefix/);
   });
 });
+
+describe("the simulation's test pin (0008)", () => {
+  let database: EmptyDatabase;
+  let beforeThePin: string;
+  let client: pg.Client;
+
+  const organizationId = newId("org");
+  const projectId = newId("prj");
+  const agentId = newId("agt");
+  const connectionId = newId("con");
+  const personaId = newId("prs");
+  const personaVersionId = newId("prsv");
+  const runId = newId("run");
+  const simulationId = newId("sim");
+  const testId = newId("tst");
+  const testVersionId = newId("tstv");
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("simulation_test_pin");
+
+    // The world as it was: every migration before the pin, in a directory of
+    // its own, so a simulation row can exist for 0008 to arrive on top of.
+    beforeThePin = await mkdtemp(path.join(os.tmpdir(), "egma-before-0008-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0008") {
+        await writeFile(path.join(beforeThePin, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, beforeThePin);
+
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query(
+      "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
+      [organizationId],
+    );
+    await client.query(
+      "insert into project (id, organization_id, name, slug) values ($1, $2, 'Default', 'default')",
+      [projectId, organizationId],
+    );
+    await client.query(
+      "insert into agent (id, organization_id, project_id, name) values ($1, $2, $3, 'Front desk')",
+      [agentId, organizationId, projectId],
+    );
+    await client.query(
+      `insert into connection
+         (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
+       values ($1, $2, $3, $4, 'Staging', 'retell', 'chat', 'hosted-broker', '{}'::jsonb)`,
+      [connectionId, organizationId, projectId, agentId],
+    );
+    await client.query("begin");
+    await client.query(
+      `insert into persona (id, organization_id, project_id, name, current_version_id)
+       values ($1, $2, $3, 'Impatient Rita', $4)`,
+      [personaId, organizationId, projectId, personaVersionId],
+    );
+    await client.query(
+      "insert into persona_version (id, persona_id, version, traits) values ($1, $2, 1, '{}'::jsonb)",
+      [personaVersionId, personaId],
+    );
+    await client.query(
+      `insert into test (id, organization_id, project_id, name, current_version_id)
+       values ($1, $2, $3, 'Reschedules a booked appointment', $4)`,
+      [testId, organizationId, projectId, testVersionId],
+    );
+    await client.query(
+      `insert into test_version (id, test_id, version, content)
+       values ($1, $2, 1, '{"scenario": "Moves a booking", "expectedBehaviors": ["verifies who it is speaking to"]}'::jsonb)`,
+      [testVersionId, testId],
+    );
+    await client.query("commit");
+    await client.query(
+      `insert into run
+         (id, organization_id, project_id, agent_id, connection_id, status, triggered_via,
+          requested_personas, connection_snapshot, expected_simulation_count)
+       values ($1, $2, $3, $4, $5, 'pending', 'manual', $6::jsonb, $7::jsonb, 1)`,
+      [
+        runId,
+        organizationId,
+        projectId,
+        agentId,
+        connectionId,
+        JSON.stringify({ personaIds: [personaId] }),
+        JSON.stringify({
+          type: "retell",
+          modality: "chat",
+          topology: "hosted-broker",
+          environment: null,
+          config: {},
+        }),
+      ],
+    );
+    await client.query(
+      `insert into simulation
+         (id, run_id, organization_id, project_id, agent_id, connection_id,
+          persona_id, persona_version_id, position, connection_type, modality, status)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, 1, 'retell', 'chat', 'queued')`,
+      [
+        simulationId,
+        runId,
+        organizationId,
+        projectId,
+        agentId,
+        connectionId,
+        personaId,
+        personaVersionId,
+      ],
+    );
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(beforeThePin, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("is what is still pending on a database that already holds simulations", async () => {
+    const result = await runMigrations(database.url);
+    expect(result.applied[0]).toBe("0008_simulation_test_pin.sql");
+    expect(result.applied.every((name) => name >= "0008")).toBe(true);
+  });
+
+  it("leaves the simulation that was already there exactly as it was, pinning nothing", async () => {
+    const { rows } = await client.query<{
+      id: string;
+      persona_version_id: string;
+      status: string;
+      test_id: string | null;
+      test_version_id: string | null;
+    }>(
+      "select id, persona_version_id, status, test_id, test_version_id from simulation",
+    );
+    expect(rows).toEqual([
+      {
+        id: simulationId,
+        persona_version_id: personaVersionId,
+        status: "queued",
+        test_id: null,
+        test_version_id: null,
+      },
+    ]);
+  });
+
+  it("lets that same row be pinned afterwards, which is what the column is for", async () => {
+    await client.query(
+      "update simulation set test_id = $1, test_version_id = $2 where id = $3",
+      [testId, testVersionId, simulationId],
+    );
+
+    const { rows } = await client.query<{
+      test_id: string;
+      test_version_id: string;
+    }>("select test_id, test_version_id from simulation where id = $1", [
+      simulationId,
+    ]);
+    expect(rows).toEqual([
+      { test_id: testId, test_version_id: testVersionId },
+    ]);
+  });
+});

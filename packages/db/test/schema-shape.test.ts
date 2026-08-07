@@ -56,6 +56,7 @@ type ColumnRow = {
   type_name: string;
   collation_name: string | null;
   has_default: boolean;
+  not_null: boolean;
 };
 
 let database: MigratedDatabase;
@@ -69,7 +70,8 @@ beforeAll(async () => {
       a.attname                 as column_name,
       t.typname                 as type_name,
       coll.collname             as collation_name,
-      a.atthasdef               as has_default
+      a.atthasdef               as has_default,
+      a.attnotnull              as not_null
     from pg_attribute a
     join pg_class c        on c.oid = a.attrelid
     join pg_namespace n    on n.oid = c.relnamespace
@@ -188,6 +190,75 @@ describe("every table", () => {
     for (const prefix of pinned) {
       expect(ID_PREFIXES).toContain(prefix);
     }
+  });
+});
+
+/**
+ * The pin the runs schema was shaped for. It is asserted here rather than only
+ * in the runs tests because it is a structural claim: two nullable columns, a
+ * check that keeps them one fact, and the paired keys that make a cross-project
+ * pin unrepresentable — the persona pin's shape, edge for edge.
+ */
+describe("the simulation's test pin", () => {
+  const pinned = (name: string): ColumnRow | undefined =>
+    columns.find(
+      (column) =>
+        column.table_name === "simulation" && column.column_name === name,
+    );
+
+  it("is two identifier columns, both nullable, because a run can be born from no test", () => {
+    for (const name of ["test_id", "test_version_id"]) {
+      const live = pinned(name);
+      expect(live, `simulation.${name}`).toBeDefined();
+      expect(live?.type_name, `simulation.${name} type`).toBe("text");
+      expect(live?.collation_name, `simulation.${name} collation`).toBe("C");
+      expect(live?.not_null, `simulation.${name} nullable`).toBe(false);
+    }
+  });
+
+  it("arrives whole or not at all, held by a check rather than by convention", async () => {
+    const { rows } = await database.sql<{ definition: string }>(
+      `select pg_get_constraintdef(oid) as definition
+         from pg_constraint where conname = 'simulation_test_pin_columns_agree'`,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.definition).toContain("test_id IS NULL");
+    expect(rows[0]?.definition).toContain("test_version_id IS NULL");
+  });
+
+  it("closes the tenancy triangle at both edges, so no raw write can pin across projects", async () => {
+    const { rows } = await database.sql<{
+      conname: string;
+      definition: string;
+    }>(`
+      select con.conname, pg_get_constraintdef(con.oid) as definition
+      from pg_constraint con
+      join pg_class c     on c.oid = con.conrelid
+      join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public' and con.contype = 'f' and c.relname = 'simulation'
+    `);
+    const byName = new Map(rows.map((row) => [row.conname, row.definition]));
+
+    // The version is the named test's…
+    expect(byName.get("simulation_test_version_test_fk")).toMatch(
+      /FOREIGN KEY \(test_version_id, test_id\) REFERENCES test_version\(id, test_id\)/,
+    );
+    // …and the test is this project's.
+    expect(byName.get("simulation_test_project_fk")).toMatch(
+      /FOREIGN KEY \(test_id, project_id\) REFERENCES test\(id, project_id\)/,
+    );
+  });
+
+  it("rests on the dormant uniques those keys target, exactly as the persona pin does", async () => {
+    const { rows } = await database.sql<{ conname: string }>(
+      `select conname from pg_constraint
+        where contype = 'u'
+          and conname in ('test_id_project_id_unique', 'test_version_id_test_id_unique')`,
+    );
+    expect(rows.map((row) => row.conname).sort()).toEqual([
+      "test_id_project_id_unique",
+      "test_version_id_test_id_unique",
+    ]);
   });
 });
 

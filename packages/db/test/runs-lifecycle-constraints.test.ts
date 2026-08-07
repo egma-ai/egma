@@ -36,6 +36,10 @@ const personaId = newId("prs");
 const personaVersionId = newId("prsv");
 const globexPersonaId = newId("prs");
 const globexPersonaVersionId = newId("prsv");
+const testId = newId("tst");
+const testVersionId = newId("tstv");
+const globexTestId = newId("tst");
+const globexTestVersionId = newId("tstv");
 
 async function seedTenancy(): Promise<void> {
   for (const [organization, slug] of [
@@ -93,6 +97,27 @@ async function seedPersona(
   await db.sql(
     "insert into persona_version (id, persona_id, version, traits) values ($1, $2, 1, '{}'::jsonb)",
     [version, persona],
+  );
+  await db.sql("commit");
+}
+
+async function seedTest(
+  test: string,
+  version: string,
+  organization: string,
+  project: string,
+): Promise<void> {
+  // The current-version pointer is deferred here too, for the same reason.
+  await db.sql("begin");
+  await db.sql(
+    `insert into test (id, organization_id, project_id, name, current_version_id)
+     values ($1, $2, $3, 'Reschedules a booked appointment', $4)`,
+    [test, organization, project, version],
+  );
+  await db.sql(
+    `insert into test_version (id, test_id, version, content)
+     values ($1, $2, 1, '{"scenario": "Moves a booking", "expectedBehaviors": ["verifies who it is speaking to"]}'::jsonb)`,
+    [version, test],
   );
   await db.sql("commit");
 }
@@ -217,6 +242,13 @@ beforeAll(async () => {
   await seedPersona(
     globexPersonaId,
     globexPersonaVersionId,
+    globex.organization,
+    globex.project,
+  );
+  await seedTest(testId, testVersionId, acme.organization, acme.project);
+  await seedTest(
+    globexTestId,
+    globexTestVersionId,
     globex.organization,
     globex.project,
   );
@@ -436,6 +468,61 @@ describe("what a simulation cannot name", () => {
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
     );
+  });
+
+  it("another customer's test pin, even though the test and its version exist", async () => {
+    // The single-column keys would both be satisfied: the test is real and the
+    // version is really its. Only the project pairing is not.
+    const { rows } = await db.sql<{ exists: boolean }>(
+      "select exists (select 1 from test where id = $1) as exists",
+      [globexTestId],
+    );
+    expect(rows[0]?.exists).toBe(true);
+
+    await expect(
+      insertSimulation("queued", {
+        test_id: globexTestId,
+        test_version_id: globexTestVersionId,
+      }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
+    );
+  });
+
+  it("a test version that is not the named test's, even when both exist", async () => {
+    await expect(
+      insertSimulation("queued", {
+        test_id: testId,
+        test_version_id: globexTestVersionId,
+      }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
+    );
+  });
+
+  it("half a test pin: an identity without a version, or a version without one", async () => {
+    await expect(
+      insertSimulation("queued", { test_id: testId }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+
+    await expect(
+      insertSimulation("queued", { test_version_id: testVersionId }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+  });
+
+  it("still writes the pin that is real, and the empty pin of a run born from no test", async () => {
+    await expect(
+      insertSimulation("queued", {
+        test_id: testId,
+        test_version_id: testVersionId,
+      }),
+    ).resolves.toBeDefined();
+
+    await expect(insertSimulation("queued")).resolves.toBeDefined();
   });
 });
 
