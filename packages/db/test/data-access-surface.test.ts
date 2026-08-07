@@ -95,6 +95,12 @@ const WORK_DISPATCHING = ["claimGradingJobs", "watchGradingWork"];
  * `appendVerdicts` and `readVerdicts` are the same two halves for the store's
  * other table. They need no window because a verdict is filed under the
  * conversation it judges, so naming the conversation is already the bound.
+ *
+ * `regrade`, `reopenGradingJob` and `correctVerdict` are the two ways a judgment
+ * is ever revisited, and neither is an edit — one reopens the queue so the
+ * engine judges again at today's grader versions, the other writes a person's
+ * disagreement as a row of its own. There are no routes above them yet, so this
+ * surface is the altitude re-grading and correcting are reachable at.
  */
 const CONTEXT_REQUIRING = [
   "addConnection",
@@ -106,6 +112,7 @@ const CONTEXT_REQUIRING = [
   "clonePersona",
   "cloneTest",
   "completeSimulation",
+  "correctVerdict",
   "createAgent",
   "createApiKey",
   "createGrader",
@@ -157,8 +164,10 @@ const CONTEXT_REQUIRING = [
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordSimulationHeartbeat",
+  "regrade",
   "releaseGradingJob",
   "removeConnection",
+  "reopenGradingJob",
   "removeMember",
   "resolveConnectionCredentials",
   "revokeApiKey",

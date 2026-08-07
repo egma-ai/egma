@@ -1,5 +1,16 @@
 import { newId } from "@egma/ids";
-import { and, asc, eq, inArray, lt, or, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  eq,
+  gte,
+  inArray,
+  lt,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 
 import { db, listen, type Listening, type Queryable } from "../client.ts";
 import {
@@ -7,6 +18,7 @@ import {
   type GradingJobStatus,
   type GradingSource,
 } from "../schema/grading.ts";
+import { run, simulation } from "../schema/runs.ts";
 import { validClaimant } from "./claimants.ts";
 import type { AuthContext } from "./context.ts";
 import { authorize, here } from "./permissions.ts";
@@ -60,6 +72,24 @@ import { within } from "./within.ts";
  * not running when a notification was raised finds the row waiting when it next
  * asks. That is why the watch also fires once on every connection it
  * establishes, and why a slow backstop sweep costs a service nothing to keep.
+ *
+ * ## Asking for a conversation to be judged again
+ *
+ * A conversation becomes work once, when it ends, and a job is unique on the
+ * conversation — so asking for it again **reopens** that one job rather than
+ * filing a second. `reopenGradingJob` is that verb, `regrade` is the deliberate
+ * action a person takes with it over a run or a window, and both raise the same
+ * notification the enqueue does, because a service should wake for a re-grade
+ * exactly as it wakes for a conversation ending.
+ *
+ * Nothing about a re-grade names a grader version. The job is a conversation,
+ * the service judges it with whatever applies to it **at each grader's current
+ * version**, and that is what puts a tightened grader's rows beside the old ones
+ * rather than over them: the verdict's identity spans the grader version, so a
+ * grader nobody edited rewrites its own row in place and only the edited one
+ * adds. Re-judging the conversation whole therefore accumulates exactly the rows
+ * re-judging one grader would, which is why there is no per-grader column here
+ * to narrow by and no need of one.
  */
 
 /**
@@ -570,4 +600,307 @@ export async function listGradingJobsForSimulation(
     .orderBy(asc(gradingJob.id));
 
   return rows.map(jobFromRow);
+}
+
+/* ------------------------------------------------------------------- *
+ * Asking for it again.
+ * ------------------------------------------------------------------- */
+
+/** A job that is finished with, one way or the other, and can be asked again. */
+const SETTLED: readonly GradingJobStatus[] = ["graded", "abandoned"];
+
+/** A job that is already going to be judged, and needs nothing asked of it. */
+const OUTSTANDING: readonly GradingJobStatus[] = ["pending", "claimed"];
+
+/**
+ * How many conversations one re-grade may reopen.
+ *
+ * A re-grade re-spends the judge on every conversation it names, so the cost of
+ * a window somebody got wrong is real money rather than a slow page. It is
+ * **refused rather than quietly narrowed**, for the reason the trace store
+ * refuses a window it cannot serve: narrowing answers a smaller question than
+ * the one asked and says nothing about having done so, and a person who meant
+ * the whole month would conclude the month was thinner than it is.
+ *
+ * A run conducts at most two hundred conversations, so a run can never reach
+ * this — which is what keeps it a guard on the window rather than a limit on
+ * the ordinary case.
+ */
+const MOST_CONVERSATIONS_PER_REGRADE = 500;
+
+/**
+ * A conversation that has been judged becomes claimable work again.
+ *
+ * `graded → pending`, or `abandoned → pending`, with the claim cleared and the
+ * attempts back to nothing — an abandoned job is one egma gave up on after three
+ * attempts, and reopening it without resetting the count would abandon it again
+ * on the first claim. The last error is cleared with them: a reader seeing
+ * `pending` beside a stale reason would read this attempt as already failed.
+ *
+ * **The row is reopened rather than replaced**, which is the whole reason the
+ * unique on the conversation is worth having. `created_at` therefore stays the
+ * moment the conversation became judgeable, so a window means the same thing
+ * before and after a re-grade of it, and asking twice is asking twice rather
+ * than moving the conversation to today.
+ *
+ * A job that is `pending` or `claimed` is left exactly alone and answers
+ * `undefined`: it is already going to be judged, at today's grader versions,
+ * which is everything a re-grade was going to ask for. So does a job out of the
+ * caller's reach — the answer reading it would have given.
+ *
+ * The notification rides the same transaction as the update, exactly as the
+ * enqueue's does, so a service woken by it always finds the row pending.
+ */
+export async function reopenGradingJob(
+  auth: AuthContext,
+  id: string,
+): Promise<GradingJob | undefined> {
+  authorize(auth, "revisit_verdicts", here(auth));
+
+  const [only] = await reopenJobs(theJob(auth, id));
+  return only;
+}
+
+/**
+ * The reopen itself, over whatever set of this customer's jobs the caller
+ * resolved. Every caller passes a predicate that already carries the tenancy,
+ * and a predicate that came out empty is refused rather than run — an update
+ * with no `where` on this table would reopen the whole deployment's queue, so
+ * the one shape that could do it is the one shape that cannot be passed.
+ */
+async function reopenJobs(
+  theseJobs: SQL | undefined,
+): Promise<readonly GradingJob[]> {
+  if (theseJobs === undefined) {
+    throw new Error("reopening grading work always names whose work it reaches");
+  }
+
+  return db().transaction(async (tx) => {
+    const rows = await tx
+      .update(gradingJob)
+      .set({
+        status: "pending",
+        claimedBy: null,
+        claimedAt: null,
+        heartbeatAt: null,
+        attempts: 0,
+        lastError: null,
+        finishedAt: null,
+      })
+      .where(and(theseJobs, inArray(gradingJob.status, [...SETTLED])))
+      .returning(JOB_COLUMNS);
+
+    if (rows.length === 0) return [];
+
+    // One notification per conversation, which is what the enqueue raises and
+    // what a copy of the service expects to be woken by. The payload is the job
+    // id and nothing reads it — a claim is a query that sees everything
+    // outstanding — so this is a nudge repeated, never a delivery.
+    await tx.execute(
+      sql`select pg_notify(${GRADING_WORK_CHANNEL}, ${gradingJob.id})
+          from ${gradingJob}
+          where ${inArray(
+            gradingJob.id,
+            rows.map((row) => row.id),
+          )}`,
+    );
+
+    return rows.map(jobFromRow);
+  });
+}
+
+/**
+ * A window of time, closed at the start and open at the end, measured on the
+ * moment each conversation **became judgeable** — the terminal transition that
+ * made it work, which is the same commit that ended it.
+ *
+ * That anchor rather than the conversation's own clock, because it is the one
+ * fact both sources have: a simulation ends in the transaction that enqueues it,
+ * and a production trace completing is what will enqueue that. And because it
+ * never moves — reopening a job leaves it alone — so re-grading the same window
+ * twice names the same conversations both times.
+ *
+ * `Date`s, because this is Postgres and the column holds a timestamp. The trace
+ * store's windows count microseconds for the opposite reason: its columns do.
+ */
+export type RegradeWindow = {
+  readonly from: Date;
+  readonly to: Date;
+};
+
+/**
+ * What to judge again: one run's conversations, or every conversation that
+ * became judgeable inside a window.
+ *
+ * Both are honest halves of the same act rather than one shape with a
+ * convenience on top. A run is how somebody re-scores a suite they just watched
+ * fail on a grader they have since fixed; a window is how they re-score
+ * production, which belongs to no run and never will.
+ */
+export type RegradeTarget =
+  | { readonly runId: string }
+  | { readonly window: RegradeWindow };
+
+export type Regraded = {
+  /** The conversations asked for again, as their jobs now stand. */
+  readonly reopened: readonly GradingJob[];
+  /**
+   * How many of the conversations named were already waiting to be judged and
+   * were left exactly alone. They are not a failure and not a skip: a
+   * conversation still in the queue is going to be judged at today's grader
+   * versions, which is all a re-grade was going to ask for.
+   */
+  readonly alreadyWaiting: number;
+};
+
+/**
+ * Judge these conversations again, at whatever each grader's current version is.
+ *
+ * **This is the only thing that ever re-scores history, and somebody has to ask
+ * for it.** Editing a grader mints a version and changes nothing that was
+ * already judged; the rows written last week keep saying what they said, in the
+ * words of the version that decided them. A tightened threshold reaches
+ * yesterday only through this call, which is what makes "our numbers changed
+ * overnight" impossible to arrive at by accident.
+ *
+ * What comes of it is rows **beside** the old ones rather than over them,
+ * because the verdict's identity spans the grader version: the graders nobody
+ * edited rewrite their own rows in place, the edited one writes a second row
+ * against the same dimension, and the read prefers the newest grading with the
+ * older still fetchable underneath. Nothing is deleted and nothing is edited,
+ * here or anywhere.
+ *
+ * The conversations are resolved, their jobs reopened, and the service does the
+ * judging — so a re-grade returns as soon as the work is queued rather than when
+ * it is done, on the same terms as starting a run. What comes back says how many
+ * conversations were asked for and how many were already going to be judged.
+ *
+ * A run nobody can reach answers `undefined`, which is the answer reading it
+ * would have given. A window always answers, because a window that names nothing
+ * is a window with nothing in it rather than a window that is not there.
+ */
+export async function regrade(
+  auth: AuthContext,
+  target: RegradeTarget,
+): Promise<Regraded | undefined> {
+  authorize(auth, "revisit_verdicts", here(auth));
+
+  const named = await conversationsNamed(auth, target);
+  if (named === undefined) return undefined;
+
+  // One over the cap, so the refusal is decided without reading a window that
+  // holds a hundred thousand conversations in order to say it holds too many.
+  const settled = await db()
+    .select({ id: gradingJob.id })
+    .from(gradingJob)
+    .where(and(named, inArray(gradingJob.status, [...SETTLED])))
+    .orderBy(asc(gradingJob.id))
+    .limit(MOST_CONVERSATIONS_PER_REGRADE + 1);
+
+  if (settled.length > MOST_CONVERSATIONS_PER_REGRADE) {
+    throw new Error(
+      `a re-grade judges at most ${MOST_CONVERSATIONS_PER_REGRADE} conversations at once, and this one names more; ask for a narrower window`,
+    );
+  }
+
+  const [waiting] = await db()
+    .select({ howMany: count() })
+    .from(gradingJob)
+    .where(and(named, inArray(gradingJob.status, [...OUTSTANDING])));
+
+  const alreadyWaiting = Number(waiting?.howMany ?? 0);
+  if (settled.length === 0) return { reopened: [], alreadyWaiting };
+
+  return {
+    reopened: await reopenJobs(
+      and(
+        named,
+        inArray(
+          gradingJob.id,
+          settled.map((row) => row.id),
+        ),
+      ),
+    ),
+    alreadyWaiting,
+  };
+}
+
+/**
+ * The caller's own jobs that the target names, as a predicate — or `undefined`
+ * when the target is a run they cannot reach.
+ *
+ * The run case resolves the run's conversations first rather than joining,
+ * because a run holds at most two hundred of them and the id list that comes
+ * back is what makes the reopen's predicate the same shape as the window's. The
+ * tenancy is on both halves: the simulations are read within it, and the jobs
+ * are narrowed by it again.
+ */
+async function conversationsNamed(
+  auth: AuthContext,
+  target: RegradeTarget,
+): Promise<SQL | undefined> {
+  const inActingProject =
+    auth.projectId === undefined
+      ? undefined
+      : eq(gradingJob.projectId, auth.projectId);
+
+  if ("window" in target) {
+    const { from, to } = validWindow(target.window);
+    return within(
+      auth,
+      gradingJob,
+      and(
+        inActingProject,
+        gte(gradingJob.createdAt, from),
+        lt(gradingJob.createdAt, to),
+      ),
+    );
+  }
+
+  const [reachable] = await db()
+    .select({ id: run.id })
+    .from(run)
+    .where(
+      within(
+        auth,
+        run,
+        and(
+          eq(run.id, target.runId),
+          auth.projectId === undefined
+            ? undefined
+            : eq(run.projectId, auth.projectId),
+        ),
+      ),
+    )
+    .limit(1);
+
+  if (reachable === undefined) return undefined;
+
+  const conversations = await db()
+    .select({ id: simulation.id })
+    .from(simulation)
+    .where(within(auth, simulation, eq(simulation.runId, reachable.id)));
+
+  return within(
+    auth,
+    gradingJob,
+    and(
+      inActingProject,
+      inArray(
+        gradingJob.simulationId,
+        conversations.map((conversation) => conversation.id),
+      ),
+    ),
+  );
+}
+
+function validWindow(window: RegradeWindow): RegradeWindow {
+  const { from, to } = window;
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+    throw new Error("a re-grade's window is two moments, and one of these is not");
+  }
+  if (from.getTime() >= to.getTime()) {
+    throw new Error("a re-grade's window starts before it ends");
+  }
+  return window;
 }
