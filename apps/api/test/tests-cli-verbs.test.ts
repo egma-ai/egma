@@ -343,10 +343,14 @@ describe("push, against a real instance", () => {
     const report = await pushTests({ signedIn, paths: folder, fetchImpl });
 
     expect(report.tests).toEqual([]);
+    // `refusedBy: "platform"` is the half the wizard's gate needs: the door's
+    // own refusal, told apart from one the push saw coming on this side.
     expect(report.turnedAway).toEqual([
       {
         name: FILE.name,
+        file: fileAt("reschedules.md"),
         shown: "egma/tests/reschedules.md",
+        refusedBy: "platform",
         reason:
           'egma has no persona called "Nobody At All" in this project. Name a persona this project already has, or name none and egma takes the project\'s default.',
       },
