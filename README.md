@@ -199,8 +199,8 @@ TWILIO_ACCOUNT_SID=AC... TWILIO_AUTH_TOKEN=... \
 ```
 
 It creates the trunk, its termination URI, a credential list and the
-credential, attaches both to the trunk, and prints the five variables the
-simulator reads. It names what it made with each identifier, and it is safe to
+credential, attaches the credential list and the number to the trunk, and
+prints the five variables the simulator reads. It names what it made with each identifier, and it is safe to
 run again — a second run finds what the first made and rotates only the
 password, because Twilio hands a password out once and never again.
 

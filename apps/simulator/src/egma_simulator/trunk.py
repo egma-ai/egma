@@ -518,10 +518,11 @@ def main() -> None:
                 number=arguments.number,
                 # Twilio's own roots, unless something is standing in for
                 # them — which is how this step is tested without an
-                # account, and is not a thing a deployment sets.
-                api_root=os.environ.get("EGMA_TWILIO_API_ROOT", API_ROOT),
+                # account. TEST_, like every stand-in override, because a
+                # deployment never sets these.
+                api_root=os.environ.get("TEST_TWILIO_API_ROOT", API_ROOT),
                 trunking_root=os.environ.get(
-                    "EGMA_TWILIO_TRUNKING_ROOT", TRUNKING_ROOT
+                    "TEST_TWILIO_TRUNKING_ROOT", TRUNKING_ROOT
                 ),
                 name=arguments.name,
             )

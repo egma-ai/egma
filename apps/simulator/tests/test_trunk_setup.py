@@ -49,7 +49,7 @@ async def test_an_account_and_a_number_become_a_trunk_the_driver_can_dial():
 
     trunk = await setup(stub)
 
-    # Every artifact the ticket names: a trunk with a termination URI, a
+    # Every artifact setup makes: a trunk with a termination URI, a
     # credential list with a credential in it, and both attached.
     assert stub.trunks, "no trunk was created"
     made = next(iter(stub.trunks.values()))
@@ -205,8 +205,8 @@ async def test_the_command_itself_prints_the_configuration_and_nothing_else(
         )
         monkeypatch.setenv("TWILIO_ACCOUNT_SID", stub.account_sid)
         monkeypatch.setenv("TWILIO_AUTH_TOKEN", stub.auth_token)
-        monkeypatch.setenv("EGMA_TWILIO_API_ROOT", running.base_url)
-        monkeypatch.setenv("EGMA_TWILIO_TRUNKING_ROOT", running.base_url)
+        monkeypatch.setenv("TEST_TWILIO_API_ROOT", running.base_url)
+        monkeypatch.setenv("TEST_TWILIO_TRUNKING_ROOT", running.base_url)
 
         await asyncio.to_thread(main)
 
