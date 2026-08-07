@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import type { Conversation } from "../src/conversation.ts";
 import { execute } from "../src/graders/index.ts";
+import { noJudgeWanted } from "./support/scripted-judge.ts";
 import type {
+  GraderType,
   MeasureAggregation,
   MetricThresholdConfig,
   ThresholdComparator,
@@ -50,6 +52,9 @@ async function judge(
   const [only] = await execute({
     judgment: { type: "metric_threshold", config: threshold(config) },
     conversation: conversation(metrics),
+    // Handed a judge it must never reach for: a threshold is arithmetic, and
+    // asking a model whether 1400 is under 2000 would be absurd and expensive.
+    judging: noJudgeWanted(),
   });
   if (only === undefined) throw new Error("the grader said nothing");
   return only;
@@ -211,14 +216,22 @@ describe("a grader type egma has not built yet", () => {
    * The alternative would be silence, and silence is what makes a page go green
    * because a check quietly judged nothing. That is the exact false trust this
    * product exists to kill, so an unbuilt type says so out loud.
+   *
+   * Every type egma names today executes, so this asks about one of the two the
+   * roster reserves and has not built — `state_check`. That is the shape a real
+   * one arrives in: named first, executed later, and never silent in between.
    */
   it("errors rather than being skipped or ignored", async () => {
     const [only] = await execute({
-      judgment: { type: "phrase_match", config: { required: [], banned: [], speaker: "agent" } },
+      judgment: {
+        type: "state_check" as GraderType,
+        config: {},
+      } as never,
       conversation: conversation({}),
+      judging: noJudgeWanted(),
     });
 
-    expect(only).toMatchObject({ dimension: "phrase_match", verdict: "errored" });
-    expect(only?.rationale).toContain("does not execute phrase_match graders yet");
+    expect(only).toMatchObject({ dimension: "state_check", verdict: "errored" });
+    expect(only?.rationale).toContain("does not execute state_check graders yet");
   });
 });

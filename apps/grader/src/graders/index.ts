@@ -6,7 +6,10 @@ import {
   type ExecutorFor,
   type Judgment,
 } from "./contract.ts";
+import { executeLlmRubric } from "./llm-rubric.ts";
 import { executeMetricThreshold } from "./metric-threshold.ts";
+import { executePhraseMatch } from "./phrase-match.ts";
+import { executeToolCalls } from "./tool-calls.ts";
 
 /**
  * The executor seam: one grader type, one function, and nothing else in the
@@ -19,10 +22,12 @@ import { executeMetricThreshold } from "./metric-threshold.ts";
  * the resolution, the verdict rows and the fold are all written once, in the
  * grader's vocabulary rather than in any type's.
  *
- * **The types that are named and not yet executed are named here too**, as
+ * **A type that is named and not yet executed is named here too**, as
  * `undefined`, so the roster is total and the compiler fails when a type joins
- * it with nowhere to run. What egma does when it meets one is below, and it is
- * deliberately not silence.
+ * it with nowhere to run. Every type egma names today executes; the reserved
+ * ones — `state_check`, `code` — arrive here first and their entry is the
+ * decision that they are not built. What egma does when it meets one is below,
+ * and it is deliberately not silence.
  */
 
 /**
@@ -33,9 +38,9 @@ const EXECUTORS: {
   readonly [Type in GraderType]: ExecutorFor<Type> | undefined;
 } = {
   metric_threshold: executeMetricThreshold,
-  llm_rubric: undefined,
-  tool_calls: undefined,
-  phrase_match: undefined,
+  llm_rubric: executeLlmRubric,
+  tool_calls: executeToolCalls,
+  phrase_match: executePhraseMatch,
 };
 
 /**
@@ -81,5 +86,6 @@ export {
   type Execution,
   type ExecutionOf,
   type ExecutorFor,
+  type Judging,
   type Judgment,
 } from "./contract.ts";

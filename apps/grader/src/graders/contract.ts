@@ -1,6 +1,12 @@
-import type { GraderJudgment, GraderType, Verdict } from "@egma/db";
+import type {
+  GraderJudgment,
+  GraderType,
+  JudgeModel,
+  Verdict,
+} from "@egma/db";
 
 import type { Conversation } from "../conversation.ts";
+import type { JudgeMakers, JudgeResolution } from "../judge/index.ts";
 
 /**
  * What every grader type is handed and what every one of them answers with.
@@ -40,12 +46,65 @@ export type Judgment = {
   readonly rationale: string;
   /** The spans this judgment is about, by their own ids. */
   readonly citedSpanIds: readonly string[];
+  /**
+   * Who decided it, when it was not egma's own engine — `provider/model` for a
+   * judged type, and absent for a deterministic one.
+   *
+   * Absent means `engine`, and the engine fills that in, so a type that needs no
+   * model never has to say so. It is per judgment rather than per grader because
+   * that is the granularity the verdict row has: `judged_by` is part of a row's
+   * identity, which is what lets a person's disagreement sit beside the
+   * machine's word instead of replacing it, and a grader that one day decides
+   * one dimension in-process and asks a model about another must be able to say
+   * so honestly.
+   *
+   * Never a key, and there is nowhere here one could come from: what a grader
+   * module holds is a way to ask and a name to record.
+   */
+  readonly judgedBy?: string | undefined;
 };
 
 /**
- * What a grader is handed, and all it is handed: what it judges by, and the
- * conversation. Not the grader's name, not its priority, not whose it is — an
- * executor that could see any of those could be written to answer with them.
+ * How a grader type that judges with a model reaches one.
+ *
+ * **A capability rather than a fact about the grader.** It is handed to every
+ * executor, including the deterministic ones, and the deterministic ones simply
+ * never call it — resolving a judge is what unseals a project's key, so a
+ * conversation whose graders are all deterministic never opens the envelope
+ * however many of them were handed this. That is what keeps "asked for only if
+ * something judges" a property of the shape rather than of the roster.
+ *
+ * **The key is deliberately absent, and cannot be reached from here.** What
+ * `judging` answers with is a way to ask and a `provider/model` name to record,
+ * so no grader type — today's or tomorrow's — can put a secret in a rationale, a
+ * verdict row or a log line.
+ */
+export type Judging = {
+  /**
+   * The project's judge, resolved at most once per conversation and shared by
+   * everything on it that judges — so five judged checks cost one read of the
+   * configuration rather than five, and all of them speak with one account.
+   */
+  readonly judge: JudgeResolution;
+  /** How each provider is spoken to. A test hands over a scripted one. */
+  readonly makers: JudgeMakers;
+  /**
+   * This grader version's own judge, or `null` for the project's default.
+   *
+   * The override is judged content: it lives on the immutable version beside the
+   * config, so a verdict written under it stays readable as "decided by this
+   * model" long after the project's default moved on. It names a provider and a
+   * model and never a key, so a grader cannot move a project's judging onto an
+   * account nobody configured.
+   */
+  readonly model: JudgeModel | null;
+};
+
+/**
+ * What a grader is handed, and all it is handed: what it judges by, the
+ * conversation, and a way to reach a judge. Not the grader's name, not its
+ * priority, not whose it is — an executor that could see any of those could be
+ * written to answer with them.
  *
  * Narrowed by the type, so a `metric_threshold` executor is handed a
  * `MetricThresholdConfig` and cannot be handed anything else. The pair travels
@@ -54,6 +113,7 @@ export type Judgment = {
 export type ExecutionOf<Type extends GraderType> = {
   readonly judgment: Extract<GraderJudgment, { readonly type: Type }>;
   readonly conversation: Conversation;
+  readonly judging: Judging;
 };
 
 /** Any grader's execution, which is what the dispatch holds. */

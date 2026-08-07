@@ -142,12 +142,11 @@ describe("the project's default judge", () => {
   /**
    * The per-grader override, resolved at its own seam.
    *
-   * It cannot be seen in a verdict row yet, and the reason is worth stating: the
-   * only grader type that carries a judge model is `llm_rubric`, and egma does
-   * not execute that type until the ticket that adds its executor. The resolution
-   * is what this ticket owns, so the resolution is what this asserts — against a
-   * real grader version read back out of Postgres, with the project's real key
-   * behind it.
+   * This is the resolution alone, against a real grader version read back out
+   * of Postgres with the project's real key behind it. What the override looks
+   * like once it has reached a verdict row — the `llm_rubric` executor asking on
+   * the grader's model and the row naming it — is `llm-rubric.test.ts`, through
+   * the whole service.
    */
   it("is overridden by a grader that names its own provider and model", async () => {
     const graderId = await seedGrader(world, {

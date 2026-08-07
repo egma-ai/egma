@@ -1,4 +1,12 @@
 import { newId } from "@egma/ids";
+import {
+  isCatalogedMeasure,
+  CATALOGED_MEASURES,
+  MEASURE_AGGREGATIONS,
+  MEASURE_CATALOG_DOCUMENT,
+  MEASURE_CATALOG_VERSION,
+  type MeasureAggregation,
+} from "@egma/simulation-contract";
 import { and, desc, eq, isNull, lt, sql, type SQL } from "drizzle-orm";
 
 import { db } from "../client.ts";
@@ -48,21 +56,15 @@ import { within } from "./within.ts";
  */
 
 /**
- * How a measure is reduced to one number before the threshold is applied. A
- * latency grader almost always wants a percentile — a mean hides the one turn
- * that took nine seconds, which is the turn the caller hung up on.
+ * How a measure is reduced to one number before the threshold is applied.
+ *
+ * The list belongs to the measure catalog rather than to this file: which
+ * reductions make sense is a fact about what was measured, so the catalog is
+ * where the measures and the aggregations they accept are written down
+ * together. It is re-exported here because a `metric_threshold` config is where
+ * anybody outside meets one.
  */
-const MEASURE_AGGREGATIONS = [
-  "mean",
-  "max",
-  "min",
-  "sum",
-  "p50",
-  "p90",
-  "p95",
-  "p99",
-] as const;
-export type MeasureAggregation = (typeof MEASURE_AGGREGATIONS)[number];
+export type { MeasureAggregation };
 
 /**
  * Which way the threshold points, in words rather than symbols: `<` and `<=`
@@ -392,20 +394,43 @@ function validLlmRubricConfig(config: unknown): LlmRubricConfig {
   return { rubric: rubric.trim() };
 }
 
+/**
+ * A measure the simulator actually emits, checked against the catalog.
+ *
+ * **The one write-door rule that is about the world rather than about the
+ * shape.** A threshold grader names what it reads as a string, and a string
+ * naming nothing produces a grader that reads nothing, judges nothing and is
+ * `skipped` forever — a check somebody wrote, believes in, and that can never
+ * fire. Nothing downstream can catch it: a missing measure is a legitimate
+ * `skipped` on a chat conversation with no audio, so the engine has no way to
+ * tell a typo from a modality. Only the moment of writing can.
+ *
+ * The refusal names the catalog rather than only the list, because the next
+ * question after "that is not a measure" is always "then what is", and the
+ * catalog is the document that answers it — and says what each measure means,
+ * which a list of names cannot.
+ */
+function validMeasure(measure: string): string {
+  if (!isCatalogedMeasure(measure)) {
+    throw new Error(
+      `"${measure}" is not a measure egma's simulator produces, so a grader reading it could never fire; the measure catalog (${MEASURE_CATALOG_DOCUMENT}, version ${MEASURE_CATALOG_VERSION}) names ${CATALOGED_MEASURES.join(", ")}`,
+    );
+  }
+  return measure;
+}
+
 function validMetricThresholdConfig(config: unknown): MetricThresholdConfig {
   const { measure, aggregation, comparator, threshold } = fields(
     config,
     "a metric_threshold grader's config",
   );
 
-  // Named against the measure catalog, not validated against it — that check
-  // arrives with the catalog itself. Naming nothing is refused here and now,
-  // because a threshold grader with no measure reads nothing and can never fire.
   if (typeof measure !== "string" || measure.trim() === "") {
     throw new Error(
       "a metric_threshold grader needs a measure: the name of what it reads",
     );
   }
+  validMeasure(measure.trim());
   if (typeof aggregation !== "string") {
     throw new Error(
       `a metric_threshold grader needs an aggregation; expected one of ${MEASURE_AGGREGATIONS.join(", ")}`,

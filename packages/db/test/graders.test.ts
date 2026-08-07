@@ -1,4 +1,9 @@
 import { isId, newId } from "@egma/ids";
+import {
+  CATALOGED_MEASURES,
+  MEASURE_CATALOG_DOCUMENT,
+  MEASURE_CATALOG_VERSION,
+} from "@egma/simulation-contract";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -250,6 +255,74 @@ describe("a grader whose config does not fit its type", () => {
       },
       /measure/,
     );
+  });
+
+  /**
+   * The one write-door rule that is about the world rather than about the shape.
+   *
+   * A threshold grader names what it reads as a string, and a string naming
+   * nothing produces a grader that reads nothing, judges nothing and is
+   * `skipped` forever — green, silent, and wrong. Nothing downstream can catch
+   * it: a missing measure is a legitimate `skipped` on a chat conversation with
+   * no audio, so the engine cannot tell a typo from a modality. Only this moment
+   * can.
+   */
+  it("is refused when a metric_threshold names a measure the catalog does not", async () => {
+    await refusedNaming(
+      {
+        name: "Reads a measure nobody emits",
+        type: "metric_threshold",
+        config: {
+          measure: "turn_responze_latency",
+          aggregation: "p90",
+          comparator: "below",
+          threshold: 2000,
+        },
+      },
+      /measure catalog/,
+    );
+  });
+
+  it("names the catalog and everything in it, so the next question is answered too", async () => {
+    const refusal = await createGrader(actingAsAcme(), {
+      name: "Reads a measure nobody emits",
+      type: "metric_threshold",
+      config: {
+        measure: "time_to_resolution",
+        aggregation: "p90",
+        comparator: "below",
+        threshold: 2000,
+      },
+    }).then(
+      () => "the grader was written",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+
+    expect(refusal).toContain('"time_to_resolution" is not a measure');
+    expect(refusal).toContain(MEASURE_CATALOG_DOCUMENT);
+    expect(refusal).toContain(`version ${MEASURE_CATALOG_VERSION}`);
+    // Every cataloged name, because "then what is" is always the next question
+    // and a refusal that sends somebody hunting is a refusal that cost them the
+    // afternoon.
+    for (const cataloged of CATALOGED_MEASURES) {
+      expect(refusal).toContain(cataloged);
+    }
+  });
+
+  it("takes every measure the catalog does name", async () => {
+    for (const cataloged of CATALOGED_MEASURES) {
+      const created = await createGrader(actingAsAcme(), {
+        name: `Holds ${cataloged} to something`,
+        type: "metric_threshold",
+        config: {
+          measure: cataloged,
+          aggregation: "p90",
+          comparator: "below",
+          threshold: 2000,
+        },
+      });
+      expect(created.config).toMatchObject({ measure: cataloged });
+    }
   });
 
   it("is refused when a metric_threshold names no threshold", async () => {

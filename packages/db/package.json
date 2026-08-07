@@ -21,6 +21,7 @@
   "dependencies": {
     "@clickhouse/client": "^1.23.1",
     "@egma/ids": "workspace:*",
+    "@egma/simulation-contract": "workspace:*",
     "better-auth": "^1.6.25",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.16.3"

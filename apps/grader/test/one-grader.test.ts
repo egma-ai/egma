@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Conversation } from "../src/conversation.ts";
 import { judgmentsOf } from "../src/grade.ts";
+import { noJudgeWanted } from "./support/scripted-judge.ts";
 
 /**
  * What one grader says about one conversation, before anything is written down.
@@ -77,6 +78,7 @@ describe("a simulation that never ran", () => {
         // be coming from the executor having looked at them.
         metrics: { turn_response_latency: [10] },
       }),
+      noJudgeWanted(),
     );
 
     expect(only).toMatchObject({ verdict: "errored", score: 0 });
@@ -99,6 +101,7 @@ describe("a grader whose execution falls over", () => {
     const [only] = await judgmentsOf(
       grader({ config: null }),
       conversation(),
+      noJudgeWanted(),
     );
 
     expect(only).toMatchObject({
@@ -115,7 +118,11 @@ describe("a grader whose execution falls over", () => {
       grader({ config: null }),
       grader({ type: "tool_calls" }),
     ]) {
-      for (const judgment of await judgmentsOf(broken, conversation())) {
+      for (const judgment of await judgmentsOf(
+        broken,
+        conversation(),
+        noJudgeWanted(),
+      )) {
         expect(judgment.verdict).toBe("errored");
       }
     }
