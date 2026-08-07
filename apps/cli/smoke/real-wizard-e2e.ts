@@ -638,8 +638,12 @@ async function assertWhatLanded(options: {
 
   /* the block it left in scrollback, each line whole */
 
-  const address = `${platform.url}/runs/${outcome.run.id}`;
+  // The address the platform issued, not one built here out of its parts. A
+  // reconstruction would be this check agreeing with itself about where a run
+  // lives; what a developer triple-clicks is whatever came back on the run.
+  const address = String(run.body.results_url ?? "");
   const lines = outcome.leftBehind;
+  check(address.startsWith("http"), `the run came back with an address (${address})`);
   check(
     lines.some((line) => line.startsWith("✓ Your first run is live")),
     "the headline says the run is live",
