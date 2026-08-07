@@ -216,6 +216,24 @@ describe("a phrase looked for as a regular expression", () => {
       judge({ required: [{ text: "[a-", match: "regex" }] }),
     ).resolves.toMatchObject({ verdict: "errored" });
   });
+
+  /**
+   * The pattern compiles and never finishes: catastrophic backtracking against
+   * a near-match. Nothing can interrupt a regular expression mid-`test`, so the
+   * containment is a worker thread with a deadline — this asserts the deadline
+   * answers `errored` for this grader while the process stays free to grade
+   * everything else, rather than one authored pattern stalling every heartbeat
+   * the service owes.
+   */
+  it("errors a pattern that backtracks past the deadline, rather than stalling the service", async () => {
+    const judgment = await judge(
+      { required: [{ text: "(a+)+$", match: "regex" }] },
+      [{ speaker: "agent", text: `${"a".repeat(64)}b` }],
+    );
+
+    expect(judgment).toMatchObject({ verdict: "errored", score: 0 });
+    expect(judgment.rationale).toContain("took longer than");
+  }, 15_000);
 });
 
 describe("a list holding several phrases", () => {

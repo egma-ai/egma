@@ -1,3 +1,5 @@
+import { Worker } from "node:worker_threads";
+
 import type { Phrase, PhraseSpeaker } from "@egma/db";
 
 import { judgeInputOf, turnReference, type Turn } from "../judge/index.ts";
@@ -36,17 +38,25 @@ import { heldRationale } from "./rule-shelf.ts";
  * a per-rule dimension for either shelf, and why one shelf is one policy rather
  * than a proportion of one.
  *
- * ## A pattern that will not compile
+ * ## A pattern that will not compile, and one that will not finish
  *
- * `errored`, never `failed`. A regular expression is stored as text, and a
- * pattern written before the write door tightened around it — or hand-edited
- * into the row since — is a check egma cannot make rather than a check the agent
- * failed. Saying `failed` there would mark down an agent for egma's own broken
- * config, which is the one thing a test product must never do.
+ * `errored`, never `failed`, for both. A regular expression is stored as text,
+ * and a pattern written before the write door tightened around it — or
+ * hand-edited into the row since — is a check egma cannot make rather than a
+ * check the agent failed. Saying `failed` there would mark down an agent for
+ * egma's own broken config, which is the one thing a test product must never do.
+ *
+ * The one that will not finish is the sharper case. An author-written pattern
+ * can backtrack catastrophically, and a regular expression cannot be
+ * interrupted mid-`test` — so author patterns are applied inside a worker
+ * thread that can be terminated, with a deadline. A pattern that misses the
+ * deadline is one `errored` row on this grader, and never a stalled heartbeat
+ * that costs every other conversation its turn. `contains` phrases never leave
+ * this thread: they are escaped into literals, and a literal cannot backtrack.
  */
-export function executePhraseMatch(
+export async function executePhraseMatch(
   execution: ExecutionOf<"phrase_match">,
-): readonly Judgment[] {
+): Promise<readonly Judgment[]> {
   const { config } = execution.judgment;
   const dimension = theOneCheck("phrase_match");
   // The transcript as the judge reads it, so this grader and a judge looking at
@@ -74,11 +84,31 @@ export function executePhraseMatch(
     ];
   }
 
+  const searches = [...required.searches, ...banned.searches];
+  const matched = await matchesOf(searches, turns);
+  if (matched === undefined) {
+    return [
+      {
+        dimension,
+        verdict: "errored",
+        score: 0,
+        rationale: `a pattern on this grader took longer than ${PATTERN_DEADLINE_MILLISECONDS}ms against this transcript, so this check was not made.`,
+        citedSpanIds: [],
+      },
+    ];
+  }
+  const foundBy = new Map(
+    searches.map((looking, at) => [
+      looking,
+      turns.filter((_, turnAt) => matched[at]?.[turnAt] === true),
+    ]),
+  );
+
   const broken: string[] = [];
   const cited = new Set<number>();
 
   for (const looking of required.searches) {
-    const found = turns.filter((turn) => looking.pattern.test(turn.text));
+    const found = foundBy.get(looking) ?? [];
     if (found.length === 0) {
       broken.push(
         `${describing(looking.phrase)} was never ${said(config.speaker)}`,
@@ -89,7 +119,7 @@ export function executePhraseMatch(
   }
 
   for (const looking of banned.searches) {
-    const found = turns.filter((turn) => looking.pattern.test(turn.text));
+    const found = foundBy.get(looking) ?? [];
     if (found.length === 0) continue;
     broken.push(
       `${describing(looking.phrase)} was ${said(config.speaker)} at ${turnsInWords(found)}`,
@@ -164,6 +194,76 @@ function compile(phrase: Phrase): RegExp | undefined {
 function escaped(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+/**
+ * How long the patterns have, together, against one conversation. Far above
+ * anything an honest pattern needs on a transcript this size, and far below
+ * the lease a stalled worker would otherwise burn.
+ */
+const PATTERN_DEADLINE_MILLISECONDS = 1000;
+
+/**
+ * Which turns each search matches — `undefined` when the deadline passed.
+ *
+ * Escaped literals are answered right here: they cannot backtrack, so a grader
+ * of `contains` phrases never pays for a thread. An author-written pattern can
+ * backtrack catastrophically, and `test` cannot be interrupted — the one thing
+ * that can stop it is its whole thread being terminated, so that is the
+ * containment: the patterns run in a worker built from the small script below,
+ * and the deadline kills the worker rather than the service.
+ */
+async function matchesOf(
+  searches: readonly Search[],
+  turns: readonly Turn[],
+): Promise<readonly (readonly boolean[])[] | undefined> {
+  const texts = turns.map((turn) => turn.text);
+  if (searches.every((looking) => looking.phrase.match === "contains")) {
+    return searches.map((looking) =>
+      texts.map((text) => looking.pattern.test(text)),
+    );
+  }
+
+  const worker = new Worker(MATCHING, {
+    eval: true,
+    workerData: {
+      patterns: searches.map((looking) => ({
+        source: looking.pattern.source,
+        flags: looking.pattern.flags,
+      })),
+      texts,
+    },
+  });
+
+  try {
+    return await new Promise((resolve) => {
+      const deadline = setTimeout(() => {
+        resolve(undefined);
+      }, PATTERN_DEADLINE_MILLISECONDS);
+      worker.once("message", (matched: readonly (readonly boolean[])[]) => {
+        clearTimeout(deadline);
+        resolve(matched);
+      });
+      worker.once("error", () => {
+        clearTimeout(deadline);
+        resolve(undefined);
+      });
+    });
+  } finally {
+    void worker.terminate();
+  }
+}
+
+/** The worker's whole program: compile, test, answer. Nothing else to import. */
+const MATCHING = `
+const { parentPort, workerData } = require("node:worker_threads");
+const { patterns, texts } = workerData;
+parentPort.postMessage(
+  patterns.map(({ source, flags }) => {
+    const pattern = new RegExp(source, flags);
+    return texts.map((text) => pattern.test(text));
+  }),
+);
+`;
 
 /** One phrase, ready to be looked for. */
 type Search = { readonly phrase: Phrase; readonly pattern: RegExp };
