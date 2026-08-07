@@ -235,6 +235,7 @@ export {
   failSimulation,
   getRun,
   getSimulation,
+  getSimulationTestVersion,
   listRuns,
   listSimulations,
   markSimulationCanceled,

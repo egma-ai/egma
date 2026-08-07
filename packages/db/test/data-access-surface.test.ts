@@ -106,6 +106,7 @@ const CONTEXT_REQUIRING = [
   "getPersonaVersion",
   "getRun",
   "getSimulation",
+  "getSimulationTestVersion",
   "getTest",
   "getTestVersion",
   "listAgents",
