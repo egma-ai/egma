@@ -35,6 +35,19 @@
  * is asked by the one caller with no credential at all — somebody looking at a
  * signup form — and the same test names it.
  *
+ * **Work-dispatching.** `claimGradingJobs` and `watchGradingWork`, and only
+ * those two. They are asked by the grader service, which stands behind every
+ * organization on the deployment at once and holds no credential, because there
+ * is no honest one to give it. The exemption is narrow and each half of it is
+ * enforced: neither takes an argument by which a caller could name a customer,
+ * and a build rule refuses one that grows one; the only table either reaches is
+ * egma's own grading queue; a claim carries out identifiers and tenancy and
+ * never anything a customer wrote; and every claim arrives with the
+ * `AuthContext` narrowed to that job's own organization and project, which is
+ * what all of the grading afterwards goes through. `grading.ts` writes the
+ * reasoning out in full. A third name in this category is a deliberate act: a
+ * test names both and fails when one appears.
+ *
  * **Deciding.** The role list, the action list, and the one function every
  * action in the product passes through. They take an `AuthContext` like
  * everything else and then read nothing: a permission is decided from the role
@@ -50,18 +63,54 @@
  * project to narrow to — a narrowing argument, never a filter — because the
  * trace store is filed by time and a read that named none would be the one
  * unfiltered scan this boundary exists to make unreachable.
+ *
+ * `recordProductionTraces` sits beside `appendSpans` on that same path and is
+ * the other half of what the ingest door does with an export. It is handed the
+ * very same spans: the trace store gets the rows, and the grading queue gets one
+ * row per conversation saying when egma last heard about it and whether its root
+ * span closed. Taking the spans rather than a summary of them is what keeps
+ * "when is a conversation over" written down once. It is a queue write and a
+ * notification and never a judgment — grading happens in a service that holds no
+ * request open.
+ *
+ * `appendVerdicts` and `readVerdicts` are the same two halves for the store's
+ * other table. They need no window, because a verdict is filed under the
+ * conversation it judges rather than under the minute it was written in, so
+ * naming the conversation is already the bound. The read hands back the rows and
+ * the folded answer over them; nothing writes an overall row anywhere, and the
+ * fold that computes one is a pure function exported from the package's entry
+ * point rather than from here, because it reaches no store at all.
+ *
+ * `readRunVerdicts` is that read one grain up, and it is a third door rather
+ * than an option on the second because a run's verdicts are filed under the run
+ * and not under any one conversation. It answers a run's outcome and each of its
+ * conversations', both from the same fold over the same rows, which is what
+ * fills the run header's verdict counts at read time and keeps them incapable of
+ * disagreeing with the page beneath.
+ *
+ * The two ways a judgment is ever revisited are exported beside them, and
+ * neither is an edit: `regrade` reopens the queue so the engine judges a run or
+ * a window again at each grader's current version — narrowed to one grader when
+ * the ask names one, which is a decision about judge spend rather than about
+ * what the rows come to say — and `correctVerdict` writes one person's
+ * disagreement as a row of its own with the machine's still underneath it. Both
+ * take the context like everything else, and both are the whole API for
+ * revisiting a verdict today — there are no routes above them yet, and this
+ * surface is the altitude the product is reachable at.
  */
 
 export type { AuthContext, Role, Via } from "./context.ts";
 export { ROLES, VIA } from "./context.ts";
 export {
   AlreadyBelongsToAnOrganizationError,
+  GraderNamedByTestsError,
   LastAdminError,
   NotPermittedError,
   PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
   TraceStoreRefusedError,
   UnreadableTraceQueryError,
+  type TestNamingGrader,
   type TestNamingPersona,
 } from "./errors.ts";
 
@@ -164,6 +213,21 @@ export {
 } from "./traces.ts";
 
 export {
+  appendVerdicts,
+  correctVerdict,
+  readRunVerdicts,
+  readVerdicts,
+  type AppendedVerdicts,
+  type NewVerdict,
+  type ReadVerdictsOptions,
+  type RecordedVerdict,
+  type RunVerdicts,
+  type SimulationVerdicts,
+  type TraceVerdicts,
+  type VerdictCorrection,
+} from "./verdicts.ts";
+
+export {
   addConnection,
   createAgent,
   deleteAgent,
@@ -220,13 +284,71 @@ export {
   getTestVersion,
   listTests,
   type DeletedTest,
+  type ExpectedBehavior,
+  type ExpectedBehaviorInput,
   type NewTest,
   type Test,
   type TestChanges,
+  type TestGrader,
   type TestPage,
   type TestPersona,
   type TestVersion,
 } from "./tests.ts";
+
+export {
+  advanceProductionSampling,
+  createGrader,
+  deleteGrader,
+  editGrader,
+  getGrader,
+  getGraderVersion,
+  listGraders,
+  type DeletedGrader,
+  type Grader,
+  type GraderChanges,
+  type GraderConfig,
+  type GraderConfigInput,
+  type GraderJudgment,
+  type GraderPage,
+  type GraderVersion,
+  type JudgeModel,
+  type JudgeProvider,
+  type LlmRubricConfig,
+  type MeasureAggregation,
+  type MetricThresholdConfig,
+  type NewGrader,
+  type NewGraderJudgment,
+  type Phrase,
+  type PhraseInput,
+  type PhraseMatch,
+  type PhraseMatchConfig,
+  type PhraseMatchConfigInput,
+  type PhraseSpeaker,
+  type ThresholdComparator,
+  type ToolCallsConfig,
+  type ToolCallsConfigInput,
+  type ToolExpectation,
+  type ToolExpectationInput,
+} from "./graders.ts";
+export type {
+  GraderScope,
+  GraderType,
+  Priority,
+} from "../schema/graders.ts";
+
+/**
+ * The project's default judge. `resolveJudgeKey` is the one door to the
+ * plaintext of a judge key and it takes the context like everything else — and
+ * then refuses every context that did not come from a grading claim, because
+ * judging is the only thing egma does with one.
+ */
+export {
+  getJudgeConfiguration,
+  resolveJudgeKey,
+  setJudgeConfiguration,
+  type JudgeConfiguration,
+  type NewJudgeConfiguration,
+} from "./judges.ts";
 
 export {
   cancelRun,
@@ -235,6 +357,7 @@ export {
   failSimulation,
   getRun,
   getSimulation,
+  getSimulationTestVersion,
   listRuns,
   listSimulations,
   markSimulationCanceled,
@@ -259,3 +382,25 @@ export type {
   SimulationEndingReason,
   SimulationStatus,
 } from "../schema/runs.ts";
+
+export {
+  claimGradingJobs,
+  finishGradingJob,
+  getGradingJob,
+  getGradingJobForTrace,
+  listGradingJobsForSimulation,
+  recordGradingHeartbeat,
+  recordProductionTraces,
+  regrade,
+  releaseGradingJob,
+  reopenGradingJob,
+  watchGradingWork,
+  type GradingClaim,
+  type GradingClaimRequest,
+  type GradingJob,
+  type Regraded,
+  type RegradeTarget,
+  type RegradeWindow,
+} from "./grading.ts";
+export type { GradingJobStatus, GradingSource } from "../schema/grading.ts";
+export type { Listening } from "../client.ts";

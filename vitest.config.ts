@@ -9,17 +9,24 @@ export default defineConfig({
     alias: {
       "@egma/ids": resolve("./packages/ids/src/index.ts"),
       "@egma/db": resolve("./packages/db/src/index.ts"),
+      "@egma/simulation-contract": resolve(
+        "./packages/simulation-contract/src/index.ts",
+      ),
     },
   },
   test: {
     // The CLI tests drive the built entry point, because that is what a
-    // developer runs. Building it here keeps two test files from racing to
-    // build it themselves.
-    globalSetup: ["apps/cli/test/support/build-cli.ts"],
+    // developer runs, and the grader test drives the one its image runs.
+    // Building both here keeps two test files from racing to build one.
+    globalSetup: [
+      "apps/cli/test/support/build-cli.ts",
+      "apps/grader/test/support/build-grader.ts",
+    ],
     include: [
       "packages/*/src/**/*.test.ts",
       "packages/*/test/**/*.test.ts",
       "apps/api/test/**/*.test.ts",
+      "apps/grader/test/**/*.test.ts",
       "apps/web/test/**/*.test.ts",
       "apps/cli/test/**/*.test.ts",
     ],

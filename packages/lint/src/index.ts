@@ -95,6 +95,40 @@ const CONTEXT_ESTABLISHING = [
 const INSTANCE_SCOPED = ["instanceIsClaimed"];
 
 /**
+ * The exports that dispatch egma's own work across the whole deployment.
+ *
+ * The grader service stands behind every organization at once and holds no
+ * credential, because there is no honest one to give it: an API key minted
+ * inside one customer would either see too little to do the job or be shared
+ * between customers to do it. So it is handed work instead of asked for a
+ * credential — and the two calls that hand it out are these.
+ *
+ * This category is narrower than it looks, and the rule enforces the property
+ * that makes it safe: **nothing here may take an argument by which a caller
+ * could name a customer.** A claimant's name and a capacity say who is asking
+ * and how much they can hold; neither says whose work to bring back. A function
+ * here that grew an `organizationId` or a `projectId` would be an ordinary
+ * cross-tenant read wearing an exemption, and the rule refuses it.
+ *
+ * The rest of what makes it safe is not mechanical and is written out where the
+ * functions live: the only table either reaches is egma's own grading queue, a
+ * claim carries identifiers and tenancy rather than anything a customer wrote,
+ * and every claim arrives with the `AuthContext` narrowed to that job's own
+ * organization and project — which is what the grading itself goes through.
+ *
+ * A third name here is a decision somebody has to make on purpose.
+ */
+const WORK_DISPATCHING = ["claimGradingJobs", "watchGradingWork"];
+
+/**
+ * What a work-dispatching export may not be handed, in any position: an
+ * argument named for a customer, or an object argument carrying one. Matched on
+ * the text of the parameter and its type, which is how these are written —
+ * inline object types with named properties.
+ */
+const NAMES_A_CUSTOMER = /\b(organizationId|projectId)\b/;
+
+/**
  * The auth provider, as the package names it import. The provider answers one
  * question — who is this person, and are they logged in — and the whole reason
  * a swap stays cheap is that the answer arrives through egma's own types rather
@@ -373,10 +407,31 @@ function exportedFunction(
 }
 
 /**
+ * One parameter as a reader of the call sees it: what is written at the call
+ * site, plus the body of a type alias declared in the same file, so a parameter
+ * cannot hide a field behind a name. One level of alias, which is how these are
+ * written — a second would be a shape nobody could read either.
+ */
+function asWritten(tree: ts.SourceFile, parameter: ts.ParameterDeclaration): string {
+  const written = parameter.getText(tree);
+  const type = parameter.type;
+  if (type === undefined || !ts.isTypeReferenceNode(type)) return written;
+  const referenced = type.typeName.getText(tree);
+
+  for (const statement of tree.statements) {
+    if (ts.isTypeAliasDeclaration(statement) && statement.name.text === referenced) {
+      return `${written} ${statement.getText(tree)}`;
+    }
+  }
+  return written;
+}
+
+/**
  * Every function the module exports either takes an `AuthContext` first, or is
- * one of the two named exceptions that produce one. Nothing exported takes a
- * predicate, so there is no call shape that lets a caller supply their own
- * tenancy filter — or none.
+ * one of the named exceptions: the seven that produce a context, the one that
+ * asks about the deployment, and the two that dispatch egma's own work. Nothing
+ * exported takes a predicate, so there is no call shape that lets a caller
+ * supply their own tenancy filter — or none.
  */
 async function checkExportedCallShapes(root: string): Promise<Violation[]> {
   const surface = path.join(root, ACCESS_SURFACE);
@@ -427,7 +482,9 @@ async function checkExportedCallShapes(root: string): Promise<Violation[]> {
       const first = declaration.parameters[0];
       const firstType = first?.type?.getText(declaring);
       const exempt =
-        CONTEXT_ESTABLISHING.includes(name) || INSTANCE_SCOPED.includes(name);
+        CONTEXT_ESTABLISHING.includes(name) ||
+        INSTANCE_SCOPED.includes(name) ||
+        WORK_DISPATCHING.includes(name);
       if (!exempt && firstType !== AUTH_CONTEXT) {
         violations.push({
           file,
@@ -451,6 +508,23 @@ async function checkExportedCallShapes(root: string): Promise<Violation[]> {
             `while it takes nothing. A parameter would give it a customer to ` +
             `name, and it would be an ordinary read wearing an exemption.`,
         });
+      }
+
+      if (WORK_DISPATCHING.includes(name)) {
+        for (const parameter of declaration.parameters) {
+          const written = asWritten(declaring, parameter);
+          if (!NAMES_A_CUSTOMER.test(written)) continue;
+          violations.push({
+            file,
+            line: line(parameter),
+            rule: "every-exported-call-carries-an-auth-context",
+            detail:
+              `${name} skips the ${AUTH_CONTEXT} because it dispatches egma's ` +
+              `own work across the deployment, and that only holds while no ` +
+              `caller can name a customer to it. This parameter names one, ` +
+              `which makes it a cross-tenant read wearing an exemption.`,
+          });
+        }
       }
 
       for (const parameter of declaration.parameters) {

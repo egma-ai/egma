@@ -11,7 +11,7 @@ You need Docker with Compose. Nothing else.
 docker compose up
 ```
 
-That starts five services and applies both schemas. Nobody runs a migration
+That starts six services and applies both schemas. Nobody runs a migration
 step, because there isn't one — the API applies its migrations while it boots.
 
 | Service | URL |
@@ -21,6 +21,7 @@ step, because there isn't one — the API applies its migrations while it boots.
 | Postgres | `postgres://egma:egma@localhost:5433/egma` |
 | ClickHouse | `http://egma:egma@localhost:8124/egma` |
 | Simulator | none — it only dials out |
+| Grader | none — it only dials out |
 
 Open http://localhost:3101 and sign up. Your organization and your first project
 are created together, and you become their admin. On a fresh instance the first
@@ -50,9 +51,9 @@ It is an override rather than the default because a container may not raise its
 limit past the daemon's own, so a host with a low hard `nofile` would not start
 at all.
 
-## The simulator, and why it publishes nothing
+## The two services that publish nothing
 
-The fifth service conducts simulations: it takes a persona and a scenario and
+The simulator conducts simulations: it takes a persona and a scenario and
 holds a real conversation with the agent under test, then reports the
 transcript, the measurements and how it ended.
 
@@ -92,7 +93,36 @@ Anything set to something it cannot use stops the container on its first line,
 naming the variable. A wrongly mounted volume is caught the same way, rather
 than by losing the first recording.
 
-### Watching one without a control plane
+### The grader
+
+The other one judges conversations — the ones the simulator conducted and the
+ones a real caller had, with the same graders. A simulation reaching its end
+becomes claimable work in the same commit that ends it; a production
+conversation becomes claimable when its telemetry says it is over. The grader
+takes the work, reads the conversation, resolves the graders that apply to it,
+and writes one verdict row per judged dimension.
+
+**It claims its work too**, on the same terms and for the same reasons: no
+`ports:`, no inbound surface, and more throughput is more copies —
+`docker compose up --scale grader=3` needs nothing in front of them. It reads
+the two stores directly rather than through the API, so grading existing costs
+the request path nothing at all.
+
+**A conversation ending wakes it**, rather than an interval catching it later,
+so nothing here promises a latency and nothing here waits for one. For a
+production conversation that ending is the root span reaching the OTLP door: an
+exporter sends a span when the span *ends*, so the one span the whole
+conversation happened inside arriving is the conversation being over.
+`EGMA_GRADER_TRACE_IDLE_SECONDS` is the fallback for an exporter that never
+closes one, and `EGMA_GRADER_SWEEP_SECONDS` is the backstop under all of it, for
+the notification raised while every copy happened to be restarting.
+
+It is handed the deployment's encryption key, because a judged grader runs on
+the project's own judge model and the sealed key has to be replayed to that
+provider — and never a model key of its own, because the judge is always the
+customer's choice, not egma's. `apps/grader/README.md` is the whole table.
+
+### Watching a simulator without a control plane
 
 The endpoints the simulator dials are still being built, so there is nothing to
 trigger a run with yet. To see the machinery work anyway, start it against the
@@ -148,6 +178,7 @@ configuration file to write.
 | Container | Reachable from the internet? |
 | --- | --- |
 | simulator | **Never.** It publishes nothing, in this configuration or any other. |
+| grader | **Never.** The same, for the same reason. |
 | LiveKit server | No — its clients are the containers beside it. |
 | Redis | No. |
 | **SIP gateway** | **Yes.** Its SIP port and its RTP range have to be reachable from your carrier. |
@@ -278,6 +309,11 @@ the happy one is covered against the API instead, where it costs milliseconds.
 
 ```
 apps/api        Fastify API. Applies migrations on boot, then serves.
+apps/grader     The service that judges finished conversations: claims a
+                conversation the moment it ends, resolves the graders that
+                apply to it, executes them and writes verdict rows. Claims
+                its work, so it publishes nothing; scaled by running more
+                copies. See its README.
 apps/simulator  The Python service that conducts simulations: claims specs
                 from the control plane, conducts each as a persona
                 conversing with the agent under test through a platform

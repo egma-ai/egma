@@ -8,7 +8,10 @@
     "baseUrl": ".",
     "paths": {
       "@egma/ids": ["./packages/ids/src/index.ts"],
-      "@egma/db": ["./packages/db/src/index.ts"]
+      "@egma/db": ["./packages/db/src/index.ts"],
+      "@egma/simulation-contract": [
+        "./packages/simulation-contract/src/index.ts"
+      ]
     }
   },
   "include": [
@@ -16,6 +19,7 @@
     "packages/*/src/**/*.test.ts",
     "packages/*/test/**/*.ts",
     "apps/api/test/**/*.ts",
+    "apps/grader/test/**/*.ts",
     "apps/cli/test/**/*.ts",
     "apps/cli/smoke/**/*.ts"
   ]

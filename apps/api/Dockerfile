@@ -11,9 +11,11 @@ COPY apps/web/package.json apps/web/
 COPY packages/db/package.json packages/db/
 COPY packages/ids/package.json packages/ids/
 COPY packages/lint/package.json packages/lint/
+COPY packages/simulation-contract/package.json packages/simulation-contract/
 RUN pnpm install --frozen-lockfile --filter "egma" --filter "@egma/api..."
 
 COPY packages/ids packages/ids
+COPY packages/simulation-contract packages/simulation-contract
 COPY packages/db packages/db
 COPY apps/api apps/api
 RUN pnpm exec tsc -b packages/ids packages/db apps/api

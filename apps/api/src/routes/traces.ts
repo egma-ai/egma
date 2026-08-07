@@ -4,6 +4,7 @@ import {
   appendSpans,
   authorize,
   NotPermittedError,
+  recordProductionTraces,
   TraceStoreRefusedError,
 } from "@egma/db";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -54,6 +55,17 @@ import {
  * happened. Spans egma refuses are reported there — a count and one message —
  * because the specification is explicit that rejected data must not be retried
  * and the client must be told how much of it there was.
+ *
+ * **A conversation ending here becomes grading work, and nothing more.** The
+ * spans are stored, and then one row per trace goes to the grading queue saying
+ * when this trace was last heard from and whether its root span closed. That is
+ * bookkeeping: a queue write and a notification, on the same terms as the
+ * transaction that ends a simulation raising one. No grader is resolved here, no
+ * conversation is read back, no judgment is made and no model is called.
+ * Judging belongs to a service that holds no request open, and it stays there:
+ * a door that judged would make an exporter's timeout depend on how many
+ * graders a customer wrote and on how fast somebody else's judge model felt
+ * like answering.
  */
 
 export type TraceRoutesOptions = {
@@ -313,6 +325,21 @@ export async function traceRoutes(
           "not stored and re-sending the same batch will not change that.",
       );
     }
+
+    // And the conversations those spans belong to become known to the grading
+    // queue: one row per trace, saying when egma last heard about it and whether
+    // its root span closed. The same spans go to both calls, so what completion
+    // means is read off the telemetry in one place rather than agreed between
+    // two.
+    //
+    // Deliberately not caught. A trace nothing recorded is a trace nothing will
+    // ever grade, so an export whose bookkeeping did not land was not accepted:
+    // the failure reaches the exporter as a 5xx, which OTLP says to retry, and
+    // the retry is byte-identical so the store drops the spans it already has.
+    // The door's availability already depends on this database — the credential
+    // is resolved from it before a byte of the body is read — so this couples
+    // nothing that was not coupled.
+    await recordProductionTraces(auth, normalised.spans);
 
     return exportResponse(
       reply,
