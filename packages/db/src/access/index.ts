@@ -55,6 +55,7 @@
 export type { AuthContext, Role, Via } from "./context.ts";
 export { ROLES, VIA } from "./context.ts";
 export {
+  AgentWriteRefusedError,
   AlreadyBelongsToAnOrganizationError,
   LastAdminError,
   NotPermittedError,
@@ -64,6 +65,7 @@ export {
   TraceStoreRefusedError,
   UnprocessableInputError,
   UnreadableTraceQueryError,
+  type AgentWriteRefusal,
   type TestNamingPersona,
 } from "./errors.ts";
 
@@ -173,6 +175,7 @@ export {
   getConnection,
   listAgents,
   listConnections,
+  registerAgent,
   removeConnection,
   resolveConnectionCredentials,
   updateAgent,
@@ -186,6 +189,8 @@ export {
   type DeletedAgent,
   type NewAgent,
   type NewConnection,
+  type Registration,
+  type RegistrationResult,
   type RemovedConnection,
 } from "./agents.ts";
 export type {

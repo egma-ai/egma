@@ -26,6 +26,41 @@ export class ProjectOutsideOrganizationError extends Error {
 }
 
 /**
+ * The agent factory turned a write away, and which rule turned it away is
+ * carried beside the sentence rather than hidden inside it.
+ *
+ * Three rules refuse a write here and they are three different answers to
+ * whoever asked: a connection payload the type's own registry entry will not
+ * take, something the factory needs a name for and did not get one for, and a
+ * name a living row already holds. An HTTP layer has to tell them apart, and
+ * reading the sentence to do it would make the prose load-bearing — while the
+ * sentence is the part deliberately left free to improve. So the reason
+ * travels as a value and the sentence travels untouched, to be relayed word
+ * for word to whoever asked.
+ */
+export class AgentWriteRefusedError extends Error {
+  readonly reason: AgentWriteRefusal;
+
+  constructor(reason: AgentWriteRefusal, message: string) {
+    super(message);
+    this.name = "AgentWriteRefusedError";
+    this.reason = reason;
+  }
+}
+
+/**
+ * Which rule refused.
+ *
+ * - `not_admitted` — the connection registry's per-type gate: an unknown type,
+ *   a modality the type does not speak, a config key it has no place for, a
+ *   credential where none belongs or none where one is required.
+ * - `needs_a_name` — an agent or a connection arrived without a usable name.
+ * - `name_taken` — a living agent in the project, or a living connection on
+ *   the agent, already holds the name.
+ */
+export type AgentWriteRefusal = "not_admitted" | "needs_a_name" | "name_taken";
+
+/**
  * The person being invited is already in an organization.
  *
  * One person belongs to one organization in this version, so there is no second

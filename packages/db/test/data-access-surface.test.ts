@@ -126,6 +126,7 @@ const CONTEXT_REQUIRING = [
   "readTrace",
   "recordDeviceAuthorization",
   "recordSimulationHeartbeat",
+  "registerAgent",
   "removeConnection",
   "removeMember",
   "resolveConnectionCredentials",
@@ -156,6 +157,10 @@ const PERMISSION = [
 
 /** Vocabulary: the table definitions, how a caller proved who they are, and the refusals. */
 const VALUES = [
+  // The agent factory's own refusal, carrying which of its three rules turned
+  // a write away: an HTTP layer answers the three differently and must not
+  // have to read the sentence to tell them apart.
+  "AgentWriteRefusedError",
   "AlreadyBelongsToAnOrganizationError",
   "LastAdminError",
   "NotPermittedError",

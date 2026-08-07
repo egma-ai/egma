@@ -37,6 +37,11 @@ const config: NextConfig = {
           source: "/api/device/:path*",
           destination: `${api}/api/device/:path*`,
         },
+        { source: "/api/agents", destination: `${api}/api/agents` },
+        {
+          source: "/api/agents/:path*",
+          destination: `${api}/api/agents/:path*`,
+        },
         { source: "/api/keys", destination: `${api}/api/keys` },
         { source: "/api/keys/:path*", destination: `${api}/api/keys/:path*` },
         { source: "/api/members", destination: `${api}/api/members` },
