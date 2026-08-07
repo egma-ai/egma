@@ -10,18 +10,20 @@ process. The rig here is exactly that wiring.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import signal
 import subprocess
 import sys
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import aiohttp
 import pytest
 from aiohttp import web
+from retell_stub import RetellStub, RunningStub, serving
 
 from egma_simulator.contract import contract_dir
 from egma_simulator.workbench.app import WorkbenchState, build_app
@@ -122,7 +124,12 @@ class SimulatorProcess:
     stdout_path: Path
     stderr_path: Path
     wal_dir: Path
+    blob_dir: Path
     extra_env: dict[str, str] = field(default_factory=dict)
+
+    def blob(self, reference: str) -> bytes:
+        """What a reported reference actually resolves to on disk."""
+        return (self.blob_dir / reference).read_bytes()
 
     def output(self) -> str:
         return (
@@ -157,19 +164,31 @@ def start_simulator(
         capacity: int = 2,
         log_level: str = "INFO",
         claimant: str = "sim-under-test",
+        extra_env: dict[str, str] | None = None,
     ) -> SimulatorProcess:
         stdout_path = tmp_path / f"simulator-{len(started)}.out"
         stderr_path = tmp_path / f"simulator-{len(started)}.err"
         wal_dir = tmp_path / f"wal-{len(started)}"
+        blob_dir = tmp_path / f"blobs-{len(started)}"
+        # Empty, and pointed at by the two variables a tokenizer corpus is
+        # ever looked up through. The simulator promises it needs no such
+        # corpus and fetches none; a child that quietly grew a need for
+        # one would find this machine's cache and pass, which is exactly
+        # the regression this starves. See the package docstring.
+        starved = tmp_path / f"no-corpus-{len(started)}"
+        starved.mkdir(exist_ok=True)
         env = os.environ | {
+            "NLTK_DATA": str(starved),
+            "HOME": str(starved),
             "EGMA_SIMULATOR_CONTROL_PLANE_URL": workbench.base_url,
             "EGMA_SIMULATOR_CLAIMANT": claimant,
             "EGMA_SIMULATOR_CAPACITY": str(capacity),
             "EGMA_SIMULATOR_HEARTBEAT_SECONDS": str(HEARTBEAT_SECONDS),
             "EGMA_SIMULATOR_CLAIM_WAIT_SECONDS": "2",
             "EGMA_SIMULATOR_WAL_DIR": str(wal_dir),
+            "EGMA_SIMULATOR_BLOB_DIR": str(blob_dir),
             "EGMA_SIMULATOR_LOG_LEVEL": log_level,
-        }
+        } | (extra_env or {})
         with open(stdout_path, "wb") as stdout, open(stderr_path, "wb") as stderr:
             process = subprocess.Popen(
                 [sys.executable, "-m", "egma_simulator"],
@@ -182,6 +201,8 @@ def start_simulator(
             stdout_path=stdout_path,
             stderr_path=stderr_path,
             wal_dir=wal_dir,
+            blob_dir=blob_dir,
+            extra_env=extra_env or {},
         )
         started.append(simulator)
         return simulator
@@ -190,6 +211,22 @@ def start_simulator(
 
     for simulator in started:
         simulator.stop()
+
+
+@pytest.fixture
+async def start_retell_stub() -> AsyncIterator[Callable[..., Awaitable[RunningStub]]]:
+    """Start Retell-shaped stubs on loopback; each stops when the test ends.
+
+    The keyword arguments are :class:`RetellStub`'s script — the key it
+    honors, the greeting, the replies, whether the agent ends the exchange
+    itself.
+    """
+    async with contextlib.AsyncExitStack() as stack:
+
+        async def start(**script: object) -> RunningStub:
+            return await stack.enter_async_context(serving(RetellStub(**script)))
+
+        yield start
 
 
 @pytest.fixture
@@ -212,11 +249,45 @@ def load_fixture_spec(name: str) -> dict:
         return json.load(handle)
 
 
+A_SCENARIO = "State the first point. State the second point."
+"""Two sentences, so the scripted persona speaks twice and then concludes."""
+
+A_PERSONALITY = "Terse test person; sticks to the script."
+
+
+def a_spec(
+    simulation_id: str,
+    *,
+    connection: dict,
+    scenario: str,
+    personality: str,
+    max_turns: int,
+    max_duration_seconds: int,
+    modality: str = "chat",
+) -> dict:
+    """The envelope every spec shares: one persona, one scenario, one set of
+    walls, one exchange. What differs between two specs is the connection
+    block and the modality, which is exactly the difference the plug seam
+    exists to absorb."""
+    return {
+        "contract_version": 1,
+        "simulation_id": simulation_id,
+        "modality": modality,
+        "connection": connection,
+        "persona": {"traits": {"personality": personality, "language": "en-US"}},
+        "scenario": {"instructions": scenario},
+        "limits": {
+            "max_duration_seconds": max_duration_seconds,
+            "max_turns": max_turns,
+        },
+    }
+
+
 def scripted_spec(
     simulation_id: str,
     *,
-    scenario: str = "State the first point. State the second point.",
-    personality: str = "Terse test person; sticks to the script.",
+    scenario: str = A_SCENARIO,
+    personality: str = A_PERSONALITY,
     greeting: str | None = None,
     replies: list[str] | None = None,
     ends_after_replies: bool = False,
@@ -240,24 +311,152 @@ def scripted_spec(
         config["ends_after_replies"] = True
     if provider_reference is not None:
         config["provider_reference"] = provider_reference
-    return {
-        "contract_version": 1,
-        "simulation_id": simulation_id,
-        "modality": "chat",
-        "connection": {
+    return a_spec(
+        simulation_id,
+        connection={
             "type": "scripted",
             "config": config,
             "credentials": credentials,
         },
-        "persona": {
-            "traits": {"personality": personality, "language": "en-US"}
+        scenario=scenario,
+        personality=personality,
+        max_turns=max_turns,
+        max_duration_seconds=max_duration_seconds,
+    )
+
+
+def retell_spec(
+    simulation_id: str,
+    *,
+    base_url: str,
+    api_key: str,
+    agent_id: str = "agent_stubbed_0001",
+    scenario: str = A_SCENARIO,
+    personality: str = A_PERSONALITY,
+    max_turns: int = 60,
+    max_duration_seconds: int = 600,
+) -> dict:
+    """One spec against a Retell chat connection, pointed wherever asked.
+
+    The connection block is exactly what the control plane stores for a
+    ``retell`` connection — the agent id in the config, the key in the
+    credentials — plus the base URL, which is what lets the exchange land on
+    a Retell-shaped stub instead of the platform itself.
+    """
+    return a_spec(
+        simulation_id,
+        connection={
+            "type": "retell",
+            "config": {"retellAgentId": agent_id, "baseUrl": base_url},
+            "credentials": {"apiKey": api_key},
         },
-        "scenario": {"instructions": scenario},
-        "limits": {
-            "max_duration_seconds": max_duration_seconds,
-            "max_turns": max_turns,
+        scenario=scenario,
+        personality=personality,
+        max_turns=max_turns,
+        max_duration_seconds=max_duration_seconds,
+    )
+
+
+def assert_kept_secret(
+    secret: str, *, records: list[dict], simulator: SimulatorProcess
+) -> None:
+    """A planted credential is in none of the three places it could surface.
+
+    The reports the control plane holds, every byte the process wrote, and
+    the write-ahead log on disk — all three, every time, because a secret
+    kept out of two of them is still a leaked secret. Each place is checked
+    to be non-empty first: scanning nothing always passes.
+
+    Call it once the simulator has stopped, so its output is all there.
+    """
+    assert secret not in json.dumps(records), "a report carried the credential"
+
+    output = simulator.output()
+    assert output, "expected the simulator to have logged something"
+    assert secret not in output, "a log line carried the credential"
+
+    wal_bytes = b"".join(
+        path.read_bytes() for path in simulator.wal_dir.glob("*.jsonl")
+    )
+    assert wal_bytes, "expected write-ahead log entries"
+    assert secret.encode() not in wal_bytes, (
+        "the write-ahead log carried the credential"
+    )
+
+
+def loopback_spec(
+    simulation_id: str,
+    *,
+    scenario: str = A_SCENARIO,
+    personality: str = A_PERSONALITY,
+    voice: dict | None = None,
+    greeting: str | None = None,
+    replies: list[str] | None = None,
+    ends_after_replies: bool = False,
+    answer_delay_seconds: float = 0.0,
+    sample_rate_hz: int | None = None,
+    provider_reference: str | None = None,
+    max_turns: int = 60,
+    max_duration_seconds: int = 600,
+    credentials: dict | None = None,
+) -> dict:
+    """One voice spec against the loopback counterpart.
+
+    Deliberately the same shape as :func:`scripted_spec`: the two differ by
+    modality and connection type and by nothing else, which is what makes
+    "the same test over chat and over voice" a comparison rather than two
+    unrelated stories.
+    """
+    config: dict = {"answer_delay_seconds": answer_delay_seconds}
+    if greeting is not None:
+        config["greeting"] = greeting
+    if replies is not None:
+        config["replies"] = replies
+    if ends_after_replies:
+        config["ends_after_replies"] = True
+    if sample_rate_hz is not None:
+        config["sample_rate_hz"] = sample_rate_hz
+    if provider_reference is not None:
+        config["provider_reference"] = provider_reference
+    spec = a_spec(
+        simulation_id,
+        modality="voice",
+        connection={
+            "type": "loopback",
+            "config": config,
+            "credentials": credentials,
         },
+        scenario=scenario,
+        personality=personality,
+        max_turns=max_turns,
+        max_duration_seconds=max_duration_seconds,
+    )
+    if voice is not None:
+        spec["persona"]["traits"]["voice"] = voice
+    return spec
+
+
+def assert_one_speaker_to_a_channel(
+    recording: bytes, turns: list[tuple[str, str]]
+) -> None:
+    """Each turn is on its own speaker's channel and on neither other one.
+
+    The recording is read the only way a listener could read it — the
+    samples of each channel, transcribed — so this says what a person
+    would hear, not what the simulator believed it wrote.
+    """
+    from egma_simulator.pipeline import channels_of
+    from egma_simulator.speech import decode_speech
+
+    persona_audio, agent_audio, band = channels_of(recording)
+    said = {
+        "human": decode_speech(persona_audio, band),
+        "agent": decode_speech(agent_audio, band),
     }
+    for speaker, text in turns:
+        other = "agent" if speaker == "human" else "human"
+        assert text in said[speaker], (speaker, text)
+        assert text not in said[other], (speaker, text)
 
 
 # -- Record readers: the acceptance suite's entire vocabulary -----------------

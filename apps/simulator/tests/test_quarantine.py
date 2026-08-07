@@ -29,6 +29,9 @@ ALLOWED_DEPENDENCIES = {
     "aiohttp",  # the outbound HTTP client, and the workbench's server
     "jsonschema",  # holds every document to the contract, both directions
     "rfc3339-validator",  # so the schemas' date-time format is really checked
+    "pipecat-ai",  # the voice pipeline: the speech legs and the recording
+    "loguru",  # what pipecat logs through, gathered under one filter
+    "nltk",  # pipecat's tokenizer, held to no downloads (see __init__)
 }
 
 # A datastore driver in here would mean the simulator had stopped asking
@@ -82,7 +85,7 @@ def test_the_dependency_list_stays_short_and_declared():
 def test_no_module_imports_anything_from_outside_the_app():
     """Third-party imports are the declared ones; everything else is stdlib."""
     # The distribution names above are not always the module names.
-    allowed_modules = {"aiohttp", "jsonschema"}
+    allowed_modules = {"aiohttp", "jsonschema", "pipecat", "loguru", "nltk"}
     permitted = allowed_modules | set(sys.stdlib_module_names) | {"egma_simulator"}
 
     offenders: dict[str, set[str]] = {}

@@ -34,6 +34,20 @@ Constructors validate and hold; they never do I/O. A constructor that
 raises means the simulation fails with an honest reason before the
 platform is ever dialled.
 
+## Chat or voice: same job, different currency
+
+A chat plug exchanges text. A **voice plug exchanges audio** — that is the
+whole difference, and it is the plug's difference alone. Between a voice
+plug and the persona brain sit the speech legs, assembled around it per
+simulation: the persona's words are spoken into audio before they reach
+the plug, and the audio that comes back is transcribed before anyone else
+sees it. So a voice plug never handles text, the persona never handles
+audio, and neither of them learns about the other.
+
+The seams are :class:`PlatformPlug` (chat, and what the walk drives
+whatever the modality) and :class:`VoicePlug` (voice). A plug implements
+the one for the modality it speaks and refuses the other at construction.
+
 ## The lifecycle the walk drives
 
 For one simulation, in order, always:
@@ -55,6 +69,15 @@ For one simulation, in order, always:
    whatever happened: after a natural end, after a limit tripped, after a
    cancel directive, and after a fault. Make it safe to call in every one
    of those states.
+
+A voice plug's lifecycle is the same three steps in audio: ``open``
+answers with the agent's spoken greeting, ``deliver`` takes the persona's
+speech as an ``Utterance`` and answers with an ``AgentSpeech``, ``close``
+tears the exchange down. It also declares ``sample_rate_hz`` — **the band
+it actually carries**, after whatever negotiation the platform does, not
+the band the config asked for. The legs are assembled at that band and the
+simulation's audio facts are measured from what flowed, so a plug that
+returns a hopeful number is lying on the record.
 
 ``provider_reference`` is the platform's own identifier for the exchange —
 a chat id, a telephony leg id — reported with the terminal facts as the
@@ -79,6 +102,10 @@ A real platform takes real time to answer; that is the plug's time to
 take, inside ``deliver``. Fakes that answer instantly make some walks
 untestable (nothing can be canceled mid-flight), which is why the scripted
 counterpart takes a ``turn_seconds`` knob.
+
+A voice plug has a second, better way to be slow: the quiet before an
+agent starts speaking belongs in the audio it returns, because that is
+where it is on a real call and where the measurement of it is read from.
 
 ## Registration
 
@@ -107,14 +134,39 @@ class AgentReply:
     a hang-up, or the platform closing it from its side."""
 
 
+@dataclass(frozen=True)
+class Utterance:
+    """One stretch of speech, as it flows: 16-bit signed little-endian mono
+    PCM, and the band it is carried at."""
+
+    pcm: bytes
+    sample_rate_hz: int
+
+
+@dataclass(frozen=True)
+class AgentSpeech:
+    """The agent's spoken answer to one delivered persona utterance."""
+
+    audio: Utterance | None
+    """What the agent said, or ``None`` for an answer that carried no audio."""
+
+    ended: bool = False
+    """True when this answer ended the exchange — the same meaning as on
+    :class:`AgentReply`, one modality over."""
+
+
 class PlugError(Exception):
     """A plug refusing config it does not understand, a modality it cannot
     speak, or a platform interaction that failed in a way it can name."""
 
 
 class PlatformPlug(Protocol):
-    """The seam. One implementation per connection type; see the module
-    docstring for the full brief."""
+    """The seam the walk drives: text in, text out, whatever the modality.
+
+    A chat plug implements it directly; a voice plug is reached through it,
+    with the speech legs assembled in between. See the module docstring for
+    the full brief.
+    """
 
     @property
     def provider_reference(self) -> str | None: ...
@@ -126,7 +178,27 @@ class PlatformPlug(Protocol):
     async def close(self) -> None: ...
 
 
-PlugFactory = Callable[..., PlatformPlug]
+class VoicePlug(Protocol):
+    """The seam a voice connection is reached through: audio in, audio out.
+
+    ``sample_rate_hz`` is the band actually carried, which the speech legs
+    are assembled at and the simulation's measured audio band is read from.
+    """
+
+    @property
+    def provider_reference(self) -> str | None: ...
+
+    @property
+    def sample_rate_hz(self) -> int: ...
+
+    async def open(self) -> AgentSpeech | None: ...
+
+    async def deliver(self, speech: Utterance) -> AgentSpeech: ...
+
+    async def close(self) -> None: ...
+
+
+PlugFactory = Callable[..., PlatformPlug | VoicePlug]
 """What the registry hands back: called with ``modality=``, ``config=``
 and ``credentials=`` keywords, it returns one plug for one simulation —
 in practice, the plug class itself."""
@@ -138,8 +210,12 @@ def plug_for(connection_type: str) -> PlugFactory | None:
     The registry is deliberately a literal here: adding a platform is one
     import and one line, and the diff that adds it touches nothing else.
     """
+    from .loopback import LoopbackCounterpart
+    from .retell import RetellChat
     from .scripted import ScriptedCounterpart
 
     return {
+        "loopback": LoopbackCounterpart,
+        "retell": RetellChat,
         "scripted": ScriptedCounterpart,
     }.get(connection_type)

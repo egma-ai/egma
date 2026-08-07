@@ -7,6 +7,9 @@ requires-python = ">=3.11"
 dependencies = [
     "aiohttp>=3.13.3",
     "jsonschema>=4.25.1",
+    "loguru>=0.7.3",
+    "nltk>=3.10.2",
+    "pipecat-ai>=1.7.0",
     "rfc3339-validator>=0.1.4",
 ]
 
