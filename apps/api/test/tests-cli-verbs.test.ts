@@ -31,12 +31,9 @@ import { mintKey, signUp, type Customer } from "./support/traces.ts";
  * client and a server that drift apart fail here rather than in somebody's
  * terminal.
  *
- * Two things stand in for the world outside, and neither hides anything the API
- * does. The transport is the API's own injection rather than a socket, because
- * what is under test is what the two ends say to each other. And the list
- * response is adapted below — the one client-side change this API's unified
- * list envelope still needs, applied here as an adapter so that everything else
- * about pull and push can be proven now rather than after it lands.
+ * One thing stands in for the world outside, and it hides nothing the API
+ * does: the transport is the API's own injection rather than a socket, because
+ * what is under test is what the two ends say to each other.
  */
 
 let api: TestApi;
@@ -92,37 +89,6 @@ function fetchThrough(app: FastifyInstance): Fetch {
   }) as Fetch;
 }
 
-/**
- * The client change this API's list envelope is waiting for, as an adapter.
- *
- * Every list in this API answers `{ items, next_cursor }`; the client still
- * reads the older per-resource key. Moving the client is its own piece of work,
- * so it is stood in for here — and only here, for exactly that one field, so
- * that this file proves the rest of pull and push against the API as it is.
- */
-function readsTheUnifiedEnvelope(inner: Fetch): Fetch {
-  return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    const response = await inner(input as never, init as never);
-    const address = String(
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.href
-          : (input as Request).url,
-    );
-    if (!new URL(address).pathname.startsWith("/api/tests") || !response.ok) {
-      return response;
-    }
-
-    const body = (await response.json()) as Record<string, unknown>;
-    if (!Array.isArray(body.items)) return Response.json(body, { status: response.status });
-    return Response.json(
-      { ...body, tests: body.items },
-      { status: response.status },
-    );
-  }) as Fetch;
-}
-
 /** What `egma login` leaves on the machine: one instance, and a key for it. */
 async function signedInAs(person: Customer): Promise<SignedIn> {
   const key = await mintKey(
@@ -157,7 +123,7 @@ describe("push, against a real instance", () => {
     api = await createApi("sync_push_create");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
-    const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
+    const fetchImpl = fetchThrough(api.app);
 
     await writeTestFile(fileAt("reschedules.md"), { ...FILE });
 
@@ -193,7 +159,7 @@ describe("push, against a real instance", () => {
     api = await createApi("sync_push_settled");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
-    const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
+    const fetchImpl = fetchThrough(api.app);
 
     await writeTestFile(fileAt("reschedules.md"), { ...FILE });
     const first = await pushTests({ signedIn, paths: folder, fetchImpl });
@@ -214,7 +180,7 @@ describe("push, against a real instance", () => {
     api = await createApi("sync_push_edit");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
-    const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
+    const fetchImpl = fetchThrough(api.app);
 
     await writeTestFile(fileAt("reschedules.md"), { ...FILE });
     const first = await pushTests({ signedIn, paths: folder, fetchImpl });
@@ -240,7 +206,7 @@ describe("push, against a real instance", () => {
     api = await createApi("sync_push_moved");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
-    const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
+    const fetchImpl = fetchThrough(api.app);
 
     await writeTestFile(fileAt("reschedules.md"), { ...FILE });
     await pushTests({ signedIn, paths: folder, fetchImpl });
@@ -292,7 +258,7 @@ describe("push, against a real instance", () => {
     api = await createApi("sync_push_unknown_pin");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
-    const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
+    const fetchImpl = fetchThrough(api.app);
 
     await writeTestFile(fileAt("reschedules.md"), {
       ...FILE,
@@ -315,7 +281,7 @@ describe("push, against a real instance", () => {
     api = await createApi("sync_push_late_conflict");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
-    const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
+    const fetchImpl = fetchThrough(api.app);
 
     await writeTestFile(fileAt("reschedules.md"), { ...FILE });
     await pushTests({ signedIn, paths: folder, fetchImpl });
@@ -367,7 +333,7 @@ describe("push, against a real instance", () => {
     api = await createApi("sync_push_turned_away");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
-    const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
+    const fetchImpl = fetchThrough(api.app);
 
     await writeTestFile(fileAt("reschedules.md"), {
       ...FILE,
@@ -393,7 +359,7 @@ describe("pull, against a real instance", () => {
     api = await createApi("sync_pull_writes");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
-    const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
+    const fetchImpl = fetchThrough(api.app);
 
     const authored = await api.app.inject({
       method: "POST",
@@ -430,7 +396,7 @@ describe("pull, against a real instance", () => {
     api = await createApi("sync_pull_settled");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
-    const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
+    const fetchImpl = fetchThrough(api.app);
 
     await writeTestFile(fileAt("reschedules.md"), { ...FILE });
     await pushTests({ signedIn, paths: folder, fetchImpl });
@@ -444,7 +410,7 @@ describe("pull, against a real instance", () => {
     api = await createApi("sync_pull_stale_pin");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
-    const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
+    const fetchImpl = fetchThrough(api.app);
 
     await writeTestFile(fileAt("reschedules.md"), { ...FILE });
     await pushTests({ signedIn, paths: folder, fetchImpl });
