@@ -12,7 +12,12 @@ import {
   EXPECTED_BEHAVIORS,
   judgeExpectedBehaviors,
 } from "./graders/expected-behaviors.ts";
-import { execute, theOneCheck, type Judgment } from "./graders/index.ts";
+import {
+  execute,
+  theOneCheck,
+  type Judging,
+  type Judgment,
+} from "./graders/index.ts";
 import { JUDGE_MAKERS, judgeOnce, type JudgeMakers } from "./judge/index.ts";
 import { applicableGraders } from "./resolve.ts";
 
@@ -92,7 +97,17 @@ export async function gradeClaim(
   const [byGrader, builtIn] = await Promise.all([
     Promise.all(
       graders.map(async (grader) =>
-        (await judgmentsOf(grader, conversation)).map((judgment) =>
+        (
+          await judgmentsOf(grader, conversation, {
+            judge,
+            makers,
+            // This version's own judge, or null for the project's default. It
+            // is judged content, frozen on the version beside the config, so a
+            // verdict decided by it stays readable as "decided by this model"
+            // long after the project's default moved on.
+            model: grader.judgeModel,
+          })
+        ).map((judgment) =>
           verdictRow(
             {
               graderId: grader.id,
@@ -101,10 +116,6 @@ export async function gradeClaim(
               // decided by is frozen behind this id, and a re-grade at the next
               // version writes beside rather than over.
               graderVersionId: grader.versionId,
-              // `engine`, because no model was asked anything. A judge model's
-              // own name goes here when one is used, and `human` when a person
-              // disagrees.
-              judgedBy: "engine",
               priority: grader.priority,
             },
             conversation,
@@ -184,6 +195,7 @@ export async function gradeClaim(
 export async function judgmentsOf(
   grader: Grader,
   conversation: Conversation,
+  judging: Judging,
 ): Promise<readonly Judgment[]> {
   if (!conversation.happened) {
     return [
@@ -197,8 +209,9 @@ export async function judgmentsOf(
   try {
     // The grader *is* its judgment plus its identity and its live settings — the
     // type and the config it shapes are one inseparable pair on the row already
-    // — so the executor is handed the grader itself and sees only the pair.
-    return await execute({ judgment: grader, conversation });
+    // — so the executor is handed the grader itself and sees only the pair, plus
+    // a way to reach a judge that the deterministic types never use.
+    return await execute({ judgment: grader, conversation, judging });
   } catch (error) {
     // One grader falling over is one `errored` row, not a conversation with no
     // verdicts on it. Every other grader's judgment still lands, and this one
@@ -235,7 +248,13 @@ function couldNotJudge(grader: Grader, rationale: string): Judgment {
 type JudgedBy = {
   readonly graderId: string;
   readonly graderVersionId: string;
-  readonly judgedBy: string;
+  /**
+   * Who judged, when the judgment did not say. The built-in names its own —
+   * one judge for the whole list — and an authored grader's is per judgment,
+   * because a judged type records the model that answered and a deterministic
+   * one records nothing at all.
+   */
+  readonly judgedBy?: string | undefined;
   readonly priority: Priority;
 };
 
@@ -251,7 +270,10 @@ function verdictRow(
     graderVersionId: by.graderVersionId,
     dimension: judgment.dimension,
     source: conversation.source,
-    judgedBy: by.judgedBy,
+    // The judge that answered, or `engine` when no model was asked anything —
+    // and `human` on the day a person disagrees, which is a row of their own
+    // rather than an edit to this one.
+    judgedBy: judgment.judgedBy ?? by.judgedBy ?? "engine",
     verdict: judgment.verdict,
     score: judgment.score,
     rationale: judgment.rationale,

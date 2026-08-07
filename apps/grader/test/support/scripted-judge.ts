@@ -1,8 +1,12 @@
+import type { JudgeModel } from "@egma/db";
+
+import type { Judging } from "../../src/graders/index.ts";
 import type {
   Judge,
   JudgeAnswer,
   JudgeMakers,
   JudgeQuestion,
+  JudgeResolution,
   ResolvedJudge,
 } from "../../src/judge/index.ts";
 
@@ -70,6 +74,59 @@ export function scriptedJudge(options: ScriptedJudgeOptions): ScriptedJudge {
   };
 
   return { makers, asked, configured };
+}
+
+/**
+ * The judge seam as an executor is handed it, with no project and no store
+ * behind it — for the unit tests that judge one conversation with one config.
+ *
+ * The whole path from a project's judge configuration to a resolved key has its
+ * own tests and its own acceptance suite, through the real service. What is
+ * stood in for here is only the resolution, so that "this rubric asked one
+ * question and the answer became this row" is testable without a database.
+ */
+export function scriptedJudging(
+  options: ScriptedJudgeOptions & { readonly model?: JudgeModel | undefined },
+): { readonly judging: Judging; readonly judge: ScriptedJudge } {
+  const judge = scriptedJudge(options);
+
+  const resolution: JudgeResolution = async () => ({
+    judging(override, makers) {
+      const resolved: ResolvedJudge = {
+        provider: override?.provider ?? "openai",
+        model: override?.model ?? "gpt-4.1-mini",
+        key: "sk-egma-unit-judge-NEVERLEAKME",
+      };
+      return {
+        ask: makers[resolved.provider](resolved),
+        name: `${resolved.provider}/${resolved.model}`,
+      };
+    },
+  });
+
+  return {
+    judge,
+    judging: {
+      judge: resolution,
+      makers: judge.makers,
+      model: options.model ?? null,
+    },
+  };
+}
+
+/**
+ * The judge seam handed to a grader that must never reach for one.
+ *
+ * Every deterministic type is handed a way to judge, because the seam is one
+ * shape for every type — and every one of them is supposed to answer without
+ * touching it. Asking here throws, so "no model was called" is an assertion the
+ * suite makes rather than a claim the doc comment makes.
+ */
+export function noJudgeWanted(): Judging {
+  const refuse = (): never => {
+    throw new Error("a deterministic grader reached for a judge");
+  };
+  return { judge: refuse, makers: { openai: refuse }, model: null };
 }
 
 /** An answer in one line, for the ordinary case. */
