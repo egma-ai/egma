@@ -672,7 +672,12 @@ export function runRoutes(options: {
             // arrived empty is a parameter nobody set.
             const said = given(request.url.searchParams.get("after"));
             const from = said === undefined ? 0 : Number(said);
-            if (said !== undefined && !/^\d+$/u.test(said)) {
+            if (
+              said !== undefined &&
+              (!/^\d+$/u.test(said) ||
+                !Number.isSafeInteger(from) ||
+                from > 2_147_483_647)
+            ) {
               return refuse(
                 400,
                 "invalid_request",

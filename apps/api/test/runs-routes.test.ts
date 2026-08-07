@@ -871,7 +871,10 @@ describe("following a run", () => {
 
     // `Number` would take every one of these and answer about a page nobody
     // asked for — 0x10 is sixteen, 1e3 is a thousand, " 7 " is seven — while
-    // the sentence says a sequence number is what it takes.
+    // the sentence says a sequence number is what it takes. The last three
+    // are digits and still refused: past the sequence column's integer range
+    // they would surface as the database's own error, and past what a number
+    // here can hold exactly they would quietly round.
     for (const after of [
       "the-last-one",
       "-1",
@@ -881,6 +884,9 @@ describe("following a run", () => {
       "5.0",
       " 7 ",
       "+3",
+      "2147483648",
+      "9007199254740993",
+      "99999999999999999999",
     ]) {
       const refused = await request(
         "GET",

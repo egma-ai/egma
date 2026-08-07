@@ -1325,7 +1325,19 @@ describe("reading and following a run", () => {
     // `Number` would take every one of these and answer about a page nobody
     // asked for — 0x10 is sixteen, 1e3 is a thousand, " 7 " is seven — while
     // the sentence says a sequence number is what it takes.
-    for (const after of ["the-last-one", "-1", "1.5", "0x10", "1e3", "5.0", " 7 ", "+3"]) {
+    for (const after of [
+      "the-last-one",
+      "-1",
+      "1.5",
+      "0x10",
+      "1e3",
+      "5.0",
+      " 7 ",
+      "+3",
+      "2147483648",
+      "9007199254740993",
+      "99999999999999999999",
+    ]) {
       const refused = await ask(
         "GET",
         `/api/runs/${runId}/events?after=${encodeURIComponent(after)}`,

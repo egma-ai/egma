@@ -311,10 +311,18 @@ export async function runRoutes(
     // Digits and nothing else. `Number` would take 0x10, 1e3, 5.0 and a
     // padded " 7 " and quietly answer about a page nobody asked for, while
     // the sentence below promised it would not — so the shape of a sequence
-    // number is checked as written rather than as parsed.
+    // number is checked as written rather than as parsed. And digits alone
+    // are still not enough: the sequence column is a Postgres integer, so a
+    // number too big for it is refused here rather than surfacing as the
+    // database's own error about a page that could never exist.
     const said = given(query.after);
     const after = said === undefined ? 0 : Number(said);
-    if (said !== undefined && !/^\d+$/u.test(said)) {
+    if (
+      said !== undefined &&
+      (!/^\d+$/u.test(said) ||
+        !Number.isSafeInteger(after) ||
+        after > 2_147_483_647)
+    ) {
       return invalid(
         reply,
         `"${said}" is not a sequence number this feed issued. Send back the ` +
