@@ -35,6 +35,19 @@
  * is asked by the one caller with no credential at all — somebody looking at a
  * signup form — and the same test names it.
  *
+ * **Work-dispatching.** `claimGradingJobs` and `watchGradingWork`, and only
+ * those two. They are asked by the grader service, which stands behind every
+ * organization on the deployment at once and holds no credential, because there
+ * is no honest one to give it. The exemption is narrow and each half of it is
+ * enforced: neither takes an argument by which a caller could name a customer,
+ * and a build rule refuses one that grows one; the only table either reaches is
+ * egma's own grading queue; a claim carries out identifiers and tenancy and
+ * never anything a customer wrote; and every claim arrives with the
+ * `AuthContext` narrowed to that job's own organization and project, which is
+ * what all of the grading afterwards goes through. `grading.ts` writes the
+ * reasoning out in full. A third name in this category is a deliberate act: a
+ * test names both and fails when one appears.
+ *
  * **Deciding.** The role list, the action list, and the one function every
  * action in the product passes through. They take an `AuthContext` like
  * everything else and then read nothing: a permission is decided from the role
@@ -323,3 +336,18 @@ export type {
   SimulationEndingReason,
   SimulationStatus,
 } from "../schema/runs.ts";
+
+export {
+  claimGradingJobs,
+  finishGradingJob,
+  getGradingJob,
+  listGradingJobsForSimulation,
+  recordGradingHeartbeat,
+  releaseGradingJob,
+  watchGradingWork,
+  type GradingClaim,
+  type GradingClaimRequest,
+  type GradingJob,
+} from "./grading.ts";
+export type { GradingJobStatus, GradingSource } from "../schema/grading.ts";
+export type { Listening } from "../client.ts";

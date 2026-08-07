@@ -47,6 +47,7 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   test_grader: "tstv",
   run: "run",
   simulation: "sim",
+  grading_job: "gjb",
 };
 
 const declaredTables = (Object.values(schema) as unknown[])

@@ -69,6 +69,20 @@ const CONTEXT_ESTABLISHING = [
 const INSTANCE_SCOPED = ["instanceIsClaimed"];
 
 /**
+ * What hands egma's own engine its work. The grader service stands behind every
+ * organization on the deployment at once and holds no credential, because there
+ * is no honest one to give it — so it is handed work rather than asked for one.
+ *
+ * Two names, and a third is a decision somebody makes on purpose. Neither takes
+ * an argument by which a caller could name a customer, and a build rule refuses
+ * one that grows one; the only table either reaches is egma's own grading queue;
+ * and every claim arrives carrying the `AuthContext` narrowed to that job's own
+ * organization and project, which is what all of the grading afterwards goes
+ * through.
+ */
+const WORK_DISPATCHING = ["claimGradingJobs", "watchGradingWork"];
+
+/**
  * Everything that touches a customer's data. All of it needs the context.
  *
  * The trace store's three are `appendSpans`, which writes, and `listTraces` and
@@ -108,10 +122,12 @@ const CONTEXT_REQUIRING = [
   "editPersona",
   "editTest",
   "failSimulation",
+  "finishGradingJob",
   "getAgent",
   "getConnection",
   "getGrader",
   "getGraderVersion",
+  "getGradingJob",
   "getPersona",
   "getPersonaVersion",
   "getRun",
@@ -123,6 +139,7 @@ const CONTEXT_REQUIRING = [
   "listApiKeys",
   "listConnections",
   "listGraders",
+  "listGradingJobsForSimulation",
   "listMembers",
   "listPendingInvitations",
   "listPersonas",
@@ -138,7 +155,9 @@ const CONTEXT_REQUIRING = [
   "readTrace",
   "readVerdicts",
   "recordDeviceAuthorization",
+  "recordGradingHeartbeat",
   "recordSimulationHeartbeat",
+  "releaseGradingJob",
   "removeConnection",
   "removeMember",
   "resolveConnectionCredentials",
@@ -201,11 +220,12 @@ const READ_LIMITS = [
 /**
  * The fold, and the vocabulary it is written in.
  *
- * These take no `AuthContext` and are the only exports that legitimately do not,
- * because they are the only ones that reach nothing: rows a caller already holds
- * go in, arithmetic over them comes out. There is no store to name a customer
- * in, so there is no tenancy to stamp — the rows were fetched by a call that
- * stamped it already.
+ * These take no `AuthContext` and are the only exports that reach nothing at
+ * all: rows a caller already holds go in, arithmetic over them comes out. There
+ * is no store to name a customer in, so there is no tenancy to stamp — the rows
+ * were fetched by a call that stamped it already. (The other exports that take
+ * no context do reach a store; each of the three groups above says on what
+ * terms.)
  *
  * They are exported because the algebra has to live in exactly one place. A
  * grader's outcome, a conversation's and a run's are all this computation, no
@@ -231,6 +251,7 @@ describe("the data-access module's surface", () => {
         ...IDENTITY,
         ...CONTEXT_ESTABLISHING,
         ...INSTANCE_SCOPED,
+        ...WORK_DISPATCHING,
         ...CONTEXT_REQUIRING,
         ...PERMISSION,
         ...VALUES,

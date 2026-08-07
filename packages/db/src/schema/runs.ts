@@ -485,6 +485,10 @@ export const simulation = pgTable(
     // A run's conversations are an ordered list, and no place in it is
     // claimed twice.
     unique("simulation_run_id_position_unique").on(table.runId, table.position),
+    // Looks redundant next to the primary key; it is the composite-foreign-key
+    // target that lets a grading job prove the conversation it was written for
+    // is its own project's — the run's own dormant unique, one level down.
+    unique("simulation_id_project_id_unique").on(table.id, table.projectId),
     index("simulation_run_id_idx").on(table.runId),
     // The claim's hot path: the oldest queued simulations of one customer.
     index("simulation_queued_idx")

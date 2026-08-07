@@ -48,6 +48,7 @@ export const ID_PREFIXES = [
   "ste",
   "run",
   "sim",
+  "gjb",
   "del",
 ] as const;
 

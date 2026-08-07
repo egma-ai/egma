@@ -21,7 +21,9 @@ import {
   type SimulationStatus,
 } from "../schema/runs.ts";
 import { test } from "../schema/tests.ts";
+import { validClaimant } from "./claimants.ts";
 import type { AuthContext } from "./context.ts";
+import { enqueueGradingJob } from "./grading.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import { getTestVersion, type TestVersion } from "./tests.ts";
@@ -369,17 +371,47 @@ function theRun(auth: AuthContext, id: string): SQL {
 }
 
 /**
- * The claimant's name for itself, as it will be stored: trimmed, non-empty,
- * short enough to be a label. An operational identifier, never an identity in
- * egma's tables — two replicas telling each other apart is all it is for.
+ * Whether landing in this state makes the conversation something to judge.
+ *
+ * A conversation happened, or a simulation failed trying to have one: both are
+ * graded, and the difference between them is what the verdicts say rather than
+ * whether there are any — a simulation that never ran gets `errored` verdicts,
+ * because a broken test is never a broken agent. A `canceled` simulation is
+ * neither: nobody was told to stop conducting it and then judged for stopping.
  */
-function validClaimant(claimant: string): string {
-  const trimmed = claimant.trim();
-  if (trimmed === "") throw new Error("a claimant needs a name");
-  if (trimmed.length > 200) {
-    throw new Error("a claimant's name fits in 200 characters");
-  }
-  return trimmed;
+function isGradable(status: SimulationStatus): boolean {
+  return status === "completed" || status === "failed";
+}
+
+/**
+ * The terminal transition also makes the work.
+ *
+ * Called inside the transaction that landed it, so the row that says a
+ * conversation is over and the row that says it needs judging are one commit —
+ * a conversation cannot land and leave no work behind, and there is no window
+ * for a sweep of forgotten simulations to exist in. The notification the
+ * enqueue raises travels on the same transaction and so reaches a listening
+ * grader the moment the transition is visible to it.
+ */
+async function makeGradable(
+  tx: Transaction,
+  auth: AuthContext,
+  row: {
+    readonly id: string;
+    readonly status: string;
+    readonly projectId: string;
+  },
+): Promise<void> {
+  if (!isGradable(row.status as SimulationStatus)) return;
+  // The organization comes off the context rather than off the row: the row was
+  // reached through `within`, so its organization is this one by construction,
+  // and the answer's columns stay the tenant-free view they are everywhere else.
+  await enqueueGradingJob(tx, {
+    organizationId: auth.organizationId,
+    projectId: row.projectId,
+    source: "simulation",
+    simulationId: row.id,
+  });
 }
 
 /**
@@ -1156,6 +1188,7 @@ async function landSimulation(
       .returning(SIMULATION_COLUMNS);
 
     if (row === undefined) return undefined;
+    await makeGradable(tx, auth, row);
     await finalizeRunIfDone(tx, row.runId, now);
     return simulationFromRow(row);
   });
@@ -1293,6 +1326,15 @@ export async function sweepOrphanedSimulations(
         ),
       )
       .returning(SIMULATION_COLUMNS);
+
+    // An orphan is a terminal transition like any other, so it becomes work
+    // like any other: a simulator that died mid-conversation produces a `failed`
+    // simulation, and a `failed` simulation is judged `errored` rather than left
+    // unjudged. In id order, so two sweeps racing over one set take the rows in
+    // one order and cannot deadlock over them.
+    for (const row of [...rows].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+      await makeGradable(tx, auth, row);
+    }
 
     // Each affected run at most once, in one order, as everywhere else.
     const runIds = [...new Set(rows.map((row) => row.runId))].sort();
