@@ -57,8 +57,8 @@ function acrossTheOrganization(customer: typeof acme): AuthContext {
 }
 
 const GRADER = newId("grd");
-const VERSION_ONE = newId("grdv");
-const VERSION_TWO = newId("grdv");
+const VERSION_ONE = newId("grv");
+const VERSION_TWO = newId("grv");
 
 /** An instant as the microseconds a judgment is stamped in. */
 function judgedAt(instant: string): bigint {
