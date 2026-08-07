@@ -9,6 +9,7 @@ import {
   createPersona,
   createTest,
   failSimulation,
+  getRun,
   listRunEvents,
   listSimulations,
   markSimulationCanceled,
@@ -450,13 +451,42 @@ describe("the feed's done", () => {
     await markSimulationCanceled(actingAsAcme(), only.id, CLAIMANT);
     const settled = await feedOf(started.id);
     expect(settled.done).toBe(true);
+
+    // The straggler landing finishes the run, and finishing is not a
+    // transition: the header already said `canceled`. One change, one event —
+    // a second would draw a screen back through a status it never left, and
+    // "the run has finished" is what `done` is for.
     expect(settled.events.map(said)).toEqual([
       "Reschedules/Impatient Rita claimed",
       "run running",
       "run canceled",
       "Reschedules/Impatient Rita canceled",
-      "run canceled",
     ]);
+  });
+
+  it("says the run was canceled exactly once, however late the stragglers land", async () => {
+    const started = await aRun([twoCallers]);
+    const claimed = await claimOwn(started.id);
+    expect(claimed).toHaveLength(2);
+
+    await cancelRun(actingAsAcme(), started.id);
+    for (const one of claimed) {
+      await markSimulationCanceled(actingAsAcme(), one.id, CLAIMANT);
+    }
+
+    const feed = await feedOf(started.id);
+    expect(feed.done).toBe(true);
+    expect(feed.events.filter((event) => said(event) === "run canceled")).toHaveLength(
+      1,
+    );
+    // And the counts landed all the same, with nothing pretending to have run.
+    const settled = await getRun(actingAsAcme(), started.id);
+    expect(settled).toMatchObject({
+      status: "canceled",
+      completedCount: 0,
+      failedCount: 0,
+      canceledCount: 2,
+    });
   });
 
   it("is true the moment a cancel catches every conversation still queued", async () => {

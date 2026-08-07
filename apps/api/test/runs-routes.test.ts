@@ -3,18 +3,29 @@ import {
   completeSimulation,
   createPersona,
   createProject,
+  createTest,
+  deletePersona,
+  editTest,
   failSimulation,
   markSimulationCanceled,
   startSimulation,
   type AuthContext,
-  type Role,
   type Simulation,
 } from "@egma/db";
 import { newId } from "@egma/ids";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { cookiesFrom, createApi, type TestApi } from "./support/api.ts";
-import { mintKey, signUp, type Customer } from "./support/traces.ts";
+import { createApi, type TestApi } from "./support/api.ts";
+import {
+  colleagueOf,
+  contextFor,
+  NEUTRAL_TRAITS,
+  projectKeyFor,
+  request as ask,
+  signUp,
+  type Answer,
+  type Customer,
+} from "./support/traces.ts";
 
 /**
  * The run routes, over real HTTP against real Postgres.
@@ -38,86 +49,15 @@ afterEach(async () => {
   await api?.close();
 });
 
-function contextFor(person: Customer, role: Role): AuthContext {
-  return {
-    userId: person.userId,
-    organizationId: person.organizationId,
-    projectId: person.projectId,
-    role,
-    via: "session",
-  };
-}
-
-/** A key as `egma login` leaves one: minted for the project a terminal names. */
-async function projectKeyFor(person: Customer): Promise<string> {
-  return mintKey(api.app, person.cookie, "a terminal", person.projectId);
-}
-
-/** A colleague, added the way the product adds one: invited, and they follow. */
-async function colleagueOf(
-  host: Customer,
-  email: string,
-  role: Role,
-): Promise<Customer> {
-  const invited = await api.app.inject({
-    method: "POST",
-    url: "/api/invitations",
-    headers: { cookie: host.cookie },
-    payload: { email, role },
-  });
-  expect(invited.statusCode, invited.body).toBe(201);
-
-  const link = (invited.json() as { accept_url: string }).accept_url;
-  const joined = await api.app.inject({
-    method: "POST",
-    url: "/api/signup",
-    payload: {
-      email,
-      password: "a-long-enough-password",
-      invitationToken: new URL(link).searchParams.get("token"),
-    },
-  });
-  expect(joined.statusCode, joined.body).toBe(201);
-  const cookie = cookiesFrom(joined.headers["set-cookie"]);
-
-  return {
-    userId: (joined.json() as { userId: string }).userId,
-    organizationId: host.organizationId,
-    projectId: host.projectId,
-    cookie,
-    secret: await mintKey(api.app, cookie, email),
-  };
-}
-
-type Answer = {
-  readonly statusCode: number;
-  readonly body: Record<string, unknown>;
-};
-
-async function request(
+/** The shared helpers, with the app this file is driving already in hand. */
+function request(
   method: "GET" | "POST",
   url: string,
   key: string,
   payload?: Record<string, unknown>,
 ): Promise<Answer> {
-  const response = await api.app.inject({
-    method,
-    url,
-    headers: { authorization: `Bearer ${key}` },
-    ...(payload === undefined ? {} : { payload }),
-  });
-  return {
-    statusCode: response.statusCode,
-    body: response.json() as Record<string, unknown>,
-  };
+  return ask(api.app, method, url, key, payload);
 }
-
-/** Somebody plain, because who the persona is is not under test here. */
-const NEUTRAL = {
-  personality: "Speaks plainly, stays patient, asks one question at a time.",
-  language: "en-US",
-  voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
-} as const;
 
 const RESCHEDULING = {
   name: "Reschedules a booked appointment",
@@ -185,7 +125,7 @@ async function aCustomerReadyToRun(label: string): Promise<{
 }> {
   api = await createApi(label);
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
-  const key = await projectKeyFor(ada);
+  const key = await projectKeyFor(api.app, ada);
 
   const { agentId, connectionId } = await registerAgentThrough(
     key,
@@ -197,7 +137,7 @@ async function aCustomerReadyToRun(label: string): Promise<{
   // route ships for a persona. One test then names both, which is what makes
   // "one simulation per test per person" something this file can observe.
   for (const name of ["Impatient Rita", "Deliberate Sam"]) {
-    await createPersona(contextFor(ada, "member"), { name, traits: NEUTRAL });
+    await createPersona(contextFor(ada, "member"), { name, traits: NEUTRAL_TRAITS });
   }
 
   const { versionId: oneCaller } = await pushTest(key, "Reschedules", [
@@ -386,16 +326,17 @@ describe("starting a run", () => {
       config: { retellAgentId: "agent_in_retell_2" },
     });
 
+    const missing = newId("con");
     const nowhere = await request("POST", "/api/runs", key, {
-      connection: newId("con"),
+      connection: missing,
       test_versions: [oneCaller],
     });
     expect(nowhere.statusCode).toBe(404);
     expect(nowhere.body).toEqual({
       error: "not_found",
       message:
-        "no connection of yours has that id. Check the id, or list your " +
-        "agents with GET /api/agents to see how each one is reached.",
+        `there is no connection ${missing} in this project. Check the id, ` +
+        `or read your agents to see how each one is reached.`,
     });
 
     const mismatched = await request("POST", "/api/runs", key, {
@@ -407,9 +348,148 @@ describe("starting a run", () => {
     expect(mismatched.body).toEqual({
       error: "not_found",
       message:
-        `connection ${connectionId} is not on agent ${other.agentId}. Send ` +
-        `the agent that connection is on, or leave agent out and egma takes ` +
-        `the connection's own.`,
+        `connection ${connectionId} is not on agent ${other.agentId}. Name ` +
+        `the agent that connection is on, or leave the agent out and egma ` +
+        `takes the connection's own.`,
+    });
+
+    // A string that could not be an agent id at all is the same mistake one
+    // step earlier, and it says which of the two ids it could not read.
+    const misread = await request("POST", "/api/runs", key, {
+      agent: connectionId,
+      connection: connectionId,
+      test_versions: [oneCaller],
+    });
+    expect(misread.statusCode).toBe(404);
+    expect(misread.body).toEqual({
+      error: "not_found",
+      message:
+        `"${connectionId}" is not an agent id, so no connection is on it. ` +
+        `Name the agent that connection is on, or leave the agent out and ` +
+        `egma takes the connection's own.`,
+    });
+
+    // And a connection id that could not be one either.
+    const unreadable = await request("POST", "/api/runs", key, {
+      connection: other.agentId,
+      test_versions: [oneCaller],
+    });
+    expect(unreadable.statusCode).toBe(404);
+    expect(unreadable.body).toEqual({
+      error: "not_found",
+      message:
+        `"${other.agentId}" is not a connection id. Send the con_ id ` +
+        `registering the agent answered with.`,
+    });
+  });
+
+  it("refuses a request that named no connection, rather than one it never sent", async () => {
+    const { key, oneCaller } = await aCustomerReadyToRun("runs_no_connection");
+
+    // Absent and blank are the same mistake, and "no connection of yours has
+    // that id" would be a sentence about an id the request never sent.
+    for (const body of [
+      { test_versions: [oneCaller] },
+      { connection: "", test_versions: [oneCaller] },
+      { connection: "   ", test_versions: [oneCaller] },
+    ]) {
+      const refused = await request("POST", "/api/runs", key, body);
+      expect(refused.statusCode, JSON.stringify(body)).toBe(422);
+      expect(refused.body).toEqual({
+        error: "unprocessable",
+        message:
+          "a run is conducted over a connection, and this request named " +
+          "none. Send connection with the con_ id of the way egma should " +
+          "reach the agent — registering the agent answered with one.",
+      });
+    }
+  });
+
+  it("refuses a selection larger than a run may hold, naming what it asked for", async () => {
+    const { ada, key, connectionId } = await aCustomerReadyToRun("runs_ceiling");
+    const auth = contextFor(ada, "member");
+
+    // Twenty people, and eleven frozen versions naming all of them: two
+    // hundred and twenty conversations, over a run's two hundred.
+    const personaIds: string[] = [];
+    for (let index = 0; index < 20; index += 1) {
+      personaIds.push(
+        (
+          await createPersona(auth, {
+            name: `Caller ${String(index)}`,
+            traits: NEUTRAL_TRAITS,
+          })
+        ).id,
+      );
+    }
+
+    const crowded = await createTest(auth, {
+      name: "Asks about everything",
+      scenario: "The first of many.",
+      expectedBehaviors: ["answers"],
+      personaIds,
+    });
+    const versions = [crowded.versionId];
+    for (let index = 1; index < 11; index += 1) {
+      const edited = await editTest(auth, crowded.id, {
+        scenario: `Version ${String(index)} of many.`,
+        expectedVersionId: versions.at(-1) as string,
+      });
+      versions.push(edited?.versionId ?? "");
+    }
+
+    const refused = await request("POST", "/api/runs", key, {
+      connection: connectionId,
+      test_versions: versions,
+    });
+
+    expect(refused.statusCode).toBe(422);
+    expect(refused.body).toEqual({
+      error: "unprocessable",
+      message:
+        "a run conducts at most 200 simulations, and these 11 versions ask " +
+        "for 220. Split the selection across runs.",
+    });
+
+    const { rows } = await api.database.sql("select id from run");
+    expect(rows).toEqual([]);
+  });
+
+  it("refuses a version whose persona has since been deleted, rather than conducting one fewer", async () => {
+    const { ada, key, connectionId } = await aCustomerReadyToRun("runs_gone");
+    const auth = contextFor(ada, "member");
+
+    const leaving = await createPersona(auth, {
+      name: "Departing Dara",
+      traits: NEUTRAL_TRAITS,
+    });
+    const pinned = await createTest(auth, {
+      name: "Asks twice",
+      scenario: "They call back about the same booking.",
+      expectedBehaviors: ["remembers the earlier conversation"],
+      personaIds: [leaving.id],
+    });
+
+    // The test moves off them first: a live test naming somebody is what
+    // refuses their delete, and the version they were on goes on naming them.
+    await editTest(auth, pinned.id, {
+      personaIds: [],
+      expectedVersionId: pinned.versionId,
+    });
+    await deletePersona(auth, leaving.id);
+
+    const refused = await request("POST", "/api/runs", key, {
+      connection: connectionId,
+      test_versions: [pinned.versionId],
+    });
+
+    expect(refused.statusCode).toBe(422);
+    expect(refused.body).toEqual({
+      error: "unprocessable",
+      message:
+        `persona ${leaving.id} is deleted, and a run cannot conduct a ` +
+        `simulation with a deleted persona. Edit the tests that name them, ` +
+        `then pin the versions those edits mint.`,
     });
   });
 
@@ -428,7 +508,8 @@ describe("starting a run", () => {
       error: "no_adapter",
       message:
         "egma has no simulator adapter for a phone connection yet, so it " +
-        "will not start a run it cannot conduct",
+        "will not start a run it cannot conduct. Run these tests over a " +
+        "connection egma conducts today: retell.",
     });
 
     // And nothing is left queued for a conductor that does not exist.
@@ -440,7 +521,7 @@ describe("starting a run", () => {
     const { ada, connectionId, oneCaller } = await aCustomerReadyToRun(
       "runs_viewer_create",
     );
-    const quentin = await colleagueOf(ada, "quentin@acme.example", "viewer");
+    const quentin = await colleagueOf(api.app, ada, "quentin@acme.example", "viewer");
 
     const refused = await request("POST", "/api/runs", quentin.secret, {
       connection: connectionId,
@@ -554,7 +635,7 @@ describe("reading one run", () => {
     const { ada, key, connectionId, oneCaller } = await aCustomerReadyToRun(
       "runs_read",
     );
-    const quentin = await colleagueOf(ada, "quentin@acme.example", "viewer");
+    const quentin = await colleagueOf(api.app, ada, "quentin@acme.example", "viewer");
 
     const started = await request("POST", "/api/runs", key, {
       connection: connectionId,
@@ -746,7 +827,7 @@ describe("following a run", () => {
     const { ada, key, connectionId, oneCaller } = await aCustomerReadyToRun(
       "runs_follow_roles",
     );
-    const quentin = await colleagueOf(ada, "quentin@acme.example", "viewer");
+    const quentin = await colleagueOf(api.app, ada, "quentin@acme.example", "viewer");
     const grace = await signUp(api.app, "grace@globex.example", "Globex");
 
     const started = await request("POST", "/api/runs", key, {
@@ -788,7 +869,19 @@ describe("following a run", () => {
     });
     const runId = String(started.body.id);
 
-    for (const after of ["the-last-one", "-1", "1.5"]) {
+    // `Number` would take every one of these and answer about a page nobody
+    // asked for — 0x10 is sixteen, 1e3 is a thousand, " 7 " is seven — while
+    // the sentence says a sequence number is what it takes.
+    for (const after of [
+      "the-last-one",
+      "-1",
+      "1.5",
+      "0x10",
+      "1e3",
+      "5.0",
+      " 7 ",
+      "+3",
+    ]) {
       const refused = await request(
         "GET",
         `/api/runs/${runId}/events?after=${encodeURIComponent(after)}`,
@@ -803,6 +896,13 @@ describe("following a run", () => {
           `start at the first change.`,
       });
     }
+
+    // A parameter that arrived empty is a parameter nobody set — the rule
+    // every query in this API shares — so `?after=` starts at the beginning
+    // rather than being refused for a value it does not have.
+    const blank = await request("GET", `/api/runs/${runId}/events?after=`, key);
+    expect(blank.statusCode).toBe(200);
+    expect(blank.body).toEqual({ events: [], next: 0, done: false });
   });
 });
 
@@ -923,7 +1023,10 @@ describe("stopping a run", () => {
     expect(missed.statusCode).toBe(409);
     expect(missed.body).toEqual({
       error: "conflict",
-      message: `run ${ranId} is completed, and a completed run has nothing left to cancel`,
+      message:
+        `run ${ranId} is completed, and a completed run has nothing left to ` +
+        `cancel. Its counts are final; start a fresh run to conduct those ` +
+        `tests again.`,
     });
   });
 
@@ -931,7 +1034,7 @@ describe("stopping a run", () => {
     const { ada, key, connectionId, oneCaller } = await aCustomerReadyToRun(
       "runs_cancel_roles",
     );
-    const quentin = await colleagueOf(ada, "quentin@acme.example", "viewer");
+    const quentin = await colleagueOf(api.app, ada, "quentin@acme.example", "viewer");
 
     const started = await request("POST", "/api/runs", key, {
       connection: connectionId,

@@ -63,9 +63,10 @@ export type AgentWriteRefusal = "not_admitted" | "needs_a_name" | "name_taken";
 /**
  * A run was turned away, and which rule turned it away travels beside the
  * sentence rather than inside it — the agent factory's arrangement, for the
- * same reason: an HTTP layer answers the four differently, and reading the
+ * same reason: an HTTP layer answers each of them differently, and reading the
  * prose to tell them apart would make the prose load-bearing while the prose is
- * the part deliberately left free to improve.
+ * the part deliberately left free to improve. The sentence is whole where it is
+ * written and is relayed word for word, never finished off somewhere else.
  */
 export class RunWriteRefusedError extends Error {
   readonly reason: RunWriteRefusal;

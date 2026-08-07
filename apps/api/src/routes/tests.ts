@@ -14,11 +14,17 @@ import {
   type TestVersion,
 } from "@egma/db";
 import { isId } from "@egma/ids";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
+import {
+  invalid,
+  notFound,
+  notPermitted,
+  unprocessable,
+} from "../http/refusals.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text, textList } from "../http/reading.ts";
 
@@ -63,22 +69,6 @@ type Query = {
   readonly project?: string;
   readonly cursor?: string;
 };
-
-function invalid(reply: FastifyReply, message: string): FastifyReply {
-  return reply.code(400).send({ error: "invalid_request", message });
-}
-
-function notPermitted(reply: FastifyReply, message: string): FastifyReply {
-  return reply.code(403).send({ error: "not_permitted", message });
-}
-
-function notFound(reply: FastifyReply, message: string): FastifyReply {
-  return reply.code(404).send({ error: "not_found", message });
-}
-
-function unprocessable(reply: FastifyReply, message: string): FastifyReply {
-  return reply.code(422).send({ error: "unprocessable", message });
-}
 
 /** A persona as a test names them. */
 function describedPersona(named: TestPersona): Record<string, unknown> {
@@ -348,6 +338,9 @@ export async function testRoutes(
      * which is the half the factory has no business knowing.
      */
     if (error instanceof TestMovedOnError) {
+      // The one refusal in this API that carries more than `{ error, message }`
+      // — the caller's next move is to go and read a specific test — so it
+      // writes its own body rather than going through the shared answer.
       return reply.code(409).send({
         error: "conflict",
         message:

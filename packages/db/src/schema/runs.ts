@@ -157,6 +157,10 @@ export const run = pgTable(
      * they were named. The pin itself is each simulation's own column; this is
      * what the trigger asked for, kept whole so the request stays readable
      * even for a version whose test has since been deleted.
+     *
+     * Empty only on a run written before a run could pin one at all — the
+     * migration that added this column says so about the rows it found, rather
+     * than inventing a selection nobody made.
      */
     pinnedTestVersions: jsonb("pinned_test_versions").notNull(),
     /**
@@ -298,9 +302,16 @@ export const simulation = pgTable(
      * editing the test tomorrow rewrites nothing. The identity rides beside it
      * because it is what the composite keys below pair on: the version is this
      * test's, and the test is this project's.
+     *
+     * **Absent only on a row written before the two halves of the product
+     * met.** Nothing can write one now — `startRun` names a version for every
+     * conversation it creates — but an instance upgraded across that migration
+     * holds simulations that executed no stored test, and they say so rather
+     * than being handed a test somebody invented for them. The check below
+     * keeps the pair whole either way.
      */
-    testId: idText("test_id").notNull(),
-    testVersionId: idText("test_version_id").notNull(),
+    testId: idText("test_id"),
+    testVersionId: idText("test_version_id"),
     /** Where in the run's requested order this conversation sits, from one. */
     position: integer("position").notNull(),
     /**
@@ -494,6 +505,12 @@ export const simulation = pgTable(
       columns: [table.testId, table.projectId],
       foreignColumns: [test.id, test.projectId],
     }),
+    // The pin is a pair or it is nothing: half of it would name a test with
+    // no version, or a version with no test, and neither says what ran.
+    check(
+      "simulation_test_pin_is_whole",
+      sql`(${table.testId} is null) = (${table.testVersionId} is null)`,
+    ),
     // A run's conversations are an ordered list, and no place in it is
     // claimed twice.
     unique("simulation_run_id_position_unique").on(table.runId, table.position),

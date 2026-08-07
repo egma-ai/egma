@@ -17,7 +17,13 @@ import {
 } from "../../cli/src/platform/runs.ts";
 import type { SignedIn } from "../../cli/src/platform/signed-in.ts";
 import { createApi, type TestApi } from "./support/api.ts";
-import { mintKey, signUp, type Customer } from "./support/traces.ts";
+import {
+  contextFor,
+  mintKey,
+  NEUTRAL_TRAITS,
+  signUp,
+  type Customer,
+} from "./support/traces.ts";
 
 /**
  * `egma run`'s own seam — the client egma actually ships — against the real
@@ -89,22 +95,6 @@ async function signedInAs(person: Customer): Promise<SignedIn> {
   return { url: "http://egma.test", key };
 }
 
-function contextFor(person: Customer): AuthContext {
-  return {
-    userId: person.userId,
-    organizationId: person.organizationId,
-    projectId: person.projectId,
-    role: "member",
-    via: "session",
-  };
-}
-
-const NEUTRAL = {
-  personality: "Speaks plainly, stays patient, asks one question at a time.",
-  language: "en-US",
-  voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
-} as const;
-
 const CLAIMANT = "simulator-blue-1";
 
 /** A signed-in developer with an agent to check and two tests to check it. */
@@ -142,9 +132,9 @@ async function readyToRun(label: string): Promise<{
     },
   });
 
-  await createPersona(contextFor(ada), {
+  await createPersona(contextFor(ada, "member"), {
     name: "Impatient Rita",
-    traits: NEUTRAL,
+    traits: NEUTRAL_TRAITS,
   });
 
   const versions: string[] = [];
@@ -251,7 +241,8 @@ describe("starting a run from the terminal's own code", () => {
       kind: "refused",
       reason:
         "egma has no simulator adapter for a phone connection yet, so it " +
-        "will not start a run it cannot conduct",
+        "will not start a run it cannot conduct. Run these tests over a " +
+        "connection egma conducts today: retell.",
     });
   });
 });
@@ -260,7 +251,7 @@ describe("following a run from the terminal's own code", () => {
   it("takes each change once, in order, and stops when the run is done", async () => {
     const { ada, signedIn, fetchImpl, connectionId, versions } =
       await readyToRun("runs_cli_follow");
-    const auth = contextFor(ada);
+    const auth = contextFor(ada, "member");
 
     const answer = await startRun(
       signedIn,

@@ -1,5 +1,5 @@
 {
-  "id": "e96f6a95-a523-47c8-b156-614c4eb98612",
+  "id": "f89e7c72-d8e2-43e7-962e-1756b28d47f3",
   "prevId": "78a51b61-2404-46dc-91c1-b3b658e232ea",
   "version": "7",
   "dialect": "postgresql",
@@ -2933,13 +2933,13 @@
           "name": "test_id",
           "type": "text COLLATE \"C\"",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "test_version_id": {
           "name": "test_version_id",
           "type": "text COLLATE \"C\"",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "position": {
           "name": "position",
@@ -3389,6 +3389,10 @@
         "simulation_audio_band_is_a_rate": {
           "name": "simulation_audio_band_is_a_rate",
           "value": "\"simulation\".\"measured_audio_band_hertz\" is null or \"simulation\".\"measured_audio_band_hertz\" > 0"
+        },
+        "simulation_test_pin_is_whole": {
+          "name": "simulation_test_pin_is_whole",
+          "value": "(\"simulation\".\"test_id\" is null) = (\"simulation\".\"test_version_id\" is null)"
         }
       },
       "isRLSEnabled": false

@@ -39,7 +39,7 @@ import {
 } from "../schema/runs.ts";
 import { descriptorOf, noSimulatorAdapterMessage } from "./connection-registry.ts";
 import type { AuthContext } from "./context.ts";
-import { RunWriteRefusedError } from "./errors.ts";
+import { RunWriteRefusedError, type RunWriteRefusal } from "./errors.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import { within } from "./within.ts";
@@ -141,10 +141,14 @@ export type Simulation = {
   readonly personaId: string;
   /** …and the pin: exactly as they were, for as long as this row is kept. */
   readonly personaVersionId: string;
-  /** What is being checked, by identity… */
-  readonly testId: string;
-  /** …and the pin: the frozen version this conversation executed. */
-  readonly testVersionId: string;
+  /**
+   * What is being checked, by identity, and the pin: the frozen version this
+   * conversation executed. Both absent together on a row written before a
+   * simulation could carry either — an upgraded instance's history, saying it
+   * executed no stored test rather than naming one it did not.
+   */
+  readonly testId: string | null;
+  readonly testVersionId: string | null;
   readonly position: number;
   readonly connectionType: ConnectionType;
   readonly modality: Modality;
@@ -175,7 +179,8 @@ export type Simulation = {
  * that is pinned by the version columns rather than by the name.
  */
 export type ConductedSimulation = Simulation & {
-  readonly testName: string;
+  /** Absent exactly where the pin is: a conversation with no test to name. */
+  readonly testName: string | null;
   readonly personaName: string;
 };
 
@@ -313,11 +318,13 @@ const REPORTABLE_FAILURE_REASONS: readonly FailedEndingReason[] =
 function idListFromRow(
   value: unknown,
   key: string,
-  malformed: () => Error,
+  options: { readonly malformed: () => Error; readonly mayBeEmpty: boolean },
 ): readonly string[] {
+  const { malformed } = options;
   if (typeof value !== "object" || value === null) throw malformed();
   const held = (value as Record<string, unknown>)[key];
-  if (!Array.isArray(held) || held.length === 0) throw malformed();
+  if (!Array.isArray(held)) throw malformed();
+  if (held.length === 0 && !options.mayBeEmpty) throw malformed();
   for (const id of held) {
     if (typeof id !== "string") throw malformed();
   }
@@ -328,28 +335,28 @@ function requestedPersonaIdsFromRow(
   value: unknown,
   runId: string,
 ): readonly string[] {
-  return idListFromRow(
-    value,
-    "personaIds",
-    () =>
+  return idListFromRow(value, "personaIds", {
+    mayBeEmpty: false,
+    malformed: () =>
       new Error(
         `run ${runId} holds a requested-persona selection in a shape egma never writes; the row needs repairing before anybody can read it`,
       ),
-  );
+  });
 }
 
 function pinnedTestVersionIdsFromRow(
   value: unknown,
   runId: string,
 ): readonly string[] {
-  return idListFromRow(
-    value,
-    "testVersionIds",
-    () =>
+  // Empty is readable, and means what the migration that added the column
+  // wrote down: a run from before a run could pin a version at all.
+  return idListFromRow(value, "testVersionIds", {
+    mayBeEmpty: true,
+    malformed: () =>
       new Error(
         `run ${runId} holds a pinned-version selection in a shape egma never writes; the row needs repairing before anybody can read it`,
       ),
-  );
+  });
 }
 
 function connectionSnapshotFromRow(
@@ -539,11 +546,37 @@ function validClaimant(claimant: string): string {
   return trimmed;
 }
 
-function refuseRun(
-  reason: "not_admitted" | "no_such_connection" | "connection_not_on_agent" | "no_adapter",
-  message: string,
-): never {
+/**
+ * Every refusal this file makes, in the one shape a layer above branches on.
+ *
+ * The reason is the whole `RunWriteRefusal` rather than a hand-copied subset:
+ * a copy would go stale the first time the vocabulary grew, and it would go
+ * stale silently. The sentence is whole here too — a layer above relays it
+ * word for word, so a half-sentence finished somewhere else would be a
+ * contract that exists nowhere as one string.
+ */
+function refuseRun(reason: RunWriteRefusal, message: string): never {
   throw new RunWriteRefusedError(reason, message);
+}
+
+/** What a caller does instead, when a run named the wrong agent. */
+const NAME_THE_RIGHT_AGENT =
+  "Name the agent that connection is on, or leave the agent out and egma " +
+  "takes the connection's own.";
+
+/**
+ * A completed run has nothing left to cancel, and what to do about it.
+ *
+ * One builder, because the same sentence is owed at two moments — before the
+ * lock and after losing the race for it — and two copies of a contract
+ * sentence are two things to keep in step by hand.
+ */
+function nothingLeftToCancel(runId: string): string {
+  return (
+    `run ${runId} is completed, and a completed run has nothing left to ` +
+    `cancel. Its counts are final; start a fresh run to conduct those tests ` +
+    `again.`
+  );
 }
 
 /**
@@ -624,7 +657,8 @@ async function resolvePinnedVersions(
 
   const found = new Map(rows.map((row) => [row.id, row] as const));
 
-  const named = await on
+  const named = new Map<string, string[]>();
+  for (const entry of await on
     .select({
       testVersionId: testVersionPersona.testVersionId,
       personaId: testVersionPersona.personaId,
@@ -632,7 +666,11 @@ async function resolvePinnedVersions(
     })
     .from(testVersionPersona)
     .where(inArray(testVersionPersona.testVersionId, [...found.keys()]))
-    .orderBy(asc(testVersionPersona.position));
+    .orderBy(asc(testVersionPersona.position))) {
+    const held = named.get(entry.testVersionId);
+    if (held === undefined) named.set(entry.testVersionId, [entry.personaId]);
+    else held.push(entry.personaId);
+  }
 
   return ids.map((id) => {
     const row = found.get(id);
@@ -643,9 +681,7 @@ async function resolvePinnedVersions(
           `or read the test and pin the version_id it names now.`,
       );
     }
-    const personaIds = named
-      .filter((entry) => entry.testVersionId === id)
-      .map((entry) => entry.personaId);
+    const personaIds = named.get(id) ?? [];
     if (personaIds.length === 0) {
       // Unreachable through the test factory, which gives a version with no
       // named persona the project's default one. A version that got here
@@ -763,13 +799,26 @@ export async function startRun(
   if (onAgentId !== undefined && !isId("agt", onAgentId)) {
     refuseRun(
       "connection_not_on_agent",
-      `"${onAgentId}" is not an agent id, so no connection is on it`,
+      `"${onAgentId}" is not an agent id, so no connection is on it. ` +
+        NAME_THE_RIGHT_AGENT,
+    );
+  }
+  // Named nothing at all is its own answer: "no connection of yours has that
+  // id" would be a sentence about an id the request never sent, and a coding
+  // agent reading it would go looking for a connection that was never named.
+  if (input.connectionId.trim() === "") {
+    refuseRun(
+      "not_admitted",
+      "a run is conducted over a connection, and this request named none. " +
+        "Send connection with the con_ id of the way egma should reach the " +
+        "agent — registering the agent answered with one.",
     );
   }
   if (!isId("con", input.connectionId)) {
     refuseRun(
       "no_such_connection",
-      `"${input.connectionId}" is not a connection id`,
+      `"${input.connectionId}" is not a connection id. Send the con_ id ` +
+        `registering the agent answered with.`,
     );
   }
   validPinnedVersions(input.testVersionIds);
@@ -811,7 +860,8 @@ export async function startRun(
     if (reached === undefined) {
       refuseRun(
         "no_such_connection",
-        `there is no connection ${input.connectionId} in this project`,
+        `there is no connection ${input.connectionId} in this project. ` +
+          `Check the id, or read your agents to see how each one is reached.`,
       );
     }
     // Named, and it has to be the one the connection is actually on. The
@@ -820,7 +870,8 @@ export async function startRun(
     if (onAgentId !== undefined && reached.agentId !== onAgentId) {
       refuseRun(
         "connection_not_on_agent",
-        `connection ${input.connectionId} is not on agent ${onAgentId}`,
+        `connection ${input.connectionId} is not on agent ${onAgentId}. ` +
+          NAME_THE_RIGHT_AGENT,
       );
     }
     if (!descriptorOf(reached.type).simulatorAdapter) {
@@ -836,7 +887,9 @@ export async function startRun(
       if (retried === undefined) {
         refuseRun(
           "not_admitted",
-          `there is no run ${retryOfRunId} in this project`,
+          `there is no run ${retryOfRunId} in this project, so this run ` +
+            `retries nothing. Leave the retry out, or name a run this ` +
+            `credential can read.`,
         );
       }
     }
@@ -872,6 +925,23 @@ export async function startRun(
         await resolvePersonaVersions(tx, auth, projectId, distinctPersonaIds)
       ).map((one) => [one.personaId, one.personaVersionId] as const),
     );
+    /**
+     * The version pinned for one of the personas just resolved.
+     *
+     * `resolvePersonaVersions` answers one entry per id or refuses, so a miss
+     * here is this file having lost track of its own input rather than
+     * anything a caller did — and it says so instead of writing a row with a
+     * pin nobody chose.
+     */
+    const versionOf = (personaId: string): string => {
+      const pinned = pinnedPersonas.get(personaId);
+      if (pinned === undefined) {
+        throw new Error(
+          `persona ${personaId} was resolved for this run and then lost before the simulation was written`,
+        );
+      }
+      return pinned;
+    };
 
     const [header] = await tx
       .insert(run)
@@ -913,7 +983,7 @@ export async function startRun(
           agentId: reached.agentId,
           connectionId: input.connectionId,
           personaId,
-          personaVersionId: pinnedPersonas.get(personaId) as string,
+          personaVersionId: versionOf(personaId),
           testId: version.testId,
           testVersionId: version.versionId,
           position: index + 1,
@@ -947,7 +1017,13 @@ export async function startRun(
     simulations: written.simulations
       .map((row) => ({
         ...simulationFromRow(row),
-        testName: written.testNames.get(row.testVersionId) ?? "",
+        // Every row this verb writes carries its pin, so every one of them has
+        // a name to answer with; the fallback is the type being honest about a
+        // column that other rows may leave empty.
+        testName:
+          row.testVersionId === null
+            ? null
+            : (written.testNames.get(row.testVersionId) ?? null),
         personaName: written.personaNames.get(row.personaId) ?? "",
       }))
       .sort((a, b) => a.position - b.position),
@@ -1026,7 +1102,11 @@ export async function listSimulations(
       personaName: persona.name,
     })
     .from(simulation)
-    .innerJoin(test, eq(simulation.testId, test.id))
+    // Left, not inner: a conversation from before a simulation could carry a
+    // test pin still belongs to its run and still has to appear in it. An
+    // inner join would quietly drop it and leave a run whose page held fewer
+    // rows than its own expected count.
+    .leftJoin(test, eq(simulation.testId, test.id))
     .innerJoin(persona, eq(simulation.personaId, persona.id))
     .where(within(auth, simulation, eq(simulation.runId, runId)))
     .orderBy(asc(simulation.position));
@@ -1063,8 +1143,14 @@ export async function getSimulation(
 /**
  * Whether every conversation of the run has landed, and if so the one write
  * that freezes the header: the three counts, `finished_at`, and the terminal
- * status, together. Answers the status it settled on, and nothing when there
- * was nothing to settle — the caller turns that into the run's own event.
+ * status, together.
+ *
+ * **Answers a status only when the header actually moved to it.** A run
+ * already canceled finishes here without changing status, and the caller must
+ * not write a second `canceled` event for it: a follower drawing transitions
+ * would draw that one twice, and the second would be a change that never
+ * happened. Whether the run has *finished* is the header's own business and is
+ * what `done` reads.
  *
  * Called inside the transaction of whichever terminal transition might have
  * been the last, under a lock on the run's own row — so of two reporters
@@ -1118,7 +1204,7 @@ async function finalizeRunIfDone(
     })
     .where(eq(run.id, runId));
 
-  return settled;
+  return settled === header.status ? undefined : settled;
 }
 
 /**
@@ -1159,7 +1245,7 @@ export async function cancelRun(
     if (current.status === "completed") {
       throw new RunWriteRefusedError(
         "already_finished",
-        `run ${id} is completed, and a completed run has nothing left to cancel`,
+        nothingLeftToCancel(id),
       );
     }
 
@@ -1221,10 +1307,7 @@ export async function cancelRun(
       if (moved !== undefined && moved.status === "canceled") {
         return runFromRow(moved);
       }
-      throw new RunWriteRefusedError(
-        "already_finished",
-        `run ${id} is completed, and a completed run has nothing left to cancel`,
-      );
+      throw new RunWriteRefusedError("already_finished", nothingLeftToCancel(id));
     }
 
     await finalizeRunIfDone(tx, id, now);

@@ -13,13 +13,21 @@ import {
   type Run,
   type RunEvent,
 } from "@egma/db";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
+import {
+  conflict,
+  invalid,
+  noAdapter,
+  notFound,
+  notPermitted,
+  unprocessable,
+} from "../http/refusals.ts";
 
 /**
  * Starting a run, reading it whole, following it while it happens, and
@@ -69,22 +77,6 @@ export const RUN_EVENTS_PATH = "/api/runs/:runId/events";
 export const RUN_CANCEL_PATH = "/api/runs/:runId/cancel";
 
 type Body = Record<string, unknown>;
-
-function invalid(reply: FastifyReply, message: string): FastifyReply {
-  return reply.code(400).send({ error: "invalid_request", message });
-}
-
-function notPermitted(reply: FastifyReply, message: string): FastifyReply {
-  return reply.code(403).send({ error: "not_permitted", message });
-}
-
-function notFound(reply: FastifyReply, message: string): FastifyReply {
-  return reply.code(404).send({ error: "not_found", message });
-}
-
-function unprocessable(reply: FastifyReply, message: string): FastifyReply {
-  return reply.code(422).send({ error: "unprocessable", message });
-}
 
 /**
  * The versions a body pinned, in the order it pinned them.
@@ -224,8 +216,10 @@ async function runAsItStands(
   auth: AuthContext,
   runId: string,
   baseUrl: string,
+  /** Already read by the write that just moved it, when there was one. */
+  known?: Run,
 ): Promise<Record<string, unknown> | undefined> {
-  const header = await getRun(auth, runId);
+  const header = known ?? (await getRun(auth, runId));
   if (header === undefined) return undefined;
 
   const simulations = (await listSimulations(auth, runId)) ?? [];
@@ -314,9 +308,13 @@ export async function runRoutes(
     const { runId } = request.params as { runId: string };
     const query = (request.query ?? {}) as { readonly after?: string };
 
+    // Digits and nothing else. `Number` would take 0x10, 1e3, 5.0 and a
+    // padded " 7 " and quietly answer about a page nobody asked for, while
+    // the sentence below promised it would not — so the shape of a sequence
+    // number is checked as written rather than as parsed.
     const said = given(query.after);
     const after = said === undefined ? 0 : Number(said);
-    if (!Number.isInteger(after) || after < 0) {
+    if (said !== undefined && !/^\d+$/u.test(said)) {
       return invalid(
         reply,
         `"${said}" is not a sequence number this feed issued. Send back the ` +
@@ -356,10 +354,18 @@ export async function runRoutes(
       projectId: auth.projectId,
     });
 
+    // The header comes back from the write itself rather than from a second
+    // read: it is the run as the cancel left it, which is the thing a caller
+    // asked about.
     const canceled = await cancelRun(auth, runId);
     if (canceled === undefined) return notFound(reply, NO_SUCH_RUN);
 
-    const described = await runAsItStands(auth, runId, options.baseUrl);
+    const described = await runAsItStands(
+      auth,
+      runId,
+      options.baseUrl,
+      canceled,
+    );
     if (described === undefined) return notFound(reply, NO_SUCH_RUN);
     return reply.send(described);
   });
@@ -375,33 +381,21 @@ export async function runRoutes(
    */
   app.setErrorHandler(async (error, _request, reply) => {
     if (error instanceof RunWriteRefusedError) {
-      if (
-        error.reason === "no_such_connection" ||
-        error.reason === "connection_not_on_agent"
-      ) {
-        return notFound(
-          reply,
-          error.reason === "no_such_connection"
-            ? "no connection of yours has that id. Check the id, or list " +
-                "your agents with GET /api/agents to see how each one is " +
-                "reached."
-            : `${error.message}. Send the agent that connection is on, or ` +
-              `leave agent out and egma takes the connection's own.`,
-        );
+      // A map from the reason to the answer, and nothing else. The sentence is
+      // written whole where the refusal was decided and travels untouched:
+      // finishing one off here would put half the contract in a second file,
+      // and the wire text would exist nowhere as one string to check.
+      switch (error.reason) {
+        case "no_such_connection":
+        case "connection_not_on_agent":
+          return notFound(reply, error.message);
+        case "no_adapter":
+          return noAdapter(reply, error.message);
+        case "already_finished":
+          return conflict(reply, error.message);
+        default:
+          return unprocessable(reply, error.message);
       }
-      if (error.reason === "no_adapter") {
-        return reply
-          .code(422)
-          .send({ error: "no_adapter", message: error.message });
-      }
-      if (error.reason === "already_finished") {
-        return reply
-          .code(409)
-          .send({ error: "conflict", message: error.message });
-      }
-      return reply
-        .code(422)
-        .send({ error: "unprocessable", message: error.message });
     }
 
     // Reachable only in a race — the project was checked before the write, and

@@ -1,6 +1,8 @@
 import { listProjects, type AuthContext } from "@egma/db";
 import type { FastifyReply } from "fastify";
 
+import { invalid, notPermitted } from "./refusals.ts";
+
 /**
  * Which project a request acts in, resolved from the credential and from what
  * the request named.
@@ -49,12 +51,17 @@ export const NAME_THE_PROJECT =
   "none, so egma cannot tell which project this is about. Send project with " +
   "the one you mean, or use a key minted for that project.";
 
-export type Acting =
-  | { readonly auth: AuthContext }
-  | {
-      readonly refusal: string;
-      readonly code: "not_permitted" | "invalid_request";
-    };
+/**
+ * Why a project could not be resolved, and which answer that is. Named rather
+ * than retyped at every use: the two codes are the whole of the choice, and a
+ * second copy of the pair is a second place for one of them to be forgotten.
+ */
+export type ActingRefusal = {
+  readonly refusal: string;
+  readonly code: "not_permitted" | "invalid_request";
+};
+
+export type Acting = { readonly auth: AuthContext } | ActingRefusal;
 
 /**
  * The acting project as a context to hand the data-access module. Absent, it is
@@ -98,12 +105,9 @@ export async function actingIn(
 /** The two ways a project can fail to resolve, each answered as what it is. */
 export function refuseActing(
   reply: FastifyReply,
-  acting: {
-    readonly refusal: string;
-    readonly code: "not_permitted" | "invalid_request";
-  },
+  acting: ActingRefusal,
 ): FastifyReply {
   return acting.code === "not_permitted"
-    ? reply.code(403).send({ error: "not_permitted", message: acting.refusal })
-    : reply.code(400).send({ error: "invalid_request", message: acting.refusal });
+    ? notPermitted(reply, acting.refusal)
+    : invalid(reply, acting.refusal);
 }

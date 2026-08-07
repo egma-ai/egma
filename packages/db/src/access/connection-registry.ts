@@ -152,17 +152,28 @@ export const CONNECTION_REGISTRY: Readonly<
   },
 };
 
+/** The types something can actually conduct a run over today. */
+export function conductableConnectionTypes(): readonly ConnectionType[] {
+  return CONNECTION_TYPES.filter(
+    (type) => CONNECTION_REGISTRY[type].simulatorAdapter,
+  );
+}
+
 /**
  * What a run over a type nothing can conduct is told.
  *
  * The wording is the platform's own and a client relays it word for word to
- * whoever is reading a terminal, so it says both halves: what is missing, and
- * why egma would rather refuse now than queue something forever.
+ * whoever is reading a terminal, so it says all of it in one place: what is
+ * missing, why egma would rather refuse now than queue something forever, and
+ * the move that works today. The list of types comes off the registry rather
+ * than out of the sentence, so it can never name an adapter that has not
+ * shipped or miss one that has.
  */
 export function noSimulatorAdapterMessage(type: string): string {
   return (
     `egma has no simulator adapter for a ${type} connection yet, ` +
-    `so it will not start a run it cannot conduct`
+    `so it will not start a run it cannot conduct. Run these tests over a ` +
+    `connection egma conducts today: ${conductableConnectionTypes().join(", ")}.`
   );
 }
 

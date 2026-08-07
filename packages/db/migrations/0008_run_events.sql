@@ -30,10 +30,23 @@ CREATE TABLE "run_event" (
         or ("run_event"."status" = 'failed' and "run_event"."reason" in ('agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned')))
 );
 --> statement-breakpoint
-ALTER TABLE "run" ADD COLUMN "pinned_test_versions" jsonb NOT NULL;--> statement-breakpoint
-ALTER TABLE "simulation" ADD COLUMN "test_id" text COLLATE "C" NOT NULL;--> statement-breakpoint
-ALTER TABLE "simulation" ADD COLUMN "test_version_id" text COLLATE "C" NOT NULL;--> statement-breakpoint
--- Moved ahead of the three foreign keys that target them, exactly as the
+-- The column arrives with a value for the rows already here, then stops
+-- having one: an instance upgrading across this migration holds runs written
+-- before a run could pin a version at all, and the honest thing to say about
+-- those is that they pinned none. Dropping the default afterwards is what
+-- keeps it a fact every new run has to state for itself rather than a blank
+-- the next writer can forget to fill in.
+ALTER TABLE "run" ADD COLUMN "pinned_test_versions" jsonb NOT NULL DEFAULT '{"testVersionIds": []}'::jsonb;--> statement-breakpoint
+ALTER TABLE "run" ALTER COLUMN "pinned_test_versions" DROP DEFAULT;--> statement-breakpoint
+-- Nullable for the same reason, and there is no default that could be right:
+-- a simulation conducted before the two halves of the product met executed no
+-- stored test, and pointing it at one somebody invented would be egma writing
+-- down a test that never ran. Nothing writes a half-pinned row — `startRun`
+-- names a version for every conversation it creates — and the check below
+-- holds the pair whole whatever path a row arrives by.
+ALTER TABLE "simulation" ADD COLUMN "test_id" text COLLATE "C";--> statement-breakpoint
+ALTER TABLE "simulation" ADD COLUMN "test_version_id" text COLLATE "C";--> statement-breakpoint
+-- Moved ahead of the four foreign keys that target them, exactly as the
 -- persona pin's were in 0007: the generator emits the unique constraints last,
 -- and a key cannot reference one that does not exist yet.
 ALTER TABLE "test" ADD CONSTRAINT "test_id_project_id_unique" UNIQUE("id","project_id");--> statement-breakpoint
@@ -47,6 +60,7 @@ ALTER TABLE "simulation" ADD CONSTRAINT "simulation_test_version_test_fk" FOREIG
 ALTER TABLE "simulation" ADD CONSTRAINT "simulation_test_project_fk" FOREIGN KEY ("test_id","project_id") REFERENCES "public"."test"("id","project_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "simulation_test_version_id_idx" ON "simulation" USING btree ("test_version_id");--> statement-breakpoint
 CREATE INDEX "simulation_test_id_idx" ON "simulation" USING btree ("test_id");--> statement-breakpoint
+ALTER TABLE "simulation" ADD CONSTRAINT "simulation_test_pin_is_whole" CHECK (("simulation"."test_id" is null) = ("simulation"."test_version_id" is null));--> statement-breakpoint
 -- Written here by hand for the reason the two lifecycle guards were: the
 -- schema source cannot express a trigger, and this is the only form in which
 -- "an event is appended, never rewritten" is enforced by the database itself.
