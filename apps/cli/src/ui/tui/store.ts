@@ -3,12 +3,16 @@
  *
  * Adapted from the PostHog wizard (MIT) — see ../../../NOTICE.
  *
- * A gate is a promise that settles the first time a condition on the state
- * becomes true. It is how asynchronous flow logic waits for a decision a human
- * makes on screen without the flow ever asking a question: the flow parks, a
- * keystroke changes state, and the gate opens. A gate that never opens keeps
- * the flow parked, which is exactly right — closing the wizard is how a
- * developer says no.
+ * A gate is a promise that settles while a condition on the state holds. It is
+ * how asynchronous flow logic waits for a decision a human makes on screen
+ * without the flow ever asking a question: the flow parks, a keystroke changes
+ * state, and the gate opens. A gate that never opens keeps the flow parked,
+ * which is exactly right — closing the wizard is how a developer says no.
+ *
+ * A gate whose condition goes false again is shut again, with a promise nobody
+ * has settled. That is what lets the same decision be asked for twice over two
+ * different lists: agreement is to the list that was on the screen, so a list
+ * that changes is a list nobody has agreed to yet.
  */
 
 import { WizardRouter, type ScreenName, type Sequence } from "./router.ts";
@@ -60,8 +64,8 @@ const GATE_CONDITIONS: Readonly<Record<GateId, (state: WizardState) => boolean>>
 
 type Gate = {
   readonly condition: (state: WizardState) => boolean;
-  readonly promise: Promise<void>;
-  readonly open: () => void;
+  promise: Promise<void>;
+  open: () => void;
   opened: boolean;
 };
 
@@ -73,6 +77,14 @@ type OpenQuestion = {
 
 /** The most recent status lines kept in memory, oldest dropped first. */
 const MAX_STATUS_LINES = 200;
+
+/** Give a gate a promise nobody has settled, so it parks whoever waits on it. */
+function shut(gate: Gate): void {
+  gate.opened = false;
+  gate.promise = new Promise<void>((resolve) => {
+    gate.open = resolve;
+  });
+}
 
 export class WizardStore {
   private state: WizardState = emptyState();
@@ -87,11 +99,14 @@ export class WizardStore {
   constructor(screens: Sequence = WALK_SCREENS) {
     this.router = new WizardRouter(screens);
     for (const [id, condition] of Object.entries(GATE_CONDITIONS)) {
-      let open!: () => void;
-      const promise = new Promise<void>((resolve) => {
-        open = resolve;
-      });
-      this.gates.set(id as GateId, { condition, promise, open, opened: false });
+      const gate: Gate = {
+        condition,
+        promise: Promise.resolve(),
+        open: () => undefined,
+        opened: false,
+      };
+      shut(gate);
+      this.gates.set(id as GateId, gate);
     }
   }
 
@@ -179,8 +194,19 @@ export class WizardStore {
     this.change({ generation });
   }
 
+  /**
+   * Put a list up, or take it down.
+   *
+   * A list going up is a question being asked, so the answer to the last one is
+   * forgotten with it: the platform can turn a test away after the keystroke,
+   * and the list that comes back is a different list. Agreement is to what was
+   * on the screen, and nothing here can tell one list from another — so every
+   * list is asked about, and the wizard cannot walk past a list nobody read.
+   */
   setGate(gate: TestGate | null): void {
-    this.change(gate === null ? { gate, editorProblem: null } : { gate, gateAt: 0 });
+    this.change(
+      gate === null ? { gate, editorProblem: null } : { gate, gateAt: 0, agreedToRun: false },
+    );
   }
 
   setRun(run: RunView | null): void {
@@ -233,11 +259,17 @@ export class WizardStore {
     this.change({ agreedToRun: true });
   }
 
-  /** Move the gate's selection, kept inside the list however far it is pushed. */
+  /**
+   * Move the gate's selection, kept inside the list however far it is pushed.
+   *
+   * The list is the tests going up and the files being held back, in that
+   * order: both are files, and the key that opens one opens the other.
+   */
   moveGate(by: number): void {
-    const rows = this.state.gate?.rows.length ?? 0;
-    if (rows === 0) return;
-    const at = Math.min(Math.max(this.state.gateAt + by, 0), rows - 1);
+    const gate = this.state.gate;
+    const lines = (gate?.rows.length ?? 0) + (gate?.heldBack.length ?? 0);
+    if (lines === 0) return;
+    const at = Math.min(Math.max(this.state.gateAt + by, 0), lines - 1);
     this.change({ gateAt: at, editorProblem: null });
   }
 
@@ -267,10 +299,16 @@ export class WizardStore {
   private change(patch: Partial<WizardState>): void {
     this.state = { ...this.state, ...patch };
     for (const gate of this.gates.values()) {
-      if (!gate.opened && gate.condition(this.state)) {
+      const holds = gate.condition(this.state);
+      if (!gate.opened && holds) {
         gate.opened = true;
         gate.open();
+        continue;
       }
+      // The decision was taken back, which is what a second list on the same
+      // screen is. Whoever waited on the old promise has long since walked on;
+      // whoever asks from here is parked until the new list is agreed to.
+      if (gate.opened && !holds) shut(gate);
     }
     for (const listener of this.listeners) listener();
   }

@@ -49,9 +49,9 @@ export async function runPushCommand(options: FolderCommandOptions): Promise<num
     options.out(`version: ${test.versionId}`);
   }
 
-  // Turned away at egma's door, in egma's own words. The words are the
-  // platform's because the rule is the platform's — a test with nothing to
-  // check can never be red, and only the platform gets to say so.
+  // Turned away, in egma's own words. The refusal egma can see coming — no
+  // expected behaviors — is said before anything uploads; a refusal only the
+  // platform can make arrives in the platform's words.
   for (const turned of report.turnedAway) {
     options.out(`turned-away: ${turned.name}`);
     options.out(`file: ${turned.shown}`);

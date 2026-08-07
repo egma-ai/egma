@@ -16,6 +16,21 @@
  * from what the agent says about it. When the writing stops, the list the
  * developer scans is built from the files that are really there — which is why
  * a coding agent that says it wrote twelve and wrote nine puts nine on screen.
+ *
+ * **What runs is what was agreed to.** The push can come back with a refusal
+ * egma could not see coming: the platform's own door, on a rule only the
+ * platform can check. That is one test off the list the developer just read, so
+ * the step does not walk on into a run over a list nobody agreed to — the list
+ * goes up again with the refused file held back in the platform's own words,
+ * and the same one keystroke is asked for. Pressing it a second time without
+ * fixing anything is consent to leave that test out; pressing it after fixing
+ * the file puts the test up with the rest.
+ *
+ * A UI with nobody watching opens every list itself, so `--headless` agrees to
+ * the second list the moment it is drawn and goes on with what the platform
+ * accepted. That is right rather than a shortcut: consent to a run with nobody
+ * watching was given in the command, and what the platform refused is on the
+ * output as a named line before the run begins.
  */
 
 import { readdir } from "node:fs/promises";
@@ -39,7 +54,7 @@ import type { DrivenAgentLog } from "./driven-agent-log.ts";
 import type { ExitReport } from "./exit-line.ts";
 import type { Facts } from "./discovery.ts";
 import { readExistingTests } from "./existing-tests.ts";
-import { gateFrom, type TestGate } from "./gate.ts";
+import { gateFrom, type HeldBack } from "./gate.ts";
 import { MarkerStream, type ParsedLine } from "./markers.ts";
 import { ACTION_MARK, DETAIL_MARK, FAILURE_MARK } from "./status.ts";
 import { stopReasonOf, stopReport, untilAborted } from "./stop.ts";
@@ -326,18 +341,25 @@ async function suiteNameIn(paths: FolderPaths): Promise<string> {
 }
 
 /** The push, and what the wizard has to work with afterwards. */
+type Pushed = Omit<GenerateOutcome, "suite"> & {
+  /**
+   * What the platform's own door turned away, for the list to carry back.
+   *
+   * Which refusal is the door's is read off the push and never off the words:
+   * the door's sentence is the door's, and a wizard that recognised it by its
+   * wording would walk past the day the platform said it differently.
+   */
+  readonly refused: readonly HeldBack[];
+};
+
 async function pushGate(
   options: GenerateStepOptions,
   paths: FolderPaths,
-  gate: TestGate,
-): Promise<Omit<GenerateOutcome, "suite">> {
+  only: readonly string[],
+): Promise<Pushed> {
   const { ui } = options;
 
-  const report = await pushTests({
-    signedIn: options.signedIn,
-    paths,
-    only: gate.rows.map((row) => row.file),
-  });
+  const report = await pushTests({ signedIn: options.signedIn, paths, only });
 
   for (const test of report.tests) {
     ui.pushStatus(`${ACTION_MARK} ${test.state} ${test.name}`);
@@ -354,12 +376,16 @@ async function pushGate(
         reason: `egma has a newer version of ${names}. Run egma pull, look at what changed, then egma push.`,
       },
       pushed: [],
+      refused: [],
     };
   }
 
   return {
     report: { kind: "tests-pushed", count: report.tests.length },
     pushed: report.tests.map((test) => test.versionId),
+    refused: report.turnedAway
+      .filter((turned) => turned.refusedBy === "platform")
+      .map((turned) => ({ shown: turned.shown, file: turned.file, reason: turned.reason })),
   };
 }
 
@@ -436,41 +462,82 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
     if (halted !== null) return ending(halted);
   }
 
-  // What is really on disk, whatever anybody said about it.
-  const gate = gateFrom(await readFolder(paths), {
+  const about = {
     agentName: options.registered.agent.name,
     connectionName: options.registered.connection.name,
     modality: options.registered.connection.modality,
     suite,
-  });
+  };
 
-  for (const held of gate.heldBack) {
-    ui.pushStatus(`${FAILURE_MARK} ${held.shown} was not pushed: ${held.reason}`);
+  /** What the platform's door turned away from the push the last key agreed to. */
+  let refused: readonly HeldBack[] = [];
+  /** Every file a keystroke has already agreed to go without. */
+  const agreedToGoWithout = new Set<string>();
+  /** Said once, however many times the list goes up. */
+  const alreadySaid = new Set<string>();
+
+  for (;;) {
+    // What is really on disk, whatever anybody said about it, and what the
+    // platform said about the files it was handed.
+    const folder = await readFolder(paths);
+    const gate = gateFrom(folder, about, refused);
+
+    for (const held of gate.heldBack) {
+      const line = `${FAILURE_MARK} ${held.shown} was not pushed: ${held.reason}`;
+      if (alreadySaid.has(line)) continue;
+      alreadySaid.add(line);
+      ui.pushStatus(line);
+    }
+
+    // Nothing to put on a list and nothing the platform has refused: the coding
+    // agent wrote nothing egma can use, which is a different ending from the
+    // platform refusing what it wrote.
+    if (gate.rows.length === 0 && refused.length === 0) {
+      return ending({
+        kind: "failed",
+        reason: `${options.launch.name} wrote no test egma could use. What it printed is in ${options.log.file}.`,
+      });
+    }
+
+    ui.setGate(gate);
+    await untilAborted(ui.waitForGate("run-tests"), signal);
+    ui.setGate(null);
+
+    if (signal.aborted) {
+      // Closing the wizard here is a decision and not a failure: nothing is
+      // running, the files are written, and they are the developer's. So Ctrl-C
+      // and `q` leave the same line about where the files are — an interruption
+      // here shut no coding agent down and stopped no task, and saying it did
+      // would be egma telling a story about itself rather than about the run.
+      return ending({
+        kind: "tests-kept",
+        count: gate.rows.length,
+        stopped: stopReasonOf(signal) !== "quit",
+      });
+    }
+
+    // The keystroke was over this list, held-back files and all. Every one of
+    // them is now a file the developer has agreed to go without, which is what
+    // makes leaving it out of the run consented rather than quiet — and what
+    // stops the same refusal sending them back to the same list forever.
+    for (const held of gate.heldBack) agreedToGoWithout.add(held.file);
+
+    const pushed = await pushGate(options, paths, [
+      ...gate.rows.map((row) => row.file),
+      // What the door refused before goes up again. The developer may have
+      // fixed it at this very list — `e` opens it — and the only way to find
+      // out is to knock. A file it refuses again is refused with the same
+      // sentence, which was on the list this keystroke agreed to.
+      ...refused.map((held) => held.file),
+    ]);
+
+    const unagreed = pushed.refused.filter((held) => !agreedToGoWithout.has(held.file));
+    if (unagreed.length === 0) return { report: pushed.report, pushed: pushed.pushed, suite };
+
+    // The platform refused something nobody agreed to go without, so the list
+    // that would run is not the list the keystroke was over. Round it goes
+    // again, carrying what the platform said, and nothing runs until a key has
+    // been pressed over the real list.
+    refused = pushed.refused;
   }
-
-  if (gate.rows.length === 0) {
-    return ending({
-      kind: "failed",
-      reason: `${options.launch.name} wrote no test egma could use. What it printed is in ${options.log.file}.`,
-    });
-  }
-
-  ui.setGate(gate);
-  await untilAborted(ui.waitForGate("run-tests"), signal);
-  ui.setGate(null);
-
-  if (signal.aborted) {
-    // Closing the wizard here is a decision and not a failure: nothing is
-    // running, the files are written, and they are the developer's. So Ctrl-C
-    // and `q` leave the same line about where the files are — an interruption
-    // here shut no coding agent down and stopped no task, and saying it did
-    // would be egma telling a story about itself rather than about the run.
-    return ending({
-      kind: "tests-kept",
-      count: gate.rows.length,
-      stopped: stopReasonOf(signal) !== "quit",
-    });
-  }
-
-  return { ...(await pushGate(options, paths, gate)), suite };
 }

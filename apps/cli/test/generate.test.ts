@@ -20,7 +20,8 @@ import { folderPathsIn } from "../src/folder/egma-folder.ts";
 import { parseTestFile } from "../src/folder/test-file.ts";
 import { signedInAt } from "../src/platform/signed-in.ts";
 import { pushTests } from "../src/sync/push.ts";
-import { HeadlessUI } from "../src/ui/headless-ui.ts";
+import { HeadlessUI, type HeadlessOptions } from "../src/ui/headless-ui.ts";
+import type { GateId } from "../src/ui/wizard-ui.ts";
 import { NO_BEHAVIORS_REASON } from "../src/wizard/gate.ts";
 import { readExistingTests } from "../src/wizard/existing-tests.ts";
 import {
@@ -132,6 +133,8 @@ function names(howMany: number, from = 1): string[] {
 type WalkOutcome = {
   readonly ui: HeadlessUI;
   readonly report: Awaited<ReturnType<typeof walk>>;
+  /** Every line the walk wrote, which is what a machine reads it by. */
+  readonly lines: readonly string[];
 };
 
 /** One whole walk, with the answers written in advance. */
@@ -139,15 +142,23 @@ async function runWalk(options: {
   readonly script: string;
   readonly existingTests?: string;
   readonly howManyTests?: number;
+  /**
+   * A UI built around the same answers, for a walk that has something to do
+   * between one list and the next. Nobody is watching either way.
+   */
+  readonly ui?: (built: HeadlessOptions) => HeadlessUI;
 }): Promise<WalkOutcome> {
-  const ui = new HeadlessUI({
+  const lines: string[] = [];
+  const built: HeadlessOptions = {
+    write: (line) => lines.push(line),
     answers: {
       "retell-key": KEY,
       ...(options.existingTests === undefined
         ? {}
         : { "existing-tests": options.existingTests }),
     },
-  });
+  };
+  const ui = options.ui === undefined ? new HeadlessUI(built) : options.ui(built);
 
   // The walk ends in a run, and a run ends when verdicts arrive. Nothing here
   // conducts a simulation, so the fixture is given the one thing a platform
@@ -170,7 +181,7 @@ async function runWalk(options: {
     grading.stop();
   }
 
-  return { ui, report };
+  return { ui, report, lines };
 }
 
 /**
@@ -288,7 +299,11 @@ describe("the whole generate step", () => {
 
     // And the developer was told, in words that say what to do about it.
     expect(ui.record.gate?.heldBack).toEqual([
-      { shown: "egma/tests/nothing-to-check.md", reason: NO_BEHAVIORS_REASON },
+      {
+        shown: "egma/tests/nothing-to-check.md",
+        file: path.join(testsFolder(), "nothing-to-check.md"),
+        reason: NO_BEHAVIORS_REASON,
+      },
     ]);
     expect(ui.record.statuses.join("\n")).toContain(NO_BEHAVIORS_REASON);
 
@@ -307,8 +322,13 @@ describe("the whole generate step", () => {
       {
         name: "nothing-to-check",
         shown: "egma/tests/nothing-to-check.md",
-        reason:
-          "a test needs at least one expected behavior, because a test that cannot fail is not a test",
+        file: path.join(testsFolder(), "nothing-to-check.md"),
+        // The belt, not the door: push sees this refusal coming and says so
+        // before anything is uploaded, and says which of the two it was. The
+        // door's own sentence is proven by the test that reaches the platform
+        // directly.
+        reason: "no expected behaviors, so it could never fail. Add one, then run egma push.",
+        refusedBy: "egma",
       },
     ]);
     expect(platform.tests.tests.map((test) => test.name)).not.toContain("nothing-to-check");
@@ -549,6 +569,58 @@ describe("the whole generate step", () => {
   });
 });
 
+/**
+ * The command itself, with nobody watching: a real subprocess, no terminal, and
+ * the walk carried through to its run.
+ *
+ * The walk ends in a run, and a run ends when verdicts arrive. Nothing here
+ * conducts a simulation, so the fixture is given the one thing a platform with a
+ * simulator attached has: something that judges what is queued.
+ */
+async function withNobodyWatching(
+  script: string,
+  extra: readonly string[] = [],
+): Promise<{ readonly stdout: string; readonly code: number }> {
+  const grading = gradeEveryRun(platform);
+  try {
+    return await new Promise<{ stdout: string; code: number }>((resolve) => {
+      const child = spawn(
+        process.execPath,
+        [
+          CLI_ENTRY,
+          "--headless",
+          "--cwd",
+          workspace.dir,
+          ...extra,
+          "--",
+          process.execPath,
+          FAKE_AGENT,
+          script,
+        ],
+        {
+          cwd: workspace.dir,
+          env: workspace.env({
+            EGMA_URL: platform.url,
+            EGMA_RETELL_URL: retell.url,
+            EGMA_RETELL_API_KEY: KEY,
+            // Nowhere near the home of whoever is running this.
+            HOME: path.join(workspace.dir, "pretend-home"),
+          }),
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let stdout = "";
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => {
+        stdout += chunk;
+      });
+      child.on("close", (code) => resolve({ stdout, code: code ?? 1 }));
+    });
+  } finally {
+    grading.stop();
+  }
+}
+
 describe("with nobody watching", () => {
   it("takes the one answer it cannot ask for from the command, and opens its own gate", async () => {
     const material = "order-line-tests.csv";
@@ -577,49 +649,14 @@ describe("with nobody watching", () => {
       ],
     });
 
-    // The walk ends in a run, and the fixture is given something that judges
-    // what the run queues — the least a platform with a simulator looks like.
-    const grading = gradeEveryRun(platform);
-    const result = await new Promise<{ stdout: string; code: number }>((resolve) => {
-      const child = spawn(
-        process.execPath,
-        [
-          CLI_ENTRY,
-          "--headless",
-          "--cwd",
-          workspace.dir,
-          "--existing-tests",
-          material,
-          // Named as well as commanded, so the skill offer is reached at all:
-          // egma will not offer to write a skill for an agent it has no
-          // convention for.
-          "--coding-agent",
-          "claude-acp",
-          "--",
-          process.execPath,
-          FAKE_AGENT,
-          script,
-        ],
-        {
-          cwd: workspace.dir,
-          env: workspace.env({
-            EGMA_URL: platform.url,
-            EGMA_RETELL_URL: retell.url,
-            EGMA_RETELL_API_KEY: KEY,
-            // Nowhere near the home of whoever is running this.
-            HOME: path.join(workspace.dir, "pretend-home"),
-          }),
-          stdio: ["ignore", "pipe", "pipe"],
-        },
-      );
-      let stdout = "";
-      child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => {
-        stdout += chunk;
-      });
-      child.on("close", (code) => resolve({ stdout, code: code ?? 1 }));
-    });
-    grading.stop();
+    const result = await withNobodyWatching(script, [
+      "--existing-tests",
+      material,
+      // Named as well as commanded, so the skill offer is reached at all: egma
+      // will not offer to write a skill for an agent it has no convention for.
+      "--coding-agent",
+      "claude-acp",
+    ]);
 
     // No terminal, no keystroke, and the whole walk happened anyway.
     expect(result.code).toBe(0);
@@ -943,3 +980,159 @@ describe("a file egma cannot read", () => {
     expect(platform.tests.tests.map((test) => test.name)).toEqual(["price-question"]);
   });
 });
+
+/**
+ * The refusal nothing on this side can see coming.
+ *
+ * A file naming a persona reads perfectly well, and whether egma holds a persona
+ * of that name is a thing only the platform knows. So the refusal arrives after
+ * the keystroke, over a list the developer has already agreed to — and a wizard
+ * that carried on would run a different list from the one it was given.
+ */
+describe("a test the platform's own door turns away", () => {
+  /** The persona nobody authored, which is what the door is refusing. */
+  const UNHELD = "somebody-in-a-hurry";
+  const REFUSAL =
+    `egma has no persona called "${UNHELD}" in this project. Name a persona ` +
+    `this project already has, or name none and egma takes the project's ` +
+    `default.`;
+  const GOOD = ["price-question", "sunday-drop-off"];
+  const NAMED = "asked-for-the-binder";
+
+  /** Three files, one of them naming a persona egma does not hold. */
+  async function threeFiles(): Promise<string> {
+    return workspace.script({
+      steps: FOUND,
+      stepsByTask: [
+        {
+          // However many were asked for: what lands on disk is the list, and a
+          // walk with nobody watching asks for egma's own default.
+          contains: GENERATE_TASK,
+          steps: [
+            ...GOOD.flatMap((name) =>
+              writes({ name, behaviors: ["The agent says which days."] }),
+            ),
+            ...writes({
+              name: NAMED,
+              personas: [UNHELD],
+              behaviors: ["The agent says the workshop's name."],
+            }),
+            { kind: "stop", reason: "end_turn" },
+          ],
+        },
+      ],
+    });
+  }
+
+  it("puts the list back with what the platform said, and runs what was agreed to", async () => {
+    const { ui, report, lines } = await runWalk({ script: await threeFiles(), howManyTests: 3 });
+
+    // Two lists, because the first one is not the list that would have run.
+    expect(ui.record.gatesOpened.filter((gate) => gate === "run-tests")).toHaveLength(2);
+
+    // The second one holds the two the platform took, and names the third with
+    // the platform's own sentence about it.
+    expect(ui.record.gate?.rows.map((row) => row.name)).toEqual(GOOD);
+    expect(ui.record.gate?.heldBack).toEqual([
+      {
+        shown: `egma/tests/${NAMED}.md`,
+        file: path.join(testsFolder(), `${NAMED}.md`),
+        reason: REFUSAL,
+      },
+    ]);
+
+    // Said in the platform's words while the push was happening, and named
+    // again on the line a machine reads the list by.
+    expect(ui.record.statuses.join("\n")).toContain(`egma would not take egma/tests/${NAMED}.md`);
+    expect(lines).toContain(`held-back: egma/tests/${NAMED}.md ${REFUSAL}`);
+
+    // The run went on exactly what the second keystroke agreed to.
+    expect(report.kind).toBe("run-started");
+    expect(pushedToEgma()).toBe(2);
+    expect(platform.tests.tests.map((test) => test.name).sort()).toEqual([...GOOD].sort());
+
+    // All three files are the developer's, and the refused one is unpinned and
+    // exactly as it was written.
+    expect(await filesInFolder()).toHaveLength(3);
+    expect(await readTest(`${NAMED}.md`)).toMatchObject({
+      version: null,
+      personas: [UNHELD],
+    });
+  });
+
+  it("takes the test the developer fixed between one list and the next", async () => {
+    // What `e` at the list is for, done by hand: the persona line comes out,
+    // and the file the platform refused becomes one it will take.
+    const fix = async (): Promise<void> => {
+      await writeFile(
+        path.join(testsFolder(), `${NAMED}.md`),
+        fileFor({ name: NAMED, behaviors: ["The agent says the workshop's name."] }),
+        "utf8",
+      );
+    };
+
+    const { ui, report } = await runWalk({
+      script: await threeFiles(),
+      howManyTests: 3,
+      ui: (built) => new FixingBetweenLists(built, fix),
+    });
+
+    expect(ui.record.gatesOpened.filter((gate) => gate === "run-tests")).toHaveLength(2);
+
+    // Everything went up, including the one the door refused the first time.
+    expect(report.kind).toBe("run-started");
+    expect(pushedToEgma()).toBe(3);
+    expect(platform.tests.tests.map((test) => test.name).sort()).toEqual(
+      [...GOOD, NAMED].sort(),
+    );
+
+    // And the fixed file came back pinned, naming the persona every project has.
+    expect(await readTest(`${NAMED}.md`)).toMatchObject({ personas: ["default-persona"] });
+    expect((await readTest(`${NAMED}.md`)).version).toMatch(/^tstv_/u);
+  });
+
+  /**
+   * A run with nobody watching cannot deliberate, and does not pretend to. The
+   * word was given in the command, so the second list is agreed to the moment
+   * it is drawn and the walk goes on with what the platform took — with the
+   * refused file named on a line a machine reads, before the run begins.
+   */
+  it("says what was refused and goes on with the rest when nobody is watching", async () => {
+    const result = await withNobodyWatching(await threeFiles());
+
+    expect(result.code).toBe(0);
+    for (const name of GOOD) expect(result.stdout).toContain(`test: ${name} default persona`);
+    expect(result.stdout).toContain(`held-back: egma/tests/${NAMED}.md ${REFUSAL}`);
+    expect(result.stdout).toContain(`egma would not take egma/tests/${NAMED}.md: ${REFUSAL}`);
+
+    // The run happened, over what the platform took and nothing else.
+    expect(result.stdout).toMatch(/^first-verdict: /mu);
+    expect(platform.tests.tests.map((test) => test.name).sort()).toEqual([...GOOD].sort());
+    expect(await filesInFolder()).toHaveLength(3);
+  });
+});
+
+/**
+ * A wizard with nobody watching that fixes a file between one list and the
+ * next, which is what a developer does with `e` and their own editor.
+ *
+ * Every list opens itself here, so the hand goes in where the developer's would:
+ * after the second list is drawn and before the keystroke that agrees to it.
+ */
+class FixingBetweenLists extends HeadlessUI {
+  private lists = 0;
+  private readonly fix: () => Promise<void>;
+
+  constructor(built: HeadlessOptions, fix: () => Promise<void>) {
+    super(built);
+    this.fix = fix;
+  }
+
+  override async waitForGate(gate: GateId): Promise<void> {
+    if (gate === "run-tests") {
+      this.lists += 1;
+      if (this.lists === 2) await this.fix();
+    }
+    return super.waitForGate(gate);
+  }
+}

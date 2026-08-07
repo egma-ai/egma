@@ -413,7 +413,7 @@ describe("egma push", () => {
     expect(platform.tests.versionsOf("one")).toBe(1);
   });
 
-  it("surfaces egma's own words when a test is turned away at the door", async () => {
+  it("turns an unfalsifiable test away before anything is uploaded", async () => {
     await makeFolder();
     await writeTest(
       "unfalsifiable.md",
@@ -425,11 +425,43 @@ describe("egma push", () => {
     expect(result.code).toBe(6);
     expect(factOf(result.stdout, "status")).toBe("turned-away");
     expect(valuesOf(result.stdout, "turned-away")).toEqual(["unfalsifiable"]);
-    // The reason is egma's own, word for word, and not egma's client's.
+    // egma can see this refusal coming without asking, so the reason is its
+    // own belt, said before any upload. The door's sentence is proven where
+    // the door is reached directly.
     expect(factOf(result.stdout, "reason")).toBe(
-      "a test needs at least one expected behavior, because a test that cannot fail is not a test",
+      "no expected behaviors, so it could never fail. Add one, then run egma push.",
     );
     expect(platform.tests.tests).toHaveLength(0);
+  });
+
+  it("lands the folder's good tests while the empty one is named, never uploaded ahead of it", async () => {
+    await makeFolder();
+    await writeTest(
+      "kept.md",
+      [
+        "---",
+        "name: kept",
+        "---",
+        "## Scenario",
+        "Something happens.",
+        "## Expected behaviors",
+        "1. The agent says so.",
+      ].join("\n"),
+    );
+    await writeTest(
+      "unfalsifiable.md",
+      ["---", "name: unfalsifiable", "---", "## Scenario", "Something happens.", "## Expected behaviors", ""].join("\n"),
+    );
+
+    const result = await egma(["push"]);
+
+    expect(result.code).toBe(6);
+    expect(valuesOf(result.stdout, "turned-away")).toEqual(["unfalsifiable"]);
+    expect(valuesOf(result.stdout, "created")).toEqual(["kept"]);
+    // The platform holds exactly the valid test — the empty one was decided
+    // before the first upload, not discovered at the door after it.
+    expect(platform.tests.tests.map((test) => test.name)).toEqual(["kept"]);
+    expect(platform.tests.versionsOf("kept")).toBe(1);
   });
 
   /**

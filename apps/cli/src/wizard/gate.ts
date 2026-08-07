@@ -14,6 +14,13 @@
  * something it could see. So the file is held back here, named on the screen,
  * and left exactly where it is: it is the developer's file now, and deleting
  * their file to tidy up egma's own report would be the worse of the two.
+ *
+ * The other thing that holds a file back is the door itself, and it can only be
+ * learned by knocking. A rule only the platform can check — today, a test naming
+ * a persona the platform does not hold — is a refusal that arrives after the
+ * keystroke. So the list is built a second time, carrying what the platform
+ * said, and the same one keystroke is asked for over the list that would really
+ * run. Nothing runs on a list the developer never read.
  */
 
 import type { FolderContents } from "../folder/egma-folder.ts";
@@ -35,6 +42,15 @@ export type GateRow = {
 /** A file egma will not push, and why, in words a developer can act on. */
 export type HeldBack = {
   readonly shown: string;
+  /**
+   * Absolute, for opening in an editor, exactly as a row carries one.
+   *
+   * A held-back file is the one a developer most wants to open: it is the one
+   * with something wrong with it. So it is reachable by the same key, and the
+   * screen does not have to explain why one line on it can be opened and the
+   * line under it cannot.
+   */
+  readonly file: string;
   readonly reason: string;
 };
 
@@ -49,8 +65,9 @@ export type TestGate = {
   readonly suite: string;
 };
 
-export const NO_BEHAVIORS_REASON =
-  "no expected behaviors, so it could never fail. Add one, then run egma push.";
+import { NO_BEHAVIORS_REASON } from "../sync/push.ts";
+
+export { NO_BEHAVIORS_REASON };
 
 /**
  * The other way a file in the folder is not a test: egma could not read it at
@@ -76,16 +93,30 @@ export function gateFrom(
     readonly modality: string;
     readonly suite: string;
   },
+  /**
+   * What the platform's own door turned away, from a push a keystroke has
+   * already agreed to. Empty the first time the list is drawn, because nothing
+   * has knocked on the door yet.
+   *
+   * These are files egma can read and would push again: they are kept off the
+   * list rather than on it, so that the keystroke over this list agrees to what
+   * would really run, and the platform's own sentence is on the screen beside
+   * the file it is about.
+   */
+  refused: readonly HeldBack[] = [],
 ): TestGate {
   const rows: GateRow[] = [];
   const heldBack: HeldBack[] = folder.unreadable.map((file) => ({
     shown: file.shown,
+    file: file.file,
     reason: unreadableReason(file.reason),
   }));
 
+  const refusedFiles = new Set(refused.map((held) => held.file));
   for (const held of folder.found) {
+    if (refusedFiles.has(held.file)) continue;
     if (held.test.expectedBehaviors.length === 0) {
-      heldBack.push({ shown: held.shown, reason: NO_BEHAVIORS_REASON });
+      heldBack.push({ shown: held.shown, file: held.file, reason: NO_BEHAVIORS_REASON });
       continue;
     }
     rows.push({
@@ -95,6 +126,13 @@ export function gateFrom(
       file: held.file,
     });
   }
+
+  // One line per file. A file the door refused and egma can no longer read —
+  // the developer went in to fix it and left it half-written — is named in what
+  // egma can see about it now, which is the newer of the two answers and the
+  // one that says what to do next.
+  const named = new Set(heldBack.map((held) => held.file));
+  heldBack.push(...refused.filter((held) => !named.has(held.file)));
 
   // Both lists read in the folder's own order, whichever reason a file was
   // held back for, so the screen is the folder rather than egma's bookkeeping.

@@ -11,6 +11,11 @@
  * business. `e` never reaches the flow at all — the screen hands the terminal to
  * the editor and takes it back, and the flow is still parked exactly where it
  * was, which is what the gate pattern is for.
+ *
+ * The files being held back are on the same list and under the same keys. They
+ * are the ones with something wrong with them, so a screen that named them and
+ * then would not open them would be pointing at a problem while holding the door
+ * shut.
  */
 
 import { Box, Text, useInput } from "ink";
@@ -47,8 +52,13 @@ export function GateScreen({
   onEdit,
   onQuit,
 }: GateScreenProps) {
-  const on = Math.min(Math.max(at, 0), gate.rows.length - 1);
-  const selected = gate.rows[on];
+  // What the keys act on: the tests going up, and then the files being held
+  // back. A held-back file is the one a developer most wants to open — it is
+  // the one with something wrong with it, and on a list the platform has
+  // already refused something from, it is the one they came back to fix.
+  const openable = [...gate.rows, ...gate.heldBack];
+  const on = Math.min(Math.max(at, 0), Math.max(openable.length - 1, 0));
+  const selected = openable[on];
 
   const bindings: KeyBinding[] = [
     { match: "upArrow", label: "↑↓", action: "browse", hidden: true, handler: () => onMove(-1) },
@@ -73,8 +83,10 @@ export function GateScreen({
   const width = columnWidth(gate.rows.map((row) => row.name));
 
   // The window follows the selection, so browsing past the bottom row scrolls
-  // rather than losing the mark.
-  const from = Math.max(0, Math.min(on - VISIBLE_ROWS + 1, gate.rows.length - VISIBLE_ROWS));
+  // rather than losing the mark. A selection that has moved on into the
+  // held-back lines leaves the window at the end of the list, where it was.
+  const onRow = Math.min(on, Math.max(gate.rows.length - 1, 0));
+  const from = Math.max(0, Math.min(onRow - VISIBLE_ROWS + 1, gate.rows.length - VISIBLE_ROWS));
   const shown = gate.rows.slice(from, from + VISIBLE_ROWS);
   const rest = gate.rows.length - shown.length;
 
@@ -99,8 +111,10 @@ export function GateScreen({
       </Box>
       {gate.heldBack.length > 0 ? (
         <Box flexDirection="column" marginTop={1}>
-          {gate.heldBack.map((held) => (
-            <Text key={held.shown}>{`✗ ${held.shown} — ${held.reason}`}</Text>
+          {gate.heldBack.map((held, index) => (
+            <Text key={held.shown} inverse={gate.rows.length + index === on}>
+              {`✗ ${held.shown} — ${held.reason}`}
+            </Text>
           ))}
         </Box>
       ) : null}

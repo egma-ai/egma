@@ -13,6 +13,11 @@
  *   written and the current version comes back.
  * - **A test is falsifiable from birth.** A write with no expected behaviors is
  *   refused at the door, in the factory's own words, rather than stored.
+ * - **A test names personas this project holds.** A write naming one it does
+ *   not is refused at the door, in the factory's own words. It is the refusal
+ *   nothing on the CLI's side can see coming — the file is perfectly readable
+ *   and only the platform knows the answer — so it is the one this fixture has
+ *   to be able to make.
  * - **Identifiers are egma's.** `tst_` and `tstv_`, minted by the same
  *   generator every table uses, so a pinned version id in a committed file is
  *   the same string it would be against a real instance.
@@ -223,6 +228,14 @@ export function testRoutes(options: {
    * The persona ids a write names, from the names it gave. An empty list takes
    * the project's default, which is what lets a first test be authored before
    * anybody has authored a persona.
+   *
+   * Both refusals are the shipped API's own sentences, word for word, as the
+   * agreement suite pins them: an identifier relays the factory's sentence
+   * verbatim (`packages/db/src/access/tests.ts`), and a name — which is what
+   * actually crosses the wire — answers the API's fuller sentence, next move
+   * included. This is the one refusal the CLI cannot see coming: a file
+   * naming a persona reads perfectly well, and only the platform knows which
+   * personas it holds.
    */
   const resolvePersonas = (
     named: readonly string[],
