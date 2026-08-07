@@ -83,11 +83,13 @@
  *
  * The two ways a judgment is ever revisited are exported beside them, and
  * neither is an edit: `regrade` reopens the queue so the engine judges a run or
- * a window again at each grader's current version, and `correctVerdict` writes
- * one person's disagreement as a row of its own with the machine's still
- * underneath it. Both take the context like everything else, and both are the
- * whole API for revisiting a verdict today — there are no routes above them
- * yet, and this surface is the altitude the product is reachable at.
+ * a window again at each grader's current version — narrowed to one grader when
+ * the ask names one, which is a decision about judge spend rather than about
+ * what the rows come to say — and `correctVerdict` writes one person's
+ * disagreement as a row of its own with the machine's still underneath it. Both
+ * take the context like everything else, and both are the whole API for
+ * revisiting a verdict today — there are no routes above them yet, and this
+ * surface is the altitude the product is reachable at.
  */
 
 export type { AuthContext, Role, Via } from "./context.ts";

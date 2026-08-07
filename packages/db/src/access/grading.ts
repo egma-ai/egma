@@ -1,4 +1,4 @@
-import { newId } from "@egma/ids";
+import { isId, newId } from "@egma/ids";
 import {
   and,
   asc,
@@ -22,6 +22,7 @@ import {
 import { run, simulation } from "../schema/runs.ts";
 import { validClaimant } from "./claimants.ts";
 import type { AuthContext } from "./context.ts";
+import { getGrader } from "./graders.ts";
 import { authorize, here } from "./permissions.ts";
 import type { NewSpan } from "./spans.ts";
 import { within } from "./within.ts";
@@ -110,14 +111,21 @@ import { within } from "./within.ts";
  * notification the enqueue does, because a service should wake for a re-grade
  * exactly as it wakes for a conversation ending.
  *
- * Nothing about a re-grade names a grader version. The job is a conversation,
+ * Nothing about a re-grade names a grader *version*. The job is a conversation,
  * the service judges it with whatever applies to it **at each grader's current
  * version**, and that is what puts a tightened grader's rows beside the old ones
  * rather than over them: the verdict's identity spans the grader version, so a
  * grader nobody edited rewrites its own row in place and only the edited one
- * adds. Re-judging the conversation whole therefore accumulates exactly the rows
- * re-judging one grader would, which is why there is no per-grader column here
- * to narrow by and no need of one.
+ * adds.
+ *
+ * A re-grade **may** name a grader, and that is a question about spend rather
+ * than about what the rows come to say. Re-judging the conversation whole
+ * accumulates exactly the rows re-judging one grader would; it also asks every
+ * LLM judge on the conversation again, and somebody who fixed one rubric did not
+ * ask to pay for the other four. So the grader a re-grade named travels on the
+ * reopened job — `grading_job.regrade_grader_id`, cleared the moment the job
+ * settles — and the engine reads it off the claim. Omitting it re-judges the
+ * conversation, which is what a re-grade has always meant.
  */
 
 /**
@@ -173,6 +181,11 @@ const DEFAULT_TRACE_IDLE_SECONDS = 300;
  * store files spans by the minute they started in, so a read naming only a trace
  * id would have nothing to prune with. They are timestamps egma wrote, not
  * anything a customer authored, which is the line this claim has always drawn.
+ *
+ * The grader a re-grade narrowed to is here on the same terms: an identifier
+ * egma minted, saying which of this customer's graders to judge with — never
+ * what that grader says, which the engine reads for itself through the scoped
+ * surface with the context this claim hands back.
  */
 const CLAIM_COLUMNS = {
   id: gradingJob.id,
@@ -183,6 +196,7 @@ const CLAIM_COLUMNS = {
   traceId: gradingJob.traceId,
   firstSpanAt: gradingJob.firstSpanAt,
   lastSpanAt: gradingJob.lastSpanAt,
+  regradeGraderId: gradingJob.regradeGraderId,
   attempts: gradingJob.attempts,
   claimedBy: gradingJob.claimedBy,
   claimedAt: gradingJob.claimedAt,
@@ -207,6 +221,17 @@ export type GradingClaim = {
   readonly lastSpanAt: Date | null;
   readonly organizationId: string;
   readonly projectId: string;
+  /**
+   * The one grader this job was reopened for, or null for the whole
+   * conversation — which is what a first grading and an un-narrowed re-grade
+   * both are.
+   *
+   * The engine judges with this grader and nothing else when it is set: not the
+   * other graders that apply, and not the built-in. Somebody who fixed one
+   * rubric asked for one rubric's judgment, and every other judge call on the
+   * conversation would be spend they did not ask for.
+   */
+  readonly regradeGraderId: string | null;
   /** Including this one, so a copy can say which attempt it is making. */
   readonly attempts: number;
   readonly claimedBy: string;
@@ -240,6 +265,12 @@ export type GradingJob = {
   readonly heartbeatAt: Date | null;
   readonly attempts: number;
   readonly lastError: string | null;
+  /**
+   * The one grader this job stands reopened for, or null for the whole
+   * conversation. Never set on a job that has settled: the narrowing belongs to
+   * the asking rather than to the job, and a check on the table holds it there.
+   */
+  readonly regradeGraderId: string | null;
   readonly finishedAt: Date | null;
   readonly createdAt: Date;
 };
@@ -261,6 +292,7 @@ const JOB_COLUMNS = {
   heartbeatAt: gradingJob.heartbeatAt,
   attempts: gradingJob.attempts,
   lastError: gradingJob.lastError,
+  regradeGraderId: gradingJob.regradeGraderId,
   finishedAt: gradingJob.finishedAt,
   createdAt: gradingJob.createdAt,
 } as const;
@@ -673,7 +705,10 @@ export async function claimGradingJobs(
     if (exhausted.length > 0) {
       await tx
         .update(gradingJob)
-        .set({ status: "abandoned", finishedAt: now })
+        // The narrowing goes with the giving-up. egma is not going to judge
+        // this conversation for that grader, and a job left narrowed after it
+        // settles would hand the instruction to whoever reopens it next.
+        .set({ status: "abandoned", finishedAt: now, regradeGraderId: null })
         .where(inArray(gradingJob.id, exhausted));
     }
 
@@ -705,6 +740,7 @@ export async function claimGradingJobs(
       lastSpanAt: row.lastSpanAt,
       organizationId: row.organizationId,
       projectId: row.projectId,
+      regradeGraderId: row.regradeGraderId,
       attempts: row.attempts,
       claimedBy: row.claimedBy ?? claimant,
       claimedAt: row.claimedAt ?? now,
@@ -790,6 +826,13 @@ export async function recordGradingHeartbeat(
  * The conversation has been judged and the verdicts are written: `claimed →
  * graded`, once, by whoever held it. The guarded update is the check, so there
  * is no window in which the job moves between being looked at and being moved.
+ *
+ * **Finishing is where a narrowing ends.** The grader a re-grade named was an
+ * instruction for this one piece of work, and the work is done — so the next
+ * time this conversation is asked about, whether by an ordinary re-grade or by a
+ * narrowed one naming a different grader, it starts from the whole conversation
+ * again. A job that carried its last instruction forward would judge less and
+ * less of a conversation the more often anybody asked about it.
  */
 export async function finishGradingJob(
   auth: AuthContext,
@@ -799,7 +842,13 @@ export async function finishGradingJob(
   const now = new Date();
   const [row] = await db()
     .update(gradingJob)
-    .set({ status: "graded", finishedAt: now, heartbeatAt: now, lastError: null })
+    .set({
+      status: "graded",
+      finishedAt: now,
+      heartbeatAt: now,
+      lastError: null,
+      regradeGraderId: null,
+    })
     .where(
       and(
         theJob(auth, id),
@@ -982,6 +1031,11 @@ const MOST_CONVERSATIONS_PER_REGRADE = 500;
  * which is everything a re-grade was going to ask for. So does a job out of the
  * caller's reach — the answer reading it would have given.
  *
+ * **This verb asks for the whole conversation and cannot ask for less.**
+ * Narrowing to one grader is a re-grade's decision, made by the person who named
+ * one, and it travels through `regrade` — so a job reopened here is explicitly
+ * un-narrowed rather than left carrying whatever the last ask said.
+ *
  * The notification rides the same transaction as the update, exactly as the
  * enqueue's does, so a service woken by it always finds the row pending.
  */
@@ -991,7 +1045,7 @@ export async function reopenGradingJob(
 ): Promise<GradingJob | undefined> {
   authorize(auth, "revisit_verdicts", here(auth));
 
-  const [only] = await reopenJobs(theJob(auth, id));
+  const [only] = await reopenJobs(theJob(auth, id), null);
   return only;
 }
 
@@ -1001,9 +1055,14 @@ export async function reopenGradingJob(
  * and a predicate that came out empty is refused rather than run — an update
  * with no `where` on this table would reopen the whole deployment's queue, so
  * the one shape that could do it is the one shape that cannot be passed.
+ *
+ * `forGrader` is written every time, `null` included, so that what the engine
+ * will read off these jobs is what this reopen asked for and never what an
+ * earlier one did.
  */
 async function reopenJobs(
   theseJobs: SQL | undefined,
+  forGrader: string | null,
 ): Promise<readonly GradingJob[]> {
   if (theseJobs === undefined) {
     throw new Error("reopening grading work always names whose work it reaches");
@@ -1020,6 +1079,7 @@ async function reopenJobs(
         attempts: 0,
         lastError: null,
         finishedAt: null,
+        regradeGraderId: forGrader,
       })
       .where(and(theseJobs, inArray(gradingJob.status, [...SETTLED])))
       .returning(JOB_COLUMNS);
@@ -1063,21 +1123,67 @@ export type RegradeWindow = {
 };
 
 /**
- * What to judge again: one run's conversations, or every conversation that
- * became judgeable inside a window.
+ * Which conversations to judge again: one run's, or every one that became
+ * judgeable inside a window.
  *
  * Both are honest halves of the same act rather than one shape with a
  * convenience on top. A run is how somebody re-scores a suite they just watched
  * fail on a grader they have since fixed; a window is how they re-score
  * production, which belongs to no run and never will.
  */
-export type RegradeTarget =
+type RegradeConversations =
   | { readonly runId: string }
   | { readonly window: RegradeWindow };
+
+/**
+ * What to judge again: which conversations, and — if the person asking says so
+ * — which grader.
+ *
+ * The ticket's words are "a run (or a time window) **and a grader**", and this
+ * makes the grader optional rather than required. Both readings are coherent,
+ * and the difference is only ever about judge spend: re-judging the conversation
+ * whole accumulates exactly the rows re-judging one grader would, because a
+ * grader nobody edited rewrites its own row in place. What it also does is ask
+ * every LLM judge on that conversation again.
+ *
+ * So:
+ *
+ * - **A grader named** narrows the re-judge to that one grader, at its current
+ *   version. Nothing else on the conversation is judged — not the other graders,
+ *   not the built-in — and nothing else's rows are touched. This is what
+ *   somebody who fixed one rubric is asking for, and it is the only shape in
+ *   which fixing a rubric costs one rubric's worth of judging.
+ * - **No grader named** re-judges the conversation, which is what a re-grade has
+ *   always meant here and stays the default so that the plain ask keeps working.
+ *
+ * The grader is named **by identity**, never by version. Which version judges is
+ * always the current one — that is the whole point of asking again — exactly as
+ * a test's grader array names a grader and gets today's version of it.
+ *
+ * **The built-in `expected_behaviors` grader cannot be named**, and that is a
+ * consequence of what it is rather than an omission here: it is never a row in
+ * any table, so it has no identity to name. Re-judging a test's expected
+ * behaviors alone is future work; today they are re-judged by asking for the
+ * conversation.
+ */
+export type RegradeTarget = RegradeConversations & {
+  /**
+   * The one grader to judge with, or absent for every grader that applies.
+   * Validated like any other read: the shape first, then whether the caller can
+   * reach it at all.
+   */
+  readonly graderId?: string | undefined;
+};
 
 export type Regraded = {
   /** The conversations asked for again, as their jobs now stand. */
   readonly reopened: readonly GradingJob[];
+  /**
+   * The grader this re-grade narrowed to, or null for the whole conversation.
+   * It is what the reopened jobs carry, echoed back so a caller sees the ask
+   * that was actually made rather than the one they typed.
+   */
+  readonly graderId: string | null;
   /**
    * How many of the conversations named were already waiting to be judged and
    * were left exactly alone. They are not a failure and not a skip: a
@@ -1088,7 +1194,7 @@ export type Regraded = {
 };
 
 /**
- * Judge these conversations again, at whatever each grader's current version is.
+ * Judge these conversations again, at whatever the current grader version is.
  *
  * **This is the only thing that ever re-scores history, and somebody has to ask
  * for it.** Editing a grader mints a version and changes nothing that was
@@ -1096,6 +1202,14 @@ export type Regraded = {
  * words of the version that decided them. A tightened threshold reaches
  * yesterday only through this call, which is what makes "our numbers changed
  * overnight" impossible to arrive at by accident.
+ *
+ * **The ask may name a grader, and then only that grader judges.** Every other
+ * grader's rows on those conversations are left exactly where they are, and no
+ * judge is asked anything on their behalf — which is what keeps fixing one
+ * rubric from re-spending the whole conversation's judging. The narrowing rides
+ * the reopened job, so the engine reads it long after the person asking has
+ * gone, and it is cleared when the job finishes. Naming no grader re-judges the
+ * conversation, which is what this call has always done.
  *
  * What comes of it is rows **beside** the old ones rather than over them,
  * because the verdict's identity spans the grader version: the graders nobody
@@ -1110,14 +1224,19 @@ export type Regraded = {
  * conversations were asked for and how many were already going to be judged.
  *
  * A run nobody can reach answers `undefined`, which is the answer reading it
- * would have given. A window always answers, because a window that names nothing
- * is a window with nothing in it rather than a window that is not there.
+ * would have given, and so does a grader nobody can reach — a thing that is not
+ * there is not there, whichever of the two was named. A window that holds
+ * nothing still answers, because a window with nothing in it is a different fact
+ * from a window that is not there.
  */
 export async function regrade(
   auth: AuthContext,
   target: RegradeTarget,
 ): Promise<Regraded | undefined> {
   authorize(auth, "revisit_verdicts", here(auth));
+
+  const graderId = await theGraderNamed(auth, target.graderId);
+  if (graderId === undefined) return undefined;
 
   const named = await conversationsNamed(auth, target);
   if (named === undefined) return undefined;
@@ -1137,13 +1256,17 @@ export async function regrade(
     );
   }
 
+  await widenWhatIsAlreadyWaiting(named, graderId);
+
   const [waiting] = await db()
     .select({ howMany: count() })
     .from(gradingJob)
     .where(and(named, inArray(gradingJob.status, [...OUTSTANDING])));
 
   const alreadyWaiting = Number(waiting?.howMany ?? 0);
-  if (settled.length === 0) return { reopened: [], alreadyWaiting };
+  if (settled.length === 0) {
+    return { reopened: [], graderId, alreadyWaiting };
+  }
 
   return {
     reopened: await reopenJobs(
@@ -1154,9 +1277,47 @@ export async function regrade(
           settled.map((row) => row.id),
         ),
       ),
+      graderId,
     ),
+    graderId,
     alreadyWaiting,
   };
+}
+
+/**
+ * A conversation that is already waiting keeps waiting — but a narrowing it is
+ * waiting *under* is widened to cover what has now been asked as well.
+ *
+ * Leaving an outstanding job alone was always sound because an outstanding job
+ * judges everything, and that is exactly the invariant narrowing breaks: a job
+ * queued for one grader would answer a second ask about a different grader by
+ * judging neither of them, silently. Two asks that disagree about how narrow the
+ * work is therefore settle on the wider one, which is the only answer that
+ * carries out both.
+ *
+ * **Only a job nobody has taken.** A claimed job is being judged right now,
+ * under the instruction it was claimed with; the column no longer decides
+ * anything for it, and finishing clears it — so a second ask that arrives during
+ * that window is asked again once the conversation is graded, which is a re-grade
+ * of a graded conversation and the ordinary case.
+ */
+async function widenWhatIsAlreadyWaiting(
+  theseJobs: SQL,
+  forGrader: string | null,
+): Promise<void> {
+  await db()
+    .update(gradingJob)
+    .set({ regradeGraderId: null })
+    .where(
+      and(
+        theseJobs,
+        eq(gradingJob.status, "pending"),
+        isNotNull(gradingJob.regradeGraderId),
+        forGrader === null
+          ? undefined
+          : sql`${gradingJob.regradeGraderId} <> ${forGrader}`,
+      ),
+    );
 }
 
 /**
@@ -1226,6 +1387,38 @@ async function conversationsNamed(
       ),
     ),
   );
+}
+
+/**
+ * The grader this re-grade narrows to, as the reopened jobs will carry it:
+ * `null` when nobody named one, and `undefined` when somebody named one the
+ * caller cannot reach.
+ *
+ * The two halves are the two halves every read here has. **The shape is refused
+ * out loud**, because a string that is not a grader identifier is a caller
+ * mistake rather than a grader that is missing — the same line `startRun` draws
+ * when it is handed something that is not an agent. **Existence and tenancy are
+ * one question and are asked through the ordinary scoped read**, so a grader in
+ * another customer's project is exactly as absent as one that was never created,
+ * and this call learns nothing about it either way.
+ *
+ * A grader somebody deleted is unreachable and answers the same, which is right:
+ * a deleted grader judges nothing from now on, and a re-grade is from now on.
+ */
+async function theGraderNamed(
+  auth: AuthContext,
+  graderId: string | undefined,
+): Promise<string | null | undefined> {
+  if (graderId === undefined) return null;
+
+  if (!isId("grd", graderId)) {
+    throw new Error(
+      "a re-grade narrows to a grader by its identifier, and this is not one",
+    );
+  }
+
+  const reachable = await getGrader(auth, graderId);
+  return reachable === undefined ? undefined : reachable.id;
 }
 
 function validWindow(window: RegradeWindow): RegradeWindow {

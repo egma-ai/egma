@@ -1,5 +1,6 @@
 import {
   appendVerdicts,
+  getGrader,
   getSimulation,
   readTrace,
   type Grader,
@@ -56,6 +57,13 @@ import { applicableGraders, applicableProductionGraders } from "./resolve.ts";
  * an entry in the executor roster — and why it belongs to simulations alone: a
  * production trace has no test, so there is nothing for the built-in to judge
  * against.
+ *
+ * **A claim reopened for one grader judges that grader and nothing else.** Both
+ * branches of the fan-out are narrowed by it: the resolved list becomes that one
+ * grader, and the built-in does not run at all. Somebody who fixed one rubric
+ * asked for one rubric's judgment, and every other judge call on the
+ * conversation would be money they did not agree to spend — which is the whole
+ * reason the narrowing exists rather than a nicety of it.
  */
 
 /** What judging one conversation came to. */
@@ -91,6 +99,39 @@ type Resolved = {
    */
   readonly simulationId: string | undefined;
 };
+
+/**
+ * The graders this claim judges with: the one it was reopened for, or everything
+ * that applies to the conversation.
+ *
+ * **A narrowed claim never asks what applies**, which is why the ordinary
+ * resolution is passed as something to call rather than as a list. Resolving a
+ * production trace's graders advances each one's sampling accumulator, and a
+ * deliberate re-grade must not spend other graders' turns to answer a question
+ * about one of them.
+ *
+ * **The named grader judges whatever its scope says**, on the same terms a test's
+ * grader array is applied whatever its scope says: naming it *is* the scoping
+ * decision, made once by the person who asked for this re-grade rather than
+ * standing policy about where the grader usually applies. Sampling is not asked
+ * either — a re-grade somebody typed is not traffic egma did not cause.
+ *
+ * A grader that has gone between the ask and the claim — deleted in the minutes
+ * the job sat in the queue — judges nothing, and the job finishes having written
+ * nothing. That is the honest answer in both directions: it must not widen back
+ * to every grader, which would spend exactly what the narrowing was asked to
+ * save.
+ */
+async function judgingGraders(
+  claim: GradingClaim,
+  whatApplies: () => Promise<readonly Grader[]>,
+): Promise<readonly Grader[]> {
+  const { regradeGraderId } = claim;
+  if (regradeGraderId === null) return whatApplies();
+
+  const named = await getGrader(claim.auth, regradeGraderId);
+  return named === undefined ? [] : [named];
+}
 
 export async function gradeClaim(
   claim: GradingClaim,
@@ -143,7 +184,13 @@ export async function gradeClaim(
         ),
       ),
     ),
-    simulationId === undefined
+    // No test's behaviors on a narrowed claim, and the built-in is the reason
+    // narrowing had to be spelled out here rather than left to the resolution:
+    // it is never resolved, so nothing above could have dropped it. A re-grade
+    // naming a grader named an authored one — the built-in is not a row and has
+    // no identity to name — so it is not what was asked for, and it is one judge
+    // call per behavior of spend nobody agreed to.
+    simulationId === undefined || claim.regradeGraderId !== null
       ? undefined
       : judgeExpectedBehaviors({
           auth: claim.auth,
@@ -212,7 +259,9 @@ async function theSimulation(claim: GradingClaim): Promise<Resolved> {
 
   return {
     conversation: conversationOf(simulation),
-    graders: await applicableGraders(claim.auth, simulation),
+    graders: await judgingGraders(claim, () =>
+      applicableGraders(claim.auth, simulation),
+    ),
     simulationId: simulation.id,
   };
 }
@@ -257,7 +306,9 @@ async function theProductionTrace(claim: GradingClaim): Promise<Resolved> {
 
   return {
     conversation: conversationOfTrace(trace),
-    graders: await applicableProductionGraders(claim.auth),
+    graders: await judgingGraders(claim, () =>
+      applicableProductionGraders(claim.auth),
+    ),
     simulationId: undefined,
   };
 }

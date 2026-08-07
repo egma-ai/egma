@@ -9,6 +9,7 @@ import {
   unique,
 } from "drizzle-orm/pg-core";
 
+import { grader } from "./graders.ts";
 import { simulation } from "./runs.ts";
 import { organization, project } from "./tenancy.ts";
 import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
@@ -173,6 +174,34 @@ export const gradingJob = pgTable(
     attempts: integer("attempts").notNull().default(0),
     /** Why the last attempt did not finish. Plain prose, never a stack. */
     lastError: text("last_error"),
+    /**
+     * The one grader this job was reopened for, when somebody asked for one
+     * grader rather than for the conversation.
+     *
+     * **It is what the narrowing travels on, and there was nowhere else to put
+     * it.** A re-grade is not a row of its own: it reopens the job the
+     * conversation already has, and the service reads the job long after the
+     * person who asked has gone. So a re-grade that names a grader has to leave
+     * that name on the row, or the engine would have no way to learn it and
+     * would re-judge every grader that applies — which is the judge spend a
+     * narrowed re-grade exists to not make.
+     *
+     * Null is the ordinary case and means *the whole conversation*: a
+     * conversation becoming work for the first time, and a re-grade nobody
+     * narrowed. The two are deliberately the same value, because they are the
+     * same instruction.
+     *
+     * **It belongs to the reopening rather than to the job**, so it is cleared
+     * the moment the job settles — the check below holds that rather than
+     * trusting every writer to remember. Without it a job narrowed in March
+     * would still be narrowed when a straggling re-enqueue reopened it in June,
+     * and a conversation would quietly stop being judged by everything else.
+     *
+     * The grader is named by identity and never by version, exactly as a test's
+     * grader array names one: which version judges is always the current one,
+     * which is the whole point of asking again.
+     */
+    regradeGraderId: idText("regrade_grader_id").references(() => grader.id),
     finishedAt: moment("finished_at"),
     createdAt: createdAt(),
   },
@@ -244,6 +273,17 @@ export const gradingJob = pgTable(
         = (${table.status} not in ('graded', 'abandoned'))`,
     ),
     check("grading_job_attempts_are_counted", sql`${table.attempts} >= 0`),
+    // A narrowing belongs to work that is still outstanding. It is set by the
+    // reopen that asked for one grader and cleared by whatever ends the job —
+    // finishing it, or egma giving up on it — so a later ordinary re-grade
+    // cannot inherit a narrowing nobody asked for. Said here rather than left to
+    // every writer, because the writer that forgot would produce a conversation
+    // judged by one grader for the rest of its life and no error anywhere.
+    check(
+      "grading_job_only_outstanding_work_is_narrowed",
+      sql`${table.regradeGraderId} is null
+        or ${table.status} in ('pending', 'claimed')`,
+    ),
     // The tenancy triangle, edge by edge, as everywhere else: the project is
     // this organization's, and the simulation is that project's — so a job
     // cannot be written against another customer's conversation.

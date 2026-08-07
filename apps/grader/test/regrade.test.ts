@@ -15,6 +15,7 @@ import {
   makeWorld,
   runService,
   seedGrader,
+  seedTest,
   testConfig,
   type ConductedSimulation,
   type World,
@@ -257,5 +258,176 @@ describe("a re-grade of a window", () => {
     expect(
       (await readVerdicts(world.auth, judged.simulationId)).outcome.verdict,
     ).toBe("failed");
+  });
+});
+
+/**
+ * The ask that names a grader, which the ticket's words allow for: "a run (or a
+ * time window) **and a grader**".
+ *
+ * **It is a question about spend and never about the rows.** Re-judging the
+ * conversation whole accumulates exactly the rows re-judging one grader would,
+ * because a grader nobody edited rewrites its own row in place. What it also
+ * does is ask every judge on that conversation again, and somebody who fixed one
+ * rubric did not ask to pay for the other four. So the assertions below are
+ * about what stayed byte for byte where it was: the other grader's rows, and the
+ * built-in's — the two things a narrowed re-grade must not spend a judge on.
+ */
+describe("a re-grade that names one grader", () => {
+  /** The second authored grader, and the one every ask below names. */
+  let alsoJudging: string;
+  let conducted: ConductedSimulation;
+  let before: readonly RecordedVerdict[];
+  /** The version the narrowed re-grade wrote its first row at. */
+  let tightened: string;
+
+  const rowsFrom = (
+    verdicts: readonly RecordedVerdict[],
+    grader: string,
+  ): readonly RecordedVerdict[] =>
+    verdicts.filter((row) => row.graderId === grader);
+
+  /** The conversation judged and settled, so the next ask is a re-grade. */
+  async function judgedAndSettled(): Promise<readonly RecordedVerdict[]> {
+    await eventually(`the job for ${conducted.simulationId}`, async () => {
+      const [only] = await listGradingJobsForSimulation(
+        world.auth,
+        conducted.simulationId,
+      );
+      return only?.status === "graded" ? only : undefined;
+    });
+    return (await readVerdicts(world.auth, conducted.simulationId)).verdicts;
+  }
+
+  it("judges the grader it names, and leaves every other row exactly where it was", async () => {
+    // Three voices on one conversation: the file's grader, a second one, and
+    // the built-in judging the test's behaviors. Only one of them is asked
+    // again, and the other two are the assertion.
+    alsoJudging = await seedGrader(
+      world,
+      aThreshold({
+        name: "Answers inside five seconds",
+        priority: "P2",
+        config: {
+          measure: "turn_response_latency",
+          aggregation: "p90",
+          comparator: "below",
+          threshold: 5_000,
+        },
+      }),
+    );
+    const testId = await seedTest(world, []);
+    conducted = await conductSimulation(world, {
+      testId,
+      metrics: { turn_response_latency: [900, 1_100] },
+    });
+
+    before = await verdictsOn(conducted.simulationId, 3);
+    await judgedAndSettled();
+    expect(rowsFrom(before, alsoJudging)).toHaveLength(1);
+    expect(rowsFrom(before, graderId)).toHaveLength(1);
+    // No judge is configured in this file, so the built-in says out loud that
+    // it could not make the check. That it is `errored` rather than absent is
+    // what makes it a row this re-grade could have rewritten and did not.
+    expect(rowsFrom(before, "expected_behaviors")).toHaveLength(1);
+
+    // The fix somebody made, on one grader: a tighter threshold, and the
+    // informational check promoted to a blocker.
+    const edited = await editGrader(world.auth, alsoJudging, {
+      priority: "P0",
+      config: {
+        measure: "turn_response_latency",
+        aggregation: "p90",
+        comparator: "below",
+        threshold: 500,
+      },
+    });
+    expect(edited?.version).toBe(2);
+    tightened = edited?.versionId ?? "";
+
+    const asked = await regrade(world.auth, {
+      runId: conducted.runId,
+      graderId: alsoJudging,
+    });
+    expect(asked?.graderId).toBe(alsoJudging);
+    expect(asked?.reopened).toHaveLength(1);
+
+    const after = await eventually(
+      `the second grading of ${alsoJudging}`,
+      async () => {
+        const read = await readVerdicts(world.auth, conducted.simulationId);
+        return rowsFrom(read.verdicts, alsoJudging).length >= 2
+          ? read.verdicts
+          : undefined;
+      },
+    );
+
+    // The named grader judged, at the version that decided it.
+    expect(rowsFrom(after, alsoJudging)).toHaveLength(2);
+    expect(
+      rowsFrom(after, alsoJudging).find(
+        (row) => row.graderVersionId === tightened,
+      ),
+    ).toMatchObject({ verdict: "failed", dimension: "metric_threshold" });
+
+    // And nothing else was asked anything. Row for row, byte for byte — the
+    // moment each was stamped at included, which is what tells "not judged
+    // again" apart from "judged again and said the same thing".
+    expect(rowsFrom(after, graderId)).toEqual(rowsFrom(before, graderId));
+    expect(rowsFrom(after, "expected_behaviors")).toEqual(
+      rowsFrom(before, "expected_behaviors"),
+    );
+  });
+
+  it("snapshots today's priority on the row it wrote and leaves yesterday's alone", async () => {
+    const rows = rowsFrom(await judgedAndSettled(), alsoJudging);
+
+    const older = rows.find((row) => row.graderVersionId !== tightened);
+    const newer = rows.find((row) => row.graderVersionId === tightened);
+
+    // A narrowed re-grade is a judgment made today, exactly as a whole one is,
+    // so it snapshots the priority the grader carries today. Yesterday's row
+    // was made when this check only informed and still says so.
+    expect(older?.priority).toBe("P2");
+    expect(newer?.priority).toBe("P0");
+  });
+
+  it("rewrites that grader's own row when nothing about the grader changed", async () => {
+    const rewriting = rowsFrom(await judgedAndSettled(), alsoJudging).find(
+      (row) => row.graderVersionId === tightened,
+    );
+    if (rewriting === undefined) throw new Error("nothing to rewrite");
+
+    const asked = await regrade(world.auth, {
+      runId: conducted.runId,
+      graderId: alsoJudging,
+    });
+    expect(asked?.reopened).toHaveLength(1);
+
+    const after = await eventually(
+      `${alsoJudging} judged again at ${tightened}`,
+      async () => {
+        const read = await readVerdicts(world.auth, conducted.simulationId);
+        const now = rowsFrom(read.verdicts, alsoJudging).find(
+          (row) => row.graderVersionId === tightened,
+        );
+        return now !== undefined &&
+          now.judgedAtMicroseconds > rewriting.judgedAtMicroseconds
+          ? read.verdicts
+          : undefined;
+      },
+    );
+
+    // Still two rows for this grader, not three: the same grader at the same
+    // version saying something about the same dimension again replaces itself,
+    // which is why re-judging one grader and re-judging the conversation
+    // accumulate identically and the narrowing is only ever about spend.
+    expect(rowsFrom(after, alsoJudging)).toHaveLength(2);
+    expect(rowsFrom(after, graderId)).toEqual(rowsFrom(before, graderId));
+    expect(rowsFrom(after, "expected_behaviors")).toEqual(
+      rowsFrom(before, "expected_behaviors"),
+    );
+
+    await judgedAndSettled();
   });
 });

@@ -6,7 +6,9 @@ import {
   claimSimulations,
   completeSimulation,
   createAgent,
+  createGrader,
   createPersona,
+  deleteGrader,
   finishGradingJob,
   getGradingJob,
   listGradingJobsForSimulation,
@@ -70,6 +72,35 @@ const outsider: AuthContext = {
 let agentId: string;
 let connectionId: string;
 let personaId: string;
+/** One of this project's graders, for the asks that narrow to one. */
+let graderId: string;
+
+/** A grader on the project, so a re-grade has something to name. */
+async function aGrader(
+  who: AuthContext = auth,
+  name = `Answers inside two seconds ${newId("grd").slice(-6)}`,
+): Promise<string> {
+  const created = await createGrader(who, {
+    name,
+    type: "metric_threshold",
+    config: {
+      measure: "turn_response_latency",
+      aggregation: "p90",
+      comparator: "below",
+      threshold: 2_000,
+    },
+  });
+  return created.id;
+}
+
+/** What a job says it stands reopened for, read straight off the row. */
+async function narrowedTo(jobId: string): Promise<string | null> {
+  const { rows } = await database.sql<{ regrade_grader_id: string | null }>(
+    "select regrade_grader_id from grading_job where id = $1",
+    [jobId],
+  );
+  return rows[0]?.regrade_grader_id ?? null;
+}
 
 type Conducted = { readonly runId: string; readonly simulationId: string };
 
@@ -170,6 +201,8 @@ beforeAll(async () => {
       },
     })
   ).id;
+
+  graderId = await aGrader();
 });
 
 afterAll(async () => {
@@ -438,5 +471,212 @@ describe("re-grading a window", () => {
         },
       }),
     ).rejects.toThrow("two moments");
+  });
+});
+
+/**
+ * The half of the ticket that is about spend rather than about rows.
+ *
+ * Re-judging a conversation whole accumulates exactly the rows re-judging one
+ * grader would — a grader nobody edited rewrites its own row in place — so
+ * naming a grader changes nothing about what the record comes to say. What it
+ * changes is how many judges are asked, and somebody who fixed one rubric did
+ * not ask to pay for the other four. Everything below is that instruction
+ * surviving the trip from the person asking to the engine reading it: it goes on
+ * the job, it comes back off the claim, and it is gone the moment the work is.
+ */
+describe("re-grading with a grader named", () => {
+  it("leaves the grader on the reopened job, which is where the engine will read it", async () => {
+    const { runId, simulationId } = await aJudgedSimulation();
+
+    const asked = await regrade(auth, { runId, graderId });
+
+    // Echoed back, so a caller sees the ask that was actually made.
+    expect(asked?.graderId).toBe(graderId);
+    const reopened = await theJobFor(simulationId);
+    expect(reopened.status).toBe("pending");
+    expect(reopened.regradeGraderId).toBe(graderId);
+    expect(await narrowedTo(reopened.id)).toBe(graderId);
+  });
+
+  it("hands it to whoever claims the work, and takes it back when the work is done", async () => {
+    const { runId, simulationId } = await aJudgedSimulation();
+    await regrade(auth, { runId, graderId });
+    const job = await theJobFor(simulationId);
+
+    const claimant = "grader-narrowed";
+    const claimed = await claimGradingJobs({ claimant, capacity: 50 });
+    const mine = claimed.find((claim) => claim.id === job.id);
+    if (mine === undefined) throw new Error("the narrowed job was not claimed");
+
+    // The whole point of the column: the person who asked has gone, and the
+    // engine learns which grader they meant off the claim.
+    expect(mine.regradeGraderId).toBe(graderId);
+
+    const finished = await finishGradingJob(mine.auth, job.id, claimant);
+    // The instruction was for that one piece of work, and the work is done. A
+    // job that carried it forward would judge less and less of a conversation
+    // the more often anybody asked about it.
+    expect(finished?.regradeGraderId).toBeNull();
+    expect(await narrowedTo(job.id)).toBeNull();
+  });
+
+  it("starts from the whole conversation again the next time nobody names one", async () => {
+    const { runId, simulationId } = await aJudgedSimulation();
+    await regrade(auth, { runId, graderId });
+
+    const job = await theJobFor(simulationId);
+    const claimant = "grader-then-widened";
+    const claimed = await claimGradingJobs({ claimant, capacity: 50 });
+    const mine = claimed.find((claim) => claim.id === job.id);
+    if (mine === undefined) throw new Error("the narrowed job was not claimed");
+    await finishGradingJob(mine.auth, job.id, claimant);
+
+    const again = await regrade(auth, { runId });
+
+    expect(again?.graderId).toBeNull();
+    expect(again?.reopened.map((row) => row.regradeGraderId)).toEqual([null]);
+    expect(await narrowedTo(job.id)).toBeNull();
+  });
+
+  it("is not something reopening one job can ask for, so that verb never inherits one", async () => {
+    const { runId, simulationId } = await aJudgedSimulation();
+    await regrade(auth, { runId, graderId });
+
+    const job = await theJobFor(simulationId);
+    const claimant = "grader-before-the-reopen";
+    const claimed = await claimGradingJobs({ claimant, capacity: 50 });
+    const mine = claimed.find((claim) => claim.id === job.id);
+    if (mine === undefined) throw new Error("the narrowed job was not claimed");
+    await finishGradingJob(mine.auth, job.id, claimant);
+
+    // `reopenGradingJob` asks for the conversation and cannot ask for less, so
+    // it writes the un-narrowing rather than leaving whatever was last asked.
+    const reopened = await reopenGradingJob(auth, job.id);
+    expect(reopened?.regradeGraderId).toBeNull();
+  });
+
+  it("widens a conversation already waiting under a different grader, rather than judging neither", async () => {
+    const { runId, simulationId } = await aJudgedSimulation();
+    const otherGrader = await aGrader();
+
+    await regrade(auth, { runId, graderId });
+    const job = await theJobFor(simulationId);
+    expect(await narrowedTo(job.id)).toBe(graderId);
+
+    // A second ask about a different grader on work nobody has taken. Leaving
+    // it alone was sound while an outstanding job judged everything; a job
+    // queued for one grader would answer this one by judging neither.
+    const second = await regrade(auth, { runId, graderId: otherGrader });
+
+    expect(second?.reopened).toEqual([]);
+    expect(second?.alreadyWaiting).toBe(1);
+    expect(await narrowedTo(job.id)).toBeNull();
+  });
+
+  it("leaves a conversation waiting under the same grader exactly as it is", async () => {
+    const { runId, simulationId } = await aJudgedSimulation();
+
+    await regrade(auth, { runId, graderId });
+    const waiting = await theJobFor(simulationId);
+
+    const second = await regrade(auth, { runId, graderId });
+
+    expect(second?.reopened).toEqual([]);
+    expect(second?.alreadyWaiting).toBe(1);
+    expect(await getGradingJob(auth, waiting.id)).toEqual(waiting);
+  });
+
+  it("gives up on a narrowed job with the narrowing given up too", async () => {
+    const { runId, simulationId } = await aJudgedSimulation();
+    await regrade(auth, { runId, graderId });
+    const job = await theJobFor(simulationId);
+
+    // Three copies take it and vanish, which is what abandons it. egma is not
+    // going to judge this conversation for that grader, and a job left narrowed
+    // after it settles would hand the instruction to whoever reopens it next.
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      await claimGradingJobs({ claimant: `narrowed-${attempt}`, capacity: 50 });
+      await database.sql(
+        "update grading_job set heartbeat_at = now() - interval '1 hour' where id = $1",
+        [job.id],
+      );
+    }
+    await claimGradingJobs({ claimant: "narrowed-4", capacity: 50 });
+
+    expect((await getGradingJob(auth, job.id))?.status).toBe("abandoned");
+    expect(await narrowedTo(job.id)).toBeNull();
+  });
+
+  it("is refused by the table on work that has settled, rather than by every writer remembering", async () => {
+    const { simulationId } = await aJudgedSimulation();
+    const job = await theJobFor(simulationId);
+    expect(job.status).toBe("graded");
+
+    await expect(
+      database.sql(
+        "update grading_job set regrade_grader_id = $2 where id = $1",
+        [job.id, graderId],
+      ),
+    ).rejects.toThrow("grading_job_only_outstanding_work_is_narrowed");
+  });
+
+  it("answers with nothing at all for a grader nobody can reach", async () => {
+    const { runId, simulationId } = await aJudgedSimulation();
+    const theirs = await aGrader(outsider, "Globex's own");
+    const deleted = await aGrader();
+    await deleteGrader(auth, deleted);
+
+    // Another customer's, one that was never created, and one that has gone:
+    // three ways of naming a thing that is not there, and the same answer to
+    // all three — which is what keeps this call from confirming a grader exists.
+    expect(await regrade(auth, { runId, graderId: theirs })).toBeUndefined();
+    expect(
+      await regrade(auth, { runId, graderId: newId("grd") }),
+    ).toBeUndefined();
+    expect(await regrade(auth, { runId, graderId: deleted })).toBeUndefined();
+
+    // And nothing was reopened on the way to saying so.
+    expect((await theJobFor(simulationId)).status).toBe("graded");
+  });
+
+  it("refuses out loud a name that is not a grader identifier at all", async () => {
+    const { runId, simulationId } = await aJudgedSimulation();
+
+    await expect(
+      regrade(auth, { runId, graderId: "Answers inside two seconds" }),
+    ).rejects.toThrow("not one");
+    await expect(
+      regrade(auth, { runId, graderId: newId("tst") }),
+    ).rejects.toThrow("not one");
+
+    expect((await theJobFor(simulationId)).status).toBe("graded");
+  });
+
+  it("narrows a window exactly as it narrows a run", async () => {
+    const { simulationId } = await aJudgedSimulation();
+    const job = await theJobFor(simulationId);
+    await becameJudgeableAt(job.id, "2026-06-01T09:00:00Z");
+
+    const asked = await regrade(auth, {
+      window: {
+        from: new Date("2026-06-01T00:00:00Z"),
+        to: new Date("2026-06-02T00:00:00Z"),
+      },
+      graderId,
+    });
+
+    expect(asked?.graderId).toBe(graderId);
+    expect(asked?.reopened.map((row) => row.id)).toEqual([job.id]);
+    expect(await narrowedTo(job.id)).toBe(graderId);
+  });
+
+  it("is refused to a viewer, who cannot spend the judge on history at any width", async () => {
+    const { runId, simulationId } = await aJudgedSimulation();
+
+    await expect(
+      regrade(actingAsAcme("viewer"), { runId, graderId }),
+    ).rejects.toThrow(NotPermittedError);
+    expect((await theJobFor(simulationId)).status).toBe("graded");
   });
 });

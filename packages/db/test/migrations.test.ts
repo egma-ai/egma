@@ -560,3 +560,109 @@ describe("the simulation's test pin (0009)", () => {
     ]);
   });
 });
+
+describe("the re-grade's narrowing (0013)", () => {
+  let database: EmptyDatabase;
+  let beforeTheNarrowing: string;
+  let client: pg.Client;
+
+  const organizationId = newId("org");
+  const projectId = newId("prj");
+  const jobId = newId("gjb");
+  const traceId = "0123456789abcdef0123456789abcdef";
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("regrade_narrowing");
+
+    // The world as it was: every migration before the narrowing, in a directory
+    // of its own, so a conversation egma has already judged is sitting in the
+    // queue when 0013 arrives on top of it.
+    beforeTheNarrowing = await mkdtemp(
+      path.join(os.tmpdir(), "egma-before-0013-"),
+    );
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0013") {
+        await writeFile(
+          path.join(beforeTheNarrowing, migration.name),
+          migration.sql,
+        );
+      }
+    }
+    await runMigrations(database.url, beforeTheNarrowing);
+
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query(
+      "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
+      [organizationId],
+    );
+    await client.query(
+      "insert into project (id, organization_id, name, slug) values ($1, $2, 'Default', 'default')",
+      [projectId, organizationId],
+    );
+    // A production trace's job, because it is the source that needs no run and
+    // no simulation behind it — and a *graded* one, because a settled job is
+    // exactly what the check 0013 brings is about: a deployment with judged
+    // conversations in it must take the constraint rather than be rejected by it.
+    await client.query(
+      `insert into grading_job
+         (id, organization_id, project_id, source, trace_id, status,
+          first_span_at, last_span_at, last_seen_at, root_closed_at,
+          attempts, finished_at)
+       values ($1, $2, $3, 'production', $4, 'graded',
+               now(), now(), now(), now(), 1, now())`,
+      [jobId, organizationId, projectId, traceId],
+    );
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(beforeTheNarrowing, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("is what is still pending on a database that already holds judged conversations", async () => {
+    const result = await runMigrations(database.url);
+    expect(result.applied[0]).toBe("0013_regrade_narrowing.sql");
+    expect(result.applied.every((name) => name >= "0013")).toBe(true);
+  });
+
+  it("leaves the job that was already there narrowed to nothing, which is what every job starts as", async () => {
+    const { rows } = await client.query<{
+      id: string;
+      status: string;
+      regrade_grader_id: string | null;
+    }>("select id, status, regrade_grader_id from grading_job");
+
+    expect(rows).toEqual([
+      { id: jobId, status: "graded", regrade_grader_id: null },
+    ]);
+  });
+
+  it("brings the check that keeps a narrowing on work still outstanding", async () => {
+    // The settled row above is why this constraint could be added at all: it
+    // validates every row already in the table, and a null narrowing satisfies
+    // it whatever state the job is in.
+    const { rows } = await client.query<{ definition: string }>(
+      `select pg_get_constraintdef(oid) as definition from pg_constraint
+        where conname = 'grading_job_only_outstanding_work_is_narrowed'`,
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.definition).toContain("regrade_grader_id IS NULL");
+    expect(rows[0]?.definition).toContain("'pending'");
+    expect(rows[0]?.definition).toContain("'claimed'");
+  });
+
+  it("points the column at the grader table, so a narrowing names a grader that exists", async () => {
+    const { rows } = await client.query<{ definition: string }>(
+      `select pg_get_constraintdef(oid) as definition from pg_constraint
+        where conname = 'grading_job_regrade_grader_id_grader_id_fk'`,
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.definition).toMatch(
+      /FOREIGN KEY \(regrade_grader_id\) REFERENCES grader\(id\)/,
+    );
+  });
+});

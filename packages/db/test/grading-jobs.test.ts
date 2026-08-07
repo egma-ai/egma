@@ -547,6 +547,11 @@ describe("the claim", () => {
    * egma's own door made off the telemetry it accepted, in the same family as
    * the id and the tenancy. Nothing a customer wrote crosses here — no
    * transcript, no name, no configuration.
+   *
+   * The grader a re-grade narrowed to is here on the same terms: an identifier
+   * egma minted, saying which of this customer's graders to judge with, and
+   * never a word of what that grader says — which the engine reads for itself,
+   * through the scoped surface, with the context this claim hands back.
    */
   it("carries no conversation out of it — identifiers and tenancy, nothing else", async () => {
     await aCompletedSimulation();
@@ -567,6 +572,7 @@ describe("the claim", () => {
         "lastSpanAt",
         "organizationId",
         "projectId",
+        "regradeGraderId",
         "simulationId",
         "source",
         "traceId",
