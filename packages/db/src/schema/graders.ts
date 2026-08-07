@@ -114,6 +114,31 @@ export const grader = pgTable(
       .notNull()
       .default(100),
     /**
+     * How far this grader has got towards its next sampled trace, in the same
+     * per cent the rate is written in — **an accumulator, deliberately not a
+     * coin toss**.
+     *
+     * Every completed production trace adds the rate to it, and crossing a
+     * hundred is this grader's turn and takes a hundred back off. So a quarter
+     * is literally every fourth trace, and a rate that divides a hundred less
+     * neatly spends exactly what it accumulates and carries the remainder into
+     * the next stretch rather than rounding it away. A customer who chose 25%
+     * and watched four calls go by can point at the one that was judged.
+     * Randomness would bill the same in the long run and would make every
+     * skipped call unanswerable: "why was that one not judged" deserves a better
+     * answer than "it did not come up".
+     *
+     * A column rather than a table of its own, because it belongs to exactly one
+     * grader and is exactly one number. It is not versioned for the reason the
+     * rate beside it is not — how often a grader ran changes nothing about what
+     * any verdict already meant — and nothing that moves it touches
+     * `updated_at`, which says when somebody last *changed* this grader.
+     * Ordinary traffic is not an edit.
+     */
+    productionSampleAccumulator: integer("production_sample_accumulator")
+      .notNull()
+      .default(0),
+    /**
      * Circular with the version table on purpose; the constraint is deferred so
      * create can insert both rows in one transaction.
      */
@@ -137,6 +162,12 @@ export const grader = pgTable(
     check(
       "grader_production_sample_rate_is_a_percentage",
       sql`${table.productionSampleRate} between 0 and 100`,
+    ),
+    // What is left after the last hundred was taken off, so it is a remainder
+    // and never reaches a hundred itself.
+    check(
+      "grader_production_sample_accumulator_is_a_remainder",
+      sql`${table.productionSampleAccumulator} between 0 and 99`,
     ),
     // The pairing, not each column on its own: a grader cannot name one
     // organization and another organization's project.

@@ -64,6 +64,15 @@
  * trace store is filed by time and a read that named none would be the one
  * unfiltered scan this boundary exists to make unreachable.
  *
+ * `recordProductionTraces` sits beside `appendSpans` on that same path and is
+ * the other half of what the ingest door does with an export. It is handed the
+ * very same spans: the trace store gets the rows, and the grading queue gets one
+ * row per conversation saying when egma last heard about it and whether its root
+ * span closed. Taking the spans rather than a summary of them is what keeps
+ * "when is a conversation over" written down once. It is a queue write and a
+ * notification and never a judgment — grading happens in a service that holds no
+ * request open.
+ *
  * `appendVerdicts` and `readVerdicts` are the same two halves for the store's
  * other table. They need no window, because a verdict is filed under the
  * conversation it judges rather than under the minute it was written in, so
@@ -265,6 +274,7 @@ export {
 } from "./tests.ts";
 
 export {
+  advanceProductionSampling,
   createGrader,
   deleteGrader,
   editGrader,
@@ -341,8 +351,10 @@ export {
   claimGradingJobs,
   finishGradingJob,
   getGradingJob,
+  getGradingJobForTrace,
   listGradingJobsForSimulation,
   recordGradingHeartbeat,
+  recordProductionTraces,
   releaseGradingJob,
   watchGradingWork,
   type GradingClaim,

@@ -11,14 +11,17 @@ import {
   failSimulation,
   finishGradingJob,
   getGradingJob,
+  getGradingJobForTrace,
   listGradingJobsForSimulation,
   recordGradingHeartbeat,
+  recordProductionTraces,
   releaseGradingJob,
   startRun,
   startSimulation,
   sweepOrphanedSimulations,
   watchGradingWork,
   type AuthContext,
+  type NewSpan,
 } from "@egma/db";
 
 import {
@@ -163,6 +166,72 @@ afterAll(async () => {
   await database.drop();
 });
 
+/* ------------------------------------------------------------------- *
+ * The other source: telemetry at the door.
+ * ------------------------------------------------------------------- */
+
+let nextWireId = 0;
+
+/** An id off the wire — fixed-width hex, which egma's own format is not. */
+function wireId(bytes: 8 | 16): string {
+  nextWireId += 1;
+  return nextWireId.toString(16).padStart(bytes * 2, "0");
+}
+
+/**
+ * A span as the ingest door hands one over. Only four fields decide anything
+ * here — the trace it belongs to, whether it names a parent, when it began, and
+ * that it is production — so the rest are the door's own defaults.
+ */
+function aSpan(over: Partial<NewSpan> & { readonly traceId: string }): NewSpan {
+  return {
+    spanId: wireId(8),
+    parentSpanId: wireId(8),
+    source: "production",
+    emitter: "agent",
+    environment: "default",
+    startedAtMicroseconds: BigInt(Date.now()) * 1_000n,
+    durationNanoseconds: 1_000_000_000n,
+    name: "user_turn",
+    kind: "turn:human",
+    status: "unset",
+    text: "",
+    audioUrl: "",
+    toolName: "",
+    toolArguments: "",
+    toolResult: "",
+    providerCallId: "",
+    connectionType: "livekit",
+    audioSampleRateHz: 0,
+    audioEncoding: "",
+    runId: "",
+    agentId: "",
+    agentVersionId: "",
+    testVersionId: "",
+    personaVersionId: "",
+    payload: "{}",
+    ...over,
+  };
+}
+
+/** A root span: the one that names no parent, and so closes the conversation. */
+function aRootSpan(traceId: string, startedAt = Date.now()): NewSpan {
+  return aSpan({
+    traceId,
+    parentSpanId: "",
+    name: "agent_session",
+    kind: "root",
+    startedAtMicroseconds: BigInt(startedAt) * 1_000n,
+  });
+}
+
+/** The job standing behind a trace, or a loud failure. */
+async function theJobForTrace(traceId: string) {
+  const job = await getGradingJobForTrace(auth, traceId);
+  if (job === undefined) throw new Error(`no job for trace ${traceId}`);
+  return job;
+}
+
 describe("a terminal transition", () => {
   it("makes the conversation claimable work, in the same commit", async () => {
     const simulationId = await aCompletedSimulation();
@@ -243,6 +312,207 @@ describe("a terminal transition", () => {
   });
 });
 
+/**
+ * A production trace has no transaction to ride, so its job is written at the
+ * door on the first export that mentions it and completed later — by the root
+ * span arriving, or by nothing arriving at all for long enough.
+ */
+describe("a production trace at the door", () => {
+  it("becomes known on the first export, and is not claimable while it is still happening", async () => {
+    const traceId = wireId(16);
+    await recordProductionTraces(auth, [aSpan({ traceId })]);
+
+    expect(await theJobForTrace(traceId)).toMatchObject({
+      traceId,
+      source: "production",
+      simulationId: null,
+      status: "pending",
+      rootClosedAt: null,
+      organizationId: acme.organization,
+      projectId: acme.project,
+    });
+
+    // Pending, and deliberately not claimable: the conversation has not ended,
+    // and judging half of one would be a verdict about a call still going on.
+    const claimed = await claimGradingJobs({
+      claimant: "grader-early",
+      capacity: 50,
+    });
+    expect(claimed.some((claim) => claim.traceId === traceId)).toBe(false);
+  });
+
+  it("is one job however many flushes it arrives in, and the window is the widest anybody sent", async () => {
+    const traceId = wireId(16);
+    const middle = Date.now();
+
+    // Out of order on purpose. An exporter flushes when its queue fills or its
+    // timer fires, and nothing promises the batches arrive in the order the
+    // spans happened.
+    await recordProductionTraces(auth, [
+      aSpan({ traceId, startedAtMicroseconds: BigInt(middle) * 1_000n }),
+    ]);
+    await recordProductionTraces(auth, [
+      aSpan({
+        traceId,
+        startedAtMicroseconds: BigInt(middle + 30_000) * 1_000n,
+      }),
+      aSpan({
+        traceId,
+        startedAtMicroseconds: BigInt(middle - 30_000) * 1_000n,
+      }),
+    ]);
+
+    const job = await theJobForTrace(traceId);
+    expect(job.firstSpanAt?.getTime()).toBe(middle - 30_000);
+    expect(job.lastSpanAt?.getTime()).toBe(middle + 30_000);
+
+    // One row, and nothing in the module is what makes it one: a second job for
+    // a trace is unrepresentable, which is what stops any conversation ever
+    // being judged twice.
+    await expect(
+      database.sql(
+        "insert into grading_job (id, organization_id, project_id, source, trace_id, status, first_span_at, last_span_at, last_seen_at) values ($1, $2, $3, 'production', $4, 'pending', now(), now(), now())",
+        [newId("gjb"), acme.organization, acme.project, traceId],
+      ),
+    ).rejects.toMatchObject({ code: POSTGRES_ERROR.uniqueViolation });
+  });
+
+  it("is claimable the moment its root span closes it", async () => {
+    const traceId = wireId(16);
+    await recordProductionTraces(auth, [aSpan({ traceId })]);
+    await recordProductionTraces(auth, [aRootSpan(traceId)]);
+
+    expect((await theJobForTrace(traceId)).rootClosedAt).toBeInstanceOf(Date);
+
+    const claimed = await claimGradingJobs({
+      claimant: "grader-on-a-closed-root",
+      capacity: 50,
+    });
+    const mine = claimed.find((claim) => claim.traceId === traceId);
+
+    expect(mine).toMatchObject({
+      source: "production",
+      simulationId: null,
+      organizationId: acme.organization,
+      projectId: acme.project,
+    });
+    // The window travels with the claim, because the trace store is filed by
+    // the minute a span started in and a read naming only a trace would have
+    // nothing to prune with.
+    expect(mine?.firstSpanAt).toBeInstanceOf(Date);
+    expect(mine?.lastSpanAt).toBeInstanceOf(Date);
+  });
+
+  it("is completed by the idle window when its root span never closes", async () => {
+    const traceId = wireId(16);
+    await recordProductionTraces(auth, [aSpan({ traceId })]);
+
+    // Nothing has arrived for a while, which is the only signal there is: the
+    // event this waits for is the absence of events, so no notification can
+    // ever be raised for it and the claim query is what finds it.
+    await database.sql(
+      "update grading_job set last_seen_at = now() - interval '10 minutes' where trace_id = $1",
+      [traceId],
+    );
+
+    const claimed = await claimGradingJobs({
+      claimant: "grader-sweeping",
+      capacity: 50,
+      idleSeconds: 60,
+    });
+    const mine = claimed.find((claim) => claim.traceId === traceId);
+    expect(mine).toBeDefined();
+    // Judged with no root ever closing it, and the row still says so.
+    expect((await theJobForTrace(traceId)).rootClosedAt).toBeNull();
+  });
+
+  it("waits for the whole idle window, not part of it", async () => {
+    const traceId = wireId(16);
+    await recordProductionTraces(auth, [aSpan({ traceId })]);
+    await database.sql(
+      "update grading_job set last_seen_at = now() - interval '30 seconds' where trace_id = $1",
+      [traceId],
+    );
+
+    const claimed = await claimGradingJobs({
+      claimant: "grader-impatient",
+      capacity: 50,
+      idleSeconds: 300,
+    });
+    expect(claimed.some((claim) => claim.traceId === traceId)).toBe(false);
+  });
+
+  it("is not resurrected by a late export, however loudly it says the trace ended", async () => {
+    const traceId = wireId(16);
+    await recordProductionTraces(auth, [aSpan({ traceId }), aRootSpan(traceId)]);
+
+    const [claim] = (
+      await claimGradingJobs({ claimant: "grader-beta", capacity: 50 })
+    ).filter((each) => each.traceId === traceId);
+    if (claim === undefined) throw new Error("the trace was not claimed");
+    await finishGradingJob(auth, claim.id, "grader-beta");
+
+    const graded = await theJobForTrace(traceId);
+    expect(graded.status).toBe("graded");
+
+    // A straggling flush, a root span in it and all. Re-grading history is
+    // something somebody asks for, never something a late export causes.
+    await recordProductionTraces(auth, [aRootSpan(traceId)]);
+
+    const after = await theJobForTrace(traceId);
+    expect(after.status).toBe("graded");
+    expect(after.finishedAt).toEqual(graded.finishedAt);
+    expect(after.lastSeenAt).toEqual(graded.lastSeenAt);
+
+    const again = await claimGradingJobs({
+      claimant: "grader-gamma",
+      capacity: 50,
+    });
+    expect(again.some((each) => each.traceId === traceId)).toBe(false);
+  });
+
+  it("records nothing for a credential acting in no project", async () => {
+    const traceId = wireId(16);
+    const wholeCustomer: AuthContext = {
+      ...actingAsAcme(),
+      projectId: undefined,
+      via: "api_key",
+    };
+
+    await recordProductionTraces(wholeCustomer, [
+      aSpan({ traceId }),
+      aRootSpan(traceId),
+    ]);
+
+    // Its spans file under the store's own sentinel, which is not a project row
+    // and could not carry the tenancy a job needs — and graders belong to
+    // projects, so the trace has nothing to be judged by in the first place.
+    expect(await getGradingJobForTrace(wholeCustomer, traceId)).toBeUndefined();
+  });
+
+  it("records nothing for a simulation's own spans, whoever exported them", async () => {
+    const traceId = wireId(16);
+    // Simulations reach the queue through the transaction that ends them. When
+    // egma's own runtime starts exporting through this door, its spans must not
+    // make a second job for a conversation that already has one.
+    await recordProductionTraces(auth, [
+      aSpan({ traceId, source: "simulation" }),
+      { ...aRootSpan(traceId), source: "simulation" },
+    ]);
+
+    expect(await getGradingJobForTrace(auth, traceId)).toBeUndefined();
+  });
+
+  it("belongs to one customer, and another cannot see it", async () => {
+    const traceId = wireId(16);
+    await recordProductionTraces(auth, [aSpan({ traceId }), aRootSpan(traceId)]);
+
+    expect(
+      await getGradingJobForTrace(actingAsGlobex(), traceId),
+    ).toBeUndefined();
+  });
+});
+
 describe("the claim", () => {
   it("hands back the job with the context it is graded under", async () => {
     const simulationId = await aCompletedSimulation();
@@ -271,6 +541,13 @@ describe("the claim", () => {
     });
   });
 
+  /**
+   * The window a production trace is read inside travels with the claim, and it
+   * belongs on this list rather than beside it: those two instants are stamps
+   * egma's own door made off the telemetry it accepted, in the same family as
+   * the id and the tenancy. Nothing a customer wrote crosses here — no
+   * transcript, no name, no configuration.
+   */
   it("carries no conversation out of it — identifiers and tenancy, nothing else", async () => {
     await aCompletedSimulation();
     const [claim] = await claimGradingJobs({
@@ -285,11 +562,14 @@ describe("the claim", () => {
         "auth",
         "claimedAt",
         "claimedBy",
+        "firstSpanAt",
         "id",
+        "lastSpanAt",
         "organizationId",
         "projectId",
         "simulationId",
         "source",
+        "traceId",
       ].sort(),
     );
   });

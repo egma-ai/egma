@@ -1,5 +1,5 @@
 import { newId } from "@egma/ids";
-import { and, desc, eq, isNull, lt, type SQL } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, sql, type SQL } from "drizzle-orm";
 
 import { db } from "../client.ts";
 import {
@@ -1195,6 +1195,67 @@ export async function listGraders(
 
   const { items, nextCursor } = pageOf(rows, limit);
   return { items: items.map(answer), nextCursor };
+}
+
+/**
+ * Whether this grader judges the production trace in front of it — and the
+ * accumulator moved on by one trace, whatever the answer.
+ *
+ * **Deterministic, and that is the entire point.** The rate is added to the
+ * accumulator; crossing a hundred is this grader's turn and takes a hundred back
+ * off. A quarter is every fourth trace, exactly; a hundred per cent is all of
+ * them and nought per cent is none; a rate that divides a hundred less neatly
+ * spends what it accumulates and carries the remainder rather than rounding it
+ * away. A customer who chose 25% and watched four calls go past can be shown
+ * which one was judged and why the other three were not, which is an answer
+ * randomness cannot give at any price.
+ *
+ * The crossing is read back off the accumulator rather than remembered: after
+ * adding a rate under a hundred, the remainder is *below* the rate exactly when
+ * a hundred came off it, because what is left is `before + rate - 100` and
+ * `before` was under a hundred to begin with. At a hundred per cent the
+ * accumulator never moves and is always under the rate — every trace, as
+ * promised — and at nought it never moves and is never under it. So the whole
+ * rule is one statement with no read before the write, which is also what makes
+ * two copies of the grader service judging two traces at once share one sequence
+ * instead of racing to the same tick.
+ *
+ * **Forward only.** The accumulator says where sampling has got to and nothing
+ * about which traces were judged, so raising a rate speeds the next decision up
+ * and lowering it slows the next one down; neither reaches back. Nothing is
+ * re-judged and nothing is deleted, on exactly the same terms as an edit to a
+ * scope.
+ *
+ * A retried job takes another tick. A copy of the service that died mid-judgment
+ * and a second copy that picks the conversation up are two decisions about one
+ * trace, and the phase shifts by one — never the rate. The alternative is
+ * remembering every trace every grader ever declined, which is a table that
+ * grows with traffic to answer a question nobody asks.
+ *
+ * No permission is asked for, on the same terms as `appendVerdicts`: what may
+ * judge is decided by holding the claim, and this is egma's own count of how
+ * often it did rather than anything the customer wrote. A grader nobody can
+ * reach from this context judges nothing — the safe direction, and the only one.
+ */
+export async function advanceProductionSampling(
+  auth: AuthContext,
+  graderId: string,
+): Promise<boolean> {
+  const [row] = await db()
+    .update(grader)
+    .set({
+      productionSampleAccumulator: sql`(${grader.productionSampleAccumulator} + ${grader.productionSampleRate}) % 100`,
+    })
+    // Deliberately not `updated_at`: this is traffic passing, not somebody
+    // editing a grader, and a definition whose modified time moved every time a
+    // call came in would make "what changed on Tuesday" unanswerable.
+    .where(theGrader(auth, graderId))
+    .returning({
+      accumulator: grader.productionSampleAccumulator,
+      rate: grader.productionSampleRate,
+    });
+
+  return row !== undefined && row.accumulator < row.rate;
 }
 
 export type DeletedGrader = {

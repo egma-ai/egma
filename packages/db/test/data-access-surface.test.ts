@@ -95,9 +95,16 @@ const WORK_DISPATCHING = ["claimGradingJobs", "watchGradingWork"];
  * `appendVerdicts` and `readVerdicts` are the same two halves for the store's
  * other table. They need no window because a verdict is filed under the
  * conversation it judges, so naming the conversation is already the bound.
+ *
+ * `recordProductionTraces` is here rather than among the work-dispatching pair,
+ * and that is the whole shape of production grading: the door that already knows
+ * whose spans these are writes the queue row, with the tenancy it already
+ * resolved, so nothing on the judging side ever has to ask across customers what
+ * has finished.
  */
 const CONTEXT_REQUIRING = [
   "addConnection",
+  "advanceProductionSampling",
   "appendSpans",
   "appendVerdicts",
   "cancelRun",
@@ -128,6 +135,7 @@ const CONTEXT_REQUIRING = [
   "getGrader",
   "getGraderVersion",
   "getGradingJob",
+  "getGradingJobForTrace",
   "getPersona",
   "getPersonaVersion",
   "getRun",
@@ -156,6 +164,7 @@ const CONTEXT_REQUIRING = [
   "readVerdicts",
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
+  "recordProductionTraces",
   "recordSimulationHeartbeat",
   "releaseGradingJob",
   "removeConnection",
