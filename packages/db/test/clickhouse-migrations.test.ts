@@ -21,11 +21,22 @@ const SORTING_KEY =
   "organization_id, project_id, toStartOfMinute(started_at), xxHash32(trace_id), span_id";
 const PARTITION_KEY = "toYYYYMM(started_at)";
 
+/**
+ * The verdicts table's identity, which is what a `ReplacingMergeTree` collapses
+ * on: the customer, the conversation, the grader, the version of it, the
+ * dimension, where the conversation came from, and who judged. Every part after
+ * the third is there so that a re-grade adds a row rather than losing one.
+ */
+const VERDICT_IDENTITY =
+  "organization_id, project_id, trace_id, grader_id, grader_version_id, " +
+  "dimension, source, judged_by";
+
 type Table = {
   readonly name: string;
   readonly engine: string;
   readonly sorting_key: string;
   readonly partition_key: string;
+  readonly primary_key: string;
 };
 
 function fixture(name: string): string {
@@ -174,6 +185,7 @@ describe("four instances booting at the same moment", () => {
       "spans",
       "turns",
       "turns_mv",
+      "verdicts",
     ]);
 
     const ledger = await rowsIn<{ name: string }>(
@@ -259,11 +271,21 @@ describe("the schema a boot leaves behind", () => {
 
   async function tableNamed(name: string): Promise<Table | undefined> {
     const [table] = await store.rows<Table>(
-      `select name, engine, sorting_key, partition_key
+      `select name, engine, sorting_key, partition_key, primary_key
          from system.tables
         where database = '${store.name}' and name = '${name}'`,
     );
     return table;
+  }
+
+  async function typesOf(
+    table: string,
+  ): Promise<(name: string) => string | undefined> {
+    const columns = await store.rows<{ name: string; type: string }>(
+      `select name, type from system.columns
+        where database = '${store.name}' and table = '${table}'`,
+    );
+    return (name) => columns.find((column) => column.name === name)?.type;
   }
 
   it("files spans by organization, project, minute, trace and span", async () => {
@@ -291,12 +313,7 @@ describe("the schema a boot leaves behind", () => {
   });
 
   it("keeps the provider's payload verbatim beside the normalised columns", async () => {
-    const columns = await store.rows<{ name: string; type: string }>(
-      `select name, type from system.columns
-        where database = '${store.name}' and table = 'spans'`,
-    );
-    const typeOf = (name: string) =>
-      columns.find((column) => column.name === name)?.type;
+    const typeOf = await typesOf("spans");
 
     expect(typeOf("payload")).toBe("String");
     expect(typeOf("trace_id")).toBe("String");
@@ -318,6 +335,151 @@ describe("the schema a boot leaves behind", () => {
     const turns = await tableNamed("turns");
     expect(turns?.sorting_key).toBe(SORTING_KEY);
     expect(turns?.partition_key).toBe(PARTITION_KEY);
+  });
+
+  /**
+   * The verdicts table arrived as one additive file, long after the two above.
+   * This is the guard on what "additive" means: the big table and the view over
+   * it are byte for byte what the first migration left, because a chain that
+   * rewrites `spans` to add a small table beside it is a chain that will rewrite
+   * it again for the next one.
+   */
+  it("leaves spans and its view exactly as the first migration wrote them", async () => {
+    const spans = await tableNamed("spans");
+    expect(spans?.engine).toBe("MergeTree");
+    expect(spans?.sorting_key).toBe(SORTING_KEY);
+    expect(spans?.partition_key).toBe(PARTITION_KEY);
+
+    const spanTypeOf = await typesOf("spans");
+    // Nothing was added to the row, and nothing named `verdict` crept onto it:
+    // a judgment is a row of its own table, made after the conversation, and a
+    // column here would be the one thing a later grading would have to rewrite.
+    for (const name of ["verdict", "score", "grader_id", "grader_version_id"]) {
+      expect(spanTypeOf(name)).toBeUndefined();
+    }
+
+    const turns = await tableNamed("turns");
+    expect(turns?.sorting_key).toBe(SORTING_KEY);
+    expect(turns?.partition_key).toBe(PARTITION_KEY);
+    expect((await tableNamed("turns_mv"))?.engine).toBe("MaterializedView");
+  });
+
+  it("collapses a verdict only onto the identical judgment", async () => {
+    const verdicts = await tableNamed("verdicts");
+
+    expect(verdicts?.engine).toBe("ReplacingMergeTree");
+    expect(verdicts?.sorting_key).toBe(VERDICT_IDENTITY);
+
+    // The later judgment wins, which is what makes a re-run after a transient
+    // error a correction rather than a second opinion.
+    const [created] = await store.rows<{ create_table_query: string }>(
+      `select create_table_query from system.tables
+        where database = '${store.name}' and name = 'verdicts'`,
+    );
+    expect(created?.create_table_query).toMatch(
+      /ReplacingMergeTree\(event_ts\)/,
+    );
+  });
+
+  /**
+   * A `ReplacingMergeTree` collapses rows inside a partition and never across
+   * one, so a partition key derived from a clock would leave a re-run that
+   * happened to land in the next month as two rows forever. The table is small
+   * enough not to need one, so it does not have one — and this says so, because
+   * adding a partition key later would look like an optimisation and would
+   * quietly break the collapse.
+   */
+  it("files verdicts in one partition, so an identity can never straddle two", async () => {
+    const verdicts = await tableNamed("verdicts");
+    expect(verdicts?.partition_key).toBe("");
+    // The index prunes on the customer and the conversation; the rest of the
+    // sorting key is there to collapse rows, which happens after the granule
+    // has been found.
+    expect(verdicts?.primary_key).toBe(
+      "organization_id, project_id, trace_id",
+    );
+  });
+
+  it("types a verdict's columns as the vocabulary they hold", async () => {
+    const typeOf = await typesOf("verdicts");
+
+    // Closed vocabularies, so the store refuses a fifth word rather than filing
+    // it. `skipped` and `errored` are in the enum because they must never be
+    // collapsed into `failed`.
+    expect(typeOf("verdict")).toBe(
+      "Enum8('passed' = 1, 'failed' = 2, 'skipped' = 3, 'errored' = 4)",
+    );
+    expect(typeOf("priority")).toBe("Enum8('P0' = 0, 'P1' = 1, 'P2' = 2)");
+
+    // Tenancy takes the shape it has on `spans`, and so does `source`: the two
+    // tables are read together and a word that meant two things would make that
+    // impossible.
+    expect(typeOf("organization_id")).toBe("LowCardinality(String)");
+    expect(typeOf("project_id")).toBe("LowCardinality(String)");
+    expect(typeOf("source")).toBe("LowCardinality(String)");
+    expect(typeOf("judged_by")).toBe("LowCardinality(String)");
+
+    expect(typeOf("trace_id")).toBe("String");
+    expect(typeOf("grader_id")).toBe("String");
+    expect(typeOf("grader_version_id")).toBe("String");
+    expect(typeOf("dimension")).toBe("String");
+    expect(typeOf("score")).toBe("Float64");
+    expect(typeOf("rationale")).toBe("String");
+    expect(typeOf("cited_span_ids")).toBe("Array(String)");
+    expect(typeOf("run_id")).toBe("String");
+    expect(typeOf("agent_id")).toBe("String");
+    expect(typeOf("agent_version_id")).toBe("String");
+    expect(typeOf("event_ts")).toBe("DateTime64(6, 'UTC')");
+  });
+
+  /**
+   * The fold divides by this number, so a row outside 0 to 1 would not be one
+   * wrong figure — it would be a wrong figure everywhere the row is ever
+   * counted. Refused at the door instead.
+   */
+  it("refuses a score that is not a proportion", async () => {
+    const judgment = {
+      organization_id: "org_01JQZ0000000000000000000AA",
+      trace_id: "cccccccccccccccccccccccccccccccc",
+      grader_id: "grd_01JQZ0000000000000000000AA",
+      grader_version_id: "grdv_01JQZ0000000000000000000AA",
+      dimension: "confirms the appointment time",
+      source: "simulation",
+      judged_by: "engine",
+      verdict: "passed",
+      priority: "P0",
+      event_ts: "2026-08-07 09:00:00.000000",
+    };
+
+    await expect(
+      store.append("verdicts", [{ ...judgment, score: 1.5 }]),
+    ).rejects.toThrow(/Constraint `score_is_a_proportion`.*is violated/);
+    await expect(
+      store.append("verdicts", [{ ...judgment, score: -0.1 }]),
+    ).rejects.toThrow(/Constraint `score_is_a_proportion`.*is violated/);
+
+    await store.append("verdicts", [{ ...judgment, score: 1 }]);
+    expect(await store.rows("select 1 from verdicts")).toHaveLength(1);
+  });
+
+  it("refuses a word that is not one of the four", async () => {
+    await expect(
+      store.append("verdicts", [
+        {
+          organization_id: "org_01JQZ0000000000000000000AA",
+          trace_id: "dddddddddddddddddddddddddddddddd",
+          grader_id: "grd_01JQZ0000000000000000000AA",
+          grader_version_id: "grdv_01JQZ0000000000000000000AA",
+          dimension: "confirms the appointment time",
+          source: "simulation",
+          judged_by: "engine",
+          verdict: "inconclusive",
+          score: 0.5,
+          priority: "P0",
+          event_ts: "2026-08-07 09:00:00.000000",
+        },
+      ]),
+    ).rejects.toThrow(/UNKNOWN_ELEMENT_OF_ENUM|Unknown element/);
   });
 });
 
