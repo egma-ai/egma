@@ -1,6 +1,8 @@
 import type { ToolExpectation } from "@egma/db";
 
+import { textOf } from "../judge/index.ts";
 import { theOneCheck, type ExecutionOf, type Judgment } from "./contract.ts";
+import { heldRationale } from "./rule-shelf.ts";
 
 /**
  * The tools that had to fire and the tools that must never have — judged from
@@ -29,26 +31,11 @@ import { theOneCheck, type ExecutionOf, type Judgment } from "./contract.ts";
  * ## One grader, one dimension
  *
  * A `tool_calls` grader names one dimension — its own type — however many rules
- * it holds, and the rationale names every rule that was broken.
- *
- * **Because a dimension name may derive nothing from the config.** The fold
- * counts one dimension once, keyed by the conversation, the grader and the
- * name, and prefers the latest grading of it. A per-rule dimension could only be
- * named out of the config — by the tool's name, which an edit changes, or by its
- * position, which a reorder changes — so a grader edited from three required
- * tools to two would leave the third rule's row behind, speaking forever about a
- * rule that no longer exists, with no later grading able to supersede it. The
- * built-in behaviors grader escapes that by filing under the frozen test version
- * a conversation was executed against, which never changes for that conversation;
- * an authored grader has no such pin, because editing it is exactly what it is
- * for.
- *
- * **And because a rule shelf is one policy.** "These tools must fire, and this
- * one must never" is one thing a team decided. Two thirds of a compliance rule
- * is not a pass, and a score of 0.67 would say it was. So the verdict is one
- * word about the whole shelf, and the granularity a developer needs lives where
- * they will actually read it: in the rationale, which names the rules that were
- * broken and nothing else.
+ * it holds, and the rationale names every rule that was broken. Here the rule
+ * that could not be a dimension is a tool's name, which an edit changes, or its
+ * position in the shelf, which a reorder changes; `rule-shelf.ts` carries why
+ * that rules out a per-rule dimension for either shelf, and why one shelf is one
+ * policy rather than a proportion of one.
  */
 export function executeToolCalls(
   execution: ExecutionOf<"tool_calls">,
@@ -101,7 +88,9 @@ export function executeToolCalls(
       dimension: theOneCheck("tool_calls"),
       verdict: passed ? "passed" : "failed",
       score: passed ? 1 : 0,
-      rationale: passed ? heldRationale(config) : broken.join("; ") + ".",
+      rationale: passed
+        ? heldRationale(whatHeld(config), "tools")
+        : broken.join("; ") + ".",
       // Empty, and honestly so. A tool call is not a turn: the simulator
       // records it as its own event, with no position in the transcript, so
       // there is no turn to point a reader at. When a simulation's tool calls
@@ -128,7 +117,9 @@ type ObservedCall = {
  * that is not a tool call event with a name on it is not a tool call. Read the
  * same way `judgeInputOf` reads it, deliberately: a judge and this grader
  * looking at two different lists of tool calls would be two answers to one
- * question.
+ * question. The reading of a field is literally the judge input's `textOf`
+ * rather than a copy of it, so "the same way" is a fact about the code and not
+ * an intention stated in a comment.
  */
 function observedCalls(events: unknown): readonly ObservedCall[] {
   if (!Array.isArray(events)) return [];
@@ -145,10 +136,6 @@ function observedCalls(events: unknown): readonly ObservedCall[] {
     called.push({ tool, arguments: argumentsOf(fields["arguments"]) });
   }
   return called;
-}
-
-function textOf(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
 /**
@@ -250,17 +237,11 @@ function howOften(times: number): string {
   return times === 1 ? "once" : `${times} times`;
 }
 
-/**
- * What a shelf that held says about itself.
- *
- * It names the rules rather than saying "all checks passed", because a verdict
- * somebody is reading a week later has to say what was actually checked — a bare
- * "passed" is a row that cannot be audited against the config it came from.
- */
-function heldRationale(config: {
+/** What this shelf holds, as the clauses a rationale is written out of. */
+function whatHeld(config: {
   readonly required: readonly ToolExpectation[];
   readonly forbidden: readonly ToolExpectation[];
-}): string {
+}): readonly string[] {
   const said: string[] = [];
   if (config.required.length > 0) {
     said.push(`${config.required.map(named).join(", ")} fired`);
@@ -268,9 +249,5 @@ function heldRationale(config: {
   if (config.forbidden.length > 0) {
     said.push(`${config.forbidden.map(named).join(", ")} never fired`);
   }
-  // The write door refuses a shelf naming neither, because one that names
-  // neither can never fail. A row hand-edited past it says so out loud rather
-  // than passing with an empty sentence.
-  if (said.length === 0) return "this grader names no tools, so nothing was checked.";
-  return `${said.join(", and ")}.`;
+  return said;
 }

@@ -2,6 +2,7 @@ import type { Phrase, PhraseSpeaker } from "@egma/db";
 
 import { judgeInputOf, turnReference, type Turn } from "../judge/index.ts";
 import { theOneCheck, type ExecutionOf, type Judgment } from "./contract.ts";
+import { heldRationale } from "./rule-shelf.ts";
 
 /**
  * The disclosure that had to be said and the promise that must not have been —
@@ -29,20 +30,11 @@ import { theOneCheck, type ExecutionOf, type Judgment } from "./contract.ts";
  *
  * A `phrase_match` grader names one dimension — its own type — however many
  * phrases it holds, and the rationale names every phrase that broke the rule,
- * with the turns it was found in cited.
- *
- * **Because a dimension name may derive nothing from the config.** The fold
- * counts one dimension once, keyed by the conversation, the grader and the
- * name, and prefers the latest grading of it. A per-phrase dimension could only
- * be named out of the config — by the phrase's text, which an edit changes, or
- * by its position, which a reorder changes — so a grader edited from three
- * banned phrases to two would leave the third phrase's row behind, speaking
- * forever about a phrase nobody is checking any more, with no later grading able
- * to supersede it.
- *
- * **And because a phrase list is one policy.** "Say the disclosure, never
- * promise a refund" is one thing a compliance team decided; two thirds of it is
- * not a pass, and a score of 0.67 would say it was.
+ * with the turns it was found in cited. Here the rule that could not be a
+ * dimension is a phrase's own text, which an edit changes, or its position in
+ * the list, which a reorder changes; `rule-shelf.ts` carries why that rules out
+ * a per-rule dimension for either shelf, and why one shelf is one policy rather
+ * than a proportion of one.
  *
  * ## A pattern that will not compile
  *
@@ -112,7 +104,9 @@ export function executePhraseMatch(
       dimension,
       verdict: passed ? "passed" : "failed",
       score: passed ? 1 : 0,
-      rationale: passed ? heldRationale(config) : `${broken.join("; ")}.`,
+      rationale: passed
+        ? heldRationale(whatHeld(config), "phrases")
+        : `${broken.join("; ")}.`,
       // The turns this judgment is actually about: where a required phrase was
       // found, and where a banned one was. A reader clicks straight to the
       // sentence rather than searching the transcript for it.
@@ -215,16 +209,12 @@ function turnsInWords(turns: readonly Turn[]): string {
   return `${numbers.slice(0, -1).join(", ")} and ${numbers[numbers.length - 1]}`;
 }
 
-/**
- * What a list that held says about itself — the phrases by name, because a
- * verdict read a week later has to say what was checked, and a bare "passed" is
- * a row nobody can audit against the config it came from.
- */
-function heldRationale(config: {
+/** What this shelf holds, as the clauses a rationale is written out of. */
+function whatHeld(config: {
   readonly required: readonly Phrase[];
   readonly banned: readonly Phrase[];
   readonly speaker: PhraseSpeaker;
-}): string {
+}): readonly string[] {
   const where = said(config.speaker);
   const parts: string[] = [];
   if (config.required.length > 0) {
@@ -233,11 +223,5 @@ function heldRationale(config: {
   if (config.banned.length > 0) {
     parts.push(`${config.banned.map(describing).join(", ")} was never ${where}`);
   }
-  // The write door refuses a list naming neither, because one that names
-  // neither can never fail. A row hand-edited past it says so out loud rather
-  // than passing with an empty sentence.
-  if (parts.length === 0) {
-    return "this grader names no phrases, so nothing was checked.";
-  }
-  return `${parts.join(", and ")}.`;
+  return parts;
 }

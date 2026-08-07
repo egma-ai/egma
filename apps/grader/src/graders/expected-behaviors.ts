@@ -8,14 +8,13 @@ import {
 import type { Conversation } from "../conversation.ts";
 import {
   judgeInputOf,
-  turnReference,
   NoJudge,
-  type JudgeAnswer,
   type JudgeMakers,
   type JudgeQuestion,
   type JudgeResolution,
 } from "../judge/index.ts";
 import type { Judgment } from "./contract.ts";
+import { judgmentOf } from "./judged.ts";
 
 /**
  * The built-in grader: a test's expected behaviors, judged one at a time.
@@ -182,7 +181,14 @@ export async function judgeExpectedBehaviors(
         evidence,
       };
       try {
-        return asJudgment(behavior, at, await judge.ask(question), turns);
+        return {
+          priority: behavior.priority,
+          judgment: judgmentOf(
+            behaviorDimension(at),
+            await judge.ask(question),
+            turns,
+          ),
+        };
       } catch (error) {
         // One judge call falling over is one `errored` row. Every sibling's
         // answer still lands, and this one says out loud that egma could not
@@ -209,40 +215,6 @@ export async function judgeExpectedBehaviors(
  */
 function behaviorDimension(at: number): string {
   return `behavior_${at + 1}`;
-}
-
-/** One judge's answer, as the verdict row it becomes. */
-function asJudgment(
-  behavior: ExpectedBehavior,
-  at: number,
-  answer: JudgeAnswer,
-  turns: number,
-): BehaviorJudgment {
-  const verdict =
-    answer.decision === "met"
-      ? "passed"
-      : answer.decision === "not_met"
-        ? "failed"
-        : "skipped";
-
-  return {
-    priority: behavior.priority,
-    judgment: {
-      dimension: behaviorDimension(at),
-      verdict,
-      // A behavior is met or it is not; there is no half of a written-down
-      // expectation. `skipped` scores zero and is out of the denominator, so
-      // the number it carries is never counted either way.
-      score: verdict === "passed" ? 1 : 0,
-      rationale: answer.rationale,
-      // Only turns that are actually in the transcript. A judgment citing turn
-      // nine of a seven-turn conversation is pointing a reader at nothing, and
-      // dropping it is better than filing evidence nobody can look up.
-      citedSpanIds: answer.citedTurns
-        .filter((cited) => cited >= 1 && cited <= turns)
-        .map(turnReference),
-    },
-  };
 }
 
 /** egma could not judge this. Never `failed`: nothing is said about the agent. */

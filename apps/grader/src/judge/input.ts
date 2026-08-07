@@ -117,7 +117,20 @@ function objectsOf(value: unknown): readonly Record<string, unknown>[] {
   );
 }
 
-function textOf(value: unknown): string | undefined {
+/**
+ * One field of a jsonb column as something somebody wrote, or `undefined` when
+ * there is nothing there to read.
+ *
+ * **Blank is absent**, deliberately: a transcript entry holding an empty string
+ * is a turn with nothing said in it, and a tool call event naming `""` names no
+ * tool.
+ *
+ * Exported because the `tool_calls` grader reads the same column and has to see
+ * the same tool calls a judge is shown. Two readings of one shapeless column
+ * would be two answers to one question, and the way to stop that is one reading
+ * rather than two careful ones.
+ */
+export function textOf(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 

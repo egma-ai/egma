@@ -1,10 +1,6 @@
-import {
-  judgeInputOf,
-  turnReference,
-  NoJudge,
-  type JudgeAnswer,
-} from "../judge/index.ts";
+import { judgeInputOf, NoJudge } from "../judge/index.ts";
 import { theOneCheck, type ExecutionOf, type Judgment } from "./contract.ts";
+import { judgmentOf } from "./judged.ts";
 
 /**
  * A team's own criteria, in the words they wrote them in, decided by a judge.
@@ -85,40 +81,13 @@ export async function executeLlmRubric(
   const evidence = judgeInputOf(execution.conversation);
   const answer = await judge.ask({ criterion: config.rubric, evidence });
 
-  return [asJudgment(dimension, answer, judge.name, evidence.transcript.length)];
-}
-
-/** One judge's answer, as the verdict row it becomes. */
-function asJudgment(
-  dimension: string,
-  answer: JudgeAnswer,
-  judgedBy: string,
-  turns: number,
-): Judgment {
-  const verdict =
-    answer.decision === "met"
-      ? "passed"
-      : answer.decision === "not_met"
-        ? "failed"
-        : "skipped";
-
-  return {
-    dimension,
-    verdict,
-    // A rubric is met or it is not; there is no half of a written-down
-    // criterion. `skipped` scores zero and is out of the denominator, so the
-    // number it carries is never counted either way.
-    score: verdict === "passed" ? 1 : 0,
-    rationale: answer.rationale,
-    // Only turns that are actually in the transcript. A judgment citing turn
-    // nine of a seven-turn conversation is pointing a reader at nothing, and
-    // dropping it is better than filing evidence nobody can look up.
-    citedSpanIds: answer.citedTurns
-      .filter((cited) => cited >= 1 && cited <= turns)
-      .map(turnReference),
+  const judged: Judgment = {
+    ...judgmentOf(dimension, answer, evidence.transcript.length),
     // The judge that answered, on the row, and never the account: `judged_by`
     // is part of a verdict's identity, so a project that changes its judge model
     // gets rows beside the old ones rather than over them.
-    judgedBy,
+    judgedBy: judge.name,
   };
+
+  return [judged];
 }
