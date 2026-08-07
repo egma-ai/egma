@@ -7,10 +7,8 @@ import { isId, type IdPrefix } from "@egma/ids";
  * drift when rows arrive mid-scroll. Three lists page this way; the rules
  * live here so a fourth cannot come to disagree with them.
  *
- * Nothing here reads a store or takes a context. The cap and the request shape
- * are exported from the package because a public endpoint has to name the cap in
- * a refusal; the two functions that enforce them are not, so the enforcement
- * stays in one place.
+ * Internal to the module: nothing here reads a store or takes a context, and
+ * none of it is exported from the package.
  */
 
 export const DEFAULT_PAGE_SIZE = 50;

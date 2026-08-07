@@ -2,7 +2,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { createApiKey, type AuthContext, type Role } from "@egma/db";
 import { newId } from "@egma/ids";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -18,8 +17,8 @@ import type { SignedIn } from "../../cli/src/platform/signed-in.ts";
 import { editTest as editTestOnPlatform } from "../../cli/src/platform/tests.ts";
 import { pullTests } from "../../cli/src/sync/pull.ts";
 import { pushTests } from "../../cli/src/sync/push.ts";
-import { hashApiKeySecret } from "../src/auth/api-key.ts";
-import { cookiesFrom, createApi, type TestApi } from "./support/api.ts";
+import { createApi, type TestApi } from "./support/api.ts";
+import { mintKey, signUp, type Customer } from "./support/traces.ts";
 
 /**
  * `pull` and `push` — the real sync code a developer runs — against the real
@@ -124,54 +123,17 @@ function readsTheUnifiedEnvelope(inner: Fetch): Fetch {
   }) as Fetch;
 }
 
-type Person = {
-  readonly userId: string;
-  readonly organizationId: string;
-  readonly projectId: string;
-  readonly cookie: string;
-};
-
-async function signUp(email: string, organizationName: string): Promise<Person> {
-  const created = await api.app.inject({
-    method: "POST",
-    url: "/api/signup",
-    payload: { email, password: "a-long-enough-password", organizationName },
-  });
-  expect(created.statusCode, created.body).toBe(201);
-
-  const landed = created.json() as {
-    userId: string;
-    organization: { id: string };
-    project: { id: string };
-  };
-  return {
-    userId: landed.userId,
-    organizationId: landed.organization.id,
-    projectId: landed.project.id,
-    cookie: cookiesFrom(created.headers["set-cookie"]),
-  };
-}
-
 /** What `egma login` leaves on the machine: one instance, and a key for it. */
-async function signedInAs(person: Person, role: Role = "admin"): Promise<SignedIn> {
-  const secret = `egma_sk_${newId("key")}`;
-  const auth: AuthContext = {
-    userId: person.userId,
-    organizationId: person.organizationId,
-    projectId: person.projectId,
-    role,
-    via: "session",
-  };
-  await createApiKey(auth, {
-    hash: hashApiKeySecret(secret),
-    prefix: "egma_sk_",
-    displaySuffix: secret.slice(-4),
-    name: "a terminal",
-    projectId: person.projectId,
-  });
+async function signedInAs(person: Customer): Promise<SignedIn> {
+  const key = await mintKey(
+    api.app,
+    person.cookie,
+    "a terminal",
+    person.projectId,
+  );
   // Any origin does: the transport above answers from this process whatever
   // address it is given, and the client sends the path it would have sent.
-  return { url: "http://egma.test", key: secret };
+  return { url: "http://egma.test", key };
 }
 
 const FILE = {
@@ -193,7 +155,7 @@ function fileAt(name: string): string {
 describe("push, against a real instance", () => {
   it("creates the folder's test and writes the version it minted back into the file", async () => {
     api = await createApi("sync_push_create");
-    const ada = await signUp("ada@acme.example", "Acme");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
     const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
 
@@ -229,7 +191,7 @@ describe("push, against a real instance", () => {
 
   it("leaves a second push of unchanged files with nothing to do", async () => {
     api = await createApi("sync_push_settled");
-    const ada = await signUp("ada@acme.example", "Acme");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
     const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
 
@@ -250,7 +212,7 @@ describe("push, against a real instance", () => {
 
   it("uploads an edited file as the next version, and the file follows it", async () => {
     api = await createApi("sync_push_edit");
-    const ada = await signUp("ada@acme.example", "Acme");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
     const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
 
@@ -276,7 +238,7 @@ describe("push, against a real instance", () => {
 
   it("refuses the whole push, uploading nothing, when the platform has moved", async () => {
     api = await createApi("sync_push_moved");
-    const ada = await signUp("ada@acme.example", "Acme");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
     const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
 
@@ -328,7 +290,7 @@ describe("push, against a real instance", () => {
 
   it("refuses a file pinned to a version this egma never issued, uploading nothing", async () => {
     api = await createApi("sync_push_unknown_pin");
-    const ada = await signUp("ada@acme.example", "Acme");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
     const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
 
@@ -351,7 +313,7 @@ describe("push, against a real instance", () => {
 
   it("reads the version conflict the platform answers with, and names the test", async () => {
     api = await createApi("sync_push_late_conflict");
-    const ada = await signUp("ada@acme.example", "Acme");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
     const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
 
@@ -403,7 +365,7 @@ describe("push, against a real instance", () => {
 
   it("names a test the platform turned away, in the platform's own words", async () => {
     api = await createApi("sync_push_turned_away");
-    const ada = await signUp("ada@acme.example", "Acme");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
     const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
 
@@ -429,7 +391,7 @@ describe("push, against a real instance", () => {
 describe("pull, against a real instance", () => {
   it("writes the platform's tests into an empty folder", async () => {
     api = await createApi("sync_pull_writes");
-    const ada = await signUp("ada@acme.example", "Acme");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
     const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
 
@@ -466,7 +428,7 @@ describe("pull, against a real instance", () => {
 
   it("finds nothing to do straight after a push", async () => {
     api = await createApi("sync_pull_settled");
-    const ada = await signUp("ada@acme.example", "Acme");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
     const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
 
@@ -480,7 +442,7 @@ describe("pull, against a real instance", () => {
 
   it("follows a stale pin to the test it belongs to and updates that file", async () => {
     api = await createApi("sync_pull_stale_pin");
-    const ada = await signUp("ada@acme.example", "Acme");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
     const fetchImpl = readsTheUnifiedEnvelope(fetchThrough(api.app));
 

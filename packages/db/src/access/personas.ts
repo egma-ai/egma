@@ -543,13 +543,15 @@ export async function listPersonas(
  * the write, under the lock that makes a delete and a write over one persona
  * wait for each other; that check is the guarantee this one leans on.
  *
- * Three ways it refuses, each naming what the caller wrote rather than what egma
+ * Four ways it refuses, each naming what the writer wrote rather than what egma
  * looked up. A name nothing answers to, because a test naming somebody who is
- * not there would run one simulation fewer than it says it runs. A name two
- * personas answer to, because there is no uniqueness rule on a persona's name
- * and picking one of the two would put somebody in a test that nobody chose. And
- * the same persona named twice, which asks for the same simulation twice — a
- * run's business, never a test's.
+ * not there would run one simulation fewer than it says it runs. A name only a
+ * deleted persona answers to, which is a different problem with a different fix
+ * and so gets the factory's own words for it rather than being reported as never
+ * having existed. A name two living personas answer to, because there is no
+ * uniqueness rule on a persona's name and picking one of the two would put
+ * somebody in a test that nobody chose. And the same persona named twice, which
+ * asks for the same simulation twice — a run's business, never a test's.
  */
 export async function resolvePersonaNames(
   auth: AuthContext,
@@ -568,10 +570,15 @@ export async function resolvePersonaNames(
   if (wanted.length === 0) return [];
 
   // One read for the whole list, matching an entry against either column: an
-  // entry is an identifier or a name, and which one it is is the caller's
+  // entry is an identifier or a name, and which one it is is the writer's
   // choice rather than something to make them declare.
+  //
+  // Deleted personas are read too, and judged below rather than filtered out
+  // here. Filtered, every one of them would be reported as a persona that never
+  // existed — which sends somebody looking for a typo in a name that was right
+  // when they wrote it.
   const rows = await db()
-    .select({ id: persona.id, name: persona.name })
+    .select({ id: persona.id, name: persona.name, deletedAt: persona.deletedAt })
     .from(persona)
     .where(
       within(
@@ -579,7 +586,6 @@ export async function resolvePersonaNames(
         persona,
         and(
           eq(persona.projectId, projectId),
-          notDeleted,
           or(inArray(persona.id, wanted), inArray(persona.name, wanted)),
         ),
       ),
@@ -590,9 +596,20 @@ export async function resolvePersonaNames(
     // The identifier first, so a project holding a persona whose *name* is
     // another persona's identifier still resolves the identifier to the row it
     // names. Nothing stops somebody authoring such a name.
-    const byId = rows.filter((row) => row.id === entry);
-    const found = byId.length > 0 ? byId : rows.filter((row) => row.name === entry);
+    const matching = rows.filter((row) => row.id === entry);
+    const answering =
+      matching.length > 0 ? matching : rows.filter((row) => row.name === entry);
+    const found = answering.filter((row) => row.deletedAt === null);
 
+    if (found.length === 0 && answering.length > 0) {
+      // The factory's own sentence for this, word for word: a version may not
+      // name a deleted persona, and it says so the same way whichever layer
+      // catches it.
+      const [gone] = answering;
+      throw new UnprocessableInputError(
+        `persona ${gone?.id ?? entry} is deleted, and a test cannot name a deleted persona`,
+      );
+    }
     if (found.length === 0) {
       throw new UnprocessableInputError(
         isId("prs", entry)
@@ -610,7 +627,7 @@ export async function resolvePersonaNames(
     if (only === undefined) throw new Error("a matched persona went missing");
     if (resolved.includes(only.id)) {
       throw new UnprocessableInputError(
-        `persona "${entry}" is named twice on one test; name each persona once.`,
+        `persona "${entry}" is named twice on one test; name each persona once`,
       );
     }
     resolved.push(only.id);

@@ -181,13 +181,12 @@ const VALUES = [
 ];
 
 /**
- * The read surfaces' own limits, exported because the endpoints that enforce
+ * The read surface's own limits, exported because the endpoints that enforce
  * them have to say what they are in a refusal, and a cap named in two places is
  * a cap that will one day disagree with itself. Each is a number; none of them
  * reaches a store or names a customer.
  */
 const READ_LIMITS = [
-  "LARGEST_PAGE_SIZE",
   "MAXIMUM_LIST_LIMIT",
   "MAXIMUM_SPANS_PER_TRACE",
   "MAXIMUM_WINDOW_MILLISECONDS",

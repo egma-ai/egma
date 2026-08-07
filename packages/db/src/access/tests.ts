@@ -115,11 +115,13 @@ export type TestChanges = {
    * The version this edit was written against, when the writer knows it.
    *
    * A precondition rather than a change, and it rides here because it belongs
-   * to the same call: it is compared under the lock the edit already takes, so
+   * to the same write: it is compared under the lock the edit already takes, so
    * there is no moment between checking and writing for a second writer to
-   * arrive in. A mismatch refuses everything with `TestMovedOnError`. Left out,
-   * nothing is compared, which is what a caller with no version in hand — a
-   * first edit made straight after a create — needs.
+   * arrive in. A mismatch refuses everything with `TestMovedOnError`.
+   *
+   * Left out, nothing is compared — which is only ever right for a writer that
+   * is the sole writer, such as a migration or a development script. Anything
+   * serving more than one names it, and the public route requires it.
    */
   readonly expectedVersionId?: string;
 };
@@ -220,7 +222,7 @@ function validatePersonaIds(ids: readonly string[]): void {
     }
     if (seen.has(id)) {
       throw new UnprocessableInputError(
-        `persona ${id} is named twice on one test`,
+        `persona ${id} is named twice on one test; name each persona once`,
       );
     }
     seen.add(id);
@@ -375,6 +377,13 @@ async function validateNamedPersonas(
  * two be told apart, instead of reporting every reachable failure as a
  * deletion.
  *
+ * **Every way this fails is the instance's fault rather than the writer's**, and
+ * these stay plain errors for that reason. Signup seeds a project's persona and
+ * points the project at them in the same transaction that makes the project, so
+ * a project pointing at nobody is a project something else broke — and a write
+ * answered as though the body were at fault would send the writer looking at
+ * their own file for a problem that is not in it.
+ *
  * Every way this fails says what to do about it and writes nothing: a test
  * whose persona egma picked for itself would be a test nobody authored.
  */
@@ -391,7 +400,7 @@ async function projectDefaultPersona(
 
   const id = row?.defaultPersonaId ?? null;
   if (id === null) {
-    throw new UnprocessableInputError(
+    throw new Error(
       "this test names no persona and the project has no default persona; name one on the test, or set the project's default",
     );
   }
@@ -418,12 +427,12 @@ async function projectDefaultPersona(
     .for("share");
 
   if (pointed === undefined) {
-    throw new UnprocessableInputError(
+    throw new Error(
       `this test names no persona and the project's default points at ${id}, and there is no persona ${id} in this project; name one on the test, or point the project's default at a living persona of this project`,
     );
   }
   if (pointed.deletedAt !== null) {
-    throw new UnprocessableInputError(
+    throw new Error(
       `this test names no persona and the project's default persona ${id} is deleted; name one on the test, or point the project's default at a living persona`,
     );
   }

@@ -154,9 +154,9 @@ export class UnprocessableInputError extends Error {
  * A test is edited by two people who both start from what they last read: a
  * developer with the file in their repository, and a teammate in the dashboard.
  * Nothing here merges them, because there is no merge that could be right — two
- * people saying different things about one test is a conversation they have to
- * have, and a heuristic that picked one would be egma deciding which of them was
- * wrong.
+ * people saying different things about one test have to settle it between
+ * themselves, and a heuristic that picked one would be egma deciding which of
+ * them was wrong.
  *
  * It carries both versions and the test's identity, because the caller's next
  * move is to go and read the test as it now stands, and a refusal that only said

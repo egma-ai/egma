@@ -16,14 +16,13 @@ import {
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
- * Names off a reviewed file, turned into the identity a version names.
+ * Names off a reviewed file, turned into the identity a version names. Why the
+ * wire carries names at all is `resolvePersonaNames`'s own story.
  *
- * A folder a team reads in pull requests cannot be a folder of identifiers, so
- * the wire carries names and this is what resolves them. What is checked here is
- * only what this function decides: which persona a written name means, and how
- * it refuses when the answer is none, more than one, or the same one twice.
- * Whether an empty list becomes the project's default is the test factory's
- * rule and is tested there.
+ * What is checked here is only what this function decides: which persona a
+ * written name means, and how it refuses when the answer is none, somebody
+ * deleted, more than one, or the same one twice. Whether an empty list becomes
+ * the project's default is the test factory's rule and is tested there.
  */
 
 let database: MigratedDatabase;
@@ -157,13 +156,44 @@ describe("a name this project cannot answer", () => {
     ).rejects.toThrow(/egma has no persona called "Careful Grace"/u);
   });
 
-  it("is a persona who has been deleted, which is what gone looks like", async () => {
+});
+
+describe("a name only a deleted persona answers to", () => {
+  /**
+   * A different problem from a name nothing answers to, and it gets different
+   * words. The name was right when somebody wrote it, so reporting it as never
+   * having existed would send them looking for a typo that is not there.
+   */
+  it("is refused in the factory's own words, by name and by identifier alike", async () => {
     const leaving = await seedPersona(actingIn(acme.project), "Leaving Soon");
     await deletePersona(actingIn(acme.project), leaving);
 
+    const gone = `persona ${leaving} is deleted, and a test cannot name a deleted persona`;
     await expect(
       resolvePersonaNames(actingIn(acme.project), ["Leaving Soon"]),
-    ).rejects.toThrow(/egma has no persona called "Leaving Soon"/u);
+    ).rejects.toThrow(gone);
+    await expect(
+      resolvePersonaNames(actingIn(acme.project), [leaving]),
+    ).rejects.toThrow(gone);
+  });
+
+  it("is still a persona nobody has, once another customer asks by that name", async () => {
+    const leaving = await seedPersona(actingIn(acme.project), "Also Leaving");
+    await deletePersona(actingIn(acme.project), leaving);
+
+    await expect(
+      resolvePersonaNames(actingAsGlobex(), ["Also Leaving"]),
+    ).rejects.toThrow(/egma has no persona called "Also Leaving"/u);
+  });
+
+  it("does not shadow a living persona of the same name", async () => {
+    const gone = await seedPersona(actingIn(acme.project), "Two Of Them");
+    await deletePersona(actingIn(acme.project), gone);
+    const living = await seedPersona(actingIn(acme.project), "Two Of Them");
+
+    expect(
+      await resolvePersonaNames(actingIn(acme.project), ["Two Of Them"]),
+    ).toEqual([living]);
   });
 });
 
@@ -183,13 +213,13 @@ describe("a name that is not one persona", () => {
     await expect(
       resolvePersonaNames(actingIn(acme.project), ["Omar", "Omar"]),
     ).rejects.toThrow(
-      'persona "Omar" is named twice on one test; name each persona once.',
+      'persona "Omar" is named twice on one test; name each persona once',
     );
 
     await expect(
       resolvePersonaNames(actingIn(acme.project), [omar, "Omar"]),
     ).rejects.toThrow(
-      'persona "Omar" is named twice on one test; name each persona once.',
+      'persona "Omar" is named twice on one test; name each persona once',
     );
   });
 });
