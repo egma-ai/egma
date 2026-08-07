@@ -168,10 +168,11 @@ describe("the grader's place in the deployment", () => {
 
 describe("the API process", () => {
   /**
-   * Grading exists and the request path did not grow. That is ADR-0007's whole
-   * consequence, and this is the cheapest possible way to keep it true: the
-   * grading queue is reached by the service that works it, and by nothing that
-   * answers an HTTP request.
+   * Grading exists and the request path did not grow. Grading is bursty in a
+   * way a request path is not — one run of thirty simulations lands thirty
+   * conversations to judge at once — so it scales by its own copies rather than
+   * by the API's, and the queue is reached by the service that works it and by
+   * nothing that answers an HTTP request.
    */
   it("gains nothing from grading existing", async () => {
     const source = path.join(ROOT, "apps/api/src");
