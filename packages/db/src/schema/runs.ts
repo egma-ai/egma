@@ -13,6 +13,7 @@ import {
 
 import { agent, connection, CONNECTION_TYPES, MODALITIES } from "./agents.ts";
 import { persona, personaVersion } from "./personas.ts";
+import { test, testVersion } from "./tests.ts";
 import { organization, project } from "./tenancy.ts";
 import { user } from "./identity.ts";
 import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
@@ -24,12 +25,13 @@ import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
  * silently vanish. Retry is a new run pointing back at the old one; a
  * terminal run's numbers are frozen and never reopened.
  *
- * The test linkage is deliberately absent-but-shaped-for: when the two
- * workstreams meet, a simulation gains its test-version pin by one additive
- * migration, and nothing here moves. Verdict counts and the gate result are
- * likewise the graders' side of the line and arrive with them; the counts on
- * this header are simulation outcomes — did each conversation happen — never
- * judgements of what happened in one.
+ * The test linkage was deliberately absent-but-shaped-for, and this is the
+ * meeting point: a simulation carries its test-version pin, added by one
+ * additive migration, and nothing else here moved. It is nullable, because a
+ * run against an agent that names no test still happens. Verdict counts and
+ * the gate result are still the graders' side of the line and arrive with
+ * them; the counts on this header are simulation outcomes — did each
+ * conversation happen — never judgements of what happened in one.
  */
 
 /**
@@ -263,6 +265,21 @@ export const simulation = pgTable(
      */
     personaId: idText("persona_id").notNull(),
     personaVersionId: idText("persona_version_id").notNull(),
+    /**
+     * What was being checked, and the pin — the persona pin's shape exactly,
+     * for the same reason. A run born from a test resolves the test's current
+     * version at start and stamps it here, so whoever reads this conversation
+     * afterwards can say which expected behaviors it was executed against,
+     * however far the test has moved on since. The identity rides beside the
+     * version because it is what the composite keys below pair on: the version
+     * is this test's, and the test is this project's.
+     *
+     * Nullable, and null together: a run somebody started against an agent
+     * without naming a test pinned nothing, and there is nothing about that
+     * conversation to judge against expectations nobody wrote.
+     */
+    testId: idText("test_id"),
+    testVersionId: idText("test_version_id"),
     /** Where in the run's requested order this conversation sits, from one. */
     position: integer("position").notNull(),
     /**
@@ -345,6 +362,13 @@ export const simulation = pgTable(
         else ${table.endingReason} is null
       end`,
     ),
+    // The test pin is one fact in two columns and arrives whole or not at all,
+    // so no reader ever meets a version without the identity it pairs on — or
+    // an identity whose version nothing recorded.
+    check(
+      "simulation_test_pin_columns_agree",
+      sql`(${table.testId} is null) = (${table.testVersionId} is null)`,
+    ),
     // The three claim columns are one fact and arrive together.
     check(
       "simulation_claim_columns_agree",
@@ -412,7 +436,9 @@ export const simulation = pgTable(
     // the run of the same project, so a simulation cannot sit in a run that
     // cannot see it. The persona pin closes the same way: the version is the
     // named persona's, and the persona is this project's, so a raw write
-    // cannot pin another customer's persona.
+    // cannot pin another customer's persona. The test pin closes it once more,
+    // on the same two edges, so a cross-project pin is unrepresentable rather
+    // than merely unwritten by the application.
     foreignKey({
       name: "simulation_project_organization_fk",
       columns: [table.projectId, table.organizationId],
@@ -443,6 +469,19 @@ export const simulation = pgTable(
       columns: [table.personaId, table.projectId],
       foreignColumns: [persona.id, persona.projectId],
     }),
+    // Nullable both, and Postgres lets a composite key with a null column pass
+    // — which is exactly the "born from no test" row. Filled, both edges are
+    // checked, and the check above is what stops half of one being written.
+    foreignKey({
+      name: "simulation_test_version_test_fk",
+      columns: [table.testVersionId, table.testId],
+      foreignColumns: [testVersion.id, testVersion.testId],
+    }),
+    foreignKey({
+      name: "simulation_test_project_fk",
+      columns: [table.testId, table.projectId],
+      foreignColumns: [test.id, test.projectId],
+    }),
     // A run's conversations are an ordered list, and no place in it is
     // claimed twice.
     unique("simulation_run_id_position_unique").on(table.runId, table.position),
@@ -461,5 +500,11 @@ export const simulation = pgTable(
     // question by identity, which is what a persona's own erasure checks.
     index("simulation_persona_version_id_idx").on(table.personaVersionId),
     index("simulation_persona_id_idx").on(table.personaId),
+    // The same two questions of the test pin — "which conversations were
+    // conducted against version so-and-so", which is what a grader's reads
+    // start from, and the same question by identity, which is how one test's
+    // whole history is read across every version its runs pinned.
+    index("simulation_test_version_id_idx").on(table.testVersionId),
+    index("simulation_test_id_idx").on(table.testId),
   ],
 );

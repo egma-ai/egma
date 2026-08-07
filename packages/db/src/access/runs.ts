@@ -20,9 +20,11 @@ import {
   type SimulationEndingReason,
   type SimulationStatus,
 } from "../schema/runs.ts";
+import { test } from "../schema/tests.ts";
 import type { AuthContext } from "./context.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
+import { getTestVersion, type TestVersion } from "./tests.ts";
 import { within } from "./within.ts";
 
 /**
@@ -51,6 +53,17 @@ export type NewRun = {
   readonly connectionId: string;
   /** Who calls, by identity, in the order the simulations should sit. */
   readonly personaIds: readonly string[];
+  /**
+   * What is being checked, by identity — never by version, exactly as the
+   * personas are named. The current version is resolved here and pinned on
+   * every simulation this run creates, so editing the test tomorrow cannot
+   * rewrite what today's conversations were judged against.
+   *
+   * Optional, because a run against an agent is a thing somebody does without
+   * naming a test — a smoke call, a connection somebody is proving. Those
+   * simulations pin nothing, and nothing about them is expected.
+   */
+  readonly testId?: string | undefined;
   /** Something to recognise the run by in a list. */
   readonly label?: string | undefined;
   /** The run this one retries, when it retries one. */
@@ -104,6 +117,14 @@ export type Simulation = {
   readonly personaId: string;
   /** …and the pin: exactly as they were, for as long as this row is kept. */
   readonly personaVersionId: string;
+  /**
+   * What was being checked, by identity, and the pin — the same two columns
+   * on the same terms. Null together on a run that named no test, which is
+   * why reading them is how a caller tells a conversation with expectations
+   * from one without any.
+   */
+  readonly testId: string | null;
+  readonly testVersionId: string | null;
   readonly position: number;
   readonly connectionType: ConnectionType;
   readonly modality: Modality;
@@ -183,6 +204,8 @@ const SIMULATION_COLUMNS = {
   connectionId: simulation.connectionId,
   personaId: simulation.personaId,
   personaVersionId: simulation.personaVersionId,
+  testId: simulation.testId,
+  testVersionId: simulation.testVersionId,
   position: simulation.position,
   connectionType: simulation.connectionType,
   modality: simulation.modality,
@@ -442,14 +465,61 @@ async function resolvePersonaVersions(
 }
 
 /**
+ * The named test resolved to the version this run will pin: alive, this
+ * project's, exactly as the personas are resolved and refused. A test of
+ * another customer or another project is refused in the same words as one that
+ * never existed, because confirming that somebody else's row exists is itself
+ * a leak.
+ *
+ * The read takes a shared lock on the row it finds, held to commit, for the
+ * reason the personas' does: marking the test deleted takes the conflicting
+ * lock on the same row, so a concurrent delete either lands first and is seen
+ * here, or waits behind the pin this run wrote.
+ */
+async function resolveTestVersion(
+  on: Queryable,
+  auth: AuthContext,
+  projectId: string,
+  id: string,
+): Promise<{ testId: string; testVersionId: string }> {
+  const [row] = await on
+    .select({
+      id: test.id,
+      deletedAt: test.deletedAt,
+      currentVersionId: test.currentVersionId,
+    })
+    .from(test)
+    .where(
+      within(auth, test, and(eq(test.id, id), eq(test.projectId, projectId))),
+    )
+    .limit(1)
+    .for("share");
+
+  if (row === undefined) {
+    throw new Error(`there is no test ${id} in this project`);
+  }
+  if (row.deletedAt !== null) {
+    throw new Error(
+      `test ${id} is deleted, and a run cannot conduct a simulation of a deleted test`,
+    );
+  }
+  return { testId: id, testVersionId: row.currentVersionId };
+}
+
+/**
  * The run, its k simulations born `queued`, and the facts stamped at start —
  * the requested selection as provenance, the connection's non-secret shape as
- * snapshot, the persona versions as each simulation's pin — in one
- * transaction, so nothing a team triggers can half-exist.
+ * snapshot, the persona versions and the test version as each simulation's
+ * pins — in one transaction, so nothing a team triggers can half-exist.
  *
  * The connection is read alive, on the named agent, in the acting project;
  * the composite foreign keys re-check the same pairings underneath, for every
  * path that does not come through here.
+ *
+ * The test pin is resolved once for the whole run and stamped on every
+ * simulation it writes, so the k conversations of one run are all judged
+ * against one frozen version — a test edited between the first simulation and
+ * the last cannot split a run's meaning in two.
  */
 export async function startRun(
   auth: AuthContext,
@@ -473,6 +543,10 @@ export async function startRun(
     throw new Error(`"${input.connectionId}" is not a connection id`);
   }
   validRequestedPersonas(input.personaIds);
+  const namedTestId = input.testId ?? null;
+  if (namedTestId !== null && !isId("tst", namedTestId)) {
+    throw new Error(`"${namedTestId}" is not a test id`);
+  }
   const label = input.label?.trim() || null;
   const retryOfRunId = input.retryOfRunId ?? null;
   if (retryOfRunId !== null && !isId("run", retryOfRunId)) {
@@ -532,6 +606,11 @@ export async function startRun(
       input.personaIds,
     );
 
+    const pinnedTest =
+      namedTestId === null
+        ? null
+        : await resolveTestVersion(tx, auth, projectId, namedTestId);
+
     const [header] = await tx
       .insert(run)
       .values({
@@ -572,6 +651,8 @@ export async function startRun(
           connectionId: input.connectionId,
           personaId,
           personaVersionId,
+          testId: pinnedTest?.testId ?? null,
+          testVersionId: pinnedTest?.testVersionId ?? null,
           position: index + 1,
           connectionType: reached.type,
           modality: reached.modality,
@@ -685,6 +766,37 @@ export async function getSimulation(
     .limit(1);
 
   return row === undefined ? undefined : simulationFromRow(row);
+}
+
+/**
+ * What one simulation was executed against: the frozen test version it pinned
+ * at start, with the scenario, the expected behaviors in the order they were
+ * authored, and the personas the version named.
+ *
+ * This is the resolution the pin exists for. Whoever judges a finished
+ * conversation asks here what it was supposed to do, and gets the version as
+ * it was on the day rather than the test as it is now — which is what keeps a
+ * judgement re-readable after the test moves on. The version's own id comes
+ * back with it, so anything else the version carries stays reachable from one
+ * answer.
+ *
+ * Three different absences answer alike, with `undefined`: a simulation the
+ * caller cannot see, one that pinned no test, and a pin whose version the
+ * caller cannot reach. None of them has a version to resolve, and telling them
+ * apart at this seam would be telling one customer about another's rows. A
+ * caller who needs the distinction has it already — the pin is on the
+ * simulation row.
+ */
+export async function getSimulationTestVersion(
+  auth: AuthContext,
+  simulationId: string,
+): Promise<TestVersion | undefined> {
+  authorize(auth, "read", here(auth));
+
+  const pinned = await getSimulation(auth, simulationId);
+  if (pinned === undefined || pinned.testVersionId === null) return undefined;
+
+  return getTestVersion(auth, pinned.testVersionId);
 }
 
 /**

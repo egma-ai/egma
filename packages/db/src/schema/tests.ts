@@ -64,6 +64,9 @@ export const test = pgTable(
       columns: [table.projectId, table.organizationId],
       foreignColumns: [project.id, project.organizationId],
     }).onDelete("cascade"),
+    // Looks redundant next to the primary key; it is the composite-foreign-key
+    // target that lets a simulation prove the test it pins is its own project's.
+    unique("test_id_project_id_unique").on(table.id, table.projectId),
     // Deliberately no unique index on (project_id, name): cloning a test copies
     // the name verbatim, so two tests in one project may share one.
     index("test_organization_id_project_id_idx")
@@ -97,6 +100,9 @@ export const testVersion = pgTable(
       table.testId,
       table.version,
     ),
+    // The composite-foreign-key target that lets a simulation prove the version
+    // it pins really is a version of the test it names.
+    unique("test_version_id_test_id_unique").on(table.id, table.testId),
   ],
 );
 
