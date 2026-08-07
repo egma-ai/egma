@@ -95,6 +95,10 @@ const WORK_DISPATCHING = ["claimGradingJobs", "watchGradingWork"];
  * `appendVerdicts` and `readVerdicts` are the same two halves for the store's
  * other table. They need no window because a verdict is filed under the
  * conversation it judges, so naming the conversation is already the bound.
+ * `readRunVerdicts` is that read one grain up — a run's outcome and each of its
+ * conversations', both from the same fold over the same rows — and it is a door
+ * of its own because a run's verdicts are filed under the run and not under any
+ * one conversation.
  *
  * `recordProductionTraces` is here rather than among the work-dispatching pair,
  * and that is the whole shape of production grading: the door that already knows
@@ -169,6 +173,7 @@ const CONTEXT_REQUIRING = [
   "readOrganization",
   "readOrganizationSettings",
   "readProject",
+  "readRunVerdicts",
   "readTrace",
   "readVerdicts",
   "recordDeviceAuthorization",

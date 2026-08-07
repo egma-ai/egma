@@ -40,7 +40,10 @@ import { authorize, here } from "./permissions.ts";
  * **No overall row is written here or anywhere.** `readVerdicts` answers with
  * the rows and with the fold's answer over them, computed at the moment of
  * asking, so the headline and the evidence are two views of one thing rather
- * than two records that can drift apart.
+ * than two records that can drift apart. `readRunVerdicts` is the same act one
+ * grain up — a run's outcome and each of its conversations', both from the same
+ * fold over the same rows — because a run header is a thing computed and never
+ * a thing stored.
  */
 
 /* ------------------------------------------------------------------- *
@@ -306,6 +309,129 @@ export async function readVerdicts(
 ): Promise<TraceVerdicts> {
   authorize(auth, "read", here(auth));
 
+  const verdicts = await verdictsFiledUnder(auth, options, {
+    column: "trace_id",
+    value: traceId,
+  });
+
+  return {
+    verdicts,
+    outcome: foldVerdicts(verdicts),
+    byGrader: foldVerdictsByGrader(verdicts),
+  };
+}
+
+/** One conversation of a run, and what its rows add up to. */
+export type SimulationVerdicts = {
+  /** The conversation, by the id its verdict rows are filed under. */
+  readonly simulationId: string;
+  /** Folded over that conversation's rows alone. */
+  readonly outcome: FoldedOutcome;
+};
+
+export type RunVerdicts = {
+  readonly runId: string;
+  /**
+   * One entry per conversation of this run that has been judged, in id order.
+   *
+   * Id order is arbitrary and deterministic, exactly as `byGrader`'s is: the
+   * order to show simulations in is the run's own — their position — and that
+   * lives with the simulation rows rather than with their verdicts.
+   *
+   * A conversation nobody has judged yet has no rows and so is not here at all.
+   * That is the honest answer from this side: the run knows how many
+   * conversations it expects and this table knows what has been judged, and a
+   * placeholder invented here would be this module guessing at the other's
+   * business.
+   */
+  readonly simulations: readonly SimulationVerdicts[];
+  /** The run's own answer, folded over every row beneath it. */
+  readonly outcome: FoldedOutcome;
+  /** And per grader across the whole run, so a header can say which check failed. */
+  readonly byGrader: readonly GraderOutcome[];
+};
+
+/**
+ * A run's outcome and each of its conversations', computed at the moment of
+ * asking.
+ *
+ * **It is the same fold, twice, over the same rows.** A run's answer is
+ * `foldVerdicts` over every row the run holds; a simulation's is `foldVerdicts`
+ * over that conversation's. Those two agree by construction rather than by care:
+ * supersession is decided inside one conversation's dimensions, so folding the
+ * run whole and folding each conversation and adding the counts up are the same
+ * arithmetic. That is what makes a run header and the rows on the page beneath
+ * it incapable of disagreeing — and it is why there is no second algebra here,
+ * no aggregate in the query, and no stored rollup anywhere for either to drift
+ * from. The run header's verdict-count slots are filled by this, at read time.
+ *
+ * **The rows themselves are deliberately not returned.** A conversation's rows
+ * are bounded and `readVerdicts` hands them over with its answer, because the
+ * evidence is what somebody opening one conversation came for. A run is two
+ * hundred of those, and a caller that wanted every row of it would be building
+ * the page one conversation at a time anyway. So this answers the two grains a
+ * run header actually shows and nothing more.
+ *
+ * `FINAL` and the project narrowing are `readVerdicts`'s, for its reasons: the
+ * background merge is unpromised, and a caller's own project always wins over
+ * anything asked for. A run of another customer's simply has no rows here, which
+ * is the same answer an unjudged run gives — this read confirms nothing about
+ * whether a run exists, and the run table is where that question is asked.
+ *
+ * Permitted to every role, `viewer` included, on the same terms as reading one
+ * conversation's: looking at what egma thought is the product.
+ */
+export async function readRunVerdicts(
+  auth: AuthContext,
+  runId: string,
+  options: ReadVerdictsOptions = {},
+): Promise<RunVerdicts> {
+  authorize(auth, "read", here(auth));
+
+  const verdicts = await verdictsFiledUnder(auth, options, {
+    column: "run_id",
+    value: runId,
+  });
+
+  const byConversation = new Map<string, RecordedVerdict[]>();
+  for (const row of verdicts) {
+    const held = byConversation.get(row.traceId);
+    if (held === undefined) byConversation.set(row.traceId, [row]);
+    else held.push(row);
+  }
+
+  return {
+    runId,
+    simulations: [...byConversation.entries()]
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([simulationId, its]) => ({
+        simulationId,
+        outcome: foldVerdicts(its),
+      })),
+    outcome: foldVerdicts(verdicts),
+    byGrader: foldVerdictsByGrader(verdicts),
+  };
+}
+
+/**
+ * The rows of one conversation, or of one run, read the one way this module
+ * reads rows.
+ *
+ * Two callers and one query, so that `FINAL`, the tenancy and the projection can
+ * never come to differ between the grain somebody opened a conversation at and
+ * the grain a run header is folded from. The column is one of two literals
+ * written here rather than anything a caller passes, which is what makes
+ * interpolating it into the text safe; the value it is compared against is a
+ * bound parameter like every other.
+ *
+ * Ordered by the conversation first, then by grader, dimension, version and
+ * judge — a stable order at both grains, and the order the run read groups in.
+ */
+async function verdictsFiledUnder(
+  auth: AuthContext,
+  options: ReadVerdictsOptions,
+  under: { readonly column: "trace_id" | "run_id"; readonly value: string },
+): Promise<readonly RecordedVerdict[]> {
   // The caller's own project wins over anything asked for, and an empty name is
   // nobody's project rather than a project called nothing — which is what a form
   // submits for a field left blank, and what would otherwise return an empty
@@ -334,23 +460,17 @@ export async function readVerdicts(
             from ${VERDICTS_TABLE} final
             where organization_id = {organization_id:String}
               ${projectId === undefined ? "" : "and project_id = {project_id:String}"}
-              and trace_id = {trace_id:String}
-            order by grader_id, dimension, grader_version_id, judged_by`,
+              and ${under.column} = {filed_under:String}
+            order by trace_id, grader_id, dimension, grader_version_id, judged_by`,
     query_params: {
       organization_id: auth.organizationId,
       ...(projectId === undefined ? {} : { project_id: projectId }),
-      trace_id: traceId,
+      filed_under: under.value,
     },
     format: "JSONEachRow",
   });
 
-  const verdicts = (await answered.json<VerdictRow>()).map(verdictOf);
-
-  return {
-    verdicts,
-    outcome: foldVerdicts(verdicts),
-    byGrader: foldVerdictsByGrader(verdicts),
-  };
+  return (await answered.json<VerdictRow>()).map(verdictOf);
 }
 
 /* ------------------------------------------------------------------- *

@@ -2,6 +2,7 @@ import {
   appendVerdicts,
   connectClickHouse,
   disconnectClickHouse,
+  readRunVerdicts,
   readVerdicts,
   speakingVerdicts,
   type AuthContext,
@@ -530,6 +531,255 @@ describe("a whole simulation's worth of judgments", () => {
 
     expect(blocking).toHaveLength(3);
     expect(speakingVerdicts(blocking)).toHaveLength(3);
+  });
+});
+
+/**
+ * A whole run, at both grains, from one fold and no stored anything.
+ *
+ * The run header's verdict counts are computed here at the moment of asking,
+ * exactly as a conversation's are, which is the property the spec asks for: an
+ * overall answer that can never disagree with the evidence beneath it. So the
+ * assertion that matters most below is the arithmetic one — the run's counts are
+ * the conversations' counts added up, because supersession is decided inside a
+ * conversation and folding the run whole is therefore the same sum.
+ */
+describe("a whole run's worth of judgments", () => {
+  const runId = "run_01JQZ0000000000000000000BB";
+  const elsewhere = "run_01JQZ0000000000000000000CC";
+
+  const wentWell = "1111111111111111111111111111bbbb";
+  const disagreed = "2222222222222222222222222222bbbb";
+  const brokeDown = "3333333333333333333333333333bbbb";
+  const notScored = "4444444444444444444444444444bbbb";
+  const anotherRun = "5555555555555555555555555555bbbb";
+  const anotherCustomer = "6666666666666666666666666666bbbb";
+
+  const behaviors = newId("grd");
+  const latency = newId("grd");
+
+  /** Four conversations of one run, judged the four ways they can be. */
+  beforeAll(async () => {
+    await appendVerdicts(at(acme), [
+      // One that went well, judged by two graders.
+      verdict({
+        traceId: wentWell,
+        runId,
+        graderId: behaviors,
+        dimension: "confirms the new time back",
+        verdict: "passed",
+        score: 1,
+      }),
+      verdict({
+        traceId: wentWell,
+        runId,
+        graderId: latency,
+        dimension: "metric_threshold",
+        verdict: "passed",
+        score: 1,
+        priority: "P1",
+      }),
+      // One the machine failed and a person disagreed with.
+      verdict({
+        traceId: disagreed,
+        runId,
+        graderId: behaviors,
+        dimension: "confirms the new time back",
+        verdict: "failed",
+        score: 0,
+        rationale: "no confirmation of the time was found.",
+      }),
+      verdict({
+        traceId: disagreed,
+        runId,
+        graderId: behaviors,
+        dimension: "confirms the new time back",
+        judgedBy: "human",
+        verdict: "passed",
+        score: 1,
+        rationale: "the agent said it back at turn six; the judge missed it.",
+        judgedAtMicroseconds: judgedAt("2026-08-07T11:00:00Z"),
+      }),
+      // One egma could not judge — never `failed`, which is the distinction the
+      // fold carries all the way up to this header.
+      verdict({
+        traceId: brokeDown,
+        runId,
+        graderId: behaviors,
+        dimension: "confirms the new time back",
+        verdict: "errored",
+        score: 0,
+        rationale: "this simulation ended before the agent joined.",
+      }),
+      // And one whose only check did not apply.
+      verdict({
+        traceId: notScored,
+        runId,
+        graderId: latency,
+        dimension: "metric_threshold",
+        verdict: "skipped",
+        score: 0,
+        priority: "P2",
+        rationale: "a chat simulation records no audio latency.",
+      }),
+      // Two rows that must not reach it: another run of the same customer's…
+      verdict({
+        traceId: anotherRun,
+        runId: elsewhere,
+        graderId: behaviors,
+        verdict: "failed",
+        score: 0,
+      }),
+    ]);
+
+    // …and another customer's run wearing the same id, which is the only way to
+    // show the tenancy predicate is doing work rather than the id being unique.
+    await appendVerdicts(at(globex), [
+      verdict({
+        traceId: anotherCustomer,
+        runId,
+        graderId: behaviors,
+        verdict: "failed",
+        score: 0,
+      }),
+    ]);
+  });
+
+  it("folds each conversation and the run itself, at read time, from the same rows", async () => {
+    const read = await readRunVerdicts(at(acme), runId);
+
+    expect(read.runId).toBe(runId);
+    expect(read.simulations).toEqual([
+      {
+        simulationId: wentWell,
+        outcome: {
+          verdict: "passed",
+          score: 1,
+          counts: { passed: 2, failed: 0, skipped: 0, errored: 0, total: 2 },
+        },
+      },
+      {
+        // The person's word, not the machine's, and the machine's row is still
+        // on the table underneath it.
+        simulationId: disagreed,
+        outcome: {
+          verdict: "passed",
+          score: 1,
+          counts: { passed: 1, failed: 0, skipped: 0, errored: 0, total: 1 },
+        },
+      },
+      {
+        simulationId: brokeDown,
+        outcome: {
+          verdict: "errored",
+          score: 0,
+          counts: { passed: 0, failed: 0, skipped: 0, errored: 1, total: 1 },
+        },
+      },
+      {
+        simulationId: notScored,
+        outcome: {
+          verdict: "skipped",
+          // A proportion of nothing is not a number, and both available lies
+          // are worse than saying so.
+          score: undefined,
+          counts: { passed: 0, failed: 0, skipped: 1, errored: 0, total: 1 },
+        },
+      },
+    ]);
+
+    // Nothing failed once the correction is counted, and one conversation egma
+    // could not judge — so the run errored rather than passed. A run that went
+    // green because a simulation never ran is the exact false trust the words
+    // `skipped` and `errored` exist to prevent.
+    expect(read.outcome).toEqual({
+      verdict: "errored",
+      score: 0.75,
+      counts: { passed: 3, failed: 0, skipped: 1, errored: 1, total: 5 },
+    });
+  });
+
+  it("adds up: the run's counts are its conversations' counts, because it is one fold", async () => {
+    const read = await readRunVerdicts(at(acme), runId);
+
+    const summed = read.simulations.reduce(
+      (running, { outcome }) => ({
+        passed: running.passed + outcome.counts.passed,
+        failed: running.failed + outcome.counts.failed,
+        skipped: running.skipped + outcome.counts.skipped,
+        errored: running.errored + outcome.counts.errored,
+        total: running.total + outcome.counts.total,
+      }),
+      { passed: 0, failed: 0, skipped: 0, errored: 0, total: 0 },
+    );
+
+    // Folding the run whole and folding each conversation and adding up are the
+    // same arithmetic, because supersession is decided inside one conversation's
+    // dimensions. That is what makes a run header and the rows on the page
+    // beneath it incapable of disagreeing.
+    expect(summed).toEqual(read.outcome.counts);
+  });
+
+  it("says which check failed across the run, from that same fold", async () => {
+    const read = await readRunVerdicts(at(acme), runId);
+
+    expect(read.byGrader).toEqual(
+      [
+        {
+          graderId: behaviors,
+          outcome: {
+            verdict: "errored",
+            score: 2 / 3,
+            counts: { passed: 2, failed: 0, skipped: 0, errored: 1, total: 3 },
+          },
+        },
+        {
+          graderId: latency,
+          outcome: {
+            verdict: "passed",
+            score: 1,
+            counts: { passed: 1, failed: 0, skipped: 1, errored: 0, total: 2 },
+          },
+        },
+      ].sort((left, right) => (left.graderId < right.graderId ? -1 : 1)),
+    );
+  });
+
+  it("reaches no other run and no other customer, whatever the run is called", async () => {
+    const mine = await readRunVerdicts(at(acme), runId);
+    expect(mine.simulations.map((one) => one.simulationId)).not.toContain(
+      anotherRun,
+    );
+    expect(mine.simulations.map((one) => one.simulationId)).not.toContain(
+      anotherCustomer,
+    );
+
+    // Globex asks for the same run id and gets its own one conversation, which
+    // is the whole of what it has under that name.
+    const theirs = await readRunVerdicts(at(globex), runId);
+    expect(theirs.simulations.map((one) => one.simulationId)).toEqual([
+      anotherCustomer,
+    ]);
+    expect(theirs.outcome.verdict).toBe("failed");
+  });
+
+  it("is nothing at all for a run nobody has judged, and says so as `skipped`", async () => {
+    const read = await readRunVerdicts(at(acme), newId("run"));
+
+    expect(read.simulations).toEqual([]);
+    // Nothing judged has earned no green tick, and this is the one place that
+    // rule shows up as a whole run's answer.
+    expect(read.outcome).toEqual({
+      verdict: "skipped",
+      score: undefined,
+      counts: { passed: 0, failed: 0, skipped: 0, errored: 0, total: 0 },
+    });
+    expect(read.byGrader).toEqual([]);
+  });
+
+  it("is readable by a viewer, exactly as one conversation's answer is", async () => {
+    const read = await readRunVerdicts(at(acme, "viewer"), runId);
+    expect(read.simulations).toHaveLength(4);
   });
 });
 

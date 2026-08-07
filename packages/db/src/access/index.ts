@@ -81,6 +81,13 @@
  * fold that computes one is a pure function exported from the package's entry
  * point rather than from here, because it reaches no store at all.
  *
+ * `readRunVerdicts` is that read one grain up, and it is a third door rather
+ * than an option on the second because a run's verdicts are filed under the run
+ * and not under any one conversation. It answers a run's outcome and each of its
+ * conversations', both from the same fold over the same rows, which is what
+ * fills the run header's verdict counts at read time and keeps them incapable of
+ * disagreeing with the page beneath.
+ *
  * The two ways a judgment is ever revisited are exported beside them, and
  * neither is an edit: `regrade` reopens the queue so the engine judges a run or
  * a window again at each grader's current version — narrowed to one grader when
@@ -208,11 +215,14 @@ export {
 export {
   appendVerdicts,
   correctVerdict,
+  readRunVerdicts,
   readVerdicts,
   type AppendedVerdicts,
   type NewVerdict,
   type ReadVerdictsOptions,
   type RecordedVerdict,
+  type RunVerdicts,
+  type SimulationVerdicts,
   type TraceVerdicts,
   type VerdictCorrection,
 } from "./verdicts.ts";
