@@ -160,6 +160,12 @@ async function holdAndGrade(
 
   try {
     const graded = await gradeClaim(claim);
+    // The verdicts are written before the job is finished, in that order and
+    // not the other way round. Between the two this copy could lose the job to
+    // an expired lease, and another copy would judge the same conversation
+    // again — which costs nothing, because the same judgment at the same grader
+    // version replaces rather than doubles. Finishing first would risk the
+    // opposite: a job marked judged with nothing written under it.
     await finishGradingJob(claim.auth, claim.id, config.claimant);
     log.info("judged a conversation", {
       job: claim.id,

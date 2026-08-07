@@ -53,12 +53,19 @@ export async function gradeClaim(claim: GradingClaim): Promise<Graded> {
   const conversation = conversationOf(simulation);
   const graders = await applicableGraders(claim.auth, simulation);
 
-  const rows: NewVerdict[] = [];
-  for (const grader of graders) {
-    for (const judgment of await judgmentsOf(grader, conversation)) {
-      rows.push(verdictRow(grader, conversation, judgment));
-    }
-  }
+  // In parallel, and not because today's graders are slow — they are instant.
+  // Because the judged types are one model call each, and wall-clock for a
+  // conversation with five checks should be one call rather than five. Building
+  // the fan-out now means the first judge is a new executor rather than a new
+  // shape here.
+  const judged = await Promise.all(
+    graders.map(async (grader) =>
+      (await judgmentsOf(grader, conversation)).map((judgment) =>
+        verdictRow(grader, conversation, judgment),
+      ),
+    ),
+  );
+  const rows = judged.flat();
 
   await appendVerdicts(claim.auth, rows);
 
@@ -79,27 +86,55 @@ export async function gradeClaim(claim: GradingClaim): Promise<Graded> {
  * is `errored` rather than `failed`, the fold keeps the two apart all the way up
  * to the run's headline, and the check is here rather than inside each executor
  * so that no future grader type can get it wrong.
+ *
+ * It answers with one row per grader, named by the grader's own one check —
+ * which is the honest shape while every type executed makes one. A type that
+ * names several dimensions of its own will want one `errored` row per dimension
+ * instead, so that a page shows the same list whether the conversation happened
+ * or not; that is a question for the type that first has several, and this is
+ * where it is asked.
  */
-async function judgmentsOf(
+export async function judgmentsOf(
   grader: Grader,
   conversation: Conversation,
 ): Promise<readonly Judgment[]> {
   if (!conversation.happened) {
     return [
-      {
-        dimension: theOneCheck(grader.type),
-        verdict: "errored",
-        score: 0,
-        rationale: `this simulation ended ${conversation.endingReason ?? "without running"}, so there was no conversation to judge.`,
-        citedSpanIds: [],
-      },
+      couldNotJudge(
+        grader,
+        `this simulation ended ${conversation.endingReason ?? "without running"}, so there was no conversation to judge.`,
+      ),
     ];
   }
 
-  // The grader *is* its judgment plus its identity and its live settings — the
-  // type and the config it shapes are one inseparable pair on the row already —
-  // so the executor is handed the grader itself and sees only the pair.
-  return execute({ judgment: grader, conversation });
+  try {
+    // The grader *is* its judgment plus its identity and its live settings — the
+    // type and the config it shapes are one inseparable pair on the row already
+    // — so the executor is handed the grader itself and sees only the pair.
+    return await execute({ judgment: grader, conversation });
+  } catch (error) {
+    // One grader falling over is one `errored` row, not a conversation with no
+    // verdicts on it. Every other grader's judgment still lands, and this one
+    // says out loud that egma could not make its check — which is the whole
+    // reason `errored` is a word separate from `failed`.
+    return [
+      couldNotJudge(
+        grader,
+        `this check could not be made: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+    ];
+  }
+}
+
+/** egma could not judge this. Never `failed`: nothing is being said about the agent. */
+function couldNotJudge(grader: Grader, rationale: string): Judgment {
+  return {
+    dimension: theOneCheck(grader.type),
+    verdict: "errored",
+    score: 0,
+    rationale,
+    citedSpanIds: [],
+  };
 }
 
 /** One judgment, as the row that records it. */
