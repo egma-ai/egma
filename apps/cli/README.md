@@ -539,6 +539,25 @@ hands you to that agent's own login and carries on where it left off. And if
 there is no coding agent here for egma to drive at all, it prints the words to
 paste into whichever one you do use, and stops.
 
+## Trying it from this repository, today
+
+The public API does not yet serve agents, tests or runs, so a bare checkout
+has nothing real for the wizard to register against. Until it does, this
+package carries a platform you can try the whole walk on:
+
+```
+docker compose up -d --wait          # once, from the repository root
+pnpm --filter egma-cli build
+pnpm --filter egma-cli tryout
+```
+
+`tryout` starts a real egma behind one address — the sign-in and the key it
+mints are the real thing — with a stand-in serving what has not shipped, and
+prints the exact command to run the wizard from whatever repository holds
+your voice agent. Verdicts arrive from a stand-in simulator and every one is
+`passed`; the run is real everywhere except the judging. The whole stand-in
+half dies the day the public API ships.
+
 ## Licence
 
 Apache 2.0. Parts of the terminal UI are adapted from the PostHog wizard under

@@ -7,7 +7,12 @@
   "bin": {
     "egma": "./dist/bin.js"
   },
-  "files": ["dist", "skills", "NOTICE", "README.md"],
+  "files": [
+    "dist",
+    "skills",
+    "NOTICE",
+    "README.md"
+  ],
   "engines": {
     "node": ">=22"
   },
@@ -19,7 +24,8 @@
     "smoke": "node smoke/real-claude-code.ts && node smoke/real-claude-code-fence.ts && node smoke/real-claude-code-discovery.ts && node smoke/real-claude-code-generation.ts",
     "smoke:platform": "node smoke/real-platform-login.ts",
     "smoke:retell": "node smoke/real-retell-connect.ts",
-    "smoke:e2e": "node smoke/real-wizard-e2e.ts"
+    "smoke:e2e": "node smoke/real-wizard-e2e.ts",
+    "tryout": "node smoke/tryout-platform.ts"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.3.0",
