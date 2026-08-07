@@ -1,4 +1,5 @@
 import {
+  advanceProductionSampling,
   getGrader,
   getSimulationTestVersion,
   listGraders,
@@ -8,7 +9,7 @@ import {
 } from "@egma/db";
 
 /**
- * Which graders judge this conversation.
+ * Which graders judge this simulation.
  *
  * Two sources add up, and the addition is the product's own promise: **every
  * grader in the project applies to every test by default**, so writing a policy
@@ -36,6 +37,11 @@ import {
  * row and never attachable, so it is never resolved — it is applied because
  * running a test means judging it against what the test says, which is a
  * different fact from a grader being attached.
+ *
+ * **Sampling never happens here.** A simulation is a conversation somebody asked
+ * for, one at a time, and judging nine of ten of them would mean a suite whose
+ * report is missing a test for no reason anybody chose. Sampling is about
+ * traffic egma did not cause, and it lives on the production path alone.
  */
 export async function applicableGraders(
   auth: AuthContext,
@@ -53,11 +59,78 @@ export async function applicableGraders(
     applicable.set(grader.id, grader);
   }
 
-  // By id, which is the mint order: an arbitrary order, but the same one every
-  // time, so two gradings of one conversation walk the same list.
-  return [...applicable.values()].sort((left, right) =>
-    left.id < right.id ? -1 : left.id > right.id ? 1 : 0,
-  );
+  return inAStableOrder(applicable.values());
+}
+
+/**
+ * Which graders judge this production trace, and whose turn it is.
+ *
+ * **The project's graders scoped to production, and nothing else at all.** Two
+ * absences do the work here, and both are the same fact said twice: a production
+ * trace has no test.
+ *
+ * - **No test-attached grader.** A test's grader array says "this grader judges
+ *   this scenario", and a real caller phoning a real agent is not in anybody's
+ *   scenario. There is no test version to read an array off, and inventing one
+ *   would mean a customer's monitoring bill quietly depending on which tests
+ *   somebody happened to write.
+ * - **No built-in `expected_behaviors`.** It judges a test against the behaviors
+ *   that test wrote down, and there is no test here to have written any. A
+ *   built-in with nothing to check would either judge nothing at all or judge a
+ *   real conversation against expectations somebody set for a different one.
+ *
+ * So the scope setting is the *whole* of the decision on this side, which is why
+ * `production` and `both` are the only two words that reach here — a grader
+ * scoped to simulations is not a grader that failed on this conversation, it was
+ * never about it, and there is no verdict row for it at all.
+ *
+ * **Then sampling, per grader, deterministically.** Each applicable grader is
+ * asked whether this trace is its turn; the accumulator behind that answer lives
+ * in the data-access module because it is state and this file is not the place
+ * for state. A grader that says no produces **nothing** — not a `skipped` row,
+ * which would mean "this check did not apply to this conversation" and would
+ * drag every un-judged call into the record as evidence of something. A call
+ * nobody chose to judge leaves no trace of having been considered.
+ *
+ * **Scope and rate are read live, so both take effect forward only.** They are
+ * settings on the grader row rather than on its versions, so pointing a grader
+ * at production judges the next trace and says nothing about the ones before it:
+ * no back-fill, and no deleting the verdicts a wider scope had already produced.
+ * The rate moves the same way — raising it speeds the next decision up, lowering
+ * it slows the next one down, and neither reaches backwards.
+ */
+export async function applicableProductionGraders(
+  auth: AuthContext,
+): Promise<readonly Grader[]> {
+  const scoped = [...(await everyGraderInTheProject(auth))]
+    .filter(
+      (grader) => grader.scope === "production" || grader.scope === "both",
+    )
+    .sort(byId);
+
+  const theirTurn: Grader[] = [];
+  // One at a time and in the settled order, so that a deployment reading its own
+  // logs sees the same sequence of decisions a second run over the same traffic
+  // would make.
+  for (const grader of scoped) {
+    if (await advanceProductionSampling(auth, grader.id)) {
+      theirTurn.push(grader);
+    }
+  }
+
+  return theirTurn;
+}
+
+/**
+ * By id, which is the mint order: an arbitrary order, but the same one every
+ * time, so two gradings of one conversation walk the same list.
+ */
+function inAStableOrder(graders: Iterable<Grader>): readonly Grader[] {
+  return [...graders].sort(byId);
+}
+
+function byId(left: Grader, right: Grader): number {
+  return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
 }
 
 /**

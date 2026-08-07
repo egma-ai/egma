@@ -95,10 +95,12 @@ than by losing the first recording.
 
 ### The grader
 
-The other one judges what the simulator reported. A conversation reaching its
-end becomes claimable work in the same commit that ends it; the grader takes the
-work, reads the conversation, resolves the graders that apply to it, and writes
-one verdict row per judged dimension.
+The other one judges conversations — the ones the simulator conducted and the
+ones a real caller had, with the same graders. A simulation reaching its end
+becomes claimable work in the same commit that ends it; a production
+conversation becomes claimable when its telemetry says it is over. The grader
+takes the work, reads the conversation, resolves the graders that apply to it,
+and writes one verdict row per judged dimension.
 
 **It claims its work too**, on the same terms and for the same reasons: no
 `ports:`, no inbound surface, and more throughput is more copies —
@@ -107,9 +109,13 @@ the two stores directly rather than through the API, so grading existing costs
 the request path nothing at all.
 
 **A conversation ending wakes it**, rather than an interval catching it later,
-so nothing here promises a latency and nothing here waits for one.
-`EGMA_GRADER_SWEEP_SECONDS` is the backstop under that, for the notification
-raised while every copy happened to be restarting.
+so nothing here promises a latency and nothing here waits for one. For a
+production conversation that ending is the root span reaching the OTLP door: an
+exporter sends a span when the span *ends*, so the one span the whole
+conversation happened inside arriving is the conversation being over.
+`EGMA_GRADER_TRACE_IDLE_SECONDS` is the fallback for an exporter that never
+closes one, and `EGMA_GRADER_SWEEP_SECONDS` is the backstop under all of it, for
+the notification raised while every copy happened to be restarting.
 
 It is handed no encryption key, because grading never touches a connection's
 credentials, and no model key, because the grader types v1 executes judge
