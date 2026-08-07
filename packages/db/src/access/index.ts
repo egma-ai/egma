@@ -67,14 +67,6 @@ export {
   type TestNamingPersona,
 } from "./errors.ts";
 
-/**
- * How many rows one page of a keyset-paginated list may hold. Exported for the
- * endpoints that have to say it in a refusal — a cap named in two places is a
- * cap that will one day disagree with itself. It is a number: it reaches no
- * store and names no customer.
- */
-export { LARGEST_PAGE_SIZE } from "./pages.ts";
-
 export {
   ACTIONS,
   authorize,

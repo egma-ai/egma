@@ -2,7 +2,6 @@ import {
   addConnection,
   AgentWriteRefusedError,
   getAgent,
-  LARGEST_PAGE_SIZE,
   listAgents,
   listConnections,
   listProjects,
@@ -16,6 +15,7 @@ import {
   type Modality,
   type NewConnection,
 } from "@egma/db";
+import { isId } from "@egma/ids";
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
@@ -59,12 +59,28 @@ export type AgentRoutesOptions = {
 
 type Body = Record<string, unknown>;
 
-/** What a refusal is, before it becomes a reply. */
+/**
+ * What a refusal is, before it becomes a reply.
+ *
+ * Tagged, so a function answering "a value or a refusal" is told apart by a
+ * field that exists for exactly that and never by sniffing for a property the
+ * other side might one day grow. The tag is never sent: `refused` below writes
+ * out the two fields the contract has.
+ */
 type Refusal = {
+  readonly refused: true;
   readonly status: number;
   readonly error: string;
   readonly message: string;
 };
+
+function isRefusal(value: unknown): value is Refusal {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { refused?: unknown }).refused === true
+  );
+}
 
 function refused(reply: FastifyReply, refusal: Refusal): FastifyReply {
   return reply
@@ -73,7 +89,11 @@ function refused(reply: FastifyReply, refusal: Refusal): FastifyReply {
 }
 
 function invalid(message: string): Refusal {
-  return { status: 400, error: "invalid_request", message };
+  return { refused: true, status: 400, error: "invalid_request", message };
+}
+
+function notPermitted(message: string): Refusal {
+  return { refused: true, status: 403, error: "not_permitted", message };
 }
 
 /**
@@ -82,6 +102,7 @@ function invalid(message: string): Refusal {
  * another customer's id and a made-up one get the same sentence.
  */
 const NO_SUCH_AGENT: Refusal = {
+  refused: true,
   status: 404,
   error: "not_found",
   message:
@@ -90,21 +111,14 @@ const NO_SUCH_AGENT: Refusal = {
 };
 
 /** A value that has to be text when it is there at all. */
-function textOr(
-  value: unknown,
-  named: string,
-): { readonly text: string | undefined } | Refusal {
-  if (value === undefined || value === null) return { text: undefined };
+function given(value: unknown, named: string): string | undefined | Refusal {
+  if (value === undefined || value === null || value === "") return undefined;
   if (typeof value !== "string") {
     return invalid(
       `${named} is written as text, and this request sent ${typeof value}`,
     );
   }
-  return { text: value };
-}
-
-function isRefusal(value: object): value is Refusal {
-  return "status" in value;
+  return value;
 }
 
 /**
@@ -124,8 +138,8 @@ function unknownKeyIn(
     if (held.includes(key)) continue;
     if (key === "pulled") {
       return invalid(
-        "egma no longer keeps what was pulled from the provider, so a " +
-          'registration has no "pulled" key. Drop it and send ' +
+        `egma no longer keeps what was pulled from the provider, so ${what} ` +
+          'has no "pulled" key. Drop it and send ' +
           `${held.join(", ")}; the agent's content stays at the provider, ` +
           "where egma reads it fresh rather than out of a copy that would go " +
           "stale.",
@@ -158,8 +172,8 @@ const CONNECTION_KEYS = [
  * ones carrying text carry text.
  *
  * **Topology is not in the list on purpose.** It is derived from the type — it
- * predicts who moves first when a simulation starts — so a caller's guess
- * would just be wrong, and a supplied one is refused as the unknown key it is.
+ * predicts who moves first when a simulation starts — so a guess would just be
+ * wrong, and a supplied one is refused as the unknown key it is.
  */
 function connectionIn(value: unknown): NewConnection | Refusal {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -170,13 +184,16 @@ function connectionIn(value: unknown): NewConnection | Refusal {
   const unknown = unknownKeyIn(body, CONNECTION_KEYS, "a connection");
   if (unknown !== undefined) return unknown;
 
-  const name = textOr(body.name, "a connection's name");
+  const name = given(body.name, "a connection's name");
   if (isRefusal(name)) return name;
-  const environment = textOr(body.environment, "a connection's environment");
+  const environment = given(body.environment, "a connection's environment");
   if (isRefusal(environment)) return environment;
 
   return {
-    ...(name.text === undefined ? {} : { name: name.text }),
+    // A name sent blank is passed on rather than dropped, so the factory's own
+    // "a connection needs a name" is what comes back. Absent is different and
+    // means the smallest free numbered name.
+    ...(typeof body.name === "string" ? { name: name ?? "" } : {}),
     // Handed on as they arrived. The registry names an unknown type, a
     // modality the type does not speak and a config key it has no place for,
     // each in its own words.
@@ -184,9 +201,7 @@ function connectionIn(value: unknown): NewConnection | Refusal {
     modality: (typeof body.modality === "string"
       ? body.modality
       : "") as Modality,
-    ...(environment.text === undefined
-      ? {}
-      : { environment: environment.text }),
+    ...(environment === undefined ? {} : { environment }),
     config: (body.config ?? {}) as Readonly<Record<string, unknown>>,
     ...(body.credentials === undefined
       ? {}
@@ -235,53 +250,116 @@ function describedConnection(one: Connection): Record<string, unknown> {
 }
 
 /**
+ * A project that is not this customer's, wherever it was named.
+ *
+ * One sentence for reads and writes both, from one place: the wording is what
+ * a client relays to a terminal, so a second copy of it is a second thing to
+ * keep in step.
+ */
+function projectOutsideOrganization(projectId: string): Refusal {
+  return notPermitted(
+    `project ${projectId} is not in your organization. A request may name a ` +
+      "project of your own organization or leave it out, and which " +
+      "organization this is always comes from the key.",
+  );
+}
+
+/**
+ * A key minted for one project, asked to act in a different one.
+ *
+ * The verb is passed in because that is the only word that differs between
+ * the read and the write — and two sentences kept in step by hand is how
+ * contract wording drifts.
+ */
+function credentialActsElsewhere(
+  scoped: string,
+  named: string,
+  verb: "writes into" | "reads",
+): Refusal {
+  return notPermitted(
+    `this credential acts in project ${scoped}, and the request named ` +
+      `${named}. A key minted for one product area ${verb} that one; drop ` +
+      "the project, or use a key for the whole organization.",
+  );
+}
+
+/**
+ * The project a request named, checked against what the credential may reach.
+ *
+ * **One rule for reads and writes.** A surface that refuses a stranger's
+ * project on a write and answers an empty list on a read has two rules, and
+ * the empty list is the worse half: it reads as "you have no agents there"
+ * rather than as "that is not yours to ask about".
+ *
+ * A key minted for one project is answered rather than quietly widened — it
+ * acts in that project and cannot be argued out of it. A key for the whole
+ * customer may name any project of that customer, and the membership read is
+ * what makes "any project of that customer" true rather than assumed.
+ */
+async function projectNamed(
+  auth: AuthContext,
+  named: string,
+  verb: "writes into" | "reads",
+): Promise<string | Refusal> {
+  if (auth.projectId !== undefined) {
+    return named === auth.projectId
+      ? named
+      : credentialActsElsewhere(auth.projectId, named, verb);
+  }
+
+  const projects = await listProjects(auth);
+  return projects.some((one) => one.id === named)
+    ? named
+    : projectOutsideOrganization(named);
+}
+
+/**
  * Where a write lands, given what it named.
  *
- * A body may name a project and mostly does not. Named, it has to be one this
- * credential may act in; left out, it is the credential's own — and for a key
- * minted for the whole customer, the organization's project, which in this
- * version there is one of. Nothing about the shape changes when projects
- * become first-class; only the default relaxes.
- *
- * A key minted for one project is answered rather than quietly widened. It
- * reads that project and cannot be argued out of it, so naming a sibling
- * project is refused with both named rather than silently ignored.
+ * A body may name a project and mostly does not. Left out, it is the
+ * credential's own — and for a key minted for the whole customer, the
+ * organization's project, which in this version there is one of. Nothing about
+ * the shape changes when projects become first-class; only the default
+ * relaxes.
  */
-async function actingIn(
+async function writingIn(
   auth: AuthContext,
   named: string | undefined,
 ): Promise<AuthContext | Refusal> {
-  if (named === undefined || named === "") {
-    if (auth.projectId !== undefined) return auth;
-
-    const projects = await listProjects(auth);
-    const home = projects[0];
-    if (home === undefined) {
-      return {
-        status: 403,
-        error: "not_permitted",
-        message:
-          "this organization has no project to write into, which should not " +
-          "be possible — sign in to egma and open the organization to check.",
-      };
-    }
-    return { ...auth, projectId: home.id };
+  if (named !== undefined) {
+    const project = await projectNamed(auth, named, "writes into");
+    return isRefusal(project) ? project : { ...auth, projectId: project };
   }
 
-  if (auth.projectId !== undefined && named !== auth.projectId) {
-    return {
-      status: 403,
-      error: "not_permitted",
-      message:
-        `this credential acts in project ${auth.projectId}, and the request ` +
-        `named ${named}. A key minted for one product area writes into that ` +
-        "one; drop the project, or use a key for the whole organization.",
-    };
-  }
+  if (auth.projectId !== undefined) return auth;
 
-  // Whether it belongs to this customer at all is the factory's own check,
-  // made against the live row rather than against anything a client sent.
-  return { ...auth, projectId: named };
+  const projects = await listProjects(auth);
+  const home = projects[0];
+  if (home === undefined) {
+    // Not a refusal: signing up provisions a project and nothing takes it
+    // away, so there is nothing the person holding this key could do about
+    // it. It is this instance being broken, and it is answered as one.
+    throw new Error(
+      `organization ${auth.organizationId} has no project to write into, ` +
+        `which signing up provisions and nothing removes`,
+    );
+  }
+  return { ...auth, projectId: home.id };
+}
+
+/**
+ * What a read narrows to. Nothing, unless it named a project — reading across
+ * a whole customer is the first-class case, because two projects of one
+ * customer are always readable together.
+ */
+async function readingIn(
+  auth: AuthContext,
+  named: string | undefined,
+): Promise<AuthContext | Refusal> {
+  if (named === undefined) return auth;
+
+  const project = await projectNamed(auth, named, "reads");
+  return isRefusal(project) ? project : { ...auth, projectId: project };
 }
 
 export async function agentRoutes(
@@ -310,31 +388,27 @@ export async function agentRoutes(
     const unknown = unknownKeyIn(body, AGENT_KEYS, "a registration");
     if (unknown !== undefined) return refused(reply, unknown);
 
-    const name = textOr(body.name, "an agent's name");
+    const name = given(body.name, "an agent's name");
     if (isRefusal(name)) return refused(reply, name);
-    const description = textOr(body.description, "an agent's description");
+    const description = given(body.description, "an agent's description");
     if (isRefusal(description)) return refused(reply, description);
-    const project = textOr(body.project, "a project");
+    const project = given(body.project, "a project");
     if (isRefusal(project)) return refused(reply, project);
 
     const inline =
       body.connection === undefined
         ? undefined
         : connectionIn(body.connection);
-    if (inline !== undefined && isRefusal(inline)) {
-      return refused(reply, inline);
-    }
+    if (isRefusal(inline)) return refused(reply, inline);
 
-    const acting = await actingIn(auth, project.text);
+    const acting = await writingIn(auth, project);
     if (isRefusal(acting)) return refused(reply, acting);
 
     const registered = await registerAgent(acting, {
       // Empty rather than absent, so the factory's own "an agent needs a name"
       // is what a request with no name hears.
-      name: name.text ?? "",
-      ...(description.text === undefined
-        ? {}
-        : { description: description.text }),
+      name: name ?? "",
+      ...(description === undefined ? {} : { description }),
       ...(inline === undefined ? {} : { connection: inline }),
     });
 
@@ -356,60 +430,36 @@ export async function agentRoutes(
    * A project is a filter in the query and never a level in the address. The
    * cursor is the last id of the page: the ids sort by mint time, so a list
    * changing underneath a reader never shows a row twice and never skips one.
+   *
+   * There is no page-size parameter. A page is a page, and the cursor is what
+   * carries a reader through the rest — nothing in this API exists because a
+   * surface would look incomplete without it.
    */
   app.get("/api/agents", async (request, reply) => {
     const { auth } = requesterOf(request);
     const query = (request.query ?? {}) as Record<string, string | undefined>;
 
-    const asked =
-      query.limit === undefined || query.limit === ""
-        ? undefined
-        : Number(query.limit);
-    if (asked !== undefined && (!Number.isInteger(asked) || asked < 1)) {
+    const named = given(query.project, "a project");
+    if (isRefusal(named)) return refused(reply, named);
+
+    const cursor = given(query.cursor, "a cursor");
+    if (isRefusal(cursor)) return refused(reply, cursor);
+    if (cursor !== undefined && !isId("agt", cursor)) {
       return refused(
         reply,
         invalid(
-          `limit is how many agents one page may carry, at most ` +
-            `${LARGEST_PAGE_SIZE}, and "${query.limit}" is not a count.`,
+          `"${cursor}" is not an agent id, so it cannot be a cursor. Send ` +
+            "back the next_cursor from the page before this one, or leave it " +
+            "out to start at the newest.",
         ),
       );
     }
 
-    const named =
-      query.project === undefined || query.project === ""
-        ? undefined
-        : query.project;
-    if (
-      named !== undefined &&
-      auth.projectId !== undefined &&
-      named !== auth.projectId
-    ) {
-      return refused(reply, {
-        status: 403,
-        error: "not_permitted",
-        message:
-          `this credential acts in project ${auth.projectId}, and the request ` +
-          `named ${named}. A key minted for one product area reads that one; ` +
-          "drop the project, or use a key for the whole organization.",
-      });
-    }
-
-    // A whole customer's agents when nothing narrows them, which is the
-    // first-class case: two projects of one customer are always readable
-    // together, and the filter narrows rather than unlocks.
-    const reading: AuthContext =
-      named === undefined ? auth : { ...auth, projectId: named };
+    const reading = await readingIn(auth, named);
+    if (isRefusal(reading)) return refused(reply, reading);
 
     const page = await listAgents(reading, {
-      // Asking for more than a page holds is answered with a page rather than
-      // a refusal: nothing the reader asked for is missing, it just arrives
-      // over more requests.
-      ...(asked === undefined
-        ? {}
-        : { limit: Math.min(asked, LARGEST_PAGE_SIZE) }),
-      ...(query.cursor === undefined || query.cursor === ""
-        ? {}
-        : { cursor: query.cursor }),
+      ...(cursor === undefined ? {} : { cursor }),
     });
 
     return reply.send({
@@ -466,6 +516,7 @@ export async function agentRoutes(
     if (error instanceof AgentWriteRefusedError) {
       if (error.reason === "name_taken") {
         return refused(reply, {
+          refused: true,
           status: 409,
           error: "name_taken",
           message: error.message,
@@ -473,6 +524,7 @@ export async function agentRoutes(
       }
       if (error.reason === "needs_a_name") {
         return refused(reply, {
+          refused: true,
           status: 422,
           error: "unprocessable",
           message: error.message,
@@ -481,18 +533,11 @@ export async function agentRoutes(
       return refused(reply, invalid(error.message));
     }
 
-    // A project of somebody else's, named in a body. It is a permission
-    // answer rather than a not-found one: the caller named a real thing and
-    // may not act there, and the reply says so without saying whose it is.
+    // The same answer the routes already give a project of somebody else's,
+    // for the moment between the check and the write in which one stopped
+    // being the caller's. One sentence, from the one place that writes it.
     if (error instanceof ProjectOutsideOrganizationError) {
-      return refused(reply, {
-        status: 403,
-        error: "not_permitted",
-        message:
-          `project ${error.projectId} is not in your organization. A write ` +
-          "may name a project of your own organization or leave it out, and " +
-          "which organization this is always comes from the key.",
-      });
+      return refused(reply, projectOutsideOrganization(error.projectId));
     }
 
     if (error instanceof NotPermittedError) {

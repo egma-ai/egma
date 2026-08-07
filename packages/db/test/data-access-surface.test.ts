@@ -182,7 +182,6 @@ const VALUES = [
  * reaches a store or names a customer.
  */
 const READ_LIMITS = [
-  "LARGEST_PAGE_SIZE",
   "MAXIMUM_LIST_LIMIT",
   "MAXIMUM_SPANS_PER_TRACE",
   "MAXIMUM_WINDOW_MILLISECONDS",

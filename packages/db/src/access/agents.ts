@@ -21,7 +21,6 @@ import {
   AgentWriteRefusedError,
   ProjectOutsideOrganizationError,
 } from "./errors.ts";
-import { DEFAULT_PAGE_SIZE, LARGEST_PAGE_SIZE } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
 import { within } from "./within.ts";
@@ -749,6 +748,9 @@ export async function getAgent(
     .limit(1);
   return row;
 }
+
+const DEFAULT_PAGE_SIZE = 50;
+const LARGEST_PAGE_SIZE = 200;
 
 /**
  * One page of the agents the caller can reach — the acting project's, or the
