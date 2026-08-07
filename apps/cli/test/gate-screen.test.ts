@@ -629,4 +629,75 @@ describe("the gate", () => {
     expect(await readFile(path.join(tests, "half-written.md"), "utf8")).toBe(broken);
     expect(await readFile(path.join(tests, "nothing-to-check.md"), "utf8")).toBe(unfalsifiable);
   });
+
+  /**
+   * The one refusal egma cannot see coming, met on a real terminal.
+   *
+   * A file naming a persona reads perfectly well; whether egma holds a persona
+   * of that name is the platform's own business. So the refusal lands after the
+   * keystroke, and the list comes back rather than the run going ahead on a
+   * list nobody agreed to. Every key it offers still does what it says: `e`
+   * opens the file that is holding things up, and enter over the list as it now
+   * stands is consent to run without it.
+   */
+  it("puts the list back when the platform turns a test away, and keeps every key", async () => {
+    const named = [
+      "---",
+      "name: wanted-it-by-friday",
+      "personas: [in-a-hurry]",
+      "---",
+      "## Scenario",
+      "Somebody rings the order line wanting it by Friday.",
+      "## Expected behaviors",
+      "1. The agent says the workshop's name.",
+      "",
+    ].join("\n");
+    const refused = path.join(workspace.dir, "egma", "tests", "wanted-it-by-friday.md");
+    const added = "2. The agent thanks the person.";
+    const editor = await workspace.editor(added);
+
+    const run = await toTheGate({ EDITOR: editor.command }, [
+      ...writes(TESTS[0]),
+      { kind: "write-file", path: "egma/tests/wanted-it-by-friday.md", content: named },
+      { kind: "say", text: "egma:wrote wanted-it-by-friday\n" },
+      { kind: "stop", reason: "end_turn" },
+    ]);
+
+    // Both are ordinary rows: nothing on this side can tell that one of them is
+    // about to be refused.
+    await showing(run, "2 tests generated", TESTS[0], "wanted-it-by-friday", ...GATE_HINTS);
+    run.write("\r");
+
+    // The platform said no, so the list is back — one test on it, and the other
+    // named under it in the platform's own words.
+    await showing(
+      run,
+      "1 test generated",
+      "egma/tests/wanted-it-by-friday.md",
+      "there is no persona in-a-hurry",
+      ...GATE_HINTS,
+    );
+
+    // Down onto the file that is holding things up, and `e` opens that one.
+    run.write("[B");
+    run.write("e");
+    expect(await run.waitFor(() => existsSync(editor.opened))).toBe(true);
+    expect((await readFile(editor.opened, "utf8")).trim().split("\n")).toEqual([refused]);
+
+    // The editor left the persona alone, so enter over this list is agreement
+    // to run without it — and the run starts, over what the platform took.
+    await showing(run, "1 test generated", ...GATE_HINTS);
+    await enterAndLeave(run);
+
+    expect(await run.exited).toBe(0);
+    expect(run.scrollback()).toContain("✓ Your first run is live");
+    expect(platform.tests.tests.map((test) => test.name)).toEqual([TESTS[0]]);
+
+    // Both files are the developer's. The refused one carries their own edit
+    // and no pin, because nothing on egma was ever made from it.
+    expect(await testsInFolder()).toEqual([`${TESTS[0]}.md`, "wanted-it-by-friday.md"]);
+    const kept = await readFile(refused, "utf8");
+    expect(kept).toContain(added);
+    expect(kept).not.toContain("version:");
+  });
 });

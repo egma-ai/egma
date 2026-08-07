@@ -13,6 +13,11 @@
  *   written and the current version comes back.
  * - **A test is falsifiable from birth.** A write with no expected behaviors is
  *   refused at the door, in the factory's own words, rather than stored.
+ * - **A test names personas this project holds.** A write naming one it does
+ *   not is refused at the door, in the factory's own words. It is the refusal
+ *   nothing on the CLI's side can see coming — the file is perfectly readable
+ *   and only the platform knows the answer — so it is the one this fixture has
+ *   to be able to make.
  * - **Identifiers are egma's.** `tst_` and `tstv_`, minted by the same
  *   generator every table uses, so a pinned version id in a committed file is
  *   the same string it would be against a real instance.
@@ -161,6 +166,13 @@ export function testRoutes(options: {
    * The persona ids a write names, from the names it gave. An empty list takes
    * the project's default, which is what lets a first test be authored before
    * anybody has authored a persona.
+   *
+   * Both refusals are the factory's own sentences, word for word
+   * (`packages/db/src/access/tests.ts`), with the name standing where the
+   * factory writes an identifier — because a name is what crosses the wire and
+   * an identifier is what the factory is handed. This is the one refusal the
+   * CLI cannot see coming: a file naming a persona reads perfectly well, and
+   * only the platform knows which personas it holds.
    */
   const resolvePersonas = (
     named: readonly string[],
@@ -173,9 +185,11 @@ export function testRoutes(options: {
       const found =
         personas.find((persona) => persona.id === wanted) ??
         personas.find((persona) => persona.name === wanted);
-      if (found === undefined) return { refusal: `egma has no persona called "${wanted}"` };
+      if (found === undefined) {
+        return { refusal: `there is no persona ${wanted} in this project` };
+      }
       if (ids.includes(found.id)) {
-        return { refusal: `persona "${wanted}" is named twice on one test` };
+        return { refusal: `persona ${wanted} is named twice on one test` };
       }
       ids.push(found.id);
     }

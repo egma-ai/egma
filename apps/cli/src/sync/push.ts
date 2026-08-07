@@ -72,7 +72,23 @@ export type PushedTest = {
 export type TurnedAway = {
   readonly name: string;
   readonly shown: string;
+  /** Absolute, for a caller that offers to open the file it is about. */
+  readonly file: string;
   readonly reason: string;
+  /**
+   * Which of the two refusals this was.
+   *
+   * `egma` is the one egma can see coming and says before anything uploads: a
+   * file it could not read, or a test with nothing to check. `platform` is the
+   * platform's own door — it read the upload and refused it for a rule only it
+   * can check, which today means a test naming a persona it does not hold.
+   *
+   * It is written down rather than worked out afterwards, because the door's
+   * words are the door's: any sentence it likes, in any wording, changing the
+   * day the platform changes. A caller that has to tell one refusal from the
+   * other reads this and never the reason.
+   */
+  readonly refusedBy: "egma" | "platform";
 };
 
 export type PushReport = {
@@ -153,14 +169,18 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
     ).map((file) => ({
       name: path.basename(file.file, ".md"),
       shown: file.shown,
+      file: file.file,
       reason: file.reason,
+      refusedBy: "egma" as const,
     })),
     ...readable
       .filter((file) => file.test.expectedBehaviors.length === 0)
       .map((file) => ({
         name: file.test.name,
         shown: file.shown,
+        file: file.file,
         reason: NO_BEHAVIORS_REASON,
+        refusedBy: "egma" as const,
       })),
   ];
 
@@ -260,7 +280,9 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
         turnedAway.push({
           name: plan.file.test.name,
           shown: plan.file.shown,
+          file: plan.file.file,
           reason: answer.reason,
+          refusedBy: "platform",
         });
         break;
     }
