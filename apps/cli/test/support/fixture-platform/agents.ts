@@ -600,14 +600,16 @@ export function agentRoutes(options: {
         : undefined;
     if (typeof named !== "string" || named.trim() === "") return [];
 
-    return connections
-      .filter(
-        (held) =>
-          held.projectId === projectId &&
-          held.type === type &&
-          held.config[reuseKey] === named.trim(),
-      )
-      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    // In the order they were written, which is what "oldest first" means here.
+    // The real instance orders by connection id and gets the same answer, its
+    // ids being time-sortable; this file's are not, so it uses the order it
+    // actually wrote them in rather than one that would only look like it.
+    return connections.filter(
+      (held) =>
+        held.projectId === projectId &&
+        held.type === type &&
+        held.config[reuseKey] === named.trim(),
+    );
   };
 
   const group: RouteGroup = {
