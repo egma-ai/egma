@@ -170,14 +170,14 @@ function personaEntries(value: unknown): NamedPersonas {
   return { entries };
 }
 
+/** How many rows one page holds, as the data-access layer's default does. */
+const PAGE_SIZE = 50;
+
 /**
  * One frozen version, as the run endpoints need it: what test it belongs to,
  * and who calls about it. A run pins one of these per test and produces one
  * simulation per persona named on it.
  */
-/** How many rows one page holds, as the data-access layer's default does. */
-const PAGE_SIZE = 50;
-
 export type VersionLookup = (versionId: string) => {
   readonly versionId: string;
   readonly testId: string;
@@ -188,6 +188,15 @@ export type VersionLookup = (versionId: string) => {
 export function testRoutes(options: {
   /** Whether the key a request carries is one this instance minted. */
   readonly holdsKey: (key: string) => boolean;
+  /**
+   * The one project this key acts in.
+   *
+   * Handed in rather than minted here, so every group of this fixture agrees
+   * about which project this is — a fixture whose halves each believed in a
+   * different project could not say anything true about a request that named
+   * one.
+   */
+  readonly projectId: string;
 }): {
   readonly group: RouteGroup;
   readonly controls: TestControls;
@@ -199,7 +208,7 @@ export function testRoutes(options: {
   // The one project this key acts in. Never in a path and never asked for; it
   // exists so that a body or a filter that names one has something to agree
   // with, which is the shape the public API has to keep room for.
-  const projectId = newId("prj");
+  const projectId = options.projectId;
 
   const addPersona = (name: string): string => {
     const already = personas.find((persona) => persona.name === name);

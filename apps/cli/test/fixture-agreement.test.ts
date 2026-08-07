@@ -786,6 +786,47 @@ describe("names, and reading an agent back", () => {
     });
   });
 
+  /**
+   * The two route groups say this in two different sentences, and the fixture
+   * keeps both rather than choosing one.
+   *
+   * The tests group resolves the acting project through the shared helper and
+   * says "this credential may not act in project X"; the agents group writes
+   * its own and says "this credential acts in project Y, and the request named
+   * X". Both are the shipped wording, asserted word for word by each group's
+   * own route tests, and a fixture that answered whichever it preferred would
+   * teach a client to branch on a sentence the real thing does not always send.
+   */
+  it("refuses a project this credential was not minted for, in this group's own words", async () => {
+    const registered = await ask("POST", "/api/agents", registration());
+    const ours = String(agentOf(registered).project_id);
+    const theirs = "prj_01JZZZZZZZZZZZZZZZZZZZZZZZ";
+
+    const reading = await ask("GET", `/api/agents?project=${theirs}`);
+    expect(reading.status).toBe(403);
+    expect(reading.body).toEqual({
+      error: "not_permitted",
+      message:
+        `this credential acts in project ${ours}, and the request ` +
+        `named ${theirs}. A key minted for one product area reads that ` +
+        "one; drop the project, or use a key for the whole organization.",
+    });
+
+    const writing = await ask("POST", "/api/agents", {
+      ...registration({ name: "Elsewhere", retellAgentId: "agent_in_retell_5" }),
+      project: theirs,
+    });
+    expect(writing.status).toBe(403);
+    expect(writing.body).toEqual({
+      error: "not_permitted",
+      message:
+        `this credential acts in project ${ours}, and the request ` +
+        `named ${theirs}. A key minted for one product area writes into ` +
+        "that one; drop the project, or use a key for the whole organization.",
+    });
+    expect(platform.registered.agents).toHaveLength(1);
+  });
+
   it("never answers a sealed secret back, on any read", async () => {
     const secret = "retell-secret-A1B2C3D4WXYZ";
     const registered = await ask("POST", "/api/agents", registration({ apiKey: secret }));

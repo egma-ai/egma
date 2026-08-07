@@ -398,6 +398,26 @@ export type AgentControls = {
 };
 
 /**
+ * A key minted for one project, asked to act in a different one.
+ *
+ * The verb is passed in because that is the only word that differs between the
+ * read and the write — and two sentences kept in step by hand is how contract
+ * wording drifts.
+ */
+function credentialActsElsewhere(
+  scoped: string,
+  named: string,
+  verb: "writes into" | "reads",
+): Refusal {
+  return new Refusal(
+    `this credential acts in project ${scoped}, and the request named ` +
+      `${named}. A key minted for one product area ${verb} that one; drop ` +
+      "the project, or use a key for the whole organization.",
+    { status: 403, code: "not_permitted" },
+  );
+}
+
+/**
  * One connection, as the run endpoints need it: which agent it reaches, and
  * what egma would have to speak to conduct a simulation over it.
  */
@@ -408,7 +428,19 @@ export type ConnectionLookup = (connectionId: string) => {
   readonly modality: string;
 } | null;
 
-export function agentRoutes(knowsKey: (key: string) => boolean): {
+export function agentRoutes(options: {
+  /** Whether the key a request carries is one this instance minted. */
+  readonly knowsKey: (key: string) => boolean;
+  /**
+   * The one project this key acts in.
+   *
+   * Handed in rather than minted here, so every group of this fixture agrees
+   * about which project this is — a fixture whose halves each believed in a
+   * different project could not say anything true about a request that named
+   * one.
+   */
+  readonly projectId: string;
+}): {
   readonly group: RouteGroup;
   readonly controls: AgentControls;
   /** How a run resolves the connection it will execute over. */
@@ -419,12 +451,30 @@ export function agentRoutes(knowsKey: (key: string) => boolean): {
   const sealed: string[] = [];
   const projectsNamed: (string | null)[] = [];
 
-  /** The project everything lands in when a write names none. */
-  const HOME_PROJECT = newId("prj");
+  /** The project everything lands in, named or not. */
+  const HOME_PROJECT = options.projectId;
+
+  /**
+   * The project a request named, checked against what this key may reach.
+   *
+   * One rule for reads and writes. A surface that refused a stranger's project
+   * on a write and answered an empty list on a read has two rules, and the
+   * empty list is the worse half: it reads as "you have no agents there"
+   * rather than as "that is not yours to ask about".
+   */
+  const projectNamed = (
+    named: string | undefined,
+    verb: "writes into" | "reads",
+  ): string => {
+    if (named !== undefined && named !== HOME_PROJECT) {
+      throw credentialActsElsewhere(HOME_PROJECT, named, verb);
+    }
+    return HOME_PROJECT;
+  };
 
   const authorized = (headers: Record<string, string | undefined>): boolean => {
     const offered = (headers["authorization"] ?? "").replace(/^Bearer\s+/iu, "");
-    return offered !== "" && knowsKey(offered);
+    return offered !== "" && options.knowsKey(offered);
   };
 
   const notAuthenticated: FixtureAnswer = {
@@ -589,7 +639,7 @@ export function agentRoutes(knowsKey: (key: string) => boolean): {
             // its address, and it never names an organization anywhere.
             const named = typeof body["project"] === "string" ? body["project"] : null;
             projectsNamed.push(named);
-            const projectId = named ?? HOME_PROJECT;
+            const projectId = projectNamed(given(named), "writes into");
 
             const inline =
               body["connection"] === undefined ? undefined : connectionIn(body["connection"]);
@@ -694,7 +744,10 @@ export function agentRoutes(knowsKey: (key: string) => boolean): {
         handle: (request) => {
           if (!authorized(request.headers)) return notAuthenticated;
           return answering(() => {
-            const project = given(request.url.searchParams.get("project"));
+            const project = projectNamed(
+              given(request.url.searchParams.get("project")),
+              "reads",
+            );
             const cursor = given(request.url.searchParams.get("cursor"));
             if (cursor !== undefined && !isId("agt", cursor)) {
               throw new Refusal(
@@ -704,9 +757,7 @@ export function agentRoutes(knowsKey: (key: string) => boolean): {
               );
             }
 
-            const mine = agents.filter(
-              (agent) => project === undefined || agent.projectId === project,
-            );
+            const mine = agents.filter((agent) => agent.projectId === project);
             const from =
               cursor === undefined ? 0 : mine.findIndex((held) => held.id === cursor) + 1;
             const page = mine.slice(from, from + PAGE_SIZE);

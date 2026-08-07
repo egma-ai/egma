@@ -6,6 +6,7 @@
  * part of the API is adding a group beside the ones here.
  */
 
+import { newId } from "../../../../../packages/ids/src/index.ts";
 import { agentRoutes, type AgentControls } from "./agents.ts";
 import { controlRoutes } from "./controls.ts";
 import { deviceRoutes, type DeviceControls } from "./device.ts";
@@ -54,13 +55,16 @@ export async function startPlatform(): Promise<Platform> {
     device = deviceGroup.controls;
 
     // Which customer this is comes from the key, so every group that writes
-    // asks the same question of the same list of minted keys.
+    // asks the same question of the same list of minted keys — and every group
+    // acts in the one project that key was minted for, so a body or a filter
+    // naming a project meets one answer rather than one per route group.
     const holdsKey = (key: string): boolean => device.keys.includes(key);
+    const projectId = newId("prj");
 
-    const agentGroup = agentRoutes(holdsKey);
+    const agentGroup = agentRoutes({ knowsKey: holdsKey, projectId });
     registered = agentGroup.controls;
 
-    const testGroup = testRoutes({ holdsKey });
+    const testGroup = testRoutes({ holdsKey, projectId });
     tests = testGroup.controls;
 
     // A run reads the other two groups rather than holding copies of what they
