@@ -581,13 +581,13 @@ async function assertWhatLanded(options: {
     `the connection names a modality (${String(connection?.modality)})`,
   );
   check(
-    connection?.credentialsHint === options.key.slice(-4),
+    connection?.credentials_hint === options.key.slice(-4),
     "the key was sealed on the platform, and only its last characters came back",
   );
 
   const tests = await askThePlatform(platform.url, held.key, "/api/tests");
-  const landed = Array.isArray(tests.body.tests)
-    ? (tests.body.tests as Record<string, unknown>[])
+  const landed = Array.isArray(tests.body.items)
+    ? (tests.body.items as Record<string, unknown>[])
     : [];
   const pinned = landed.filter((test) => String(test.version_id).startsWith("tstv_"));
   check(

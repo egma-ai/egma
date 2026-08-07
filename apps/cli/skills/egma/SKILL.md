@@ -137,6 +137,10 @@ A test passes in a run when every simulation of it passed.
   walks the whole way from nothing.
 - **`egma run` refused** — the sentence egma printed is egma's own. Give it to
   the developer as it stands. Do not guess at what it meant.
+- **`egma run` said `not-pushed` or `unknown`** — the folder and egma do not say
+  the same thing, so nothing was started. Run `egma push`, then run again. Never
+  work around this by running anyway: a run over what egma holds would come back
+  green about words the developer's files do not say.
 - **A test is red** — read the simulation on the results page before changing
   anything. A failing test is information about the voice agent, and deleting
   it or loosening its expected behaviors to get a green suite destroys the only

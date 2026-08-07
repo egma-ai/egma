@@ -19,6 +19,7 @@ import {
   connect,
   CUSTODY_LINE,
   KEY_ASK_LINE,
+  registrationLine,
   type ConnectOptions,
   type ConnectOutcome,
 } from "../retell/connect.ts";
@@ -150,6 +151,11 @@ export async function connectStep(options: ConnectStepOptions): Promise<Connecte
     ui.pushStatus(
       `${ACTION_MARK} ${registered.agent.name} is on egma, reachable over ${registered.connection.name} (retell ${registered.connection.modality}).`,
     );
+    // A second walk over the same Retell agent finds what the first one wrote.
+    // egma says so rather than drawing a line that reads like a fresh
+    // registration, and rather than failing over something that worked.
+    const already = registrationLine(registered);
+    if (already !== null) ui.pushStatus(`${DETAIL_MARK} ${already}`);
     // Shown, never blocking, and only when both halves were really read.
     if (outcome.drift === "differs") ui.pushStatus(DRIFT_LINE);
 

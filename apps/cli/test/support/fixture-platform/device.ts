@@ -19,6 +19,7 @@
 
 import { randomBytes } from "node:crypto";
 
+import { NOT_AUTHENTICATED } from "./reading.ts";
 import type { RouteGroup } from "./server.ts";
 
 type Authorization = {
@@ -251,10 +252,7 @@ export function deviceRoutes(origin: () => string): {
         handle: (request) => {
           const offered = (request.headers.authorization ?? "").replace(/^Bearer\s+/iu, "");
           if (offered === "" || !keys.includes(offered)) {
-            return {
-              status: 401,
-              body: { error: "not_authenticated", message: "no key, or not one of ours" },
-            };
+            return { status: 401, body: NOT_AUTHENTICATED };
           }
           return {
             status: 200,

@@ -158,7 +158,14 @@ async function ask(call: Call): Promise<{ response: Response; body: Record<strin
   return { response, body: await bodyOf(response) };
 }
 
-/** Everything the credential reaches, newest first, following every page. */
+/**
+ * Everything the credential reaches, newest first, following every page.
+ *
+ * Every list in this API answers one envelope — `{ items, next_cursor }` — and
+ * the page is read out of `items` whatever the list is of. One envelope is what
+ * lets a client hold one function for "walk every page" rather than one per
+ * resource, and it is what stops a new list arriving with a key nobody guessed.
+ */
 export async function listTests(
   signedIn: SignedIn,
   fetchImpl?: Fetch,
@@ -176,7 +183,7 @@ export async function listTests(
     });
     if (!response.ok) throw new PlatformRefusedError(response.status, saidBy(body, response.status));
 
-    for (const entry of Array.isArray(body.tests) ? body.tests : []) {
+    for (const entry of Array.isArray(body.items) ? body.items : []) {
       if (typeof entry === "object" && entry !== null) {
         found.push(testFrom(entry as Record<string, unknown>));
       }

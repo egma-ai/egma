@@ -307,30 +307,48 @@ async function main(): Promise<void> {
       `the response engine is one Retell names (${result.retell_response_engine ?? "none"})`,
     );
 
-    // The two halves, each exactly as Retell answered them.
+    // egma read both halves from Retell and kept neither of them.
+    //
+    // That absence is the check. What the provider is running lives at the
+    // provider: egma keeps the identity and the sealed way back, and reads the
+    // content fresh through it, because a stored copy would start rotting the
+    // moment it was written. So there is nothing here to compare byte for byte
+    // — there is only what Retell answered, and what egma read out of it.
     const agent = platform.registered.agents.at(-1);
-    const documents = agent?.pulled?.documents ?? [];
-    const agentDocument = documents.find((one) => one.of === "agent")?.body ?? "";
-    const engineDocument = documents.find((one) => one.of === "response-engine")?.body;
+    check(
+      agent !== undefined && !("pulled" in agent),
+      "nothing egma stored holds a copy of what the provider is running",
+    );
 
-    // Retell keeps voice agents and chat agents at two addresses, so what was
-    // stored is compared with what came back from the one this agent is at.
+    // Retell keeps voice agents and chat agents at two addresses, so the one
+    // this agent is at is the one that has to have answered.
     const agentAddress =
       result.connection_modality === "chat"
         ? `/get-chat-agent/${result.retell_agent_id ?? ""}`
         : `/get-agent/${result.retell_agent_id ?? ""}`;
+    const answeredWith = gate.answered(agentAddress) ?? "";
     check(
-      agentDocument !== "" && agentDocument === gate.answered(agentAddress),
-      `the agent Retell answered with was stored byte for byte (${agentDocument.length} bytes)`,
+      answeredWith.length > 0,
+      `Retell answered for the agent egma took (${answeredWith.length} bytes)`,
     );
-    check(
-      engineDocument !== undefined && engineDocument.length > 0,
-      `the response engine was stored beside it (${engineDocument?.length ?? 0} bytes)`,
-    );
-    check(
-      (agent?.pulled?.prompt ?? "").length === Number(result.prompt_characters ?? 0),
-      "what egma read out of it is stored beside it, not instead of it",
-    );
+    // A custom engine is the customer's own service and has no address at
+    // Retell, so it is the one engine with no second half to read. Saying "the
+    // engine was read" over an engine nothing read would be a line that passes
+    // by being about nothing, which is worse than no line at all — so this
+    // prints the claim it can actually make, and says which one it made.
+    if (result.retell_response_engine === "custom-llm") {
+      say(
+        "  --    the response engine is the customer's own service, so there was " +
+          "no second half at Retell to read",
+      );
+    } else {
+      check(
+        gate.forwarded.some(
+          (one) => one.includes("/get-retell-llm") || one.includes("/get-conversation-flow"),
+        ),
+        "the response engine was read as its own half, not guessed at",
+      );
+    }
 
     // The agent and the way to reach it are on the platform.
     check(platform.registered.agents.length >= 1, "an agent landed on the platform");

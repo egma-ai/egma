@@ -145,6 +145,13 @@ EGMA_RETELL_API_KEY=… egma connect
 nothing new. With several agents on the account it lists them and refuses to
 guess; name one with `--retell-agent`.
 
+**Running it twice over the same Retell agent is safe.** egma answers the
+registration you already have rather than making a second one, stores the key
+you just gave, and says which of three things it did on the `registration:`
+line — `created`, `reused`, or `connection_added` when the same agent gained
+another way of being reached. The last two also print a `note:` line saying it
+in plain words.
+
 ```
 url: https://app.egma.ai
 retell_agents: 1
@@ -158,6 +165,7 @@ connection_id: con_01K…
 connection_name: retell-1
 connection_type: retell
 connection_modality: voice
+registration: created
 drift: no
 grounded_in: retell
 status: connected
@@ -339,9 +347,16 @@ status: completed
 — for when you want the suite going and will read the results page later.
 
 It runs what egma holds, pinning the current version of each test, so a run is a
-record of exactly what executed. A file in your folder that egma has never seen
-refuses the whole run and names it: push it first. A file egma has moved past is
-named on a `stale:` line and the run happens anyway, over what egma holds.
+record of exactly what executed.
+
+**Your folder and egma have to agree, or nothing starts.** A file egma has never
+seen is named on an `unknown:` line; a file egma holds different content for is
+named on a `not-pushed:` line. Either one refuses the whole run and names the
+fix, which is `egma push` both times. The comparison is the content of each
+test, field by field, and never a version number — the numbers agree with each
+other exactly when you edited a file and did not push it, which is the case this
+gate is for. A run that went ahead over the difference would come back green
+about words nobody executed.
 
 ## The skill, if you want it
 
