@@ -80,6 +80,14 @@
  * the folded answer over them; nothing writes an overall row anywhere, and the
  * fold that computes one is a pure function exported from the package's entry
  * point rather than from here, because it reaches no store at all.
+ *
+ * The two ways a judgment is ever revisited are exported beside them, and
+ * neither is an edit: `regrade` reopens the queue so the engine judges a run or
+ * a window again at each grader's current version, and `correctVerdict` writes
+ * one person's disagreement as a row of its own with the machine's still
+ * underneath it. Both take the context like everything else, and both are the
+ * whole API for revisiting a verdict today — there are no routes above them
+ * yet, and this surface is the altitude the product is reachable at.
  */
 
 export type { AuthContext, Role, Via } from "./context.ts";
@@ -197,12 +205,14 @@ export {
 
 export {
   appendVerdicts,
+  correctVerdict,
   readVerdicts,
   type AppendedVerdicts,
   type NewVerdict,
   type ReadVerdictsOptions,
   type RecordedVerdict,
   type TraceVerdicts,
+  type VerdictCorrection,
 } from "./verdicts.ts";
 
 export {
@@ -369,11 +379,16 @@ export {
   listGradingJobsForSimulation,
   recordGradingHeartbeat,
   recordProductionTraces,
+  regrade,
   releaseGradingJob,
+  reopenGradingJob,
   watchGradingWork,
   type GradingClaim,
   type GradingClaimRequest,
   type GradingJob,
+  type Regraded,
+  type RegradeTarget,
+  type RegradeWindow,
 } from "./grading.ts";
 export type { GradingJobStatus, GradingSource } from "../schema/grading.ts";
 export type { Listening } from "../client.ts";

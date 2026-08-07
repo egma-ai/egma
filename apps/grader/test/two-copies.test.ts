@@ -2,6 +2,7 @@ import {
   claimGradingJobs,
   listGradingJobsForSimulation,
   readVerdicts,
+  reopenGradingJob,
   type GradingJob,
 } from "@egma/db";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -171,11 +172,13 @@ describe("a copy that died holding a conversation", () => {
 
 describe("judging one conversation again at the same grader version", () => {
   /**
-   * Which is what a re-run after a transient failure is, and what ticket 08's
-   * explicit re-grade will be: the job is reopened rather than a second one
-   * created. The store's identity spans the grader version, so the second
-   * judgment is a rewrite of the first rather than a row beside it — the
-   * conversation's answer cannot come to disagree with itself.
+   * Which is what a re-run after a transient failure is, and what an explicit
+   * re-grade is when nobody has edited the grader in between: the job is
+   * reopened rather than a second one created. The store's identity spans the
+   * grader version, so the second judgment is a rewrite of the first rather than
+   * a row beside it — the conversation's answer cannot come to disagree with
+   * itself, and a re-grade of a run whose graders are mostly unchanged
+   * accumulates rows only for the ones that moved.
    */
   it("replaces the judgment rather than doubling it", async () => {
     aCopy("grader-again");
@@ -186,12 +189,10 @@ describe("judging one conversation again at the same grader version", () => {
     const before = await readVerdicts(world.auth, simulationId);
     expect(before.verdicts).toHaveLength(1);
 
-    // Reopened, exactly as a re-grade reopens it. Raw, because the API for
-    // asking is ticket 08's and the storage behaviour is what is under test.
-    await world.database.sql(
-      "update grading_job set status = 'pending', claimed_by = null, claimed_at = null, heartbeat_at = null, finished_at = null, attempts = 0 where id = $1",
-      [first.id],
-    );
+    // Reopened through the door a re-grade reopens it through — one job asked
+    // again, never a second filed beside it.
+    const reopened = await reopenGradingJob(world.auth, first.id);
+    expect(reopened).toMatchObject({ id: first.id, status: "pending", attempts: 0 });
 
     await eventually(
       "the conversation to be judged again",

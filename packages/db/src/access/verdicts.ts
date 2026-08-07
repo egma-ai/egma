@@ -2,6 +2,7 @@ import { traceStore } from "../clickhouse/client.ts";
 import {
   foldVerdicts,
   foldVerdictsByGrader,
+  JUDGED_BY_HUMAN,
   type FoldedOutcome,
   type FoldableVerdict,
   type GraderOutcome,
@@ -27,6 +28,14 @@ import { authorize, here } from "./permissions.ts";
  * version saying something about the same dimension again, which is what a
  * re-run after a transient error is. That collapse is the storage engine's, and
  * this module never asks a caller which case they are in.
+ *
+ * `correctVerdict` is the third door and it breaks none of that: a person's
+ * disagreement is a whole verdict row of their own, written through the same
+ * insert as every other, and the machine's row is left exactly where it was.
+ * The other half of revisiting a judgment — asking the engine for a fresh one —
+ * is not here at all, because it is a job rather than a row: `regrade` reopens
+ * the queue, the service judges, and what lands does so through `appendVerdicts`
+ * like anything else.
  *
  * **No overall row is written here or anywhere.** `readVerdicts` answers with
  * the rows and with the fold's answer over them, computed at the moment of
@@ -342,6 +351,167 @@ export async function readVerdicts(
     outcome: foldVerdicts(verdicts),
     byGrader: foldVerdictsByGrader(verdicts),
   };
+}
+
+/* ------------------------------------------------------------------- *
+ * The human word.
+ * ------------------------------------------------------------------- */
+
+/**
+ * A person disagreeing with a judgment, and what they say instead.
+ *
+ * **What it names is the judged thing, not who judged it** — the conversation,
+ * the grader, the version that decided it, the dimension and the source. There
+ * is no `judgedBy` to give, because there is exactly one human row per judged
+ * thing and this is it. Correcting a correction is therefore the same act as
+ * making one: the row carries the same identity, the store keeps the later of
+ * the two, and a third voice is unrepresentable rather than merely discouraged.
+ *
+ * The grader version is part of what is named because a correction answers one
+ * grading. Somebody who reads a re-graded conversation and disagrees is
+ * disagreeing with the grading they read, and naming its version is how they say
+ * which one — a word against version 1 does not follow the conversation forward
+ * into version 2's grading, which they have not read.
+ */
+export type VerdictCorrection = {
+  readonly traceId: string;
+  readonly graderId: string;
+  readonly graderVersionId: string;
+  readonly dimension: string;
+  readonly source: VerdictSource;
+  /** What the person says happened, in the same four words the machine has. */
+  readonly verdict: Verdict;
+  /**
+   * Between 0 and 1, and **optional**, because a person states a verdict and a
+   * reason — a number is what a rubric produces, not what a reader has. Left
+   * out, it follows the word: 1 for `passed`, 0 for anything else, which is the
+   * same arithmetic the deterministic graders do. Somebody correcting a rubric's
+   * 0.6 to 0.8 has a number, and says so.
+   */
+  readonly score?: number | undefined;
+  /** Why they disagree. Required: a correction with no reason is an assertion. */
+  readonly rationale: string;
+  /** The turns they are pointing at, if they are pointing at any. */
+  readonly citedSpanIds?: readonly string[] | undefined;
+};
+
+/**
+ * Disagree with a judgment, and have the disagreement be what counts.
+ *
+ * **It is a whole verdict row and not an edit.** The machine's row stays exactly
+ * where it is, still returned by `readVerdicts`, still saying what egma thought
+ * — which is the entire reason the correction is stored as a second row rather
+ * than written over the first. Accumulated, those pairs are the ground truth a
+ * future measurement of judge accuracy is made of, and an edit would have thrown
+ * away one half of every pair.
+ *
+ * What the person is handed back is the row they wrote. The fold prefers it over
+ * the machine's inside that grading from the next read on, and the arithmetic
+ * that makes a run's headline is the same arithmetic it always was — no reader
+ * knows a human spoke except by looking at `judged_by`.
+ *
+ * **The priority is the corrected row's, not today's.** A person disagreeing
+ * with a P1 warning from last week is disagreeing with a warning; promoting that
+ * grader to P0 this morning did not make their word a blocker retroactively, and
+ * copying the row's own snapshot forward is what says so. It is the one place
+ * this module reads before it writes, and that is what it reads for. A re-grade
+ * snapshots today's priority instead, because a re-grade is a judgment made
+ * today.
+ *
+ * **The column says a person spoke, and not which person.** `judged_by` is the
+ * word the fold reads, and the identity spans it — so a second reviewer's
+ * correction replaces the first's rather than stacking beside it, and one judged
+ * thing has one human word. Recording who, and keeping every reviewer's, is a
+ * column this table does not have and a decision this ticket does not make.
+ *
+ * There has to be something to disagree with: a correction of a judgment that
+ * was never made would be authoring a verdict by hand, which is a different act
+ * with none of this one's reasoning behind it, and it is refused out loud.
+ */
+export async function correctVerdict(
+  auth: AuthContext,
+  correction: VerdictCorrection,
+): Promise<RecordedVerdict> {
+  authorize(auth, "revisit_verdicts", here(auth));
+
+  const rationale = correction.rationale.trim();
+  if (rationale === "") {
+    throw new Error("correcting a verdict says why you disagree");
+  }
+
+  const score = correction.score ?? (correction.verdict === "passed" ? 1 : 0);
+  if (!Number.isFinite(score) || score < 0 || score > 1) {
+    throw new Error("a verdict's score is a number between 0 and 1");
+  }
+
+  const { verdicts } = await readVerdicts(auth, correction.traceId);
+  const judged = verdicts.filter(
+    (row) =>
+      row.graderId === correction.graderId &&
+      row.graderVersionId === correction.graderVersionId &&
+      row.dimension === correction.dimension &&
+      row.source === correction.source,
+  );
+
+  // The machine's row is what carries the snapshot; a correction of a
+  // correction falls back to the row it is replacing, which carried it forward
+  // from the machine's in the first place.
+  const machine = judged.find((row) => row.judgedBy !== JUDGED_BY_HUMAN);
+  const said = judged.find((row) => row.judgedBy === JUDGED_BY_HUMAN);
+  const corrected = machine ?? said;
+
+  if (corrected === undefined) {
+    throw new Error(
+      `there is no verdict on ${correction.dimension} from that grading of ${correction.traceId} to disagree with`,
+    );
+  }
+
+  const row: NewVerdict = {
+    traceId: correction.traceId,
+    graderId: correction.graderId,
+    graderVersionId: correction.graderVersionId,
+    dimension: correction.dimension,
+    source: correction.source,
+    judgedBy: JUDGED_BY_HUMAN,
+    verdict: correction.verdict,
+    score,
+    rationale,
+    citedSpanIds: correction.citedSpanIds ?? [],
+    priority: corrected.priority,
+    // The conversation's own facts, copied rather than asked for: they belong to
+    // what was judged and not to who is judging it, so a caller who mistyped one
+    // could otherwise file their correction against a different run.
+    runId: corrected.runId,
+    agentId: corrected.agentId,
+    agentVersionId: corrected.agentVersionId,
+    judgedAtMicroseconds: correctedNow(said),
+  };
+
+  await appendVerdicts(auth, [row]);
+
+  return {
+    ...row,
+    citedSpanIds: [...row.citedSpanIds],
+    judgedAt: rfc3339(row.judgedAtMicroseconds),
+  };
+}
+
+/**
+ * When the disagreement was made, in microseconds, and always after the word it
+ * replaces.
+ *
+ * The clock is the version this table keeps rows by, so a second correction that
+ * landed inside the same millisecond as the first — or on a copy whose clock is
+ * a moment behind — would be free to lose to it, and the reviewer would be told
+ * their correction had been saved while the store kept the old one. A microsecond
+ * past the row being replaced is enough, and it never runs further ahead of the
+ * clock than the corrections actually made.
+ */
+function correctedNow(replacing: RecordedVerdict | undefined): bigint {
+  const now = BigInt(Date.now()) * 1000n;
+  if (replacing === undefined) return now;
+  const after = replacing.judgedAtMicroseconds + 1n;
+  return now > after ? now : after;
 }
 
 function verdictOf(row: VerdictRow): RecordedVerdict {
