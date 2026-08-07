@@ -204,10 +204,10 @@ export async function judgeExpectedBehaviors(
  * What the behaviors' dimension is called: the position, one-based, in the
  * order they were authored.
  *
- * Written as a function rather than as a template at each site so that the one
- * string a page, a query and a verdict row all share is decided in one place.
+ * Written as a function rather than as a template at each site so the string
+ * every verdict row files a behavior under is decided in one place.
  */
-export function behaviorDimension(at: number): string {
+function behaviorDimension(at: number): string {
   return `behavior_${at + 1}`;
 }
 

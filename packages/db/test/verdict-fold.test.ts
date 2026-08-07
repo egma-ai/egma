@@ -256,7 +256,7 @@ describe("a dimension judged more than once", () => {
       const rows = someRows(draw, 1 + Math.floor(draw() * 20));
       const dimensions = new Set(
         rows.map((one) =>
-          [one.traceId, one.graderId, one.dimension, one.source].join(" "),
+          [one.traceId, one.graderId, one.dimension, one.source].join("\0"),
         ),
       );
 

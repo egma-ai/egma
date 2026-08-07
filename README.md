@@ -117,9 +117,10 @@ conversation happened inside arriving is the conversation being over.
 closes one, and `EGMA_GRADER_SWEEP_SECONDS` is the backstop under all of it, for
 the notification raised while every copy happened to be restarting.
 
-It is handed no encryption key, because grading never touches a connection's
-credentials, and no model key, because the grader types v1 executes judge
-in-process with no model at all. `apps/grader/README.md` is the whole table.
+It is handed the deployment's encryption key, because a judged grader runs on
+the project's own judge model and the sealed key has to be replayed to that
+provider — and never a model key of its own, because the judge is always the
+customer's choice, not egma's. `apps/grader/README.md` is the whole table.
 
 ### Watching a simulator without a control plane
 

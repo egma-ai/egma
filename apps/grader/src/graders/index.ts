@@ -22,12 +22,12 @@ import { executeToolCalls } from "./tool-calls.ts";
  * the resolution, the verdict rows and the fold are all written once, in the
  * grader's vocabulary rather than in any type's.
  *
- * **A type that is named and not yet executed is named here too**, as
- * `undefined`, so the roster is total and the compiler fails when a type joins
- * it with nowhere to run. Every type egma names today executes; the reserved
- * ones — `state_check`, `code` — arrive here first and their entry is the
- * decision that they are not built. What egma does when it meets one is below,
- * and it is deliberately not silence.
+ * **The roster is total and the compiler holds it so**: a type added to the
+ * grader roster with no entry here does not compile. Every type egma names
+ * today executes. The `undefined` slot is for the day a reserved type —
+ * `state_check`, `code` — joins the roster before its executor does; its entry
+ * will be the decision that it is not yet built, and what egma does when it
+ * meets one is below, deliberately not silence.
  */
 
 /**
