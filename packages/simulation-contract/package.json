@@ -3,7 +3,17 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The versioned JSON contract between the control plane and the simulator: the spec and report schemas, with golden fixtures beside them.",
+  "description": "The versioned JSON contract between the control plane and the simulator: the spec and report schemas, with golden fixtures beside them, and the measure catalog naming what a simulation measures.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "schemas", "measure-catalog.md"],
+  "scripts": {
+    "build": "tsc -b"
+  },
   "devDependencies": {
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1"

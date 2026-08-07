@@ -9,6 +9,9 @@ export default defineConfig({
     alias: {
       "@egma/ids": resolve("./packages/ids/src/index.ts"),
       "@egma/db": resolve("./packages/db/src/index.ts"),
+      "@egma/simulation-contract": resolve(
+        "./packages/simulation-contract/src/index.ts",
+      ),
     },
   },
   test: {

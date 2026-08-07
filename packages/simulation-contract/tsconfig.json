@@ -5,6 +5,5 @@
     "rootDir": "./src",
     "tsBuildInfoFile": "./dist/.tsbuildinfo"
   },
-  "include": ["src/**/*.ts"],
-  "references": [{ "path": "../ids" }, { "path": "../simulation-contract" }]
+  "include": ["src/**/*.ts"]
 }
