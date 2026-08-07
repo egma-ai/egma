@@ -16,6 +16,7 @@ dependencies = [
 [project.scripts]
 egma-simulator = "egma_simulator.__main__:main"
 egma-workbench = "egma_simulator.workbench.__main__:main"
+egma-trunk-setup = "egma_simulator.trunk:main"
 
 [dependency-groups]
 dev = [

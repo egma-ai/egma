@@ -232,3 +232,41 @@ def load_spec_documents(path: Path) -> list[dict]:
         with open(file, encoding="utf-8") as handle:
             documents.append(json.load(handle))
     return documents
+
+
+def dialling(documents: list[dict], number: str) -> list[dict]:
+    """The specs that dial, pointed at a real number instead of a fixture's.
+
+    A checked-in fixture cannot know anybody's phone number, so
+    ``voice-phone.json`` names an obvious placeholder. That makes the one
+    demo worth watching — a real call to a real agent — the one demo the
+    fixtures cannot give, and closing that gap by hand is copying a JSON
+    document and POSTing it, which is three steps where there should be
+    none.
+
+    So the workbench takes the number instead, and does the two things that
+    make the run about the phone call: it writes the number into every spec
+    that dials, and it queues nothing else. The second half is not tidiness
+    — the simulator claims four at a time, so the other fixtures would
+    conduct their exchanges *alongside* the call and interleave their
+    events with the ones somebody started this to read.
+
+    Dev only, like everything else in this package. The real control plane
+    is handed specs; it does not edit them.
+    """
+    dials = [
+        document
+        for document in documents
+        if document.get("connection", {}).get("type") == "phone"
+    ]
+    if not dials:
+        raise FileNotFoundError(
+            "no spec here names a phone connection, so there is nothing to "
+            f"point at {number}"
+        )
+    pointed = []
+    for document in dials:
+        connection = document["connection"]
+        config = connection["config"] | {"phoneNumber": number}
+        pointed.append(document | {"connection": connection | {"config": config}})
+    return pointed
