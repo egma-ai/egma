@@ -6,6 +6,14 @@ The egma wizard and client, in one command.
 npx egma
 ```
 
+**Not yet, though: that package is not published.** The name on npm is a
+placeholder that holds it and runs nothing, so today the command is built from
+a checkout — see [Trying it on an instance of your
+own](#trying-it-on-an-instance-of-your-own) for the two lines that do it.
+Everywhere below, `npx egma` is the shape the command takes when it ships;
+`node …/apps/cli/dist/bin.js` is the same command today, and every option and
+every verb is the same.
+
 Run it in your repository. It opens a terminal wizard, tells you what it is
 about to do, and starts on one keystroke. When it closes, your terminal has one
 plain line in it and nothing else.
@@ -90,11 +98,13 @@ wider it needs to be instead of drawing an address that breaks across two lines.
 ### Your own instance
 
 ```
-EGMA_URL=http://localhost:3000 npx egma
+EGMA_URL=http://localhost:3101 egma
 ```
 
 or `--url`. It is kept beside the key after the first login, so later commands
-find it without being told again.
+find it without being told again. `3101` is where `docker compose up` puts an
+instance; see [Trying it on an instance of your own](#trying-it-on-an-instance-of-your-own),
+which is also where the `egma` in that line comes from today.
 
 ## Connecting your voice agent
 
@@ -287,6 +297,13 @@ passed 1  ·  failed 0  ·  skipped 0  ·  errored 0  ·  waiting 11
 **The wizard does not wait for the suite.** It waits for the first verdict —
 that is the point where you stop taking egma's word for it — and then closes.
 The run carries on on egma; shutting your terminal has never stopped one.
+
+**On an instance today, no verdict arrives yet.** The run is created, it is
+followed live, and every simulation sits in `queued`, because the piece that
+hands a test to the simulator and the grader that scores what it did are still
+being built. Everything up to that point is real. Until they land, close the
+window when you have seen the run — the run is yours on egma either way, at the
+address the screen shows.
 
 A **verdict** is one of four, and egma never turns four into three:
 
@@ -554,24 +571,62 @@ hands you to that agent's own login and carries on where it left off. And if
 there is no coding agent here for egma to drive at all, it prints the words to
 paste into whichever one you do use, and stops.
 
-## Trying it from this repository, today
+## Trying it on an instance of your own
 
-The public API does not yet serve agents, tests or runs, so a bare checkout
-has nothing real for the wizard to register against. Until it does, this
-package carries a platform you can try the whole walk on:
+egma is open source and runs on your machine. Clone the repository, then, from
+your checkout of it:
 
 ```
-docker compose up -d --wait          # once, from the repository root
+pnpm install
+docker compose up -d --wait
+```
+
+That starts a whole egma — Postgres, ClickHouse, the API, the pages and the
+simulator. Open <http://localhost:3101> and sign up: you become the admin of
+your own instance.
+
+The command itself is not on npm yet, so build it from the same checkout:
+
+```
 pnpm --filter egma-cli build
-pnpm --filter egma-cli tryout
 ```
 
-`tryout` starts a real egma behind one address — the sign-in and the key it
-mints are the real thing — with a stand-in serving what has not shipped, and
-prints the exact command to run the wizard from whatever repository holds
-your voice agent. Verdicts arrive from a stand-in simulator and every one is
-`passed`; the run is real everywhere except the judging. The whole stand-in
-half dies the day the public API ships.
+Then run it from the repository that holds your voice agent, naming the
+instance you just signed up on:
+
+```
+cd ~/your-voice-agent
+EGMA_URL=http://localhost:3101 node ~/egma/apps/cli/dist/bin.js
+```
+
+(`~/egma` is wherever you cloned this. When the package ships, that whole line
+becomes `npx egma`.)
+
+The wizard signs this machine in against that instance, registers your agent
+and a way to reach it, writes a first suite of tests with your coding agent,
+puts them on egma when you say so, and starts a run over them.
+
+**Where it stops today.** The run is created and followed live, and no verdict
+arrives: nothing claims a simulation yet, so the run stays pending and every
+simulation stays queued. What is missing is the grader and the piece that hands
+a test to the simulator; both are being built. Everything before them is real,
+and the moment they land the first verdict arrives on the same screen with
+nothing here to change.
+
+The whole walk is checked against a real instance the same way. On a checkout
+that has had `pnpm install`, and on a machine with a Chrome — or with
+`PLAYWRIGHT_BROWSERS_PATH` pointing at a Playwright Chromium, because the
+approval really happens in a browser — it is two commands:
+
+```
+pnpm db:up
+pnpm --filter egma-cli smoke:walk
+```
+
+The second builds everything it needs, starts an egma of its own, signs in,
+registers, pushes and runs — and says at the end what it proved and what waits.
+Set `RETELL_API_KEY` to register against your own Retell account instead of the
+stand-in one it starts.
 
 ## Licence
 
