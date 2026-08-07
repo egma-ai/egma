@@ -13,6 +13,8 @@
 import type { LoginPrompt } from "../platform/login.ts";
 import type { RetellAgent } from "../retell/client.ts";
 import type { KeyAsk } from "../retell/connect.ts";
+import type { RunView } from "../run/view.ts";
+import type { SkillPlaces } from "../skills/install.ts";
 import type { Detection } from "../wizard/detection.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
 import type { TestGate } from "../wizard/gate.ts";
@@ -39,7 +41,17 @@ export type AskId =
   | "prompts-pointer"
   | "retell-key"
   | "retell-agent"
-  | "existing-tests";
+  | "existing-tests"
+  /**
+   * Whether to install the egma skill, and where.
+   *
+   * A question rather than a gate because there are three answers and skip is
+   * one of them, and a question the developer never answers answers `null` —
+   * which is skip. Nothing is written on a `null`, which is what makes "never
+   * silent" true for a wizard that was closed as well as for one that was
+   * answered.
+   */
+  | "skills-offer";
 
 /** The coding agent egma is driving. */
 export type DrivenAgent = { readonly id: string; readonly name: string };
@@ -136,6 +148,21 @@ export interface WizardUI {
    * in an editor, which the flow never sees at all.
    */
   setGate(gate: TestGate | null): void;
+
+  /**
+   * The run, as it stands, or `null` when none is going.
+   *
+   * A write and not a question, like every other pane. The flow says which
+   * simulations there are, where each has got to, and which verdict landed
+   * first; whether that is drawn as a list that moves or printed as one line
+   * per change is the UI's business. The wizard never waits for the whole
+   * suite, so this is set for as long as the wizard is open and stops mattering
+   * the moment it closes — the run itself carries on either way.
+   */
+  setRun(run: RunView | null): void;
+
+  /** Where the skill would go, while the offer is open, or `null`. */
+  setSkillPlaces(places: SkillPlaces | null): void;
 
   /** One line describing something the driven agent did. */
   pushStatus(line: string): void;

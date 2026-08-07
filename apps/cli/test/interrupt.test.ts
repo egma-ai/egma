@@ -1,10 +1,11 @@
 /**
- * Ctrl-C, at three different moments, in a real terminal.
+ * Ctrl-C, at four different moments, in a real terminal.
  *
  * A developer changes their mind at whatever point they are at, and the wizard
  * is at a different kind of moment at each of them: waiting on a browser with
  * nothing started, part way through a task with somebody else's process tree
- * running, and looking at a list of files that are already on disk.
+ * running, looking at a list of files that are already on disk, and watching a
+ * run that is going on the platform.
  *
  * Three things have to be true at every one of them, and they are what these
  * check:
@@ -15,6 +16,13 @@
  *   written are the developer's, and the line has to name where they are.
  * - **The line tells the truth about where it stopped**, and it is the only
  *   thing in scrollback.
+ *
+ * Those four moments have three endings between them, and which one a moment
+ * gets is decided by what egma had really done by then rather than by which
+ * key was pressed. A stop while egma is working stopped work. A stop at the
+ * gate stopped nothing and left files. A stop at the run screen stopped
+ * nothing at all: the tests are on egma and the suite is going without this
+ * terminal, so the developer leaves with the address of a live run.
  */
 
 import { readdir, readFile } from "node:fs/promises";
@@ -265,6 +273,96 @@ describe("Ctrl-C at the gate, with the files already written", () => {
       // have put them on egma.
       expect((await testsInFolder()).sort()).toEqual(names.map((name) => `${name}.md`).sort());
       expect(platform.tests.tests).toHaveLength(0);
+    } finally {
+      await terminal.kill();
+    }
+  });
+});
+
+describe("Ctrl-C at the run screen, with the suite already going", () => {
+  it("leaves the address of a live run, and answers the shell as a run that got there", async () => {
+    await workspace.signIn(platform.url, platform.device.mint());
+
+    const names = ["open-on-sunday", "lost-the-order-number", "wants-it-by-friday"];
+    const script = await workspace.script({
+      steps: [
+        { kind: "say", text: "egma:found framework retell-sdk\n" },
+        { kind: "stop", reason: "end_turn" },
+      ],
+      stepsByTask: [
+        {
+          contains: GENERATE_TASK,
+          steps: [
+            { kind: "say", text: `egma:plan ${names.join(", ")}\n` },
+            ...names.flatMap((name) => writes(name)),
+            { kind: "stop", reason: "end_turn" },
+          ],
+        },
+      ],
+    });
+
+    // Wide, because what is under check is lines rather than sentences: a
+    // terminal wraps whatever will not fit, and a check that read a wrapped
+    // line as two would be checking the terminal's width and not egma's.
+    const terminal = runInTerminal({
+      command: process.execPath,
+      args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+      cwd: workspace.dir,
+      env: workspace.env({ EGMA_URL: platform.url, EGMA_RETELL_URL: retell.url }),
+      cols: 200,
+    });
+
+    try {
+      await showing(terminal, "egma is about to find", "[enter] begin");
+      terminal.write("\r");
+
+      await showing(terminal, "Paste your Retell API key");
+      terminal.write(`${KEY}\r`);
+
+      await showing(terminal, "Do you already have test cases");
+      terminal.write("n");
+
+      await showing(terminal, "3 tests generated", "[enter] run");
+      terminal.write("\r");
+
+      // The run is on the platform, and nothing has judged anything: this is
+      // the developer stopping before the first verdict, which is the moment
+      // the wizard would otherwise have waited for.
+      await showing(terminal, "run run_", "3 simulations", "queued");
+      const started = platform.running.runs[0];
+      expect(started).toBeDefined();
+
+      terminal.write(CTRL_C);
+
+      // Nothing was stopped, so the shell is not told anything was. The tests
+      // are on egma and the suite is queued there; the terminal going away
+      // never had anything to do with it.
+      expect(await terminal.exited).toBe(0);
+
+      const lines = terminal
+        .scrollback()
+        .split("\n")
+        .map((line) => line.trimEnd())
+        .filter((line) => line !== "");
+      const address = `${platform.url}/runs/${started?.id ?? ""}`;
+
+      expect(lines).toEqual([
+        "✓ Your first run is live — 3 simulations, none graded yet.",
+        address,
+        "Tests are code now: egma/tests/ (committed). Edit them, then egma push.",
+        'Hand your coding agent this: "Read egma/config.yaml, then egma --help — you can pull, push, and trigger runs from here."',
+      ]);
+      // No token rides the address, and none is anywhere in scrollback.
+      expect(new URL(address).search).toBe("");
+      expect(terminal.scrollback()).not.toContain("egma_sk_");
+      // Not one word about egma having stopped, because egma did not.
+      expect(terminal.scrollback()).not.toContain("stopped");
+
+      expect(platform.tests.tests).toHaveLength(3);
+      expect(platform.running.simulationsOf()).toHaveLength(3);
+      expect(
+        platform.running.simulationsOf().filter((one) => one.verdict !== null),
+      ).toHaveLength(0);
     } finally {
       await terminal.kill();
     }

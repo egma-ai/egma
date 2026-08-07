@@ -39,7 +39,9 @@ are in — teams often keep them apart — looks there, and otherwise says plain
 that you should run it where your agent is defined.
 
 Then it connects that agent so egma can reach it, writes a first suite of tests
-for it, and puts them on egma when you say so. See below.
+for it, puts them on egma when you say so, and runs them — closing as soon as
+the first verdict has landed, with the rest of the suite still going on egma.
+See below.
 
 ## Signing in
 
@@ -255,6 +257,133 @@ them. `[enter]` pushes them and carries on.
 It is a pause to scan, not a review. The tests are code in your repository
 either way, and code is reviewed in a pull request.
 
+## Your first run
+
+`[enter]` pushes the list and starts a **run**: one execution of those tests
+against your voice agent over the connection egma registered. Each test becomes
+one **simulation** per persona, and each one arrives on its own line and moves:
+
+```
+run run_01K7QXV2M8  ·  12 simulations
+
+◼ quoted-a-price            passed
+▶ lost-the-order-number     in progress
+▶ open-on-sunday            dialing…
+◻ after-hours-emergency     queued
+
+✓ First verdict: quoted-a-price passed
+
+passed 1  ·  failed 0  ·  skipped 0  ·  errored 0  ·  waiting 11
+```
+
+**The wizard does not wait for the suite.** It waits for the first verdict —
+that is the point where you stop taking egma's word for it — and then closes.
+The run carries on on egma; shutting your terminal has never stopped one.
+
+A **verdict** is one of four, and egma never turns four into three:
+
+- `passed` — the agent did what the test expected.
+- `failed` — it did not. Something in your agent is wrong.
+- `skipped` — nothing was judged. The test needed something this connection
+  cannot do, or a grader had nothing it could score here.
+- `errored` — the simulation never happened. The agent was not reached, or egma
+  broke.
+
+A test that could not run is not a test that failed, and reporting one as the
+other would send you hunting a bug that is not there.
+
+If your connection is of a type whose adapter has not shipped yet, egma refuses
+the run **at creation**, in its own words, and the wizard prints those words as
+they came. You never wait on a run that could not happen.
+
+```
+egma run
+```
+
+is the same thing with nobody watching. It pins the version of every test it
+runs, prints every change as it lands, and answers with a number:
+
+```
+url: https://app.egma.ai
+folder: /repo/egma
+agent: agt_01K…
+connection: con_01K…
+pin: quoted-a-price tstv_01K…
+pin: lost-the-order-number tstv_01K…
+run: run_01K…
+tests: 2
+simulations: 2
+results: https://app.egma.ai/runs/run_01K…
+simulation: quoted-a-price default-persona running
+verdict: quoted-a-price default-persona passed
+first-verdict: quoted-a-price default-persona passed
+simulation: lost-the-order-number default-persona completed
+verdict: lost-the-order-number default-persona skipped
+reason: this test needs DTMF, and this connection has none
+passed: 1
+failed: 0
+skipped: 1
+errored: 0
+pending: 0
+simulations: 2
+status: completed
+
+0 the run finished and nothing failed or errored
+1 nothing here to run   2 not signed in   3 a test failed
+4 egma did not answer, or refused
+5 egma would not start the run, and said why
+6 a simulation errored, so nothing concluded   130 stopped part way
+```
+
+`--no-follow` starts the run and returns at once, without waiting for a verdict
+— for when you want the suite going and will read the results page later.
+
+It runs what egma holds, pinning the current version of each test, so a run is a
+record of exactly what executed. A file in your folder that egma has never seen
+refuses the whole run and names it: push it first. A file egma has moved past is
+named on a `stale:` line and the run happens anyway, over what egma holds.
+
+## The skill, if you want it
+
+The last thing the wizard asks:
+
+```
+◇ Install the egma skill into Claude Code, so it can drive egma
+  on its own next time?   [p] project   [g] global   [s] skip
+```
+
+`[p]` writes `.claude/skills/egma/SKILL.md` in this repository — commit it and
+your whole team has it. `[g]` writes `~/.claude/skills/egma/SKILL.md`, for every
+repository you open. `[s]` writes nothing at all, and is a perfectly good
+answer: `egma --help` is enough for any coding agent to drive the whole product.
+
+Codex keeps its skills the same way, under `.codex/` instead. A coding agent
+egma has no skill convention for is not offered one, rather than being handed a
+file in a directory it may never read.
+
+egma writes the one file itself. Nothing is downloaded, nothing else on your
+machine is touched, and the screen names the exact path before you press
+anything.
+
+## The line the wizard leaves behind
+
+The wizard draws on the terminal's alternate screen, which your terminal throws
+away. So everything you need is printed after that screen is released, in plain
+text, each item alone on its line so a triple-click takes it whole:
+
+```
+✓ Your first run is live — 3 of 12 graded so far.
+
+https://app.egma.ai/runs/run_01K7QXV2M8ZB4C6D8E0F2G4H6J
+
+Tests are code now: egma/tests/ (committed). Edit them, then egma push.
+Hand your coding agent this: "Read egma/config.yaml, then egma --help — you can pull, push, and trigger runs from here."
+```
+
+The results address **opens already signed in** — your browser holds the
+sign-in from the approval at the start of the walk. That is why nothing rides on
+the address: no token, no key, no query at all.
+
 ## Keeping the folder and egma in step
 
 ```
@@ -311,6 +440,11 @@ Today there are three: one on finding a voice agent in a repository nobody has
 described, one on what a Retell voice agent looks like from the inside, and one
 on writing a test file that says something worth checking.
 
+A fourth, `skills/egma/SKILL.md`, is the only one that is ever *installed* —
+and only when you say so, at the end of the walk. It teaches a coding agent to
+drive egma: read `egma/config.yaml`, run `egma --help`, pull, push, run, and
+keep the four verdicts apart.
+
 ## How it reaches your coding agent
 
 Over the [Agent Client Protocol](https://agentclientprotocol.com). The agent runs
@@ -346,6 +480,8 @@ egma init [options]      Make the egma folder this repository's tests live
 egma pull [options]      Write egma's current test versions into it.
 egma push [options]      Upload the tests in it. Refuses, naming names, when
                          egma has moved on since your last pull.
+egma run [options]       Run this folder's tests, pinning the version of each.
+                         Follows the run and prints every change.
 
   --coding-agent <id>  Which coding agent to drive, named as the agent
                        registry names it. Default: claude-acp
@@ -355,6 +491,8 @@ egma push [options]      Upload the tests in it. Refuses, naming names, when
                        does the same for a whole shell.
   --force              With login: sign in again even when this machine
                        already holds a key.
+  --no-follow          With run: start the run and return at once, without
+                       waiting for a verdict. The run carries on on egma.
   --retell-agent <id>  With connect: which agent, when the Retell account
                        holds more than one.
   --repo-prompt <path> With connect: the prompt file in this repository, so

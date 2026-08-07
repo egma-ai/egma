@@ -107,10 +107,27 @@ function textList(value: unknown): readonly string[] {
   return Array.isArray(value) ? value.map((item) => text(item)) : [];
 }
 
+/**
+ * One frozen version, as the run endpoints need it: what test it belongs to,
+ * and who calls about it. A run pins one of these per test and produces one
+ * simulation per persona named on it.
+ */
+export type VersionLookup = (versionId: string) => {
+  readonly versionId: string;
+  readonly testId: string;
+  readonly testName: string;
+  readonly personas: readonly { readonly id: string; readonly name: string }[];
+} | null;
+
 export function testRoutes(options: {
   /** Whether the key a request carries is one this instance minted. */
   readonly holdsKey: (key: string) => boolean;
-}): { readonly group: RouteGroup; readonly controls: TestControls } {
+}): {
+  readonly group: RouteGroup;
+  readonly controls: TestControls;
+  /** How a run resolves a pinned version. Never a route; the store itself. */
+  readonly versionById: VersionLookup;
+} {
   const tests: StoredTest[] = [];
   const personas: Persona[] = [];
   // The one project this key acts in. Never in a path and never asked for; it
@@ -480,5 +497,22 @@ export function testRoutes(options: {
     },
   };
 
-  return { group, controls };
+  const versionById: VersionLookup = (versionId) => {
+    for (const test of tests) {
+      const version = test.versions.find((held) => held.id === versionId);
+      if (version === undefined) continue;
+      return {
+        versionId: version.id,
+        testId: test.id,
+        testName: test.name,
+        personas: namesOf(version.personaIds).map((persona) => ({
+          id: persona.id,
+          name: persona.name,
+        })),
+      };
+    }
+    return null;
+  };
+
+  return { group, controls, versionById };
 }

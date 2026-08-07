@@ -55,6 +55,22 @@ import {
 export const DEFAULT_SUITE_NAME = "first-suite";
 
 /**
+ * How the step ended, and what it left behind for the step after it.
+ *
+ * The versions are here rather than read back off the disk because they are
+ * the exact set the developer agreed to at the gate and the exact set the push
+ * put on egma. A file that was held back at the gate is still in the folder,
+ * and a run that re-read the folder would try to pin it.
+ */
+export type GenerateOutcome = {
+  readonly report: ExitReport;
+  /** What the push put on egma, by version id. Empty when nothing was pushed. */
+  readonly pushed: readonly string[];
+  /** What this folder's suite is called. */
+  readonly suite: string;
+};
+
+/**
  * How often the folder is looked at while a coding agent writes into it.
  *
  * Often enough that a file appears on screen as the developer would say it
@@ -309,12 +325,12 @@ async function suiteNameIn(paths: FolderPaths): Promise<string> {
   }
 }
 
-/** The push, and the line the wizard closes on either way. */
+/** The push, and what the wizard has to work with afterwards. */
 async function pushGate(
   options: GenerateStepOptions,
   paths: FolderPaths,
   gate: TestGate,
-): Promise<ExitReport> {
+): Promise<Omit<GenerateOutcome, "suite">> {
   const { ui } = options;
 
   const report = await pushTests({
@@ -333,30 +349,39 @@ async function pushGate(
   if (report.conflicts.length > 0) {
     const names = report.conflicts.map((conflict) => conflict.name).join(", ");
     return {
-      kind: "failed",
-      reason: `egma has a newer version of ${names}. Run egma pull, look at what changed, then egma push.`,
+      report: {
+        kind: "failed",
+        reason: `egma has a newer version of ${names}. Run egma pull, look at what changed, then egma push.`,
+      },
+      pushed: [],
     };
   }
 
-  return { kind: "tests-pushed", count: report.tests.length };
+  return {
+    report: { kind: "tests-pushed", count: report.tests.length },
+    pushed: report.tests.map((test) => test.versionId),
+  };
 }
 
 /**
  * The whole step. Every ending is an ending the developer can act on, and the
  * files are on disk for all of them.
  */
-export async function generateStep(options: GenerateStepOptions): Promise<ExitReport> {
+export async function generateStep(options: GenerateStepOptions): Promise<GenerateOutcome> {
   const { ui, cwd, signal } = options;
   const howMany = options.howMany ?? DEFAULT_TEST_COUNT;
 
   const paths = await folderFor(options);
   ui.pushStatus(`${ACTION_MARK} Your tests live in ${paths.tests}`);
+  const suite = await suiteNameIn(paths);
+  /** Any ending that pushed nothing, which is every ending but the last one. */
+  const ending = (report: ExitReport): GenerateOutcome => ({ report, pushed: [], suite });
 
   // The one question this step asks, and it is asked once. A developer who
   // closes the wizard instead of answering has answered too, so the wait ends
   // with the signal and not only with a keystroke.
   const said = await untilAborted(ui.waitForAnswer("existing-tests"), signal);
-  if (signal.aborted) return stoppedHere(signal, options.launch.name, paths);
+  if (signal.aborted) return ending(await stoppedHere(signal, options.launch.name, paths));
 
   const existing = await readExistingTests(cwd, said ?? null);
   if (existing.kind === "unusable") {
@@ -367,7 +392,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<ExitRe
 
   if (existing.kind === "read") {
     ui.pushStatus(`${ACTION_MARK} Turning ${existing.shown} into test files`);
-    const stopped = await writeFiles(
+    const halted = await writeFiles(
       options,
       paths,
       "converting",
@@ -382,7 +407,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<ExitRe
       // pane counts what turns up rather than promising a number.
       0,
     );
-    if (stopped !== null) return stopped;
+    if (halted !== null) return ending(halted);
   }
 
   const converted = (await readFolder(paths)).found;
@@ -401,14 +426,14 @@ export async function generateStep(options: GenerateStepOptions): Promise<ExitRe
       taken: namesOf(converted),
       personas: PERSONAS_EGMA_HOLDS,
     };
-    const stopped = await writeFiles(
+    const halted = await writeFiles(
       options,
       paths,
       "generating",
       generateInstructions(context, missing),
       missing,
     );
-    if (stopped !== null) return stopped;
+    if (halted !== null) return ending(halted);
   }
 
   // What is really on disk, whatever anybody said about it.
@@ -416,7 +441,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<ExitRe
     agentName: options.registered.agent.name,
     connectionName: options.registered.connection.name,
     modality: options.registered.connection.modality,
-    suite: await suiteNameIn(paths),
+    suite,
   });
 
   for (const held of gate.heldBack) {
@@ -424,10 +449,10 @@ export async function generateStep(options: GenerateStepOptions): Promise<ExitRe
   }
 
   if (gate.rows.length === 0) {
-    return {
+    return ending({
       kind: "failed",
       reason: `${options.launch.name} wrote no test egma could use. What it printed is in ${options.log.file}.`,
-    };
+    });
   }
 
   ui.setGate(gate);
@@ -440,12 +465,12 @@ export async function generateStep(options: GenerateStepOptions): Promise<ExitRe
     // and `q` leave the same line about where the files are — an interruption
     // here shut no coding agent down and stopped no task, and saying it did
     // would be egma telling a story about itself rather than about the run.
-    return {
+    return ending({
       kind: "tests-kept",
       count: gate.rows.length,
       stopped: stopReasonOf(signal) !== "quit",
-    };
+    });
   }
 
-  return pushGate(options, paths, gate);
+  return { ...(await pushGate(options, paths, gate)), suite };
 }

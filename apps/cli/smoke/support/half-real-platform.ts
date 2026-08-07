@@ -28,11 +28,17 @@ import {
   startPlatform,
   type AgentControls,
   type Platform,
+  type RunControls,
   type TestControls,
 } from "../../test/support/fixture-platform/index.ts";
 
 /** The paths the real instance does not serve yet, and the fixture does. */
-const NOT_YET_ON_THE_REAL_API = ["/api/agents", "/api/tests", "/api/test-versions"];
+const NOT_YET_ON_THE_REAL_API = [
+  "/api/agents",
+  "/api/tests",
+  "/api/test-versions",
+  "/api/runs",
+];
 
 export type HalfRealPlatform = {
   /** What the CLI is pointed at. */
@@ -43,6 +49,12 @@ export type HalfRealPlatform = {
   readonly registered: AgentControls;
   /** What was pushed, on the half that is a fixture. */
   readonly tests: TestControls;
+  /**
+   * The run, on the half that is a fixture, and what a simulator would do to
+   * it. Nothing on this machine conducts a simulation, so the verdicts a real
+   * wizard waits for are delivered through here.
+   */
+  readonly running: RunControls;
   /** Every key the real instance minted while this was up, in order. */
   readonly mintedKeys: readonly string[];
   /** Which requests went where, by path shape, for the run to print. */
@@ -140,6 +152,7 @@ export async function startHalfRealPlatform(apiOrigin: string): Promise<HalfReal
     apiOrigin,
     registered: fixture.registered,
     tests: fixture.tests,
+    running: fixture.running,
     mintedKeys,
     served,
     async close() {

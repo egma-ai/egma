@@ -9,6 +9,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -30,6 +31,7 @@ import { walk } from "../src/wizard/walk.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
+import { gradeEveryRun } from "./support/grading.ts";
 import {
   CLI_ENTRY,
   EXISTING_TESTS_FIXTURES,
@@ -147,17 +149,39 @@ async function runWalk(options: {
     },
   });
 
-  const report = await walk({
-    ui,
-    launch: workspace.launch(options.script),
-    cwd: workspace.dir,
-    signal: new AbortController().signal,
-    platform: { url: platform.url, credentialsFile: workspace.credentialsFile },
-    retell: { url: retell.url },
-    ...(options.howManyTests === undefined ? {} : { howManyTests: options.howManyTests }),
-  });
+  // The walk ends in a run, and a run ends when verdicts arrive. Nothing here
+  // conducts a simulation, so the fixture is given the one thing a platform
+  // with a simulator attached has: something that judges what is queued.
+  const grading = gradeEveryRun(platform);
+  let report;
+  try {
+    report = await walk({
+      ui,
+      launch: workspace.launch(options.script),
+      cwd: workspace.dir,
+      signal: new AbortController().signal,
+      platform: { url: platform.url, credentialsFile: workspace.credentialsFile },
+      retell: { url: retell.url },
+      home: path.join(workspace.dir, "pretend-home"),
+      runPollMs: 20,
+      ...(options.howManyTests === undefined ? {} : { howManyTests: options.howManyTests }),
+    });
+  } finally {
+    grading.stop();
+  }
 
   return { ui, report };
+}
+
+/**
+ * How many tests the walk put on egma, read from the run it went on to start.
+ *
+ * A run pins the version of every test it executes, and this walk's run is over
+ * exactly what the push uploaded — so the run is the record of the push, and
+ * reading it there is reading the fact rather than a report of it.
+ */
+function pushedToEgma(): number {
+  return platform.running.runs[0]?.testVersionIds.length ?? 0;
 }
 
 /** The step that finds the voice agent, answered the same way every time. */
@@ -245,7 +269,8 @@ describe("the whole generate step", () => {
     expect(await filesInFolder()).toContain("nothing-to-check.md");
 
     // Eleven are on egma, each as a pinned version, and the twelfth is not.
-    expect(report).toEqual({ kind: "tests-pushed", count: 11 });
+    expect(report.kind).toBe("run-started");
+    expect(pushedToEgma()).toBe(11);
     expect(platform.tests.tests).toHaveLength(11);
     expect(platform.tests.tests.map((test) => test.name)).not.toContain("nothing-to-check");
 
@@ -335,7 +360,8 @@ describe("the whole generate step", () => {
     expect(convert).toContain("Do not open the file");
     expect(convert).toContain("Convert, do not invent.");
 
-    expect(report).toEqual({ kind: "tests-pushed", count: 2 });
+    expect(report.kind).toBe("run-started");
+    expect(pushedToEgma()).toBe(2);
   });
 
   it("grounds what it generates in the words the provider is running", async () => {
@@ -373,7 +399,8 @@ describe("the whole generate step", () => {
     expect(tasks.some((task) => task.includes(CONVERT_TASK))).toBe(false);
     expect(ui.record.asked).toContain("existing-tests");
 
-    expect(report).toEqual({ kind: "tests-pushed", count: 2 });
+    expect(report.kind).toBe("run-started");
+    expect(pushedToEgma()).toBe(2);
   });
 
   it("generates nothing when the developer's own material already fills the suite", async () => {
@@ -401,7 +428,8 @@ describe("the whole generate step", () => {
 
     const tasks = await tasksSent();
     expect(tasks.some((task) => task.includes(GENERATE_TASK))).toBe(false);
-    expect(report).toEqual({ kind: "tests-pushed", count: 2 });
+    expect(report.kind).toBe("run-started");
+    expect(pushedToEgma()).toBe(2);
   });
 
   it("says plainly what it will not read, and carries on without it", async () => {
@@ -433,7 +461,8 @@ describe("the whole generate step", () => {
     expect(tasks.some((task) => task.includes(CONVERT_TASK))).toBe(false);
 
     // Turning down one file is not turning down the walk.
-    expect(report).toEqual({ kind: "tests-pushed", count: 1 });
+    expect(report.kind).toBe("run-started");
+    expect(pushedToEgma()).toBe(1);
   });
 
   it("says so rather than pushing nothing when the coding agent wrote nothing usable", async () => {
@@ -548,6 +577,9 @@ describe("with nobody watching", () => {
       ],
     });
 
+    // The walk ends in a run, and the fixture is given something that judges
+    // what the run queues — the least a platform with a simulator looks like.
+    const grading = gradeEveryRun(platform);
     const result = await new Promise<{ stdout: string; code: number }>((resolve) => {
       const child = spawn(
         process.execPath,
@@ -558,6 +590,11 @@ describe("with nobody watching", () => {
           workspace.dir,
           "--existing-tests",
           material,
+          // Named as well as commanded, so the skill offer is reached at all:
+          // egma will not offer to write a skill for an agent it has no
+          // convention for.
+          "--coding-agent",
+          "claude-acp",
           "--",
           process.execPath,
           FAKE_AGENT,
@@ -569,6 +606,8 @@ describe("with nobody watching", () => {
             EGMA_URL: platform.url,
             EGMA_RETELL_URL: retell.url,
             EGMA_RETELL_API_KEY: KEY,
+            // Nowhere near the home of whoever is running this.
+            HOME: path.join(workspace.dir, "pretend-home"),
           }),
           stdio: ["ignore", "pipe", "pipe"],
         },
@@ -580,6 +619,7 @@ describe("with nobody watching", () => {
       });
       child.on("close", (code) => resolve({ stdout, code: code ?? 1 }));
     });
+    grading.stop();
 
     // No terminal, no keystroke, and the whole walk happened anyway.
     expect(result.code).toBe(0);
@@ -589,6 +629,12 @@ describe("with nobody watching", () => {
       "open-on-sunday",
       "quoted-a-price",
     ]);
+
+    // Including the run, followed to a verdict — and the skill offer, which a
+    // run with nobody watching answers by installing nothing at all.
+    expect(result.stdout).toMatch(/^first-verdict: /mu);
+    expect(result.stdout).toContain("Nothing was installed.");
+    expect(existsSync(path.join(workspace.dir, "pretend-home", ".claude"))).toBe(false);
   });
 });
 
@@ -818,9 +864,10 @@ describe("the words a task carries but did not write", () => {
       howManyTests: 1,
     });
 
-    // The run ended on the one real test that was written, and the list the
+    // The run went on the one real test that was written, and the list the
     // developer read is the folder — not one word the file said about itself.
-    expect(report).toEqual({ kind: "tests-pushed", count: 1 });
+    expect(report.kind).toBe("run-started");
+    expect(pushedToEgma()).toBe(1);
     expect(ui.record.gate?.rows.map((row) => row.name)).toEqual(["price-question"]);
     expect(await filesInFolder()).toEqual(["price-question.md"]);
     expect(platform.tests.tests.map((test) => test.name)).toEqual(["price-question"]);
@@ -879,7 +926,8 @@ describe("a file egma cannot read", () => {
 
     const { ui, report } = await runWalk({ script, howManyTests: 2 });
 
-    expect(report).toEqual({ kind: "tests-pushed", count: 1 });
+    expect(report.kind).toBe("run-started");
+    expect(pushedToEgma()).toBe(1);
     expect(ui.record.gate?.rows.map((row) => row.name)).toEqual(["price-question"]);
     expect(ui.record.gate?.heldBack).toHaveLength(1);
     expect(ui.record.gate?.heldBack[0]?.shown).toBe("egma/tests/half-written.md");

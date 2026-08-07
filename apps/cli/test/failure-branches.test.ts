@@ -24,7 +24,8 @@ import { buildExitLine, buildExitNotice } from "../src/wizard/exit-line.ts";
 import { walk } from "../src/wizard/walk.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
-import { noAdapterRefusal, startPlatform, type Platform } from "./support/fixture-platform/index.ts";
+import { noAdapterMessage, startPlatform, type Platform } from "./support/fixture-platform/index.ts";
+import { gradeEveryRun } from "./support/grading.ts";
 import {
   CLI_ENTRY,
   RETELL_FIXTURE_REPO,
@@ -55,6 +56,30 @@ const FOUND: FakeStep[] = [
   { kind: "stop", reason: "end_turn" },
 ];
 
+/** A scripted agent that writes the one test the walk asked it for. */
+const WRITES_ONE_TEST = {
+  contains: "Write 1 test",
+  steps: [
+    { kind: "say", text: "egma:writing open-on-sunday\n" },
+    {
+      kind: "write-file",
+      path: "egma/tests/open-on-sunday.md",
+      content: [
+        "---",
+        "name: open-on-sunday",
+        "---",
+        "## Scenario",
+        "Somebody rings on a Sunday.",
+        "## Expected behaviors",
+        "1. The agent says which days the workshop opens.",
+        "",
+      ].join("\n"),
+    },
+    { kind: "say", text: "egma:wrote open-on-sunday\n" },
+    { kind: "stop", reason: "end_turn" },
+  ] as FakeStep[],
+};
+
 let platform: Platform;
 let retell: FakeRetell;
 let workspace: Workspace;
@@ -78,15 +103,28 @@ async function walkWith(options: {
   readonly answers?: Partial<Record<"prompts-pointer" | "retell-key", string>>;
 }) {
   const ui = new HeadlessUI({ answers: options.answers ?? {} });
-  const report = await walk({
-    ui,
-    launch: workspace.launch(options.script),
-    cwd: workspace.dir,
-    signal: new AbortController().signal,
-    platform: { url: platform.url, credentialsFile: workspace.credentialsFile },
-    retell: { url: retell.url },
-    howManyTests: 1,
-  });
+
+  // A walk that gets as far as a suite ends in a run, and a run ends when
+  // verdicts arrive. Nothing here conducts a simulation, so the fixture is
+  // given the one thing a platform with a simulator attached has. The branches
+  // that never reach a run are unaffected by it.
+  const grading = gradeEveryRun(platform);
+  let report;
+  try {
+    report = await walk({
+      ui,
+      launch: workspace.launch(options.script),
+      cwd: workspace.dir,
+      signal: new AbortController().signal,
+      platform: { url: platform.url, credentialsFile: workspace.credentialsFile },
+      retell: { url: retell.url },
+      howManyTests: 1,
+      home: path.join(workspace.dir, "pretend-home"),
+      runPollMs: 20,
+    });
+  } finally {
+    grading.stop();
+  }
   return { ui, report };
 }
 
@@ -137,30 +175,7 @@ describe("a coding agent that is not logged in", () => {
       // authenticated, exactly as a real adapter refuses one.
       authRequiredUntilLogin: {},
       steps: FOUND,
-      stepsByTask: [
-        {
-          contains: "Write 1 test",
-          steps: [
-            { kind: "say", text: "egma:writing open-on-sunday\n" },
-            {
-              kind: "write-file",
-              path: "egma/tests/open-on-sunday.md",
-              content: [
-                "---",
-                "name: open-on-sunday",
-                "---",
-                "## Scenario",
-                "Somebody rings on a Sunday.",
-                "## Expected behaviors",
-                "1. The agent says which days the workshop opens.",
-                "",
-              ].join("\n"),
-            },
-            { kind: "say", text: "egma:wrote open-on-sunday\n" },
-            { kind: "stop", reason: "end_turn" },
-          ],
-        },
-      ],
+      stepsByTask: [WRITES_ONE_TEST],
     });
 
     const { ui, report } = await walkWith({ script, answers: { "retell-key": KEY } });
@@ -172,7 +187,7 @@ describe("a coding agent that is not logged in", () => {
     expect(observed.loggedInWith).toBe("own-login");
     expect(ui.record.statuses.join("\n")).toContain("needs you to log in");
 
-    expect(report).toEqual({ kind: "tests-pushed", count: 1 });
+    expect(report.kind).toBe("run-started");
     expect(platform.tests.tests).toHaveLength(1);
   });
 });
@@ -229,21 +244,28 @@ describe("a Retell key Retell will not take", () => {
 
 describe("a connection egma has no adapter for", () => {
   it("prints the platform's refusal in the platform's own words", async () => {
-    // The platform refuses a connection it could not run simulations over. The
-    // wizard's whole job here is to hand that sentence on untouched.
-    platform.registered.withoutAdapterFor("retell");
+    // The platform refuses the *run*, at creation, before a single simulation
+    // is written: a run nothing can conduct must never be queued. Everything
+    // before it is untouched — the agent is registered, the tests are written
+    // and pushed — and the wizard's whole job here is to hand that one
+    // sentence on untouched.
+    platform.running.noAdapterFor("retell");
 
-    const script = await workspace.script({ steps: FOUND });
+    const script = await workspace.script({ steps: FOUND, stepsByTask: [WRITES_ONE_TEST] });
     const { ui, report } = await walkWith({ script, answers: { "retell-key": KEY } });
 
-    const refusal = noAdapterRefusal("retell");
+    const refusal = noAdapterMessage("retell");
     expect(report).toEqual({ kind: "failed", reason: refusal });
     expect(buildExitLine(report)).toBe(`egma could not finish: ${refusal}`);
     // Verbatim: not summarised, not softened, not swallowed.
-    expect(buildExitLine(report)).toContain("no adapter for it has shipped");
+    expect(buildExitLine(report)).toContain("no simulator adapter for a retell connection yet");
+    expect(ui.record.statuses.join("\n")).toContain(refusal);
 
-    expect(platform.registered.agents).toHaveLength(0);
-    expect(platform.registered.connections).toHaveLength(0);
-    expect(ui.record.gate).toBeNull();
+    // The work before the run is the developer's either way, and no run was
+    // left queued that nothing could ever pick up.
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.tests.tests).toHaveLength(1);
+    expect(platform.running.runs).toHaveLength(0);
+    expect(ui.record.run).toBeNull();
   });
 });

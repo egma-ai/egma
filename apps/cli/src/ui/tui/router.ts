@@ -24,6 +24,8 @@ export type ScreenId =
   | "existing-tests"
   | "generating"
   | "gate"
+  | "run"
+  | "skills-offer"
   | "task";
 
 /** An interruption drawn over the flow. The stack is empty in the walk. */

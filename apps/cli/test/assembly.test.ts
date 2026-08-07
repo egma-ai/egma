@@ -2,20 +2,29 @@
  * The whole walk, offline, with nobody at the keyboard.
  *
  * Intro, login, finding the voice agent, connecting it, the folder, generation,
- * the gate and the push — one run, start to finish, against the fixture
- * platform, the committed fixture repository, a scripted coding agent and a UI
- * with no screen. No model, no browser, no terminal, no network beyond this
- * machine, and nothing typed by a person.
+ * the gate, the push, the run, the skill offer and the exit block — one walk,
+ * start to finish, against the fixture platform, the committed fixture
+ * repository, a scripted coding agent and a UI with no screen. No model, no
+ * browser, no terminal, no network beyond this machine, and nothing typed by a
+ * person.
+ *
+ * The one thing the fixture cannot do for itself is conduct a simulation, so it
+ * is given the least a platform with a simulator attached has: something that
+ * judges what a run queues. Exactly one verdict is delivered, because the
+ * wizard leaves at the first one and the count in the exit line has to be a
+ * number this check can name.
  *
  * **What is asserted is what a developer could check afterwards** — which agent
  * and which connection are on egma, which tests are there and at which frozen
- * versions, which files are in the repository and what they pin, and the one
- * line left in the terminal. Nothing here asserts the order egma did any of it
- * in: that is egma's business, and a check that pinned it would have to be
- * rewritten every time a step moved.
+ * versions, which files are in the repository and what they pin, which run is
+ * going and over what, what the offer wrote (nothing), and the block left in
+ * the terminal. Nothing here asserts the order egma did any of it in: that is
+ * egma's business, and a check that pinned it would have to be rewritten every
+ * time a step moved.
  */
 
-import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -23,11 +32,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readConfig } from "../src/folder/egma-folder.ts";
 import { parseTestFile } from "../src/folder/test-file.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
-import { buildExitLine } from "../src/wizard/exit-line.ts";
+import { buildExitNotice, exitLines } from "../src/wizard/exit-line.ts";
 import { walk } from "../src/wizard/walk.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
+import { gradeEveryRun } from "./support/grading.ts";
 import {
   RETELL_FIXTURE_REPO,
   filesUnder,
@@ -84,12 +94,16 @@ let platform: Platform;
 let retell: FakeRetell;
 let workspace: Workspace;
 let prompt: string;
+/** The home this walk's coding agent keeps its configuration in. Throwaway. */
+let home: string;
 
 beforeEach(async () => {
   platform = await startPlatform();
   // The committed fixture repository: an invented workshop with invented
   // prompts and invented tools, so there is a real repository to be found.
   workspace = await makeWorkspace({}, { from: RETELL_FIXTURE_REPO });
+  home = path.join(workspace.dir, "pretend-home");
+  await mkdir(home, { recursive: true });
   prompt = await readFile(path.join(workspace.dir, "prompts", "order-line.md"), "utf8");
   retell = await startFakeRetell(account(prompt));
 });
@@ -143,7 +157,7 @@ function writes(name: string): FakeStep[] {
 }
 
 describe("the whole walk, offline", () => {
-  it("signs in, finds the agent, connects it, writes the suite and pushes it", async () => {
+  it("signs in, finds the agent, connects it, writes the suite, runs it and leaves", async () => {
     const names = suiteNames();
 
     const script = await workspace.script({
@@ -180,31 +194,71 @@ describe("the whole walk, offline", () => {
 
     // Everything a person would have done, done by the check: the keystroke at
     // the intro and the gate open themselves, the browser approves the code,
-    // and the one thing nobody can answer in advance is answered here.
+    // and the one thing nobody can answer in advance is answered here. The
+    // skill offer is left unanswered, which is skip — the answer that has to
+    // leave the machine exactly as it was.
     const ui = new HeadlessUI({ answers: { "retell-key": KEY } });
 
-    const report = await walk({
-      ui,
-      launch: workspace.launch(script),
-      cwd: workspace.dir,
-      signal: new AbortController().signal,
-      platform: {
-        url: platform.url,
-        credentialsFile: workspace.credentialsFile,
-        openBrowser: async (url) => {
-          const code = new URL(url).searchParams.get("user_code") ?? "";
-          return platform.device.approve(code);
+    // One verdict, and one only: the wizard leaves at the first, and a sweep
+    // that judged the whole suite would put a number in the exit line that
+    // depended on which poll landed first.
+    const grading = gradeEveryRun(platform, { atMost: 1 });
+    let report;
+    try {
+      report = await walk({
+        ui,
+        // Named as well as commanded, because which coding agent this is
+        // decides whether there is a skill offer at all and where it points.
+        launch: { ...workspace.launch(script), id: "claude-acp" },
+        cwd: workspace.dir,
+        signal: new AbortController().signal,
+        platform: {
+          url: platform.url,
+          credentialsFile: workspace.credentialsFile,
+          openBrowser: async (url) => {
+            const code = new URL(url).searchParams.get("user_code") ?? "";
+            return platform.device.approve(code);
+          },
         },
-      },
-      retell: { url: retell.url },
-      howManyTests: SUITE_SIZE,
-    });
+        retell: { url: retell.url },
+        howManyTests: SUITE_SIZE,
+        home,
+        runPollMs: 20,
+      });
+    } finally {
+      grading.stop();
+    }
 
     /* what the developer is left holding */
 
-    expect(report).toEqual({ kind: "tests-pushed", count: SUITE_SIZE });
-    expect(buildExitLine(report)).toBe(
-      `egma put ${SUITE_SIZE} tests on egma and left them in egma/tests/ — commit them, edit them, then run egma push.`,
+    const startedRun = platform.running.runs[0];
+    const address = `${platform.url}/runs/${startedRun?.id ?? ""}`;
+    expect(report).toEqual({
+      kind: "run-started",
+      resultsUrl: address,
+      graded: 1,
+      total: SUITE_SIZE,
+      skill: { kind: "skipped", drivenAgentName: "Claude Code" },
+    });
+
+    // The block, exactly: a headline, the address alone on its line, and the
+    // two sentences a developer takes with them.
+    expect(exitLines(report)).toEqual([
+      `✓ Your first run is live — 1 of ${SUITE_SIZE} graded so far.`,
+      "",
+      address,
+      "",
+      "Tests are code now: egma/tests/ (committed). Edit them, then egma push.",
+      'Hand your coding agent this: "Read egma/config.yaml, then egma --help — you can pull, push, and trigger runs from here."',
+    ]);
+    // Nothing rides the address: the browser that approved this machine
+    // earlier in this same walk is already signed in.
+    expect(new URL(address).search).toBe("");
+    expect(exitLines(report).join("\n")).not.toContain(KEY);
+
+    // And skipping is never silent.
+    expect(buildExitNotice(report)).toBe(
+      "Nothing was installed. Claude Code can still drive egma — tell it to run egma --help.",
     );
 
     /* this machine is signed in, and to this egma */
@@ -242,6 +296,50 @@ describe("the whole walk, offline", () => {
       expect(test.versionId, test.name).toMatch(/^tstv_/u);
       expect(platform.tests.versionsOf(test.name), test.name).toBe(1);
     }
+
+    /* one run is going, over exactly the versions that were just pushed */
+
+    expect(platform.running.runs).toHaveLength(1);
+    expect([...(startedRun?.testVersionIds ?? [])].sort()).toEqual(
+      platform.tests.tests.map((test) => test.versionId).sort(),
+    );
+    const simulations = platform.running.simulationsOf();
+    expect(simulations).toHaveLength(SUITE_SIZE);
+    expect(simulations.map((one) => one.testName).sort()).toEqual([...names].sort());
+
+    // One verdict landed, and it is the one the screen marked. The other
+    // eleven are exactly where they were: the wizard left, the suite did not.
+    expect(simulations.filter((one) => one.verdict !== null)).toHaveLength(1);
+    expect(simulations.filter((one) => one.status === "queued")).toHaveLength(SUITE_SIZE - 1);
+
+    const watched = ui.record.run;
+    expect(watched?.runId).toBe(startedRun?.id);
+    expect(watched?.rows).toHaveLength(SUITE_SIZE);
+    expect(watched?.firstVerdict?.verdict).toBe("passed");
+    expect(watched?.firstVerdict?.first).toBe(true);
+    expect(watched?.rows.filter((row) => row.first)).toHaveLength(1);
+    expect(watched?.tally).toMatchObject({
+      passed: 1,
+      failed: 0,
+      skipped: 0,
+      errored: 0,
+      graded: 1,
+      pending: SUITE_SIZE - 1,
+      total: SUITE_SIZE,
+    });
+
+    /* the offer was made, and skipping wrote nothing anywhere */
+
+    expect(ui.record.asked).toContain("skills-offer");
+    expect(ui.record.skillPlaces).toMatchObject({
+      drivenAgentId: "claude-acp",
+      name: "Claude Code",
+      project: path.join(workspace.dir, ".claude", "skills", "egma", "SKILL.md"),
+      global: path.join(home, ".claude", "skills", "egma", "SKILL.md"),
+    });
+    expect(await filesUnder(home)).toEqual([]);
+    expect(existsSync(path.join(home, ".claude"))).toBe(false);
+    expect(existsSync(path.join(workspace.dir, ".claude"))).toBe(false);
 
     /* the files are in the repository, pinned to those versions */
 

@@ -9,11 +9,24 @@
  * `support/half-real-platform.ts` — and it is exactly the endpoints the public
  * API has not shipped yet.
  *
- * **Nobody types anything.** The wizard's five human moments are answered by
+ * **Nobody types anything.** The wizard's six human moments are answered by
  * this check through a real pseudo-terminal: the keystroke at the intro, the
  * approval in a browser (made against the instance's own API, which is what the
  * page would have called), the provider key, the choice of agent when the
- * account holds several, and the keystroke at the gate.
+ * account holds several, the keystroke at the gate, and the answer to the skill
+ * offer at the end.
+ *
+ * **The one thing this machine cannot do is conduct a simulation**, so the
+ * verdict the wizard waits for is delivered by the same stand-in simulator the
+ * offline checks use, against the same fixture that serves the run endpoints.
+ * Everything about the run that egma owns is real: the run is created over the
+ * versions the push just pinned, the screen is drawn from what the platform
+ * reports, and the wizard leaves on the first verdict rather than on a timer.
+ *
+ * **The skill offer is answered with skip**, because the only home this check
+ * has is the home of whoever ran it. Skip is also the answer that has something
+ * to prove: nothing is written anywhere, and this checks the developer's own
+ * skill file is exactly as it was before the run.
  *
  * **The Retell account is only ever read.** Every request goes through the
  * allow-list gate in `support/retell-gate.ts`, which forwards the listing and
@@ -53,6 +66,8 @@ import { fileURLToPath } from "node:url";
 import { startInstance, type Instance } from "../../api/test/support/instance.ts";
 import { DEFAULT_DRIVEN_AGENT_ID, launchForId } from "../src/acp/registry.ts";
 import { parseTestFile } from "../src/folder/test-file.ts";
+import { skillPlacesFor } from "../src/skills/install.ts";
+import { gradeEveryRun } from "../test/support/grading.ts";
 import { runInTerminal, type TerminalRun } from "../test/support/pty.ts";
 import { startHalfRealPlatform, type HalfRealPlatform } from "./support/half-real-platform.ts";
 import { openGate, type Gate } from "./support/retell-gate.ts";
@@ -92,6 +107,8 @@ const BUDGET = {
   agent: 2 * 60_000,
   existing: 2 * 60_000,
   gate: 25 * 60_000,
+  run: 5 * 60_000,
+  offer: 5 * 60_000,
   exit: 5 * 60_000,
 };
 
@@ -246,12 +263,16 @@ type Timing = { readonly phase: string; readonly seconds: string };
 
 type WalkOutcome = {
   readonly exitCode: number;
+  /** Everything left in scrollback, as lines with nothing empty between. */
   readonly exitLine: string;
+  readonly leftBehind: readonly string[];
   readonly timings: readonly Timing[];
   readonly credentials: { readonly url: string; readonly key: string };
   readonly repository: string;
   /** Whether the account offered a choice of agents, and how many. */
   readonly chosenFrom: number;
+  /** The run the wizard started, as the platform holds it. */
+  readonly run: { readonly id: string; readonly simulations: number; readonly graded: number };
 };
 
 /** Waits for every one of these to be on screen, or says what was there. */
@@ -349,7 +370,12 @@ async function walkOnce(options: {
     ],
     cwd: repository,
     env,
-    cols: 110,
+    // Wide, because the block the wizard leaves behind is lines rather than
+    // sentences, and each of them has to survive whole into scrollback for a
+    // triple-click to take it. A terminal wraps whatever will not fit, and a
+    // check that read a wrapped line as two would be checking the width of the
+    // window and not what egma wrote.
+    cols: 200,
     rows: 34,
   });
 
@@ -423,13 +449,46 @@ async function walkOnce(options: {
     );
     terminal.write("\r");
 
+    /* the run: pushed, created, and every simulation on screen */
+    await showing(terminal, "the run screen", BUDGET.run, "run run_", "simulation");
+    took("pushing and starting the run");
+
+    // The one thing this machine cannot do. Exactly one verdict is delivered,
+    // because that is what the wizard waits for and the count in the exit line
+    // has to be a number this check can name.
+    const grading = gradeEveryRun(options.platform, { atMost: 1 });
+    let offerShown: string;
+    try {
+      /* [human 6] the answer to the skill offer */
+      offerShown = await showing(
+        terminal,
+        "the skill offer",
+        BUDGET.offer,
+        "Install the egma skill into",
+        "[s] skip",
+      );
+    } finally {
+      grading.stop();
+    }
+    took("the first verdict");
+
+    // Where each key said it would write, before either key is pressed. Skip
+    // is answered below, and nothing at either place may exist afterwards that
+    // did not exist before.
+    check(
+      offerShown.includes("writes nothing at all"),
+      "the offer said what skip does before it was answered",
+    );
+
+    terminal.write("s");
+
     const exitCode = await Promise.race([
       terminal.exited,
       new Promise<number>((_, reject) =>
         setTimeout(() => reject(new Error("the wizard never finished")), BUDGET.exit),
       ),
     ]);
-    took("pushing");
+    took("the offer and the exit");
 
     const held = JSON.parse(await readFile(path.join(home, "credentials"), "utf8")) as {
       url: string;
@@ -437,13 +496,26 @@ async function walkOnce(options: {
     };
     secrets.push(held.key);
 
+    const started = options.platform.running.runs.at(-1);
+    const simulations = options.platform.running.simulationsOf(started?.id);
+
     return {
       exitCode,
       exitLine: terminal.scrollback().trim(),
+      leftBehind: terminal
+        .scrollback()
+        .split("\n")
+        .map((line) => line.trimEnd())
+        .filter((line) => line !== ""),
       timings,
       credentials: held,
       repository,
       chosenFrom,
+      run: {
+        id: started?.id ?? "",
+        simulations: simulations.length,
+        graded: simulations.filter((one) => one.verdict !== null).length,
+      },
     };
   } finally {
     await terminal.kill();
@@ -544,6 +616,60 @@ async function assertWhatLanded(options: {
     `${pinnedFiles} of the ${files.length} files in the repository pin a version the platform answered with`,
   );
 
+  /* the run the walk ended in, and what it was over */
+
+  const run = await askThePlatform(platform.url, held.key, `/api/runs/${outcome.run.id}`);
+  const inTheRun = Array.isArray(run.body.simulations)
+    ? (run.body.simulations as Record<string, unknown>[])
+    : [];
+  check(outcome.run.id.startsWith("run_"), "a run was created");
+  check(
+    inTheRun.length === pinnedFiles && inTheRun.length > 0,
+    `the run holds one simulation per pushed test (${inTheRun.length} for ${pinnedFiles} files)`,
+  );
+  check(
+    outcome.run.graded === 1,
+    `one verdict landed, and the wizard left on it rather than on the suite (${outcome.run.graded})`,
+  );
+  check(
+    outcome.run.simulations - outcome.run.graded > 0,
+    `the suite was still going when the wizard closed (${outcome.run.simulations - outcome.run.graded} not judged)`,
+  );
+
+  /* the block it left in scrollback, each line whole */
+
+  // The address the platform issued, not one built here out of its parts. A
+  // reconstruction would be this check agreeing with itself about where a run
+  // lives; what a developer triple-clicks is whatever came back on the run.
+  const address = String(run.body.results_url ?? "");
+  const lines = outcome.leftBehind;
+  check(address.startsWith("http"), `the run came back with an address (${address})`);
+  check(
+    lines.some((line) => line.startsWith("✓ Your first run is live")),
+    "the headline says the run is live",
+  );
+  check(lines.includes(address), "the results address is a line, and the whole of it");
+  check(
+    !lines.some((line) => line.includes(address) && line !== address),
+    "nothing shares the line the address is on",
+  );
+  check(new URL(address).search === "", "no token rides the address");
+  check(!outcome.exitLine.includes("egma_sk_"), "no key is anywhere in what survived the screen");
+  check(
+    lines.includes("Tests are code now: egma/tests/ (committed). Edit them, then egma push."),
+    "the line that says where the tests are survived whole",
+  );
+  check(
+    lines.includes(
+      'Hand your coding agent this: "Read egma/config.yaml, then egma --help — you can pull, push, and trigger runs from here."',
+    ),
+    "the handoff sentence survived whole",
+  );
+  check(
+    lines.some((line) => line.startsWith("Nothing was installed.")),
+    "skipping the offer was said out loud rather than passed over",
+  );
+
   return agentName;
 }
 
@@ -580,6 +706,20 @@ async function main(): Promise<void> {
 
   const real = path.join(process.env.HOME ?? "", ".egma", "credentials");
   const before = await stat(real).then((found) => `${found.mtimeMs}`, () => "absent");
+
+  // The global scope of the skill offer is the home of whoever ran this, and
+  // there is no throwaway one to point it at without taking the coding agent's
+  // own login away from it. So the offer is skipped and this is the proof: the
+  // developer's own skill file, exactly as it was before and after. Where that
+  // file would be is asked of the same code the wizard asks, so a convention
+  // that moves cannot leave this check watching the wrong path.
+  const places = skillPlacesFor(drivenAgentId, {
+    repository: targetRepo,
+    home: process.env.HOME ?? "",
+  });
+  const stamp = async (file: string): Promise<string> =>
+    stat(file).then((found) => `${found.mtimeMs}:${found.size}`, () => "absent");
+  const skillBefore = places === null ? "absent" : await stamp(places.global);
 
   // The API writes a line per request, and one walk makes a great many.
   process.env.LOG_LEVEL ??= "silent";
@@ -630,7 +770,7 @@ async function main(): Promise<void> {
       walked.push(outcome);
 
       say("");
-      say("── the line it left behind ───────────────────────────────");
+      say("── what it left behind ───────────────────────────────────");
       say(redact(outcome.exitLine));
       say("");
       say("── how long each phase took ──────────────────────────────");
@@ -675,6 +815,17 @@ async function main(): Promise<void> {
 
     const after = await stat(real).then((found) => `${found.mtimeMs}`, () => "absent");
     check(before === after, "nothing touched the credentials of whoever ran this");
+
+    const skillAfter = places === null ? "absent" : await stamp(places.global);
+    check(skillBefore === skillAfter, "skip wrote nothing into the home of whoever ran this");
+    for (const outcome of walked) {
+      const here = skillPlacesFor(drivenAgentId, {
+        repository: outcome.repository,
+        home: process.env.HOME ?? "",
+      });
+      const written = here === null ? false : (await stamp(here.project)) !== "absent";
+      check(!written, "skip wrote nothing into the repository either");
+    }
   } finally {
     for (const outcome of walked) {
       await rm(outcome.repository, { recursive: true, force: true });
@@ -693,7 +844,8 @@ async function main(): Promise<void> {
   say(RULE);
   say("  PASSED — the whole wizard, driven end to end with nobody at the");
   say("  keyboard, put an agent, a connection and a suite of tests on a real");
-  say("  egma and left the files in the repository.");
+  say("  egma, ran them, showed the first verdict, and left on it with the");
+  say("  files in the repository and nothing written outside it.");
   say(RULE);
 }
 

@@ -106,7 +106,7 @@ function sameList(a: readonly string[], b: readonly string[]): boolean {
  * content in both lists: an expected behaviors list is one a reader goes down,
  * and personas are named in the order they were authored.
  */
-function sameAsPlatform(file: TestFile, test: PlatformTest): boolean {
+export function sameAsPlatform(file: TestFile, test: PlatformTest): boolean {
   return (
     file.name === test.name &&
     file.scenario === test.scenario &&

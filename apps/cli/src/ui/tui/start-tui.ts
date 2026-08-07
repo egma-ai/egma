@@ -13,7 +13,7 @@ import { createElement } from "react";
 
 import { render } from "ink";
 
-import { buildExitLine, buildExitNotice, type ExitReport } from "../../wizard/exit-line.ts";
+import { buildExitNotice, exitLines, type ExitReport } from "../../wizard/exit-line.ts";
 import type { StopReason } from "../../wizard/stop.ts";
 import type { WizardUI } from "../wizard-ui.ts";
 import { App } from "./App.tsx";
@@ -59,7 +59,7 @@ export function startTui(options: StartTuiOptions): TuiHandle {
     leaveAlternateScreen(stdout);
     const notice = buildExitNotice(report);
     if (notice !== null) stdout.write(`${notice}\n\n`);
-    stdout.write(`${buildExitLine(report)}\n`);
+    stdout.write(`${exitLines(report).join("\n")}\n`);
   };
 
   // Tearing raw mode down while a read is pending surfaces a harmless EIO on

@@ -17,12 +17,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LEARN_CARDS, CARD_WIDTH, cardAt } from "../src/wizard/teaching.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
-import { buildExitLine } from "../src/wizard/exit-line.ts";
+import { exitLines } from "../src/wizard/exit-line.ts";
 import { walk } from "../src/wizard/walk.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { bannedWordsIn } from "./support/glossary.ts";
+import { gradeEveryRun } from "./support/grading.ts";
 import { runInTerminal, showing } from "./support/pty.ts";
 import {
   CLI_ENTRY,
@@ -103,6 +104,26 @@ function scriptFor(workspace: Workspace): Promise<string> {
   });
 }
 
+/**
+ * The exit block, with the one line no two runs can share stood in for.
+ *
+ * Everything the wizard leaves behind is the same sentence on both runs but
+ * one: the address of the run, which names the instance it was created on and
+ * the run it created. Two runs on two platforms cannot have the same one, and
+ * a check that demanded it would be checking the fixture rather than the pane.
+ */
+function endingShape(lines: readonly string[], resultsUrl: string): readonly string[] {
+  return lines.map((line) => (line === resultsUrl ? "<the address of this run>" : line));
+}
+
+/** What a terminal left in scrollback, as lines with nothing empty between. */
+function scrollbackLines(text: string): readonly string[] {
+  return text
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line !== "");
+}
+
 let platform: Platform;
 let retell: FakeRetell;
 let workspace: Workspace;
@@ -166,12 +187,23 @@ describe("the pane, while the files land", () => {
   it("is drawn beside them, and the walk ends exactly as it does without it", async () => {
     const script = await scriptFor(workspace);
 
+    // The gate is not the end of the walk any more: enter starts a run, and
+    // the wizard leaves once one verdict has landed. Exactly one is judged on
+    // each of the two platforms below, so the count in the ending is the same
+    // number on both — a sweep that judged all three would leave "1 of 3" on
+    // one run and "all 3" on the other, depending on which poll landed first.
+    const grading = gradeEveryRun(platform, { atMost: 1 });
+
     const terminal = runInTerminal({
       command: process.execPath,
       args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
       cwd: workspace.dir,
       env: workspace.env({ EGMA_URL: platform.url, EGMA_RETELL_URL: retell.url }),
-      cols: 100,
+      // Wide, because the ending under check here is lines rather than
+      // sentences. A terminal wraps whatever will not fit, and a check that
+      // read a wrapped line as two would be checking the terminal's width and
+      // not egma's output. It is wide enough for the pane either way.
+      cols: 200,
     });
 
     try {
@@ -209,6 +241,7 @@ describe("the pane, while the files land", () => {
 
       const elsewhere = await startPlatform();
       const second = await makeWorkspace({}, { from: RETELL_FIXTURE_REPO });
+      const gradingElsewhere = gradeEveryRun(elsewhere, { atMost: 1 });
       try {
         await second.signIn(elsewhere.url, elsewhere.device.mint());
         const ui = new HeadlessUI({ answers: { "retell-key": KEY } });
@@ -219,28 +252,38 @@ describe("the pane, while the files land", () => {
           signal: new AbortController().signal,
           platform: { url: elsewhere.url, credentialsFile: second.credentialsFile },
           retell: { url: retell.url },
+          home: path.join(second.dir, "pretend-home"),
+          runPollMs: 20,
         });
 
-        expect(buildExitLine(report)).toBe(
-          "egma put 3 tests on egma and left them in egma/tests/ — commit them, edit them, then run egma push.",
+        expect(report.kind).toBe("run-started");
+        const address = report.kind === "run-started" ? report.resultsUrl : "";
+        const written = exitLines(report).filter((line) => line !== "");
+        expect(written[0]).toBe("✓ Your first run is live — 1 of 3 graded so far.");
+
+        // Line for line the same ending, and the same tests on egma either way.
+        const here = `${platform.url}/runs/${platform.running.runs[0]?.id ?? ""}`;
+        expect(endingShape(scrollbackLines(terminal.scrollback()), here)).toEqual(
+          endingShape(written, address),
         );
-        // Byte for byte the same ending, and the same tests on egma either way.
-        expect(terminal.scrollback().trim()).toBe(buildExitLine(report));
         expect(elsewhere.tests.tests.map((test) => test.name).sort()).toEqual(
           platform.tests.tests.map((test) => test.name).sort(),
         );
         expect(platform.tests.tests.map((test) => test.name).sort()).toEqual([...NAMES].sort());
       } finally {
+        gradingElsewhere.stop();
         await elsewhere.close();
         await second.remove();
       }
     } finally {
+      grading.stop();
       await terminal.kill();
     }
   });
 
   it("gives the whole width to the files when the terminal is too narrow for both", async () => {
     const script = await scriptFor(workspace);
+    const grading = gradeEveryRun(platform, { atMost: 1 });
 
     const terminal = runInTerminal({
       command: process.execPath,
@@ -272,6 +315,7 @@ describe("the pane, while the files land", () => {
       expect(await terminal.exited).toBe(0);
       expect(path.basename(workspace.dir).startsWith("egma-cli-")).toBe(true);
     } finally {
+      grading.stop();
       await terminal.kill();
     }
   });

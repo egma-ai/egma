@@ -20,6 +20,7 @@ import { CONNECT_EXIT } from "../src/commands/connect.ts";
 import { DRIFT_LINE } from "../src/retell/prompt-drift.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
+import { gradeEveryRun } from "./support/grading.ts";
 import { CLI_ENTRY, MANIFEST, makeWorkspace, type Workspace } from "./support/workspace.ts";
 
 const KEY = "key_1f4c9b7e2a6d0538c1e7";
@@ -316,6 +317,10 @@ describe("the whole walk, headless", () => {
       ],
     });
 
+    // The walk ends in a run, and a run ends when verdicts arrive. Nothing
+    // here conducts a simulation, so the fixture is given the one thing a
+    // platform with a simulator attached has.
+    const grading = gradeEveryRun(platform);
     const result = await egma(
       [
         "--headless",
@@ -328,6 +333,7 @@ describe("the whole walk, headless", () => {
       ],
       { env: { EGMA_RETELL_API_KEY: KEY } },
     );
+    grading.stop();
 
     expect(result.code).toBe(0);
     // The drift the coding agent's answer made checkable, said once.
@@ -339,8 +345,14 @@ describe("the whole walk, headless", () => {
     // is a file in the repository and a version on egma.
     expect(result.stdout).toContain("test: price-question default persona");
     expect(platform.tests.tests.map((test) => test.name)).toEqual(["price-question"]);
+    // And it did not stop at pushing either: the run is going, and the line
+    // left behind says where to watch it.
+    expect(result.stdout).toContain("✓ Your first run is live");
     expect(result.stdout).toContain(
-      "egma put 1 test on egma and left it in egma/tests/ — commit it, edit it, then run egma push.",
+      `${platform.url}/runs/${platform.running.runs[0]?.id ?? ""}`,
+    );
+    expect(result.stdout).toContain(
+      "Tests are code now: egma/tests/ (committed). Edit them, then egma push.",
     );
   });
 });
