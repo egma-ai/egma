@@ -307,8 +307,10 @@ describe("the whole generate step", () => {
       {
         name: "nothing-to-check",
         shown: "egma/tests/nothing-to-check.md",
-        reason:
-          "a test needs at least one expected behavior, because a test that cannot fail is not a test",
+        // The belt, not the door: push sees this refusal coming and says so
+        // before anything is uploaded. The door's own sentence is proven by
+        // the test that reaches the platform directly.
+        reason: "no expected behaviors, so it could never fail. Add one, then run egma push.",
       },
     ]);
     expect(platform.tests.tests.map((test) => test.name)).not.toContain("nothing-to-check");

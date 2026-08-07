@@ -49,8 +49,9 @@ export type TestGate = {
   readonly suite: string;
 };
 
-export const NO_BEHAVIORS_REASON =
-  "no expected behaviors, so it could never fail. Add one, then run egma push.";
+import { NO_BEHAVIORS_REASON } from "../sync/push.ts";
+
+export { NO_BEHAVIORS_REASON };
 
 /**
  * The other way a file in the folder is not a test: egma could not read it at

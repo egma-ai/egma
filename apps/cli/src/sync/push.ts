@@ -40,6 +40,16 @@ import {
 import { pinsAgainst } from "./pins.ts";
 import { fileFromPlatform } from "./pull.ts";
 
+/**
+ * The one door rule egma can check without asking: a test with no expected
+ * behaviors can never fail, and the platform will refuse it. Checking it here,
+ * before anything is uploaded, keeps a folder with one empty test from landing
+ * its good files and then being told about the bad one — the same reason the
+ * pin check runs before the first upload.
+ */
+export const NO_BEHAVIORS_REASON =
+  "no expected behaviors, so it could never fail. Add one, then run egma push.";
+
 /** A test the push will not touch, and why. */
 export type PushConflict = {
   readonly name: string;
@@ -127,17 +137,32 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
 
   const folder = await readFolder(paths);
   const wanted = options.only === undefined ? null : new Set(options.only);
-  const held = wanted === null ? folder.found : folder.found.filter((file) => wanted.has(file.file));
+  const readable =
+    wanted === null ? folder.found : folder.found.filter((file) => wanted.has(file.file));
+  const held = readable.filter((file) => file.test.expectedBehaviors.length > 0);
 
   // A file egma cannot read is named rather than uploaded, and rather than
   // ending the push: the other files in the folder are somebody's work too.
-  const refused: TurnedAway[] = (
-    wanted === null ? folder.unreadable : folder.unreadable.filter((file) => wanted.has(file.file))
-  ).map((file) => ({
-    name: path.basename(file.file, ".md"),
-    shown: file.shown,
-    reason: file.reason,
-  }));
+  // A test with no expected behaviors is the same shape — the platform's door
+  // would refuse it anyway, and egma can see that from here, before any of the
+  // folder's other files have been uploaded ahead of the refusal.
+  const refused: TurnedAway[] = [
+    ...(wanted === null
+      ? folder.unreadable
+      : folder.unreadable.filter((file) => wanted.has(file.file))
+    ).map((file) => ({
+      name: path.basename(file.file, ".md"),
+      shown: file.shown,
+      reason: file.reason,
+    })),
+    ...readable
+      .filter((file) => file.test.expectedBehaviors.length === 0)
+      .map((file) => ({
+        name: file.test.name,
+        shown: file.shown,
+        reason: NO_BEHAVIORS_REASON,
+      })),
+  ];
 
   if (held.length === 0) {
     return {
