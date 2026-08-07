@@ -24,7 +24,7 @@ import { buildExitLine, buildExitNotice } from "../src/wizard/exit-line.ts";
 import { walk } from "../src/wizard/walk.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
-import { noAdapterMessage, startPlatform, type Platform } from "./support/fixture-platform/index.ts";
+import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { gradeEveryRun } from "./support/grading.ts";
 import {
   CLI_ENTRY,
@@ -254,7 +254,7 @@ describe("a connection egma has no adapter for", () => {
     const script = await workspace.script({ steps: FOUND, stepsByTask: [WRITES_ONE_TEST] });
     const { ui, report } = await walkWith({ script, answers: { "retell-key": KEY } });
 
-    const refusal = noAdapterMessage("retell");
+    const refusal = platform.running.noAdapterMessage("retell");
     expect(report).toEqual({ kind: "failed", reason: refusal });
     expect(buildExitLine(report)).toBe(`egma could not finish: ${refusal}`);
     // Verbatim: not summarised, not softened, not swallowed.

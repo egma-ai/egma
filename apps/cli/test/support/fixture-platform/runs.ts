@@ -33,7 +33,8 @@
 // The platform's own identifier generator, reached by path for the same reason
 // the test group reaches it that way: the smoke checks run this fixture under
 // plain node, where a package name nothing has installed does not resolve.
-import { newId } from "../../../../../packages/ids/src/index.ts";
+import { isId, newId } from "../../../../../packages/ids/src/index.ts";
+import { CONDUCTABLE_TYPES } from "./agents.ts";
 import type { FixtureAnswer, FixtureRequest, RouteGroup } from "./server.ts";
 
 /** How far one simulation got. The real `simulation_status_allowed`. */
@@ -206,9 +207,18 @@ export type RunControls = {
    * Make this egma refuse a run over a connection of this type, because no
    * simulator adapter for it has shipped. The refusal is the platform's own
    * and the CLI must relay it word for word.
+   *
+   * The registry already answers this for every type it ships — `phone` has no
+   * adapter and never has — so this is for taking away one that does.
    */
   noAdapterFor(type: string): void;
-  /** The words that refusal is made of, so a check can assert on the same ones. */
+  /**
+   * The words that refusal is made of, so a check can assert on the same ones.
+   *
+   * It is a control rather than a bare function because the sentence ends on
+   * the list of types this instance can conduct over, and that list is the
+   * registry's answer minus whatever a check has taken away.
+   */
   noAdapterMessage(type: string): string;
 };
 
@@ -225,19 +235,42 @@ function textList(value: unknown): readonly string[] {
 }
 
 /**
+ * A run nobody can see reads exactly like a run nobody started. Existence is
+ * never confirmed to somebody who could not have seen the thing anyway, so
+ * another customer's id and a made-up one get the same sentence.
+ */
+const NO_SUCH_RUN =
+  "no run of yours has that id. Check the id, or start a run with POST " +
+  "/api/runs.";
+
+/**
  * The platform's own words for a connection type it cannot conduct a run over.
  *
  * A connection type lands in egma one adapter at a time, and a run over a type
  * whose adapter has not shipped can never happen — so it is refused at
  * creation, loudly, rather than left queued forever. The wording is the
  * platform's; egma's terminal repeats it and never paraphrases it.
+ *
+ * It says all of it in one place: what is missing, why egma would rather refuse
+ * now than queue something forever, and the move that works today. The list of
+ * types that work comes off the registry rather than out of the sentence, so it
+ * can never name an adapter that has not shipped or miss one that has.
  */
-export function noAdapterMessage(type: string): string {
+export function noAdapterMessage(type: string, conductable: readonly string[]): string {
   return (
     `egma has no simulator adapter for a ${type} connection yet, ` +
-    `so it will not start a run it cannot conduct`
+    `so it will not start a run it cannot conduct. Run these tests over a ` +
+    `connection egma conducts today: ${conductable.join(", ")}.`
   );
 }
+
+/** How many simulations one run may hold, as the run machinery's ceiling does. */
+const MOST_SIMULATIONS_PER_RUN = 200;
+
+/** What a caller does instead, when a run named the wrong agent. */
+const NAME_THE_RIGHT_AGENT =
+  "Name the agent that connection is on, or leave the agent out and egma " +
+  "takes the connection's own.";
 
 export function runRoutes(options: {
   readonly holdsKey: (key: string) => boolean;
@@ -251,7 +284,13 @@ export function runRoutes(options: {
   const runs: StoredRun[] = [];
   const simulations: StoredSimulation[] = [];
   const events: StoredEvent[] = [];
+  // Seeded from the registry, which is where "nothing conducts this yet" is
+  // actually written down. A check may take one more away.
   const withoutAdapter = new Set<string>();
+
+  /** The types this instance can conduct a run over, right now. */
+  const conductable = (): readonly string[] =>
+    CONDUCTABLE_TYPES.filter((type) => !withoutAdapter.has(type));
 
   const record = (event: NewEvent): void => {
     events.push({ ...event, seq: events.length + 1, at: new Date().toISOString() });
@@ -389,45 +428,147 @@ export function runRoutes(options: {
     return answer();
   };
 
+  /**
+   * Start a run, in the order the platform decides it.
+   *
+   * Everything answerable without reading anything is answered first — the two
+   * ids and the shape of the selection — so a body that could never be written
+   * is refused before it learns whether the connection it names is there. Then
+   * the connection, then the adapter, then every version, and only then is a
+   * single row written: one unknown or doubled id refuses the whole creation,
+   * because a run that quietly executed eleven of the twelve versions somebody
+   * named would report green about a suite that did not run.
+   */
   const create = (body: Record<string, unknown> | null): FixtureAnswer => {
     const said = body ?? {};
 
-    const connection = options.connectionById(text(said.connection).trim());
-    if (connection === null) {
-      return refuse(404, "not_found", "no connection of yours has that id");
-    }
     const agentId = text(said.agent).trim();
-    if (agentId !== "" && agentId !== connection.agentId) {
-      return refuse(404, "not_found", "that connection is not on that agent");
+    if (agentId !== "" && !isId("agt", agentId)) {
+      return refuse(
+        404,
+        "not_found",
+        `"${agentId}" is not an agent id, so no connection is on it. ${NAME_THE_RIGHT_AGENT}`,
+      );
     }
 
-    // Refused at creation, in the platform's own words, before a single
-    // simulation is written: a run nothing can conduct must never be queued.
-    if (withoutAdapter.has(connection.type)) {
-      return refuse(422, "no_adapter", noAdapterMessage(connection.type));
+    // Named nothing at all is its own answer: "no connection of yours has that
+    // id" would be a sentence about an id the request never sent, and a coding
+    // agent reading it would go looking for a connection nobody named.
+    const connectionId = text(said.connection).trim();
+    if (connectionId === "") {
+      return refuse(
+        422,
+        "unprocessable",
+        "a run is conducted over a connection, and this request named none. " +
+          "Send connection with the con_ id of the way egma should reach the " +
+          "agent — registering the agent answered with one.",
+      );
+    }
+    if (!isId("con", connectionId)) {
+      return refuse(
+        404,
+        "not_found",
+        `"${connectionId}" is not a connection id. Send the con_ id ` +
+          `registering the agent answered with.`,
+      );
     }
 
-    const wanted = textList(said.test_versions).map((one) => one.trim());
+    // Text, and every entry of it. An entry that is not a version id is
+    // refused rather than dropped: dropping one would start a run over the
+    // rest, and the caller would read green about a selection egma quietly
+    // shortened.
+    const pinnedIn = said.test_versions ?? [];
+    if (!Array.isArray(pinnedIn)) {
+      return refuse(
+        422,
+        "unprocessable",
+        "test_versions is the list of frozen versions this run executes, by " +
+          'id. Send it as a list of text, like ["tstv_..."], taking each ' +
+          "version_id from the test it belongs to.",
+      );
+    }
+    for (const entry of pinnedIn) {
+      if (typeof entry !== "string" || entry.trim() === "") {
+        return refuse(
+          422,
+          "unprocessable",
+          "a run pins each test version as text — the version_id a push or a " +
+            "read answered with — and one entry in test_versions is neither. " +
+            "Send them all, or none of them runs.",
+        );
+      }
+    }
+
+    const wanted = textList(pinnedIn).map((one) => one.trim());
     if (wanted.length === 0) {
       return refuse(
         422,
         "unprocessable",
-        "a run needs at least one test version, because a run with no simulations checks nothing",
+        "a run needs at least one test version, because a run with no " +
+          "simulations checks nothing. Pin the version_id of each test this " +
+          "run should execute.",
       );
     }
-
-    const pinned: PinnedVersion[] = [];
     const seen = new Set<string>();
     for (const versionId of wanted) {
       if (seen.has(versionId)) {
-        return refuse(422, "unprocessable", `test version ${versionId} is pinned twice on one run`);
+        return refuse(
+          422,
+          "unprocessable",
+          `test version ${versionId} is pinned twice on one run. Pin each ` +
+            `version once; a run already conducts one simulation per test per ` +
+            `persona.`,
+        );
       }
       seen.add(versionId);
+    }
+
+    const connection = options.connectionById(connectionId);
+    if (connection === null) {
+      return refuse(
+        404,
+        "not_found",
+        `there is no connection ${connectionId} in this project. Check the id, ` +
+          `or read your agents to see how each one is reached.`,
+      );
+    }
+    if (agentId !== "" && agentId !== connection.agentId) {
+      return refuse(
+        404,
+        "not_found",
+        `connection ${connectionId} is not on agent ${agentId}. ${NAME_THE_RIGHT_AGENT}`,
+      );
+    }
+
+    // Refused at creation, in the platform's own words, before a single
+    // simulation is written: a run nothing can conduct must never be queued.
+    if (!conductable().includes(connection.type)) {
+      return refuse(422, "no_adapter", noAdapterMessage(connection.type, conductable()));
+    }
+
+    const pinned: PinnedVersion[] = [];
+    for (const versionId of wanted) {
       const version = options.versionById(versionId);
       if (version === null) {
-        return refuse(422, "unprocessable", `there is no test version ${versionId} on this egma`);
+        return refuse(
+          422,
+          "unprocessable",
+          `there is no test version ${versionId} on this egma. Push the test ` +
+            `first, or read the test and pin the version_id it names now.`,
+        );
       }
       pinned.push(version);
+    }
+
+    const asksFor = pinned.reduce((total, one) => total + one.personas.length, 0);
+    if (asksFor > MOST_SIMULATIONS_PER_RUN) {
+      return refuse(
+        422,
+        "unprocessable",
+        `a run conducts at most ${MOST_SIMULATIONS_PER_RUN} simulations, and ` +
+          `these ${pinned.length} versions ask for ${asksFor}. Split the ` +
+          `selection across runs.`,
+      );
     }
 
     const run: StoredRun = {
@@ -498,9 +639,7 @@ export function runRoutes(options: {
         handle: (request) =>
           behindAKey(request, () => {
             const run = runById(request.params.runId ?? "");
-            if (run === undefined) {
-              return refuse(404, "not_found", "no run of yours has that id");
-            }
+            if (run === undefined) return refuse(404, "not_found", NO_SUCH_RUN);
             return {
               status: 200,
               body: {
@@ -511,19 +650,40 @@ export function runRoutes(options: {
           }),
       },
       {
-        // Everything that has changed since a point, in order. A cursor rather
-        // than a socket: a follower that loses its connection asks again from
-        // where it was, so it never misses a change and never sees one twice.
+        /**
+         * Everything that has changed since a point, in order. A cursor rather
+         * than a socket: a follower that loses its connection asks again from
+         * where it was, so it never misses a change and never sees one twice.
+         *
+         * `after` is a sequence number this feed issued, and anything else is
+         * refused rather than read as zero — silently starting again from the
+         * beginning would replay a whole run into a screen that had already
+         * drawn it.
+         */
         method: "GET",
         path: "/api/runs/:runId/events",
         handle: (request) =>
           behindAKey(request, () => {
             const run = runById(request.params.runId ?? "");
-            if (run === undefined) {
-              return refuse(404, "not_found", "no run of yours has that id");
+            if (run === undefined) return refuse(404, "not_found", NO_SUCH_RUN);
+
+            // Digits and nothing else. `Number` would take 0x10, 1e3, 5.0 and
+            // a padded " 7 " and quietly answer about a page nobody asked for,
+            // while the sentence below promises it would not — so the shape of
+            // a sequence number is checked as written rather than as parsed. A
+            // parameter that arrived empty is a parameter nobody set.
+            const said = request.url.searchParams.get("after");
+            const from = said === null || said === "" ? 0 : Number(said);
+            if (said !== null && said !== "" && !/^\d+$/u.test(said)) {
+              return refuse(
+                400,
+                "invalid_request",
+                `"${said}" is not a sequence number this feed issued. Send back ` +
+                  `the next an earlier page answered with, or leave after out to ` +
+                  `start at the first change.`,
+              );
             }
-            const after = Number.parseInt(request.url.searchParams.get("after") ?? "0", 10);
-            const from = Number.isFinite(after) && after > 0 ? after : 0;
+
             const mine = events.filter(
               (event) => event.runId === run.id && event.seq > from,
             );
@@ -586,7 +746,7 @@ export function runRoutes(options: {
     noAdapterFor(type) {
       withoutAdapter.add(type);
     },
-    noAdapterMessage,
+    noAdapterMessage: (type) => noAdapterMessage(type, conductable()),
   };
 
   return { group, controls };

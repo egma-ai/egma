@@ -22,6 +22,19 @@
  *   writing into somebody else's account by asking nicely.
  * - **A sealed secret never comes back.** What a caller sends is stored sealed
  *   and answered as its last four characters and nothing more.
+ *
+ * Two more are the public API's rather than the factory's, and both are here
+ * because a client that guessed at either would fail in somebody's terminal:
+ *
+ * - **Registering is retry-safe by construction.** A registration carrying an
+ *   inline connection goes through the per-type reuse rule, and the reply's
+ *   `result` says which of the three things happened — created, reused, or the
+ *   same agent reached a new way. A `reused` registration wrote no row, so it
+ *   rides a 200 where the other two ride a 201.
+ * - **An unknown key is refused by name.** That is what turns a typo into an
+ *   answer a coding agent can act on, and it is what makes the dropped vendor
+ *   payload loud: a client still sending what was pulled from the provider
+ *   hears so, instead of watching egma quietly keep nothing.
  */
 
 import { randomBytes } from "node:crypto";
@@ -39,8 +52,22 @@ function newId(prefix: string): string {
   return `${prefix}_${body}`;
 }
 
+/** Whether a string is an identifier of this kind, as the id package reads one. */
+function isId(prefix: string, value: string): boolean {
+  return new RegExp(`^${prefix}_[0-9A-HJKMNP-TV-Z]{${ID_BODY_LENGTH}}$`, "u").test(value);
+}
+
 /** The floor under a credential field, so a last-4 hint stays a hint. */
 const SHORTEST_CREDENTIAL = 8;
+
+/** How many rows one page holds, as the data-access layer's default does. */
+const PAGE_SIZE = 50;
+
+/** What a caller actually said, as against a parameter that arrived empty. */
+function given(value: string | null | undefined): string | undefined {
+  const said = (value ?? "").trim();
+  return said === "" ? undefined : said;
+}
 
 type ConfigGate = (key: string, value: unknown) => string;
 
@@ -51,6 +78,14 @@ type Descriptor = {
   readonly credentials:
     | { readonly required: true; readonly fields: readonly string[]; readonly hintField: string }
     | { readonly required: false; readonly refusal: string };
+  /**
+   * Which config key decides that two registrations are about one vendor
+   * agent. A type that cannot answer that — a framework the customer runs
+   * themselves has no vendor identifier — declares none and always creates.
+   */
+  readonly reuseKey?: string;
+  /** Whether anything can conduct a run over this type today. */
+  readonly simulatorAdapter: boolean;
 };
 
 function nonEmptyString(key: string, value: unknown): string {
@@ -86,11 +121,17 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     topology: "hosted-broker",
     config: { retellAgentId: nonEmptyString },
     credentials: { required: true, fields: ["apiKey"], hintField: "apiKey" },
+    // The provider's own agent id: the first vendor to carry a reuse rule.
+    reuseKey: "retellAgentId",
+    simulatorAdapter: true,
   },
   phone: {
     modalities: ["voice"],
     topology: "egma-dials-in",
     config: { phoneNumber: e164PhoneNumber },
+    // No reuse rule, deliberately: a number is where egma dials, not who
+    // answers, and two agents can legitimately share one.
+    simulatorAdapter: false,
     credentials: {
       required: false,
       refusal:
@@ -102,6 +143,27 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
 
 const CONNECTION_TYPES = Object.keys(REGISTRY);
 
+/**
+ * The types something can actually conduct a run over today.
+ *
+ * Read off the registry rather than written out, so a refusal naming what works
+ * can never name an adapter that has not shipped or miss one that has.
+ */
+export const CONDUCTABLE_TYPES: readonly string[] = CONNECTION_TYPES.filter(
+  (type) => (REGISTRY[type] as Descriptor).simulatorAdapter,
+);
+
+/** What a registration holds, and what a connection holds. Nothing else. */
+const AGENT_KEYS = ["name", "description", "project", "connection"] as const;
+const CONNECTION_KEYS = [
+  "name",
+  "type",
+  "modality",
+  "environment",
+  "config",
+  "credentials",
+] as const;
+
 /** A refusal with a sentence in it, turned into an answer at the door. */
 class Refusal extends Error {
   readonly status: number;
@@ -112,6 +174,36 @@ class Refusal extends Error {
     this.name = "Refusal";
     this.status = options.status ?? 400;
     this.code = options.code ?? "invalid_request";
+  }
+}
+
+/**
+ * The unknown-key gate, written once for both objects a registration carries.
+ *
+ * Refusing by name rather than ignoring is what turns a typo into an answer a
+ * coding agent can act on. And it is what makes the dropped vendor payload
+ * loud: egma no longer keeps what was pulled from the provider — the agent's
+ * content stays where it lives and is read fresh through the sealed credential
+ * — so a client still sending a copy of it is told, rather than left believing
+ * egma holds something it does not.
+ */
+function refuseUnknownKeyIn(
+  body: Record<string, unknown>,
+  held: readonly string[],
+  what: string,
+): void {
+  for (const key of Object.keys(body)) {
+    if (held.includes(key)) continue;
+    if (key === "pulled") {
+      throw new Refusal(
+        `egma no longer keeps what was pulled from the provider, so ${what} ` +
+          'has no "pulled" key. Drop it and send ' +
+          `${held.join(", ")}; the agent's content stays at the provider, ` +
+          "where egma reads it fresh rather than out of a copy that would go " +
+          "stale.",
+      );
+    }
+    throw new Refusal(`${what} has no key "${key}"; it holds ${held.join(", ")}`);
   }
 }
 
@@ -217,49 +309,6 @@ function validName(name: unknown, what: string): string {
   return trimmed;
 }
 
-/** What was pulled from the provider, stored exactly as it was sent. */
-type Pulled = {
-  readonly vendor: string;
-  readonly documents: readonly { readonly of: string; readonly body: string }[];
-  readonly prompt: string | null;
-  readonly voice: string | null;
-  readonly tools: readonly unknown[];
-};
-
-/**
- * The vendor payload, checked for shape and otherwise untouched.
- *
- * Every document's body is kept as the string it arrived as. Parsing it here
- * and storing the result would make the stored copy a reading of the provider's
- * answer rather than the answer, which is the one thing the rule forbids.
- */
-function validPulled(pulled: unknown): Pulled | null {
-  if (pulled === undefined) return null;
-  if (typeof pulled !== "object" || pulled === null || Array.isArray(pulled)) {
-    throw new Refusal("what was pulled from the provider is an object, or is left out entirely");
-  }
-  const held = pulled as Record<string, unknown>;
-  const documents = Array.isArray(held["documents"]) ? held["documents"] : [];
-  const kept: { of: string; body: string }[] = [];
-  for (const document of documents) {
-    if (typeof document !== "object" || document === null) {
-      throw new Refusal("every pulled document names what it is and carries a body");
-    }
-    const one = document as Record<string, unknown>;
-    if (typeof one["of"] !== "string" || typeof one["body"] !== "string") {
-      throw new Refusal("every pulled document names what it is and carries a body");
-    }
-    kept.push({ of: one["of"], body: one["body"] });
-  }
-  return {
-    vendor: typeof held["vendor"] === "string" ? held["vendor"] : "",
-    documents: kept,
-    prompt: typeof held["prompt"] === "string" ? held["prompt"] : null,
-    voice: typeof held["voice"] === "string" ? held["voice"] : null,
-    tools: Array.isArray(held["tools"]) ? (held["tools"] as unknown[]) : [],
-  };
-}
-
 type StoredConnection = {
   readonly id: string;
   readonly agentId: string;
@@ -271,25 +320,56 @@ type StoredConnection = {
   readonly environment: string | null;
   readonly config: Readonly<Record<string, string>>;
   /** Sealed. Nothing outside this file ever reads it back through a route. */
-  readonly credentials: Readonly<Record<string, string>> | null;
-  readonly credentialsHint: string | null;
+  credentials: Readonly<Record<string, string>> | null;
+  credentialsHint: string | null;
   readonly createdAt: string;
+  updatedAt: string;
 };
 
 type StoredAgent = {
   readonly id: string;
   readonly projectId: string;
-  readonly name: string;
-  readonly description: string | null;
-  readonly pulled: Pulled | null;
+  name: string;
+  description: string | null;
   readonly createdAt: string;
+  updatedAt: string;
 };
 
-/** What a route answers with: everything but the sealed envelope. */
+/** An agent, as every read of one describes it. */
+function agentOut(agent: StoredAgent): Record<string, unknown> {
+  return {
+    id: agent.id,
+    project_id: agent.projectId,
+    name: agent.name,
+    description: agent.description,
+    created_at: agent.createdAt,
+    updated_at: agent.updatedAt,
+  };
+}
+
+/**
+ * A connection, as every read of one describes it.
+ *
+ * The sealed envelope has no line here, so there is no serializer to remember
+ * to strip it in. `credentials_hint` is the whole of what comes back: enough to
+ * tell one provider key from another, and enough to see that a rotation landed.
+ */
 function connectionOut(connection: StoredConnection): Record<string, unknown> {
-  const { credentials, ...shown } = connection;
-  void credentials;
-  return shown;
+  return {
+    id: connection.id,
+    agent_id: connection.agentId,
+    project_id: connection.projectId,
+    name: connection.name,
+    type: connection.type,
+    modality: connection.modality,
+    topology: connection.topology,
+    environment: connection.environment,
+    config: connection.config,
+    credentials_hint: connection.credentialsHint,
+    capabilities: null,
+    created_at: connection.createdAt,
+    updated_at: connection.updatedAt,
+  };
 }
 
 export type AgentControls = {
@@ -344,6 +424,21 @@ export function agentRoutes(knowsKey: (key: string) => boolean): {
     body: { error: "not_authenticated", message: "no key, or not one of ours" },
   };
 
+  /**
+   * An agent nobody can see reads exactly like an agent nobody wrote. Existence
+   * is never confirmed to somebody who could not have seen the thing anyway, so
+   * another customer's id and a made-up one get the same sentence.
+   */
+  const noSuchAgent: FixtureAnswer = {
+    status: 404,
+    body: {
+      error: "not_found",
+      message:
+        "no agent of yours has that id. Check the id, or list your agents with " +
+        "GET /api/agents.",
+    },
+  };
+
   const answering = (make: () => FixtureAnswer): FixtureAnswer => {
     try {
       return make();
@@ -364,6 +459,22 @@ export function agentRoutes(knowsKey: (key: string) => boolean): {
       const candidate = `${type}-${n}`;
       if (!taken.has(candidate)) return candidate;
     }
+  };
+
+  /**
+   * One connection payload, read the one way — inline on a registration and
+   * standalone on an attach. Two dialects for one thing is how a client comes
+   * to work on one path and fail on the other.
+   */
+  const connectionIn = (value: unknown): Record<string, unknown> => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      throw new Refusal("a connection is an object, or is left out entirely");
+    }
+    const body = value as Record<string, unknown>;
+    // Topology is not in the list on purpose: it is derived from the type, so a
+    // supplied one is refused as the unknown key it is.
+    refuseUnknownKeyIn(body, CONNECTION_KEYS, "a connection");
+    return body;
   };
 
   const writeConnection = (
@@ -402,24 +513,68 @@ export function agentRoutes(knowsKey: (key: string) => boolean): {
       credentials: credentials === null ? null : credentials.sealed,
       credentialsHint: credentials === null ? null : credentials.hint,
       createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
     connections.push(written);
     return written;
+  };
+
+  /**
+   * The living connection in this project that is about the same vendor agent,
+   * if there is one — the whole of what makes registering retry-safe.
+   *
+   * Oldest first, so which agent a second modality attaches to is the same
+   * answer every time.
+   */
+  const sameVendorAgent = (
+    projectId: string,
+    input: Record<string, unknown>,
+  ): readonly StoredConnection[] => {
+    const type = typeof input["type"] === "string" ? input["type"] : "";
+    const descriptor = REGISTRY[type];
+    const reuseKey = descriptor?.reuseKey;
+    if (reuseKey === undefined) return [];
+
+    const config = input["config"];
+    const named =
+      typeof config === "object" && config !== null
+        ? (config as Record<string, unknown>)[reuseKey]
+        : undefined;
+    if (typeof named !== "string" || named.trim() === "") return [];
+
+    return connections
+      .filter(
+        (held) =>
+          held.projectId === projectId &&
+          held.type === type &&
+          held.config[reuseKey] === named.trim(),
+      )
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   };
 
   const group: RouteGroup = {
     name: "agents",
     routes: [
       {
-        // Register a voice agent, with the first way of reaching it written in
-        // the same request: an agent nothing can reach is not worth having, so
-        // the happy path never produces one.
+        /**
+         * Register a voice agent, with the first way of reaching it written in
+         * the same request: an agent nothing can reach is not worth having, so
+         * the happy path never produces one.
+         *
+         * Both rows or neither, and the reuse rule runs in the same breath:
+         * a living connection about the same vendor agent decides the outcome.
+         * Same modality answers what is there with the credential rotated
+         * whole; a different modality gives that same agent another way of
+         * being reached; no match writes both. `result` says which.
+         */
         method: "POST",
         path: "/api/agents",
         handle: (request) => {
           if (!authorized(request.headers)) return notAuthenticated;
           return answering(() => {
             const body = request.body ?? {};
+            refuseUnknownKeyIn(body, AGENT_KEYS, "a registration");
+
             const name = validName(body["name"], "an agent");
 
             // A write may name a project in its body. It never names one in
@@ -428,6 +583,53 @@ export function agentRoutes(knowsKey: (key: string) => boolean): {
             projectsNamed.push(named);
             const projectId = named ?? HOME_PROJECT;
 
+            const inline =
+              body["connection"] === undefined ? undefined : connectionIn(body["connection"]);
+
+            if (inline !== undefined) {
+              const living = sameVendorAgent(projectId, inline);
+              const asked = typeof inline["modality"] === "string" ? inline["modality"] : "";
+              const same = living.find((held) => held.modality === asked);
+
+              if (same !== undefined) {
+                // Whole, never merged: what arrived replaces what is stored.
+                // The whole payload is still read first, so a registration that
+                // would be refused is refused rather than rotating a key on the
+                // strength of a body egma will not take.
+                const credentials = validCredentials(same.type, inline["credentials"]);
+                validConfig(same.type, inline["config"]);
+                if (credentials !== null) sealed.push(...Object.values(credentials.sealed));
+                same.credentials = credentials === null ? null : credentials.sealed;
+                same.credentialsHint = credentials === null ? null : credentials.hint;
+                same.updatedAt = new Date().toISOString();
+
+                const owner = agents.find((held) => held.id === same.agentId) as StoredAgent;
+                // No row was written, and saying 201 would be the protocol
+                // claiming something the `result` field is there to deny.
+                return {
+                  status: 200,
+                  body: {
+                    result: "reused",
+                    agent: agentOut(owner),
+                    connection: connectionOut(same),
+                  },
+                };
+              }
+
+              const known = living[0];
+              if (known !== undefined) {
+                const owner = agents.find((held) => held.id === known.agentId) as StoredAgent;
+                return {
+                  status: 201,
+                  body: {
+                    result: "connection_added",
+                    agent: agentOut(owner),
+                    connection: connectionOut(writeConnection(owner, inline)),
+                  },
+                };
+              }
+            }
+
             if (agents.some((held) => held.projectId === projectId && held.name === name)) {
               throw new Refusal(`an agent named "${name}" already exists in this project`, {
                 status: 409,
@@ -435,74 +637,96 @@ export function agentRoutes(knowsKey: (key: string) => boolean): {
               });
             }
 
-            const pulled = validPulled(body["pulled"]);
-
-            // Both rows or neither: a bad connection payload leaves no agent
-            // behind, so the write is checked before either is kept.
+            // Both rows or neither: a connection payload the registry turns
+            // away leaves no agent behind, so nothing is kept until both are.
             const agent: StoredAgent = {
               id: newId("agt"),
               projectId,
               name,
               description: typeof body["description"] === "string" ? body["description"] : null,
-              pulled,
               createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
             };
 
-            const inline = body["connection"];
             if (inline === undefined) {
               agents.push(agent);
-              return { status: 201, body: { agent } };
-            }
-            if (typeof inline !== "object" || inline === null || Array.isArray(inline)) {
-              throw new Refusal("a connection is an object, or is left out entirely");
+              return { status: 201, body: { result: "created", agent: agentOut(agent) } };
             }
 
             const before = connections.length;
             let connection: StoredConnection;
             try {
-              connection = writeConnection(agent, inline as Record<string, unknown>);
+              connection = writeConnection(agent, inline);
             } catch (error) {
               connections.length = before;
               throw error;
             }
             agents.push(agent);
 
-            return { status: 201, body: { agent, connection: connectionOut(connection) } };
+            return {
+              status: 201,
+              body: {
+                result: "created",
+                agent: agentOut(agent),
+                connection: connectionOut(connection),
+              },
+            };
           });
         },
       },
       {
-        // One page of the agents this key can reach. A project is a filter in
-        // the query, never a level in the address.
+        /**
+         * One page of the agents this key can reach, newest first. A project is
+         * a filter in the query and never a level in the address, and there is
+         * no page-size parameter: a page is a page, and the cursor is what
+         * carries a reader through the rest.
+         */
         method: "GET",
         path: "/api/agents",
         handle: (request) => {
           if (!authorized(request.headers)) return notAuthenticated;
-          const project = request.url.searchParams.get("project");
-          const items = agents.filter(
-            (agent) => project === null || agent.projectId === project,
-          );
-          return { status: 200, body: { items } };
+          return answering(() => {
+            const project = given(request.url.searchParams.get("project"));
+            const cursor = given(request.url.searchParams.get("cursor"));
+            if (cursor !== undefined && !isId("agt", cursor)) {
+              throw new Refusal(
+                `"${cursor}" is not an agent id, so it cannot be a cursor. Send ` +
+                  "back the next_cursor from the page before this one, or leave it " +
+                  "out to start at the newest.",
+              );
+            }
+
+            const mine = agents.filter(
+              (agent) => project === undefined || agent.projectId === project,
+            );
+            const from =
+              cursor === undefined ? 0 : mine.findIndex((held) => held.id === cursor) + 1;
+            const page = mine.slice(from, from + PAGE_SIZE);
+            const more = mine.length > from + page.length;
+
+            return {
+              status: 200,
+              body: {
+                items: page.map(agentOut),
+                next_cursor: more ? (page.at(-1)?.id ?? null) : null,
+              },
+            };
+          });
         },
       },
       {
-        // The agent, everything pulled from the provider for it, and every way
-        // of reaching it. A connection is only ever reached through its agent.
+        // The agent, and every living way of reaching it. A connection is only
+        // ever reached through its agent.
         method: "GET",
         path: "/api/agents/:agentId",
         handle: (request) => {
           if (!authorized(request.headers)) return notAuthenticated;
           const agent = agents.find((held) => held.id === request.params["agentId"]);
-          if (agent === undefined) {
-            return {
-              status: 404,
-              body: { error: "not_found", message: "no agent of yours has that id" },
-            };
-          }
+          if (agent === undefined) return noSuchAgent;
           return {
             status: 200,
             body: {
-              agent,
+              agent: agentOut(agent),
               connections: connections
                 .filter((held) => held.agentId === agent.id)
                 .map(connectionOut),
@@ -511,23 +735,20 @@ export function agentRoutes(knowsKey: (key: string) => boolean): {
         },
       },
       {
-        // Another way of reaching an agent that already exists. Same rules, and
-        // the same defaulted name one number further along.
+        // Another way of reaching an agent that already exists. Same body shape,
+        // and the same defaulted name one number further along.
         method: "POST",
         path: "/api/agents/:agentId/connections",
         handle: (request) => {
           if (!authorized(request.headers)) return notAuthenticated;
           const agent = agents.find((held) => held.id === request.params["agentId"]);
-          if (agent === undefined) {
-            return {
-              status: 404,
-              body: { error: "not_found", message: "no agent of yours has that id" },
-            };
-          }
+          if (agent === undefined) return noSuchAgent;
           return answering(() => ({
             status: 201,
             body: {
-              connection: connectionOut(writeConnection(agent, request.body ?? {})),
+              connection: connectionOut(
+                writeConnection(agent, connectionIn(request.body ?? {})),
+              ),
             },
           }));
         },

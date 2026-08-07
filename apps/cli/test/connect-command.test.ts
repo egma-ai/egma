@@ -156,10 +156,20 @@ describe("egma connect", () => {
     expect(facts(ours.stdout).agent_name).toBe("order-line");
 
     // Retell's own variable name is read too, so an environment that already
-    // holds one needs nothing new set.
+    // holds one needs nothing new set. The same Retell agent registered again
+    // is the registration already there, said in a fact line a coding agent
+    // reads rather than left to be worked out by counting agents.
     const theirs = await egma(["connect"], { env: { RETELL_API_KEY: KEY } });
     expect(theirs.code).toBe(CONNECT_EXIT.connected);
-    expect(facts(theirs.stdout).agent_name).toBe("order-line-2");
+    expect(facts(theirs.stdout).agent_name).toBe("order-line");
+    expect(facts(theirs.stdout).registration).toBe("reused");
+    expect(facts(ours.stdout).registration).toBe("created");
+    expect(theirs.stdout).toContain(
+      "note: This Retell agent was already registered as order-line, so egma kept it " +
+        "and stored the key you just gave. Nothing new was registered.",
+    );
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.registered.connections).toHaveLength(1);
   });
 
   it("refuses a key handed to it as an argument, and never says it back", async () => {

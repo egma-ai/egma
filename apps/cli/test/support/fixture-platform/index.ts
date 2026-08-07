@@ -24,7 +24,6 @@ export type {
   SimulationStatus,
   Verdict,
 } from "./runs.ts";
-export { noAdapterMessage } from "./runs.ts";
 export type { FixturePlatform, Observation } from "./server.ts";
 export type { SeedTest, SeededTest, TestControls } from "./tests.ts";
 

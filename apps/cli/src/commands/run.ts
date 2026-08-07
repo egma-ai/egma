@@ -6,11 +6,17 @@
  * agent can start a run, watch it, and act on what came back without anybody
  * reading a screen.
  *
- * Three promises this verb keeps, and each is a decision rather than a detail.
+ * Four promises this verb keeps, and each is a decision rather than a detail.
  *
  * **What it pins is what it says it pins.** The versions go on the wire and
  * every one of them is printed, so what executed is readable afterwards from
  * the terminal's own output as well as from the platform.
+ *
+ * **What the folder says and what egma holds either agree or nothing starts.**
+ * A file egma has never seen and a file egma holds different content for are
+ * both doors, not notes, and both name `egma push`. A run that went ahead over
+ * the difference would answer green about content nobody executed, and a
+ * coding agent reading that green reports an edit verified that never ran.
  *
  * **A refusal is repeated, never rewritten.** The platform decides whether a
  * run can happen — a connection type whose adapter has not shipped is the case
@@ -31,9 +37,9 @@ import { notSignedInRefusal, signedInAt, type SignedIn } from "../platform/signe
 import { followRun, RunFollower } from "../run/follow.ts";
 import { changeLines, tallyLines } from "../run/lines.ts";
 import {
+  pushEditsRefusal,
   pushFirstRefusal,
   selectFromFolder,
-  staleWarning,
   type Selection,
 } from "../run/selection.ts";
 import type { FolderCommandOptions } from "./folder-verbs.ts";
@@ -82,12 +88,10 @@ function targetIn(config: FolderConfig): { readonly agentId: string; readonly co
   return { agentId, connectionId };
 }
 
-/** The whole selection, printed: what will run, and what will not. */
+/** The whole selection, printed: what would run, and what stands in the way. */
 function reportSelection(options: RunCommandOptions, selection: Selection): void {
   for (const one of selection.pinned) options.out(`pin: ${one.name} ${one.versionId}`);
-  for (const one of selection.pinned.filter((held) => held.stale)) {
-    options.out(`stale: ${one.name}`);
-  }
+  for (const one of selection.diverged) options.out(`not-pushed: ${one.name}`);
   for (const one of selection.unknown) options.out(`unknown: ${one.name}`);
 }
 
@@ -141,6 +145,16 @@ export async function runRunCommand(options: RunCommandOptions): Promise<number>
     options.fail(pushFirstRefusal(selection.unknown));
     return RUN_EXIT.nothing;
   }
+  if (selection.diverged.length > 0) {
+    // Its own word again, and never `refused`: this is egma refusing to ask,
+    // not the platform refusing to conduct, and the two want different next
+    // actions from whoever is reading. Nothing is started — a run over what
+    // egma holds would come back green about content nobody executed, which is
+    // exactly the failure this verb exists to make impossible.
+    options.out("status: not-pushed");
+    options.fail(pushEditsRefusal(selection.diverged));
+    return RUN_EXIT.nothing;
+  }
   if (selection.pinned.length === 0) {
     options.out("status: no-tests");
     options.fail(
@@ -148,9 +162,6 @@ export async function runRunCommand(options: RunCommandOptions): Promise<number>
     );
     return RUN_EXIT.nothing;
   }
-
-  const stale = selection.pinned.filter((one) => one.stale);
-  if (stale.length > 0) options.fail(staleWarning(stale));
 
   let answer;
   try {

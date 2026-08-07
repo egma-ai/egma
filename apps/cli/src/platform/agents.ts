@@ -8,24 +8,17 @@
  * The Retell key travels inside that one request body and is read out of the
  * key object exactly here, on the way to being sealed. Nothing in this module
  * writes a file, prints a line, or puts the body into an error.
+ *
+ * **What the provider is running does not travel.** egma keeps identity,
+ * credentials and what it learns; the agent's own content stays at the
+ * provider, where egma reads it fresh through the sealed credential rather than
+ * out of a stored copy that rots from the moment it is written. So this sends
+ * no verbatim vendor payload, and a body that carried one would be refused by
+ * name rather than quietly ignored.
  */
 
-import type { RetellDocument } from "../retell/client.ts";
 import type { RetellKey } from "../retell/key.ts";
 import type { Fetch } from "./device-flow.ts";
-
-/**
- * What was pulled from the provider, kept whole beside what egma read out of
- * it. The documents are the provider's own bytes: egma's columns are a reading
- * of them, and a reading is never allowed to be the only copy.
- */
-export type PulledPayload = {
-  readonly vendor: "retell";
-  readonly documents: readonly RetellDocument[];
-  readonly prompt: string | null;
-  readonly voice: string | null;
-  readonly tools: readonly unknown[];
-};
 
 export type NewConnection = {
   /** Omit and the platform names it: `retell-1`, then `retell-2`. */
@@ -44,7 +37,6 @@ export type Registration = {
   /** Which project the agent lands in. Omit and the key's own project applies. */
   readonly project?: string | undefined;
   readonly connection: NewConnection;
-  readonly pulled: PulledPayload;
 };
 
 export type RegisteredAgent = {
@@ -61,7 +53,22 @@ export type RegisteredConnection = {
   readonly credentialsHint: string | null;
 };
 
+/**
+ * Which of the three things a registration did.
+ *
+ * Registering the same vendor agent twice is safe by construction — a retry
+ * after an uncertain network failure never mints a second identity — and this
+ * is how egma is told which of the three happened rather than left to guess.
+ * `reused` answered the registration already there, with the credential
+ * rotated; `connection_added` reached the same agent a new way.
+ */
+export type RegisterOutcome = "created" | "reused" | "connection_added";
+
+const OUTCOMES: readonly string[] = ["created", "reused", "connection_added"];
+
 export type Registered = {
+  /** What egma did, in egma's own word for it. */
+  readonly result: RegisterOutcome;
   readonly agent: RegisteredAgent;
   readonly connection: RegisteredConnection;
 };
@@ -107,7 +114,7 @@ function connectionIn(body: Record<string, unknown>): RegisteredConnection | nul
   const connection = held as Record<string, unknown>;
   const id = plain(connection["id"]);
   if (id === "") return null;
-  const hint = plain(connection["credentialsHint"]);
+  const hint = plain(connection["credentials_hint"]);
   return {
     id,
     name: plain(connection["name"]),
@@ -118,10 +125,24 @@ function connectionIn(body: Record<string, unknown>): RegisteredConnection | nul
 }
 
 /**
+ * Which of the three things egma says it did.
+ *
+ * An answer that says nothing reads as `created`, because that is what a reply
+ * with an agent and a connection in it meant before the field existed and it is
+ * the only reading that cannot describe a write egma did not make.
+ */
+function outcomeIn(body: Record<string, unknown>): RegisterOutcome {
+  const said = plain(body["result"]);
+  return (OUTCOMES.includes(said) ? said : "created") as RegisterOutcome;
+}
+
+/**
  * Writes the agent and its first connection, and answers what happened.
  *
  * Every ending is a value: a name already held is not a fault, and a machine
- * that is not signed in is neither.
+ * that is not signed in is neither. Neither is registering the same vendor
+ * agent twice — egma answers what is already there, says so in `result`, and
+ * that travels up as an ordinary success rather than as an error.
  */
 export async function registerAgent(
   registration: Registration,
@@ -148,7 +169,6 @@ export async function registerAgent(
         ? {}
         : { credentials: { apiKey: registration.connection.credentials.reveal() } }),
     },
-    pulled: registration.pulled,
   };
 
   let response: Response;
@@ -188,5 +208,8 @@ export async function registerAgent(
     };
   }
 
-  return { kind: "registered", registered: { agent, connection } };
+  return {
+    kind: "registered",
+    registered: { result: outcomeIn(held), agent, connection },
+  };
 }

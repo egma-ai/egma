@@ -13,7 +13,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
@@ -32,7 +32,6 @@ import type {
 import { RunFollower } from "../src/run/follow.ts";
 import { pullTests } from "../src/sync/pull.ts";
 import {
-  noAdapterMessage,
   startPlatform,
   type AdvanceStep,
   type Platform,
@@ -414,8 +413,8 @@ describe("egma run", () => {
 
     expect(said.code).toBe(RUN_EXIT.refused);
     expect(factOf(said.lines, "status")).toBe("refused");
-    expect(factOf(said.lines, "reason")).toBe(noAdapterMessage("phone"));
-    expect(factOf(said.lines, "stderr")).toBe(noAdapterMessage("phone"));
+    expect(factOf(said.lines, "reason")).toBe(platform.running.noAdapterMessage("phone"));
+    expect(factOf(said.lines, "stderr")).toBe(platform.running.noAdapterMessage("phone"));
     // And nothing was queued that could never happen.
     expect(platform.running.runs).toHaveLength(0);
   });
@@ -464,14 +463,68 @@ describe("egma run", () => {
     expect(platform.running.runs).toHaveLength(0);
   });
 
-  it("names a file egma has moved past, and runs what egma holds", async () => {
+  /**
+   * The hard gate, and the case it exists for.
+   *
+   * A developer edits a test this morning, forgets to push, and runs. egma
+   * holds last week's wording; the file says this morning's. A run over what
+   * egma holds would look completely ordinary and would come back green — about
+   * content nobody executed. The developer, or the coding agent reading that
+   * green, would then report an edit verified that never ran.
+   *
+   * So the run is refused, and the refusal names the one verb that fixes it.
+   * Nothing was started.
+   */
+  it("refuses a run over a file it edited and never pushed, and names the push", async () => {
+    const registered = await register();
+    await makeFolder(registered);
+    await seed(["quoted-a-price"]);
+    const file = path.join(paths().tests, "quoted-a-price.md");
+    const pinned = platform.tests.tests[0]?.versionId as string;
+
+    // The edit a developer makes and forgets to push. The pin does not move —
+    // which is exactly why a version number could never answer this question.
+    const held = await readFile(file, "utf8");
+    await writeFile(
+      file,
+      held.replace(
+        "1. The agent says the workshop's name.",
+        "1. The agent says the workshop's name.\n2. The agent never quotes a price.",
+      ),
+      "utf8",
+    );
+
+    const said = await egmaRun({ noFollow: true });
+
+    expect(said.code).toBe(RUN_EXIT.nothing);
+    expect(valuesOf(said.lines, "not-pushed")).toEqual(["quoted-a-price"]);
+    // Its own word, and never `refused`: `refused` is the platform saying no to
+    // a run it will not conduct, and it answers with its own number.
+    expect(factOf(said.lines, "status")).toBe("not-pushed");
+    expect(factOf(said.lines, "stderr")).toBe(
+      "egma holds something other than what this file says: quoted-a-price. Run egma " +
+        "push to put your edit on egma, then run this again. Nothing was started.",
+    );
+    // Nothing was started, and nothing was pinned.
+    expect(platform.running.runs).toHaveLength(0);
+    expect(valuesOf(said.lines, "pin")).toEqual([]);
+    // And egma still holds exactly what it held: a refused run writes nothing.
+    expect(platform.tests.tests[0]?.versionId).toBe(pinned);
+  });
+
+  /**
+   * The other direction, refused for the same reason: somebody moved the test
+   * on the platform and this folder has not pulled it. The file says something
+   * egma does not hold, and which side is behind changes nothing about that.
+   */
+  it("refuses a run over a file egma has moved past", async () => {
     const registered = await register();
     await makeFolder(registered);
     await seed(["quoted-a-price"]);
     const before = platform.tests.tests[0]?.versionId;
 
     // The QA lead edits it in the dashboard while the developer is looking at
-    // their own copy. The run pins what egma holds now, and says so.
+    // their own copy.
     const after = platform.tests.editInDashboard("quoted-a-price", {
       expectedBehaviors: ["The agent says the workshop's name.", "The agent repeats the price."],
     });
@@ -479,9 +532,33 @@ describe("egma run", () => {
 
     const said = await egmaRun({ noFollow: true });
 
+    expect(said.code).toBe(RUN_EXIT.nothing);
+    expect(factOf(said.lines, "status")).toBe("not-pushed");
+    expect(valuesOf(said.lines, "not-pushed")).toEqual(["quoted-a-price"]);
+    expect(factOf(said.lines, "stderr")).toContain("Run egma push");
+    expect(platform.running.runs).toHaveLength(0);
+  });
+
+  /**
+   * And the ordinary folder, which is the whole point of the two refusals
+   * above: when the two agree, nothing changed at all.
+   */
+  it("runs a folder that agrees with egma, exactly as it always did", async () => {
+    const registered = await register();
+    await makeFolder(registered);
+    await seed(["quoted-a-price", "asked-for-a-refund"]);
+    const versions = platform.tests.tests.map((test) => test.versionId);
+
+    const said = await egmaRun({ noFollow: true });
+
     expect(said.code).toBe(RUN_EXIT.done);
-    expect(valuesOf(said.lines, "stale")).toEqual(["quoted-a-price"]);
-    expect(platform.running.runs[0]?.testVersionIds).toEqual([after.versionId]);
+    expect(factOf(said.lines, "status")).toBe("started");
+    expect(valuesOf(said.lines, "not-pushed")).toEqual([]);
+    // Every test in the folder, each pinned at the version egma holds for it.
+    // The order is the folder's, so the two lists are compared as sets.
+    expect([...(platform.running.runs[0]?.testVersionIds ?? [])].sort()).toEqual(
+      [...versions].sort(),
+    );
   });
 
   it("says which of the things it needs is missing, and does nothing about it", async () => {

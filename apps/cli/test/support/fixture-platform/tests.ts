@@ -32,7 +32,7 @@
 // that cross a package reach one: by path. `@egma/ids` is a name only the test
 // runner knows how to resolve, and the smoke checks run this fixture under
 // plain node, where a name nothing has installed is a name that does not exist.
-import { newId } from "../../../../../packages/ids/src/index.ts";
+import { isId, newId } from "../../../../../packages/ids/src/index.ts";
 import type { FixtureAnswer, FixtureRequest, RouteGroup } from "./server.ts";
 
 /** One version of a test, frozen the moment it was written. */
@@ -95,12 +95,52 @@ const NEEDS_A_BEHAVIOR =
   "a test needs at least one expected behavior, because a test that cannot fail is not a test";
 const EMPTY_BEHAVIOR = "an expected behavior needs to say something";
 
+/** The wire's own refusals, word for word, from the route rather than the factory. */
+const PERSONAS_NOT_A_LIST =
+  "personas is the list of people who call about this test, by name. " +
+  'Send it as a list of text, like ["impatient-caller"], or leave it ' +
+  "out and egma takes the project's default persona.";
+
+const A_PERSONA_IS_TEXT =
+  "a test names each persona as text — their name, or their prs_ " +
+  'identifier — and one entry in personas is neither. Send it as a ' +
+  'list of text, like ["impatient-caller"].';
+
+const NO_EXPECTED_VERSION =
+  "an edit says which version it was written against, and this one " +
+  "named no expected_version_id. Send the version_id you last read " +
+  "for this test, or read the test again and send the version it " +
+  "names now.";
+
+/**
+ * A project this credential may not act in.
+ *
+ * One sentence for reads and writes alike. A surface that refused a stranger's
+ * project on a write and answered an empty list on a read would have two rules,
+ * and the empty list is the worse half: it reads as "you have no tests there"
+ * rather than as "that is not yours to ask about".
+ */
+function cannotActIn(projectId: string): string {
+  return (
+    `this credential may not act in project ${projectId}. A credential ` +
+    `authorized for one project acts in that one, and a key for the whole ` +
+    `organization acts in any project of that organization. Leave project out ` +
+    `to use the project this credential already acts in.`
+  );
+}
+
 function refuse(status: number, error: string, message: string): FixtureAnswer {
   return { status, body: { error, message } };
 }
 
+/** A string somebody sent, trimmed, or nothing at all for anything else. */
 function text(value: unknown): string {
-  return typeof value === "string" ? value : "";
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** What a caller actually said, as against a field that arrived empty. */
+function given(value: string | undefined | null): string | undefined {
+  return value === undefined || value === null || value === "" ? undefined : value;
 }
 
 function textList(value: unknown): readonly string[] {
@@ -108,10 +148,36 @@ function textList(value: unknown): readonly string[] {
 }
 
 /**
+ * The personas a body names, in the order it named them.
+ *
+ * Text, and only text. An entry that is not text is refused rather than
+ * dropped, because dropping it would quietly hand the test to the project's
+ * default persona instead — a different test from the one that was asked for.
+ */
+type NamedPersonas =
+  | { readonly entries: readonly string[] }
+  | { readonly refusal: string };
+
+function personaEntries(value: unknown): NamedPersonas {
+  if (!Array.isArray(value)) return { refusal: PERSONAS_NOT_A_LIST };
+
+  const entries: string[] = [];
+  for (const entry of value) {
+    const named = text(entry);
+    if (typeof entry !== "string" || named === "") return { refusal: A_PERSONA_IS_TEXT };
+    entries.push(named);
+  }
+  return { entries };
+}
+
+/**
  * One frozen version, as the run endpoints need it: what test it belongs to,
  * and who calls about it. A run pins one of these per test and produces one
  * simulation per persona named on it.
  */
+/** How many rows one page holds, as the data-access layer's default does. */
+const PAGE_SIZE = 50;
+
 export type VersionLookup = (versionId: string) => {
   readonly versionId: string;
   readonly testId: string;
@@ -170,12 +236,20 @@ export function testRoutes(options: {
     const ids: string[] = [];
     for (const entry of named) {
       const wanted = entry.trim();
+      // The identifier first, so a project holding a persona whose name is
+      // another persona's identifier still resolves the identifier.
       const found =
         personas.find((persona) => persona.id === wanted) ??
         personas.find((persona) => persona.name === wanted);
-      if (found === undefined) return { refusal: `egma has no persona called "${wanted}"` };
+      if (found === undefined) {
+        return {
+          refusal: isId("prs", wanted)
+            ? `there is no persona ${wanted} in this project`
+            : `egma has no persona called "${wanted}" in this project. Name a persona this project already has, or name none and egma takes the project's default.`,
+        };
+      }
       if (ids.includes(found.id)) {
-        return { refusal: `persona "${wanted}" is named twice on one test` };
+        return { refusal: `persona "${wanted}" is named twice on one test; name each persona once` };
       }
       ids.push(found.id);
     }
@@ -285,11 +359,48 @@ export function testRoutes(options: {
     return answer();
   };
 
-  /** A body that named a project has to have named this one. */
+  /**
+   * A project a request named has to be the one this key acts in.
+   *
+   * This key is minted for one project, so naming a different one is refused
+   * rather than quietly narrowed back to this one. The narrowing would be safe
+   * and the silence would not: a caller whose filter was dropped reads the
+   * answer as though the filter had applied.
+   */
   const projectNamed = (value: unknown): FixtureAnswer | null => {
-    const named = text(value).trim();
-    if (named === "" || named === projectId) return null;
-    return refuse(403, "not_permitted", "this key does not act there");
+    const named = given(text(value));
+    if (named === undefined || named === projectId) return null;
+    return refuse(403, "not_permitted", cannotActIn(named));
+  };
+
+  /**
+   * Who a write names, resolved — in exactly the order the route resolves
+   * them.
+   *
+   * The order is contract as much as the sentences are: the shape of the
+   * `personas` field is answered before the project, the project before the
+   * names in it, and the names before anything the factory checks. A caller
+   * fixing one refusal at a time meets them in that order, and a fixture that
+   * met them in another would teach a client the wrong first move.
+   */
+  const personasFor = (
+    said: Record<string, unknown>,
+  ): { readonly ids: readonly string[] | undefined } | { readonly answer: FixtureAnswer } => {
+    const named = "personas" in said ? personaEntries(said.personas) : undefined;
+    if (named !== undefined && "refusal" in named) {
+      return { answer: refuse(422, "unprocessable", named.refusal) };
+    }
+
+    const outsider = projectNamed(said.project);
+    if (outsider !== null) return { answer: outsider };
+
+    if (named === undefined) return { ids: undefined };
+
+    const resolved = resolvePersonas(named.entries);
+    if ("refusal" in resolved) {
+      return { answer: refuse(422, "unprocessable", resolved.refusal) };
+    }
+    return { ids: resolved.ids };
   };
 
   const writeFrom = (
@@ -305,8 +416,9 @@ export function testRoutes(options: {
       }
     | { readonly answer: FixtureAnswer } => {
     const said = body ?? {};
-    const outsider = projectNamed(said.project);
-    if (outsider !== null) return { answer: outsider };
+
+    const who = personasFor(said);
+    if ("answer" in who) return who;
 
     const name = text(said.name);
     const scenario = text(said.scenario);
@@ -315,17 +427,14 @@ export function testRoutes(options: {
     const problem = validate({ name, scenario, expectedBehaviors });
     if (problem !== null) return { answer: refuse(422, "unprocessable", problem.refusal) };
 
-    const resolved = resolvePersonas(textList(said.personas));
-    if ("refusal" in resolved) {
-      return { answer: refuse(422, "unprocessable", resolved.refusal) };
-    }
-
     return {
       input: {
-        name: name.trim(),
-        scenario: scenario.trim(),
-        expectedBehaviors: expectedBehaviors.map((behavior) => behavior.trim()),
-        personaIds: resolved.ids,
+        name,
+        scenario,
+        expectedBehaviors: [...expectedBehaviors],
+        // Absent means the project's default persona, exactly as an empty list
+        // does: a first test costs nobody a persona to author.
+        personaIds: who.ids ?? [defaultPersonaId],
       },
     };
   };
@@ -334,21 +443,51 @@ export function testRoutes(options: {
     name: "tests",
     routes: [
       {
-        // Newest first, as the factory's own list answers. A project may be
-        // named as a filter and never has to be.
+        /**
+         * The project's tests, newest first, one page at a time.
+         *
+         * `{ items, next_cursor }` is the envelope every list in this API
+         * answers with, and the cursor is the last id of the page rather than a
+         * count of rows to skip: the ids sort by mint time, so a list changing
+         * under a reader never shows them a row twice and never skips one.
+         *
+         * There is no page-size parameter, here or anywhere. A page is a page,
+         * and the cursor carries a reader through the rest.
+         */
         method: "GET",
         path: "/api/tests",
         handle: (request) =>
           behindAKey(request, () => {
-            const filter = (request.url.searchParams.get("project") ?? "").trim();
-            if (filter !== "" && filter !== projectId) {
-              return { status: 200, body: { tests: [], next_cursor: null } };
+            const outsider = projectNamed(request.url.searchParams.get("project"));
+            if (outsider !== null) return outsider;
+
+            const cursor = given(text(request.url.searchParams.get("cursor")));
+            if (cursor !== undefined && !isId("tst", cursor)) {
+              return refuse(
+                400,
+                "invalid_request",
+                `"${cursor}" is not a cursor this list issued. Send the next_cursor ` +
+                  `an earlier page answered with, or leave it out to start at the ` +
+                  `newest test.`,
+              );
             }
+
+            const newestFirst = [...tests].reverse();
+            const from =
+              cursor === undefined
+                ? 0
+                : newestFirst.findIndex((held) => held.id === cursor) + 1;
+            const page = newestFirst.slice(from, from + PAGE_SIZE);
+            const more = newestFirst.length > from + page.length;
+
             return {
               status: 200,
               body: {
-                tests: [...tests].reverse().map(described),
-                next_cursor: null,
+                items: page.map(described),
+                // Null rather than absent, so a client can tell "there is no
+                // next page" from "this answer is an older shape that never
+                // had one".
+                next_cursor: more ? (page.at(-1)?.id ?? null) : null,
               },
             };
           }),
@@ -370,7 +509,8 @@ export function testRoutes(options: {
               return refuse(
                 404,
                 "not_found",
-                `there is no test version ${wanted} on this egma`,
+                `there is no test version ${wanted} on this egma. List the tests ` +
+                  `to see the version each of them stands on now.`,
               );
             }
             return {
@@ -403,29 +543,71 @@ export function testRoutes(options: {
           }),
       },
       {
-        // An edit, carrying the version it was written against. The comparison
-        // is the refusal rule, and it lives here rather than in the client:
-        // a check the client did could be walked past by a second writer.
+        /**
+         * An edit, carrying the version it was written against.
+         *
+         * `expected_version_id` is **required**, and it is required because it
+         * is the whole of the refusal rule: an edit that named no version would
+         * be accepted over a test somebody else moved in the meantime, and the
+         * later write would quietly become what the test says. It costs the
+         * writer nothing — a create and every read answer the version id.
+         *
+         * The comparison is the platform's and not the client's: a check the
+         * client did could be walked past by a second writer between the check
+         * and the write.
+         *
+         * The order below is the route's order and it is contract. Everything
+         * answerable without reading anything is answered first, so a body that
+         * could never be written is refused before it can learn whether the
+         * test it names is even there.
+         */
         method: "PATCH",
         path: "/api/tests/:testId",
         handle: (request) =>
           behindAKey(request, () => {
+            const said = request.body ?? {};
+
+            const expected = given(text(said.expected_version_id));
+            if (expected === undefined) {
+              return refuse(422, "unprocessable", NO_EXPECTED_VERSION);
+            }
+
+            const who = personasFor(said);
+            if ("answer" in who) return who.answer;
+
+            // A name is answerable without the database, so it is answered
+            // before one, exactly as a create answers it.
+            const name = given(text(said.name));
+            if ("name" in said && name === undefined) {
+              return refuse(422, "unprocessable", NEEDS_A_NAME);
+            }
+
+            // A test this key cannot see reads exactly as a test that is not
+            // there, because to this caller those are the same thing.
             const test = tests.find((candidate) => candidate.id === request.params.testId);
             if (test === undefined) {
               return refuse(
                 404,
                 "not_found",
-                `there is no test ${request.params.testId ?? ""} on this egma`,
+                `there is no test ${request.params.testId ?? ""} on this egma. List ` +
+                  `the tests to see what this project holds, or create this one ` +
+                  `instead of editing it.`,
               );
             }
 
-            const expected = text(request.body?.expected_version_id).trim();
-            if (expected !== "" && expected !== test.currentVersionId) {
+            if (expected !== test.currentVersionId) {
+              // The one refusal in this API carrying more than
+              // `{ error, message }` — the caller's next move is to go and read
+              // one named test — so it writes its own body.
               return {
                 status: 409,
                 body: {
                   error: "conflict",
-                  message: `this edit was written against version ${expected}, and the test has moved on to ${test.currentVersionId}`,
+                  message:
+                    `this edit was written against version ${expected}, and the ` +
+                    `test has moved on to ${test.currentVersionId}. Read the test ` +
+                    `again and send the edit with expected_version_id set to the ` +
+                    `version it names now.`,
                   test: { id: test.id, name: test.name },
                   expected_version_id: expected,
                   current_version_id: test.currentVersionId,
@@ -433,17 +615,27 @@ export function testRoutes(options: {
               };
             }
 
-            const read = writeFrom(request.body);
-            if ("answer" in read) return read.answer;
+            // What the body leaves out, the test keeps. An empty persona list
+            // is not the same as leaving the field out: it means what it means
+            // on a create, which is that the project's default persona calls.
+            const current = currentOf(test);
+            const content = {
+              scenario: "scenario" in said ? text(said.scenario) : current.scenario,
+              expectedBehaviors:
+                "expected_behaviors" in said
+                  ? textList(said.expected_behaviors)
+                  : current.expectedBehaviors,
+            };
+            const problem = validate({ name: name ?? test.name, ...content });
+            if (problem !== null) return refuse(422, "unprocessable", problem.refusal);
 
             write(test, {
-              scenario: read.input.scenario,
-              expectedBehaviors: read.input.expectedBehaviors,
-              personaIds: read.input.personaIds,
+              scenario: content.scenario,
+              expectedBehaviors: [...content.expectedBehaviors],
+              personaIds: who.ids ?? current.personaIds,
             });
-            // Name and description are identity: they write in place and
-            // version nothing.
-            test.name = read.input.name;
+            // A name is identity: it writes in place and versions nothing.
+            if (name !== undefined) test.name = name;
             test.updatedAt = new Date();
             return { status: 200, body: described(test) };
           }),

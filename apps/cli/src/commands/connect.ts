@@ -21,6 +21,7 @@ import {
   CUSTODY_LINE,
   KEY_ASK_LINE,
   keyAskLines,
+  registrationLine,
   type ConnectOptions,
   type ConnectOutcome,
 } from "../retell/connect.ts";
@@ -218,6 +219,12 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       options.out(`connection_name: ${registered.connection.name}`);
       options.out(`connection_type: ${registered.connection.type}`);
       options.out(`connection_modality: ${registered.connection.modality}`);
+      // Which of the three things egma did, as its own fact line: a coding
+      // agent retrying this verb reads whether it made a second agent from
+      // here rather than by counting what the platform holds.
+      options.out(`registration: ${registered.result}`);
+      const already = registrationLine(registered);
+      if (already !== null) options.out(`note: ${already}`);
       options.out(driftLine(outcome));
       // Which half the tests will be written from, said the same way the
       // wizard says it, so neither surface can promise the other's answer.

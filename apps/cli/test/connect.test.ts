@@ -6,9 +6,9 @@
  * key exists anywhere here and CI never reaches the real Retell.
  *
  * What is asserted is what a developer could check afterwards: what was said on
- * screen, what landed on the platform, and — for the one rule that cannot be
- * checked any other way — that what landed is byte for byte what the provider
- * answered.
+ * screen, what landed on the platform, and — for the two rules that cannot be
+ * checked any other way — that egma read the provider's own bytes whole, and
+ * that none of them went anywhere near egma's own store.
  */
 
 import { rm, symlink, writeFile } from "node:fs/promises";
@@ -123,7 +123,7 @@ class ScriptedUI extends HeadlessUI {
 async function run(options: RunOptions) {
   const ui = new ScriptedUI(options);
 
-  const { report } = await connectStep({
+  const { report, connected } = await connectStep({
     ui,
     platform: { url: platform.url, credentialsFile: workspace.credentialsFile },
     cwd: workspace.dir,
@@ -132,7 +132,7 @@ async function run(options: RunOptions) {
     retell: { url: retell?.url ?? "http://127.0.0.1:1" },
   });
 
-  return { ui, report };
+  return { ui, report, connected };
 }
 
 describe("the key, and the two failures worth a second try", () => {
@@ -280,12 +280,12 @@ describe("one agent, and several", () => {
   it("carries the agent's own modality, so a chat agent is not called a voice one", async () => {
     retell = await startFakeRetell(THREE_AGENTS);
 
-    await run({ keys: [KEY], agent: "agent_0003" });
+    const { connected } = await run({ keys: [KEY], agent: "agent_0003" });
 
     const [connection] = platform.registered.connections;
     expect(connection?.modality).toBe("chat");
     // A custom model is the customer's own service, so Retell holds no prompt.
-    expect(platform.registered.agents[0]?.pulled?.prompt).toBeNull();
+    expect(connected?.config.prompt).toBeNull();
   });
 
   it("reads a chat agent at the address Retell keeps chat agents at", async () => {
@@ -302,31 +302,91 @@ describe("one agent, and several", () => {
 });
 
 describe("what lands on the platform", () => {
-  it("keeps the provider's answer byte for byte, beside what egma read out of it", async () => {
+  /**
+   * egma reads both halves of a Retell agent and keeps neither.
+   *
+   * The provider's own bytes are read whole — not a re-encoding of a parse,
+   * which is what would quietly drop a field egma has no place for — and they
+   * are used, and then they are let go. What the agent is running lives at the
+   * provider, reachable forever through the sealed credential; a copy on egma
+   * would start going stale the moment it was written and nothing ever read it
+   * back. So the request egma sends carries identity, the way of reaching the
+   * agent, and the credential, and nothing else at all.
+   */
+  it("reads the provider's answer whole, and sends none of it to egma", async () => {
     const provider = await startFakeRetell(ONE_AGENT);
     retell = provider;
 
-    await run({ keys: [KEY] });
+    const { connected } = await run({ keys: [KEY] });
 
-    const [agent] = platform.registered.agents;
-    const pulled = agent?.pulled;
-    expect(pulled?.vendor).toBe("retell");
-
-    // Both halves, each exactly as Retell answered it — not a re-encoding of
-    // a parse, which is what would quietly drop a field egma has no place for.
-    const kept = Object.fromEntries((pulled?.documents ?? []).map((one) => [one.of, one.body]));
-    expect(kept["agent"]).toBe(provider.answered("/get-agent/agent_0001"));
-    expect(kept["response-engine"]).toBe(provider.answered("/get-retell-llm/llm_0001"));
+    // Both halves, each exactly as Retell answered it, in egma's hands.
+    const read = Object.fromEntries(
+      (connected?.config.documents ?? []).map((one) => [one.of, one.body]),
+    );
+    expect(read["agent"]).toBe(provider.answered("/get-agent/agent_0001"));
+    expect(read["response-engine"]).toBe(provider.answered("/get-retell-llm/llm_0001"));
 
     // A field egma has no column for is still in there, because nothing was
     // dropped on the way through.
-    expect(kept["agent"]).toContain('"language":"en-GB"');
-    expect(kept["response-engine"]).toContain('"model":"gpt-4.1"');
+    expect(read["agent"]).toContain('"language":"en-GB"');
+    expect(read["response-engine"]).toContain('"model":"gpt-4.1"');
 
-    // And what egma read out of it is beside it, never instead of it.
-    expect(pulled?.prompt).toBe(PROMPT);
-    expect(pulled?.voice).toBe("11labs-Adrian");
-    expect(pulled?.tools).toHaveLength(1);
+    // And what egma read out of it is what the next step is grounded in.
+    expect(connected?.config.prompt).toBe(PROMPT);
+    expect(connected?.config.voice).toBe("11labs-Adrian");
+    expect(connected?.config.tools).toHaveLength(1);
+
+    // None of it went to egma. The platform keeps identity, the connection and
+    // the sealed key — and the read of the agent it just registered carries no
+    // trace of what the provider is running.
+    const [agent] = platform.registered.agents;
+    expect(agent).not.toHaveProperty("pulled");
+    expect(Object.keys(agent ?? {}).sort()).toEqual([
+      "createdAt",
+      "description",
+      "id",
+      "name",
+      "projectId",
+      "updatedAt",
+    ]);
+  });
+
+  /**
+   * And a client that still sent it hears about it by name.
+   *
+   * Dropping it silently would leave a client believing egma held something it
+   * does not, which is the one outcome worse than either keeping it or
+   * refusing it.
+   */
+  it("refuses a registration still carrying what was pulled, by name", async () => {
+    const key = platform.device.mint();
+
+    const answer = await fetch(`${platform.url}/api/agents`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "order-line",
+        pulled: { vendor: "retell", documents: [], prompt: null, voice: null, tools: [] },
+        connection: {
+          type: "retell",
+          modality: "voice",
+          config: { retellAgentId: "agent_0001" },
+          credentials: { apiKey: KEY },
+        },
+      }),
+    });
+
+    expect(answer.status).toBe(400);
+    expect(await answer.json()).toEqual({
+      error: "invalid_request",
+      message:
+        "egma no longer keeps what was pulled from the provider, so a " +
+        'registration has no "pulled" key. Drop it and send name, ' +
+        "description, project, connection; the agent's content stays at the " +
+        "provider, where egma reads it fresh rather than out of a copy that " +
+        "would go stale.",
+    });
+    expect(platform.registered.agents).toHaveLength(0);
   });
 
   it("registers an agent and a connection with names nobody had to type", async () => {
@@ -356,21 +416,51 @@ describe("what lands on the platform", () => {
     expect(platform.registered.connections[0]?.credentialsHint).toBe(KEY.slice(-4));
   });
 
-  it("takes the next free name when a run has been here before", async () => {
-    retell = await startFakeRetell(ONE_AGENT);
+  /**
+   * The second connect over the same Retell agent, which is the ordinary case
+   * and not a rare one: a developer runs it again, or a coding agent retries
+   * after a network failure it could not read the answer to.
+   *
+   * egma answers the registration that already exists, rotates the key it was
+   * just given, and writes no second identity — so results stay under one
+   * agent. And it says so out loud, in its own words, because a screen that
+   * looked identical to the first run would leave a developer counting agents
+   * to find out what happened.
+   */
+  it("finds the registration already there when a run has been here before", async () => {
+    // Two keys the account accepts, so the second connect can be a rotation as
+    // well as a reuse — which is what a developer coming back with a fresh
+    // provider key actually does.
+    retell = await startFakeRetell({ ...ONE_AGENT, keys: [KEY, OTHER_KEY] });
 
-    await run({ keys: [KEY] });
-    const second = await run({ keys: [KEY] });
+    const first = await run({ keys: [KEY] });
+    const second = await run({ keys: [OTHER_KEY] });
 
     expect(second.report).toEqual({
       kind: "connected",
-      agentName: "order-line-2",
+      agentName: "order-line",
       connectionName: "retell-1",
     });
-    expect(platform.registered.agents.map((agent) => agent.name)).toEqual([
-      "order-line",
-      "order-line-2",
-    ]);
+    expect(second.connected?.registered.result).toBe("reused");
+    expect(first.connected?.registered.result).toBe("created");
+
+    // Nothing new was registered — one agent, one way of reaching it.
+    expect(platform.registered.agents.map((agent) => agent.name)).toEqual(["order-line"]);
+    expect(platform.registered.connections).toHaveLength(1);
+    expect(second.connected?.registered.agent.id).toBe(first.connected?.registered.agent.id);
+    expect(second.connected?.registered.connection.id).toBe(
+      first.connected?.registered.connection.id,
+    );
+
+    // The key it was just given is the one now sealed, replaced whole.
+    expect(platform.registered.sealed).toEqual([KEY, OTHER_KEY]);
+    expect(platform.registered.connections[0]?.credentialsHint).toBe(OTHER_KEY.slice(-4));
+
+    // Said in plain words, on the screen, and never as a failure.
+    expect(second.ui.record.statuses.join("\n")).toContain(
+      "This Retell agent was already registered as order-line, so egma kept it and " +
+        "stored the key you just gave. Nothing new was registered.",
+    );
   });
 });
 
