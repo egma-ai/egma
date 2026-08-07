@@ -7,8 +7,10 @@ import { isId, type IdPrefix } from "@egma/ids";
  * drift when rows arrive mid-scroll. Three lists page this way; the rules
  * live here so a fourth cannot come to disagree with them.
  *
- * Internal to the module: nothing here reads a store or takes a context, and
- * none of it is exported from the package.
+ * Internal to the module: nothing here reads a store or takes a context. The
+ * ceiling alone leaves the package, because an endpoint that refuses a page
+ * size has to say what the ceiling is, and a cap named in two places is a cap
+ * that will one day disagree with itself.
  */
 
 export const DEFAULT_PAGE_SIZE = 50;

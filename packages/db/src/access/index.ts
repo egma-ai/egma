@@ -55,6 +55,7 @@
 export type { AuthContext, Role, Via } from "./context.ts";
 export { ROLES, VIA } from "./context.ts";
 export {
+  AgentWriteRefusedError,
   AlreadyBelongsToAnOrganizationError,
   LastAdminError,
   NotPermittedError,
@@ -62,8 +63,17 @@ export {
   ProjectOutsideOrganizationError,
   TraceStoreRefusedError,
   UnreadableTraceQueryError,
+  type AgentWriteRefusal,
   type TestNamingPersona,
 } from "./errors.ts";
+
+/**
+ * How many rows one page of a keyset-paginated list may hold. Exported for the
+ * endpoints that have to say it in a refusal — a cap named in two places is a
+ * cap that will one day disagree with itself. It is a number: it reaches no
+ * store and names no customer.
+ */
+export { LARGEST_PAGE_SIZE } from "./pages.ts";
 
 export {
   ACTIONS,
@@ -171,6 +181,7 @@ export {
   getConnection,
   listAgents,
   listConnections,
+  registerAgent,
   removeConnection,
   resolveConnectionCredentials,
   updateAgent,
@@ -184,6 +195,8 @@ export {
   type DeletedAgent,
   type NewAgent,
   type NewConnection,
+  type Registration,
+  type RegistrationResult,
   type RemovedConnection,
 } from "./agents.ts";
 export type {

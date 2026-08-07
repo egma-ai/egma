@@ -1,5 +1,5 @@
 import { isId, newId } from "@egma/ids";
-import { and, asc, desc, eq, isNull, lt, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, lt, sql, type SQL } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
 import {
@@ -17,7 +17,11 @@ import {
   validModality,
 } from "./connection-registry.ts";
 import type { AuthContext } from "./context.ts";
-import { ProjectOutsideOrganizationError } from "./errors.ts";
+import {
+  AgentWriteRefusedError,
+  ProjectOutsideOrganizationError,
+} from "./errors.ts";
+import { DEFAULT_PAGE_SIZE, LARGEST_PAGE_SIZE } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
 import { within } from "./within.ts";
@@ -186,7 +190,7 @@ const CONNECTION_COLUMNS = {
 function validName(name: string, what: string): string {
   const trimmed = name.trim();
   if (trimmed === "") {
-    throw new Error(`${what} needs a name`);
+    throw new AgentWriteRefusedError("needs_a_name", `${what} needs a name`);
   }
   return trimmed;
 }
@@ -411,7 +415,8 @@ async function freeDefaultName(
 function refusingHeldAgentName(name: string): (error: unknown) => never {
   return (error: unknown) => {
     if (lostToConstraint(error, "agent_project_id_name_unique")) {
-      throw new Error(
+      throw new AgentWriteRefusedError(
+        "name_taken",
         `an agent named "${name}" already exists in this project`,
       );
     }
@@ -426,7 +431,8 @@ function refusingHeldAgentName(name: string): (error: unknown) => never {
 function refusingHeldConnectionName(name: string): (error: unknown) => never {
   return (error: unknown) => {
     if (lostToConstraint(error, "connection_agent_id_name_unique")) {
-      throw new Error(
+      throw new AgentWriteRefusedError(
+        "name_taken",
         `a connection named "${name}" already exists on this agent`,
       );
     }
@@ -473,12 +479,52 @@ async function insertConnection(
   return connectionFromRow(inserted);
 }
 
-export async function createAgent(
+/**
+ * The insert every agent-writing path shares, wherever the caller is in a
+ * transaction. It owns the friendly refusal for the moment a living agent in
+ * the project already holds the name.
+ */
+async function insertAgent(
+  on: Queryable,
+  auth: AuthContext,
+  projectId: string,
+  identity: { readonly name: string; readonly description: string | null },
+): Promise<Agent> {
+  const [inserted] = await on
+    .insert(agent)
+    .values({
+      id: newId("agt"),
+      organizationId: auth.organizationId,
+      projectId,
+      name: identity.name,
+      description: identity.description,
+      createdBy: auth.userId,
+    })
+    .returning(COLUMNS)
+    .catch(refusingHeldAgentName(identity.name));
+
+  if (inserted === undefined) throw new Error("the agent was not written");
+  return inserted;
+}
+
+/**
+ * Everything a write to this factory settles before it touches the database:
+ * where the rows land, what the agent is called, and the inline connection
+ * once its type's registry entry has had its say.
+ *
+ * Pulled out because both write paths do it in the same order and the order is
+ * the point — a bad inline connection dies before there is an agent to orphan,
+ * and only an input worth writing costs the project-membership read.
+ */
+async function settled(
   auth: AuthContext,
   input: NewAgent,
-): Promise<CreatedAgent> {
-  authorize(auth, "configure_agents", here(auth));
-
+): Promise<{
+  readonly projectId: string;
+  readonly name: string;
+  readonly description: string | null;
+  readonly inline: AdmittedConnection | undefined;
+}> {
   const { projectId } = auth;
   if (projectId === undefined) {
     throw new Error(
@@ -486,9 +532,6 @@ export async function createAgent(
     );
   }
 
-  // Everything answerable without the database is answered first; only an
-  // input worth writing costs the project-membership read below, and a bad
-  // inline connection dies before there is an agent to orphan.
   const name = validName(input.name, "an agent");
   const inline =
     input.connection === undefined
@@ -499,37 +542,197 @@ export async function createAgent(
     throw new ProjectOutsideOrganizationError(auth.organizationId, projectId);
   }
 
-  const insertAgent = async (on: Queryable): Promise<Agent> => {
-    const [inserted] = await on
-      .insert(agent)
-      .values({
-        id: newId("agt"),
-        organizationId: auth.organizationId,
-        projectId,
-        name,
-        description: input.description ?? null,
-        createdBy: auth.userId,
-      })
-      .returning(COLUMNS)
-      .catch(refusingHeldAgentName(name));
+  return { projectId, name, description: input.description ?? null, inline };
+}
 
-    if (inserted === undefined) throw new Error("the agent was not written");
-    return inserted;
-  };
+export async function createAgent(
+  auth: AuthContext,
+  input: NewAgent,
+): Promise<CreatedAgent> {
+  authorize(auth, "configure_agents", here(auth));
 
-  if (inline === undefined) return insertAgent(db());
+  const { projectId, name, description, inline } = await settled(auth, input);
+  const identity = { name, description };
+
+  if (inline === undefined) {
+    return insertAgent(db(), auth, projectId, identity);
+  }
 
   // Both rows or neither: the transaction is what makes the happy onboarding
   // path unable to produce an agent its own connection failed to reach.
   return db().transaction(async (tx) => {
-    const identity = await insertAgent(tx);
+    const written = await insertAgent(tx, auth, projectId, identity);
     const wired = await insertConnection(
       tx,
       auth,
-      { id: identity.id, projectId },
+      { id: written.id, projectId },
       inline,
     );
-    return { ...identity, connection: wired };
+    return { ...written, connection: wired };
+  });
+}
+
+/** What a registration turned out to be, once the reuse rule had its say. */
+export type RegistrationResult = "created" | "reused" | "connection_added";
+
+export type Registration = {
+  readonly result: RegistrationResult;
+  readonly agent: Agent;
+  /** Absent only when the registration named no connection at all. */
+  readonly connection?: Connection;
+};
+
+/**
+ * Register an agent, and answer whether that meant creating one.
+ *
+ * `createAgent` writes what it is given and refuses a name a living agent
+ * already holds. That is the right answer for somebody registering a second
+ * agent by hand, and the wrong one for the path this exists for: a developer's
+ * `connect`, and the coding agent that retries it after an uncertain network
+ * failure. Minting a second identity for one vendor agent splits a team's
+ * results history in half, which is the one thing that must not happen quietly.
+ *
+ * So the type's own reuse key decides (`connection-registry.ts`), and a living
+ * connection in the project naming the same vendor agent decides the outcome:
+ *
+ * - **same modality** → that agent and that connection answer, with the
+ *   supplied credential replacing the stored one **whole**. Rotation never
+ *   asks for the old secret and never merges into it, so plaintext has no
+ *   reason to travel back out. `reused`.
+ * - **a different modality** → the same agent gains a new connection, because
+ *   a chat endpoint and a voice endpoint on one vendor agent are two ways to
+ *   reach one thing. `connection_added`.
+ * - **no match, or a type with no reuse key at all** → both rows, exactly as
+ *   `createAgent` writes them. `created`.
+ *
+ * The reused and extended paths answer the agent as it stands and leave its
+ * name and description alone: the registration named an identity that already
+ * exists, and quietly renaming somebody's agent because a second machine typed
+ * it differently would be a change nobody asked for.
+ *
+ * **Racing registrations settle to one agent.** Two identical creates arriving
+ * together would both find nothing, both insert, and one would lose to the
+ * name index — an error where a retry-safe path must answer. The transaction
+ * takes an advisory lock on the vendor agent first, so the second one reads
+ * the first one's committed work and reuses it.
+ */
+export async function registerAgent(
+  auth: AuthContext,
+  input: NewAgent,
+): Promise<Registration> {
+  authorize(auth, "configure_agents", here(auth));
+
+  const { projectId, name, description, inline } = await settled(auth, input);
+  const identity = { name, description };
+
+  if (inline === undefined) {
+    return {
+      result: "created",
+      agent: await insertAgent(db(), auth, projectId, identity),
+    };
+  }
+
+  const reuseKey = descriptorOf(inline.type).reuseKey;
+  const vendorAgent =
+    reuseKey === undefined ? undefined : inline.config[reuseKey];
+
+  const bothRows = async (tx: Queryable): Promise<Registration> => {
+    const written = await insertAgent(tx, auth, projectId, identity);
+    return {
+      result: "created",
+      agent: written,
+      connection: await insertConnection(
+        tx,
+        auth,
+        { id: written.id, projectId },
+        inline,
+      ),
+    };
+  };
+
+  // A type with no reuse key has nothing to match on, so this is `createAgent`
+  // with a word for what it did.
+  if (reuseKey === undefined || vendorAgent === undefined) {
+    return db().transaction(bothRows);
+  }
+
+  // What the lock is taken on: this one vendor agent, in this one project, of
+  // this one customer. Nothing else waits behind it.
+  const racing = `${auth.organizationId}:${projectId}:${inline.type}:${vendorAgent}`;
+
+  return db().transaction(async (tx): Promise<Registration> => {
+    // Taken before anything is read, and let go when the transaction ends.
+    // Two machines registering one vendor agent at the same instant is the
+    // ordinary retry rather than a rare race, so the second one waits here and
+    // then reads what the first one wrote instead of colliding with it.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${racing}::text, 0))`,
+    );
+
+    const living = await tx
+      .select({ identity: COLUMNS, reached: CONNECTION_COLUMNS })
+      .from(connection)
+      .innerJoin(agent, eq(connection.agentId, agent.id))
+      .where(
+        within(
+          auth,
+          connection,
+          and(
+            eq(connection.projectId, projectId),
+            eq(connection.type, inline.type),
+            sql`${connection.config}->>${reuseKey} = ${vendorAgent}`,
+            connectionNotDeleted,
+            notDeleted,
+          ),
+        ),
+      )
+      .orderBy(asc(connection.id));
+
+    const sameModality = living.find(
+      (row) => row.reached.modality === inline.modality,
+    );
+
+    if (sameModality !== undefined) {
+      const [rotated] = await tx
+        .update(connection)
+        .set({
+          // Whole, never merged: what arrived replaces what is stored, and a
+          // type that takes no secret clears both columns together, which is
+          // what the row's own CHECK demands.
+          credentials: inline.credentials,
+          credentialsHint: inline.credentialsHint,
+          updatedAt: new Date(),
+        })
+        .where(eq(connection.id, sameModality.reached.id))
+        .returning(CONNECTION_COLUMNS);
+
+      if (rotated === undefined) {
+        throw new Error("the connection was not rotated");
+      }
+      return {
+        result: "reused",
+        agent: sameModality.identity,
+        connection: connectionFromRow(rotated),
+      };
+    }
+
+    // The same vendor agent reached a different way. Oldest first, so which
+    // agent gains the connection is the same answer every time.
+    const known = living[0];
+    if (known !== undefined) {
+      return {
+        result: "connection_added",
+        agent: known.identity,
+        connection: await insertConnection(
+          tx,
+          auth,
+          { id: known.identity.id, projectId },
+          inline,
+        ),
+      };
+    }
+
+    return bothRows(tx);
   });
 }
 
@@ -546,9 +749,6 @@ export async function getAgent(
     .limit(1);
   return row;
 }
-
-const DEFAULT_PAGE_SIZE = 50;
-const LARGEST_PAGE_SIZE = 200;
 
 /**
  * One page of the agents the caller can reach — the acting project's, or the
