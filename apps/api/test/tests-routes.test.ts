@@ -841,6 +841,32 @@ describe("who may do what", () => {
         "Sign in, or send Authorization: Bearer with an egma key.",
     });
   });
+
+  it("refuses an unknown key before the body is even parsed", async () => {
+    api = await createApi("tests_unknown_key_unparsed");
+    await signUp(api.app, "ada@acme.example", "Acme");
+
+    // A body that is not JSON at all. If anything read it first, the answer
+    // would be a parse error in a shape this API never speaks — the door
+    // answers who-is-asking before a single byte of the body is looked at.
+    const refused = await api.app.inject({
+      method: "POST",
+      url: "/api/tests",
+      headers: {
+        authorization: "Bearer egma_sk_this-was-never-a-key-anybody-was-given",
+        "content-type": "application/json",
+      },
+      payload: "{this was never json",
+    });
+
+    expect(refused.statusCode).toBe(401);
+    expect(refused.json()).toEqual({
+      error: "not_authenticated",
+      message:
+        "this request carried no session and no usable API key. " +
+        "Sign in, or send Authorization: Bearer with an egma key.",
+    });
+  });
 });
 
 describe("the project a write lands in", () => {

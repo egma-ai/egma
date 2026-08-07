@@ -4,7 +4,6 @@ import {
   getAgent,
   listAgents,
   listConnections,
-  listProjects,
   NotPermittedError,
   ProjectOutsideOrganizationError,
   registerAgent,
@@ -19,8 +18,15 @@ import { isId } from "@egma/ids";
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
+import {
+  AGENTS_PROJECT_WORDING,
+  resolveAbsentProject,
+  resolveNamedProject,
+  type ActingRefusal,
+} from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
+import { CODES, type RefusalCode } from "../http/refusals.ts";
 
 /**
  * Registering an agent, reading it back, and attaching another way to reach it.
@@ -65,12 +71,13 @@ type Body = Record<string, unknown>;
  * Tagged, so a function answering "a value or a refusal" is told apart by a
  * field that exists for exactly that and never by sniffing for a property the
  * other side might one day grow. The tag is never sent: `refused` below writes
- * out the two fields the contract has.
+ * out the two fields the contract has, and the status comes off the one code
+ * table in `http/refusals.ts`, so this group cannot carry a code that list
+ * does not hold.
  */
 type Refusal = {
   readonly refused: true;
-  readonly status: number;
-  readonly error: string;
+  readonly error: RefusalCode;
   readonly message: string;
 };
 
@@ -84,16 +91,16 @@ function isRefusal(value: unknown): value is Refusal {
 
 function refused(reply: FastifyReply, refusal: Refusal): FastifyReply {
   return reply
-    .code(refusal.status)
+    .code(CODES[refusal.error])
     .send({ error: refusal.error, message: refusal.message });
 }
 
 function invalid(message: string): Refusal {
-  return { refused: true, status: 400, error: "invalid_request", message };
+  return { refused: true, error: "invalid_request", message };
 }
 
 function notPermitted(message: string): Refusal {
-  return { refused: true, status: 403, error: "not_permitted", message };
+  return { refused: true, error: "not_permitted", message };
 }
 
 /**
@@ -103,15 +110,22 @@ function notPermitted(message: string): Refusal {
  */
 const NO_SUCH_AGENT: Refusal = {
   refused: true,
-  status: 404,
   error: "not_found",
   message:
     "no agent of yours has that id. Check the id, or list your agents with " +
     "GET /api/agents.",
 };
 
-/** A value that has to be text when it is there at all. */
-function given(value: unknown, named: string): string | undefined | Refusal {
+/**
+ * A body value that has to be text when it is there at all. Not the query
+ * reader in `http/reading.ts` of the same shape and a near name — this one
+ * refuses a wrong type out loud, because a body field carries intent where a
+ * query parameter carries at most a filter.
+ */
+function textWhenGiven(
+  value: unknown,
+  named: string,
+): string | undefined | Refusal {
   if (value === undefined || value === null || value === "") return undefined;
   if (typeof value !== "string") {
     return invalid(
@@ -184,9 +198,9 @@ function connectionIn(value: unknown): NewConnection | Refusal {
   const unknown = unknownKeyIn(body, CONNECTION_KEYS, "a connection");
   if (unknown !== undefined) return unknown;
 
-  const name = given(body.name, "a connection's name");
+  const name = textWhenGiven(body.name, "a connection's name");
   if (isRefusal(name)) return name;
-  const environment = given(body.environment, "a connection's environment");
+  const environment = textWhenGiven(body.environment, "a connection's environment");
   if (isRefusal(environment)) return environment;
 
   return {
@@ -256,31 +270,16 @@ function describedConnection(one: Connection): Record<string, unknown> {
  * a client relays to a terminal, so a second copy of it is a second thing to
  * keep in step.
  */
+/** This group's wording for a project it must refuse, as a Refusal value. */
 function projectOutsideOrganization(projectId: string): Refusal {
-  return notPermitted(
-    `project ${projectId} is not in your organization. A request may name a ` +
-      "project of your own organization or leave it out, and which " +
-      "organization this is always comes from the key.",
-  );
+  return notPermitted(AGENTS_PROJECT_WORDING.outsideOrganization(projectId));
 }
 
-/**
- * A key minted for one project, asked to act in a different one.
- *
- * The verb is passed in because that is the only word that differs between
- * the read and the write — and two sentences kept in step by hand is how
- * contract wording drifts.
- */
-function credentialActsElsewhere(
-  scoped: string,
-  named: string,
-  verb: "writes into" | "reads",
-): Refusal {
-  return notPermitted(
-    `this credential acts in project ${scoped}, and the request named ` +
-      `${named}. A key minted for one product area ${verb} that one; drop ` +
-      "the project, or use a key for the whole organization.",
-  );
+/** An acting.ts answer, carried into this group's tagged-value flow. */
+function refusalOf(acting: ActingRefusal): Refusal {
+  return acting.code === "not_permitted"
+    ? notPermitted(acting.refusal)
+    : invalid(acting.refusal);
 }
 
 /**
@@ -291,26 +290,22 @@ function credentialActsElsewhere(
  * the empty list is the worse half: it reads as "you have no agents there"
  * rather than as "that is not yours to ask about".
  *
- * A key minted for one project is answered rather than quietly widened — it
- * acts in that project and cannot be argued out of it. A key for the whole
- * customer may name any project of that customer, and the membership read is
- * what makes "any project of that customer" true rather than assumed.
+ * The check itself is `http/acting.ts`'s — one membership rule for every
+ * route group. Only the wording is this group's own, and it lives beside the
+ * other group's in that module, where the two can be unified in one edit the
+ * day the dev picks a winner.
  */
 async function projectNamed(
   auth: AuthContext,
   named: string,
   verb: "writes into" | "reads",
 ): Promise<string | Refusal> {
-  if (auth.projectId !== undefined) {
-    return named === auth.projectId
-      ? named
-      : credentialActsElsewhere(auth.projectId, named, verb);
-  }
-
-  const projects = await listProjects(auth);
-  return projects.some((one) => one.id === named)
-    ? named
-    : projectOutsideOrganization(named);
+  const acting = await resolveNamedProject(auth, named, {
+    actsElsewhere: (scoped, asked) =>
+      AGENTS_PROJECT_WORDING.actsElsewhere(scoped, asked, verb),
+    outsideOrganization: AGENTS_PROJECT_WORDING.outsideOrganization,
+  });
+  return "auth" in acting ? named : refusalOf(acting);
 }
 
 /**
@@ -331,20 +326,12 @@ async function writingIn(
     return isRefusal(project) ? project : { ...auth, projectId: project };
   }
 
-  if (auth.projectId !== undefined) return auth;
-
-  const projects = await listProjects(auth);
-  const home = projects[0];
-  if (home === undefined) {
-    // Not a refusal: signing up provisions a project and nothing takes it
-    // away, so there is nothing the person holding this key could do about
-    // it. It is this instance being broken, and it is answered as one.
-    throw new Error(
-      `organization ${auth.organizationId} has no project to write into, ` +
-        `which signing up provisions and nothing removes`,
-    );
-  }
-  return { ...auth, projectId: home.id };
+  // The absent case is acting.ts's whole answer: the key's own project, the
+  // single v1 project for a customer-wide key, a fault for zero, and a loud
+  // ask for more than one — never the oldest of several, which would be the
+  // silent narrowing this codebase has already had to find once.
+  const acting = await resolveAbsentProject(auth);
+  return "auth" in acting ? acting.auth : refusalOf(acting);
 }
 
 /**
@@ -388,11 +375,11 @@ export async function agentRoutes(
     const unknown = unknownKeyIn(body, AGENT_KEYS, "a registration");
     if (unknown !== undefined) return refused(reply, unknown);
 
-    const name = given(body.name, "an agent's name");
+    const name = textWhenGiven(body.name, "an agent's name");
     if (isRefusal(name)) return refused(reply, name);
-    const description = given(body.description, "an agent's description");
+    const description = textWhenGiven(body.description, "an agent's description");
     if (isRefusal(description)) return refused(reply, description);
-    const project = given(body.project, "a project");
+    const project = textWhenGiven(body.project, "a project");
     if (isRefusal(project)) return refused(reply, project);
 
     const inline =
@@ -439,10 +426,10 @@ export async function agentRoutes(
     const { auth } = requesterOf(request);
     const query = (request.query ?? {}) as Record<string, string | undefined>;
 
-    const named = given(query.project, "a project");
+    const named = textWhenGiven(query.project, "a project");
     if (isRefusal(named)) return refused(reply, named);
 
-    const cursor = given(query.cursor, "a cursor");
+    const cursor = textWhenGiven(query.cursor, "a cursor");
     if (isRefusal(cursor)) return refused(reply, cursor);
     if (cursor !== undefined && !isId("agt", cursor)) {
       return refused(
@@ -517,7 +504,6 @@ export async function agentRoutes(
       if (error.reason === "name_taken") {
         return refused(reply, {
           refused: true,
-          status: 409,
           error: "name_taken",
           message: error.message,
         });
@@ -525,7 +511,6 @@ export async function agentRoutes(
       if (error.reason === "needs_a_name") {
         return refused(reply, {
           refused: true,
-          status: 422,
           error: "unprocessable",
           message: error.message,
         });

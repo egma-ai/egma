@@ -64,29 +64,75 @@ export type ActingRefusal = {
 export type Acting = { readonly auth: AuthContext } | ActingRefusal;
 
 /**
- * The acting project as a context to hand the data-access module. Absent, it is
- * the project the credential is authorized for, or the organization's single
- * project for a key minted for the whole customer. Named, it has to be one this
- * credential may act in.
+ * The words a refusal uses when a named project cannot be acted in. Two cases,
+ * two sentences — or one sentence twice, which is what the tests and runs
+ * groups do.
+ *
+ * The agents group speaks its own pair (below). One situation answered in two
+ * wordings is a recorded inconsistency awaiting the dev's word on which
+ * sentence wins; housing both HERE is what turns that decision into a
+ * one-file edit instead of a hunt.
  */
-export async function actingIn(
+export type ProjectWording = {
+  actsElsewhere(scoped: string, named: string): string;
+  outsideOrganization(named: string): string;
+};
+
+const ACTING_WORDING: ProjectWording = {
+  actsElsewhere: (_scoped, named) => cannotActIn(named),
+  outsideOrganization: (named) => cannotActIn(named),
+};
+
+/** The agents group's pair, byte-for-byte as its tests pin them. */
+export const AGENTS_PROJECT_WORDING = {
+  actsElsewhere: (
+    scoped: string,
+    named: string,
+    verb: "writes into" | "reads",
+  ): string =>
+    `this credential acts in project ${scoped}, and the request named ` +
+    `${named}. A key minted for one product area ${verb} that one; drop ` +
+    "the project, or use a key for the whole organization.",
+  outsideOrganization: (named: string): string =>
+    `project ${named} is not in your organization. A request may name a ` +
+    "project of your own organization or leave it out, and which " +
+    "organization this is always comes from the key.",
+};
+
+/**
+ * A named project, checked against what the credential may reach. A key
+ * minted for one project is answered rather than quietly widened; a key for
+ * the whole customer may name any project the membership read confirms.
+ */
+export async function resolveNamedProject(
   auth: AuthContext,
-  named: string | undefined,
+  named: string,
+  wording: ProjectWording,
 ): Promise<Acting> {
   if (auth.projectId !== undefined) {
-    if (named !== undefined && named !== auth.projectId) {
-      return { refusal: cannotActIn(named), code: "not_permitted" };
-    }
-    return { auth };
+    return named === auth.projectId
+      ? { auth }
+      : {
+          refusal: wording.actsElsewhere(auth.projectId, named),
+          code: "not_permitted",
+        };
   }
 
   const projects = await listProjects(auth);
-  if (named !== undefined) {
-    return projects.some((project) => project.id === named)
-      ? { auth: { ...auth, projectId: named } }
-      : { refusal: cannotActIn(named), code: "not_permitted" };
-  }
+  return projects.some((project) => project.id === named)
+    ? { auth: { ...auth, projectId: named } }
+    : { refusal: wording.outsideOrganization(named), code: "not_permitted" };
+}
 
+/**
+ * The project a credential acts in when the request named none: the key's
+ * own, or the organization's single v1 project. Zero projects is this
+ * instance broken; more than one is a question only the caller can answer.
+ */
+export async function resolveAbsentProject(auth: AuthContext): Promise<Acting> {
+  if (auth.projectId !== undefined) return { auth };
+
+  const projects = await listProjects(auth);
   const [only] = projects;
   if (only === undefined) {
     // Not a refusal: signing up provisions a project and nothing takes it
@@ -100,6 +146,21 @@ export async function actingIn(
     return { refusal: NAME_THE_PROJECT, code: "invalid_request" };
   }
   return { auth: { ...auth, projectId: only.id } };
+}
+
+/**
+ * The acting project as a context to hand the data-access module. Absent, it is
+ * the project the credential is authorized for, or the organization's single
+ * project for a key minted for the whole customer. Named, it has to be one this
+ * credential may act in.
+ */
+export async function actingIn(
+  auth: AuthContext,
+  named: string | undefined,
+): Promise<Acting> {
+  return named === undefined
+    ? resolveAbsentProject(auth)
+    : resolveNamedProject(auth, named, ACTING_WORDING);
 }
 
 /** The two ways a project can fail to resolve, each answered as what it is. */

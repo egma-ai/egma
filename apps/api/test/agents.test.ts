@@ -913,7 +913,27 @@ describe("the project a request names", () => {
       slug: "outbound",
     });
 
-    await post("/api/agents", withKey(ada.secret), registration());
+    // With two projects to choose from, a write naming none is asked to name
+    // one — the same words the other route groups answer with, because the
+    // oldest-project guess is the silent narrowing this codebase refuses.
+    const unnamed = await post(
+      "/api/agents",
+      withKey(ada.secret),
+      registration(),
+    );
+    expect(unnamed.status).toBe(400);
+    expect(unnamed.body).toEqual({
+      error: "invalid_request",
+      message:
+        "this organization holds more than one project and this credential " +
+        "names none, so egma cannot tell which project this is about. Send " +
+        "project with the one you mean, or use a key minted for that project.",
+    });
+
+    await post("/api/agents", withKey(ada.secret), {
+      ...registration(),
+      project: ada.projectId,
+    });
     await post("/api/agents", withKey(ada.secret), {
       ...registration({ name: "Outbound desk", retellAgentId: "agent_two" }),
       project: outbound.id,
