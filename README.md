@@ -70,13 +70,20 @@ container being restarted, replaced or rebuilt; only `docker compose down -v`
 removes them, and that is what it is for.
 
 Everything else is environment, and `.env.example` names each one with its
-default. Two are worth knowing about before anything else:
+default. Three are worth knowing about before anything else:
 
 - **`EGMA_SIMULATOR_MODEL_PROVIDER` decides where the persona's words come
   from.** The default, `scripted`, walks the scenario deterministically and
   needs no account at all. Set it to `openai` — with `EGMA_SIMULATOR_MODEL_NAME`
   and `EGMA_SIMULATOR_MODEL_API_KEY`, and `EGMA_SIMULATOR_MODEL_BASE_URL` for
   anything OpenAI-compatible — and the persona improvises instead.
+- **`EGMA_SIMULATOR_TTS_PROVIDER` and `EGMA_SIMULATOR_STT_PROVIDER` decide
+  whether a voice simulation is really spoken.** Both default to `scripted`,
+  which carries a deterministic test tone and needs no account, so a first
+  voice simulation costs nothing. Set them to `elevenlabs` and `deepgram` —
+  with `EGMA_SIMULATOR_ELEVENLABS_API_KEY` and
+  `EGMA_SIMULATOR_DEEPGRAM_API_KEY` — and the persona speaks with a human
+  voice and hears real words. Each leg is chosen on its own.
 - **`EGMA_SIMULATOR_CAPACITY` is how many conversations happen at once.** The
   simulator claims only what it can hold, so a big run degrades into a queue
   rather than into overload.
@@ -107,6 +114,133 @@ handing it to a network would hand over queueing and cancelling work too.
 
 `docker compose up` starts no workbench. This is a dev and demo affair, which
 is why it lives in a file you have to ask for by name.
+
+## Calling a real phone number
+
+A simulation whose connection names a phone number places a real call to it.
+What answers does not matter — the telephone network neither knows nor cares —
+so an agent behind a number is tested over the exact path its customers dial.
+
+Two things have to be true for that. The simulator needs a **media bridge**
+that turns a phone call into a room it can join, and it needs a **SIP trunk**
+that carries the call to the phone network. The trunk is yours, from whatever
+carrier you already pay; egma is never in that relationship. The bridge is
+LiveKit, and you have two ways to get one.
+
+**LiveKit Cloud is one variable.** Point `EGMA_SIMULATOR_LIVEKIT_URL` at it
+with its key and secret, set your trunk, and stop reading this section — there
+is nothing to host and nothing to open.
+
+**Hosting it yourself is an overlay you ask for by name:**
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.phone.yml up
+```
+
+That adds three containers — the LiveKit server, its SIP gateway, and the
+Redis they find each other through — and points the simulator at them. A plain
+`docker compose up` starts none of it, and nothing about the default first-run
+story changes. Every setting is an environment variable; there is no
+configuration file to write.
+
+### What has to be reachable, and what never is
+
+| Container | Reachable from the internet? |
+| --- | --- |
+| simulator | **Never.** It publishes nothing, in this configuration or any other. |
+| LiveKit server | No — its clients are the containers beside it. |
+| Redis | No. |
+| **SIP gateway** | **Yes.** Its SIP port and its RTP range have to be reachable from your carrier. |
+
+The gateway is the one honest exception in the whole deployment, and it is not
+ours to remove: it is the piece your carrier sends a call's audio *to*. It
+writes an address and a port into the SDP it sends, and the carrier sends RTP
+there.
+
+**On a server with a public IP, or behind a 1:1 NAT with those ports forwarded,
+that is routine.** Set `EGMA_LIVEKIT_SIP_EXTERNAL_IP` to the address and open
+UDP 5060 plus the RTP range to your carrier's published ranges.
+
+**On a laptop behind an ordinary router it does not work, and "required" is
+measured rather than assumed.** The gateway discovers its public address by
+asking a STUN server, which answers with the address only — and pairs it with
+its own *local* RTP port. On a consumer router that pairing names nothing. Here
+is the measurement, from a MacBook behind a home router: a UDP socket bound to
+port 10019 is seen by the outside world as port 41110, another on 10105 as
+39306, another on 10106 as 64104 — a different arbitrary port every time, and
+no inbound mapping for any of them. So audio addressed to the advertised
+`public-address:10019` arrives nowhere. Signalling is only luckier, not
+reliable: of four INVITEs sent through that router, two brought the carrier's
+own answer back and two timed out having heard nothing.
+
+The one thing that could rescue a NATed gateway is the carrier ignoring the
+address in the SDP and replying to wherever our audio came from — symmetric
+RTP latching, which many carriers do. We could not settle whether ours does,
+because the account we tested with refused every call before it was answered
+and latching only happens after. So: **a public IP or a 1:1 NAT is required.**
+If your carrier latches you may get away with less, but do not plan a
+deployment on it. Use LiveKit Cloud instead — same API, same trunk, same code,
+one URL.
+
+The RTP range is 21 ports by default, not LiveKit's own 10000-20000: that is
+about ten calls at once, more than the simulator's default capacity of four can
+use, and a range published to the internet is a range to justify. Widen both
+ends together if you raise capacity, and widen your firewall by the same
+amount.
+
+### Turning a carrier account into a trunk
+
+You should not have to hand-build SIP paperwork in somebody's console. One
+command takes a Twilio account and one of its numbers and makes the trunk:
+
+```bash
+TWILIO_ACCOUNT_SID=AC... TWILIO_AUTH_TOKEN=... \
+  uv run --directory apps/simulator egma-trunk-setup --number +15551234567
+```
+
+It creates the trunk, its termination URI, a credential list and the
+credential, attaches the credential list and the number to the trunk, and
+prints the five variables the simulator reads. It names what it made with each identifier, and it is safe to
+run again — a second run finds what the first made and rotates only the
+password, because Twilio hands a password out once and never again.
+
+**The account token is used by that command and by nothing else.** What a
+running deployment keeps is a SIP credential that can do exactly one thing:
+authenticate a call over one trunk. Keep the printed lines wherever the rest of
+your secrets live, and in no repository.
+
+### The whole thing, end to end
+
+One command, with your own number and your own credentials in the environment:
+
+```bash
+EGMA_WORKBENCH_PHONE_NUMBER=+15551234567 \
+docker compose -f docker-compose.yml -f docker-compose.workbench.yml \
+  -f docker-compose.phone.yml up --build simulator workbench
+```
+
+The overlays go in that order — the phone one last, because it adds to what
+the workbench one replaces. Naming the two services is what keeps the API and
+the two databases out of it; the phone stack comes along because the simulator
+depends on it. What starts is a workbench holding one spec, pointed at your
+number instead of the fixture's placeholder, and a simulator that can dial it.
+Then watch the workbench's log: the claim, the call, each turn of the
+conversation as it is spoken, the timings measured off the audio, and the
+recording's reference. The `.wav` is on the `simulator-data` volume with the
+persona on one channel and the agent on the other —
+`docker compose cp simulator:/var/lib/egma-simulator/blobs/<reference> ./call.wav`
+brings it out to listen to.
+
+The persona speaks in a deterministic test tone unless you name real speech
+providers, and a real agent hears that as noise. Set
+`EGMA_SIMULATOR_TTS_PROVIDER`, `EGMA_SIMULATOR_STT_PROVIDER` and their keys
+before you expect a conversation.
+
+Every variable this section mentions is in `.env.example` with its default and
+whether it is required. Anything set to something unusable stops the simulator
+on its first line naming the variable — including a trunk given only half a
+credential, which a carrier would otherwise refuse once per call in a way that
+reads exactly like a wrong one.
 
 ## Working on it
 

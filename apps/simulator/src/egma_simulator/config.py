@@ -28,6 +28,24 @@ MODEL_PROVIDERS = ("scripted", "openai")
 DEFAULT_MODEL_BASE_URL = "https://api.openai.com/v1"
 LOG_LEVELS = ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG")
 
+STT_PROVIDERS = ("scripted", "deepgram")
+"""What the persona hears with. ``scripted`` needs no account and no network."""
+
+TTS_PROVIDERS = ("scripted", "elevenlabs")
+"""What the persona speaks with. ``scripted`` needs no account and no network."""
+
+SPEECH_PROVIDER_KEYS = {
+    "deepgram": "EGMA_SIMULATOR_DEEPGRAM_API_KEY",
+    "elevenlabs": "EGMA_SIMULATOR_ELEVENLABS_API_KEY",
+}
+"""The variable each real speech provider's key arrives in. Naming a
+provider is what makes its key required, and the refusal names this."""
+
+MEDIA_BACKENDS = ("scripted", "livekit")
+"""How a phone call's audio may travel. Naming one is what makes a
+simulator able to dial at all, and what makes that backend's own
+variables required."""
+
 
 def _text(name: str, fallback: str | None = None) -> str | None:
     """A variable's value, where blank means absent.
@@ -101,6 +119,33 @@ def _level(name: str, fallback: str) -> str:
     return level
 
 
+def _one_of(name: str, allowed: tuple[str, ...], fallback: str) -> str:
+    """A variable naming one of a short list, refused by name when it does not."""
+    chosen = _text(name, fallback)
+    if chosen not in allowed:
+        raise ValueError(
+            f"{name} must be one of {', '.join(allowed)}; got {chosen!r}"
+        )
+    return chosen
+
+
+def _speech_key(provider: str) -> str:
+    """The key a chosen speech provider needs, or a refusal naming its variable.
+
+    Choosing a provider is the whole of what makes its key required. A
+    simulator started with a provider it has no key for would conduct
+    nothing: every voice simulation it claimed would fail at the first
+    turn, one after another, with the provider's refusal rather than with
+    the one sentence that says which variable to set. So it says it here,
+    before it claims anything.
+    """
+    variable = SPEECH_PROVIDER_KEYS[provider]
+    key = _text(variable)
+    if key is None:
+        raise ValueError(f"{variable} is required when the {provider} leg is chosen")
+    return key
+
+
 def _writable_directory(name: str, path: Path) -> Path:
     """A directory the simulator can really write to, proven at startup.
 
@@ -126,6 +171,121 @@ def _writable_directory(name: str, path: Path) -> Path:
             f"{refusal}"
         ) from refusal
     return path
+
+
+@dataclass(frozen=True)
+class MediaSettings:
+    """How this deployment places a phone call, read once at startup.
+
+    A phone call needs a bridge and — for a real one — a SIP trunk, and
+    both belong to the deployment rather than to any one simulation. So
+    they arrive here, are checked here, and a simulator that cannot place
+    calls says so on its first line naming the variable rather than
+    failing one claimed simulation after another with the same sentence.
+
+    A deployment that names no backend gets no settings at all and starts
+    in silence: dialling is opt-in, and a simulator that never dials
+    should not have to explain a trunk it does not want.
+    """
+
+    backend: str
+    """Which driver places the call — one of :data:`MEDIA_BACKENDS`."""
+
+    livekit_url: str | None = None
+    livekit_api_key: str | None = None
+    livekit_api_secret: str | None = field(default=None, repr=False)
+
+    trunk_id: str | None = None
+    """A SIP trunk already stored in LiveKit. Wins over the inline fields."""
+
+    trunk_address: str | None = None
+    trunk_number: str | None = None
+    trunk_username: str | None = None
+    trunk_password: str | None = field(default=None, repr=False)
+
+    @property
+    def secrets(self) -> tuple[str, ...]:
+        """Every secret these settings hold, for redaction. One place to
+        ask, so a third one arriving cannot fall out of the scrubbing."""
+        return tuple(
+            secret
+            for secret in (self.livekit_api_secret, self.trunk_password)
+            if secret is not None
+        )
+
+    @classmethod
+    def from_env(cls) -> MediaSettings | None:
+        """This deployment's bridge, or ``None`` where it names none."""
+        named = _text("EGMA_SIMULATOR_MEDIA_BACKEND")
+        if named is None:
+            return None
+        if named not in MEDIA_BACKENDS:
+            raise ValueError(
+                "EGMA_SIMULATOR_MEDIA_BACKEND must be one of "
+                f"{', '.join(MEDIA_BACKENDS)}; got {named!r}"
+            )
+        if named != "livekit":
+            return cls(backend=named)
+
+        settings = cls(
+            backend=named,
+            livekit_url=_needed("EGMA_SIMULATOR_LIVEKIT_URL", named),
+            livekit_api_key=_needed("EGMA_SIMULATOR_LIVEKIT_API_KEY", named),
+            livekit_api_secret=_needed("EGMA_SIMULATOR_LIVEKIT_API_SECRET", named),
+            trunk_id=_text("EGMA_SIMULATOR_SIP_TRUNK_ID"),
+            trunk_address=_text("EGMA_SIMULATOR_SIP_TRUNK_ADDRESS"),
+            trunk_number=_text("EGMA_SIMULATOR_SIP_TRUNK_NUMBER"),
+            trunk_username=_text("EGMA_SIMULATOR_SIP_TRUNK_USERNAME"),
+            trunk_password=_text("EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"),
+        )
+        if settings.trunk_id is None and settings.trunk_address is None:
+            raise ValueError(
+                "a phone call needs a trunk: set EGMA_SIMULATOR_SIP_TRUNK_ID "
+                "for a trunk already stored in LiveKit, or "
+                "EGMA_SIMULATOR_SIP_TRUNK_ADDRESS with "
+                "EGMA_SIMULATOR_SIP_TRUNK_USERNAME and "
+                "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD for an inline one"
+            )
+        # Credential auth is a pair. Neither half is a trunk the carrier
+        # authenticates some other way — by the address it came from — and
+        # that is a real deployment. One half is nobody's deployment: every
+        # call it places comes back 403, which reads as *wrong* credentials
+        # rather than as half of one, and it reads that way once per
+        # simulation until somebody looks here. The rule binds the inline
+        # trunk only: with a stored trunk selected the inline fields are
+        # never read, and refusing a working deployment over a leftover
+        # half would be the louder wrong.
+        if settings.trunk_id is None and (settings.trunk_username is None) != (
+            settings.trunk_password is None
+        ):
+            # Both names written out whole, never assembled from parts: a
+            # variable somebody has to search for has to be searchable, in
+            # this file as much as in the sentence it prints.
+            username = "EGMA_SIMULATOR_SIP_TRUNK_USERNAME"
+            password = "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"
+            missing, given = (
+                (password, username)
+                if settings.trunk_password is None
+                else (username, password)
+            )
+            raise ValueError(
+                f"{missing} is required alongside {given}: a trunk "
+                "authenticated by credentials needs both halves, and a "
+                "carrier refuses half of one exactly the way it refuses a "
+                "wrong one"
+            )
+        return settings
+
+
+def _needed(variable: str, backend: str) -> str:
+    """A variable one chosen media backend cannot do without."""
+    value = _text(variable)
+    if value is None:
+        raise ValueError(
+            f"{variable} is required when "
+            f"EGMA_SIMULATOR_MEDIA_BACKEND={backend}"
+        )
+    return value
 
 
 @dataclass(frozen=True)
@@ -184,6 +344,47 @@ class SimulatorConfig:
     """The provider key. Required for the ``openai`` provider; kept out of
     the dataclass repr so no log line can carry it by accident."""
 
+    stt_provider: str = "scripted"
+    """The persona's ears, for a voice simulation: ``scripted`` (the exactly
+    invertible test codec, what CI and the free local demo run on) or
+    ``deepgram``. Read at pipeline assembly and nowhere else."""
+
+    tts_provider: str = "scripted"
+    """The persona's mouth, for a voice simulation: ``scripted`` or
+    ``elevenlabs``. Chosen apart from the ears on purpose — a real mouth
+    with scripted ears is a configuration somebody will want."""
+
+    deepgram_api_key: str | None = field(default=None, repr=False)
+    """The Deepgram key. Required when the ``deepgram`` ears are chosen;
+    kept out of the dataclass repr, and registered for redaction."""
+
+    elevenlabs_api_key: str | None = field(default=None, repr=False)
+    """The ElevenLabs key. Required when the ``elevenlabs`` mouth is chosen;
+    kept out of the dataclass repr, and registered for redaction."""
+
+    media: MediaSettings | None = None
+    """How a phone call's audio travels, for a deployment that dials at
+    all. ``None`` where none was named, and a simulation that then names a
+    phone number is refused with a sentence naming the variable."""
+
+    @property
+    def speech_secrets(self) -> tuple[str, ...]:
+        """Every speech-provider key this configuration holds.
+
+        One place to ask, so registering them for redaction cannot fall
+        behind the day a third provider arrives.
+        """
+        return tuple(
+            key
+            for key in (self.deepgram_api_key, self.elevenlabs_api_key)
+            if key is not None
+        )
+
+    @property
+    def media_secrets(self) -> tuple[str, ...]:
+        """Every secret the media configuration holds, for the same reason."""
+        return () if self.media is None else self.media.secrets
+
     @classmethod
     def from_env(cls) -> SimulatorConfig:
         url = _text("EGMA_SIMULATOR_CONTROL_PLANE_URL")
@@ -207,12 +408,9 @@ class SimulatorConfig:
                 f"EGMA_SIMULATOR_CAPACITY must be at least 1, got {capacity}"
             )
 
-        provider = _text("EGMA_SIMULATOR_MODEL_PROVIDER", "scripted")
-        if provider not in MODEL_PROVIDERS:
-            raise ValueError(
-                "EGMA_SIMULATOR_MODEL_PROVIDER must be one of "
-                f"{', '.join(MODEL_PROVIDERS)}; got {provider!r}"
-            )
+        provider = _one_of(
+            "EGMA_SIMULATOR_MODEL_PROVIDER", MODEL_PROVIDERS, "scripted"
+        )
         model_name = _text("EGMA_SIMULATOR_MODEL_NAME")
         model_api_key = _text("EGMA_SIMULATOR_MODEL_API_KEY")
         if provider == "openai":
@@ -226,6 +424,18 @@ class SimulatorConfig:
                     "EGMA_SIMULATOR_MODEL_API_KEY is required when "
                     "EGMA_SIMULATOR_MODEL_PROVIDER=openai"
                 )
+
+        stt_provider = _one_of(
+            "EGMA_SIMULATOR_STT_PROVIDER", STT_PROVIDERS, "scripted"
+        )
+        tts_provider = _one_of(
+            "EGMA_SIMULATOR_TTS_PROVIDER", TTS_PROVIDERS, "scripted"
+        )
+        speech_keys = {
+            provider: _speech_key(provider)
+            for provider in (stt_provider, tts_provider)
+            if provider != "scripted"
+        }
 
         return cls(
             control_plane_url=url.rstrip("/"),
@@ -255,4 +465,9 @@ class SimulatorConfig:
             ).rstrip("/"),
             model_name=model_name,
             model_api_key=model_api_key,
+            stt_provider=stt_provider,
+            tts_provider=tts_provider,
+            deepgram_api_key=speech_keys.get("deepgram"),
+            elevenlabs_api_key=speech_keys.get("elevenlabs"),
+            media=MediaSettings.from_env(),
         )

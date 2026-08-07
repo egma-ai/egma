@@ -21,6 +21,13 @@ Its config keys, like every plug's, are its own:
   scripted reply ends the exchange (with no replies at all, the exchange
   ends silently on the first persona turn). When false, a spent script
   falls back to a fixed holding line forever.
+- ``echoes_what_it_hears`` (bool, default false) — the telephone company's
+  own echo test line: instead of reading a script, the counterpart answers
+  with the caller's own audio. It replaces the script, so it cannot be
+  combined with ``replies`` or ``ends_after_replies``. What it buys is a
+  whole exchange whose agent side is real speech rather than the scripted
+  codec — the only way, short of dialling somebody, to hear real speech
+  legs work end to end: what a real voice speaks, real ears read back.
 - ``answer_delay_seconds`` (number ≥ 0, default 0) — how long the agent is
   quiet before it starts speaking. It is rendered into the answer's own
   audio, where a live exchange carries it and where time-to-first-word
@@ -55,6 +62,7 @@ _KNOWN_KEYS = {
     "replies",
     "ends_after_replies",
     "answer_delay_seconds",
+    "echoes_what_it_hears",
     "sample_rate_hz",
     "provider_reference",
 }
@@ -103,6 +111,18 @@ class LoopbackCounterpart:
         if not isinstance(ends_after_replies, bool):
             raise PlugError("loopback config: ends_after_replies must be a bool")
 
+        echoes = config.get("echoes_what_it_hears", False)
+        if not isinstance(echoes, bool):
+            raise PlugError(
+                "loopback config: echoes_what_it_hears must be a bool"
+            )
+        if echoes and ("replies" in config or ends_after_replies):
+            raise PlugError(
+                "loopback config: a counterpart that echoes has no script, so "
+                "echoes_what_it_hears cannot be combined with replies or "
+                "ends_after_replies"
+            )
+
         delay = config.get("answer_delay_seconds", 0)
         if isinstance(delay, bool) or not isinstance(delay, int | float):
             raise PlugError("loopback config: answer_delay_seconds must be a number")
@@ -124,6 +144,7 @@ class LoopbackCounterpart:
         self._greeting = greeting
         self._replies = list(replies)
         self._ends_after_replies = ends_after_replies
+        self._echoes = echoes
         self._answer_delay_seconds = float(delay)
         self._band_hz = negotiated_band(asked_for)
         self._provider_reference = reference
@@ -143,6 +164,18 @@ class LoopbackCounterpart:
         return AgentSpeech(audio=self._say(self._greeting))
 
     async def deliver(self, speech: Utterance) -> AgentSpeech:
+        if self._echoes:
+            # Whatever arrived, sent straight back — after the same quiet
+            # a scripted answer waits, so time-to-first-word is measured
+            # here exactly as it is everywhere else.
+            return AgentSpeech(
+                audio=Utterance(
+                    pcm=silence(self._answer_delay_seconds, self._band_hz)
+                    + speech.pcm,
+                    sample_rate_hz=self._band_hz,
+                )
+            )
+
         # A script answers on cue, not on content — the persona's audio is
         # heard and then answered from the script, the way the scripted
         # chat counterpart answers text.

@@ -6,7 +6,10 @@ import asyncio
 import json
 
 import aiohttp
-from conftest import scripted_spec
+import pytest
+from conftest import load_fixture_spec, scripted_spec
+
+from egma_simulator.workbench.app import dialling
 
 
 async def test_a_claim_waits_and_is_answered_the_moment_a_spec_arrives(workbench):
@@ -132,3 +135,54 @@ async def test_a_cancel_directive_rides_the_next_heartbeat_answer(workbench):
         assert await beat() is None
         await workbench.cancel("sim-wb-cancel")
         assert await beat() == "cancel"
+
+
+# -- Pointing the fixtures at a real phone --------------------------------
+#
+# A checked-in fixture cannot know anybody's number, which is why the one
+# run worth watching is the one the fixtures cannot give. `dialling` is the
+# whole of what closes that, and is what the documented demo command rides
+# on — so what it does, and what it refuses to do, is worth pinning.
+
+
+def test_a_real_number_replaces_the_fixtures_placeholder():
+    fixture = load_fixture_spec("voice-phone.json")
+    assert fixture["connection"]["config"]["phoneNumber"] != "+12025550143"
+
+    (pointed,) = dialling([fixture], "+12025550143")
+
+    assert pointed["connection"]["config"]["phoneNumber"] == "+12025550143"
+    # Everything else about the spec is the fixture's, untouched: the
+    # persona, the scenario and the limits are what make it a simulation
+    # worth watching, and a demo that quietly rewrote them would be
+    # demonstrating itself.
+    assert pointed["persona"] == fixture["persona"]
+    assert pointed["scenario"] == fixture["scenario"]
+    assert pointed["limits"] == fixture["limits"]
+    # And the fixture on disk is not edited on the way past.
+    assert fixture["connection"]["config"]["phoneNumber"] != "+12025550143"
+
+
+def test_only_the_specs_that_dial_are_queued():
+    """The simulator claims four at a time, so a chat fixture queued
+    alongside would conduct its exchange *during* the call and interleave
+    its events with the ones somebody started this to read."""
+    every = [
+        load_fixture_spec(name)
+        for name in (
+            "chat-scripted-hurried.json",
+            "voice-loopback.json",
+            "voice-phone.json",
+        )
+    ]
+
+    queued = dialling(every, "+12025550143")
+
+    assert [spec["connection"]["type"] for spec in queued] == ["phone"]
+
+
+def test_a_number_with_nothing_to_dial_it_is_refused_rather_than_ignored():
+    with pytest.raises(FileNotFoundError) as refused:
+        dialling([load_fixture_spec("chat-scripted-hurried.json")], "+12025550143")
+
+    assert "+12025550143" in str(refused.value)

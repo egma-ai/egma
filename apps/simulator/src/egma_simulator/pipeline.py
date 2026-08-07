@@ -35,6 +35,7 @@ from array import array
 from dataclasses import dataclass
 
 from pipecat.frames.frames import (
+    ControlFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
@@ -44,6 +45,8 @@ from pipecat.frames.frames import (
     TextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -63,11 +66,15 @@ from .plugs import (
 from .spec import SimulationSpec
 from .speech import (
     SAMPLE_WIDTH_BYTES,
+    SCRIPTED_PAIR,
     PersonaVoice,
-    ScriptedSTT,
-    ScriptedTTS,
+    SpeechFault,
+    SpeechLegs,
+    SpeechProviders,
+    build_legs,
     duration_seconds,
     leading_silence_seconds,
+    silence,
     spoken_seconds,
     voice_from_traits,
 )
@@ -81,10 +88,41 @@ RECORDING_NAME = "dual-channel.wav"
 TEARDOWN_SECONDS = 10.0
 """How long a torn-down pipeline may take to finish before it is cancelled."""
 
+HEARD_NOTHING_SECONDS = 20.0
+"""How long a listening leg may hold a whole turn of audio and say nothing
+about it before the turn counts as one that carried no words.
+
+A streaming transcriber that finds no words in a stretch of audio pushes
+no frame at all — there is no empty transcript, only silence — so a turn
+waiting for one waits forever, and the simulation runs to its duration
+limit with nothing on the record saying why. Phone calls make that
+ordinary: hold music, a line left open, a room with a television in it.
+
+It is a backstop and not a turn-taking rule, which is why it is generous
+and why it is the only wait in this file measured in time rather than in
+frames. The scripted pair answers every turn it is given, so no
+deterministic exchange ever reaches it.
+"""
+
 PERSONA_CHANNEL = 0
 AGENT_CHANNEL = 1
 """Who is on which channel of a recording. The transcript's two labels in
 the transcript's own order, so the file needs no legend to be read."""
+
+
+@dataclass
+class TurnSpoken(ControlFrame):
+    """The mark the pipeline puts after a persona turn it has queued.
+
+    A turn is finished being spoken when everything queued before this
+    frame has come out the other end, and a frame nobody but this file
+    knows about is the only thing every leg is guaranteed to pass along
+    untouched. The alternative — watching for one of the speaking leg's
+    own frames — is a different answer for every provider: some push the
+    frames that opened the turn, some hold them back for word timing, and
+    some emit the end only after an idle timeout. Then a turn boundary
+    would be a fact about a vendor rather than about the exchange.
+    """
 
 
 class PipelineGone(RuntimeError):
@@ -131,7 +169,11 @@ class Assembled:
 
 
 def assemble(
-    spec: SimulationSpec, *, blobs: BlobStore, on_timing: OnTiming | None = None
+    spec: SimulationSpec,
+    *,
+    blobs: BlobStore,
+    speech: SpeechProviders = SCRIPTED_PAIR,
+    on_timing: OnTiming | None = None,
 ) -> Assembled:
     """Build one simulation's pipeline from its spec.
 
@@ -139,6 +181,12 @@ def assemble(
     and no pipeline is started until the walk opens the exchange — so a
     spec that cannot be conducted fails here, honestly, before anything
     happens.
+
+    ``speech`` is where a deployment's choice of real providers enters,
+    and the only place: the spec says what the simulation is, the
+    configuration says what carries it. Left alone it is the scripted
+    pair, so a caller with nothing to say about providers gets exactly
+    the pipeline it always got.
     """
     factory = plug_for(spec.connection_type)
     if factory is None:
@@ -156,6 +204,7 @@ def assemble(
     speech_legs = VoicePipeline(
         transport=plug,
         voice=voice_from_traits(spec.persona_traits),
+        speech=speech,
         blobs=blobs,
         recording_key=f"{spec.simulation_id}/{RECORDING_NAME}",
         on_timing=on_timing,
@@ -166,8 +215,8 @@ def assemble(
 class _TurnSink(FrameProcessor):
     """The end of the pipeline, where a turn is known to be over.
 
-    Two frames are what the pipeline is driven by: the end of an LLM
-    response means the persona's words have all been spoken, and a
+    Two frames are what the pipeline is driven by: the mark closing a
+    persona turn means their words have all been spoken, and a
     transcription means the agent's audio has all been read. Waiting for
     those rather than for a length of time is what keeps a voice walk as
     deterministic as a chat one.
@@ -178,11 +227,20 @@ class _TurnSink(FrameProcessor):
         self.started = asyncio.Event()
         self.spoken = asyncio.Event()
         self.heard = asyncio.Event()
-        self.words_heard = ""
+        self._heard_pieces: list[str] = []
+        self._persona_audio = bytearray()
+
+    @property
+    def words_heard(self) -> str:
         """What the transcriber made of the agent's last turn. One turn's
         words — the transcript is the whole record, and that is the
-        reporter's."""
-        self._persona_audio = bytearray()
+        reporter's.
+
+        A real transcriber may hand back a long turn in pieces, so the
+        pieces are joined rather than the last one kept; the scripted one
+        answers a turn in one piece and reads back exactly as before.
+        """
+        return " ".join(self._heard_pieces)
 
     def before_speaking(self) -> None:
         self.spoken.clear()
@@ -190,7 +248,7 @@ class _TurnSink(FrameProcessor):
 
     def before_hearing(self) -> None:
         self.heard.clear()
-        self.words_heard = ""
+        self._heard_pieces.clear()
 
     def spoken_audio(self) -> bytes:
         return bytes(self._persona_audio)
@@ -201,10 +259,10 @@ class _TurnSink(FrameProcessor):
             self.started.set()
         elif isinstance(frame, TTSAudioRawFrame):
             self._persona_audio.extend(frame.audio)
-        elif isinstance(frame, LLMFullResponseEndFrame):
+        elif isinstance(frame, TurnSpoken):
             self.spoken.set()
         elif isinstance(frame, TranscriptionFrame):
-            self.words_heard = frame.text
+            self._heard_pieces.append(frame.text)
             self.heard.set()
         await self.push_frame(frame, direction)
 
@@ -225,6 +283,7 @@ class VoicePipeline:
         voice: PersonaVoice,
         blobs: BlobStore,
         recording_key: str,
+        speech: SpeechProviders = SCRIPTED_PAIR,
         on_timing: OnTiming | None = None,
     ) -> None:
         self._transport = transport
@@ -233,8 +292,9 @@ class VoicePipeline:
         self._recording_key = recording_key
         self._on_timing = on_timing
 
-        self._tts = ScriptedTTS(voice=voice, sample_rate_hz=self._band_hz)
-        self._stt = ScriptedSTT(sample_rate_hz=self._band_hz)
+        self._legs = build_legs(
+            speech, voice=voice, sample_rate_hz=self._band_hz
+        )
         self._recorder = AudioBufferProcessor(
             sample_rate=self._band_hz, num_channels=2
         )
@@ -244,7 +304,9 @@ class VoicePipeline:
         # audio frame that passes it, and its own side's speech is not the
         # transcript.
         self._worker = PipelineWorker(
-            Pipeline([self._stt, self._tts, self._recorder, self._sink]),
+            Pipeline(
+                [self._legs.stt, self._legs.tts, self._recorder, self._sink]
+            ),
             params=PipelineParams(
                 audio_in_sample_rate=self._band_hz,
                 audio_out_sample_rate=self._band_hz,
@@ -265,6 +327,21 @@ class VoicePipeline:
         self._tracks: tuple[bytes, bytes, int] | None = None
         self.audio: AudioFacts | None = None
         """What the exchange measured about its own audio, once it is over."""
+
+        self._faulted = asyncio.Event()
+        self._fault = ""
+
+        @self._worker.event_handler("on_pipeline_error")
+        async def _remember_fault(_worker: object, error: object) -> None:
+            # A leg refusing a turn — a key the provider will not take, a
+            # plan that does not cover the voice — reaches here and
+            # nowhere else: error frames travel back up the pipeline, away
+            # from the sink. Without this the refusal is a log line, the
+            # turn quietly carries no audio, and the simulation stalls
+            # until its duration limit with nothing on the record saying
+            # why. What is kept is the provider's own words.
+            self._fault = str(getattr(error, "error", error))
+            self._faulted.set()
 
         @self._recorder.event_handler("on_track_audio_data")
         async def _keep_tracks(
@@ -292,10 +369,16 @@ class VoicePipeline:
         return self._transport.provider_reference
 
     @property
+    def legs(self) -> SpeechLegs:
+        """The mouth and ears this pipeline was assembled with."""
+        return self._legs
+
+    @property
     def speaking_voice(self) -> PersonaVoice:
         """The voice the speaking leg was built with — read back off the
-        leg itself, so what this answers is what the persona spoke with."""
-        return self._tts.voice
+        legs themselves, so what this answers is what the persona spoke
+        with, default and all."""
+        return self._legs.voice
 
     async def open(self) -> str | None:
         await self._runner.add_workers(self._worker)
@@ -303,6 +386,10 @@ class VoicePipeline:
             self._runner.run(), name="voice-pipeline"
         )
         await self._reach(self._sink.started)
+        # A listening leg that connects does so once the pipeline starts,
+        # and drops anything handed to it before that lands. The greeting
+        # is the very next thing to arrive, so it is waited for here.
+        await self._legs.ready()
         await self._recorder.start_recording()
 
         greeting = await self._transport.open()
@@ -330,13 +417,17 @@ class VoicePipeline:
         because that is what it is from the legs' seat: the persona brain
         is this pipeline's model, and the frames that open and close a
         model's answer are what tell the speaking leg a turn is whole.
+        The pipeline's own mark goes last, and is what says the turn came
+        all the way through — see :class:`TurnSpoken`.
         """
+        self._before_turn()
         self._sink.before_speaking()
         await self._worker.queue_frames(
             [
                 LLMFullResponseStartFrame(),
                 TextFrame(text),
                 LLMFullResponseEndFrame(),
+                TurnSpoken(),
             ]
         )
         await self._reach(self._sink.spoken)
@@ -356,42 +447,92 @@ class VoicePipeline:
             "agent_speech_duration",
             spoken_seconds(speech.pcm, speech.sample_rate_hz),
         )
+        self._before_turn()
         self._sink.before_hearing()
-        await self._worker.queue_frame(
-            InputAudioRawFrame(
-                audio=speech.pcm,
-                sample_rate=speech.sample_rate_hz,
-                num_channels=1,
-            )
+        # The audio is one whole turn — the plug hands over nothing less —
+        # so the pipeline knows exactly where the agent started and stopped
+        # speaking and says so, twice over. It marks the boundary with the
+        # frames a transcriber commits on, and it carries the turn's last
+        # word into the pause a real line would have had after it, because
+        # hearing the speaker stop is what a transcriber trusts and being
+        # told is what it merely races. The pause is added to what is heard
+        # and never to what was measured: the numbers above are the
+        # agent's, not this pipeline's.
+        heard = speech.pcm + silence(
+            self._legs.trailing_quiet_seconds, speech.sample_rate_hz
         )
-        await self._reach(self._sink.heard)
+        await self._worker.queue_frames(
+            [
+                VADUserStartedSpeakingFrame(),
+                InputAudioRawFrame(
+                    audio=heard,
+                    sample_rate=speech.sample_rate_hz,
+                    num_channels=1,
+                ),
+                VADUserStoppedSpeakingFrame(),
+            ]
+        )
+        if not await self._reach(self._sink.heard, within=HEARD_NOTHING_SECONDS):
+            logger.info(
+                "the listening leg found no words in a turn of audio; the "
+                "turn is recorded as one that carried none"
+            )
+            return ""
         return self._sink.words_heard
 
     async def _measure(self, measure: str, seconds: float) -> None:
         if self._on_timing is not None:
             await self._on_timing(measure, seconds * 1000)
 
-    async def _reach(self, event: asyncio.Event) -> None:
-        """Wait for one point in the pipeline, or say plainly that it is gone.
+    async def _reach(
+        self, event: asyncio.Event, *, within: float | None = None
+    ) -> bool:
+        """Wait for one point in the pipeline, or say plainly what stopped it.
 
         Racing the wait against the pipeline's own task is what stops a
         pipeline that ended early — a leg that raised, a worker cancelled —
-        from becoming a simulation that hangs until its duration limit.
+        from becoming a simulation that hangs until its duration limit. A
+        leg that refused this turn is raced the same way and for the same
+        reason, and its refusal is quoted rather than summarised: what a
+        provider says about a key or a plan is the whole diagnosis.
+
+        ``within`` gives up rather than raising, answering ``False``. Only
+        one caller uses it, and :data:`HEARD_NOTHING_SECONDS` says why.
         """
         if self._running is None:
             raise PipelineGone("the voice pipeline was driven before it was opened")
         waiting = asyncio.ensure_future(event.wait())
+        faulted = asyncio.ensure_future(self._faulted.wait())
         try:
             done, _pending = await asyncio.wait(
-                {waiting, self._running}, return_when=asyncio.FIRST_COMPLETED
+                {waiting, faulted, self._running},
+                return_when=asyncio.FIRST_COMPLETED,
+                timeout=within,
             )
         finally:
-            if not waiting.done():
-                waiting.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await waiting
-        if waiting not in done:
-            raise PipelineGone("the voice pipeline ended before the turn did")
+            for unfinished in (waiting, faulted):
+                if not unfinished.done():
+                    unfinished.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await unfinished
+        if waiting in done:
+            return True
+        if faulted in done:
+            raise SpeechFault(f"a speech leg refused this turn: {self._fault}")
+        if not done:
+            return False
+        raise PipelineGone("the voice pipeline ended before the turn did")
+
+    def _before_turn(self) -> None:
+        """Forget any earlier refusal, so a turn answers for itself.
+
+        A leg can complain between turns — a transcriber reconnecting says
+        so — and an exchange that carried on regardless is an exchange
+        that was fine. What ends a simulation is a refusal landing while a
+        turn is waiting on the leg that refused.
+        """
+        self._faulted.clear()
+        self._fault = ""
 
     async def _finish(self) -> None:
         """Stop recording, write what was heard, and end the pipeline.
@@ -401,6 +542,14 @@ class VoicePipeline:
         written is logged and dropped — it would otherwise eat the walk's
         own answer, and the report simply carries no audio.
         """
+        try:
+            await self._end_pipeline()
+        finally:
+            # The legs were built when the pipeline was assembled, so they
+            # have something to release even if the exchange never opened.
+            await self._legs.aclose()
+
+    async def _end_pipeline(self) -> None:
         if self._running is None:
             return
         try:
