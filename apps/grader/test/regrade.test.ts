@@ -12,11 +12,13 @@ import {
   aThreshold,
   conductSimulation,
   eventually,
+  jobFor,
   makeWorld,
   runService,
   seedGrader,
   seedTest,
   testConfig,
+  verdictsOn,
   type ConductedSimulation,
   type World,
 } from "./support/world.ts";
@@ -42,23 +44,12 @@ let world: World;
 let service: Service;
 let graderId: string;
 
-/** The conversation's rows once there are at least this many. */
-async function verdictsOn(
-  simulationId: string,
-  atLeast: number,
-): Promise<readonly RecordedVerdict[]> {
-  return eventually(`${atLeast} verdicts on ${simulationId}`, async () => {
-    const read = await readVerdicts(world.auth, simulationId);
-    return read.verdicts.length >= atLeast ? read.verdicts : undefined;
-  });
-}
-
 /** One judged conversation the agent answered quickly. */
 async function aFastConversation(): Promise<ConductedSimulation> {
   const conducted = await conductSimulation(world, {
     metrics: { turn_response_latency: [900, 1_100] },
   });
-  await verdictsOn(conducted.simulationId, 1);
+  await verdictsOn(world, conducted.simulationId, 1);
   return conducted;
 }
 
@@ -98,8 +89,8 @@ describe("editing a grader", () => {
     judged = await aFastConversation();
     alsoJudged = await aFastConversation();
 
-    before = await verdictsOn(judged.simulationId, 1);
-    alsoBefore = await verdictsOn(alsoJudged.simulationId, 1);
+    before = await verdictsOn(world, judged.simulationId, 1);
+    alsoBefore = await verdictsOn(world, alsoJudged.simulationId, 1);
     expect(before[0]).toMatchObject({ verdict: "passed", priority: "P1" });
 
     // The edit: a tighter threshold, and the warning promoted to a blocker.
@@ -143,7 +134,7 @@ describe("editing a grader", () => {
       const asked = await regrade(world.auth, { runId: judged.runId });
       expect(asked?.reopened).toHaveLength(1);
 
-      const rows = await verdictsOn(judged.simulationId, 2);
+      const rows = await verdictsOn(world, judged.simulationId, 2);
       expect(rows).toHaveLength(2);
 
       const first = before[0];
@@ -231,7 +222,7 @@ describe("a re-grade of a window", () => {
   it("re-judges what became judgeable inside it, at the grader's current version", async () => {
     const from = new Date();
     const judged = await aFastConversation();
-    const before = await verdictsOn(judged.simulationId, 1);
+    const before = await verdictsOn(world, judged.simulationId, 1);
 
     const edited = await editGrader(world.auth, graderId, {
       config: {
@@ -250,7 +241,7 @@ describe("a re-grade of a window", () => {
       judged.simulationId,
     ]);
 
-    const rows = await verdictsOn(judged.simulationId, 2);
+    const rows = await verdictsOn(world, judged.simulationId, 2);
     const versions = new Set(rows.map((row) => row.graderVersionId));
 
     expect(versions.size).toBe(2);
@@ -289,13 +280,7 @@ describe("a re-grade that names one grader", () => {
 
   /** The conversation judged and settled, so the next ask is a re-grade. */
   async function judgedAndSettled(): Promise<readonly RecordedVerdict[]> {
-    await eventually(`the job for ${conducted.simulationId}`, async () => {
-      const [only] = await listGradingJobsForSimulation(
-        world.auth,
-        conducted.simulationId,
-      );
-      return only?.status === "graded" ? only : undefined;
-    });
+    await jobFor(world, { simulationId: conducted.simulationId }, "graded");
     return (await readVerdicts(world.auth, conducted.simulationId)).verdicts;
   }
 
@@ -322,7 +307,7 @@ describe("a re-grade that names one grader", () => {
       metrics: { turn_response_latency: [900, 1_100] },
     });
 
-    before = await verdictsOn(conducted.simulationId, 3);
+    before = await verdictsOn(world, conducted.simulationId, 3);
     await judgedAndSettled();
     expect(rowsFrom(before, alsoJudging)).toHaveLength(1);
     expect(rowsFrom(before, graderId)).toHaveLength(1);

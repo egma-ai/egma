@@ -12,7 +12,10 @@ import {
   disconnect,
   disconnectClickHouse,
   failSimulation,
+  getGradingJobForTrace,
   getSimulation,
+  listGradingJobsForSimulation,
+  readVerdicts,
   recordProductionTraces,
   setJudgeConfiguration,
   startRun,
@@ -20,8 +23,10 @@ import {
   type AuthContext,
   type ExpectedBehaviorInput,
   type FailedEndingReason,
+  type GradingJob,
   type NewGrader,
   type NewSpan,
+  type RecordedVerdict,
 } from "@egma/db";
 
 import {
@@ -37,6 +42,7 @@ import type { Config } from "../../src/config.ts";
 import type { JudgeMakers } from "../../src/judge/index.ts";
 import { makeLog, type Log } from "../../src/log.ts";
 import { startService, type Service } from "../../src/service.ts";
+import { scriptedJudge, type Scripted, type ScriptedJudge } from "./scripted-judge.ts";
 
 /**
  * A whole deployment, small enough to reason about: two stores of its own, one
@@ -46,6 +52,12 @@ import { startService, type Service } from "../../src/service.ts";
  * behaviours — the notification a transaction raises, the lock that keeps two
  * copies off one conversation, the replace semantics of a re-grade. A substitute
  * would confirm the calls egma makes and nothing about what they do.
+ *
+ * Beside the world, what every file in this suite waits on: the verdicts of one
+ * conversation, the job behind it, and one running copy of the service. They are
+ * here rather than in each file because they are all the same shape of mistake —
+ * asserting before the engine has got there, or after another copy has — and a
+ * hand-written copy of the wait is where that mistake gets made.
  */
 
 export type World = {
@@ -536,6 +548,126 @@ export function runService(
     log: options.log ?? makeLog(config.logLevel, config.claimant),
     ...(options.makers === undefined ? {} : { makers: options.makers }),
   });
+}
+
+/**
+ * One copy of the service at a time, for a file whose cases each judge with
+ * their own scripted answers.
+ *
+ * **Stopping means stopped and waited out**, not asked to stop: a copy still
+ * finishing its claim when the next case conducts a conversation would judge
+ * that conversation with the previous case's answers, and the failure would land
+ * in whichever case ran second. Held here rather than written out in every file
+ * that needs it, because that is exactly the mistake a hand-written copy makes
+ * once and then flakes forever.
+ *
+ * Starting stops whatever is running first, so "exactly one copy is ever
+ * claiming" is a property of this object rather than of everybody remembering
+ * the pair of calls.
+ */
+export type OneService = {
+  /** Started, with whatever was running stopped and waited out first. */
+  start(config?: Config, options?: ServiceUnderTest): Promise<Service>;
+  /**
+   * Started behind a judge that answers as scripted, and the scripted judge
+   * handed back — which is the whole of what most cases want.
+   */
+  judgingWith(
+    answers: Readonly<Record<string, Scripted>>,
+    config?: Config,
+  ): Promise<ScriptedJudge>;
+  /** Stopped and waited out. Doing it with nothing running is not an error. */
+  stop(): Promise<void>;
+};
+
+export function oneServiceAtATime(): OneService {
+  let running: Service | undefined;
+
+  const stop = async (): Promise<void> => {
+    if (running === undefined) return;
+    running.stop();
+    await running.finished;
+    running = undefined;
+  };
+
+  const start = async (
+    config: Config = testConfig(),
+    options: ServiceUnderTest = {},
+  ): Promise<Service> => {
+    await stop();
+    running = runService(config, options);
+    return running;
+  };
+
+  return {
+    start,
+    stop,
+    async judgingWith(answers, config) {
+      const judge = scriptedJudge({ answers });
+      await start(config, { makers: judge.makers });
+      return judge;
+    },
+  };
+}
+
+/**
+ * The verdicts on one conversation, once there are at least this many.
+ *
+ * The conversation is a simulation or a production trace and this does not ask
+ * which: a verdict is filed under the conversation it judges, and both sources
+ * name theirs the same way.
+ */
+export async function verdictsOn(
+  world: World,
+  conversationId: string,
+  atLeast = 1,
+): Promise<readonly RecordedVerdict[]> {
+  return eventually(`${atLeast} verdicts on ${conversationId}`, async () => {
+    const read = await readVerdicts(world.auth, conversationId);
+    return read.verdicts.length >= atLeast ? read.verdicts : undefined;
+  });
+}
+
+/**
+ * The one job behind a conversation, once it has reached a state worth
+ * asserting on.
+ *
+ * Which read finds it is the one thing the two sources differ on — a simulation
+ * has its run's jobs listed under it, a production trace is looked up by the id
+ * it arrived with — so naming the conversation is naming which. Waiting for the
+ * job to be `graded` is also how a case leaves the queue quiet behind it: a job
+ * still claimable when the next case starts its own copy would be judged again,
+ * by a judge scripted for something else.
+ */
+export async function jobFor(
+  world: World,
+  conversation:
+    | { readonly simulationId: string }
+    | { readonly traceId: string },
+  settled: GradingJob["status"],
+  withinMilliseconds?: number,
+): Promise<GradingJob> {
+  const named =
+    "simulationId" in conversation
+      ? conversation.simulationId
+      : conversation.traceId;
+
+  return eventually(
+    `the job for ${named} to be ${settled}`,
+    async () => {
+      const job =
+        "simulationId" in conversation
+          ? (
+              await listGradingJobsForSimulation(
+                world.auth,
+                conversation.simulationId,
+              )
+            )[0]
+          : await getGradingJobForTrace(world.auth, conversation.traceId);
+      return job?.status === settled ? job : undefined;
+    },
+    withinMilliseconds,
+  );
 }
 
 /**

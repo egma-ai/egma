@@ -3,7 +3,6 @@ import {
   listGradingJobsForSimulation,
   readVerdicts,
   reopenGradingJob,
-  type GradingJob,
 } from "@egma/db";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
@@ -11,6 +10,7 @@ import {
   aThreshold,
   conductSimulation,
   eventually,
+  jobFor,
   makeWorld,
   runService,
   seedGrader,
@@ -63,21 +63,6 @@ function aCopy(claimant: string): Service {
   return service;
 }
 
-/** The one job a conversation has, once it has settled into a state. */
-async function jobFor(
-  simulationId: string,
-  settled: GradingJob["status"],
-): Promise<GradingJob> {
-  return eventually(
-    `job for ${simulationId} to be ${settled}`,
-    async () => {
-      const [only] = await listGradingJobsForSimulation(world.auth, simulationId);
-      return only?.status === settled ? only : undefined;
-    },
-    30_000,
-  );
-}
-
 /**
  * How many rows the store actually holds for this conversation, **without
  * `FINAL`** — which is the only way to tell "one copy wrote once" apart from
@@ -117,7 +102,7 @@ describe("two copies running at once", () => {
 
     const held = new Set<string>();
     for (const { simulationId } of conducted) {
-      const job = await jobFor(simulationId, "graded");
+      const job = await jobFor(world, { simulationId }, "graded", 30_000);
       held.add(job.claimedBy ?? "");
 
       // One grader, one dimension, one row — and asked of the store directly,
@@ -160,7 +145,7 @@ describe("a copy that died holding a conversation", () => {
     );
 
     aCopy("grader-that-lived");
-    const job = await jobFor(simulationId, "graded");
+    const job = await jobFor(world, { simulationId }, "graded", 30_000);
 
     expect(job.claimedBy).toBe("grader-that-lived");
     expect(job.attempts).toBe(2);
@@ -184,7 +169,7 @@ describe("judging one conversation again at the same grader version", () => {
     aCopy("grader-again");
 
     const { simulationId } = await conductSimulation(world);
-    const first = await jobFor(simulationId, "graded");
+    const first = await jobFor(world, { simulationId }, "graded", 30_000);
 
     const before = await readVerdicts(world.auth, simulationId);
     expect(before.verdicts).toHaveLength(1);

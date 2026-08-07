@@ -1,7 +1,6 @@
 import {
   getGrader,
   getJudgeConfiguration,
-  listGradingJobsForSimulation,
   readVerdicts,
   type AuthContext,
   type RecordedVerdict,
@@ -13,8 +12,9 @@ import {
   capturedLog,
   conductSimulation,
   eventually,
+  jobFor,
   makeWorld,
-  runService,
+  oneServiceAtATime,
   seedGrader,
   seedJudge,
   seedTest,
@@ -24,7 +24,6 @@ import {
 } from "./support/world.ts";
 import { met, scriptedJudge } from "./support/scripted-judge.ts";
 import { projectJudge, NoJudge } from "../src/judge/index.ts";
-import type { Service } from "../src/service.ts";
 
 /**
  * Which judge answers, where its key comes from, and where the key never goes.
@@ -40,16 +39,9 @@ import type { Service } from "../src/service.ts";
  */
 
 let world: World;
-let service: Service | undefined;
+const service = oneServiceAtATime();
 
 const BEHAVIOR = "confirms the new time back before finishing";
-
-async function stopService(): Promise<void> {
-  if (service === undefined) return;
-  service.stop();
-  await service.finished;
-  service = undefined;
-}
 
 function behaviorRows(
   verdicts: readonly RecordedVerdict[],
@@ -73,14 +65,13 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await stopService();
+  await service.stop();
   await world.drop();
 });
 
 describe("a project that configured no judge", () => {
   it("says so on every behavior, and never quietly passes one", async () => {
-    const judge = scriptedJudge({ answers: {} });
-    service = runService(testConfig(), { makers: judge.makers });
+    const judge = await service.judgingWith({});
 
     const testId = await seedTest(world, [], [BEHAVIOR, "never quotes a price"]);
     const { simulationId } = await conductSimulation(world, {
@@ -104,7 +95,7 @@ describe("a project that configured no judge", () => {
     }
     expect(judge.asked).toEqual([]);
 
-    await stopService();
+    await service.stop();
   });
 
   it("is what the resolver says, before anything else asks", async () => {
@@ -184,13 +175,11 @@ describe("the project's default judge", () => {
   });
 
   it("names itself on every row it judged, and never the account behind it", async () => {
-    await stopService();
-
     const judge = scriptedJudge({
       answers: { [BEHAVIOR]: met("the new time was read back at turn 5.", [5]) },
     });
     const captured = capturedLog();
-    service = runService(testConfig({ logLevel: "DEBUG" }), {
+    await service.start(testConfig({ logLevel: "DEBUG" }), {
       makers: judge.makers,
       log: captured.log,
     });
@@ -206,10 +195,7 @@ describe("the project's default judge", () => {
       const rows = behaviorRows(read.verdicts);
       return rows.length > 0 ? rows : undefined;
     });
-    await eventually("the job to be graded", async () => {
-      const [only] = await listGradingJobsForSimulation(world.auth, simulationId);
-      return only?.status === "graded" ? only : undefined;
-    });
+    await jobFor(world, { simulationId }, "graded");
 
     expect(verdicts[0]).toMatchObject({
       graderId: "expected_behaviors",

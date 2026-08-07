@@ -1,31 +1,26 @@
-import {
-  listGradingJobsForSimulation,
-  readVerdicts,
-  type RecordedVerdict,
-} from "@egma/db";
+import { readVerdicts, type RecordedVerdict } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   aConversation,
   aThreshold,
   conductSimulation,
-  eventually,
+  jobFor,
   makeWorld,
-  runService,
+  oneServiceAtATime,
   seedGrader,
   seedJudge,
   seedTest,
-  testConfig,
+  verdictsOn,
   type World,
 } from "./support/world.ts";
 import {
   cannotDetermine,
   met,
   notMet,
-  scriptedJudge,
   type Scripted,
+  type ScriptedJudge,
 } from "./support/scripted-judge.ts";
-import type { Service } from "../src/service.ts";
 
 /**
  * The built-in grader: a test's expected behaviors, judged one at a time.
@@ -43,7 +38,7 @@ import type { Service } from "../src/service.ts";
  */
 
 let world: World;
-let service: Service | undefined;
+const service = oneServiceAtATime();
 
 const FIRST = "confirms the new time back before finishing";
 const SECOND = "never quotes a price";
@@ -56,16 +51,6 @@ const THREE = [
   { behavior: THIRD, priority: "P2" as const },
 ];
 
-async function verdictsOn(
-  simulationId: string,
-  atLeast: number,
-): Promise<readonly RecordedVerdict[]> {
-  return eventually(`${atLeast} verdicts on ${simulationId}`, async () => {
-    const read = await readVerdicts(world.auth, simulationId);
-    return read.verdicts.length >= atLeast ? read.verdicts : undefined;
-  });
-}
-
 /** The behaviors' rows, in dimension order, whatever else judged the same run. */
 function behaviorRows(
   verdicts: readonly RecordedVerdict[],
@@ -73,14 +58,6 @@ function behaviorRows(
   return [...verdicts]
     .filter((verdict) => verdict.graderId === "expected_behaviors")
     .sort((left, right) => left.dimension.localeCompare(right.dimension));
-}
-
-/** The running service stopped and waited out, so nothing re-claims behind us. */
-async function stopService(): Promise<void> {
-  if (service === undefined) return;
-  service.stop();
-  await service.finished;
-  service = undefined;
 }
 
 /**
@@ -95,13 +72,10 @@ async function judgedWith(
   landing: Parameters<typeof conductSimulation>[1] = {},
 ): Promise<{
   readonly simulationId: string;
-  readonly judge: ReturnType<typeof scriptedJudge>;
+  readonly judge: ScriptedJudge;
   readonly verdicts: readonly RecordedVerdict[];
 }> {
-  await stopService();
-
-  const judge = scriptedJudge({ answers });
-  service = runService(testConfig(), { makers: judge.makers });
+  const judge = await service.judgingWith(answers);
 
   const testId = await seedTest(world, [], THREE);
   const { simulationId } = await conductSimulation(world, {
@@ -110,14 +84,11 @@ async function judgedWith(
     ...landing,
   });
 
-  const verdicts = await verdictsOn(simulationId, THREE.length);
+  const verdicts = await verdictsOn(world, simulationId, THREE.length);
   // Waited out before the case returns, so the job is finished rather than
   // merely written: a job still claimable when the next case starts its own
   // copy would be judged a second time, by a judge scripted for another test.
-  await eventually(`the job for ${simulationId} to be graded`, async () => {
-    const [only] = await listGradingJobsForSimulation(world.auth, simulationId);
-    return only?.status === "graded" ? only : undefined;
-  });
+  await jobFor(world, { simulationId }, "graded");
 
   return { simulationId, judge, verdicts };
 }
@@ -128,7 +99,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await stopService();
+  await service.stop();
   await world.drop();
 });
 
@@ -317,16 +288,13 @@ describe("a simulation born from no test", () => {
    * "no behavior rows" an observation rather than a timeout.
    */
   it("has no behavior rows at all, which is not the same as failing any", async () => {
-    await stopService();
-
-    const judge = scriptedJudge({ answers: {} });
-    service = runService(testConfig(), { makers: judge.makers });
+    const judge = await service.judgingWith({});
     await seedGrader(world, aThreshold({ name: "Latency, on an untested call" }));
 
     const { simulationId } = await conductSimulation(world, {
       transcript: aConversation(),
     });
-    const verdicts = await verdictsOn(simulationId, 1);
+    const verdicts = await verdictsOn(world, simulationId, 1);
 
     expect(behaviorRows(verdicts)).toEqual([]);
     expect(verdicts.map((verdict) => verdict.dimension)).toEqual([

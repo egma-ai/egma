@@ -1,21 +1,14 @@
-import {
-  listGradingJobsForSimulation,
-  readVerdicts,
-  type RecordedVerdict,
-} from "@egma/db";
+import { readVerdicts, type RecordedVerdict } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { Conversation } from "../src/conversation.ts";
 import { execute, type Judgment } from "../src/graders/index.ts";
 import { NoJudge, type JudgeResolution } from "../src/judge/index.ts";
-import type { Service } from "../src/service.ts";
 import {
   cannotDetermine,
   met,
   notMet,
-  scriptedJudge,
   scriptedJudging,
-  type Scripted,
 } from "./support/scripted-judge.ts";
 import {
   aConversation,
@@ -23,11 +16,11 @@ import {
   aThreshold,
   conductSimulation,
   eventually,
+  jobFor,
   makeWorld,
-  runService,
+  oneServiceAtATime,
   seedGrader,
   seedJudge,
-  testConfig,
   A_RUBRIC,
   THE_JUDGE_KEY,
   type World,
@@ -49,14 +42,7 @@ import {
  */
 
 let world: World;
-let service: Service | undefined;
-
-async function stopService(): Promise<void> {
-  if (service === undefined) return;
-  service.stop();
-  await service.finished;
-  service = undefined;
-}
+const service = oneServiceAtATime();
 
 /** The rows one grader wrote, once the conversation has been judged. */
 async function rowsFrom(
@@ -75,21 +61,8 @@ async function rowsFrom(
   // Waited out before the case returns, so the job is finished rather than
   // merely written: a job still claimable when the next case starts its own
   // copy would be judged again, by a judge scripted for another case.
-  await eventually(`the job for ${simulationId} to be graded`, async () => {
-    const [only] = await listGradingJobsForSimulation(world.auth, simulationId);
-    return only?.status === "graded" ? only : undefined;
-  });
+  await jobFor(world, { simulationId }, "graded");
   return found;
-}
-
-/** One conversation judged by a judge that answers as scripted. */
-async function judgedWith(
-  answers: Readonly<Record<string, Scripted>>,
-): Promise<ReturnType<typeof scriptedJudge>> {
-  await stopService();
-  const judge = scriptedJudge({ answers });
-  service = runService(testConfig(), { makers: judge.makers });
-  return judge;
 }
 
 beforeAll(async () => {
@@ -98,14 +71,14 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await stopService();
+  await service.stop();
   await world.drop();
 });
 
 describe("a rubric judged on the project's own judge", () => {
   it("is one call, one dimension and one row naming the judge that answered", async () => {
     const graderId = await seedGrader(world, aRubric());
-    const judge = await judgedWith({
+    const judge = await service.judgingWith({
       [A_RUBRIC]: met("the agent said sorry at turn 3.", [3]),
     });
 
@@ -143,7 +116,7 @@ describe("a rubric judged on the project's own judge", () => {
       world,
       aRubric({ name: "Undecidable", config: { rubric: "Was it warm enough?" } }),
     );
-    await judgedWith({
+    await service.judgingWith({
       "Was it warm enough?": cannotDetermine("the caller never said."),
       [A_RUBRIC]: met("sorry at turn 3.", [3]),
     });
@@ -182,7 +155,7 @@ describe("a rubric judged on the project's own judge", () => {
       world,
       aThreshold({ name: "Latency beside a broken judge" }),
     );
-    await judgedWith({
+    await service.judgingWith({
       "Did the agent stay on policy?": new Error(
         "the judge model answered 503: upstream unavailable",
       ),
@@ -223,7 +196,7 @@ describe("a rubric on a grader that names its own judge", () => {
         judgeModel: { provider: "openai", model: "gpt-4.1" },
       }),
     );
-    const judge = await judgedWith({
+    const judge = await service.judgingWith({
       "Did the agent handle the objection gracefully?": notMet(
         "the objection was talked over.",
       ),

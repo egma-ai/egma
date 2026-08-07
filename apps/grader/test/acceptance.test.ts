@@ -1,21 +1,20 @@
 import {
   claimGradingJobs,
   getGradingJob,
-  listGradingJobsForSimulation,
   readVerdicts,
-  type RecordedVerdict,
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   aThreshold,
   conductSimulation,
-  eventually,
+  jobFor,
   makeWorld,
   runService,
   seedGrader,
   seedTest,
   testConfig,
+  verdictsOn,
   type World,
 } from "./support/world.ts";
 import type { Service } from "../src/service.ts";
@@ -44,17 +43,6 @@ import type { Service } from "../src/service.ts";
 let world: World;
 let service: Service;
 
-/** The verdicts on one conversation, once there are any. */
-async function verdictsOn(
-  simulationId: string,
-  atLeast = 1,
-): Promise<readonly RecordedVerdict[]> {
-  return eventually(`verdicts on ${simulationId}`, async () => {
-    const read = await readVerdicts(world.auth, simulationId);
-    return read.verdicts.length >= atLeast ? read.verdicts : undefined;
-  });
-}
-
 beforeAll(async () => {
   world = await makeWorld("grader_acceptance");
   service = runService(testConfig());
@@ -75,7 +63,7 @@ describe("a conversation reaching its terminal transition", () => {
       metrics: { turn_response_latency: [900, 1_100] },
     });
 
-    const verdicts = await verdictsOn(simulationId);
+    const verdicts = await verdictsOn(world, simulationId);
 
     // The service's backstop sweep is an hour out, so anything that arrived in
     // seconds arrived because the terminal transition woke it.
@@ -93,7 +81,7 @@ describe("a conversation reaching its terminal transition", () => {
       metrics: { turn_response_latency: [900, 9_100] },
     });
 
-    const verdicts = await verdictsOn(simulationId, 2);
+    const verdicts = await verdictsOn(world, simulationId, 2);
     const mine = verdicts.find((verdict) => verdict.graderId === graderId);
 
     expect(mine).toMatchObject({
@@ -124,7 +112,7 @@ describe("a conversation reaching its terminal transition", () => {
     );
 
     const { simulationId } = await conductSimulation(world);
-    const verdicts = await verdictsOn(simulationId, 3);
+    const verdicts = await verdictsOn(world, simulationId, 3);
     const graders = new Set(verdicts.map((verdict) => verdict.graderId));
 
     expect(graders.has(judging)).toBe(true);
@@ -141,7 +129,7 @@ describe("a conversation reaching its terminal transition", () => {
     const testId = await seedTest(world, [attached]);
 
     const { simulationId } = await conductSimulation(world, { testId });
-    const verdicts = await verdictsOn(simulationId, 3);
+    const verdicts = await verdictsOn(world, simulationId, 3);
 
     // Named by the test, so it judges this conversation whatever its project
     // scope says: naming it is the scoping decision, made per test.
@@ -155,7 +143,7 @@ describe("a conversation reaching its terminal transition", () => {
     const testId = await seedTest(world, [both]);
 
     const { simulationId } = await conductSimulation(world, { testId });
-    const verdicts = await verdictsOn(simulationId, 3);
+    const verdicts = await verdictsOn(world, simulationId, 3);
 
     expect(
       verdicts.filter((verdict) => verdict.graderId === both),
@@ -176,7 +164,7 @@ describe("a simulation that never ran", () => {
       failedBecause: "agent_never_joined",
     });
 
-    const verdicts = await verdictsOn(simulationId);
+    const verdicts = await verdictsOn(world, simulationId);
 
     expect(verdicts.length).toBeGreaterThan(0);
     for (const verdict of verdicts) {
@@ -190,7 +178,7 @@ describe("a simulation that never ran", () => {
     const { simulationId } = await conductSimulation(world, {
       failedBecause: "not_answered",
     });
-    await verdictsOn(simulationId);
+    await verdictsOn(world, simulationId);
 
     const read = await readVerdicts(world.auth, simulationId);
     expect(read.outcome.verdict).toBe("errored");
@@ -215,7 +203,7 @@ describe("a completed conversation missing the measure a grader wants", () => {
     const { simulationId } = await conductSimulation(world, {
       metrics: { turn_response_latency: [900] },
     });
-    await verdictsOn(simulationId, 2);
+    await verdictsOn(world, simulationId, 2);
 
     const read = await readVerdicts(world.auth, simulationId);
     const skipped = read.verdicts.filter(
@@ -237,12 +225,9 @@ describe("the job behind it", () => {
   it("is finished once the verdicts are written, and never handed out again", async () => {
     await seedGrader(world, aThreshold({ name: "One more" }));
     const { simulationId } = await conductSimulation(world);
-    await verdictsOn(simulationId);
+    await verdictsOn(world, simulationId);
 
-    const job = await eventually("the job to be graded", async () => {
-      const [only] = await listGradingJobsForSimulation(world.auth, simulationId);
-      return only?.status === "graded" ? only : undefined;
-    });
+    const job = await jobFor(world, { simulationId }, "graded");
 
     expect(job).toMatchObject({ status: "graded", claimedBy: "grader-under-test" });
     expect(job.finishedAt).toBeInstanceOf(Date);

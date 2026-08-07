@@ -5,7 +5,6 @@ import {
   listGraders,
   readTrace,
   readVerdicts,
-  type RecordedVerdict,
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -16,11 +15,13 @@ import {
   conductSimulation,
   eventually,
   exportALateFlush,
+  jobFor,
   makeWorld,
   runService,
   seedGrader,
   seedTest,
   testConfig,
+  verdictsOn,
   type World,
 } from "./support/world.ts";
 import type { Service } from "../src/service.ts";
@@ -42,24 +43,6 @@ import type { Service } from "../src/service.ts";
 
 let world: World;
 let service: Service;
-
-async function verdictsOn(
-  traceId: string,
-  atLeast = 1,
-): Promise<readonly RecordedVerdict[]> {
-  return eventually(`verdicts on ${traceId}`, async () => {
-    const read = await readVerdicts(world.auth, traceId);
-    return read.verdicts.length >= atLeast ? read.verdicts : undefined;
-  });
-}
-
-/** The job behind a trace, once it has reached a state worth asserting on. */
-async function jobFor(traceId: string, status: string) {
-  return eventually(`the job for ${traceId} to be ${status}`, async () => {
-    const job = await getGradingJobForTrace(world.auth, traceId);
-    return job?.status === status ? job : undefined;
-  });
-}
 
 beforeAll(async () => {
   world = await makeWorld("grader_production");
@@ -96,7 +79,7 @@ describe("a production trace whose root span closes", () => {
     await seedTest(world, [attached]);
 
     const { traceId } = await conductProductionTrace(world);
-    const verdicts = await verdictsOn(traceId, 2);
+    const verdicts = await verdictsOn(world, traceId, 2);
     const judged = new Set(verdicts.map((verdict) => verdict.graderId));
 
     expect(judged.has(monitoring)).toBe(true);
@@ -118,7 +101,7 @@ describe("a production trace whose root span closes", () => {
     await seedTest(world, []);
 
     const { traceId } = await conductProductionTrace(world);
-    const verdicts = await verdictsOn(traceId);
+    const verdicts = await verdictsOn(world, traceId);
 
     expect(
       verdicts.map((verdict) => verdict.dimension),
@@ -144,7 +127,7 @@ describe("a production trace whose root span closes", () => {
     );
 
     const { traceId } = await conductProductionTrace(world);
-    const verdicts = await verdictsOn(traceId);
+    const verdicts = await verdictsOn(world, traceId);
     const mine = verdicts.find((verdict) => verdict.graderId === graderId);
 
     expect(mine).toMatchObject({
@@ -164,7 +147,7 @@ describe("a production trace whose root span closes", () => {
 
   it("folds identically to a simulation's, over the same rows", async () => {
     const { traceId } = await conductProductionTrace(world);
-    await verdictsOn(traceId);
+    await verdictsOn(world, traceId);
 
     const read = await readVerdicts(world.auth, traceId);
 
@@ -182,9 +165,9 @@ describe("a production trace whose root span closes", () => {
 
   it("is judged once, and a late export does not queue a second judgment", async () => {
     const { traceId } = await conductProductionTrace(world);
-    await verdictsOn(traceId);
+    await verdictsOn(world, traceId);
 
-    const job = await jobFor(traceId, "graded");
+    const job = await jobFor(world, { traceId }, "graded");
     expect(job.finishedAt).toBeInstanceOf(Date);
     expect(job.rootClosedAt).toBeInstanceOf(Date);
 
@@ -220,7 +203,7 @@ describe("a production trace whose root span closes", () => {
       ],
       calledTool: "reschedule_appointment",
     });
-    await jobFor(traceId, "graded");
+    await jobFor(world, { traceId }, "graded");
 
     const trace = await readTrace(world.auth, traceId, {
       window: {
@@ -307,13 +290,13 @@ describe("a production trace whose root span never closes", () => {
       expect(waiting?.status).toBe("pending");
       expect(waiting?.rootClosedAt).toBeNull();
 
-      const verdicts = await verdictsOn(traceId);
+      const verdicts = await verdictsOn(world, traceId);
       expect(verdicts.length).toBeGreaterThan(0);
       expect(verdicts.every((verdict) => verdict.source === "production")).toBe(
         true,
       );
 
-      const job = await jobFor(traceId, "graded");
+      const job = await jobFor(world, { traceId }, "graded");
       // Judged with no root ever closing it, and once: the unique on the trace
       // is what makes a second job unrepresentable rather than merely unwritten.
       expect(job.rootClosedAt).toBeNull();
@@ -344,7 +327,7 @@ describe("the production sample rate", () => {
     const judged: boolean[] = [];
     for (let trace = 0; trace < 8; trace += 1) {
       const { traceId } = await conductProductionTrace(world);
-      await jobFor(traceId, "graded");
+      await jobFor(world, { traceId }, "graded");
       const read = await readVerdicts(world.auth, traceId);
       judged.push(read.verdicts.some((verdict) => verdict.graderId === sampled));
     }
@@ -376,7 +359,7 @@ describe("the production sample rate", () => {
     );
 
     const { traceId } = await conductProductionTrace(world);
-    await jobFor(traceId, "graded");
+    await jobFor(world, { traceId }, "graded");
 
     const read = await readVerdicts(world.auth, traceId);
     // Other graders did judge this trace, so the rows are certainly readable.
@@ -419,7 +402,7 @@ describe("changing where a grader applies", () => {
     );
 
     const before = await conductProductionTrace(world);
-    await jobFor(before.traceId, "graded");
+    await jobFor(world, { traceId: before.traceId }, "graded");
     const untouched = await readVerdicts(world.auth, before.traceId);
     expect(
       untouched.verdicts.some((verdict) => verdict.graderId === graderId),
@@ -461,7 +444,7 @@ describe("changing where a grader applies", () => {
     await editGrader(world.auth, graderId, { scope: "simulations" });
 
     const after = await conductProductionTrace(world);
-    await jobFor(after.traceId, "graded");
+    await jobFor(world, { traceId: after.traceId }, "graded");
 
     expect(
       (await readVerdicts(world.auth, after.traceId)).verdicts.some(
