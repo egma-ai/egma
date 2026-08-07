@@ -9,6 +9,8 @@ import aiohttp
 import pytest
 from conftest import load_fixture_spec, scripted_spec
 
+from egma_simulator.workbench.app import dialling
+
 
 async def test_a_claim_waits_and_is_answered_the_moment_a_spec_arrives(workbench):
     async with aiohttp.ClientSession() as session:
@@ -144,8 +146,6 @@ async def test_a_cancel_directive_rides_the_next_heartbeat_answer(workbench):
 
 
 def test_a_real_number_replaces_the_fixtures_placeholder():
-    from egma_simulator.workbench.app import dialling
-
     fixture = load_fixture_spec("voice-phone.json")
     assert fixture["connection"]["config"]["phoneNumber"] != "+12025550143"
 
@@ -167,8 +167,6 @@ def test_only_the_specs_that_dial_are_queued():
     """The simulator claims four at a time, so a chat fixture queued
     alongside would conduct its exchange *during* the call and interleave
     its events with the ones somebody started this to read."""
-    from egma_simulator.workbench.app import dialling
-
     every = [
         load_fixture_spec(name)
         for name in (
@@ -184,8 +182,6 @@ def test_only_the_specs_that_dial_are_queued():
 
 
 def test_a_number_with_nothing_to_dial_it_is_refused_rather_than_ignored():
-    from egma_simulator.workbench.app import dialling
-
     with pytest.raises(FileNotFoundError) as refused:
         dialling([load_fixture_spec("chat-scripted-hurried.json")], "+12025550143")
 

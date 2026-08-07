@@ -1,7 +1,7 @@
 """The one-time setup step, proved against a Twilio-shaped stub.
 
 A customer hands over what they have — an account SID, an auth token and a
-number — and gets back the four variables the driver reads. Everything
+number — and gets back the five variables the driver reads. Everything
 between those two is Twilio's own API, so it is proved the way the Retell
 plug is: against a local server that speaks the same protocol, with no
 account, no key and no network.
@@ -15,12 +15,15 @@ one credential that outlives nothing — never reaches the output.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from twilio_stub import ACCOUNT_SID, AUTH_TOKEN, TwilioStub, serving
 
 from egma_simulator.trunk import (
     ARTIFACT_NAME,
     TrunkSetupError,
+    main,
     provision,
     render,
 )
@@ -181,3 +184,98 @@ async def test_a_run_that_cannot_get_a_domain_name_says_so_rather_than_looping()
 
     assert "already in use" in str(refused.value)
     assert not stub.trunks
+
+
+async def test_the_command_itself_prints_the_configuration_and_nothing_else(
+    capsys, monkeypatch
+):
+    """The whole command, driven the way a person drives it.
+
+    Everything above calls :func:`provision` directly, which proves the
+    steps and nothing about the thing somebody actually types. This one
+    goes in through ``main`` — the arguments, the two credentials read
+    from the environment, the two roots that point it at a stub instead of
+    Twilio, and the split that makes ``> phone.env`` capture exactly the
+    configuration: the five lines on stdout, the story on stderr.
+    """
+    stub = TwilioStub()
+    async with serving(stub) as running:
+        monkeypatch.setattr(
+            "sys.argv", ["egma-trunk-setup", "--number", A_NUMBER]
+        )
+        monkeypatch.setenv("TWILIO_ACCOUNT_SID", stub.account_sid)
+        monkeypatch.setenv("TWILIO_AUTH_TOKEN", stub.auth_token)
+        monkeypatch.setenv("EGMA_TWILIO_API_ROOT", running.base_url)
+        monkeypatch.setenv("EGMA_TWILIO_TRUNKING_ROOT", running.base_url)
+
+        await asyncio.to_thread(main)
+
+    printed = capsys.readouterr()
+    assert [line.split("=", 1)[0] for line in printed.out.splitlines()] == [
+        "EGMA_SIMULATOR_MEDIA_BACKEND",
+        "EGMA_SIMULATOR_SIP_TRUNK_ADDRESS",
+        "EGMA_SIMULATOR_SIP_TRUNK_NUMBER",
+        "EGMA_SIMULATOR_SIP_TRUNK_USERNAME",
+        "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD",
+    ]
+    # The story is on the other stream, with every identifier in it, so a
+    # redirect captures the configuration and leaves the story readable.
+    assert next(iter(stub.trunks)) in printed.err
+    assert next(iter(stub.credential_lists)) in printed.err
+    assert AUTH_TOKEN not in printed.out + printed.err
+
+
+async def test_the_command_refuses_without_the_account_credentials(
+    capsys, monkeypatch
+):
+    monkeypatch.setattr("sys.argv", ["egma-trunk-setup", "--number", A_NUMBER])
+    monkeypatch.delenv("TWILIO_ACCOUNT_SID", raising=False)
+    monkeypatch.delenv("TWILIO_AUTH_TOKEN", raising=False)
+
+    with pytest.raises(SystemExit) as stopped:
+        main()
+
+    assert stopped.value.code == 2
+    said = capsys.readouterr().err
+    assert "TWILIO_ACCOUNT_SID" in said
+    assert "TWILIO_AUTH_TOKEN" in said
+
+
+async def test_an_account_too_busy_for_one_page_is_still_read_to_the_end():
+    """Twilio pages every list, and a step that read only the first page
+    would not find last week's trunk on a busy account — it would make
+    another one, on somebody's paid account, every time it ran."""
+    stub = TwilioStub(page_size=2)
+    stub.trunks = {
+        f"TKdecoy{n:026d}": {
+            "sid": f"TKdecoy{n:026d}",
+            "friendly_name": f"somebody-elses-trunk-{n}",
+            "domain_name": f"other-{n}.pstn.twilio.com",
+        }
+        for n in range(5)
+    }
+    ours = "TKours00000000000000000000000000"
+    stub.trunks[ours] = {
+        "sid": ours,
+        "friendly_name": ARTIFACT_NAME,
+        "domain_name": "egma-simulator-already.pstn.twilio.com",
+    }
+    stub.credential_lists = {
+        f"CLdecoy{n:026d}": {
+            "sid": f"CLdecoy{n:026d}",
+            "friendly_name": f"somebody-elses-list-{n}",
+        }
+        for n in range(5)
+    }
+    mine = "CLours00000000000000000000000000"
+    stub.credential_lists[mine] = {"sid": mine, "friendly_name": ARTIFACT_NAME}
+
+    trunk = await setup(stub)
+
+    # Found on a later page, both of them, and nothing new was made.
+    assert trunk.trunk_sid == ours
+    assert len(stub.trunks) == 6
+    assert len(stub.credential_lists) == 6
+    assert trunk.address == "egma-simulator-already.pstn.twilio.com"
+    # And the paging really happened rather than the page being big enough.
+    assert sum(1 for method, path in stub.calls if path == "/v1/Trunks") >= 3

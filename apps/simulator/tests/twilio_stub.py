@@ -43,6 +43,14 @@ AUTH_TOKEN = "stub-auth-token-not-a-real-secret"
 PASSWORD_RULE = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{12,}$")
 """Twilio's own rule for a SIP credential password, as documented."""
 
+DOMAIN_TAKEN = 21241
+"""Twilio's code for a termination URI somebody already holds.
+
+Written out here rather than imported from the module under test, which
+would be the two of them agreeing with each other instead of with Twilio.
+This one is what Twilio answers; the other is what the step looks for; a
+test passes only when they are the same number."""
+
 
 @dataclass
 class TwilioStub:
@@ -74,6 +82,13 @@ class TwilioStub:
     attached_lists: dict[str, list[str]] = field(default_factory=dict)
     attached_numbers: dict[str, list[str]] = field(default_factory=dict)
 
+    page_size: int = 50
+    """How many of anything one page holds, the way Twilio's default does.
+
+    Lowered by a test to put what the setup step is looking for on the
+    second page, which is the whole of what proves it reads past the
+    first."""
+
     calls: list[tuple[str, str]] = field(default_factory=list)
     """Every request served: method and path, in order."""
 
@@ -101,12 +116,43 @@ class TwilioStub:
                 content_type="application/json",
             )
 
+
+    def _paged(
+        self, request: web.Request, items: list[dict], key: str, *, trunking: bool
+    ) -> web.Response:
+        """One page of these, and Twilio's own way of naming the next.
+
+        The two APIs say "there is more" differently — the trunking one
+        puts an absolute URL under ``meta``, the older one puts a path in
+        ``next_page_uri`` — and a client that reads only one of those
+        shapes silently stops early on the other. So the stub answers in
+        both, each on its own host's endpoints.
+
+        The page size is the stub's rather than whatever the client asked
+        for, which is a server capping a page: exactly the case a client
+        has to survive.
+        """
+        page = int(request.query.get("Page", "0"))
+        window = items[page * self.page_size : (page + 1) * self.page_size]
+        body: dict = {key: window}
+        if (page + 1) * self.page_size < len(items):
+            onward = dict(request.query) | {"Page": str(page + 1)}
+            if trunking:
+                body["meta"] = {"next_page_url": str(request.url.with_query(onward))}
+            else:
+                body["next_page_uri"] = str(
+                    request.url.with_query(onward).relative()
+                )
+        return web.json_response(body)
+
     # -- The trunking API ----------------------------------------------------
 
     async def list_trunks(self, request: web.Request) -> web.Response:
         self._authorized(request)
         self.calls.append(("GET", "/v1/Trunks"))
-        return web.json_response({"trunks": list(self.trunks.values())})
+        return self._paged(
+            request, list(self.trunks.values()), "trunks", trunking=True
+        )
 
     async def create_trunk(self, request: web.Request) -> web.Response:
         self._authorized(request)
@@ -128,7 +174,10 @@ class TwilioStub:
         ):
             self.domains_already_taken = max(0, self.domains_already_taken - 1)
             return web.json_response(
-                {"code": 21241, "message": f"DomainName {domain} is already in use"},
+                {
+                    "code": DOMAIN_TAKEN,
+                    "message": f"DomainName {domain} is already in use",
+                },
                 status=400,
             )
         sid = self._sid("TK")
@@ -144,12 +193,11 @@ class TwilioStub:
         trunk_sid = request.match_info["trunk_sid"]
         self.calls.append(("GET", f"/v1/Trunks/{trunk_sid}/CredentialLists"))
         attached = self.attached_lists.get(trunk_sid, [])
-        return web.json_response(
-            {
-                "credential_lists": [
-                    self.credential_lists[sid] for sid in attached
-                ]
-            }
+        return self._paged(
+            request,
+            [self.credential_lists[sid] for sid in attached],
+            "credential_lists",
+            trunking=True,
         )
 
     async def attach_credential_list(self, request: web.Request) -> web.Response:
@@ -171,13 +219,14 @@ class TwilioStub:
         self._authorized(request)
         trunk_sid = request.match_info["trunk_sid"]
         self.calls.append(("GET", f"/v1/Trunks/{trunk_sid}/PhoneNumbers"))
-        return web.json_response(
-            {
-                "phone_numbers": [
-                    {"sid": sid, "trunk_sid": trunk_sid}
-                    for sid in self.attached_numbers.get(trunk_sid, [])
-                ]
-            }
+        return self._paged(
+            request,
+            [
+                {"sid": sid, "trunk_sid": trunk_sid}
+                for sid in self.attached_numbers.get(trunk_sid, [])
+            ],
+            "phone_numbers",
+            trunking=True,
         )
 
     async def attach_number(self, request: web.Request) -> web.Response:
@@ -206,21 +255,25 @@ class TwilioStub:
         self._authorized(request)
         self.calls.append(("GET", "/IncomingPhoneNumbers"))
         wanted = request.query.get("PhoneNumber")
-        return web.json_response(
-            {
-                "incoming_phone_numbers": [
-                    {"sid": sid, "phone_number": number}
-                    for number, sid in self.numbers.items()
-                    if wanted is None or number == wanted
-                ]
-            }
+        return self._paged(
+            request,
+            [
+                {"sid": sid, "phone_number": number}
+                for number, sid in self.numbers.items()
+                if wanted is None or number == wanted
+            ],
+            "incoming_phone_numbers",
+            trunking=False,
         )
 
     async def list_credential_lists(self, request: web.Request) -> web.Response:
         self._authorized(request)
         self.calls.append(("GET", "/SIP/CredentialLists"))
-        return web.json_response(
-            {"credential_lists": list(self.credential_lists.values())}
+        return self._paged(
+            request,
+            list(self.credential_lists.values()),
+            "credential_lists",
+            trunking=False,
         )
 
     async def create_credential_list(self, request: web.Request) -> web.Response:
@@ -238,16 +291,17 @@ class TwilioStub:
         self._authorized(request)
         list_sid = request.match_info["list_sid"]
         self.calls.append(("GET", f"/SIP/CredentialLists/{list_sid}/Credentials"))
-        return web.json_response(
-            {
-                # No password: Twilio never hands one back, which is why a
-                # re-run rotates rather than reads.
-                "credentials": [
-                    {"sid": sid, "username": held["username"]}
-                    for sid, held in self.credentials.items()
-                    if held["list_sid"] == list_sid
-                ]
-            }
+        return self._paged(
+            request,
+            # No password: Twilio never hands one back, which is why a
+            # re-run rotates rather than reads.
+            [
+                {"sid": sid, "username": held["username"]}
+                for sid, held in self.credentials.items()
+                if held["list_sid"] == list_sid
+            ],
+            "credentials",
+            trunking=False,
         )
 
     async def create_credential(self, request: web.Request) -> web.Response:
@@ -347,8 +401,9 @@ async def serving(stub: TwilioStub) -> AsyncIterator[RunningTwilioStub]:
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
-    port = site._server.sockets[0].getsockname()[1]
     try:
-        yield RunningTwilioStub(stub=stub, base_url=f"http://127.0.0.1:{port}")
+        yield RunningTwilioStub(
+            stub=stub, base_url=f"http://127.0.0.1:{runner.addresses[0][1]}"
+        )
     finally:
         await runner.cleanup()

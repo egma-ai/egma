@@ -103,12 +103,23 @@ def test_every_variable_the_code_reads_is_in_the_readme_table():
 
 def test_nothing_is_documented_that_nothing_reads():
     """The other direction, which rots more quietly: a variable somebody
-    sets carefully and nothing has read since it was renamed."""
-    read = variables_read_by_the_code()
-    for named in (ROOT / ".env.example", *COMPOSE_FILES):
+    sets carefully and nothing has read since it was renamed.
+
+    The two READMEs are in this direction too, and only this one: a
+    variable they name and nothing reads is a paragraph telling somebody
+    to do something with no effect, which is worse than silence.
+    """
+    read = variables_read_by_the_code() | DOCUMENTED_ELSEWHERE
+    named_files = (
+        ROOT / ".env.example",
+        ROOT / "README.md",
+        Path(config_module.__file__).parents[2] / "README.md",
+        *COMPOSE_FILES,
+    )
+    for named in named_files:
         stale = set(VARIABLE.findall(named.read_text(encoding="utf-8"))) - read
         assert not stale, (
-            f"{named.name} names {sorted(stale)}, which nothing reads"
+            f"{named} names {sorted(stale)}, which nothing reads"
         )
 
 

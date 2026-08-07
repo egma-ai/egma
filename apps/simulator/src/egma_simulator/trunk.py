@@ -49,7 +49,7 @@ that deployment's secrets do and in no repository.
    id the carrier will accept on an outbound call.
 
 Only the first is Twilio-specific in shape. A second carrier is a second
-module here with the same four steps and the same four variables out.
+module here with the same four steps and the same five lines out.
 """
 
 from __future__ import annotations
@@ -94,6 +94,20 @@ fifth failure is not bad luck."""
 
 REQUEST_TIMEOUT_SECONDS = 30.0
 
+PAGE_SIZE = 100
+"""How many of anything to ask for at once. Twilio pages every list, and
+its default page is 50 — on an account with more trunks or more credential
+lists than that, a step that read only the first page would decide ours
+was not there and make a second one. So every list here is read to the
+end, and this only decides how many round trips that takes."""
+
+DOMAIN_TAKEN = 21241
+"""Twilio's code for a termination URI somebody already holds.
+
+Matched as the number rather than by its sentence: the sentence is theirs
+to reword in a release note, and a rewording would turn "try another name"
+into an unexplained failure at the one step that has to survive it."""
+
 
 class TrunkSetupError(Exception):
     """Setup cannot finish, and says what the carrier said."""
@@ -111,17 +125,19 @@ class ReadyTrunk:
     password: str = field(repr=False)
 
     trunk_sid: str = ""
-    credential_list_sid: str = ""
-    credential_sid: str = ""
-    number_sid: str = ""
+    """The trunk everything else was attached to — the one identifier that
+    says whether two runs made one trunk or two."""
 
     report: tuple[str, ...] = ()
     """What was made and what was already there, one line each, with SIDs.
 
-    Not decoration: a customer who has to delete these later, or who wants
-    to see them in their own console, needs their identifiers, and a
-    command that made four things in somebody's paid account without
-    naming them is a command they have to go looking for the effects of."""
+    Not decoration, and the only place the other identifiers live: a
+    customer who has to delete these later, or who wants to find them in
+    their own console, needs them, and a command that made five things in
+    somebody's paid account without naming them is a command they have to
+    go looking for the effects of. They are carried as the sentences a
+    person reads rather than as fields, because nothing in this program
+    ever does anything with them."""
 
 
 def render(trunk: ReadyTrunk) -> str:
@@ -219,15 +235,48 @@ class TwilioAccount:
                 f"{REQUEST_TIMEOUT_SECONDS:.0f}s"
             ) from slow
 
+    async def _every(
+        self, url: str, key: str, *, params: dict[str, str] | None = None
+    ) -> list[dict]:
+        """Everything under ``key``, across as many pages as Twilio hands back.
+
+        Both of Twilio's APIs page, and they say so differently — the
+        trunking one puts the next page under ``meta``, the older one puts
+        a path in ``next_page_uri``. Reading only the first page is the
+        bug that does not look like one: on a busy account the trunk this
+        step made last week is on page two, so it makes another.
+        """
+        gathered: list[dict] = []
+        query: dict[str, str] | None = dict(params or {}) | {
+            "PageSize": str(PAGE_SIZE)
+        }
+        following: str | None = url
+        while following is not None:
+            _status, body = await self._call("GET", following, params=query)
+            gathered.extend(body.get(key, []))
+            # A next-page URL carries its own paging and its own filter;
+            # sending ours again alongside is how a page repeats forever.
+            query = None
+            following = self._next_page(body)
+        return gathered
+
+    def _next_page(self, body: dict) -> str | None:
+        onward = (body.get("meta") or {}).get("next_page_url")
+        if onward:
+            return str(onward)
+        onward = body.get("next_page_uri")
+        # The older API answers with a path rather than a URL.
+        return f"{self._api}{onward}" if onward else None
+
     # -- The four things setup needs to know or make ------------------------
 
     async def number_sid(self, number: str) -> str:
-        _status, body = await self._call(
-            "GET",
+        held_numbers = await self._every(
             self._account_path("IncomingPhoneNumbers.json"),
+            "incoming_phone_numbers",
             params={"PhoneNumber": number},
         )
-        for held in body.get("incoming_phone_numbers", []):
+        for held in held_numbers:
             if held.get("phone_number") == number:
                 return held["sid"]
         raise TrunkSetupError(
@@ -238,8 +287,7 @@ class TwilioAccount:
 
     async def trunk(self, name: str) -> tuple[dict, bool]:
         """The trunk this step made before, or a new one. True if new."""
-        _status, body = await self._call("GET", f"{self._trunking}/v1/Trunks")
-        for existing in body.get("trunks", []):
+        for existing in await self._every(f"{self._trunking}/v1/Trunks", "trunks"):
             if existing.get("friendly_name") == name:
                 return existing, False
 
@@ -254,19 +302,19 @@ class TwilioAccount:
             )
             if status < 400:
                 return made, True
-            refusals.append(str(made.get("message", "")))
-            if "already in use" not in refusals[-1]:
+            if made.get("code") != DOMAIN_TAKEN:
                 raise TrunkSetupError(_refusal(status, made))
+            refusals.append(str(made.get("message", "")))
         raise TrunkSetupError(
             f"no termination URI could be claimed in {DOMAIN_ATTEMPTS} tries — "
             f"twilio said: {refusals[-1]}"
         )
 
     async def credential_list(self, name: str) -> tuple[dict, bool]:
-        _status, body = await self._call(
-            "GET", self._account_path("SIP/CredentialLists.json")
+        held_lists = await self._every(
+            self._account_path("SIP/CredentialLists.json"), "credential_lists"
         )
-        for existing in body.get("credential_lists", []):
+        for existing in held_lists:
             if existing.get("friendly_name") == name:
                 return existing, False
         _status, made = await self._call(
@@ -287,11 +335,11 @@ class TwilioAccount:
         it somewhere, and the only place to keep it is the file this step
         is trying not to need.
         """
-        _status, body = await self._call(
-            "GET",
+        held_credentials = await self._every(
             self._account_path(f"SIP/CredentialLists/{list_sid}/Credentials.json"),
+            "credentials",
         )
-        for held in body.get("credentials", []):
+        for held in held_credentials:
             if held.get("username") == username:
                 await self._call(
                     "POST",
@@ -316,12 +364,11 @@ class TwilioAccount:
         offered comes back 403 — the single most common way a hand-built
         trunk is wrong.
         """
-        _status, body = await self._call(
-            "GET", f"{self._trunking}/v1/Trunks/{trunk_sid}/CredentialLists"
+        attached = await self._every(
+            f"{self._trunking}/v1/Trunks/{trunk_sid}/CredentialLists",
+            "credential_lists",
         )
-        if any(
-            held.get("sid") == list_sid for held in body.get("credential_lists", [])
-        ):
+        if any(held.get("sid") == list_sid for held in attached):
             return False
         await self._call(
             "POST",
@@ -332,10 +379,10 @@ class TwilioAccount:
 
     async def attach_number(self, trunk_sid: str, number_sid: str) -> bool:
         """Put the number on the trunk. True if it was not already."""
-        _status, body = await self._call(
-            "GET", f"{self._trunking}/v1/Trunks/{trunk_sid}/PhoneNumbers"
+        attached = await self._every(
+            f"{self._trunking}/v1/Trunks/{trunk_sid}/PhoneNumbers", "phone_numbers"
         )
-        if any(held.get("sid") == number_sid for held in body.get("phone_numbers", [])):
+        if any(held.get("sid") == number_sid for held in attached):
             return False
         await self._call(
             "POST",
@@ -405,9 +452,6 @@ async def provision(
         username=name,
         password=password,
         trunk_sid=trunk["sid"],
-        credential_list_sid=credential_list["sid"],
-        credential_sid=credential_sid,
-        number_sid=number_sid,
         report=(
             f"trunk {trunk['sid']} "
             f"({'created' if trunk_is_new else 'already there'}), "

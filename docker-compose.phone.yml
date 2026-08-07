@@ -179,7 +179,7 @@ services:
   # is for.
   #
   # The trunk is still yours and still arrives from your own environment:
-  # `egma-trunk-setup` prints those four lines, and the base compose file
+  # `egma-trunk-setup` prints those five lines, and the base compose file
   # already passes them through. Without them this overlay stands up a
   # LiveKit that can place no calls, and the simulator says so at startup
   # naming the variable.
