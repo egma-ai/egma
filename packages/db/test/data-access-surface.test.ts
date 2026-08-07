@@ -129,6 +129,9 @@ const CONTEXT_REQUIRING = [
   "removeConnection",
   "removeMember",
   "resolveConnectionCredentials",
+  // Names off a reviewed file turned into the identity a version names. It
+  // reads personas and nothing else, and only ones the context already reaches.
+  "resolvePersonaNames",
   "revokeApiKey",
   "startRun",
   "startSimulation",
@@ -158,6 +161,13 @@ const VALUES = [
   "NotPermittedError",
   "PersonaNamedByTestsError",
   "ProjectOutsideOrganizationError",
+  // An edit refused because somebody moved the test since it was written. It
+  // carries both versions and the test's identity, because the caller's next
+  // move is to go and read the test as it now stands.
+  "TestMovedOnError",
+  // A write refused for what it says, told apart from a fault so that a layer
+  // above can relay the factory's sentence instead of answering with a stack.
+  "UnprocessableInputError",
   // The store's answer to a batch it will never take, told apart from a store
   // that is merely unreachable — a door has to answer those two differently,
   // and only the module that owns the client can tell them apart.
@@ -171,12 +181,13 @@ const VALUES = [
 ];
 
 /**
- * The read surface's own limits, exported because the endpoints that enforce
+ * The read surfaces' own limits, exported because the endpoints that enforce
  * them have to say what they are in a refusal, and a cap named in two places is
  * a cap that will one day disagree with itself. Each is a number; none of them
  * reaches a store or names a customer.
  */
 const READ_LIMITS = [
+  "LARGEST_PAGE_SIZE",
   "MAXIMUM_LIST_LIMIT",
   "MAXIMUM_SPANS_PER_TRACE",
   "MAXIMUM_WINDOW_MILLISECONDS",

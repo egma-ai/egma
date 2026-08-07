@@ -1,5 +1,5 @@
-import { newId } from "@egma/ids";
-import { and, desc, eq, isNull, lt, type SQL } from "drizzle-orm";
+import { isId, newId } from "@egma/ids";
+import { and, desc, eq, inArray, isNull, lt, or, type SQL } from "drizzle-orm";
 
 import { db } from "../client.ts";
 import {
@@ -10,6 +10,7 @@ import type { AuthContext } from "./context.ts";
 import {
   PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
+  UnprocessableInputError,
 } from "./errors.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
@@ -517,6 +518,105 @@ export async function listPersonas(
     })),
     nextCursor,
   };
+}
+
+/**
+ * The persona ids a write names, from the names a reviewed file carries.
+ *
+ * A test file in somebody's repository says `personas: [impatient-caller]`,
+ * because a folder a team reads in pull requests cannot be a folder of
+ * identifiers. Turning those names into identity is the platform's job, and this
+ * is where it happens. An identifier resolves too, so a caller already holding
+ * one does not have to find a name for it first.
+ *
+ * The answers come back in the order the entries were given, because that order
+ * is content: a version names its personas in the order they were authored.
+ *
+ * **Naming nobody comes back as nobody.** What an empty list means — the
+ * project's default persona — is a rule about the write, and the test factory
+ * holds it. Answering the default here as well would put one rule in two places,
+ * where it can come to disagree with itself.
+ *
+ * **This is a translation, not a promise.** The read is outside whatever
+ * transaction the write will open, so a persona can be deleted between this
+ * answer and that write. The factory checks the ids it is handed again inside
+ * the write, under the lock that makes a delete and a write over one persona
+ * wait for each other; that check is the guarantee this one leans on.
+ *
+ * Three ways it refuses, each naming what the caller wrote rather than what egma
+ * looked up. A name nothing answers to, because a test naming somebody who is
+ * not there would run one simulation fewer than it says it runs. A name two
+ * personas answer to, because there is no uniqueness rule on a persona's name
+ * and picking one of the two would put somebody in a test that nobody chose. And
+ * the same persona named twice, which asks for the same simulation twice — a
+ * run's business, never a test's.
+ */
+export async function resolvePersonaNames(
+  auth: AuthContext,
+  named: readonly string[],
+): Promise<readonly string[]> {
+  authorize(auth, "read", here(auth));
+
+  const { projectId } = auth;
+  if (projectId === undefined) {
+    throw new Error(
+      "a persona belongs to a project, and this credential is for the whole organization and acting in none",
+    );
+  }
+
+  const wanted = named.map((entry) => entry.trim());
+  if (wanted.length === 0) return [];
+
+  // One read for the whole list, matching an entry against either column: an
+  // entry is an identifier or a name, and which one it is is the caller's
+  // choice rather than something to make them declare.
+  const rows = await db()
+    .select({ id: persona.id, name: persona.name })
+    .from(persona)
+    .where(
+      within(
+        auth,
+        persona,
+        and(
+          eq(persona.projectId, projectId),
+          notDeleted,
+          or(inArray(persona.id, wanted), inArray(persona.name, wanted)),
+        ),
+      ),
+    );
+
+  const resolved: string[] = [];
+  for (const entry of wanted) {
+    // The identifier first, so a project holding a persona whose *name* is
+    // another persona's identifier still resolves the identifier to the row it
+    // names. Nothing stops somebody authoring such a name.
+    const byId = rows.filter((row) => row.id === entry);
+    const found = byId.length > 0 ? byId : rows.filter((row) => row.name === entry);
+
+    if (found.length === 0) {
+      throw new UnprocessableInputError(
+        isId("prs", entry)
+          ? `there is no persona ${entry} in this project`
+          : `egma has no persona called "${entry}" in this project. Name a persona this project already has, or name none and egma takes the project's default.`,
+      );
+    }
+    if (found.length > 1) {
+      throw new UnprocessableInputError(
+        `this project has more than one persona called "${entry}", so egma cannot tell which one this test means. Name the one you want by its prs_ identifier.`,
+      );
+    }
+
+    const [only] = found;
+    if (only === undefined) throw new Error("a matched persona went missing");
+    if (resolved.includes(only.id)) {
+      throw new UnprocessableInputError(
+        `persona "${entry}" is named twice on one test; name each persona once.`,
+      );
+    }
+    resolved.push(only.id);
+  }
+
+  return resolved;
 }
 
 /**

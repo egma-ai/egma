@@ -15,6 +15,7 @@ import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
 import { signOutRoutes } from "./routes/sign-out.ts";
 import { signupRoutes } from "./routes/signup.ts";
+import { testRoutes } from "./routes/tests.ts";
 import { traceReadRoutes } from "./routes/trace-reads.ts";
 import { traceRoutes } from "./routes/traces.ts";
 import { fixedWindowRateLimit, type RateLimit } from "./http/rate-limit.ts";
@@ -163,6 +164,11 @@ export function buildApi(options: ServerOptions): Api {
     emailSender,
     baseUrl: config.baseUrl,
   });
+
+  // What a developer's folder syncs against. Its own scope, like every other
+  // group here, so the credentialed hook and the routes it protects cannot come
+  // apart and one group's error handler never answers another's refusals.
+  void app.register(testRoutes, { provider: identity.provider, rateLimit });
 
   // The OTLP door, registered without `fastify-plugin` for the same reason the
   // provider's adapter is: it replaces every body parser inside its own scope

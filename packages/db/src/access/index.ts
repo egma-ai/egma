@@ -60,7 +60,9 @@ export {
   NotPermittedError,
   PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
+  TestMovedOnError,
   TraceStoreRefusedError,
+  UnprocessableInputError,
   UnreadableTraceQueryError,
   type TestNamingPersona,
 } from "./errors.ts";
@@ -121,6 +123,14 @@ export {
   type NewProject,
   type Project,
 } from "./projects.ts";
+
+/**
+ * How wide one page of a list may be. Exported for the same reason the trace
+ * surface's limits are: an endpoint that refuses a page size has to say what the
+ * cap is, and a cap written down in two places is a cap that will one day
+ * disagree with itself.
+ */
+export { LARGEST_PAGE_SIZE, type PageRequest } from "./pages.ts";
 
 export {
   listApiKeys,
@@ -200,6 +210,7 @@ export {
   getPersona,
   getPersonaVersion,
   listPersonas,
+  resolvePersonaNames,
   VOICE_PROVIDERS,
   type DeletedPersona,
   type NewPersona,
