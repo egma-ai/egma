@@ -1,5 +1,6 @@
 import { newId } from "@egma/ids";
 import {
+  appendSpans,
   claimSimulations,
   completeSimulation,
   connect,
@@ -12,6 +13,7 @@ import {
   disconnectClickHouse,
   failSimulation,
   getSimulation,
+  recordProductionTraces,
   setJudgeConfiguration,
   startRun,
   startSimulation,
@@ -19,6 +21,7 @@ import {
   type ExpectedBehaviorInput,
   type FailedEndingReason,
   type NewGrader,
+  type NewSpan,
 } from "@egma/db";
 
 import {
@@ -268,6 +271,179 @@ export async function conductSimulation(
   return { runId: started.id, simulationId: only.id };
 }
 
+/* ------------------------------------------------------------------- *
+ * The other source: a real caller's conversation, as spans.
+ * ------------------------------------------------------------------- */
+
+/**
+ * One production trace, filed exactly as the ingest door files one: each flush
+ * of spans into the trace store, and the same spans to the grading queue.
+ *
+ * Those two calls in that order *are* the door — the HTTP, the protobuf and the
+ * credential are the API's own tests, and repeating them here would test Fastify
+ * rather than grading. What matters on this side is that a trace becomes work
+ * the same way a simulation does, and that is the pair of calls below. Nothing
+ * here tells the queue when the conversation ended: the queue reads that off the
+ * spans, which is the one place it is read.
+ *
+ * **Two flushes, because that is what an exporter does.** The captured LiveKit
+ * trace arrives in fourteen, and its root `agent_session` comes alone in the
+ * last one — so the conversation's turns land while it is still going, and the
+ * root lands when it is over. Sending it all at once would never exercise the
+ * upsert that makes a trace one job however many times it is flushed.
+ */
+export type ConductedTrace = {
+  readonly traceId: string;
+  /** When its first span began — the far end of the window a reader needs. */
+  readonly startedAt: Date;
+};
+
+let nextTraceOrdinal = 0;
+let nextSpanOrdinal = 0;
+
+function wireId(ordinal: number, bytes: 8 | 16): string {
+  return ordinal.toString(16).padStart(bytes * 2, "0");
+}
+
+export async function conductProductionTrace(
+  world: World,
+  conducting: {
+    /** Absent leaves the root span unsent, which is what the idle window is for. */
+    readonly rootCloses?: boolean;
+    readonly said?: readonly { speaker: "human" | "agent"; text: string }[];
+    readonly calledTool?: string | undefined;
+  } = {},
+): Promise<ConductedTrace> {
+  nextTraceOrdinal += 1;
+  const traceId = wireId(nextTraceOrdinal, 16);
+  const startedAt = new Date();
+  const spanId = (): string => {
+    nextSpanOrdinal += 1;
+    return wireId(nextSpanOrdinal, 8);
+  };
+
+  const rootSpanId = spanId();
+  const said = conducting.said ?? [
+    { speaker: "human" as const, text: "Can you move my cleaning to Tuesday?" },
+    { speaker: "agent" as const, text: "Booked for Tuesday at four." },
+  ];
+
+  const spans: NewSpan[] = [];
+  const spanning = (over: Partial<NewSpan>): NewSpan =>
+    productionSpan(traceId, {
+      spanId: spanId(),
+      parentSpanId: rootSpanId,
+      startedAtMicroseconds: BigInt(startedAt.getTime()) * 1_000n,
+      ...over,
+    });
+
+  said.forEach((turn, at) => {
+    const turnSpan = spanning({
+      name: turn.speaker === "human" ? "user_turn" : "agent_turn",
+      kind: `turn:${turn.speaker}`,
+      text: turn.text,
+      startedAtMicroseconds:
+        BigInt(startedAt.getTime()) * 1_000n + BigInt(at) * 2_000_000n,
+    });
+    spans.push(turnSpan);
+
+    // The tool span hangs inside the agent's turn, where LiveKit puts it.
+    if (conducting.calledTool !== undefined && turn.speaker === "agent") {
+      spans.push(
+        spanning({
+          parentSpanId: turnSpan.spanId,
+          name: "function_tool",
+          kind: "tool",
+          toolName: conducting.calledTool,
+          toolArguments: '{"when": "Tuesday"}',
+          toolResult: '"booked"',
+          startedAtMicroseconds: turnSpan.startedAtMicroseconds + 100_000n,
+        }),
+      );
+    }
+  });
+
+  // While the conversation is still happening: the turns, and nothing that
+  // closes it.
+  await exportFlush(world, spans);
+
+  if (conducting.rootCloses ?? true) {
+    // And the flush that ends it, alone, exactly as the capture's last one is.
+    await exportFlush(world, [
+      spanning({
+        spanId: rootSpanId,
+        parentSpanId: "",
+        name: "agent_session",
+        kind: "root",
+        durationNanoseconds: 20_000_000_000n,
+      }),
+    ]);
+  }
+
+  return { traceId, startedAt };
+}
+
+/** One export, as the door handles one: the store, then the queue, same spans. */
+async function exportFlush(world: World, spans: readonly NewSpan[]): Promise<void> {
+  await appendSpans(world.auth, spans);
+  await recordProductionTraces(world.auth, spans);
+}
+
+/**
+ * One more flush of a conversation egma has already dealt with — a root span at
+ * that, so it says as loudly as telemetry can that the conversation is over.
+ */
+export async function exportALateFlush(
+  world: World,
+  traceId: string,
+): Promise<void> {
+  nextSpanOrdinal += 1;
+  await exportFlush(world, [
+    productionSpan(traceId, {
+      spanId: wireId(nextSpanOrdinal, 8),
+      parentSpanId: "",
+      name: "agent_session",
+      kind: "root",
+      startedAtMicroseconds: BigInt(Date.now()) * 1_000n,
+    }),
+  ]);
+}
+
+/** A span as the door writes one, with everything a test does not care about. */
+function productionSpan(traceId: string, over: Partial<NewSpan>): NewSpan {
+  return {
+    traceId,
+    spanId: "",
+    parentSpanId: "",
+    source: "production",
+    emitter: "agent",
+    environment: "default",
+    startedAtMicroseconds: 0n,
+    durationNanoseconds: 1_000_000_000n,
+    name: "user_turn",
+    kind: "turn:human",
+    status: "unset",
+    text: "",
+    audioUrl: "",
+    toolName: "",
+    toolArguments: "",
+    toolResult: "",
+    providerCallId: `room-${traceId.slice(-6)}`,
+    connectionType: "livekit",
+    audioSampleRateHz: 0,
+    audioEncoding: "",
+    // Empty, as the door writes them: a trace arriving there was not started by
+    // egma, so there is no run and no agent behind it.
+    runId: "",
+    agentId: "",
+    agentVersionId: "",
+    testVersionId: "",
+    personaVersionId: "",
+    payload: "{}",
+    ...over,
+  };
+}
+
 /**
  * A test with expected behaviors, and the graders its array names.
  *
@@ -320,6 +496,9 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     heartbeatSeconds: 1,
     leaseSeconds: 3_600,
     sweepSeconds: 3_600,
+    // An hour, so a production trace judged inside a test's patience was judged
+    // because its root span closed. The idle fallback's own test sets it low.
+    traceIdleSeconds: 3_600,
     logLevel: "ERROR",
     ...overrides,
   };

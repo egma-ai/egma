@@ -1,20 +1,26 @@
 import {
   appendVerdicts,
   getSimulation,
+  readTrace,
   type Grader,
   type GradingClaim,
+  type GradingSource,
   type NewVerdict,
   type Priority,
 } from "@egma/db";
 
-import { conversationOf, type Conversation } from "./conversation.ts";
+import {
+  conversationOf,
+  conversationOfTrace,
+  type Conversation,
+} from "./conversation.ts";
 import {
   EXPECTED_BEHAVIORS,
   judgeExpectedBehaviors,
 } from "./graders/expected-behaviors.ts";
 import { execute, theOneCheck, type Judgment } from "./graders/index.ts";
 import { JUDGE_MAKERS, judgeOnce, type JudgeMakers } from "./judge/index.ts";
-import { applicableGraders } from "./resolve.ts";
+import { applicableGraders, applicableProductionGraders } from "./resolve.ts";
 
 /**
  * One claimed job, judged end to end: read the conversation, resolve the graders
@@ -23,6 +29,14 @@ import { applicableGraders } from "./resolve.ts";
  * Four steps and no fifth. Nothing here decides an overall answer for the
  * conversation or for its run — there is no such row anywhere, by design, and
  * the fold works one out at read time from exactly the rows this wrote.
+ *
+ * **The source decides the first two steps and nothing after them.** A
+ * simulation is read from its header row and judged by the project's graders
+ * plus its test's; a production trace is read from its spans and judged by the
+ * project's production-scoped graders, sampled. From the moment a `Conversation`
+ * and a grader list exist there is one path — one executor seam, one verdict row
+ * builder, one write — because a second judging path would be a second set of
+ * answers that could one day disagree about the same agent.
  *
  * **The verdicts are written in one call.** A conversation's judgments land
  * together or not at all as far as any reader is concerned, and a job that fails
@@ -34,12 +48,16 @@ import { applicableGraders } from "./resolve.ts";
  * expected-behaviors grader is never a row and never attachable, so it is never
  * resolved; it applies because running a test means judging it against what the
  * test says. That is why it is a second branch of the fan-out below rather than
- * an entry in the executor roster.
+ * an entry in the executor roster — and why it belongs to simulations alone: a
+ * production trace has no test, so there is nothing for the built-in to judge
+ * against.
  */
 
 /** What judging one conversation came to. */
 export type Graded = {
-  readonly simulationId: string;
+  readonly source: GradingSource;
+  /** The conversation, as the verdict rows file it. */
+  readonly traceId: string;
   /** How many graders applied — including the ones that could not score. */
   readonly graders: number;
   readonly verdicts: number;
@@ -57,24 +75,27 @@ export type GradeOptions = {
   readonly makers?: JudgeMakers | undefined;
 };
 
+/** A conversation and the graders that judge it: what a source resolves to. */
+type Judging = {
+  readonly conversation: Conversation;
+  readonly graders: readonly Grader[];
+  /**
+   * The simulation the conversation came from, when it came from one — what
+   * the built-in judges by. A production trace resolves to none, and with it
+   * to no built-in.
+   */
+  readonly simulationId: string | undefined;
+};
+
 export async function gradeClaim(
   claim: GradingClaim,
   options: GradeOptions = {},
 ): Promise<Graded> {
-  if (claim.simulationId === null) {
-    throw new NotGradable(
-      `grading job ${claim.id} names no conversation, and only a simulation's can be judged today`,
-    );
-  }
+  const { conversation, graders, simulationId } =
+    claim.source === "production"
+      ? await theProductionTrace(claim)
+      : await theSimulation(claim);
 
-  const simulation = await getSimulation(claim.auth, claim.simulationId);
-  if (simulation === undefined) {
-    throw new NotGradable(
-      `simulation ${claim.simulationId} is not reachable from the job that names it`,
-    );
-  }
-
-  const conversation = conversationOf(simulation);
   const makers = options.makers ?? JUDGE_MAKERS;
 
   // The project's judge, shared by everything on this conversation that judges
@@ -82,8 +103,6 @@ export async function gradeClaim(
   // needed — the things that judge ask, and a conversation where none of them
   // does never opens the envelope.
   const judge = judgeOnce(claim.auth);
-
-  const graders = await applicableGraders(claim.auth, simulation);
 
   // In parallel, and not because today's deterministic graders are slow — they
   // are instant. Because the judged types are one model call each, and
@@ -113,13 +132,15 @@ export async function gradeClaim(
         ),
       ),
     ),
-    judgeExpectedBehaviors({
-      auth: claim.auth,
-      simulationId: simulation.id,
-      conversation,
-      judge,
-      makers,
-    }),
+    simulationId === undefined
+      ? undefined
+      : judgeExpectedBehaviors({
+          auth: claim.auth,
+          simulationId,
+          conversation,
+          judge,
+          makers,
+        }),
   ]);
 
   const behaviorRows =
@@ -153,12 +174,80 @@ export async function gradeClaim(
   await appendVerdicts(claim.auth, rows);
 
   return {
-    simulationId: simulation.id,
+    source: conversation.source,
+    traceId: conversation.traceId,
     // The built-in counts, because it judged: a conversation judged only against
     // its test's behaviors was judged, and reporting nothing applied would be
     // reporting that nothing happened.
     graders: graders.length + (builtIn === undefined ? 0 : 1),
     verdicts: rows.length,
+  };
+}
+
+/** A finished simulation, read from the row that already holds everything. */
+async function theSimulation(claim: GradingClaim): Promise<Judging> {
+  if (claim.simulationId === null) {
+    throw new NotGradable(
+      `grading job ${claim.id} says it is a simulation's and names none`,
+    );
+  }
+
+  const simulation = await getSimulation(claim.auth, claim.simulationId);
+  if (simulation === undefined) {
+    throw new NotGradable(
+      `simulation ${claim.simulationId} is not reachable from the job that names it`,
+    );
+  }
+
+  return {
+    conversation: conversationOf(simulation),
+    graders: await applicableGraders(claim.auth, simulation),
+    simulationId: simulation.id,
+  };
+}
+
+/**
+ * A production trace, read from its spans — the settled production read path.
+ *
+ * The window comes off the job the ingest door wrote, because the trace store is
+ * filed by the minute a span started in and a read naming only a trace id would
+ * have nothing to prune with. It is widened by a second at each end: those two
+ * instants travel as timestamps, which hold milliseconds, while the store holds
+ * microseconds — so a bound copied across exactly could land a few hundred
+ * microseconds inside the conversation and clip the first or last span off the
+ * transcript. A second is far more than that rounding and far less than the gap
+ * to anything else worth reading.
+ */
+async function theProductionTrace(claim: GradingClaim): Promise<Judging> {
+  const { traceId, firstSpanAt, lastSpanAt } = claim;
+  if (traceId === null || firstSpanAt === null || lastSpanAt === null) {
+    throw new NotGradable(
+      `grading job ${claim.id} says it is a production trace's and does not say which`,
+    );
+  }
+
+  const A_SECOND_IN_MICROSECONDS = 1_000_000n;
+  const trace = await readTrace(claim.auth, traceId, {
+    window: {
+      from: BigInt(firstSpanAt.getTime()) * 1_000n - A_SECOND_IN_MICROSECONDS,
+      to: BigInt(lastSpanAt.getTime()) * 1_000n + A_SECOND_IN_MICROSECONDS,
+    },
+  });
+
+  if (trace === undefined) {
+    // Not a race: the spans were stored before the job that names them was
+    // written. This is telemetry that has gone from the store — a retention
+    // window that passed, a store restored without it — and saying so is better
+    // than writing `errored` rows about an agent that did nothing wrong.
+    throw new NotGradable(
+      `trace ${traceId} holds no spans in the window its job recorded`,
+    );
+  }
+
+  return {
+    conversation: conversationOfTrace(trace),
+    graders: await applicableProductionGraders(claim.auth),
+    simulationId: undefined,
   };
 }
 

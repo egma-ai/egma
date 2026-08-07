@@ -279,6 +279,15 @@ services:
       # every copy happened to be restarting: it costs one indexed query and
       # catches the case that would otherwise look like grading having stopped.
       EGMA_GRADER_SWEEP_SECONDS: ${EGMA_GRADER_SWEEP_SECONDS:-}
+      # How long a production conversation has to be quiet before it is judged
+      # without ever having been closed. A well-behaved exporter closes the span
+      # the whole conversation happened inside, egma is woken by it, and this
+      # decides nothing. It is here for the exporter that never closes one — a
+      # crashed agent, a framework that emits no session span — where the event
+      # to wait for is the absence of events. Five minutes by default: shorter
+      # judges a caller left on hold halfway through, longer leaves a broken
+      # exporter's conversations unjudged for an afternoon.
+      EGMA_GRADER_TRACE_IDLE_SECONDS: ${EGMA_GRADER_TRACE_IDLE_SECONDS:-}
       EGMA_GRADER_LOG_LEVEL: ${EGMA_GRADER_LOG_LEVEL:-INFO}
     depends_on:
       api:

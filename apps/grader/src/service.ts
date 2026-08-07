@@ -24,12 +24,19 @@ import { saying, type Log } from "./log.ts";
  * side of the wire.
  *
  * **Nothing here is on a timer that a verdict has to wait for.** A conversation
- * ending raises a notification inside the transaction that ends it, this wakes,
- * and it claims. The interval below is the backstop for a notification nobody
- * was listening for — a copy restarting, a connection that dropped — and no
- * verdict's latency depends on it in the ordinary case. There is no latency
- * promise anywhere in this product, and this is what makes the absence of one
- * honest rather than convenient.
+ * ending raises a notification — inside the transaction that ends a simulation,
+ * or at the door when a trace's root span closes — this wakes, and it claims.
+ * The interval below is the backstop for a notification nobody was listening for
+ * — a copy restarting, a connection that dropped — and no verdict's latency
+ * depends on it in the ordinary case. There is no latency promise anywhere in
+ * this product, and this is what makes the absence of one honest rather than
+ * convenient.
+ *
+ * **One conversation does wait on the clock, and only one.** A production trace
+ * whose exporter never closes a root span has no ending anybody can be woken by,
+ * so it is judged once it has been quiet longer than the idle window. That is
+ * the pass below finding it, because the completing event is the absence of
+ * events and there is nothing else that could.
  */
 export type Service = {
   /** Runs until `stop` is called; resolves when the last job has landed. */
@@ -105,6 +112,7 @@ export function startService(options: ServiceOptions): Service {
           claimant: config.claimant,
           capacity: config.capacity,
           leaseSeconds: config.leaseSeconds,
+          idleSeconds: config.traceIdleSeconds,
         });
       } catch (error) {
         // The control plane is unreachable or refused. Say so once and wait;
@@ -178,7 +186,8 @@ async function holdAndGrade(
     await finishGradingJob(claim.auth, claim.id, config.claimant);
     log.info("judged a conversation", {
       job: claim.id,
-      simulation: graded.simulationId,
+      source: graded.source,
+      conversation: graded.traceId,
       graders: graded.graders,
       verdicts: graded.verdicts,
     });

@@ -48,6 +48,25 @@ import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
  * finds the row waiting when it next asks — which is what keeps the
  * notification an accelerator rather than a delivery guarantee nothing could
  * make.
+ *
+ * ## The other source, and why its row is written early
+ *
+ * A production trace has no transaction to ride. It arrives as spans, at the
+ * OTLP door, in as many exports as its exporter felt like flushing — so the row
+ * is written on the **first** export carrying any span of it, and the four
+ * columns below record what completion is later decided from. Every export of
+ * that trace afterwards lands on the same row, because `trace_id` is unique here
+ * exactly as `simulation_id` is: the door's write is idempotent by the same
+ * constraint that makes one conversation ungradable twice.
+ *
+ * So a production job exists before its conversation is over, and `pending`
+ * therefore means what it always meant — *this conversation is not judged yet* —
+ * while whether it may be **claimed** is a second question the claim query
+ * answers. That question already had two answers here: a job nobody has taken,
+ * and a job whose holder went silent past its lease. A production trace that has
+ * not finished is the third, and it is a predicate rather than a status because
+ * a status only a claimant could leave would be a lie in every deployment where
+ * nobody happened to be claiming.
  */
 
 /**
@@ -73,8 +92,8 @@ export type GradingJobStatus = (typeof GRADING_JOB_STATUSES)[number];
  * Where the conversation being judged came from — the same word the verdict row
  * and `spans.source` carry, because a simulation and a production conversation
  * are compared against each other and a word that meant two things would make
- * that impossible. Only `simulation` is written today; production grading brings
- * the other.
+ * that impossible. Which one a job is decides which column names its
+ * conversation, and a check below holds the pairing.
  */
 export const GRADING_SOURCES = ["simulation", "production"] as const;
 export type GradingSource = (typeof GRADING_SOURCES)[number];
@@ -95,6 +114,46 @@ export const gradingJob = pgTable(
      * rather than merely never written.
      */
     simulationId: idText("simulation_id"),
+    /**
+     * The conversation to judge, for a production trace's job: the trace id
+     * exactly as it arrived on the wire.
+     *
+     * Adopted rather than minted, so it carries no prefix check — OpenTelemetry
+     * ids are fixed-width binary written as hex, which egma's own id format
+     * cannot be encoded in, and `spans.trace_id` already records that as the one
+     * exception to the prefixed-id rule.
+     */
+    traceId: idText("trace_id"),
+    /**
+     * When the earliest and the latest span of this trace **began**, widened by
+     * every export that adds one.
+     *
+     * They are here so that reading the conversation back needs no search: the
+     * trace store files spans by the minute they started in, and a read that
+     * named only a trace id would have nothing to prune with. The pair is the
+     * window the engine asks for the transcript inside.
+     */
+    firstSpanAt: moment("first_span_at"),
+    lastSpanAt: moment("last_span_at"),
+    /**
+     * Wall clock at the last export that carried a span of this trace — **when
+     * egma last heard about it**, not when anything inside it happened.
+     *
+     * That is deliberately a different fact from `last_span_at`. Quiet means
+     * nothing is arriving, which is a question about the door; a span's own
+     * start time is a question about the conversation, and a trace backfilled an
+     * hour late would look silent the moment it landed if the two were confused.
+     */
+    lastSeenAt: moment("last_seen_at"),
+    /**
+     * When the trace's root span arrived, and with it the conversation's end.
+     *
+     * An exporter sends a span when the span ends, so a root span reaching the
+     * door is a root span that closed. Null for a trace still in progress — and
+     * null forever for an exporter that never sends one, which is the whole
+     * reason the idle window exists beside this.
+     */
+    rootClosedAt: moment("root_closed_at"),
     status: text("status").notNull(),
     /**
      * Claim bookkeeping, the simulation's three columns exactly. The claimant
@@ -127,14 +186,37 @@ export const gradingJob = pgTable(
     // transition can be replayed and the second insert is a no-op — and it is
     // what the explicit re-grade action will reopen rather than duplicate.
     unique("grading_job_simulation_id_unique").on(table.simulationId),
+    // And one job per production trace, on exactly the same terms: an exporter
+    // sends a trace in as many flushes as it likes and every one of them lands
+    // on this row. It is what makes the ingest door's write idempotent, and it
+    // is the reason no conversation is ever judged twice.
+    unique("grading_job_trace_id_unique").on(table.traceId),
     // The source and what it names are one fact: a simulation's job names a
-    // simulation, and anything else names none.
+    // simulation, a production trace's names a trace, and neither names both.
     check(
       "grading_job_source_names_its_conversation",
       sql`case ${table.source}
-        when 'simulation' then ${table.simulationId} is not null
-        else ${table.simulationId} is null
+        when 'simulation' then ${table.simulationId} is not null and ${table.traceId} is null
+        when 'production' then ${table.traceId} is not null and ${table.simulationId} is null
+        else false
       end`,
+    ),
+    // A production job carries the three facts completion is decided from; a
+    // simulation's carries none of them, because a simulation is complete
+    // because a transaction said so rather than because anything was observed.
+    check(
+      "grading_job_production_carries_its_trace_times",
+      sql`(${table.source} = 'production') = (${table.firstSpanAt} is not null
+        and ${table.lastSpanAt} is not null
+        and ${table.lastSeenAt} is not null)`,
+    ),
+    check(
+      "grading_job_only_a_trace_closes_a_root",
+      sql`${table.rootClosedAt} is null or ${table.source} = 'production'`,
+    ),
+    check(
+      "grading_job_trace_times_run_forwards",
+      sql`${table.firstSpanAt} is null or ${table.firstSpanAt} <= ${table.lastSpanAt}`,
     ),
     // The three claim columns are one fact and arrive together, exactly as the
     // simulation's do.

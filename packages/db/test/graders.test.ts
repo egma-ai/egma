@@ -2,7 +2,9 @@ import { isId, newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  advanceProductionSampling,
   createGrader,
+  editGrader,
   getGrader,
   NotPermittedError,
   ProjectOutsideOrganizationError,
@@ -486,5 +488,147 @@ describe("a version row somebody hand-corrupted", () => {
     await expect(getGrader(actingAsAcme(), created.id)).rejects.toThrow(
       created.versionId,
     );
+  });
+});
+
+/**
+ * The production sample rate, which is a promise about *which* conversations
+ * are judged rather than about how many roughly are.
+ *
+ * Everything here is arithmetic on one row, so it is asserted here rather than
+ * through the grader service: whether a rate of a quarter comes out as every
+ * fourth trace is a question about the counter, and the engine's own tests ask
+ * the question that is actually about grading — that a trace nobody sampled
+ * carries no verdict row at all.
+ */
+describe("deciding whether a production trace is a grader's turn", () => {
+  /** Walk `traces` conversations past a grader and say which were its turn. */
+  async function walkPast(
+    productionSampleRate: number,
+    traces: number,
+  ): Promise<boolean[]> {
+    const created = await createGrader(actingAsAcme(), {
+      ...empathy,
+      name: `Sampled at ${productionSampleRate} per cent`,
+      scope: "production",
+      productionSampleRate,
+    });
+
+    const turns: boolean[] = [];
+    for (let trace = 0; trace < traces; trace += 1) {
+      turns.push(await advanceProductionSampling(actingAsAcme(), created.id));
+    }
+    return turns;
+  }
+
+  it("makes a quarter mean every fourth trace, and the same fourth every time", async () => {
+    expect(await walkPast(25, 8)).toEqual([
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+    ]);
+  });
+
+  it("judges everything at a hundred per cent and nothing at nought", async () => {
+    expect(await walkPast(100, 5)).toEqual([true, true, true, true, true]);
+    expect(await walkPast(0, 5)).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  /**
+   * A rate that does not divide a hundred has no fixed period, and that is the
+   * accumulator being honest rather than a flaw. It spends exactly what it
+   * accumulates and carries the rest, so thirty-three per cent of thirty
+   * conversations is nine of them and nine tenths of the tenth is carried into
+   * the next thirty. Nothing is rounded up on the customer's behalf, and nothing
+   * is lost.
+   */
+  it("spends what it accumulates for a rate that divides nothing, and carries the rest", async () => {
+    const turns = await walkPast(33, 30);
+    expect(turns.filter(Boolean)).toHaveLength(9);
+    // Nine of every three, near enough, and never two in a row: the first turn
+    // is the fourth trace and they come every third one after it.
+    expect(turns.indexOf(true)).toBe(3);
+    expect(turns.slice(0, 10)).toEqual([
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+    ]);
+  });
+
+  it("takes a changed rate forward only, and never re-decides a trace it has passed", async () => {
+    const created = await createGrader(actingAsAcme(), {
+      ...empathy,
+      name: "Turned up later",
+      scope: "production",
+      productionSampleRate: 0,
+    });
+
+    for (let trace = 0; trace < 3; trace += 1) {
+      expect(await advanceProductionSampling(actingAsAcme(), created.id)).toBe(
+        false,
+      );
+    }
+
+    await editGrader(actingAsAcme(), created.id, { productionSampleRate: 100 });
+
+    // From here on, and only from here on. The three that went past while the
+    // rate was nought are not reconsidered and nothing about them changes.
+    expect(await advanceProductionSampling(actingAsAcme(), created.id)).toBe(
+      true,
+    );
+  });
+
+  /**
+   * Traffic is not an edit. A grader whose modified time moved every time a call
+   * came in would make "what changed on Tuesday" unanswerable, and would put a
+   * write on the definition's own audit trail for every conversation a busy
+   * customer has.
+   */
+  it("does not touch the moment the grader was last edited", async () => {
+    const created = await createGrader(actingAsAcme(), {
+      ...empathy,
+      name: "Busy, but unedited",
+      scope: "production",
+    });
+    const before = (await getGrader(actingAsAcme(), created.id))?.updatedAt;
+
+    await advanceProductionSampling(actingAsAcme(), created.id);
+
+    expect((await getGrader(actingAsAcme(), created.id))?.updatedAt).toEqual(
+      before,
+    );
+  });
+
+  it("says no for a grader the caller cannot reach, which judges nothing", async () => {
+    const created = await createGrader(actingAsAcme(), {
+      ...empathy,
+      name: "Somebody else's",
+      scope: "production",
+      productionSampleRate: 100,
+    });
+
+    // The safe direction, and the only one: a grader out of reach is a grader
+    // that does not judge, rather than one that judges without being reachable.
+    expect(
+      await advanceProductionSampling(actingAsGlobex(), created.id),
+    ).toBe(false);
   });
 });

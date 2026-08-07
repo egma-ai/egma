@@ -1,5 +1,15 @@
 import { newId } from "@egma/ids";
-import { and, asc, eq, inArray, lt, or, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  isNotNull,
+  lt,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 
 import { db, listen, type Listening, type Queryable } from "../client.ts";
 import {
@@ -10,6 +20,7 @@ import {
 import { validClaimant } from "./claimants.ts";
 import type { AuthContext } from "./context.ts";
 import { authorize, here } from "./permissions.ts";
+import type { NewSpan } from "./spans.ts";
 import { within } from "./within.ts";
 
 /**
@@ -60,6 +71,32 @@ import { within } from "./within.ts";
  * not running when a notification was raised finds the row waiting when it next
  * asks. That is why the watch also fires once on every connection it
  * establishes, and why a slow backstop sweep costs a service nothing to keep.
+ *
+ * ## And the other source, which nobody can wake for
+ *
+ * A production trace has no transaction to ride and no moment anybody owns. It
+ * arrives as spans, so `recordProductionTraces` is called by the ingest door,
+ * once per export, and writes the two facts completion is decided from: when
+ * egma last heard about this trace, and whether the export carried its root
+ * span. **That is a queue write and a notification and nothing else** — no
+ * grader is resolved, no conversation is read, and no judgment is made anywhere
+ * near a request path. What the API process must stay free of is judge work,
+ * which would make an exporter's timeout depend on somebody's judge model; it
+ * was never free of bookkeeping.
+ *
+ * The two ways such a trace completes are answered in two different places, and
+ * they have to be:
+ *
+ * - **Its root span closed.** An exporter sends a span when the span ends, so a
+ *   root arriving at the door *is* the conversation ending. The door stamps
+ *   `root_closed_at` and raises the same notification a terminal transition
+ *   does, so the wake-up is immediate and no interval is on the path.
+ * - **It went quiet.** An exporter that never closes a root would otherwise
+ *   leave a conversation unjudged forever, and there is nothing to be woken by:
+ *   the completing event is the *absence* of one. So this half is inherently a
+ *   sweep, and it is the claim query below — a trace nothing has arrived for in
+ *   longer than `idleSeconds` is claimable, which the grader service discovers
+ *   on the backstop pass it already makes.
  */
 
 /**
@@ -93,13 +130,38 @@ const DEFAULT_LEASE_SECONDS = 120;
  */
 const MOST_ATTEMPTS = 3;
 
-/** What a claim answers with, and no more — identifiers and tenancy. */
+/**
+ * How long a production trace has to be quiet before egma judges it without a
+ * closed root span.
+ *
+ * Five minutes, and the number is a compromise nobody gets to avoid making. Too
+ * short and a caller left on hold is judged mid-conversation, on half a
+ * transcript; too long and a broken exporter's traces sit unjudged for an
+ * afternoon. It only ever applies to telemetry that never closed its root — a
+ * well-behaved exporter's traces are judged the moment the conversation ends,
+ * whatever this says — so the cost of erring long is paid by the deployment that
+ * is already misconfigured.
+ */
+const DEFAULT_TRACE_IDLE_SECONDS = 300;
+
+/**
+ * What a claim answers with, and no more — identifiers, tenancy, and the two
+ * instants egma's own door stamped on the trace.
+ *
+ * The window is here because reading the conversation back needs one: the trace
+ * store files spans by the minute they started in, so a read naming only a trace
+ * id would have nothing to prune with. They are timestamps egma wrote, not
+ * anything a customer authored, which is the line this claim has always drawn.
+ */
 const CLAIM_COLUMNS = {
   id: gradingJob.id,
   organizationId: gradingJob.organizationId,
   projectId: gradingJob.projectId,
   source: gradingJob.source,
   simulationId: gradingJob.simulationId,
+  traceId: gradingJob.traceId,
+  firstSpanAt: gradingJob.firstSpanAt,
+  lastSpanAt: gradingJob.lastSpanAt,
   attempts: gradingJob.attempts,
   claimedBy: gradingJob.claimedBy,
   claimedAt: gradingJob.claimedAt,
@@ -114,6 +176,14 @@ export type GradingClaim = {
   readonly source: GradingSource;
   /** The conversation, for a simulation's job; null for a production trace's. */
   readonly simulationId: string | null;
+  /** And the other way round: the trace, for a production job; null otherwise. */
+  readonly traceId: string | null;
+  /**
+   * When the trace's earliest and latest spans began — the window its transcript
+   * is read inside. Null for a simulation, which is read from its own row.
+   */
+  readonly firstSpanAt: Date | null;
+  readonly lastSpanAt: Date | null;
   readonly organizationId: string;
   readonly projectId: string;
   /** Including this one, so a copy can say which attempt it is making. */
@@ -136,6 +206,13 @@ export type GradingJob = {
   readonly projectId: string;
   readonly source: GradingSource;
   readonly simulationId: string | null;
+  readonly traceId: string | null;
+  readonly firstSpanAt: Date | null;
+  readonly lastSpanAt: Date | null;
+  /** When a span of this trace last arrived; what the idle window is measured from. */
+  readonly lastSeenAt: Date | null;
+  /** When the root span closed the trace, or null for one that never closed. */
+  readonly rootClosedAt: Date | null;
   readonly status: GradingJobStatus;
   readonly claimedBy: string | null;
   readonly claimedAt: Date | null;
@@ -152,6 +229,11 @@ const JOB_COLUMNS = {
   projectId: gradingJob.projectId,
   source: gradingJob.source,
   simulationId: gradingJob.simulationId,
+  traceId: gradingJob.traceId,
+  firstSpanAt: gradingJob.firstSpanAt,
+  lastSpanAt: gradingJob.lastSpanAt,
+  lastSeenAt: gradingJob.lastSeenAt,
+  rootClosedAt: gradingJob.rootClosedAt,
   status: gradingJob.status,
   claimedBy: gradingJob.claimedBy,
   claimedAt: gradingJob.claimedAt,
@@ -256,6 +338,193 @@ export async function enqueueGradingJob(
   );
 }
 
+/**
+ * What one export said about one of the conversations it carried.
+ *
+ * The two instants are the spans' own start times rather than anything about
+ * when they arrived, and `rootClosed` is whether this export carried the span
+ * the whole conversation happened inside.
+ */
+type ProductionTraceActivity = {
+  readonly traceId: string;
+  readonly firstSpanAt: Date;
+  readonly lastSpanAt: Date;
+  readonly rootClosed: boolean;
+};
+
+/**
+ * A production trace becomes known, and — when its root closes — claimable work.
+ *
+ * Called by the ingest door with the very spans it just appended, after they are
+ * stored and once per export. **It writes bookkeeping and raises a notification,
+ * and does nothing else**: no grader is resolved, no conversation is read,
+ * nothing is judged. Judging is the grader service's, and the request path stays
+ * clear of it.
+ *
+ * It takes the spans rather than a summary of them so that **what completion
+ * means is written down once**. A caller that computed "which trace, how wide,
+ * did the root arrive" for itself would be a second reader of span shape,
+ * disagreeing with this one the first time either changed — and the disagreement
+ * would show up as conversations that were never judged, which is the failure
+ * nobody notices.
+ *
+ * The row is written on the first export that carries any span of a trace and
+ * updated by every export after it, which is why the whole thing is one upsert
+ * against the `trace_id` unique: an exporter flushes a conversation in as many
+ * batches as it likes, in whatever order, and they all land on one row. That
+ * unique is also why no conversation is ever judged twice — a second job for a
+ * trace is unrepresentable rather than merely never written.
+ *
+ * **A job already claimed or already graded is not touched**, which is the whole
+ * of what late spans do. Telemetry that arrives after egma judged a trace does
+ * not resurrect the job, does not re-open the conversation and does not queue a
+ * second judgment: re-grading history is a deliberate action somebody asks for,
+ * never something a straggling export causes.
+ *
+ * **A credential naming no project writes nothing here, deliberately.** Its
+ * spans file under the store's `default` sentinel, which is not a project row
+ * and could not carry the tenancy triangle a job needs; and graders belong to
+ * projects, so such a trace has no graders to be judged by in the first place.
+ * The same sentence the grader factory says: a credential for the whole customer
+ * is acting in no project.
+ *
+ * No permission is asked for, on the same terms as `appendSpans` beside it: what
+ * may write telemetry is decided once, at the door, before a byte of the body is
+ * read.
+ */
+export async function recordProductionTraces(
+  auth: AuthContext,
+  spans: readonly NewSpan[],
+): Promise<void> {
+  const { projectId } = auth;
+  if (projectId === undefined) return;
+
+  const traces = productionTracesIn(spans);
+  if (traces.length === 0) return;
+
+  const seenAt = new Date();
+
+  // One statement, and it is safe to batch precisely because the traces were
+  // gathered by id above: Postgres refuses an upsert that would touch one row
+  // twice, so a values list with a trace in it twice would fail the whole
+  // export rather than record either half of it.
+  const written = await db()
+    .insert(gradingJob)
+    .values(
+      traces.map((trace) => ({
+        id: newId("gjb"),
+        organizationId: auth.organizationId,
+        projectId,
+        source: "production" as const,
+        traceId: trace.traceId,
+        status: "pending" as const,
+        firstSpanAt: trace.firstSpanAt,
+        lastSpanAt: trace.lastSpanAt,
+        lastSeenAt: seenAt,
+        rootClosedAt: trace.rootClosed ? seenAt : null,
+      })),
+    )
+    .onConflictDoUpdate({
+      target: gradingJob.traceId,
+      set: {
+        // Widened, never replaced: exports arrive in the order an exporter felt
+        // like sending them, so the window a trace is read inside is the widest
+        // anybody has seen rather than the newest anybody reported.
+        firstSpanAt: sql`least(${gradingJob.firstSpanAt}, excluded.first_span_at)`,
+        lastSpanAt: sql`greatest(${gradingJob.lastSpanAt}, excluded.last_span_at)`,
+        lastSeenAt: sql`excluded.last_seen_at`,
+        // A root closes once. Keeping the first answer means a trace cannot be
+        // un-completed by a later flush of spans that were buffered behind it.
+        rootClosedAt: sql`coalesce(${gradingJob.rootClosedAt}, excluded.root_closed_at)`,
+      },
+      // A row that came back is a row still waiting to be judged. One that did
+      // not is a conversation already claimed or already graded, and a late span
+      // is not a reason to do either again.
+      setWhere: eq(gradingJob.status, "pending"),
+    })
+    .returning({ id: gradingJob.id, rootClosedAt: gradingJob.rootClosedAt });
+
+  // The conversations that are over wake somebody — the same nudge a
+  // simulation's terminal transition raises, on the same channel, carrying the
+  // same nothing. A trace that goes quiet without a root raises none: there is
+  // no event to raise one on, which is why the claim query sweeps for it.
+  for (const job of written) {
+    if (job.rootClosedAt === null) continue;
+    await db().execute(sql`select pg_notify(${GRADING_WORK_CHANNEL}, ${job.id})`);
+  }
+}
+
+/**
+ * The production conversations one export carried, gathered by trace.
+ *
+ * **A trace is over when its root span closes**, and an export can tell: an
+ * OpenTelemetry exporter sends a span when the span *ends*, so the root — the
+ * one span the whole conversation happened inside — arriving here is the
+ * conversation having ended. The captured LiveKit trace does exactly that: a
+ * hundred and thirty-three spans across fourteen flushes, and `agent_session`
+ * comes alone in the last one.
+ *
+ * A root is a span naming no parent, which is the recognition the whole store
+ * already uses — `parent_span_id` is empty on a root, and the trace read files
+ * such a span at the top. It has one consequence worth saying out loud: a span
+ * whose parent id arrived malformed is normalised to no parent at all, so
+ * telemetry a hand-written client mangled can complete a trace early. The
+ * alternative is reading a framework's own word for its root out of the span
+ * name, which would make completion mean something different for every provider
+ * egma ever supports — and a trace completed early is judged on what arrived,
+ * while a trace completed by nobody is judged by the idle window anyway.
+ *
+ * Simulations are skipped rather than absent: they reach the queue through the
+ * transaction that ends them, so even when egma's own runtime starts exporting
+ * through this door its spans must not make a second job.
+ *
+ * Nothing here decides whether a trace *should* be graded. It reports what
+ * arrived; which graders apply, and whether this trace is their turn, are
+ * questions asked much later by a service that holds no request open.
+ */
+function productionTracesIn(
+  spans: readonly NewSpan[],
+): readonly ProductionTraceActivity[] {
+  const seen = new Map<
+    string,
+    { first: bigint; last: bigint; rootClosed: boolean }
+  >();
+
+  for (const span of spans) {
+    if (span.source !== "production") continue;
+
+    const isRoot = span.parentSpanId === "";
+    const found = seen.get(span.traceId);
+    if (found === undefined) {
+      seen.set(span.traceId, {
+        first: span.startedAtMicroseconds,
+        last: span.startedAtMicroseconds,
+        rootClosed: isRoot,
+      });
+      continue;
+    }
+
+    if (span.startedAtMicroseconds < found.first) {
+      found.first = span.startedAtMicroseconds;
+    }
+    if (span.startedAtMicroseconds > found.last) {
+      found.last = span.startedAtMicroseconds;
+    }
+    found.rootClosed ||= isRoot;
+  }
+
+  return [...seen].map(([traceId, when]) => ({
+    traceId,
+    // Milliseconds, because that is what a timestamp column reads back into.
+    // The lost microseconds cost nothing: the window is widened at both ends
+    // before a transcript is read with it, and the store buckets a span to the
+    // minute it started in regardless.
+    firstSpanAt: new Date(Number(when.first / 1_000n)),
+    lastSpanAt: new Date(Number(when.last / 1_000n)),
+    rootClosed: when.rootClosed,
+  }));
+}
+
 /* ------------------------------------------------------------------- *
  * Taking work. The one call that works the whole deployment.
  * ------------------------------------------------------------------- */
@@ -267,6 +536,13 @@ export type GradingClaimRequest = {
   readonly capacity: number;
   /** How long its claim survives its silence; the default is generous. */
   readonly leaseSeconds?: number | undefined;
+  /**
+   * How long a production trace must have been quiet before it is judged
+   * without a closed root span. The deployment's own patience, which is why it
+   * is asked for here rather than stamped on the row at ingest: the door records
+   * what it saw, and how long is long enough is the judging side's policy.
+   */
+  readonly idleSeconds?: number | undefined;
 };
 
 /**
@@ -285,6 +561,20 @@ export type GradingClaimRequest = {
  * function — reclaiming an abandoned job *is* claiming, and a job has no
  * half-finished state for a sweep to tidy, because grading either produced
  * verdict rows or did not.
+ *
+ * **A production trace adds a third condition to the first of those**, and this
+ * is where the idle-timeout fallback actually lives. Such a job is written when
+ * the trace's first span arrives, so `pending` alone would hand out a
+ * conversation that is still happening; it is claimable once its root span
+ * closed it, or once nothing has arrived for it in longer than `idleSeconds`.
+ * The second half is a sweep by nature — the event it waits for is the absence
+ * of events, so nobody can be woken for it — and it is a predicate here rather
+ * than a background job because the query that hands out work is already run on
+ * an interval by every copy of the service.
+ *
+ * A simulation is never asked either question. It is complete because a
+ * transaction said so, and sampling and idleness are both about traffic egma did
+ * not cause.
  *
  * A job that has been claimed `MOST_ATTEMPTS` times and still is not finished is
  * `abandoned` here instead of handed out again. egma stops trying; it does not
@@ -316,8 +606,23 @@ export async function claimGradingJobs(
     throw new Error("a lease is a positive whole number of seconds");
   }
 
+  const idleSeconds = request.idleSeconds ?? DEFAULT_TRACE_IDLE_SECONDS;
+  if (!Number.isInteger(idleSeconds) || idleSeconds < 1) {
+    throw new Error("an idle window is a positive whole number of seconds");
+  }
+
   const now = new Date();
   const silentSince = new Date(now.getTime() - leaseSeconds * 1000);
+  const quietSince = new Date(now.getTime() - idleSeconds * 1000);
+
+  // The conversation is over: a simulation's transaction said so, a trace's root
+  // span closed, or nothing has arrived for the trace in longer than the idle
+  // window and egma judges what it has rather than waiting forever.
+  const finished = or(
+    eq(gradingJob.source, "simulation"),
+    isNotNull(gradingJob.rootClosedAt),
+    lt(gradingJob.lastSeenAt, quietSince),
+  );
 
   const claimed = await db().transaction(async (tx) => {
     const candidates = await tx
@@ -325,7 +630,7 @@ export async function claimGradingJobs(
       .from(gradingJob)
       .where(
         or(
-          eq(gradingJob.status, "pending"),
+          and(eq(gradingJob.status, "pending"), finished),
           and(
             eq(gradingJob.status, "claimed"),
             lt(gradingJob.heartbeatAt, silentSince),
@@ -374,6 +679,9 @@ export async function claimGradingJobs(
       id: row.id,
       source: row.source as GradingSource,
       simulationId: row.simulationId,
+      traceId: row.traceId,
+      firstSpanAt: row.firstSpanAt,
+      lastSpanAt: row.lastSpanAt,
       organizationId: row.organizationId,
       projectId: row.projectId,
       attempts: row.attempts,
@@ -570,4 +878,39 @@ export async function listGradingJobsForSimulation(
     .orderBy(asc(gradingJob.id));
 
   return rows.map(jobFromRow);
+}
+
+/**
+ * The job standing behind one production trace, if egma has heard of it.
+ *
+ * One rather than a list, and that is the `trace_id` unique speaking: a trace
+ * has exactly one job for its whole life, from the first span that arrives to
+ * the verdicts that land. So this answers three questions with one row — has
+ * egma seen this conversation, is it over, has it been judged — and it is what a
+ * test asserts a second grading never created.
+ */
+export async function getGradingJobForTrace(
+  auth: AuthContext,
+  traceId: string,
+): Promise<GradingJob | undefined> {
+  authorize(auth, "read", here(auth));
+
+  const [row] = await db()
+    .select(JOB_COLUMNS)
+    .from(gradingJob)
+    .where(
+      within(
+        auth,
+        gradingJob,
+        and(
+          eq(gradingJob.traceId, traceId),
+          auth.projectId === undefined
+            ? undefined
+            : eq(gradingJob.projectId, auth.projectId),
+        ),
+      ),
+    )
+    .limit(1);
+
+  return row === undefined ? undefined : jobFromRow(row);
 }
