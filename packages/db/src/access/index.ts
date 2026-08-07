@@ -50,6 +50,14 @@
  * project to narrow to — a narrowing argument, never a filter — because the
  * trace store is filed by time and a read that named none would be the one
  * unfiltered scan this boundary exists to make unreachable.
+ *
+ * `appendVerdicts` and `readVerdicts` are the same two halves for the store's
+ * other table. They need no window, because a verdict is filed under the
+ * conversation it judges rather than under the minute it was written in, so
+ * naming the conversation is already the bound. The read hands back the rows and
+ * the folded answer over them; nothing writes an overall row anywhere, and the
+ * fold that computes one is a pure function exported from the package's entry
+ * point rather than from here, because it reaches no store at all.
  */
 
 export type { AuthContext, Role, Via } from "./context.ts";
@@ -164,6 +172,16 @@ export {
   type TraceSpan,
   type TraceSummary,
 } from "./traces.ts";
+
+export {
+  appendVerdicts,
+  readVerdicts,
+  type AppendedVerdicts,
+  type NewVerdict,
+  type ReadVerdictsOptions,
+  type RecordedVerdict,
+  type TraceVerdicts,
+} from "./verdicts.ts";
 
 export {
   addConnection,

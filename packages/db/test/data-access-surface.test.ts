@@ -77,10 +77,15 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
  * watching, which is the same objection as a permission row nothing enforces.
  * Both reads take a required time window on top of the context, so neither can
  * be called in a way that scans the whole table.
+ *
+ * `appendVerdicts` and `readVerdicts` are the same two halves for the store's
+ * other table. They need no window because a verdict is filed under the
+ * conversation it judges, so naming the conversation is already the bound.
  */
 const CONTEXT_REQUIRING = [
   "addConnection",
   "appendSpans",
+  "appendVerdicts",
   "cancelRun",
   "changeRole",
   "claimSimulations",
@@ -131,6 +136,7 @@ const CONTEXT_REQUIRING = [
   "readOrganizationSettings",
   "readProject",
   "readTrace",
+  "readVerdicts",
   "recordDeviceAuthorization",
   "recordSimulationHeartbeat",
   "removeConnection",
@@ -192,6 +198,30 @@ const READ_LIMITS = [
   "MAXIMUM_WINDOW_MILLISECONDS",
 ];
 
+/**
+ * The fold, and the vocabulary it is written in.
+ *
+ * These take no `AuthContext` and are the only exports that legitimately do not,
+ * because they are the only ones that reach nothing: rows a caller already holds
+ * go in, arithmetic over them comes out. There is no store to name a customer
+ * in, so there is no tenancy to stamp — the rows were fetched by a call that
+ * stamped it already.
+ *
+ * They are exported because the algebra has to live in exactly one place. A
+ * grader's outcome, a conversation's and a run's are all this computation, no
+ * row is written anywhere that records the answer, and a second implementation
+ * in a query or a page would be a second answer with nothing to settle it
+ * against.
+ */
+const THE_FOLD = [
+  "foldVerdicts",
+  "foldVerdictsByGrader",
+  "speakingVerdicts",
+  "JUDGED_BY_HUMAN",
+  "PRIORITIES",
+  "VERDICTS",
+];
+
 describe("the data-access module's surface", () => {
   it("is exactly this, so widening it cannot happen by accident", () => {
     expect(Object.keys(dataAccess).sort()).toEqual(
@@ -205,6 +235,7 @@ describe("the data-access module's surface", () => {
         ...PERMISSION,
         ...VALUES,
         ...READ_LIMITS,
+        ...THE_FOLD,
       ].sort(),
     );
   });
