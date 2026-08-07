@@ -40,6 +40,14 @@ services:
     # reaches the workbench across this network by its service name, and a
     # server bound to the container's loopback would answer nobody.
     command: ["egma-workbench", "--host", "0.0.0.0", "--port", "8085"]
+    environment:
+      # Which number the phone fixture dials. Empty is the ordinary case:
+      # every fixture is queued as written, and the phone one names an
+      # obvious placeholder that no bridge is configured to call anyway.
+      # Setting it points that fixture at a real agent and queues nothing
+      # else — which, with the phone overlay beside this one, is the whole
+      # of the real-call demo. See the README.
+      EGMA_WORKBENCH_PHONE_NUMBER: ${EGMA_WORKBENCH_PHONE_NUMBER:-}
     # Published, unlike the simulator, and for the opposite reason: this
     # one is dialled into. But bound to the host's loopback, because the
     # workbench asks nobody who they are — it hands out specs, takes

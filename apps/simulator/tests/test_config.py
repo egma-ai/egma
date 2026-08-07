@@ -477,6 +477,46 @@ def test_a_bring_your_own_trunk_arrives_whole(env):
     assert media.trunk_number == "+15550000000"
 
 
+@pytest.mark.parametrize(
+    ("missing", "given"),
+    [
+        ("EGMA_SIMULATOR_SIP_TRUNK_PASSWORD", "EGMA_SIMULATOR_SIP_TRUNK_USERNAME"),
+        ("EGMA_SIMULATOR_SIP_TRUNK_USERNAME", "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"),
+    ],
+)
+def test_half_a_trunk_credential_is_refused_naming_the_missing_half(
+    env, missing, given
+):
+    """Credential auth is a username *and* a password, and half of one
+    authenticates nobody.
+
+    Left alone this is the worst kind of misconfiguration: the simulator
+    starts, claims work, dials, and the carrier answers 403 on every call —
+    a refusal that reads exactly like wrong credentials rather than like
+    absent ones. Said here, it costs a startup line and no calls at all.
+    """
+    a_deployment_that_dials(env, **{missing: None})
+    with pytest.raises(ValueError) as refusal:
+        SimulatorConfig.from_env()
+    told = str(refusal.value)
+    assert missing in told
+    assert given in told
+
+
+def test_a_trunk_the_carrier_authenticates_by_address_needs_no_credential(env):
+    """Some carriers allow a trunk by IP rather than by password. Neither
+    half given is a deployment that meant it, and it starts."""
+    a_deployment_that_dials(
+        env,
+        EGMA_SIMULATOR_SIP_TRUNK_USERNAME=None,
+        EGMA_SIMULATOR_SIP_TRUNK_PASSWORD=None,
+    )
+    media = SimulatorConfig.from_env().media
+    assert media.trunk_username is None
+    assert media.trunk_password is None
+    assert media.trunk_address == "trunk.example.pstn.twilio.com"
+
+
 def test_a_stored_trunk_reference_is_the_other_way(env):
     a_deployment_that_dials(
         env,

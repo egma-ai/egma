@@ -246,6 +246,29 @@ class MediaSettings:
                 "EGMA_SIMULATOR_SIP_TRUNK_USERNAME and "
                 "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD for an inline one"
             )
+        # Credential auth is a pair. Neither half is a trunk the carrier
+        # authenticates some other way — by the address it came from — and
+        # that is a real deployment. One half is nobody's deployment: every
+        # call it places comes back 403, which reads as *wrong* credentials
+        # rather than as half of one, and it reads that way once per
+        # simulation until somebody looks here.
+        if (settings.trunk_username is None) != (settings.trunk_password is None):
+            # Both names written out whole, never assembled from parts: a
+            # variable somebody has to search for has to be searchable, in
+            # this file as much as in the sentence it prints.
+            username = "EGMA_SIMULATOR_SIP_TRUNK_USERNAME"
+            password = "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"
+            missing, given = (
+                (password, username)
+                if settings.trunk_password is None
+                else (username, password)
+            )
+            raise ValueError(
+                f"{missing} is required alongside {given}: a trunk "
+                "authenticated by credentials needs both halves, and a "
+                "carrier refuses half of one exactly the way it refuses a "
+                "wrong one"
+            )
         return settings
 
 
