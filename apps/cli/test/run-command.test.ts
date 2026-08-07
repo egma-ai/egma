@@ -22,6 +22,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runRunCommand, RUN_EXIT } from "../src/commands/run.ts";
 import { createEgmaFolder, folderPathsIn, writeConfig } from "../src/folder/egma-folder.ts";
+import type {
+  PlatformRun,
+  PlatformSimulation,
+  RunEvent,
+  SimulationStatus,
+  Verdict,
+} from "../src/platform/runs.ts";
+import { RunFollower } from "../src/run/follow.ts";
 import { pullTests } from "../src/sync/pull.ts";
 import {
   noAdapterMessage,
@@ -449,7 +457,9 @@ describe("egma run", () => {
 
     expect(said.code).toBe(RUN_EXIT.nothing);
     expect(valuesOf(said.lines, "unknown")).toEqual(["never-pushed"]);
-    expect(factOf(said.lines, "status")).toBe("refused");
+    // Its own word: `refused` is the platform saying no, and it comes with a
+    // number of its own. One status line, one number.
+    expect(factOf(said.lines, "status")).toBe("not-on-egma");
     expect(factOf(said.lines, "stderr")).toContain("Run egma push");
     expect(platform.running.runs).toHaveLength(0);
   });
@@ -614,5 +624,134 @@ describe("egma run, as the built command", () => {
     expect(factOf(lines, "skipped")).toBe("1");
     expect(factOf(lines, "errored")).toBe("0");
     expect(factOf(lines, "status")).toBe("completed");
+  });
+});
+
+/**
+ * The cursor, on its own.
+ *
+ * The whole of a follower's resumption story is one number: every ask names
+ * where the last one got to. Two things have to be true of it and neither can
+ * be seen from the outside of a run that went smoothly — so they are checked
+ * here, with the pages handed over by hand rather than by a platform.
+ *
+ * A run's simulations are laid out when it is created and their number is
+ * stamped there, so a change about a simulation the follower has never heard
+ * of is a change about somebody else's run. It is ignored rather than invented.
+ */
+describe("the cursor a follower resumes from", () => {
+  const SIMULATION = (id: string, position: number): PlatformSimulation => ({
+    id,
+    position,
+    testName: `test-${position}`,
+    testVersionId: `tstv_${position}`,
+    personaName: "default-persona",
+    status: "queued",
+    verdict: null,
+    reason: null,
+  });
+
+  const RUN: PlatformRun = {
+    id: "run_01",
+    status: "running",
+    agentId: "agt_01",
+    connectionId: "con_01",
+    connectionType: "retell",
+    modality: "voice",
+    testVersionIds: ["tstv_1", "tstv_2"],
+    expectedSimulationCount: 2,
+    resultsUrl: "https://app.egma.example/runs/run_01",
+    simulations: [SIMULATION("sim_1", 1), SIMULATION("sim_2", 2)],
+  };
+
+  const moved = (
+    seq: number,
+    simulationId: string,
+    status: SimulationStatus,
+    verdict: Verdict | null = null,
+  ): RunEvent => ({
+    kind: "simulation",
+    seq,
+    simulationId,
+    testName: simulationId === "sim_1" ? "test-1" : "test-2",
+    personaName: "default-persona",
+    status,
+    verdict,
+    reason: null,
+  });
+
+  it("moves forward with the platform, and never backwards", () => {
+    const follower = new RunFollower(RUN);
+    expect(follower.at).toBe(0);
+
+    follower.take([moved(1, "sim_1", "claimed")], 1);
+    expect(follower.at).toBe(1);
+
+    // A page that carried nothing leaves the cursor where it was, so the next
+    // ask covers exactly the same ground rather than stepping over it.
+    follower.take([], 1);
+    expect(follower.at).toBe(1);
+
+    // And a platform that answered with an older cursor cannot rewind one: a
+    // follower that went backwards would hand every change over twice.
+    follower.take([moved(2, "sim_1", "running")], 0);
+    expect(follower.at).toBe(1);
+  });
+
+  it("hands a change over once, however many times a page carries it", () => {
+    const follower = new RunFollower(RUN);
+    const page = [
+      moved(1, "sim_1", "claimed"),
+      moved(2, "sim_1", "running"),
+      moved(3, "sim_1", "completed", "skipped"),
+    ];
+
+    const first = follower.take(page, 3);
+    expect(first.filter((change) => change.verdictLanded)).toHaveLength(1);
+    expect(first.filter((change) => change.first)).toHaveLength(1);
+
+    // The same page again, which is what a platform that re-sent one would
+    // look like. The verdict is not news a second time and the mark does not
+    // move — a run has one first verdict, whatever arrives twice.
+    const again = follower.take(page, 3);
+    expect(again.filter((change) => change.verdictLanded)).toHaveLength(0);
+    expect(again.filter((change) => change.first)).toHaveLength(0);
+    expect(follower.firstVerdict?.id).toBe("sim_1");
+    expect(follower.rows.filter((row) => row.first)).toHaveLength(1);
+    expect(follower.tally).toMatchObject({ skipped: 1, graded: 1, pending: 1, total: 2 });
+  });
+
+  /**
+   * The first verdict is the first one that landed, whatever it was. `skipped`
+   * and `errored` are verdicts, and a wizard that waited past one of them for
+   * something greener would be waiting for the suite it promised not to wait
+   * for.
+   */
+  it("marks a first verdict of skipped or errored exactly as it marks passed", () => {
+    for (const verdict of ["skipped", "errored"] as const) {
+      const follower = new RunFollower(RUN);
+      const changes = follower.take(
+        [moved(1, "sim_1", verdict === "errored" ? "failed" : "completed", verdict)],
+        1,
+      );
+
+      expect(changes[0]?.first).toBe(true);
+      expect(follower.firstVerdict?.verdict).toBe(verdict);
+      expect(follower.tally.graded).toBe(1);
+      expect(follower.tally.failed).toBe(0);
+    }
+  });
+
+  it("ignores a change about a simulation this run never laid out", () => {
+    const follower = new RunFollower(RUN);
+
+    const changes = follower.take([moved(1, "sim_from_another_run", "completed", "passed")], 1);
+
+    expect(changes).toEqual([]);
+    expect(follower.firstVerdict).toBeNull();
+    expect(follower.tally).toMatchObject({ graded: 0, total: 2 });
+    // The cursor still moves: the page was read, and asking for it again would
+    // be asking for the same answer forever.
+    expect(follower.at).toBe(1);
   });
 });

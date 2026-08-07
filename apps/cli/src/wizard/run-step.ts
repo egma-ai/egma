@@ -108,12 +108,15 @@ async function offerTheSkill(
   }
 
   const installed = await installEgmaSkill({ places, scope });
-  ui.pushStatus(`${ACTION_MARK} The egma skill is in ${installed.file}`);
+  ui.pushStatus(
+    `${ACTION_MARK} ${installed.replaced ? "Replaced the egma skill in" : "The egma skill is in"} ${installed.file}`,
+  );
   return {
     kind: "installed",
     scope: installed.scope,
     file: installed.file,
     drivenAgentName: places.name,
+    replaced: installed.replaced,
   };
 }
 

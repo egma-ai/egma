@@ -42,6 +42,8 @@ export type SkillOutcome =
       readonly scope: SkillScope;
       readonly file: string;
       readonly drivenAgentName: string;
+      /** A file was already there, and the line has to say it is gone. */
+      readonly replaced: boolean;
     }
   | { readonly kind: "skipped"; readonly drivenAgentName: string }
   | { readonly kind: "not-offered" };
@@ -249,7 +251,12 @@ export function buildExitNotice(report: ExitReport): string | null {
 
   switch (report.skill.kind) {
     case "installed":
-      return installedLine(report.skill.scope, report.skill.file, report.skill.drivenAgentName);
+      return installedLine(
+        report.skill.scope,
+        report.skill.file,
+        report.skill.drivenAgentName,
+        report.skill.replaced,
+      );
     case "skipped":
       return skippedLine(report.skill.drivenAgentName);
     case "not-offered":

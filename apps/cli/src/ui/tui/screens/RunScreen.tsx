@@ -89,6 +89,11 @@ export function RunScreen({ run }: RunScreenProps) {
   const shown = run.rows.slice(from, from + VISIBLE_ROWS);
 
   const { tally } = run;
+  const marked = run.firstVerdict;
+  const first =
+    marked === null || marked.verdict === null
+      ? null
+      : { name: marked.name, verdict: marked.verdict };
 
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
@@ -105,11 +110,13 @@ export function RunScreen({ run }: RunScreenProps) {
           </Text>
         ))}
       </Box>
-      {run.firstVerdict === null ? null : (
+      {/* Drawn from the verdict itself rather than from the row being marked,
+          because a default here would be a word egma made up: a row with no
+          verdict on it has nothing to say about one, and "passed" is the worst
+          possible guess. */}
+      {first === null ? null : (
         <Box marginTop={1}>
-          <Text bold>
-            {`✓ First verdict: ${run.firstVerdict.name} ${VERDICT_SAID[run.firstVerdict.verdict ?? "passed"]}`}
-          </Text>
+          <Text bold>{`✓ First verdict: ${first.name} ${VERDICT_SAID[first.verdict]}`}</Text>
         </Box>
       )}
       <Box height={1} />

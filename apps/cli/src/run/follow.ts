@@ -11,7 +11,14 @@
  * **The first verdict is marked here and nowhere else.** It is the moment the
  * whole walk is timed against — the point where a developer stops taking
  * egma's word for it and reads a result — so which change it was is a fact
- * about the run, not a decision a screen makes while drawing.
+ * about the run, not a decision a screen makes while drawing. Whichever of the
+ * four it is: a verdict is a verdict, and a wizard that held out past a
+ * `skipped` for something greener would be waiting for the whole suite it
+ * promised not to wait for.
+ *
+ * **A simulation only ever moves forward.** Changes arrive numbered and are
+ * taken in that order, once each, so a page delivered twice cannot walk a
+ * judged simulation back to the moment it was picked up.
  *
  * **Nothing is folded.** `skipped` and `errored` are counted as themselves all
  * the way through: a test that could not run is not a test that failed, and a
@@ -37,7 +44,7 @@ export type SimulationRow = {
   readonly position: number;
   /** The test this executes. */
   readonly name: string;
-  /** Who calls about it. */
+  /** The synthetic person who speaks to the agent in it. */
   readonly persona: string;
   readonly status: SimulationStatus;
   readonly verdict: Verdict | null;
@@ -110,6 +117,18 @@ export class RunFollower {
   private runStatusHeld: RunStatus;
   private firstHeld: string | null = null;
   private cursor = 0;
+  /**
+   * The highest change this follower has already acted on.
+   *
+   * Kept apart from the cursor because the two answer different questions. The
+   * cursor is where to ask from and the platform owns it; this is what has
+   * already happened here, and it is what makes a change arriving twice a
+   * change that is not news. Without it a page delivered again would walk a
+   * simulation backwards through its own lifecycle — a judged one would lose
+   * its verdict to the `claimed` event that came before it, land the same
+   * verdict a second time, and be drawn as though it had started over.
+   */
+  private taken = 0;
 
   readonly runId: string;
   readonly resultsUrl: string;
@@ -178,10 +197,17 @@ export class RunFollower {
    * want to say out loud. A change to a simulation this follower has never
    * heard of is ignored rather than invented — the run laid its simulations
    * out at creation and their number is stamped there.
+   *
+   * A change that has already been taken is ignored too, however it arrived
+   * again. A page can come twice — a platform that answers with a cursor it
+   * has not moved sends the same page on the next ask — and every one of those
+   * changes is old news by then, so none of them is said again.
    */
   take(events: readonly RunEvent[], next: number): readonly RunChange[] {
     const changes: RunChange[] = [];
     for (const event of events) {
+      if (event.seq <= this.taken) continue;
+      this.taken = event.seq;
       if (event.kind === "run") {
         this.runStatusHeld = event.status;
         continue;

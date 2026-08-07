@@ -59,7 +59,7 @@ export function SkillsOfferScreen({ places, onAnswer }: SkillsOfferScreenProps) 
       <Text bold>egma</Text>
       <Box height={1} />
       <Text>
-        {`Install the egma skill into ${places.name}, so future sessions can drive egma themselves?`}
+        {`Install the egma skill into ${places.name}, so it can drive egma on its own next time?`}
       </Text>
       <Box height={1} />
       {/* Said before anything is written, because a path a developer reads

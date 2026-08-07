@@ -29,6 +29,20 @@ const EVERY_ENDING: readonly ExitReport[] = [
       scope: "project",
       file: "/repo/.claude/skills/egma/SKILL.md",
       drivenAgentName: "Claude Code",
+      replaced: false,
+    },
+  },
+  {
+    kind: "run-started",
+    resultsUrl: RESULTS_URL,
+    graded: 3,
+    total: 12,
+    skill: {
+      kind: "installed",
+      scope: "global",
+      file: "/home/you/.claude/skills/egma/SKILL.md",
+      drivenAgentName: "Claude Code",
+      replaced: true,
     },
   },
   {
@@ -247,10 +261,31 @@ describe("the exit line", () => {
           scope: "global",
           file: "/home/you/.claude/skills/egma/SKILL.md",
           drivenAgentName: "Claude Code",
+          replaced: false,
         },
       }),
     ).toBe(
       "The egma skill is in /home/you/.claude/skills/egma/SKILL.md. Every repository you open Claude Code in has it.",
+    );
+
+    // A file that was already there is gone, and this is the only place the
+    // developer will ever be told so.
+    expect(
+      buildExitNotice({
+        kind: "run-started",
+        resultsUrl: RESULTS_URL,
+        graded: 1,
+        total: 12,
+        skill: {
+          kind: "installed",
+          scope: "project",
+          file: "/repo/.claude/skills/egma/SKILL.md",
+          drivenAgentName: "Claude Code",
+          replaced: true,
+        },
+      }),
+    ).toBe(
+      "The egma skill in /repo/.claude/skills/egma/SKILL.md was replaced with this version's. Commit it, and everybody on this repository has it.",
     );
 
     expect(

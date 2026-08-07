@@ -133,7 +133,11 @@ export async function runRunCommand(options: RunCommandOptions): Promise<number>
   reportSelection(options, selection);
 
   if (selection.unknown.length > 0) {
-    options.out("status: refused");
+    // Its own word, and never `refused`. `refused` is the platform saying no
+    // to a run it will not conduct, and it answers with its own number — a
+    // reader that saw the same status line come back with two different
+    // numbers would have to guess which of the two had happened.
+    options.out("status: not-on-egma");
     options.fail(pushFirstRefusal(selection.unknown));
     return RUN_EXIT.nothing;
   }

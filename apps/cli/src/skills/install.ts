@@ -3,8 +3,8 @@
  *
  * Every skill egma has until now is content it *sends* — read out of this
  * package at the moment a task is dispatched, never written anywhere. This is
- * the one that is offered as a file, at the end of the walk, so that future
- * sessions of the developer's own coding agent can drive egma without egma
+ * the one that is offered as a file, at the end of the walk, so that the
+ * developer's own coding agent can drive egma later, on its own, without egma
  * being there.
  *
  * Three rules, and each one is a decision the offer would be worthless without.
@@ -27,7 +27,7 @@
  * key somewhere else did not thereby move their coding agent's configuration.
  */
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -132,6 +132,15 @@ export type InstalledSkill = {
   readonly scope: SkillScope;
   /** Absolute, so the line that says where it went is one a developer can use. */
   readonly file: string;
+  /**
+   * True when a file was already there and this one is now in its place.
+   *
+   * It travels out because the line the developer keeps has to say it. egma
+   * overwrites on purpose — half an old skill beside half a new one would be
+   * worse than either — but overwriting somebody's file without telling them
+   * is how a tool loses an edit they made and never finds out.
+   */
+  readonly replaced: boolean;
 };
 
 export type InstallOptions = {
@@ -145,12 +154,22 @@ export type InstallOptions = {
  * The file is overwritten if one is already there, which is what a developer
  * accepting the offer a second time means: this package's copy is the current
  * one, and half an old skill beside half a new one would be worse than either.
+ *
+ * Whether there was one is answered before the write and carried out, because
+ * a developer who had edited that file has just lost the edit and the line
+ * they keep is the only place they will ever hear about it. The look is not a
+ * gate on the write and nothing branches on it — it is one question asked of
+ * the disk, so there is nothing here for two runs at once to race over.
  */
 export async function installEgmaSkill(options: InstallOptions): Promise<InstalledSkill> {
   const file = options.scope === "project" ? options.places.project : options.places.global;
+  const replaced = await stat(file).then(
+    (found) => found.isFile(),
+    () => false,
+  );
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, `${installableSkill()}\n`, "utf8");
-  return { scope: options.scope, file };
+  return { scope: options.scope, file, replaced };
 }
 
 /** What the developer is told once the file is written. */
@@ -158,10 +177,16 @@ export function installedLine(
   scope: SkillScope,
   file: string,
   drivenAgentName: string,
+  replaced = false,
 ): string {
+  // Said first, because it is the only part of this line that is news about
+  // something the developer had rather than about something egma did.
+  const put = replaced
+    ? `The egma skill in ${file} was replaced with this version's.`
+    : `The egma skill is in ${file}.`;
   return scope === "project"
-    ? `The egma skill is in ${file}. Commit it, and everybody on this repository has it.`
-    : `The egma skill is in ${file}. Every repository you open ${drivenAgentName} in has it.`;
+    ? `${put} Commit it, and everybody on this repository has it.`
+    : `${put} Every repository you open ${drivenAgentName} in has it.`;
 }
 
 /** What the developer is told when they skip, so skipping is never silent. */

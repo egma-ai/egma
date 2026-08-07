@@ -12,8 +12,9 @@
  */
 
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -27,7 +28,10 @@ import {
   skillPlacesFor,
   skippedLine,
 } from "../src/skills/install.ts";
-import { filesUnder, makeWorkspace, type Workspace } from "./support/workspace.ts";
+import { BANNED, SCENARIO_HEADING } from "./support/glossary.ts";
+import { CLI_ENTRY, filesUnder, makeWorkspace, type Workspace } from "./support/workspace.ts";
+
+const run = promisify(execFile);
 
 let repository: Workspace;
 let home: Workspace;
@@ -143,13 +147,29 @@ describe("installing it", () => {
   /**
    * Accepting the offer a second time means this package's copy is the current
    * one. Half an old skill beside half a new one would be worse than either.
+   *
+   * And it says so. A developer who had edited that file has just lost the
+   * edit, and the line they keep is the only place they will ever hear about
+   * it — a tool that overwrites quietly is a tool that loses somebody's work
+   * and lets them find out weeks later.
    */
-  it("replaces a file that is already there, rather than leaving two", async () => {
+  it("replaces a file that is already there, and says that it did", async () => {
     const places = placesFor("claude-acp");
     if (places === null) throw new Error("Claude Code has a skill convention");
 
-    await installEgmaSkill({ places, scope: "project" });
-    await installEgmaSkill({ places, scope: "project" });
+    const first = await installEgmaSkill({ places, scope: "project" });
+    expect(first.replaced).toBe(false);
+    expect(installedLine("project", first.file, places.name, first.replaced)).not.toContain(
+      "replaced",
+    );
+
+    await writeFile(places.project, "# my own notes, written over the top\n", "utf8");
+    const second = await installEgmaSkill({ places, scope: "project" });
+
+    expect(second.replaced).toBe(true);
+    expect(installedLine("project", second.file, places.name, second.replaced)).toBe(
+      `The egma skill in ${places.project} was replaced with this version's. Commit it, and everybody on this repository has it.`,
+    );
 
     expect(await filesUnder(repository.dir)).toEqual(
       ["package.json", ".claude/skills/egma/SKILL.md"].sort(),
@@ -221,11 +241,67 @@ describe("the skill that gets installed", () => {
       "Never report `skipped` or `errored` as `failed`.",
     );
   });
+
+  /**
+   * The same ban list the sent skills are held to, and for a harder reason.
+   *
+   * This is the only text egma leaves on the machine, and a coding agent reads
+   * it in every future task in that repository. A near synonym in here does not
+   * teach one developer the wrong word once — it teaches their agent the wrong
+   * word for good, and the agent will then use it back at them.
+   */
+  it("uses the words egma uses, because this is the text that stays behind", () => {
+    const content = installableSkill().replaceAll(SCENARIO_HEADING, "");
+
+    for (const banned of BANNED) {
+      expect({ banned: String(banned), hit: banned.exec(content)?.[0] ?? null }).toEqual({
+        banned: String(banned),
+        hit: null,
+      });
+    }
+    // The bare word is the voice agent; a coding agent is always named as one.
+    expect(content).toContain("voice agent");
+  });
+
+  /**
+   * Every verb this file tells a coding agent to type has to be a verb the
+   * command really has. A skill that teaches one that was renamed sends an
+   * agent into a loop nobody is watching.
+   */
+  it("names only verbs and flags the command really has", async () => {
+    const content = installableSkill();
+    // Asked of the built command rather than of a list in the source, because
+    // the skill sends a reader to `egma --help` and that is the answer they
+    // get. A verb renamed there and left here is a loop nobody is watching.
+    const { stdout: help } = await run(process.execPath, [CLI_ENTRY, "--help"]);
+
+    // Only what it tells a reader to type: what is inside a fence, and what is
+    // inside backticks. Prose about egma is prose, and "egma from this
+    // repository" is a sentence rather than a verb.
+    const fenced = [...content.matchAll(/```[a-z]*\n(?<body>[\s\S]*?)```/gu)].flatMap((found) =>
+      (found.groups?.body ?? "").split("\n"),
+    );
+    const inline = [...content.matchAll(/`(?<code>[^`\n]+)`/gu)].map(
+      (found) => found.groups?.code ?? "",
+    );
+    const typed = [...fenced, ...inline].flatMap((one) => {
+      const verb = /^egma (?<verb>[a-z][a-z-]*)/u.exec(one.trim())?.groups?.verb;
+      return verb === undefined ? [] : [verb];
+    });
+
+    // A guard that matched nothing would pass forever.
+    expect(new Set(typed).size).toBeGreaterThan(2);
+    for (const verb of new Set(typed)) {
+      expect(help, verb).toContain(`egma ${verb} [options]`);
+    }
+    // And the one flag it names, spelt the way the command spells it.
+    expect(content).toContain("--no-follow");
+    expect(help).toContain("--no-follow");
+  });
 });
 
 describe("the skill in the package", () => {
   it("survives npm packing, which is the only reason it is outside dist", async () => {
-    const run = promisify(execFile);
     const root = fileURLToPath(new URL("..", import.meta.url));
 
     const { stdout } = await run("npm", ["pack", "--dry-run", "--json"], { cwd: root });

@@ -348,8 +348,8 @@ named on a `stale:` line and the run happens anyway, over what egma holds.
 The last thing the wizard asks:
 
 ```
-◇ Install the egma skill into Claude Code, so future sessions
-  can drive egma themselves?   [p] project   [g] global   [s] skip
+◇ Install the egma skill into Claude Code, so it can drive egma
+  on its own next time?   [p] project   [g] global   [s] skip
 ```
 
 `[p]` writes `.claude/skills/egma/SKILL.md` in this repository — commit it and
