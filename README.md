@@ -52,12 +52,23 @@ at all.
 
 ## Your first run, from a terminal
 
-With an instance up and an account on it, the walk is one command, run in the
-repository that holds your voice agent:
+With an instance up and an account on it, the walk is one command. That command
+is not on npm yet, so it comes from this checkout:
 
 ```bash
-EGMA_URL=http://localhost:3101 npx egma
+pnpm install                    # once
+pnpm --filter egma-cli build    # builds it into apps/cli/dist
 ```
+
+Then run it in the repository that holds your voice agent, naming the instance
+you signed up on:
+
+```bash
+cd ~/your-voice-agent
+EGMA_URL=http://localhost:3101 node ~/egma/apps/cli/dist/bin.js
+```
+
+`~/egma` is this checkout; when the package ships, that line becomes `npx egma`.
 
 It signs that machine in — a short code, approved in the browser you signed up
 in — registers your voice agent together with the way egma reaches it, writes a
@@ -69,21 +80,24 @@ nobody watching. `apps/cli/README.md` is the whole of it.
 
 **Where it stops today, said plainly.** The run is created and followed live,
 and no verdict arrives: nothing claims a simulation yet, so the run stays
-pending and every simulation stays queued. The simulator below conducts
-conversations already; what is missing between them is the piece that hands it a
-test, and the grader that scores what it did. Both are being built. Everything
-before them is real, and the run you started is yours — at the address the
-terminal printed, with no token on it.
+pending and every simulation stays queued. The simulator below conducts them
+already; what is missing between the two is the piece that hands it a test, and
+the grader that scores what it did. Both are being built. Everything before them
+is real, and the run you started is yours — at the address the terminal printed,
+with no token on it.
 
-The same walk runs as a check, in two commands from a checkout:
+The same walk runs as a check. On a checkout that has had `pnpm install`, and on
+a machine with a Chrome — or with `PLAYWRIGHT_BROWSERS_PATH` pointing at a
+Playwright Chromium, since the approval really happens in a browser — it is two
+commands:
 
 ```bash
 pnpm db:up
 pnpm --filter egma-cli smoke:walk
 ```
 
-It starts a whole egma of its own, signs in through a real browser, registers,
-pushes, runs and follows — then prints what it proved and what waits.
+They start a whole egma of its own, sign in through a real browser, register,
+push, run and follow — then print what was proved and what waits.
 
 ## The simulator, and why it publishes nothing
 

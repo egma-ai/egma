@@ -40,6 +40,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { startPlatform, type Platform } from "../test/support/fixture-platform/index.ts";
+import { check, problems, RULE, say } from "./support/report.ts";
 import { openGate, type Gate } from "./support/retell-gate.ts";
 
 const CLI_ENTRY = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
@@ -59,19 +60,6 @@ const STRICT_FLAG = "--require-target";
 
 /** How many agents are tried before giving up on finding one with a prompt. */
 const MOST_AGENTS_TRIED = 5;
-
-const RULE = "─".repeat(58);
-
-const problems: string[] = [];
-
-function say(message: string): void {
-  process.stdout.write(`${message}\n`);
-}
-
-function check(condition: boolean, what: string): void {
-  say(`${condition ? "  ok  " : "FAILED"}  ${what}`);
-  if (!condition) problems.push(what);
-}
 
 function requiresTarget(): boolean {
   if (process.argv.includes(STRICT_FLAG)) return true;

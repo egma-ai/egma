@@ -23,14 +23,19 @@
  * but Docker and Node. Which of the two ran is printed, every time.
  *
  * **What waits is named rather than faked.** Nothing on this machine claims a
- * simulation yet, so no verdict lands: the run stays pending and every
- * simulation stays queued. This check says so in its own summary, so a green
- * run of it can never be read as the whole ten-minute walk. It follows the run
- * the way any follower does — one numbered page at a time — and the day the
- * grader and the test-to-simulation bridge land, the first verdict arrives
- * through this same feed with nothing here to change.
+ * simulation yet, so no verdict lands: left alone, the run would sit pending
+ * with every simulation queued for as long as anybody watched it. This check
+ * proves both halves of that honestly — it reads the feed twice while the run
+ * is queued and finds it empty, and then **cancels the run itself**, because a
+ * cancel is the only change this machine can make to a live run and a feed
+ * that never carries a change proves nothing about following one. The cancel
+ * is the check's own doing, it is said out loud in what this prints, and a
+ * canceled run passes nothing and fails nothing. The day the grader and the
+ * test-to-simulation bridge land, the first verdict arrives through this same
+ * feed with nothing here to change.
  *
- * Run it with two commands, from the repository root:
+ * Run it with two commands, from the repository root, on a checkout that has
+ * had `pnpm install`:
  *
  *   pnpm db:up
  *   pnpm --filter egma-cli smoke:walk
@@ -39,6 +44,11 @@
  * everything this needs and walks. Set `RETELL_API_KEY` in the environment of
  * the second to register against your own Retell account instead of the
  * stand-in.
+ *
+ * It also needs a browser, because the approval is a real one: the Chrome on
+ * your machine, or any Chromium under `PLAYWRIGHT_BROWSERS_PATH`. This
+ * repository depends on `playwright-core` and downloads none of its own, so
+ * install Google Chrome or point that variable at one if you have neither.
  */
 
 import { spawn } from "node:child_process";
@@ -55,6 +65,9 @@ import { startInstance, type Instance } from "../../api/test/support/instance.ts
 import { folderPathsIn, updateConfig } from "../src/folder/egma-folder.ts";
 import { parseTestFile } from "../src/folder/test-file.ts";
 import { startFakeRetell, type FakeRetell } from "../test/support/fake-retell.ts";
+import { NO_BROWSER, signUpAndApprove } from "./support/approving-person.ts";
+import { ask, itemsOf } from "./support/asking.ts";
+import { check, problems, redact, RULE, say, secrets, waitUntil } from "./support/report.ts";
 import { openGate, type Gate } from "./support/retell-gate.ts";
 
 const CLI_ENTRY = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
@@ -62,56 +75,8 @@ const CLI_ENTRY = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 /** The committed name for the key a developer runs this against their own account with. */
 const KEY_VARIABLE = "RETELL_API_KEY";
 
-/** A browser egma must not open: this check drives its own. */
-const NO_BROWSER = "/usr/bin/true";
-
-const PASSWORD = "a-long-enough-password";
-
-const RULE = "─".repeat(58);
-
 // The API writes a line per request, and one walk makes a great many.
 process.env.LOG_LEVEL ??= "silent";
-
-const problems: string[] = [];
-/** Everything that must never appear in what this prints. */
-const secrets: string[] = [];
-
-/**
- * The text with everything that names somebody's account or machine taken out.
- *
- * A passing run of this gets pasted into reviews. Against a real Retell
- * account the agent's name and its identifier are that account's business, and
- * egma names its own agent after the vendor's — so all of them are collected
- * as they are learned and none of them survives into a line.
- */
-function redact(text: string): string {
-  return [...new Set(secrets)]
-    .filter((one) => one.length > 3)
-    .sort((left, right) => right.length - left.length)
-    .reduce((held, one) => held.split(one).join("<redacted>"), text);
-}
-
-function say(message: string): void {
-  process.stdout.write(`${redact(message)}\n`);
-}
-
-function check(condition: boolean, what: string): void {
-  say(`${condition ? "  ok  " : "FAILED"}  ${what}`);
-  if (!condition) problems.push(what);
-}
-
-async function waitUntil(
-  condition: () => boolean,
-  timeoutMs: number,
-  what: string,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    if (condition()) return;
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-}
 
 /* ── the command, as a developer runs it ─────────────────────────────── */
 
@@ -209,33 +174,6 @@ function exited(ran: Ran, verb: string, wanted = 0): void {
   }
 }
 
-/* ── the person in the browser ───────────────────────────────────────── */
-
-/**
- * The signup and the approval, as a person does them.
- *
- * The login smoke beside this one drives these same pages as its subject and
- * asserts what they say; here they are a step on the way to the walk, so this
- * walks them and asserts nothing about them. What matters here is that the key
- * the terminal ends up holding was approved by a real person in a real browser
- * on this instance's own pages.
- */
-async function signUpAndApprove(page: Page, approveUrl: string): Promise<void> {
-  await page.goto(approveUrl);
-  await page.click('button[type="submit"]');
-  await page.waitForURL(/\/signup\?next=/u);
-
-  await page.fill("#email", "ada@acme.example");
-  await page.fill("#password", PASSWORD);
-  await page.fill("#organizationName", "Acme");
-  await page.fill("#projectName", "Default");
-  await page.click('button[type="submit"]');
-
-  await page.waitForURL(/\/device\/approve\?user_code=/u);
-  await page.getByRole("button", { name: "Approve" }).click();
-  await page.waitForURL(/\/device\/success/u);
-}
-
 /* ── the tests this walk pushes ──────────────────────────────────────── */
 
 /**
@@ -256,7 +194,7 @@ const TESTS: readonly { readonly name: string; readonly body: string }[] = [
     name: "opening-hours",
     body: [
       "## Scenario",
-      "The caller asks when the workshop is open on a Saturday.",
+      "The person asks when the workshop is open on a Saturday.",
       "## Expected behaviors",
       "1. The agent gives the Saturday hours.",
       "2. The agent does not invent a public holiday.",
@@ -266,7 +204,7 @@ const TESTS: readonly { readonly name: string; readonly body: string }[] = [
     name: "missed-collection-reschedule",
     body: [
       "## Scenario",
-      "The caller missed yesterday's collection and wants another slot this week.",
+      "The person missed yesterday's collection and wants another slot this week.",
       "They are short of time and already annoyed.",
       "## Expected behaviors",
       "1. The agent acknowledges the missed collection without blaming anyone.",
@@ -278,7 +216,7 @@ const TESTS: readonly { readonly name: string; readonly body: string }[] = [
     name: "price-question",
     body: [
       "## Scenario",
-      "The caller asks what a full rebind costs.",
+      "The person asks what a full rebind costs.",
       "## Expected behaviors",
       "1. The agent says a person will confirm the price.",
       "2. The agent never quotes a number of its own.",
@@ -288,29 +226,6 @@ const TESTS: readonly { readonly name: string; readonly body: string }[] = [
 
 function testFile(name: string, body: string): string {
   return `---\nname: ${name}\n---\n${body}\n`;
-}
-
-/* ── what the platform holds, asked as any client would ──────────────── */
-
-type Asked = { readonly status: number; readonly body: Record<string, unknown> };
-
-async function ask(
-  origin: string,
-  key: string,
-  at: string,
-  method: "GET" | "POST" = "GET",
-): Promise<Asked> {
-  const answered = await fetch(`${origin}${at}`, {
-    method,
-    headers: { authorization: `Bearer ${key}` },
-  });
-  const body = (await answered.json().catch(() => ({}))) as Record<string, unknown>;
-  return { status: answered.status, body };
-}
-
-function itemsOf(body: Record<string, unknown>, key: string): Record<string, unknown>[] {
-  const held = body[key];
-  return Array.isArray(held) ? (held as Record<string, unknown>[]) : [];
 }
 
 /* ── the walk ────────────────────────────────────────────────────────── */
@@ -688,23 +603,33 @@ function proven(): void {
   say("    · registering the voice agent and the way egma reaches it, with");
   say("      the vendor key sealed on arrival");
   say("    · the tests pushed, each file pinned to the version egma froze");
-  say("    · the run created over exactly those versions");
-  say("    · the run followed live through the numbered events feed, and a");
-  say("      change applied by the follower as it arrived");
+  say("    · the run created over exactly those versions, and every");
+  say("      simulation in it queued");
+  say("    · the run followed live. The feed stayed empty while the run sat");
+  say("      queued, and then this check canceled the run itself, so that a");
+  say("      real change had to travel the feed: the follower drew every");
+  say("      simulation moving, ended on the run's own status, and the");
+  say("      numbers came back dense and finished. Say it plainly — the");
+  say("      cancel is this check's own doing, and it is the only change");
+  say("      this machine can make to a live run. A canceled run passes");
+  say("      nothing and fails nothing.");
   say("");
   say("  Waiting, and deliberately not faked here:");
   say("");
-  say("    · no verdict. Nothing claims a simulation on this machine yet, so");
-  say("      every simulation stays queued and the run stays pending. The");
-  say("      grader and the test-to-simulation bridge are what land that.");
-  say("      When they do, the first verdict arrives through this same feed");
-  say("      and nothing in this check changes — it already follows the way");
-  say("      any follower follows.");
+  say("    · no verdict, and nothing that could produce one. Nothing claims");
+  say("      a simulation on this machine yet, so left alone this run would");
+  say("      have stayed pending with every simulation queued for as long as");
+  say("      anybody watched it. The grader and the test-to-simulation");
+  say("      bridge are what land that. When they do, the first verdict");
+  say("      arrives through this same feed and nothing in this check");
+  say("      changes — it already follows the way any follower follows.");
   say("    · the page the results address opens is still being built. The");
   say("      address itself is real, token-free, and on this instance.");
   say("");
   say("  So a green run of this is NOT the whole ten-minute walk. It is");
-  say("  everything up to the moment a verdict lands.");
+  say("  everything up to the moment a verdict would land — and the one");
+  say("  change that moved this run was a cancel this check made, never a");
+  say("  result egma reached.");
   say(RULE);
 }
 

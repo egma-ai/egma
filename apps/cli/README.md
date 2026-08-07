@@ -6,6 +6,14 @@ The egma wizard and client, in one command.
 npx egma
 ```
 
+**Not yet, though: that package is not published.** The name on npm is a
+placeholder that holds it and runs nothing, so today the command is built from
+a checkout — see [Trying it on an instance of your
+own](#trying-it-on-an-instance-of-your-own) for the two lines that do it.
+Everywhere below, `npx egma` is the shape the command takes when it ships;
+`node …/apps/cli/dist/bin.js` is the same command today, and every option and
+every verb is the same.
+
 Run it in your repository. It opens a terminal wizard, tells you what it is
 about to do, and starts on one keystroke. When it closes, your terminal has one
 plain line in it and nothing else.
@@ -90,12 +98,13 @@ wider it needs to be instead of drawing an address that breaks across two lines.
 ### Your own instance
 
 ```
-EGMA_URL=http://localhost:3101 npx egma
+EGMA_URL=http://localhost:3101 egma
 ```
 
 or `--url`. It is kept beside the key after the first login, so later commands
 find it without being told again. `3101` is where `docker compose up` puts an
-instance; see [Trying it on an instance of your own](#trying-it-on-an-instance-of-your-own).
+instance; see [Trying it on an instance of your own](#trying-it-on-an-instance-of-your-own),
+which is also where the `egma` in that line comes from today.
 
 ## Connecting your voice agent
 
@@ -564,20 +573,34 @@ paste into whichever one you do use, and stops.
 
 ## Trying it on an instance of your own
 
-egma is open source and runs on your machine. From a checkout of the
-repository:
+egma is open source and runs on your machine. Clone the repository, then, from
+your checkout of it:
 
 ```
+pnpm install
 docker compose up -d --wait
 ```
 
-That is a whole egma: the API, the pages and the two stores. Open
-<http://localhost:3101> and sign up — you become the admin of your own
-instance. Then, from the repository that holds your voice agent:
+That starts a whole egma — Postgres, ClickHouse, the API, the pages and the
+simulator. Open <http://localhost:3101> and sign up: you become the admin of
+your own instance.
+
+The command itself is not on npm yet, so build it from the same checkout:
 
 ```
-EGMA_URL=http://localhost:3101 npx egma
+pnpm --filter egma-cli build
 ```
+
+Then run it from the repository that holds your voice agent, naming the
+instance you just signed up on:
+
+```
+cd ~/your-voice-agent
+EGMA_URL=http://localhost:3101 node ~/egma/apps/cli/dist/bin.js
+```
+
+(`~/egma` is wherever you cloned this. When the package ships, that whole line
+becomes `npx egma`.)
 
 The wizard signs this machine in against that instance, registers your agent
 and a way to reach it, writes a first suite of tests with your coding agent,
@@ -590,15 +613,17 @@ a test to the simulator; both are being built. Everything before them is real,
 and the moment they land the first verdict arrives on the same screen with
 nothing here to change.
 
-The whole walk is checked against a real instance the same way, in two commands
-from a checkout:
+The whole walk is checked against a real instance the same way. On a checkout
+that has had `pnpm install`, and on a machine with a Chrome — or with
+`PLAYWRIGHT_BROWSERS_PATH` pointing at a Playwright Chromium, because the
+approval really happens in a browser — it is two commands:
 
 ```
 pnpm db:up
 pnpm --filter egma-cli smoke:walk
 ```
 
-That builds what it needs, starts an egma, signs in through a real browser,
+The second builds everything it needs, starts an egma of its own, signs in,
 registers, pushes and runs — and says at the end what it proved and what waits.
 Set `RETELL_API_KEY` to register against your own Retell account instead of the
 stand-in one it starts.

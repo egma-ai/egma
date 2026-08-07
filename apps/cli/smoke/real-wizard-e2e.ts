@@ -73,6 +73,9 @@ import { DEFAULT_DRIVEN_AGENT_ID, launchForId } from "../src/acp/registry.ts";
 import { parseTestFile } from "../src/folder/test-file.ts";
 import { skillPlacesFor } from "../src/skills/install.ts";
 import { runInTerminal, type TerminalRun } from "../test/support/pty.ts";
+import { NO_BROWSER, PASSWORD } from "./support/approving-person.ts";
+import { ask } from "./support/asking.ts";
+import { check, problems, redact, RULE, say, secrets } from "./support/report.ts";
 import { openGate, type Gate } from "./support/retell-gate.ts";
 
 const CLI_ENTRY = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
@@ -88,9 +91,6 @@ const OTHER_KEY_VARIABLES = ["EGMA_RETELL_API_KEY"] as const;
 
 const STRICT_VARIABLE = "EGMA_SMOKE_REQUIRE_TARGET";
 const STRICT_FLAG = "--require-target";
-
-/** A browser this check must not open: it approves through the API instead. */
-const NO_BROWSER = "/usr/bin/true";
 
 /**
  * How many tests have to land for this to be a pass.
@@ -113,35 +113,6 @@ const BUDGET = {
   run: 5 * 60_000,
   exit: 5 * 60_000,
 };
-
-const RULE = "─".repeat(58);
-
-const problems: string[] = [];
-/** Everything that must never appear in what this prints. */
-const secrets: string[] = [];
-
-function say(message: string): void {
-  process.stdout.write(`${message}\n`);
-}
-
-function check(condition: boolean, what: string): void {
-  say(`${condition ? "  ok  " : "FAILED"}  ${what}`);
-  if (!condition) problems.push(what);
-}
-
-/**
- * The text with everything that names the account or the machine taken out.
- *
- * A passing run of this is pasted into reviews, so the account it read and the
- * developer's own paths must not be readable from it. Counts and shapes are the
- * point; contents never were.
- */
-function redact(text: string): string {
-  return [...new Set(secrets)]
-    .filter((one) => one.length > 3)
-    .sort((left, right) => right.length - left.length)
-    .reduce((held, one) => held.split(one).join("<redacted>"), text);
-}
 
 function requiresTarget(): boolean {
   if (process.argv.includes(STRICT_FLAG)) return true;
@@ -208,7 +179,7 @@ async function signUp(apiOrigin: string): Promise<string> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       email: `ada+${Date.now()}@acme.example`,
-      password: "a-long-enough-password",
+      password: PASSWORD,
       organizationName: "Acme",
       projectName: "Default",
     }),
@@ -313,7 +284,7 @@ async function rememberNames(origin: string, home: string): Promise<void> {
       key?: unknown;
     };
     if (typeof held.key !== "string") return;
-    const agents = await askThePlatform(origin, held.key, "/api/agents");
+    const agents = await ask(origin, held.key, "/api/agents");
     const items = Array.isArray(agents.body.items)
       ? (agents.body.items as Record<string, unknown>[])
       : [];
@@ -473,7 +444,7 @@ async function walkOnce(options: {
     // following: nothing at all. Nothing on this machine claims a simulation,
     // so the feed is open, empty and not finished — and the wizard would wait
     // at this screen for as long as it was left to.
-    const feed = await askThePlatform(
+    const feed = await ask(
       options.instance.origin,
       held.key,
       `/api/runs/${runId}/events?after=0`,
@@ -520,18 +491,6 @@ async function walkOnce(options: {
 
 /* ── what landed ─────────────────────────────────────────────────────── */
 
-type Asked = { readonly status: number; readonly body: Record<string, unknown> };
-
-async function askThePlatform(
-  url: string,
-  key: string,
-  at: string,
-): Promise<Asked> {
-  const answered = await fetch(`${url}${at}`, { headers: { authorization: `Bearer ${key}` } });
-  const body = (await answered.json().catch(() => ({}))) as Record<string, unknown>;
-  return { status: answered.status, body };
-}
-
 async function assertWhatLanded(options: {
   readonly instance: Instance;
   readonly outcome: WalkOutcome;
@@ -554,7 +513,7 @@ async function assertWhatLanded(options: {
   });
   check(opened.status === 200, `the key works on the real instance (it answered ${opened.status})`);
 
-  const agents = await askThePlatform(origin, held.key, "/api/agents");
+  const agents = await ask(origin, held.key, "/api/agents");
   const items = Array.isArray(agents.body.items) ? (agents.body.items as Record<string, unknown>[]) : [];
   // One, however many times this has walked: registering the same provider
   // agent again answers the registration that already exists rather than
@@ -567,7 +526,7 @@ async function assertWhatLanded(options: {
   secrets.push(agentName);
   check(agentId !== "", "the agent egma registered has an id");
 
-  const one = await askThePlatform(origin, held.key, `/api/agents/${agentId}`);
+  const one = await ask(origin, held.key, `/api/agents/${agentId}`);
   const connections = Array.isArray(one.body.connections)
     ? (one.body.connections as Record<string, unknown>[])
     : [];
@@ -583,7 +542,7 @@ async function assertWhatLanded(options: {
     "the key was sealed on the platform, and only its last characters came back",
   );
 
-  const tests = await askThePlatform(origin, held.key, "/api/tests");
+  const tests = await ask(origin, held.key, "/api/tests");
   const landed = Array.isArray(tests.body.items)
     ? (tests.body.items as Record<string, unknown>[])
     : [];
@@ -616,7 +575,7 @@ async function assertWhatLanded(options: {
 
   /* the run the walk ended in, and what it was over */
 
-  const run = await askThePlatform(origin, held.key, `/api/runs/${outcome.runId}`);
+  const run = await ask(origin, held.key, `/api/runs/${outcome.runId}`);
   const inTheRun = Array.isArray(run.body.simulations)
     ? (run.body.simulations as Record<string, unknown>[])
     : [];
@@ -627,8 +586,8 @@ async function assertWhatLanded(options: {
   );
   // What waits, stated as a check rather than as a comment: nothing claims a
   // simulation on this machine, so the run is still pending and not one
-  // conversation has been judged. The day the grader and the bridge land,
-  // these two lines are the ones that change.
+  // simulation has been judged. The day the grader and the bridge land, these
+  // two lines are the ones that change.
   check(
     run.body.status === "pending",
     `the run is pending, because nothing conducts a simulation yet (${String(run.body.status)})`,
@@ -846,7 +805,7 @@ async function main(): Promise<void> {
   say("");
   say("  What is not proven here, and is not faked: the verdict. Nothing");
   say("  claims a simulation on this machine, so the run stays pending and");
-  say("  every conversation stays queued. When the grader and the");
+  say("  every simulation stays queued. When the grader and the");
   say("  test-to-simulation bridge land, the first verdict arrives through");
   say("  the feed this walk was already following, and the wizard's last");
   say("  two screens — the offer and the graded exit line — are what this");

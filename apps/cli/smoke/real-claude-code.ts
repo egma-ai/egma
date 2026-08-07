@@ -19,28 +19,12 @@ import { fileURLToPath } from "node:url";
 
 import { runInTerminal } from "../test/support/pty.ts";
 import { RETELL_FIXTURE_REPO } from "../test/support/workspace.ts";
+import { say, waitUntil } from "./support/report.ts";
 
 const CLI_ENTRY = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 
 /** npx may have to fetch the adapter the first time, so this is generous. */
 const OVERALL_TIMEOUT_MS = 6 * 60_000;
-
-function say(message: string): void {
-  process.stdout.write(`${message}\n`);
-}
-
-async function waitFor(
-  condition: () => boolean,
-  timeoutMs: number,
-  what: string,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    if (condition()) return;
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-}
 
 async function main(): Promise<void> {
   const dir = await mkdtemp(path.join(tmpdir(), "egma-smoke-"));
@@ -66,7 +50,7 @@ async function main(): Promise<void> {
   let keystrokes = 0;
 
   try {
-    await waitFor(
+    await waitUntil(
       () => terminal.screen().includes("[enter] begin"),
       60_000,
       "the intro screen",
@@ -77,14 +61,14 @@ async function main(): Promise<void> {
     terminal.write("\r");
     keystrokes += 1;
 
-    await waitFor(
+    await waitUntil(
       () => terminal.screen().includes("◆"),
       OVERALL_TIMEOUT_MS,
       "the first action to stream",
     );
     // Give the agent a moment to report its first fact, so the captured frame
     // shows the step working rather than only starting.
-    await waitFor(() => terminal.screen().includes("┊"), 120_000, "the first fact").catch(
+    await waitUntil(() => terminal.screen().includes("┊"), 120_000, "the first fact").catch(
       () => undefined,
     );
     working = terminal.screen();
