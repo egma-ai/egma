@@ -64,6 +64,13 @@
       "when": 1786088195441,
       "tag": "0008_graders",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786090153025,
+      "tag": "0009_simulation_test_pin",
+      "breakpoints": true
     }
   ]
 }
