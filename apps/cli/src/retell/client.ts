@@ -55,15 +55,15 @@ export type RetellAgent = {
   readonly modality: "voice" | "chat";
 };
 
-/** A document Retell answered with, exactly as it arrived. */
-export type RetellDocument = {
-  /** Which half of the agent this is. */
-  readonly of: "agent" | "response-engine";
-  /** The body as text, unparsed and unaltered. */
-  readonly body: string;
-};
-
-/** What one agent is made of, and everything it was read out of. */
+/**
+ * What one agent is made of.
+ *
+ * What egma read, and not the bytes it read them from. The provider's own
+ * answer is used and let go: egma keeps identity and the sealed way back, and
+ * reads the content fresh through it whenever it needs it again — so a copy
+ * held here would be a second version of the truth, going stale from the moment
+ * it was taken.
+ */
 export type RetellConfig = {
   readonly agentId: string;
   readonly name: string;
@@ -81,8 +81,6 @@ export type RetellConfig = {
   readonly prompt: string | null;
   /** The tools as Retell holds them, unread and unaltered. */
   readonly tools: readonly unknown[];
-  /** Everything above, in the form it arrived in. */
-  readonly documents: readonly RetellDocument[];
 };
 
 export type ListedAgents =
@@ -336,7 +334,6 @@ export async function pullAgent(
     return { kind: "refused", reason: refusalIn(answer) };
   }
 
-  const documents: RetellDocument[] = [{ of: "agent", body: answer.body }];
   const document = parsed(answer);
   const rawEngine = document["response_engine"];
   const engine =
@@ -372,7 +369,6 @@ export async function pullAgent(
       return { kind: "refused", reason: refusalIn(engineAnswer) };
     }
 
-    documents.push({ of: "response-engine", body: engineAnswer.body });
     const words = wordsIn(kind, parsed(engineAnswer));
     prompt = words.prompt;
     tools = words.tools;
@@ -390,7 +386,6 @@ export async function pullAgent(
       engine: kind,
       prompt,
       tools,
-      documents,
     },
   };
 }

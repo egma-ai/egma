@@ -24,6 +24,7 @@ import process from "node:process";
 import { driveOneTask } from "../src/acp/drive.ts";
 import { DEFAULT_DRIVEN_AGENT_ID, launchForId } from "../src/acp/registry.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
+import { say } from "./support/report.ts";
 
 const SECRET = "sk-never-read-this-9f2c1a";
 
@@ -53,10 +54,6 @@ const VARIANTS: readonly Variant[] = [
     ].join(" "),
   },
 ];
-
-function say(message: string): void {
-  process.stdout.write(`${message}\n`);
-}
 
 async function check(variant: Variant, dir: string): Promise<string[]> {
   const launch = launchForId(DEFAULT_DRIVEN_AGENT_ID);

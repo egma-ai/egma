@@ -674,7 +674,7 @@ describe("the gate", () => {
       run,
       "1 test generated",
       "egma/tests/wanted-it-by-friday.md",
-      "there is no persona in-a-hurry",
+      'egma has no persona called "in-a-hurry"',
       ...GATE_HINTS,
     );
 

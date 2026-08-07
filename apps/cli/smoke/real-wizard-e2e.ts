@@ -1,32 +1,35 @@
 /**
  * The smoke check: the whole wizard, everything real, nobody at the keyboard.
  *
- * One command drives `npx egma` from its first screen to its last against the
+ * One command drives `npx egma` from its first screen to a live run against the
  * real things it is meant to work against: the developer's own coding agent
- * over the protocol, a whole egma running on this machine, the developer's own
- * repository, and a real Retell account. No fixture agent, no fake provider, no
- * stubbed adapter. What is not real is named in one place —
- * `support/half-real-platform.ts` — and it is exactly the endpoints the public
- * API has not shipped yet.
+ * over the protocol, a whole egma running on this machine — the real API, its
+ * real agent, test and run endpoints, a real Postgres and a real ClickHouse —
+ * the developer's own repository, and a real Retell account. No fixture agent,
+ * no fake provider, and no stand-in for any part of egma.
  *
- * **Nobody types anything.** The wizard's six human moments are answered by
+ * **Nobody types anything.** The wizard's five human moments are answered by
  * this check through a real pseudo-terminal: the keystroke at the intro, the
  * approval in a browser (made against the instance's own API, which is what the
  * page would have called), the provider key, the choice of agent when the
- * account holds several, the keystroke at the gate, and the answer to the skill
- * offer at the end.
+ * account holds several, and the keystroke at the gate.
  *
- * **The one thing this machine cannot do is conduct a simulation**, so the
- * verdict the wizard waits for is delivered by the same stand-in simulator the
- * offline checks use, against the same fixture that serves the run endpoints.
- * Everything about the run that egma owns is real: the run is created over the
- * versions the push just pinned, the screen is drawn from what the platform
- * reports, and the wizard leaves on the first verdict rather than on a timer.
+ * **The walk ends where the verdict would begin, and that is stated rather
+ * than hidden.** Nothing on this machine claims a simulation yet, so no verdict
+ * lands: the run stays pending and every simulation stays queued. The wizard
+ * waits for the first verdict, so this check closes the window itself once the
+ * run is live and the screen is drawn from it. That is a thing the product
+ * means rather than a way around it — the run carries on on the platform, and
+ * closing a terminal over a live run is how a developer leaves. What this
+ * asserts in place of a verdict is that no verdict arrived: the feed is open,
+ * empty and not done. The grader and the test-to-simulation bridge are what
+ * land the rest, and when they do the first verdict comes through the same feed
+ * the wizard is already following, with nothing here to change.
  *
- * **The skill offer is answered with skip**, because the only home this check
- * has is the home of whoever ran it. Skip is also the answer that has something
- * to prove: nothing is written anywhere, and this checks the developer's own
- * skill file is exactly as it was before the run.
+ * **The skill offer is never reached**, because the wizard asks it after the
+ * first verdict. Nothing here can therefore write outside the repository at
+ * all, and this checks that: the developer's own skill file is exactly as it
+ * was before the run.
  *
  * **The Retell account is only ever read.** Every request goes through the
  * allow-list gate in `support/retell-gate.ts`, which forwards the listing and
@@ -51,7 +54,9 @@
  *
  *   --coding-agent <id>   Which agent to drive, as the registry names it.
  *   --again               Walk a second time against the same egma, which is
- *                         what proves a second run lands beside the first.
+ *                         what proves a second walk over the same provider
+ *                         agent finds the registration the first one made
+ *                         rather than minting a second identity for it.
  *   --require-target      Turn a skip into a failure, for a machine that is
  *                         supposed to have all of this. `EGMA_SMOKE_REQUIRE_TARGET=1`
  *                         does the same.
@@ -67,9 +72,10 @@ import { startInstance, type Instance } from "../../api/test/support/instance.ts
 import { DEFAULT_DRIVEN_AGENT_ID, launchForId } from "../src/acp/registry.ts";
 import { parseTestFile } from "../src/folder/test-file.ts";
 import { skillPlacesFor } from "../src/skills/install.ts";
-import { gradeEveryRun } from "../test/support/grading.ts";
 import { runInTerminal, type TerminalRun } from "../test/support/pty.ts";
-import { startHalfRealPlatform, type HalfRealPlatform } from "./support/half-real-platform.ts";
+import { NO_BROWSER, PASSWORD } from "./support/approving-person.ts";
+import { ask } from "./support/asking.ts";
+import { check, problems, redact, RULE, say, secrets } from "./support/report.ts";
 import { openGate, type Gate } from "./support/retell-gate.ts";
 
 const CLI_ENTRY = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
@@ -85,9 +91,6 @@ const OTHER_KEY_VARIABLES = ["EGMA_RETELL_API_KEY"] as const;
 
 const STRICT_VARIABLE = "EGMA_SMOKE_REQUIRE_TARGET";
 const STRICT_FLAG = "--require-target";
-
-/** A browser this check must not open: it approves through the API instead. */
-const NO_BROWSER = "/usr/bin/true";
 
 /**
  * How many tests have to land for this to be a pass.
@@ -108,38 +111,8 @@ const BUDGET = {
   existing: 2 * 60_000,
   gate: 25 * 60_000,
   run: 5 * 60_000,
-  offer: 5 * 60_000,
   exit: 5 * 60_000,
 };
-
-const RULE = "─".repeat(58);
-
-const problems: string[] = [];
-/** Everything that must never appear in what this prints. */
-const secrets: string[] = [];
-
-function say(message: string): void {
-  process.stdout.write(`${message}\n`);
-}
-
-function check(condition: boolean, what: string): void {
-  say(`${condition ? "  ok  " : "FAILED"}  ${what}`);
-  if (!condition) problems.push(what);
-}
-
-/**
- * The text with everything that names the account or the machine taken out.
- *
- * A passing run of this is pasted into reviews, so the account it read and the
- * developer's own paths must not be readable from it. Counts and shapes are the
- * point; contents never were.
- */
-function redact(text: string): string {
-  return [...new Set(secrets)]
-    .filter((one) => one.length > 3)
-    .sort((left, right) => right.length - left.length)
-    .reduce((held, one) => held.split(one).join("<redacted>"), text);
-}
 
 function requiresTarget(): boolean {
   if (process.argv.includes(STRICT_FLAG)) return true;
@@ -206,7 +179,7 @@ async function signUp(apiOrigin: string): Promise<string> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       email: `ada+${Date.now()}@acme.example`,
-      password: "a-long-enough-password",
+      password: PASSWORD,
       organizationName: "Acme",
       projectName: "Default",
     }),
@@ -271,8 +244,8 @@ type WalkOutcome = {
   readonly repository: string;
   /** Whether the account offered a choice of agents, and how many. */
   readonly chosenFrom: number;
-  /** The run the wizard started, as the platform holds it. */
-  readonly run: { readonly id: string; readonly simulations: number; readonly graded: number };
+  /** The run the wizard started, as the run screen named it. */
+  readonly runId: string;
 };
 
 /** Waits for every one of these to be on screen, or says what was there. */
@@ -305,13 +278,13 @@ async function showing(
  * that fails fails quietly: what it buys is that the screens printed after it
  * are redacted by this script, which is where that decision belongs.
  */
-async function rememberNames(platform: HalfRealPlatform, home: string): Promise<void> {
+async function rememberNames(origin: string, home: string): Promise<void> {
   try {
     const held = JSON.parse(await readFile(path.join(home, "credentials"), "utf8")) as {
       key?: unknown;
     };
     if (typeof held.key !== "string") return;
-    const agents = await askThePlatform(platform.url, held.key, "/api/agents");
+    const agents = await ask(origin, held.key, "/api/agents");
     const items = Array.isArray(agents.body.items)
       ? (agents.body.items as Record<string, unknown>[])
       : [];
@@ -325,7 +298,7 @@ async function rememberNames(platform: HalfRealPlatform, home: string): Promise<
 
 async function walkOnce(options: {
   readonly label: string;
-  readonly platform: HalfRealPlatform;
+  readonly instance: Instance;
   readonly gate: Gate;
   readonly cookie: string;
   readonly drivenAgentId: string;
@@ -364,7 +337,7 @@ async function walkOnce(options: {
       "--cwd",
       repository,
       "--url",
-      options.platform.url,
+      options.instance.origin,
       "--coding-agent",
       options.drivenAgentId,
     ],
@@ -391,7 +364,7 @@ async function walkOnce(options: {
     const shown = await showing(terminal, "the login code", BUDGET.login, "Code:");
     const userCode = /Code: (\S+)/u.exec(shown)?.[1] ?? "";
     if (userCode === "") throw new Error("the wizard showed no code to approve");
-    const status = await approve(options.platform.apiOrigin, options.cookie, userCode);
+    const status = await approve(options.instance.origin, options.cookie, userCode);
     check(status === "approved", `the instance approved the terminal (it said ${status})`);
 
     /* [human 3] the provider key */
@@ -429,7 +402,7 @@ async function walkOnce(options: {
     // names them is filtered out below anyway — but a screen that is clean
     // because one filter happened to match is clean by luck, and this makes it
     // clean by redaction, which is the only kind that survives a wording change.
-    await rememberNames(options.platform, home);
+    await rememberNames(options.instance.origin, home);
 
     /* [human 5] the keystroke at the gate */
     await showing(terminal, "the gate", BUDGET.gate, "[enter] run");
@@ -450,45 +423,16 @@ async function walkOnce(options: {
     terminal.write("\r");
 
     /* the run: pushed, created, and every simulation on screen */
-    await showing(terminal, "the run screen", BUDGET.run, "run run_", "simulation");
-    took("pushing and starting the run");
-
-    // The one thing this machine cannot do. Exactly one verdict is delivered,
-    // because that is what the wizard waits for and the count in the exit line
-    // has to be a number this check can name.
-    const grading = gradeEveryRun(options.platform, { atMost: 1 });
-    let offerShown: string;
-    try {
-      /* [human 6] the answer to the skill offer */
-      offerShown = await showing(
-        terminal,
-        "the skill offer",
-        BUDGET.offer,
-        "Install the egma skill into",
-        "[s] skip",
-      );
-    } finally {
-      grading.stop();
-    }
-    took("the first verdict");
-
-    // Where each key said it would write, before either key is pressed. Skip
-    // is answered below, and nothing at either place may exist afterwards that
-    // did not exist before.
-    check(
-      offerShown.includes("writes nothing at all"),
-      "the offer said what skip does before it was answered",
+    const runScreen = await showing(
+      terminal,
+      "the run screen",
+      BUDGET.run,
+      "run run_",
+      "simulation",
     );
-
-    terminal.write("s");
-
-    const exitCode = await Promise.race([
-      terminal.exited,
-      new Promise<number>((_, reject) =>
-        setTimeout(() => reject(new Error("the wizard never finished")), BUDGET.exit),
-      ),
-    ]);
-    took("the offer and the exit");
+    took("pushing and starting the run");
+    const runId = /\brun_[0-9A-HJKMNP-TV-Z]{26}/u.exec(runScreen)?.[0] ?? "";
+    if (runId === "") throw new Error("the run screen named no run");
 
     const held = JSON.parse(await readFile(path.join(home, "credentials"), "utf8")) as {
       url: string;
@@ -496,8 +440,34 @@ async function walkOnce(options: {
     };
     secrets.push(held.key);
 
-    const started = options.platform.running.runs.at(-1);
-    const simulations = options.platform.running.simulationsOf(started?.id);
+    // What arrives in place of a verdict, asked while the wizard is still
+    // following: nothing at all. Nothing on this machine claims a simulation,
+    // so the feed is open, empty and not finished — and the wizard would wait
+    // at this screen for as long as it was left to.
+    const feed = await ask(
+      options.instance.origin,
+      held.key,
+      `/api/runs/${runId}/events?after=0`,
+    );
+    const arrived = Array.isArray(feed.body.events) ? (feed.body.events as unknown[]) : ["?"];
+    check(
+      arrived.length === 0 && feed.body.done === false,
+      `no verdict arrived while the wizard followed: the feed is open, empty and not done (${arrived.length} events)`,
+    );
+
+    // And the window is closed over a live run, which is what a developer does
+    // when they have seen enough: the suite carries on on egma, the exit line
+    // still says where to open it, and nothing was installed because the offer
+    // comes after the first verdict and the first verdict is what waits.
+    terminal.write("\u0003");
+
+    const exitCode = await Promise.race([
+      terminal.exited,
+      new Promise<number>((_, reject) =>
+        setTimeout(() => reject(new Error("the wizard never finished")), BUDGET.exit),
+      ),
+    ]);
+    took("the run, and the window closed over it");
 
     return {
       exitCode,
@@ -511,11 +481,7 @@ async function walkOnce(options: {
       credentials: held,
       repository,
       chosenFrom,
-      run: {
-        id: started?.id ?? "",
-        simulations: simulations.length,
-        graded: simulations.filter((one) => one.verdict !== null).length,
-      },
+      runId,
     };
   } finally {
     await terminal.kill();
@@ -525,43 +491,34 @@ async function walkOnce(options: {
 
 /* ── what landed ─────────────────────────────────────────────────────── */
 
-type Asked = { readonly status: number; readonly body: Record<string, unknown> };
-
-async function askThePlatform(
-  url: string,
-  key: string,
-  at: string,
-): Promise<Asked> {
-  const answered = await fetch(`${url}${at}`, { headers: { authorization: `Bearer ${key}` } });
-  const body = (await answered.json().catch(() => ({}))) as Record<string, unknown>;
-  return { status: answered.status, body };
-}
-
 async function assertWhatLanded(options: {
-  readonly platform: HalfRealPlatform;
+  readonly instance: Instance;
   readonly outcome: WalkOutcome;
   readonly key: string;
   readonly walk: number;
 }): Promise<string> {
-  const { platform, outcome } = options;
+  const { outcome } = options;
+  const origin = options.instance.origin;
   const held = outcome.credentials;
 
   say("");
   say(`── what walk ${options.walk} left on the platform ─────────────────`);
 
   check(outcome.exitCode === 0, `the wizard exited 0 (it exited ${outcome.exitCode})`);
-  check(held.url === platform.url, "the key is stored against the egma it signed in to");
+  check(held.url === origin, "the key is stored against the egma it signed in to");
   check(held.key.startsWith("egma_sk_"), "the key is one the instance really minted");
 
-  // The real half: the key opens a real door on a real instance.
-  const opened = await fetch(`${platform.apiOrigin}/api/keys`, {
+  const opened = await fetch(`${origin}/api/keys`, {
     headers: { authorization: `Bearer ${held.key}` },
   });
   check(opened.status === 200, `the key works on the real instance (it answered ${opened.status})`);
 
-  const agents = await askThePlatform(platform.url, held.key, "/api/agents");
+  const agents = await ask(origin, held.key, "/api/agents");
   const items = Array.isArray(agents.body.items) ? (agents.body.items as Record<string, unknown>[]) : [];
-  check(items.length === options.walk, `the platform holds ${items.length} agent(s) after walk ${options.walk}`);
+  // One, however many times this has walked: registering the same provider
+  // agent again answers the registration that already exists rather than
+  // minting a second identity for it, which is the rule a retry depends on.
+  check(items.length === 1, `the platform holds ${items.length} agent(s) after walk ${options.walk}`);
 
   const agent = items.at(-1);
   const agentId = typeof agent?.id === "string" ? agent.id : "";
@@ -569,7 +526,7 @@ async function assertWhatLanded(options: {
   secrets.push(agentName);
   check(agentId !== "", "the agent egma registered has an id");
 
-  const one = await askThePlatform(platform.url, held.key, `/api/agents/${agentId}`);
+  const one = await ask(origin, held.key, `/api/agents/${agentId}`);
   const connections = Array.isArray(one.body.connections)
     ? (one.body.connections as Record<string, unknown>[])
     : [];
@@ -581,18 +538,18 @@ async function assertWhatLanded(options: {
     `the connection names a modality (${String(connection?.modality)})`,
   );
   check(
-    connection?.credentialsHint === options.key.slice(-4),
+    connection?.credentials_hint === options.key.slice(-4),
     "the key was sealed on the platform, and only its last characters came back",
   );
 
-  const tests = await askThePlatform(platform.url, held.key, "/api/tests");
-  const landed = Array.isArray(tests.body.tests)
-    ? (tests.body.tests as Record<string, unknown>[])
+  const tests = await ask(origin, held.key, "/api/tests");
+  const landed = Array.isArray(tests.body.items)
+    ? (tests.body.items as Record<string, unknown>[])
     : [];
   const pinned = landed.filter((test) => String(test.version_id).startsWith("tstv_"));
   check(
-    pinned.length >= TESTS_ENOUGH * options.walk,
-    `${pinned.length} tests are on the platform as frozen versions (wanted at least ${TESTS_ENOUGH * options.walk})`,
+    pinned.length >= TESTS_ENOUGH,
+    `${pinned.length} tests are on the platform as frozen versions (wanted at least ${TESTS_ENOUGH})`,
   );
 
   // And the same tests are files in the repository, each pinned to the version
@@ -618,22 +575,26 @@ async function assertWhatLanded(options: {
 
   /* the run the walk ended in, and what it was over */
 
-  const run = await askThePlatform(platform.url, held.key, `/api/runs/${outcome.run.id}`);
+  const run = await ask(origin, held.key, `/api/runs/${outcome.runId}`);
   const inTheRun = Array.isArray(run.body.simulations)
     ? (run.body.simulations as Record<string, unknown>[])
     : [];
-  check(outcome.run.id.startsWith("run_"), "a run was created");
+  check(outcome.runId.startsWith("run_"), "a run was created");
   check(
     inTheRun.length === pinnedFiles && inTheRun.length > 0,
     `the run holds one simulation per pushed test (${inTheRun.length} for ${pinnedFiles} files)`,
   );
+  // What waits, stated as a check rather than as a comment: nothing claims a
+  // simulation on this machine, so the run is still pending and not one
+  // simulation has been judged. The day the grader and the bridge land, these
+  // two lines are the ones that change.
   check(
-    outcome.run.graded === 1,
-    `one verdict landed, and the wizard left on it rather than on the suite (${outcome.run.graded})`,
+    run.body.status === "pending",
+    `the run is pending, because nothing conducts a simulation yet (${String(run.body.status)})`,
   );
   check(
-    outcome.run.simulations - outcome.run.graded > 0,
-    `the suite was still going when the wizard closed (${outcome.run.simulations - outcome.run.graded} not judged)`,
+    inTheRun.every((one) => one.status === "queued" && one.verdict === null),
+    `every simulation is queued and unjudged (${inTheRun.filter((one) => one.status === "queued").length} of ${inTheRun.length})`,
   );
 
   /* the block it left in scrollback, each line whole */
@@ -645,8 +606,10 @@ async function assertWhatLanded(options: {
   const lines = outcome.leftBehind;
   check(address.startsWith("http"), `the run came back with an address (${address})`);
   check(
-    lines.some((line) => line.startsWith("✓ Your first run is live")),
-    "the headline says the run is live",
+    lines.some((line) =>
+      line.startsWith(`✓ Your first run is live — ${inTheRun.length} simulations, none graded yet.`),
+    ),
+    "the headline says the run is live, and says plainly that nothing is graded yet",
   );
   check(lines.includes(address), "the results address is a line, and the whole of it");
   check(
@@ -665,12 +628,15 @@ async function assertWhatLanded(options: {
     ),
     "the handoff sentence survived whole",
   );
+  // Nothing about the skill is in what survived, because the offer comes after
+  // the first verdict and the first verdict is what waits. A line about it
+  // here would mean the wizard had offered something this walk never reached.
   check(
-    lines.some((line) => line.startsWith("Nothing was installed.")),
-    "skipping the offer was said out loud rather than passed over",
+    !lines.some((line) => line.includes("egma skill")),
+    "nothing was offered or installed: the walk closed before the offer",
   );
 
-  return agentName;
+  return agentId;
 }
 
 /* ── the check itself ────────────────────────────────────────────────── */
@@ -737,10 +703,9 @@ async function main(): Promise<void> {
   say("");
 
   let instance: Instance | undefined;
-  let platform: HalfRealPlatform | undefined;
   let gate: Gate | undefined;
   const walked: WalkOutcome[] = [];
-  const names: string[] = [];
+  const registered: string[] = [];
 
   try {
     const bootedAt = Date.now();
@@ -748,7 +713,6 @@ async function main(): Promise<void> {
     // and a development server would put two minutes in front of every run.
     instance = await startInstance("cli-e2e", { web: false });
     gate = await openGate();
-    platform = await startHalfRealPlatform(instance.origin);
     const cookie = await signUp(instance.origin);
     say(`Instance up in ${((Date.now() - bootedAt) / 1000).toFixed(1)}s.`);
 
@@ -760,7 +724,7 @@ async function main(): Promise<void> {
 
       const outcome = await walkOnce({
         label: `walk${walk}`,
-        platform,
+        instance,
         gate,
         cookie,
         drivenAgentId,
@@ -781,7 +745,7 @@ async function main(): Promise<void> {
         say(`  (the account listed ${outcome.chosenFrom} agents, and the first was taken)`);
       }
 
-      names.push(await assertWhatLanded({ platform, outcome, key, walk }));
+      registered.push(await assertWhatLanded({ instance, outcome, key, walk }));
     }
 
     say("");
@@ -794,22 +758,15 @@ async function main(): Promise<void> {
     say("");
     say("── check ────────────────────────────────────────────────");
     check(gate.refused.length === 0, "nothing but reads was asked of Retell");
-    check(
-      platform.served.real > 0 && platform.served.fixture > 0,
-      `the walk spoke to the real instance ${platform.served.real} times and to the endpoints it does not serve yet ${platform.served.fixture} times`,
-    );
 
     if (walks > 1) {
-      // A second walk against an egma that already holds the first one's
-      // registration lands beside it rather than refusing.
-      const [first, second] = names;
+      // A second walk over the same provider agent finds the registration the
+      // first one made. Two identities for one voice agent would split a
+      // team's results history in half, so a retry has to land on the first.
+      const [first, second] = registered;
       check(
-        second !== undefined && first !== undefined && second !== first,
-        `the second walk registered a second agent (${redact(String(first))} then ${redact(String(second))})`,
-      );
-      check(
-        second !== undefined && /-\d+$/u.test(second),
-        "the second agent took the next free name rather than the taken one",
+        second !== undefined && first !== undefined && second === first,
+        `the second walk found the first walk's registration (${redact(String(first))} then ${redact(String(second))})`,
       );
     }
 
@@ -817,21 +774,20 @@ async function main(): Promise<void> {
     check(before === after, "nothing touched the credentials of whoever ran this");
 
     const skillAfter = places === null ? "absent" : await stamp(places.global);
-    check(skillBefore === skillAfter, "skip wrote nothing into the home of whoever ran this");
+    check(skillBefore === skillAfter, "nothing was written into the home of whoever ran this");
     for (const outcome of walked) {
       const here = skillPlacesFor(drivenAgentId, {
         repository: outcome.repository,
         home: process.env.HOME ?? "",
       });
       const written = here === null ? false : (await stamp(here.project)) !== "absent";
-      check(!written, "skip wrote nothing into the repository either");
+      check(!written, "and nothing was written into the repository either");
     }
   } finally {
     for (const outcome of walked) {
       await rm(outcome.repository, { recursive: true, force: true });
     }
     await gate?.close();
-    await platform?.close();
     await instance?.close();
   }
 
@@ -844,8 +800,16 @@ async function main(): Promise<void> {
   say(RULE);
   say("  PASSED — the whole wizard, driven end to end with nobody at the");
   say("  keyboard, put an agent, a connection and a suite of tests on a real");
-  say("  egma, ran them, showed the first verdict, and left on it with the");
+  say("  egma, started a run over them, and followed it live, with the");
   say("  files in the repository and nothing written outside it.");
+  say("");
+  say("  What is not proven here, and is not faked: the verdict. Nothing");
+  say("  claims a simulation on this machine, so the run stays pending and");
+  say("  every simulation stays queued. When the grader and the");
+  say("  test-to-simulation bridge land, the first verdict arrives through");
+  say("  the feed this walk was already following, and the wizard's last");
+  say("  two screens — the offer and the graded exit line — are what this");
+  say("  check gains.");
   say(RULE);
 }
 

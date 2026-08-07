@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { resolveRequester, type Requester } from "../auth/requester.ts";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import type { RateLimit } from "./rate-limit.ts";
+import { notAuthenticated, tooManyRequests } from "./refusals.ts";
 import { toIdentityRequest } from "./web-handler.ts";
 
 /**
@@ -58,37 +59,27 @@ export function credentialed(
 ): void {
   app.decorateRequest("requester", null);
 
-  app.addHook("preHandler", async (request, reply) => {
+  app.addHook("onRequest", async (request, reply) => {
     // Headers and a URL, and deliberately no body: who is calling is answered
-    // from a bearer token or a session cookie, and this hook runs in front of
-    // the ingest door, where the body is somebody's telemetry and copying it
-    // for a question that will never read it is the most expensive thing on
-    // the path.
+    // from a bearer token or a session cookie. `onRequest` runs before Fastify
+    // parses anything, which makes that claim structural rather than a habit —
+    // an unauthenticated request never has its body read at all, no schema
+    // anybody adds later can answer ahead of the 401, and in front of the
+    // ingest door the body is somebody's telemetry, where copying it for a
+    // question that will never read it is the most expensive thing on the
+    // path.
     const requester = await resolveRequester(
       options.provider,
       toIdentityRequest(request),
     );
 
     if (requester === null) {
-      return reply.code(401).send({
-        error: "not_authenticated",
-        message:
-          "this request carried no session and no usable API key. " +
-          "Sign in, or send Authorization: Bearer with an egma key.",
-      });
+      return notAuthenticated(reply);
     }
 
     const verdict = options.rateLimit.reached(requester.auth.organizationId);
     if (!verdict.allowed) {
-      return reply
-        .code(429)
-        .header("retry-after", String(verdict.retryAfterSeconds))
-        .send({
-          error: "too_many_requests",
-          message:
-            "this organization has made too many requests. The budget belongs " +
-            "to the organization, so a new key will not reset it.",
-        });
+      return tooManyRequests(reply, verdict.retryAfterSeconds);
     }
 
     request.requester = requester;

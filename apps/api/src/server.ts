@@ -8,13 +8,16 @@ import {
   type EmailSender,
 } from "./auth/email.ts";
 import { admitIdentity, onIdentityCreated } from "./auth/provisioning.ts";
+import { agentRoutes } from "./routes/agents.ts";
 import { apiKeyRoutes } from "./routes/api-keys.ts";
 import { deviceRoutes } from "./routes/device.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
+import { runRoutes } from "./routes/runs.ts";
 import { signOutRoutes } from "./routes/sign-out.ts";
 import { signupRoutes } from "./routes/signup.ts";
+import { testRoutes } from "./routes/tests.ts";
 import { traceReadRoutes } from "./routes/trace-reads.ts";
 import { traceRoutes } from "./routes/traces.ts";
 import { fixedWindowRateLimit, type RateLimit } from "./http/rate-limit.ts";
@@ -157,10 +160,31 @@ export function buildApi(options: ServerOptions): Api {
 
   void app.register(apiKeyRoutes, { provider: identity.provider, rateLimit });
 
+  // The agent group: registering an agent with the first way of reaching it,
+  // reading it back, and attaching another. Its own credentialed scope, like
+  // every other group, so the rate limit and the context resolve once for it.
+  void app.register(agentRoutes, { provider: identity.provider, rateLimit });
+
   void app.register(memberRoutes, {
     provider: identity.provider,
     rateLimit,
     emailSender,
+    baseUrl: config.baseUrl,
+  });
+
+  // What a developer's folder syncs against. Its own scope, like every other
+  // group here, so the credentialed hook and the routes it protects cannot come
+  // apart and one group's error handler never answers another's refusals.
+  void app.register(testRoutes, { provider: identity.provider, rateLimit });
+
+  // What a terminal starts and then watches: a run over one connection,
+  // pinning exact versions, and the numbered feed a follower resumes from.
+  // The base URL is handed in because the reply carries a results address a
+  // person opens in a browser, and where this instance is is configuration
+  // rather than something a route can know.
+  void app.register(runRoutes, {
+    provider: identity.provider,
+    rateLimit,
     baseUrl: config.baseUrl,
   });
 

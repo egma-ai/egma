@@ -43,6 +43,7 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   test_version: "tstv",
   test_version_persona: "tstv",
   run: "run",
+  run_event: "run",
   simulation: "sim",
 };
 
@@ -227,6 +228,8 @@ describe("every enumerated value", () => {
       { table: "simulation", column: "ending_reason" },
       { table: "simulation", column: "connection_type" },
       { table: "simulation", column: "modality" },
+      { table: "run_event", column: "kind" },
+      { table: "run_event", column: "verdict" },
     ];
 
     const { rows } = await database.sql<{

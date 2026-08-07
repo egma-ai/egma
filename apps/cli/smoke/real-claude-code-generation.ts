@@ -33,18 +33,13 @@ import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { MarkerStream } from "../src/wizard/markers.ts";
 import { generateInstructions } from "../src/wizard/test-generation.ts";
 import { RETELL_FIXTURE_REPO } from "../test/support/workspace.ts";
+import { RULE, say } from "./support/report.ts";
 
 /** How many tests this check asks for. Fewer than a walk, so it is quicker. */
 const HOW_MANY = 4;
 
 /** npx may have to fetch the adapter the first time, so this is generous. */
 const TIMEOUT_MS = 8 * 60_000;
-
-const RULE = "─".repeat(58);
-
-function say(message: string): void {
-  process.stdout.write(`${message}\n`);
-}
 
 /**
  * What the walk would have known by the time it writes tests: what the coding

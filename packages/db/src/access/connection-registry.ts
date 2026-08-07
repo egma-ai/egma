@@ -5,6 +5,7 @@ import {
   type Modality,
   type Topology,
 } from "../schema/agents.ts";
+import { AgentWriteRefusedError } from "./errors.ts";
 
 /**
  * What each connection type is made of. The registry is code, not a table,
@@ -59,11 +60,39 @@ export type ConnectionDescriptor = {
   readonly topology: Topology;
   readonly config: Readonly<Record<string, ConfigGate>>;
   readonly credentials: CredentialRule;
+  /**
+   * Whether the simulator holds an adapter for this type — whether egma can
+   * actually conduct a conversation over it.
+   *
+   * A type can be registered before anything can run over it: a customer can
+   * describe how to reach their agent while the adapter that reaches it is
+   * still being written. So this is a fact about the shipped simulator, kept
+   * here beside the rest of what the type is, and it is what refuses a run at
+   * creation instead of leaving it queued forever for a conductor that does
+   * not exist. It flips to `true` in the same commit as the adapter.
+   */
+  readonly simulatorAdapter: boolean;
+  /**
+   * Which config key holds the vendor's own name for the agent, for the types
+   * that have one — and absent for the types that do not.
+   *
+   * This is the whole of a type's create-or-reuse rule. Registering the same
+   * vendor agent twice must not mint a second egma agent, because a retry
+   * after an uncertain network failure is the ordinary case and a duplicate
+   * identity splits a team's results history in half. So a type that can say
+   * "this is the same agent you already registered" names the key that says
+   * it, and a type that cannot — a framework the customer runs themselves has
+   * no vendor identifier at all — declares none and always creates.
+   */
+  readonly reuseKey?: string | undefined;
 };
 
 function nonEmptyString(key: string, value: unknown): string {
   if (typeof value !== "string" || value.trim() === "") {
-    throw new Error(`the config's ${key} must be a non-empty string`);
+    throw new AgentWriteRefusedError(
+      "not_admitted",
+      `the config's ${key} must be a non-empty string`,
+    );
   }
   return value.trim();
 }
@@ -81,7 +110,8 @@ const SHORTEST_CREDENTIAL = 8;
 function e164PhoneNumber(key: string, value: unknown): string {
   const candidate = typeof value === "string" ? value.trim() : "";
   if (!E164.test(candidate)) {
-    throw new Error(
+    throw new AgentWriteRefusedError(
+      "not_admitted",
       `the config's ${key} must be an E.164 phone number, which looks like ` +
         `+15551234567`,
     );
@@ -97,11 +127,21 @@ export const CONNECTION_REGISTRY: Readonly<
     topology: "hosted-broker",
     config: { retellAgentId: nonEmptyString },
     credentials: { required: true, fields: ["apiKey"], hintField: "apiKey" },
+    // The provider's own agent id: the first vendor to carry a reuse rule.
+    reuseKey: "retellAgentId",
+    simulatorAdapter: true,
   },
   phone: {
     modalities: ["voice"],
     topology: "egma-dials-in",
     config: { phoneNumber: e164PhoneNumber },
+    // Nothing dials yet: a customer may register the number they want called,
+    // and a run over it is refused at creation until the adapter lands.
+    simulatorAdapter: false,
+    // No reuse rule, deliberately: a number is where egma dials, not who
+    // answers, and two agents can legitimately share one. Registering the
+    // same number twice creates twice, and the name check is what stops a
+    // duplicate that was a mistake.
     credentials: {
       required: false,
       refusal:
@@ -112,11 +152,37 @@ export const CONNECTION_REGISTRY: Readonly<
   },
 };
 
+/** The types something can actually conduct a run over today. */
+export function conductableConnectionTypes(): readonly ConnectionType[] {
+  return CONNECTION_TYPES.filter(
+    (type) => CONNECTION_REGISTRY[type].simulatorAdapter,
+  );
+}
+
+/**
+ * What a run over a type nothing can conduct is told.
+ *
+ * The wording is the platform's own and a client relays it word for word to
+ * whoever is reading a terminal, so it says all of it in one place: what is
+ * missing, why egma would rather refuse now than queue something forever, and
+ * the move that works today. The list of types comes off the registry rather
+ * than out of the sentence, so it can never name an adapter that has not
+ * shipped or miss one that has.
+ */
+export function noSimulatorAdapterMessage(type: string): string {
+  return (
+    `egma has no simulator adapter for a ${type} connection yet, ` +
+    `so it will not start a run it cannot conduct. Run these tests over a ` +
+    `connection egma conducts today: ${conductableConnectionTypes().join(", ")}.`
+  );
+}
+
 /** The descriptor, or a refusal naming what egma actually supports. */
 export function descriptorOf(type: string): ConnectionDescriptor {
   const descriptor = CONNECTION_REGISTRY[type as ConnectionType];
   if (descriptor === undefined) {
-    throw new Error(
+    throw new AgentWriteRefusedError(
+      "not_admitted",
       `"${type}" is not a connection type egma knows; expected one of ` +
         CONNECTION_TYPES.join(", "),
     );
@@ -130,11 +196,13 @@ export function validModality(type: ConnectionType, modality: string): Modality 
   if (!descriptor.modalities.includes(modality as Modality)) {
     const speaks = descriptor.modalities.join(" or ");
     if (!MODALITIES.includes(modality as Modality)) {
-      throw new Error(
+      throw new AgentWriteRefusedError(
+        "not_admitted",
         `"${modality}" is not a modality; a ${type} connection speaks ${speaks}`,
       );
     }
-    throw new Error(
+    throw new AgentWriteRefusedError(
+      "not_admitted",
       `a ${type} connection speaks ${speaks}, and this one was asked for ${modality}`,
     );
   }
@@ -155,14 +223,16 @@ export function validConfig(
   const demanded = Object.keys(gates);
 
   if (typeof config !== "object" || config === null || Array.isArray(config)) {
-    throw new Error(
+    throw new AgentWriteRefusedError(
+      "not_admitted",
       `a ${type} connection's config is an object holding ${demanded.join(", ")}`,
     );
   }
 
   for (const key of Object.keys(config)) {
     if (!(key in gates)) {
-      throw new Error(
+      throw new AgentWriteRefusedError(
+        "not_admitted",
         `a ${type} connection's config has no key "${key}"; it holds ` +
           demanded.join(", "),
       );
@@ -173,7 +243,10 @@ export function validConfig(
   for (const [key, gate] of Object.entries(gates)) {
     const value = (config as Record<string, unknown>)[key];
     if (value === undefined) {
-      throw new Error(`a ${type} connection's config needs ${key}`);
+      throw new AgentWriteRefusedError(
+        "not_admitted",
+        `a ${type} connection's config needs ${key}`,
+      );
     }
     stored[key] = gate(key, value);
   }
@@ -193,7 +266,9 @@ export function validCredentials(
   const rule = descriptorOf(type).credentials;
 
   if (!rule.required) {
-    if (credentials !== undefined) throw new Error(rule.refusal);
+    if (credentials !== undefined) {
+      throw new AgentWriteRefusedError("not_admitted", rule.refusal);
+    }
     return null;
   }
 
@@ -204,12 +279,16 @@ export function validCredentials(
     credentials === null ||
     Array.isArray(credentials)
   ) {
-    throw new Error(`a ${type} connection needs credentials shaped ${shape}`);
+    throw new AgentWriteRefusedError(
+      "not_admitted",
+      `a ${type} connection needs credentials shaped ${shape}`,
+    );
   }
 
   for (const key of Object.keys(credentials)) {
     if (!rule.fields.includes(key)) {
-      throw new Error(
+      throw new AgentWriteRefusedError(
+        "not_admitted",
         `a ${type} connection's credentials have no key "${key}"; they are ` +
           `shaped ${shape}`,
       );
@@ -224,7 +303,8 @@ export function validCredentials(
     // nothing to say the stored value was the problem.
     const trimmed = typeof value === "string" ? value.trim() : "";
     if (trimmed === "") {
-      throw new Error(
+      throw new AgentWriteRefusedError(
+        "not_admitted",
         `a ${type} connection's credentials need ${field} to be a non-empty string`,
       );
     }
@@ -232,7 +312,8 @@ export function validCredentials(
     // paste gone wrong — and the stored last-4 hint must stay a hint, never
     // most of the secret it hints at.
     if (trimmed.length < SHORTEST_CREDENTIAL) {
-      throw new Error(
+      throw new AgentWriteRefusedError(
+        "not_admitted",
         `a ${type} connection's credentials need ${field} to be at least ` +
           `${SHORTEST_CREDENTIAL} characters`,
       );

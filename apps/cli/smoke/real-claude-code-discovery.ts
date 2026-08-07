@@ -32,6 +32,7 @@ import { fileURLToPath } from "node:url";
 
 import { FACTS } from "../src/wizard/facts.ts";
 import { DETAIL_MARK } from "../src/wizard/status.ts";
+import { RULE, say } from "./support/report.ts";
 
 const CLI_ENTRY = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 
@@ -44,12 +45,6 @@ const STRICT_FLAG = "--require-target";
 
 /** npx may have to fetch the adapter the first time, so this is generous. */
 const TIMEOUT_MS = 6 * 60_000;
-
-const RULE = "─".repeat(58);
-
-function say(message: string): void {
-  process.stdout.write(`${message}\n`);
-}
 
 /** Whether an unset target must end this run with a failure. */
 function requiresTarget(): boolean {

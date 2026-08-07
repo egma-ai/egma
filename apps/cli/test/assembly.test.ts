@@ -285,8 +285,9 @@ describe("the whole walk, offline", () => {
     // The key reached egma, and only its last characters ever came back.
     expect(connection?.credentialsHint).toBe(KEY.slice(-4));
     expect(platform.registered.sealed).toContain(KEY);
-    // What Retell is running was kept whole beside what egma read out of it.
-    expect(platform.registered.agents[0]?.pulled?.prompt).toBe(prompt);
+    // And what Retell is running stayed at Retell: nothing egma wrote holds a
+    // copy of it, because a copy would go stale from the moment it landed.
+    expect(platform.registered.agents[0]).not.toHaveProperty("pulled");
 
     /* the tests are on egma, every one of them a frozen version */
 

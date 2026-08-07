@@ -55,13 +55,19 @@
 export type { AuthContext, Role, Via } from "./context.ts";
 export { ROLES, VIA } from "./context.ts";
 export {
+  AgentWriteRefusedError,
   AlreadyBelongsToAnOrganizationError,
   LastAdminError,
   NotPermittedError,
   PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
+  RunWriteRefusedError,
+  TestMovedOnError,
   TraceStoreRefusedError,
+  UnprocessableInputError,
   UnreadableTraceQueryError,
+  type AgentWriteRefusal,
+  type RunWriteRefusal,
   type TestNamingPersona,
 } from "./errors.ts";
 
@@ -171,6 +177,7 @@ export {
   getConnection,
   listAgents,
   listConnections,
+  registerAgent,
   removeConnection,
   resolveConnectionCredentials,
   updateAgent,
@@ -184,6 +191,8 @@ export {
   type DeletedAgent,
   type NewAgent,
   type NewConnection,
+  type Registration,
+  type RegistrationResult,
   type RemovedConnection,
 } from "./agents.ts";
 export type {
@@ -200,6 +209,7 @@ export {
   getPersona,
   getPersonaVersion,
   listPersonas,
+  resolvePersonaNames,
   VOICE_PROVIDERS,
   type DeletedPersona,
   type NewPersona,
@@ -235,6 +245,7 @@ export {
   failSimulation,
   getRun,
   getSimulation,
+  listRunEvents,
   listRuns,
   listSimulations,
   markSimulationCanceled,
@@ -243,10 +254,13 @@ export {
   startSimulation,
   sweepOrphanedSimulations,
   type CompletedEndingReason,
+  type ConductedSimulation,
   type ConnectionSnapshot,
   type FailedEndingReason,
   type NewRun,
   type Run,
+  type RunEvent,
+  type RunEventPage,
   type RunPage,
   type Simulation,
   type SimulationFailure,
@@ -254,8 +268,10 @@ export {
   type StartedRun,
 } from "./runs.ts";
 export type {
+  RunEventKind,
   RunStatus,
   RunTrigger,
   SimulationEndingReason,
   SimulationStatus,
+  Verdict,
 } from "../schema/runs.ts";

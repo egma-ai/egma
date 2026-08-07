@@ -32,6 +32,13 @@ import type { Browser, Page } from "playwright-core";
 import { openBrowser } from "../../api/test/support/browser.ts";
 import { startInstance, type Instance } from "../../api/test/support/instance.ts";
 import { runInTerminal } from "../test/support/pty.ts";
+import {
+  approveOnly,
+  NO_BROWSER,
+  PASSWORD,
+  signUpAndApprove,
+} from "./support/approving-person.ts";
+import { check, problems, say, waitUntil } from "./support/report.ts";
 
 const run = promisify(execFile);
 
@@ -45,37 +52,8 @@ const MANIFEST = `${JSON.stringify(
 
 const FAKE_AGENT = fileURLToPath(new URL("../test/support/fake-agent.ts", import.meta.url));
 
-/** A browser egma must not open: this check drives its own. */
-const NO_BROWSER = "/usr/bin/true";
-
-const PASSWORD = "a-long-enough-password";
-
 // The API writes a line per request, and this check makes a great many.
 process.env.LOG_LEVEL ??= "silent";
-
-const problems: string[] = [];
-
-function say(message: string): void {
-  process.stdout.write(`${message}\n`);
-}
-
-function check(condition: boolean, what: string): void {
-  say(`${condition ? "  ok  " : "FAILED"}  ${what}`);
-  if (!condition) problems.push(what);
-}
-
-async function waitFor(
-  condition: () => boolean,
-  timeoutMs: number,
-  what: string,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    if (condition()) return;
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-}
 
 type Home = { readonly folder: string; readonly credentials: string };
 
@@ -98,34 +76,6 @@ async function heldIn(home: Home): Promise<{ url: string; key: string; mode: str
   };
   const mode = ((await stat(home.credentials)).mode & 0o777).toString(8);
   return { ...held, mode };
-}
-
-/** The signup that happens inside the approval page, for a brand-new account. */
-async function signUpAndApprove(page: Page, approveUrl: string): Promise<void> {
-  await page.goto(approveUrl);
-  await page.click('button[type="submit"]');
-  await page.waitForURL(/\/signup\?next=/u);
-
-  await page.fill("#email", "ada@acme.example");
-  await page.fill("#password", PASSWORD);
-  await page.fill("#organizationName", "Acme");
-  await page.fill("#projectName", "Default");
-  await page.click('button[type="submit"]');
-
-  await page.waitForURL(/\/device\/approve\?user_code=/u);
-  await page.getByRole("button", { name: "Approve" }).click();
-  await page.waitForURL(/\/device\/success/u);
-}
-
-/** The second time round, when the browser already holds the sign-in. */
-async function approveOnly(page: Page, approveUrl: string): Promise<void> {
-  await page.goto(approveUrl);
-  // The address lands on the page that claims the code; it is only after that
-  // that there is anything to approve.
-  await page.click('button[type="submit"]');
-  await page.waitForURL(/\/device\/approve\?user_code=/u);
-  await page.getByRole("button", { name: "Approve" }).click();
-  await page.waitForURL(/\/device\/success/u);
 }
 
 /**
@@ -192,10 +142,10 @@ async function theWizard(instance: Instance, page: Page): Promise<void> {
   });
 
   try {
-    await waitFor(() => terminal.screen().includes("[enter] begin"), 60_000, "the intro");
+    await waitUntil(() => terminal.screen().includes("[enter] begin"), 60_000, "the intro");
     terminal.write("\r");
 
-    await waitFor(() => terminal.screen().includes("Code:"), 60_000, "the code");
+    await waitUntil(() => terminal.screen().includes("Code:"), 60_000, "the code");
     const screen = terminal.screen();
     say("");
     say(screen);
@@ -258,7 +208,7 @@ async function theVerb(instance: Instance, page: Page): Promise<void> {
       stdout += chunk;
     });
 
-    await waitFor(() => stdout.includes("approve_url: "), 60_000, "the address to approve at");
+    await waitUntil(() => stdout.includes("approve_url: "), 60_000, "the address to approve at");
     const approveUrl = /approve_url: (\S+)/u.exec(stdout)?.[1] ?? "";
     check(approveUrl.startsWith(instance.origin), "egma login printed an address on this instance");
 

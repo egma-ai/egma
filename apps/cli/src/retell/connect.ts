@@ -53,6 +53,38 @@ export const NO_AGENTS_LINE =
 /** What egma calls the agent when the customer never named it on Retell. */
 export const DEFAULT_AGENT_NAME = "voice-agent";
 
+/**
+ * What egma says when connecting found something already there.
+ *
+ * Registering the same Retell agent twice is safe on purpose — a coding agent
+ * retrying after a network failure it could not read must never mint a second
+ * identity — so egma answers the registration that exists and says so. Saying
+ * nothing would leave a developer counting agents to find out; treating it as a
+ * failure would tell them to fix something that is working. So it is said, in
+ * plain words, on the ordinary success path.
+ *
+ * One sentence per surface-independent case, written here because both the
+ * screen and the printed lines say it and two copies of one sentence drift.
+ */
+export function registrationLine(registered: Registered): string | null {
+  switch (registered.result) {
+    case "created":
+      // Nothing to add: the line beside this one already says what was written.
+      return null;
+    case "reused":
+      return (
+        `This Retell agent was already registered as ${registered.agent.name}, so egma ` +
+        `kept it and stored the key you just gave. Nothing new was registered.`
+      );
+    case "connection_added":
+      return (
+        `This Retell agent was already registered as ${registered.agent.name}, so egma ` +
+        `added ${registered.connection.name} as another way of reaching it. No second ` +
+        `agent was registered.`
+      );
+  }
+}
+
 /** What the wizard is waiting to be given, while it still is. */
 export type KeyAsk = {
   /** What is being asked for. */
@@ -197,6 +229,13 @@ type KeyedOptions = ConnectOptions & { readonly key: RetellKey };
  *
  * The platform names connections that way for the same reason, so a second run
  * in the same project lands beside the first instead of refusing.
+ *
+ * **Connecting the same Retell agent twice is not a name clash.** egma settles
+ * that inside its own write — the registration already there answers, with the
+ * key rotated whole — and says which of the three things it did. So the name
+ * loop below is for the other case only: a *different* Retell agent whose egma
+ * name is already taken. Nothing here retries a reuse, because there is nothing
+ * to retry.
  */
 async function register(
   options: KeyedOptions,
@@ -217,13 +256,6 @@ async function register(
           modality: config.modality,
           config: { retellAgentId: config.agentId },
           credentials: options.key,
-        },
-        pulled: {
-          vendor: "retell",
-          documents: config.documents,
-          prompt: config.prompt,
-          voice: config.voice,
-          tools: config.tools,
         },
       },
       {

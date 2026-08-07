@@ -992,7 +992,10 @@ describe("a file egma cannot read", () => {
 describe("a test the platform's own door turns away", () => {
   /** The persona nobody authored, which is what the door is refusing. */
   const UNHELD = "somebody-in-a-hurry";
-  const REFUSAL = `there is no persona ${UNHELD} in this project`;
+  const REFUSAL =
+    `egma has no persona called "${UNHELD}" in this project. Name a persona ` +
+    `this project already has, or name none and egma takes the project's ` +
+    `default.`;
   const GOOD = ["price-question", "sunday-drop-off"];
   const NAMED = "asked-for-the-binder";
 

@@ -6,6 +6,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   unique,
   type AnyPgColumn,
@@ -13,6 +14,7 @@ import {
 
 import { agent, connection, CONNECTION_TYPES, MODALITIES } from "./agents.ts";
 import { persona, personaVersion } from "./personas.ts";
+import { test, testVersion } from "./tests.ts";
 import { organization, project } from "./tenancy.ts";
 import { user } from "./identity.ts";
 import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
@@ -24,12 +26,15 @@ import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
  * silently vanish. Retry is a new run pointing back at the old one; a
  * terminal run's numbers are frozen and never reopened.
  *
- * The test linkage is deliberately absent-but-shaped-for: when the two
- * workstreams meet, a simulation gains its test-version pin by one additive
- * migration, and nothing here moves. Verdict counts and the gate result are
- * likewise the graders' side of the line and arrive with them; the counts on
- * this header are simulation outcomes — did each conversation happen — never
- * judgements of what happened in one.
+ * **A run executes frozen test versions.** The two workstreams have met: the
+ * header keeps the versions it was asked to pin, and each simulation carries
+ * the version it conducts beside the persona who calls about it — so one test
+ * with three personas is three conversations, and improving that test tomorrow
+ * rewrites none of them.
+ *
+ * Verdict counts and the gate result are the graders' side of the line and
+ * arrive with them; the counts on this header are simulation outcomes — did
+ * each conversation happen — never judgements of what happened in one.
  */
 
 /**
@@ -105,6 +110,22 @@ export const SIMULATION_ENDING_REASONS = [
 export type SimulationEndingReason =
   (typeof SIMULATION_ENDING_REASONS)[number];
 
+/**
+ * What the graders made of a simulation. Four, and never three.
+ *
+ * `skipped` and `errored` are answers in their own right and are never folded
+ * into `failed`: a test that could not run is not a test that failed, and a
+ * product that said otherwise would mark a suite red on the strength of its own
+ * outage. The pairing with the status is held by a check below, so the fold is
+ * unwritable rather than merely discouraged.
+ */
+export const VERDICTS = ["passed", "failed", "skipped", "errored"] as const;
+export type Verdict = (typeof VERDICTS)[number];
+
+/** What one event is about: one simulation moving, or the run itself. */
+export const RUN_EVENT_KINDS = ["run", "simulation"] as const;
+export type RunEventKind = (typeof RUN_EVENT_KINDS)[number];
+
 /** A quoted value list, as a check's SQL wants one: `('a', 'b', 'c')`. */
 const quoted = (values: readonly string[]) =>
   sql.raw(`(${values.map((value) => `'${value}'`).join(", ")})`);
@@ -132,9 +153,21 @@ export const run = pgTable(
       onDelete: "set null",
     }),
     /**
-     * The persona selection as it was requested, kept as provenance. What was
-     * actually conducted is each simulation's own pinned version; this answers
-     * "what did they ask for" after the personas themselves move on.
+     * The frozen test versions this run was asked to execute, in the order
+     * they were named. The pin itself is each simulation's own column; this is
+     * what the trigger asked for, kept whole so the request stays readable
+     * even for a version whose test has since been deleted.
+     *
+     * Empty only on a run written before a run could pin one at all — the
+     * migration that added this column says so about the rows it found, rather
+     * than inventing a selection nobody made.
+     */
+    pinnedTestVersions: jsonb("pinned_test_versions").notNull(),
+    /**
+     * The personas those versions named, in the order they were met, kept as
+     * provenance. What was actually conducted is each simulation's own pinned
+     * version; this answers "who was this run about" after the personas
+     * themselves move on.
      */
     requestedPersonas: jsonb("requested_personas").notNull(),
     /**
@@ -263,6 +296,22 @@ export const simulation = pgTable(
      */
     personaId: idText("persona_id").notNull(),
     personaVersionId: idText("persona_version_id").notNull(),
+    /**
+     * What is being checked, and the pin. The version is frozen content, so
+     * this row says exactly what was executed for as long as it is kept, and
+     * editing the test tomorrow rewrites nothing. The identity rides beside it
+     * because it is what the composite keys below pair on: the version is this
+     * test's, and the test is this project's.
+     *
+     * **Absent only on a row written before the two halves of the product
+     * met.** Nothing can write one now — `startRun` names a version for every
+     * conversation it creates — but an instance upgraded across that migration
+     * holds simulations that executed no stored test, and they say so rather
+     * than being handed a test somebody invented for them. The check below
+     * keeps the pair whole either way.
+     */
+    testId: idText("test_id"),
+    testVersionId: idText("test_version_id"),
     /** Where in the run's requested order this conversation sits, from one. */
     position: integer("position").notNull(),
     /**
@@ -443,9 +492,31 @@ export const simulation = pgTable(
       columns: [table.personaId, table.projectId],
       foreignColumns: [persona.id, persona.projectId],
     }),
+    // And the test pin closes the same way the persona pin does: the version
+    // is the named test's, and the test is this project's, so a raw write
+    // cannot pin another customer's test.
+    foreignKey({
+      name: "simulation_test_version_test_fk",
+      columns: [table.testVersionId, table.testId],
+      foreignColumns: [testVersion.id, testVersion.testId],
+    }),
+    foreignKey({
+      name: "simulation_test_project_fk",
+      columns: [table.testId, table.projectId],
+      foreignColumns: [test.id, test.projectId],
+    }),
+    // The pin is a pair or it is nothing: half of it would name a test with
+    // no version, or a version with no test, and neither says what ran.
+    check(
+      "simulation_test_pin_is_whole",
+      sql`(${table.testId} is null) = (${table.testVersionId} is null)`,
+    ),
     // A run's conversations are an ordered list, and no place in it is
     // claimed twice.
     unique("simulation_run_id_position_unique").on(table.runId, table.position),
+    // Looks redundant next to the primary key; it is what an event's
+    // "this simulation is of this run" pairs on.
+    unique("simulation_id_run_id_unique").on(table.id, table.runId),
     index("simulation_run_id_idx").on(table.runId),
     // The claim's hot path: the oldest queued simulations of one customer.
     index("simulation_queued_idx")
@@ -461,5 +532,139 @@ export const simulation = pgTable(
     // question by identity, which is what a persona's own erasure checks.
     index("simulation_persona_version_id_idx").on(table.personaVersionId),
     index("simulation_persona_id_idx").on(table.personaId),
+    // The same two questions about the other pin: which simulations executed
+    // this exact version, and which ever executed this test at all.
+    index("simulation_test_version_id_idx").on(table.testVersionId),
+    index("simulation_test_id_idx").on(table.testId),
+  ],
+);
+
+/**
+ * Everything that has changed about a run, in the order it changed, numbered
+ * densely from one within the run.
+ *
+ * **A row lands here in the same transaction as the change it describes.** A
+ * simulation moving, a verdict arriving, the run's own header settling: each
+ * writes its event beside itself or neither is written. That is what makes the
+ * feed a record rather than a guess.
+ *
+ * **Deriving the feed from the run and simulation rows was rejected.** Those
+ * rows are overwritten by every transition, so a follower that was away while a
+ * simulation went `claimed → running → completed` could never learn it had
+ * happened — it would see only where things ended. A log can be replayed from
+ * any point; a mutable row cannot be replayed at all.
+ *
+ * **The number, not the clock, is the cursor.** A follower asks for everything
+ * after the last number it applied, so a crash and a restart miss nothing, and
+ * a page served twice is harmless because applying the same number twice is the
+ * client's own no-op. The server is stateless about who has read what.
+ *
+ * The row is written once and never rewritten — a trigger in the migration says
+ * so, the way the two lifecycle guards do — and it holds a place for the
+ * verdict from the day this table exists, so the graders land with no change to
+ * anything a client reads.
+ */
+export const runEvent = pgTable(
+  "run_event",
+  {
+    runId: idText("run_id").notNull(),
+    /**
+     * Dense from one, within this run. Allocated under the run header's own
+     * lock, which is what makes "dense" true rather than hoped for: two
+     * writers landing at once take that lock in turn and number in turn.
+     */
+    seq: integer("seq").notNull(),
+    organizationId: idText("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    projectId: idText("project_id").notNull(),
+    kind: text("kind").notNull(),
+    /** The simulation that moved, and null when the run itself did. */
+    simulationId: idText("simulation_id"),
+    /**
+     * What the thing that moved is now: a run status on a run event, a
+     * simulation status on a simulation event. Never both vocabularies at
+     * once — the checks below hold the kind to its own words.
+     */
+    status: text("status").notNull(),
+    /**
+     * What the graders made of it, once they have. Null until then, and null
+     * forever on an event that is not about a judged conversation.
+     */
+    verdict: text("verdict"),
+    /** How it ended, in the ending-reason vocabulary; null while it has not. */
+    reason: text("reason"),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    // Its identity is its run and its number: an event is never addressed on
+    // its own, and the pair is exactly what a follower asks by.
+    primaryKey({ name: "run_event_pk", columns: [table.runId, table.seq] }),
+    prefixCheck("run_event_run_id_prefix", table.runId, "run"),
+    oneOf("run_event_kind_allowed", table.kind, [...RUN_EVENT_KINDS]),
+    check("run_event_seq_counts_from_one", sql`${table.seq} >= 1`),
+    // Each kind speaks its own vocabulary and carries its own facts. A run
+    // event is about the header, so it names no simulation and holds no
+    // judgement of one.
+    check(
+      "run_event_run_shape",
+      sql`${table.kind} <> 'run'
+        or (${table.simulationId} is null
+          and ${table.verdict} is null and ${table.reason} is null
+          and ${table.status} in ${quoted(RUN_STATUSES)})`,
+    ),
+    check(
+      "run_event_simulation_shape",
+      sql`${table.kind} <> 'simulation'
+        or (${table.simulationId} is not null
+          and ${table.status} in ${quoted(SIMULATION_STATUSES)})`,
+    ),
+    check(
+      "run_event_verdict_allowed",
+      sql`${table.verdict} is null or ${table.verdict} in ${quoted(VERDICTS)}`,
+    ),
+    // The pairing, held by the database: a conversation that ran is passed,
+    // failed or skipped; one that never ran errored; one somebody stopped was
+    // never judged and is skipped. `skipped` and `errored` can therefore never
+    // be written as `failed`, which is the one normalisation a test product
+    // cannot get wrong.
+    check(
+      "run_event_verdict_agrees",
+      sql`${table.verdict} is null
+        or (${table.status} = 'completed' and ${table.verdict} in ('passed', 'failed', 'skipped'))
+        or (${table.status} = 'failed' and ${table.verdict} = 'errored')
+        or (${table.status} = 'canceled' and ${table.verdict} = 'skipped')`,
+    ),
+    // And the ending reason keeps to its own class, exactly as it does on the
+    // simulation row it came from.
+    check(
+      "run_event_reason_agrees",
+      sql`${table.reason} is null
+        or (${table.status} = 'completed' and ${table.reason} in ${quoted(
+          COMPLETED_ENDING_REASONS,
+        )})
+        or (${table.status} = 'failed' and ${table.reason} in ${quoted(
+          FAILED_ENDING_REASONS,
+        )})`,
+    ),
+    // The tenancy triangle, edge for edge as the simulation's: the project is
+    // the organization's, the run is that project's, and the simulation named
+    // is that run's — so an event cannot describe a conversation of a run it
+    // does not belong to.
+    foreignKey({
+      name: "run_event_project_organization_fk",
+      columns: [table.projectId, table.organizationId],
+      foreignColumns: [project.id, project.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "run_event_run_project_fk",
+      columns: [table.runId, table.projectId],
+      foreignColumns: [run.id, run.projectId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "run_event_simulation_run_fk",
+      columns: [table.simulationId, table.runId],
+      foreignColumns: [simulation.id, simulation.runId],
+    }).onDelete("cascade"),
   ],
 );
