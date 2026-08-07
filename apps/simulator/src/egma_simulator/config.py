@@ -251,8 +251,13 @@ class MediaSettings:
         # that is a real deployment. One half is nobody's deployment: every
         # call it places comes back 403, which reads as *wrong* credentials
         # rather than as half of one, and it reads that way once per
-        # simulation until somebody looks here.
-        if (settings.trunk_username is None) != (settings.trunk_password is None):
+        # simulation until somebody looks here. The rule binds the inline
+        # trunk only: with a stored trunk selected the inline fields are
+        # never read, and refusing a working deployment over a leftover
+        # half would be the louder wrong.
+        if settings.trunk_id is None and (settings.trunk_username is None) != (
+            settings.trunk_password is None
+        ):
             # Both names written out whole, never assembled from parts: a
             # variable somebody has to search for has to be searchable, in
             # this file as much as in the sentence it prints.

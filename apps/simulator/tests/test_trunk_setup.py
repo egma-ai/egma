@@ -279,3 +279,21 @@ async def test_an_account_too_busy_for_one_page_is_still_read_to_the_end():
     assert trunk.address == "egma-simulator-already.pstn.twilio.com"
     # And the paging really happened rather than the page being big enough.
     assert sum(1 for method, path in stub.calls if path == "/v1/Trunks") >= 3
+
+
+async def test_the_password_turns_only_after_everything_else_stands():
+    """Rotation replaces a credential a running deployment may be dialling
+    with. If anything after it failed, the command would exit without
+    printing the replacement, and that deployment would hold a password
+    nobody has anymore — so the credential write must be the last thing
+    setup does to the account."""
+    stub = TwilioStub()
+
+    await setup(stub)
+
+    mutations = [path for method, path in stub.calls if method == "POST"]
+    assert mutations, "setup made nothing at all"
+    assert mutations[-1].endswith("/Credentials"), (
+        "the credential write must come after every attachment, "
+        f"but the last mutation was {mutations[-1]}"
+    )

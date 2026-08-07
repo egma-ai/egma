@@ -526,6 +526,21 @@ def test_a_stored_trunk_reference_is_the_other_way(env):
     assert SimulatorConfig.from_env().media.trunk_id == "ST_1234"
 
 
+def test_a_stored_trunk_is_not_refused_over_a_leftover_inline_half(env):
+    """The credential-pair rule binds the inline trunk only. A deployment
+    that moved to a stored trunk and left one stale inline variable behind
+    is a working deployment, not half of a broken one — the inline fields
+    are never read once EGMA_SIMULATOR_SIP_TRUNK_ID selects the trunk."""
+    a_deployment_that_dials(
+        env,
+        EGMA_SIMULATOR_SIP_TRUNK_ID="ST_1234",
+        EGMA_SIMULATOR_SIP_TRUNK_ADDRESS=None,
+        EGMA_SIMULATOR_SIP_TRUNK_USERNAME="left-behind",
+        EGMA_SIMULATOR_SIP_TRUNK_PASSWORD=None,
+    )
+    assert SimulatorConfig.from_env().media.trunk_id == "ST_1234"
+
+
 def test_the_telephony_secrets_never_print(env):
     """A config that landed in a log line by accident says nothing."""
     a_deployment_that_dials(env)

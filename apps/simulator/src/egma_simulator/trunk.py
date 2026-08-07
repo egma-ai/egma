@@ -437,14 +437,19 @@ async def provision(
 
         trunk, trunk_is_new = await account.trunk(name)
         credential_list, list_is_new = await account.credential_list(name)
-        password = _password()
-        credential_sid, credential_is_new = await account.set_password(
-            credential_list["sid"], name, password
-        )
         list_attached = await account.attach_credential_list(
             trunk["sid"], credential_list["sid"]
         )
         number_attached = await account.attach_number(trunk["sid"], number_sid)
+        # The password turns last, once everything else stands. Rotation
+        # replaces a credential a running deployment may be dialling with,
+        # and a failure after the rotation but before the new lines were
+        # printed would leave that deployment refusing 403 on a password
+        # nobody holds anymore.
+        password = _password()
+        credential_sid, credential_is_new = await account.set_password(
+            credential_list["sid"], name, password
+        )
 
     return ReadyTrunk(
         address=trunk["domain_name"],
