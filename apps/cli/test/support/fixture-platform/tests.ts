@@ -28,11 +28,15 @@
  * body and a read may filter by one; neither has to, and the CLI never does.
  */
 
-// The platform's own identifier generator, reached the way the other checks
-// that cross a package reach one: by path. `@egma/ids` is a name only the test
-// runner knows how to resolve, and the smoke checks run this fixture under
-// plain node, where a name nothing has installed is a name that does not exist.
-import { isId, newId } from "../../../../../packages/ids/src/index.ts";
+import {
+  given,
+  isId,
+  newId,
+  NOT_AUTHENTICATED,
+  PAGE_SIZE,
+  text,
+  textList,
+} from "./reading.ts";
 import type { FixtureAnswer, FixtureRequest, RouteGroup } from "./server.ts";
 
 /** One version of a test, frozen the moment it was written. */
@@ -133,20 +137,6 @@ function refuse(status: number, error: string, message: string): FixtureAnswer {
   return { status, body: { error, message } };
 }
 
-/** A string somebody sent, trimmed, or nothing at all for anything else. */
-function text(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-/** What a caller actually said, as against a field that arrived empty. */
-function given(value: string | undefined | null): string | undefined {
-  return value === undefined || value === null || value === "" ? undefined : value;
-}
-
-function textList(value: unknown): readonly string[] {
-  return Array.isArray(value) ? value.map((item) => text(item)) : [];
-}
-
 /**
  * The personas a body names, in the order it named them.
  *
@@ -169,9 +159,6 @@ function personaEntries(value: unknown): NamedPersonas {
   }
   return { entries };
 }
-
-/** How many rows one page holds, as the data-access layer's default does. */
-const PAGE_SIZE = 50;
 
 /**
  * One frozen version, as the run endpoints need it: what test it belongs to,
@@ -363,7 +350,7 @@ export function testRoutes(options: {
   ): FixtureAnswer => {
     const offered = (request.headers.authorization ?? "").replace(/^Bearer\s+/iu, "");
     if (offered === "" || !options.holdsKey(offered)) {
-      return refuse(401, "not_authenticated", "no key, or not one of ours");
+      return { status: 401, body: NOT_AUTHENTICATED };
     }
     return answer();
   };
@@ -375,9 +362,12 @@ export function testRoutes(options: {
    * rather than quietly narrowed back to this one. The narrowing would be safe
    * and the silence would not: a caller whose filter was dropped reads the
    * answer as though the filter had applied.
+   *
+   * It takes what the caller said rather than the raw field, because a body
+   * trims what it carries and a query string does not — the difference is the
+   * API's, so it is made at each door rather than smoothed over here.
    */
-  const projectNamed = (value: unknown): FixtureAnswer | null => {
-    const named = given(text(value));
+  const projectNamed = (named: string | undefined): FixtureAnswer | null => {
     if (named === undefined || named === projectId) return null;
     return refuse(403, "not_permitted", cannotActIn(named));
   };
@@ -400,7 +390,7 @@ export function testRoutes(options: {
       return { answer: refuse(422, "unprocessable", named.refusal) };
     }
 
-    const outsider = projectNamed(said.project);
+    const outsider = projectNamed(given(text(said.project)));
     if (outsider !== null) return { answer: outsider };
 
     if (named === undefined) return { ids: undefined };
@@ -467,10 +457,10 @@ export function testRoutes(options: {
         path: "/api/tests",
         handle: (request) =>
           behindAKey(request, () => {
-            const outsider = projectNamed(request.url.searchParams.get("project"));
+            const outsider = projectNamed(given(request.url.searchParams.get("project")));
             if (outsider !== null) return outsider;
 
-            const cursor = given(text(request.url.searchParams.get("cursor")));
+            const cursor = given(request.url.searchParams.get("cursor"));
             if (cursor !== undefined && !isId("tst", cursor)) {
               return refuse(
                 400,

@@ -7,8 +7,8 @@
  *
  * What is asserted is what a developer could check afterwards: what was said on
  * screen, what landed on the platform, and — for the two rules that cannot be
- * checked any other way — that egma read the provider's own bytes whole, and
- * that none of them went anywhere near egma's own store.
+ * checked any other way — that egma read both halves of the provider's agent,
+ * and that neither of them went anywhere near egma's own store.
  */
 
 import { rm, symlink, writeFile } from "node:fs/promises";
@@ -16,6 +16,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { registerAgent, type RegisterOptions } from "../src/platform/agents.ts";
 import {
   INVALID_KEY_LINE,
   KEY_ASK_LINE,
@@ -303,42 +304,40 @@ describe("one agent, and several", () => {
 
 describe("what lands on the platform", () => {
   /**
-   * egma reads both halves of a Retell agent and keeps neither.
+   * egma reads both halves of a Retell agent, and sends neither anywhere.
    *
-   * The provider's own bytes are read whole — not a re-encoding of a parse,
-   * which is what would quietly drop a field egma has no place for — and they
-   * are used, and then they are let go. What the agent is running lives at the
-   * provider, reachable forever through the sealed credential; a copy on egma
-   * would start going stale the moment it was written and nothing ever read it
-   * back. So the request egma sends carries identity, the way of reaching the
-   * agent, and the credential, and nothing else at all.
+   * A Retell agent is in two halves at two addresses, and egma reads both —
+   * the identity and the voice from one, the words and the tools from the
+   * other — because the half it skipped would be the half the tests needed.
+   * Then it lets them go. What the agent is running lives at the provider,
+   * reachable forever through the sealed credential; a copy on egma would start
+   * going stale the moment it was written and nothing ever read it back. So the
+   * request egma sends carries identity, the way of reaching the agent, and the
+   * credential, and nothing else at all.
    */
-  it("reads the provider's answer whole, and sends none of it to egma", async () => {
+  it("reads both halves of the agent, and sends neither to egma", async () => {
     const provider = await startFakeRetell(ONE_AGENT);
     retell = provider;
 
     const { connected } = await run({ keys: [KEY] });
 
-    // Both halves, each exactly as Retell answered it, in egma's hands.
-    const read = Object.fromEntries(
-      (connected?.config.documents ?? []).map((one) => [one.of, one.body]),
-    );
-    expect(read["agent"]).toBe(provider.answered("/get-agent/agent_0001"));
-    expect(read["response-engine"]).toBe(provider.answered("/get-retell-llm/llm_0001"));
+    // Both halves were really read, each at its own address.
+    const asked = provider.requests.map((one) => one.path);
+    expect(asked).toContain("/get-agent/agent_0001");
+    expect(asked).toContain("/get-retell-llm/llm_0001");
 
-    // A field egma has no column for is still in there, because nothing was
-    // dropped on the way through.
-    expect(read["agent"]).toContain('"language":"en-GB"');
-    expect(read["response-engine"]).toContain('"model":"gpt-4.1"');
-
-    // And what egma read out of it is what the next step is grounded in.
-    expect(connected?.config.prompt).toBe(PROMPT);
+    // And what egma read out of them is what the next step is grounded in —
+    // the identity and voice from the first, the words and tools from the
+    // second.
+    expect(connected?.config.name).toBe("order-line");
     expect(connected?.config.voice).toBe("11labs-Adrian");
+    expect(connected?.config.engine).toBe("retell-llm");
+    expect(connected?.config.prompt).toBe(PROMPT);
     expect(connected?.config.tools).toHaveLength(1);
 
     // None of it went to egma. The platform keeps identity, the connection and
-    // the sealed key — and the read of the agent it just registered carries no
-    // trace of what the provider is running.
+    // the sealed key — and the agent it just registered holds no trace of what
+    // the provider is running.
     const [agent] = platform.registered.agents;
     expect(agent).not.toHaveProperty("pulled");
     expect(Object.keys(agent ?? {}).sort()).toEqual([
@@ -714,5 +713,103 @@ describe("the platform's own rules, held by the fixture", () => {
 
     expect(answer.status).toBe(401);
     expect(platform.registered.agents).toHaveLength(0);
+  });
+});
+
+/**
+ * What the client does with a success it cannot read.
+ *
+ * Driven at the module's own seam rather than through the fixture, because the
+ * fixture answers the contract and what is under test here is an answer that
+ * breaks it — a newer egma, a proxy that rewrote something, a half-deployed
+ * instance. There is one honest thing to do with any of them and it is the same
+ * thing: say egma answered without saying what it wrote, and stop.
+ */
+describe("a registration answer this build cannot read", () => {
+  const AGENT = { id: "agt_01K000000000000000000000AA", name: "order-line" };
+  const CONNECTION = {
+    id: "con_01K000000000000000000000BB",
+    name: "retell-1",
+    type: "retell",
+    modality: "voice",
+    credentials_hint: "WXYZ",
+  };
+
+  /** One canned reply, whatever is asked. */
+  function answering(body: Record<string, unknown>, status = 201) {
+    return (() =>
+      Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "content-type": "application/json" },
+        }),
+      )) as unknown as NonNullable<RegisterOptions["fetchImpl"]>;
+  }
+
+  async function register(body: Record<string, unknown>, status?: number) {
+    return registerAgent(
+      {
+        name: "order-line",
+        connection: {
+          type: "retell",
+          modality: "voice",
+          config: { retellAgentId: "agent_0001" },
+        },
+      },
+      {
+        url: "http://egma.test",
+        key: "egma_sk_whatever",
+        fetchImpl: answering(body, status),
+      },
+    );
+  }
+
+  it("reads a reply that names no outcome as a creation, which is what it was", async () => {
+    // Every egma before the field existed answered exactly this, and a reply
+    // carrying an agent and a connection meant one thing then: both were
+    // written. That is the only reading that cannot describe a write egma did
+    // not make, so it stays.
+    const answer = await register({ agent: AGENT, connection: CONNECTION });
+
+    expect(answer).toEqual({
+      kind: "registered",
+      registered: {
+        result: "created",
+        agent: AGENT,
+        connection: {
+          id: CONNECTION.id,
+          name: "retell-1",
+          type: "retell",
+          modality: "voice",
+          credentialsHint: "WXYZ",
+        },
+      },
+    });
+  });
+
+  it("refuses a reply naming an outcome it has never heard of, rather than guessing", async () => {
+    // A fourth outcome can only mean a platform that does something this build
+    // does not know about. Reading it as a creation would be the terminal
+    // inventing a fact — and the fact it would invent is the one that leaves a
+    // developer with two identities and a screen that reported one.
+    const answer = await register({
+      result: "reattached",
+      agent: AGENT,
+      connection: CONNECTION,
+    });
+
+    expect(answer).toEqual({
+      kind: "refused",
+      reason: "egma answered without saying what it wrote. Check that this egma is up to date.",
+    });
+  });
+
+  it("says the same thing about a reply missing the agent it claims to have written", async () => {
+    const answer = await register({ result: "created", connection: CONNECTION });
+
+    expect(answer).toEqual({
+      kind: "refused",
+      reason: "egma answered without saying what it wrote. Check that this egma is up to date.",
+    });
   });
 });

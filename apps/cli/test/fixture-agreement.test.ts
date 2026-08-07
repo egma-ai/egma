@@ -267,7 +267,95 @@ describe("creating a test", () => {
   });
 });
 
+describe("the door every group is behind", () => {
+  /**
+   * A 401 is relayed to a terminal unchanged, so its sentence is contract as
+   * much as any other — and it is one sentence for the whole API rather than
+   * one per route group. A fixture with a shorter one would let a client ship a
+   * check against words the real thing never says.
+   */
+  it("answers one sentence for a key it never minted, whichever group is asked", async () => {
+    const refusal = {
+      error: "not_authenticated",
+      message:
+        "this request carried no session and no usable API key. " +
+        "Sign in, or send Authorization: Bearer with an egma key.",
+    };
+
+    for (const [method, path, payload] of [
+      ["GET", "/api/tests"],
+      ["POST", "/api/tests", RESCHEDULING],
+      ["PATCH", "/api/tests/tst_01JZZZZZZZZZZZZZZZZZZZZZZZ", RESCHEDULING],
+      ["GET", "/api/test-versions/tstv_01JZZZZZZZZZZZZZZZZZZZZZZZ"],
+      ["GET", "/api/agents"],
+      ["POST", "/api/agents", registration()],
+      ["GET", "/api/agents/agt_01JZZZZZZZZZZZZZZZZZZZZZZZ"],
+      ["POST", "/api/agents/agt_01JZZZZZZZZZZZZZZZZZZZZZZZ/connections", connectionPayload()],
+      ["POST", "/api/runs", { connection: "con_01JZZZZZZZZZZZZZZZZZZZZZZZ" }],
+      ["GET", "/api/runs/run_01JZZZZZZZZZZZZZZZZZZZZZZZ"],
+      ["GET", "/api/runs/run_01JZZZZZZZZZZZZZZZZZZZZZZZ/events"],
+      ["GET", "/api/keys"],
+    ] as const) {
+      const response = await fetch(`${platform.url}${path}`, {
+        method,
+        headers: {
+          authorization: "Bearer egma_sk_not-one-of-ours",
+          ...(payload === undefined ? {} : { "content-type": "application/json" }),
+        },
+        ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
+      });
+      expect(response.status, `${method} ${path}`).toBe(401);
+      expect(await response.json(), `${method} ${path}`).toEqual(refusal);
+    }
+
+    // Refused before anything was read, so nothing was written by any of them.
+    expect(platform.tests.tests).toEqual([]);
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.running.runs).toEqual([]);
+  });
+});
+
 describe("the list of tests", () => {
+  /**
+   * A page holds fifty, and there is no parameter to ask for fewer: a list this
+   * API answers is followed by its cursor and by nothing else. So the page size
+   * is what this seeds past, and it is written here because a change to it is a
+   * change a client would see.
+   */
+  const A_PAGE = 50;
+
+  it("answers one envelope, newest first, and pages through with its cursor", async () => {
+    // Seeded through the controls rather than the route: what is under test is
+    // the page and its cursor, and fifty-one requests to arrange that would be
+    // fifty-one requests proving nothing.
+    const written: string[] = [];
+    for (let index = 1; index <= A_PAGE + 1; index += 1) {
+      written.push(
+        platform.tests.add({
+          name: `test ${String(index).padStart(2, "0")}`,
+          scenario: RESCHEDULING.scenario,
+          expectedBehaviors: [...RESCHEDULING.expected_behaviors],
+        }).id,
+      );
+    }
+
+    const page = await ask("GET", "/api/tests");
+    expect(page.status).toBe(200);
+    const items = page.body.items as { id: string }[];
+    expect(items).toHaveLength(A_PAGE);
+    // Newest first, so the last one written is the first one read.
+    expect(items[0]?.id).toBe(written.at(-1));
+    expect(page.body.next_cursor).toBe(items.at(-1)?.id);
+
+    const rest = await ask("GET", `/api/tests?cursor=${String(page.body.next_cursor)}`);
+    const remaining = rest.body.items as { id: string }[];
+    expect(remaining.map((test) => test.id)).toEqual([written[0]]);
+    // Null rather than absent, so "no next page" is told from "an older shape".
+    expect(rest.body.next_cursor).toBeNull();
+
+    expect(new Set([...items, ...remaining].map((test) => test.id))).toEqual(new Set(written));
+  });
+
   it("answers one envelope, whatever the list is of", async () => {
     platform.tests.add({
       name: "Reschedules",
@@ -628,6 +716,90 @@ describe("registering the same vendor agent again", () => {
     expect(platform.registered.agents).toHaveLength(1);
   });
 
+  /**
+   * A registration that would be a reuse is held to exactly what a registration
+   * that would be a create is held to.
+   *
+   * The whole payload is checked before anything looks at what is already
+   * there — that is what the platform does, and it is the only order that is
+   * safe. The other way round, a body egma would refuse outright from a new
+   * customer would rotate a live credential for an existing one, and the same
+   * client would work on one machine and fail on the next.
+   */
+  it("checks the whole payload before it decides this is a reuse", async () => {
+    const first = await ask(
+      "POST",
+      "/api/agents",
+      registration({ apiKey: "retell-secret-first-0000AAAA" }),
+    );
+    expect(first.body.result).toBe("created");
+
+    // Each of these would be a reuse if it were accepted: same project, same
+    // type, same vendor agent, same modality.
+    const refusals = [
+      [
+        { ...registration(), name: "  " },
+        422,
+        { error: "unprocessable", message: "an agent needs a name" },
+      ],
+      [
+        registration({ connectionName: "  " }),
+        422,
+        { error: "unprocessable", message: "a connection needs a name" },
+      ],
+      [
+        registration({ modality: "telepathy" }),
+        400,
+        {
+          error: "invalid_request",
+          message:
+            "a retell connection speaks chat or voice, and this one was asked for telepathy",
+        },
+      ],
+    ] as const;
+
+    for (const [body, status, refusal] of refusals) {
+      const refused = await ask("POST", "/api/agents", body as Record<string, unknown>);
+      expect(refused.status, JSON.stringify(refusal)).toBe(status);
+      expect(refused.body).toEqual(refusal);
+    }
+
+    // And nothing rotated: the key the first registration sealed is still the
+    // one stored, because none of those bodies ever reached the reuse rule.
+    const one = await ask("GET", `/api/agents/${String(agentOf(first).id)}`);
+    const held = one.body.connections as Record<string, unknown>[];
+    expect(held).toHaveLength(1);
+    expect(held[0]?.credentials_hint).toBe("AAAA");
+    expect(platform.registered.sealed).toEqual(["retell-secret-first-0000AAAA"]);
+  });
+
+  it("reads the envelopes before the project, and the project before the payload", async () => {
+    // The connection's unknown key is answered before the agent's blank name,
+    // because the route reads both envelopes before the factory reads anything.
+    const envelopeFirst = await ask("POST", "/api/agents", {
+      name: "  ",
+      connection: connectionPayload({ topology: "hosted-broker" }),
+    });
+    expect(envelopeFirst.status).toBe(400);
+    expect(envelopeFirst.body).toEqual({
+      error: "invalid_request",
+      message:
+        'a connection has no key "topology"; it holds name, type, modality, environment, config, credentials',
+    });
+
+    // And the agent's name is answered before anything the registry checks,
+    // because a name is answerable without knowing what a retell connection is.
+    const nameBeforePayload = await ask("POST", "/api/agents", {
+      name: "  ",
+      connection: connectionPayload({ type: "vapi" }),
+    });
+    expect(nameBeforePayload.status).toBe(422);
+    expect(nameBeforePayload.body).toEqual({
+      error: "unprocessable",
+      message: "an agent needs a name",
+    });
+  });
+
   it("creates twice for a different vendor agent, which is a different agent", async () => {
     await ask("POST", "/api/agents", registration());
     const other = await ask(
@@ -767,13 +939,36 @@ describe("names, and reading an agent back", () => {
     expect(attaching.body).toEqual(refusal);
   });
 
-  it("answers the same list envelope, and refuses a cursor that is not an agent id", async () => {
-    await ask("POST", "/api/agents", registration());
+  it("answers one envelope, newest first, and pages through with its cursor", async () => {
+    for (let n = 0; n < 51; n += 1) {
+      const written = await ask(
+        "POST",
+        "/api/agents",
+        registration({
+          name: `Agent ${String(n).padStart(2, "0")}`,
+          retellAgentId: `agent_in_retell_${n}`,
+        }),
+      );
+      expect(written.status, `agent ${n}`).toBe(201);
+    }
 
-    const listed = await ask("GET", "/api/agents");
-    expect(listed.status).toBe(200);
-    expect(Object.keys(listed.body).sort()).toEqual(["items", "next_cursor"]);
-    expect(listed.body.next_cursor).toBeNull();
+    const page = await ask("GET", "/api/agents");
+    expect(page.status).toBe(200);
+    expect(Object.keys(page.body).sort()).toEqual(["items", "next_cursor"]);
+    const first = page.body.items as { name: string }[];
+    expect(first).toHaveLength(50);
+    // Newest first, because the agent somebody is looking for is usually the
+    // one they just registered.
+    expect(first[0]?.name).toBe("Agent 50");
+    expect(page.body.next_cursor).toBeTypeOf("string");
+
+    const rest = await ask("GET", `/api/agents?cursor=${String(page.body.next_cursor)}`);
+    expect((rest.body.items as { name: string }[]).map((one) => one.name)).toEqual(["Agent 00"]);
+    expect(rest.body.next_cursor).toBeNull();
+  });
+
+  it("refuses a cursor that is not an agent id", async () => {
+    await ask("POST", "/api/agents", registration());
 
     const refused = await ask("GET", "/api/agents?cursor=not-an-id");
     expect(refused.status).toBe(400);
@@ -1032,6 +1227,39 @@ describe("starting a run", () => {
     expect(platform.running.runs).toEqual([]);
   });
 
+  /**
+   * Which refusal arrives when a body gets two things wrong at once.
+   *
+   * The shape of the selection is read at the door, before anything about the
+   * connection is; the *contents* of the selection are read after. So a
+   * `test_versions` that is not a list of text beats a missing connection, and
+   * a `test_versions` that is empty does not. It is worth pinning because a
+   * coding agent fixes one refusal at a time and meets them in this order.
+   */
+  it("reads the shape of the selection before the connection, and its contents after", async () => {
+    const unusable = await ask("POST", "/api/runs", { test_versions: [7] });
+    expect(unusable.status).toBe(422);
+    expect(unusable.body).toEqual({
+      error: "unprocessable",
+      message:
+        "a run pins each test version as text — the version_id a push or a " +
+        "read answered with — and one entry in test_versions is neither. " +
+        "Send them all, or none of them runs.",
+    });
+
+    // Empty is not a shape problem — it is a selection problem — so the missing
+    // connection is answered first.
+    const empty = await ask("POST", "/api/runs", { test_versions: [] });
+    expect(empty.status).toBe(422);
+    expect(empty.body).toEqual({
+      error: "unprocessable",
+      message:
+        "a run is conducted over a connection, and this request named " +
+        "none. Send connection with the con_ id of the way egma should " +
+        "reach the agent — registering the agent answered with one.",
+    });
+  });
+
   it("refuses a selection larger than a run may hold, naming what it asked for", async () => {
     const { connectionId } = await readyToRun();
 
@@ -1117,6 +1345,34 @@ describe("reading and following a run", () => {
     // than being refused for a value it does not have.
     const blank = await ask("GET", `/api/runs/${runId}/events?after=`);
     expect(blank.status).toBe(200);
-    expect(Object.keys(blank.body).sort()).toEqual(["done", "events", "next"]);
+    // The whole body: a follower seeds itself from `next` and stops on `done`,
+    // so a feed that answered the right keys with the wrong numbers would send
+    // it round again from a place it had already read.
+    expect(blank.body).toEqual({ events: [], next: 0, done: false });
+  });
+
+  /**
+   * What the query says is answered before the run is looked up.
+   *
+   * Both are refusals, so which one arrives is only visible when a request gets
+   * both wrong at once — and that is exactly the request a follower makes after
+   * a crash, holding a cursor it half-remembers and a run id it may have lost.
+   * Telling it the run is gone when the real problem is its cursor sends it to
+   * start a new run over a run that is still going.
+   */
+  it("answers a cursor it cannot read before it says whether the run is there", async () => {
+    const refused = await ask(
+      "GET",
+      "/api/runs/run_01JZZZZZZZZZZZZZZZZZZZZZZZ/events?after=1e3",
+    );
+
+    expect(refused.status).toBe(400);
+    expect(refused.body).toEqual({
+      error: "invalid_request",
+      message:
+        '"1e3" is not a sequence number this feed issued. Send back the next ' +
+        "an earlier page answered with, or leave after out to start at the " +
+        "first change.",
+    });
   });
 });

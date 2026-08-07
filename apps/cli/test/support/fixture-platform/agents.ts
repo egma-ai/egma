@@ -37,37 +37,11 @@
  *   hears so, instead of watching egma quietly keep nothing.
  */
 
-import { randomBytes } from "node:crypto";
-
+import { given, isId, newId, NOT_AUTHENTICATED, PAGE_SIZE } from "./reading.ts";
 import type { FixtureAnswer, RouteGroup } from "./server.ts";
-
-/** The identifier shapes the platform mints: a prefix and a fixed-width body. */
-const ID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-const ID_BODY_LENGTH = 26;
-
-function newId(prefix: string): string {
-  const body = [...randomBytes(ID_BODY_LENGTH)]
-    .map((byte) => ID_ALPHABET[byte % ID_ALPHABET.length])
-    .join("");
-  return `${prefix}_${body}`;
-}
-
-/** Whether a string is an identifier of this kind, as the id package reads one. */
-function isId(prefix: string, value: string): boolean {
-  return new RegExp(`^${prefix}_[0-9A-HJKMNP-TV-Z]{${ID_BODY_LENGTH}}$`, "u").test(value);
-}
 
 /** The floor under a credential field, so a last-4 hint stays a hint. */
 const SHORTEST_CREDENTIAL = 8;
-
-/** How many rows one page holds, as the data-access layer's default does. */
-const PAGE_SIZE = 50;
-
-/** What a caller actually said, as against a parameter that arrived empty. */
-function given(value: string | null | undefined): string | undefined {
-  const said = (value ?? "").trim();
-  return said === "" ? undefined : said;
-}
 
 type ConfigGate = (key: string, value: unknown) => string;
 
@@ -317,6 +291,30 @@ function validName(name: unknown, what: string): string {
   return trimmed;
 }
 
+/**
+ * A connection payload the registry has already taken, on its way to a row.
+ *
+ * It exists so that the whole of the checking happens once, before anything
+ * decides whether this registration creates, reuses or extends. Every branch
+ * then works from the same admitted payload, which is what makes "a reuse is
+ * held to exactly what a create is held to" true by construction rather than by
+ * two lists somebody keeps in step.
+ */
+type Admitted = {
+  /** Absent means the smallest free numbered name for the type. */
+  readonly name: string | undefined;
+  readonly type: string;
+  readonly modality: string;
+  /** Derived from the type, never caller-supplied. */
+  readonly topology: string;
+  readonly environment: string | null;
+  readonly config: Readonly<Record<string, string>>;
+  readonly credentials: {
+    readonly sealed: Record<string, string>;
+    readonly hint: string;
+  } | null;
+};
+
 type StoredConnection = {
   readonly id: string;
   readonly agentId: string;
@@ -477,10 +475,7 @@ export function agentRoutes(options: {
     return offered !== "" && options.knowsKey(offered);
   };
 
-  const notAuthenticated: FixtureAnswer = {
-    status: 401,
-    body: { error: "not_authenticated", message: "no key, or not one of ours" },
-  };
+  const notAuthenticated: FixtureAnswer = { status: 401, body: NOT_AUTHENTICATED };
 
   /**
    * An agent nobody can see reads exactly like an agent nobody wrote. Existence
@@ -520,9 +515,12 @@ export function agentRoutes(options: {
   };
 
   /**
-   * One connection payload, read the one way — inline on a registration and
-   * standalone on an attach. Two dialects for one thing is how a client comes
-   * to work on one path and fail on the other.
+   * One connection payload's envelope, read the one way — inline on a
+   * registration and standalone on an attach. Two dialects for one thing is how
+   * a client comes to work on one path and fail on the other.
+   *
+   * Only the envelope: which keys exist at all. What a type's config holds and
+   * which modalities it speaks belong to the registry, one step further in.
    */
   const connectionIn = (value: unknown): Record<string, unknown> => {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -535,19 +533,42 @@ export function agentRoutes(options: {
     return body;
   };
 
-  const writeConnection = (
-    agent: StoredAgent,
-    input: Record<string, unknown>,
-  ): StoredConnection => {
+  /**
+   * A connection payload the registry will take, checked whole.
+   *
+   * Pure: nothing here reads or writes anything, which is what lets it happen
+   * before the outcome is decided. **Every path runs it, and runs all of it.**
+   * A registration that turns out to be a reuse is held to exactly what a
+   * registration that turns out to be a create is held to — otherwise a body
+   * egma would refuse from a new customer would rotate a live credential for an
+   * old one, and the same client would work on one machine and fail on the
+   * next.
+   *
+   * The order is the registry's own and it is contract: the type, then the
+   * modality it speaks, then its config, then its credentials, then the name.
+   */
+  const admitConnection = (input: Record<string, unknown>): Admitted => {
     const descriptor = descriptorOf(input["type"]);
     const type = input["type"] as string;
     const modality = validModality(type, input["modality"]);
     const config = validConfig(type, input["config"]);
     const credentials = validCredentials(type, input["credentials"]);
-    const asked =
-      input["name"] === undefined ? undefined : validName(input["name"], "a connection");
+    return {
+      // A name sent blank is refused rather than dropped; absent is different
+      // and means the smallest free numbered name.
+      name: input["name"] === undefined ? undefined : validName(input["name"], "a connection"),
+      type,
+      modality,
+      topology: descriptor.topology,
+      environment: typeof input["environment"] === "string" ? input["environment"] : null,
+      config,
+      credentials,
+    };
+  };
 
-    const name = asked ?? freeConnectionName(agent.id, type);
+  const writeConnection = (agent: StoredAgent, input: Admitted): StoredConnection => {
+    const { type, modality, config, credentials } = input;
+    const name = input.name ?? freeConnectionName(agent.id, type);
     if (connections.some((held) => held.agentId === agent.id && held.name === name)) {
       throw new Refusal(`a connection named "${name}" already exists on this agent`, {
         status: 409,
@@ -565,8 +586,8 @@ export function agentRoutes(options: {
       type,
       modality,
       // Derived from the type, never caller-supplied.
-      topology: descriptor.topology,
-      environment: typeof input["environment"] === "string" ? input["environment"] : null,
+      topology: input.topology,
+      environment: input.environment,
       config,
       credentials: credentials === null ? null : credentials.sealed,
       credentialsHint: credentials === null ? null : credentials.hint,
@@ -586,24 +607,18 @@ export function agentRoutes(options: {
    */
   const sameVendorAgent = (
     projectId: string,
-    input: Record<string, unknown>,
+    input: Admitted,
   ): readonly StoredConnection[] => {
-    const type = typeof input["type"] === "string" ? input["type"] : "";
-    const descriptor = REGISTRY[type];
-    const reuseKey = descriptor?.reuseKey;
+    const { type } = input;
+    const reuseKey = REGISTRY[type]?.reuseKey;
     if (reuseKey === undefined) return [];
 
-    const config = input["config"];
-    const named =
-      typeof config === "object" && config !== null
-        ? (config as Record<string, unknown>)[reuseKey]
-        : undefined;
-    if (typeof named !== "string" || named.trim() === "") return [];
+    const named = input.config[reuseKey];
+    if (named === undefined || named.trim() === "") return [];
 
-    // In the order they were written, which is what "oldest first" means here.
-    // The real instance orders by connection id and gets the same answer, its
-    // ids being time-sortable; this file's are not, so it uses the order it
-    // actually wrote them in rather than one that would only look like it.
+    // Oldest first, so which agent gains a second way of being reached is the
+    // same answer every time. The ids sort by mint time, so the order they were
+    // written in and the order the real instance sorts them by are one thing.
     return connections.filter(
       (held) =>
         held.projectId === projectId &&
@@ -633,9 +648,16 @@ export function agentRoutes(options: {
           if (!authorized(request.headers)) return notAuthenticated;
           return answering(() => {
             const body = request.body ?? {};
-            refuseUnknownKeyIn(body, AGENT_KEYS, "a registration");
 
-            const name = validName(body["name"], "an agent");
+            // The order below is the route's, then the factory's, and it is
+            // contract: the envelopes first, because they are answerable
+            // without knowing anything; then which project this is; then the
+            // agent's name and the whole connection payload. Only after all of
+            // that does anything look at what is already there — so what egma
+            // will take is decided before what egma will do is.
+            refuseUnknownKeyIn(body, AGENT_KEYS, "a registration");
+            const envelope =
+              body["connection"] === undefined ? undefined : connectionIn(body["connection"]);
 
             // A write may name a project in its body. It never names one in
             // its address, and it never names an organization anywhere.
@@ -643,21 +665,19 @@ export function agentRoutes(options: {
             projectsNamed.push(named);
             const projectId = projectNamed(given(named), "writes into");
 
-            const inline =
-              body["connection"] === undefined ? undefined : connectionIn(body["connection"]);
+            const name = validName(body["name"], "an agent");
+            const inline = envelope === undefined ? undefined : admitConnection(envelope);
 
             if (inline !== undefined) {
               const living = sameVendorAgent(projectId, inline);
-              const asked = typeof inline["modality"] === "string" ? inline["modality"] : "";
-              const same = living.find((held) => held.modality === asked);
+              const same = living.find((held) => held.modality === inline.modality);
 
               if (same !== undefined) {
                 // Whole, never merged: what arrived replaces what is stored.
-                // The whole payload is still read first, so a registration that
-                // would be refused is refused rather than rotating a key on the
-                // strength of a body egma will not take.
-                const credentials = validCredentials(same.type, inline["credentials"]);
-                validConfig(same.type, inline["config"]);
+                // Nothing about the body is checked here, because all of it was
+                // checked above — a registration egma would refuse never gets
+                // as far as rotating a live credential.
+                const { credentials } = inline;
                 if (credentials !== null) sealed.push(...Object.values(credentials.sealed));
                 same.credentials = credentials === null ? null : credentials.sealed;
                 same.credentialsHint = credentials === null ? null : credentials.hint;
@@ -759,7 +779,11 @@ export function agentRoutes(options: {
               );
             }
 
-            const mine = agents.filter((agent) => agent.projectId === project);
+            // Newest first, because the agent somebody is looking for is
+            // usually the one they just registered. The ids sort by mint time,
+            // so reversing what was written is the order the real instance
+            // reads them in.
+            const mine = agents.filter((agent) => agent.projectId === project).reverse();
             const from =
               cursor === undefined ? 0 : mine.findIndex((held) => held.id === cursor) + 1;
             const page = mine.slice(from, from + PAGE_SIZE);
@@ -808,7 +832,7 @@ export function agentRoutes(options: {
             status: 201,
             body: {
               connection: connectionOut(
-                writeConnection(agent, connectionIn(request.body ?? {})),
+                writeConnection(agent, admitConnection(connectionIn(request.body ?? {}))),
               ),
             },
           }));

@@ -145,6 +145,13 @@ EGMA_RETELL_API_KEY=… egma connect
 nothing new. With several agents on the account it lists them and refuses to
 guess; name one with `--retell-agent`.
 
+**Running it twice over the same Retell agent is safe.** egma answers the
+registration you already have rather than making a second one, stores the key
+you just gave, and says which of three things it did on the `registration:`
+line — `created`, `reused`, or `connection_added` when the same agent gained
+another way of being reached. The last two also print a `note:` line saying it
+in plain words.
+
 ```
 url: https://app.egma.ai
 retell_agents: 1
@@ -158,6 +165,7 @@ connection_id: con_01K…
 connection_name: retell-1
 connection_type: retell
 connection_modality: voice
+registration: created
 drift: no
 grounded_in: retell
 status: connected

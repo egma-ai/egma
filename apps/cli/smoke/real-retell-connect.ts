@@ -332,15 +332,23 @@ async function main(): Promise<void> {
       `Retell answered for the agent egma took (${answeredWith.length} bytes)`,
     );
     // A custom engine is the customer's own service and has no address at
-    // Retell, so it is the one engine with no second half to read.
-    const engineIsFetchable = result.retell_response_engine !== "custom-llm";
-    check(
-      !engineIsFetchable ||
+    // Retell, so it is the one engine with no second half to read. Saying "the
+    // engine was read" over an engine nothing read would be a line that passes
+    // by being about nothing, which is worse than no line at all — so this
+    // prints the claim it can actually make, and says which one it made.
+    if (result.retell_response_engine === "custom-llm") {
+      say(
+        "  --    the response engine is the customer's own service, so there was " +
+          "no second half at Retell to read",
+      );
+    } else {
+      check(
         gate.forwarded.some(
           (one) => one.includes("/get-retell-llm") || one.includes("/get-conversation-flow"),
         ),
-      "the response engine was read as its own half, not guessed at",
-    );
+        "the response engine was read as its own half, not guessed at",
+      );
+    }
 
     // The agent and the way to reach it are on the platform.
     check(platform.registered.agents.length >= 1, "an agent landed on the platform");

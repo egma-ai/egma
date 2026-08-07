@@ -33,8 +33,8 @@
 // The platform's own identifier generator, reached by path for the same reason
 // the test group reaches it that way: the smoke checks run this fixture under
 // plain node, where a package name nothing has installed does not resolve.
-import { isId, newId } from "../../../../../packages/ids/src/index.ts";
 import { CONDUCTABLE_TYPES } from "./agents.ts";
+import { given, isId, newId, NOT_AUTHENTICATED, text, textList } from "./reading.ts";
 import type { FixtureAnswer, FixtureRequest, RouteGroup } from "./server.ts";
 
 /** How far one simulation got. The real `simulation_status_allowed`. */
@@ -226,14 +226,6 @@ function refuse(status: number, error: string, message: string): FixtureAnswer {
   return { status, body: { error, message } };
 }
 
-function text(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-function textList(value: unknown): readonly string[] {
-  return Array.isArray(value) ? value.map((item) => text(item)) : [];
-}
-
 /**
  * A run nobody can see reads exactly like a run nobody started. Existence is
  * never confirmed to somebody who could not have seen the thing anyway, so
@@ -423,7 +415,7 @@ export function runRoutes(options: {
   const behindAKey = (request: FixtureRequest, answer: () => FixtureAnswer): FixtureAnswer => {
     const offered = (request.headers.authorization ?? "").replace(/^Bearer\s+/iu, "");
     if (offered === "" || !options.holdsKey(offered)) {
-      return refuse(401, "not_authenticated", "no key, or not one of ours");
+      return { status: 401, body: NOT_AUTHENTICATED };
     }
     return answer();
   };
@@ -441,6 +433,34 @@ export function runRoutes(options: {
    */
   const create = (body: Record<string, unknown> | null): FixtureAnswer => {
     const said = body ?? {};
+
+    // The route reads the shape of the selection before anything else, because
+    // a body that could never start a run is refused before it can learn
+    // whether the connection it names is even there. Text, and every entry of
+    // it: an entry that is not a version id is refused rather than dropped,
+    // because dropping one would start a run over the rest and the caller would
+    // read green about a selection egma quietly shortened.
+    const pinnedIn = said.test_versions ?? [];
+    if (!Array.isArray(pinnedIn)) {
+      return refuse(
+        422,
+        "unprocessable",
+        "test_versions is the list of frozen versions this run executes, by " +
+          'id. Send it as a list of text, like ["tstv_..."], taking each ' +
+          "version_id from the test it belongs to.",
+      );
+    }
+    for (const entry of pinnedIn) {
+      if (typeof entry !== "string" || entry.trim() === "") {
+        return refuse(
+          422,
+          "unprocessable",
+          "a run pins each test version as text — the version_id a push or a " +
+            "read answered with — and one entry in test_versions is neither. " +
+            "Send them all, or none of them runs.",
+        );
+      }
+    }
 
     const agentId = text(said.agent).trim();
     if (agentId !== "" && !isId("agt", agentId)) {
@@ -471,32 +491,6 @@ export function runRoutes(options: {
         `"${connectionId}" is not a connection id. Send the con_ id ` +
           `registering the agent answered with.`,
       );
-    }
-
-    // Text, and every entry of it. An entry that is not a version id is
-    // refused rather than dropped: dropping one would start a run over the
-    // rest, and the caller would read green about a selection egma quietly
-    // shortened.
-    const pinnedIn = said.test_versions ?? [];
-    if (!Array.isArray(pinnedIn)) {
-      return refuse(
-        422,
-        "unprocessable",
-        "test_versions is the list of frozen versions this run executes, by " +
-          'id. Send it as a list of text, like ["tstv_..."], taking each ' +
-          "version_id from the test it belongs to.",
-      );
-    }
-    for (const entry of pinnedIn) {
-      if (typeof entry !== "string" || entry.trim() === "") {
-        return refuse(
-          422,
-          "unprocessable",
-          "a run pins each test version as text — the version_id a push or a " +
-            "read answered with — and one entry in test_versions is neither. " +
-            "Send them all, or none of them runs.",
-        );
-      }
     }
 
     const wanted = textList(pinnedIn).map((one) => one.trim());
@@ -664,17 +658,21 @@ export function runRoutes(options: {
         path: "/api/runs/:runId/events",
         handle: (request) =>
           behindAKey(request, () => {
-            const run = runById(request.params.runId ?? "");
-            if (run === undefined) return refuse(404, "not_found", NO_SUCH_RUN);
-
-            // Digits and nothing else. `Number` would take 0x10, 1e3, 5.0 and
-            // a padded " 7 " and quietly answer about a page nobody asked for,
-            // while the sentence below promises it would not — so the shape of
-            // a sequence number is checked as written rather than as parsed. A
-            // parameter that arrived empty is a parameter nobody set.
-            const said = request.url.searchParams.get("after");
-            const from = said === null || said === "" ? 0 : Number(said);
-            if (said !== null && said !== "" && !/^\d+$/u.test(said)) {
+            // Digits and nothing else, and answered before the run is looked
+            // up: what the query says is answerable without knowing anything,
+            // so it is answered first. A follower that crashed is holding a
+            // cursor it half-remembers and a run id it may have lost, and
+            // telling it the run is gone when the real problem is its cursor
+            // sends it to start a fresh run over one that is still going.
+            //
+            // `Number` would take 0x10, 1e3, 5.0 and a padded " 7 " and quietly
+            // answer about a page nobody asked for, while the sentence below
+            // promises it would not — so the shape of a sequence number is
+            // checked as written rather than as parsed. A parameter that
+            // arrived empty is a parameter nobody set.
+            const said = given(request.url.searchParams.get("after"));
+            const from = said === undefined ? 0 : Number(said);
+            if (said !== undefined && !/^\d+$/u.test(said)) {
               return refuse(
                 400,
                 "invalid_request",
@@ -683,6 +681,9 @@ export function runRoutes(options: {
                   `start at the first change.`,
               );
             }
+
+            const run = runById(request.params.runId ?? "");
+            if (run === undefined) return refuse(404, "not_found", NO_SUCH_RUN);
 
             const mine = events.filter(
               (event) => event.runId === run.id && event.seq > from,

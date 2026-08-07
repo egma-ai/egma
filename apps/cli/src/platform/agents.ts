@@ -125,15 +125,24 @@ function connectionIn(body: Record<string, unknown>): RegisteredConnection | nul
 }
 
 /**
- * Which of the three things egma says it did.
+ * Which of the three things egma says it did, or nothing at all when what it
+ * said is not one of them.
  *
- * An answer that says nothing reads as `created`, because that is what a reply
- * with an agent and a connection in it meant before the field existed and it is
- * the only reading that cannot describe a write egma did not make.
+ * The two cases are different and are not folded together. **Saying nothing
+ * reads as `created`**, because that is what a reply carrying an agent and a
+ * connection meant before the field existed, and it is the only reading that
+ * cannot describe a write egma did not make.
+ *
+ * **Saying a word egma has never used is a broken answer**, and it is answered
+ * as one. Reading it as `created` would be this end inventing a fact: a fourth
+ * outcome could only mean a platform that does something this build has never
+ * heard of, and reporting that as a fresh registration is exactly how a
+ * developer ends up with two identities and a terminal that said one.
  */
-function outcomeIn(body: Record<string, unknown>): RegisterOutcome {
+function outcomeIn(body: Record<string, unknown>): RegisterOutcome | null {
   const said = plain(body["result"]);
-  return (OUTCOMES.includes(said) ? said : "created") as RegisterOutcome;
+  if (said === "") return "created";
+  return OUTCOMES.includes(said) ? (said as RegisterOutcome) : null;
 }
 
 /**
@@ -201,15 +210,17 @@ export async function registerAgent(
 
   const agent = agentIn(held);
   const connection = connectionIn(held);
-  if (agent === null || connection === null) {
+  const result = outcomeIn(held);
+  // Three ways a success can be an answer this end cannot read, and all three
+  // are the same thing to whoever is waiting: egma wrote something and this
+  // build cannot say what. Guessing at any of them would put a sentence on a
+  // terminal that nothing checked.
+  if (agent === null || connection === null || result === null) {
     return {
       kind: "refused",
       reason: "egma answered without saying what it wrote. Check that this egma is up to date.",
     };
   }
 
-  return {
-    kind: "registered",
-    registered: { result: outcomeIn(held), agent, connection },
-  };
+  return { kind: "registered", registered: { result, agent, connection } };
 }
