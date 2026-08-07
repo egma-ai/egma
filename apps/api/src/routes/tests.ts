@@ -3,14 +3,12 @@ import {
   createTest,
   editTest,
   getTestVersion,
-  listProjects,
   listTests,
   NotPermittedError,
   ProjectOutsideOrganizationError,
   resolvePersonaNames,
   TestMovedOnError,
   UnprocessableInputError,
-  type AuthContext,
   type Test,
   type TestPersona,
   type TestVersion,
@@ -19,6 +17,7 @@ import { isId } from "@egma/ids";
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
+import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text, textList } from "../http/reading.ts";
@@ -157,99 +156,6 @@ function personaEntries(value: unknown): NamedPersonas {
   return { entries };
 }
 
-function cannotActIn(projectId: string): string {
-  return (
-    `this credential may not act in project ${projectId}. A credential ` +
-    `authorized for one project acts in that one, and a key for the whole ` +
-    `organization acts in any project of that organization. Leave project out ` +
-    `to use the project this credential already acts in.`
-  );
-}
-
-/**
- * What a credential for the whole organization is told when the organization
- * turns out to hold more than one project.
- *
- * v1 gives an organization one project, and a credential naming none resolves to
- * it. Picking the oldest of several instead would read as harmless and would be
- * the same silent narrowing this codebase has already had to find once: the
- * request would be answered about one product area, correctly and completely,
- * with nothing in the answer to say which.
- */
-const NAME_THE_PROJECT =
-  "this organization holds more than one project and this credential names " +
-  "none, so egma cannot tell which project this is about. Send project with " +
-  "the one you mean, or use a key minted for that project.";
-
-type Acting =
-  | { readonly auth: AuthContext }
-  | { readonly refusal: string; readonly code: "not_permitted" | "invalid_request" };
-
-/**
- * Which project this request acts in, as a context to hand the data-access
- * module.
- *
- * A test belongs to a project, and there is no project in any of these paths —
- * so one has to be resolved before anything can be read or written. Absent, it
- * is the project the credential is authorized for, or the organization's single
- * project for a key minted for the whole customer. Named, it has to be one this
- * credential may act in.
- *
- * **The context is narrowed and never widened.** The only project it can come to
- * name is one `listProjects` answered with, and that read is scoped to the
- * caller's organization by the module itself — so a request cannot argue its way
- * into somebody else's project, and a credential authorized for one project
- * cannot argue its way out of it. The write verbs check the project against the
- * organization again before they insert anything.
- *
- * A project-scoped credential naming a *sibling* project of its own organization
- * is refused rather than quietly narrowed back. The narrowing would be safe and
- * the silence would not: a caller whose filter was dropped reads the answer as
- * though the filter had applied.
- */
-async function actingIn(
-  auth: AuthContext,
-  named: string | undefined,
-): Promise<Acting> {
-  if (auth.projectId !== undefined) {
-    if (named !== undefined && named !== auth.projectId) {
-      return { refusal: cannotActIn(named), code: "not_permitted" };
-    }
-    return { auth };
-  }
-
-  const projects = await listProjects(auth);
-  if (named !== undefined) {
-    return projects.some((project) => project.id === named)
-      ? { auth: { ...auth, projectId: named } }
-      : { refusal: cannotActIn(named), code: "not_permitted" };
-  }
-
-  const [only] = projects;
-  if (only === undefined) {
-    throw new Error(
-      "this organization holds no project, which signup makes impossible",
-    );
-  }
-  if (projects.length > 1) {
-    return { refusal: NAME_THE_PROJECT, code: "invalid_request" };
-  }
-  return { auth: { ...auth, projectId: only.id } };
-}
-
-/** The two ways a project can fail to resolve, each answered as what it is. */
-function refuse(
-  reply: FastifyReply,
-  acting: {
-    readonly refusal: string;
-    readonly code: "not_permitted" | "invalid_request";
-  },
-): FastifyReply {
-  return acting.code === "not_permitted"
-    ? notPermitted(reply, acting.refusal)
-    : invalid(reply, acting.refusal);
-}
-
 export async function testRoutes(
   app: FastifyInstance,
   options: TestRoutesOptions,
@@ -272,7 +178,7 @@ export async function testRoutes(
     const query = (request.query ?? {}) as Query;
 
     const acting = await actingIn(auth, given(query.project));
-    if ("refusal" in acting) return refuse(reply, acting);
+    if ("refusal" in acting) return refuseActing(reply, acting);
 
     const cursor = given(query.cursor);
     if (cursor !== undefined && !isId("tst", cursor)) {
@@ -308,7 +214,7 @@ export async function testRoutes(
     const query = (request.query ?? {}) as Query;
 
     const acting = await actingIn(auth, given(query.project));
-    if ("refusal" in acting) return refuse(reply, acting);
+    if ("refusal" in acting) return refuseActing(reply, acting);
 
     const version = await getTestVersion(acting.auth, versionId);
     if (version === undefined) {
@@ -343,7 +249,7 @@ export async function testRoutes(
     if ("refusal" in personas) return unprocessable(reply, personas.refusal);
 
     const acting = await actingIn(auth, given(text(body.project)));
-    if ("refusal" in acting) return refuse(reply, acting);
+    if ("refusal" in acting) return refuseActing(reply, acting);
 
     const personaIds = await resolvePersonaNames(acting.auth, personas.entries);
 
@@ -405,7 +311,7 @@ export async function testRoutes(
     }
 
     const acting = await actingIn(auth, given(text(body.project)));
-    if ("refusal" in acting) return refuse(reply, acting);
+    if ("refusal" in acting) return refuseActing(reply, acting);
 
     const personaIds =
       personas === undefined
