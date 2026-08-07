@@ -13,15 +13,32 @@
  *
  * A check that is *about* the run screen scripts the lifecycle itself, step by
  * step, and never uses this.
+ *
+ * What it is handed is the run controls and nothing else, so the smoke check —
+ * which points a real wizard at half a real platform — reaches for the same
+ * simulator the offline checks do rather than one written twice.
  */
 
-import type { Platform, Verdict } from "./fixture-platform/index.ts";
+import type { RunControls, Verdict } from "./fixture-platform/index.ts";
+
+/** Anything holding a run's controls: the whole fixture, or half of one. */
+export type Running = { readonly running: RunControls };
 
 export type GradingOptions = {
   /** What every simulation is judged. Passed when nothing says otherwise. */
   readonly verdict?: Verdict;
   /** How often the platform is looked at, for the sweeping version. */
   readonly everyMs?: number;
+  /**
+   * At most this many verdicts per run. Left out, every queued simulation is
+   * judged.
+   *
+   * It is what a check reaches for when the count in the exit line has to come
+   * out the same number twice. The wizard leaves at the first verdict, so a
+   * sweep that judged a whole suite would leave "1 of 3 graded so far" or "all
+   * 3 graded" depending on which poll landed first.
+   */
+  readonly atMost?: number;
 };
 
 /**
@@ -30,13 +47,16 @@ export type GradingOptions = {
  * Answers how many were judged, so a caller can wait for the number it
  * expected rather than for a length of time.
  */
-export function gradeWhatIsQueued(platform: Platform, options: GradingOptions = {}): number {
+export function gradeWhatIsQueued(platform: Running, options: GradingOptions = {}): number {
   const verdict = options.verdict ?? "passed";
   let judged = 0;
 
   for (const run of platform.running.runs) {
-    for (const simulation of platform.running.simulationsOf(run.id)) {
+    const held = platform.running.simulationsOf(run.id);
+    let judgedHere = held.filter((one) => one.verdict !== null).length;
+    for (const simulation of held) {
       if (simulation.status !== "queued") continue;
+      if (options.atMost !== undefined && judgedHere >= options.atMost) break;
       platform.running.advance({ run: run.id, simulation: simulation.id, status: "claimed" });
       if (verdict === "errored") {
         platform.running.advance({
@@ -54,6 +74,7 @@ export function gradeWhatIsQueued(platform: Platform, options: GradingOptions = 
           verdict,
         });
       }
+      judgedHere += 1;
       judged += 1;
     }
   }
@@ -63,7 +84,7 @@ export function gradeWhatIsQueued(platform: Platform, options: GradingOptions = 
 
 /** A sweep that keeps doing that until it is stopped. */
 export function gradeEveryRun(
-  platform: Platform,
+  platform: Running,
   options: GradingOptions = {},
 ): { stop(): void } {
   const timer = setInterval(() => {

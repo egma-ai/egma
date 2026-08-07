@@ -74,6 +74,9 @@ export const VERBS = ["login", "connect", "init", "pull", "push", "run"] as cons
  */
 export const RETELL_URL_VARIABLE = "EGMA_RETELL_URL";
 
+/** The test cases a headless walk would have been pointed at. */
+export const EXISTING_TESTS_VARIABLE = "EGMA_EXISTING_TESTS";
+
 export type Verb = (typeof VERBS)[number];
 
 export type Invocation = {
@@ -331,12 +334,14 @@ function launchFrom(invocation: Invocation): DrivenAgentLaunch {
 /** What the whole walk answers with, which is not what `egma login` answers. */
 function walkExitCode(report: ExitReport): number {
   switch (report.kind) {
+    // The files are written either way, and the developer decided what happens
+    // to them. Pressing `q` over the list is the run finishing; pressing Ctrl-C
+    // over it leaves the same files and is still an interruption to a shell.
+    case "tests-kept":
+      return report.stopped ? 130 : 0;
     case "found-agent":
     case "connected":
-    // The files are written and the developer decided what happens to them.
-    // Both decisions are the run finishing.
     case "tests-pushed":
-    case "tests-kept":
     // The run is going and the developer has what they need to watch it. That
     // the suite is not finished is the design, not an incomplete run.
     case "run-started":
@@ -356,9 +361,6 @@ function walkExitCode(report: ExitReport): number {
   }
 }
 
-/** The test cases a headless walk would have been pointed at. */
-export const EXISTING_TESTS_VARIABLE = "EGMA_EXISTING_TESTS";
-
 /** Where Retell is for this run, or `undefined` for Retell's own address. */
 function retellReach(env: NodeJS.ProcessEnv): { readonly url: string } | undefined {
   const named = env[RETELL_URL_VARIABLE]?.trim();
@@ -374,13 +376,14 @@ function retellReach(env: NodeJS.ProcessEnv): { readonly url: string } | undefin
  * be reading it for keystrokes, and a flag that says "nobody is watching" must
  * not change where a secret comes from.
  */
+/** The answers a run with nobody watching can be given in advance. */
+type Held = "retell-key" | "retell-agent" | "existing-tests";
+
 function headlessAnswers(
   invocation: Invocation,
   env: NodeJS.ProcessEnv,
-): Partial<Record<"retell-key" | "retell-agent" | "existing-tests", string>> {
-  const answers: Partial<
-    Record<"retell-key" | "retell-agent" | "existing-tests", string>
-  > = {};
+): Partial<Record<Held, string>> {
+  const answers: Partial<Record<Held, string>> = {};
   for (const variable of KEY_VARIABLES) {
     const held = env[variable];
     if (typeof held === "string" && held.trim() !== "") {

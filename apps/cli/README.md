@@ -215,16 +215,24 @@ provider is actually running and in what it found in your repository. They
 arrive one file at a time, with what is still to come beside them:
 
 ```
-◼ quoted-a-price          written
-▶ lost-the-order-number   writing…
-◻ open-on-sunday
-
-Progress: 2/12
+A test                            ◼ quoted-a-price          written
+                                  ▶ lost-the-order-number   writing…
+One situation to put your agent   ◻ open-on-sunday
+in: what the person on the other
+end wants, and the expected       Progress: 2/12
+behaviors that say what should
+happen.
 ```
 
+Beside them, egma's own words: what a test is, what a run and its simulations
+are, and the difference between a metric and a grader. The cards turn on their
+own and nothing waits on them — the suite is written at exactly the speed it
+would be with the pane closed.
+
 Twelve tests, each with at least one expected behavior. A test with none can
-never fail, so egma will not upload one — it says which file and why, and
-leaves the file exactly where it is for you to fix.
+never fail, so egma will not upload one; nor will it upload a file it could not
+read. Either way it says which file and why, and leaves the file exactly where
+it is for you to fix.
 
 Then one keystroke:
 
@@ -516,7 +524,10 @@ Environment:
 ```
 
 `Ctrl-C` stops a run at any point. The agent, and anything the agent started,
-is shut down before egma exits.
+is shut down before egma exits, and the line left behind says where it stopped.
+If tests had already been written into `egma/tests/`, that line says how many
+are there — they are yours, and egma never removes them to tidy up its own
+report.
 
 ## Requirements
 

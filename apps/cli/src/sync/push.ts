@@ -19,9 +19,11 @@
  * answer, not from what was sent to it.
  */
 
+import path from "node:path";
+
 import type { TestFile } from "../folder/test-file.ts";
 import {
-  readFolderTests,
+  readFolder,
   writeTestFile,
   type FolderPaths,
   type FolderTest,
@@ -123,11 +125,27 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
   const { signedIn, paths, fetchImpl } = options;
   const extra = fetchImpl === undefined ? [] : ([fetchImpl] as const);
 
-  const inTheFolder = await readFolderTests(paths);
+  const folder = await readFolder(paths);
   const wanted = options.only === undefined ? null : new Set(options.only);
-  const held = wanted === null ? inTheFolder : inTheFolder.filter((file) => wanted.has(file.file));
+  const held = wanted === null ? folder.found : folder.found.filter((file) => wanted.has(file.file));
+
+  // A file egma cannot read is named rather than uploaded, and rather than
+  // ending the push: the other files in the folder are somebody's work too.
+  const refused: TurnedAway[] = (
+    wanted === null ? folder.unreadable : folder.unreadable.filter((file) => wanted.has(file.file))
+  ).map((file) => ({
+    name: path.basename(file.file, ".md"),
+    shown: file.shown,
+    reason: file.reason,
+  }));
+
   if (held.length === 0) {
-    return { conflicts: [], uploadedNothing: true, tests: [], turnedAway: [] };
+    return {
+      conflicts: [],
+      uploadedNothing: true,
+      tests: [],
+      turnedAway: refused,
+    };
   }
 
   const platformTests = await listTests(signedIn, ...extra);
@@ -163,11 +181,11 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
   }
 
   if (conflicts.length > 0) {
-    return { conflicts, uploadedNothing: true, tests: [], turnedAway: [] };
+    return { conflicts, uploadedNothing: true, tests: [], turnedAway: refused };
   }
 
   const pushed: PushedTest[] = [];
-  const turnedAway: TurnedAway[] = [];
+  const turnedAway: TurnedAway[] = [...refused];
   const lateConflicts: PushConflict[] = [];
 
   for (const plan of plans) {

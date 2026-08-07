@@ -55,7 +55,10 @@ const WEB = path.join(import.meta.dirname, "../../../web");
 export const SETTLE = 120_000;
 
 export type Instance = {
-  /** Where a browser goes. The pages and the API both answer here. */
+  /**
+   * Where a browser goes. The pages and the API both answer here — or, when
+   * the pages were left out, the API alone does.
+   */
   readonly origin: string;
   readonly api: FastifyInstance;
   readonly database: MigratedDatabase;
@@ -70,6 +73,19 @@ export type InstanceOptions = {
    * the store to answer the health check the boot waits on.
    */
   readonly traces?: boolean;
+  /**
+   * Whether the pages are served beside the API. On by default, because that is
+   * what a browser needs and the browser tests are why this exists.
+   *
+   * Off is for a caller that speaks only the HTTP API and never opens a page —
+   * the CLI is the whole of that list. A development server costs a minute or
+   * two to compile the first page, and a caller that will never ask for one
+   * should not pay it. With the pages off, `origin` is the API's own address
+   * and the instance tells itself so, which keeps every address it hands out —
+   * a device-flow approval address most of all — pointing at something that
+   * answers.
+   */
+  readonly web?: boolean;
 };
 
 /** A port nothing is listening on, so two test files never collide. */
@@ -129,8 +145,9 @@ export async function startInstance(
   });
   connectClickHouse({ clickhouseUrl: traceStore.url, maxOpenConnections: 4 });
 
+  const withPages = options.web ?? true;
   const apiPort = await freePort();
-  const webPort = await freePort();
+  const webPort = withPages ? await freePort() : apiPort;
   const origin = `http://127.0.0.1:${webPort}`;
 
   const { app } = buildApi({
@@ -145,30 +162,39 @@ export async function startInstance(
   });
   await app.listen({ host: "127.0.0.1", port: apiPort });
 
-  const web = spawn(
-    path.join(WEB, "node_modules/.bin/next"),
-    ["dev", "--port", String(webPort), "--hostname", "127.0.0.1"],
-    {
-      cwd: WEB,
-      env: {
-        ...process.env,
-        EGMA_API_ORIGIN: `http://127.0.0.1:${apiPort}`,
-        NODE_ENV: "development",
-      },
-      stdio: "ignore",
-    },
-  ) as ChildProcess;
+  const web: ChildProcess | undefined = withPages
+    ? (spawn(
+        path.join(WEB, "node_modules/.bin/next"),
+        ["dev", "--port", String(webPort), "--hostname", "127.0.0.1"],
+        {
+          cwd: WEB,
+          env: {
+            ...process.env,
+            EGMA_API_ORIGIN: `http://127.0.0.1:${apiPort}`,
+            NODE_ENV: "development",
+          },
+          stdio: "ignore",
+        },
+      ) as ChildProcess)
+    : undefined;
 
   // Loudly and at once, rather than after two minutes of nothing answering.
   let failedToStart: Error | undefined;
-  web.on("error", (cause) => {
+  web?.on("error", (cause) => {
     failedToStart = cause;
   });
-  web.on("exit", (code) => {
+  web?.on("exit", (code) => {
     failedToStart ??= new Error(`the web application exited with ${code}`);
   });
 
-  await answers(`${origin}/api/health`, SETTLE, () => failedToStart);
+  // The pages forward `/api/…` to the API, and the API's own health check is
+  // at `/health` — so which address is waited on depends on which of the two
+  // is answering at the origin.
+  await answers(
+    withPages ? `${origin}/api/health` : `${origin}/health`,
+    SETTLE,
+    () => failedToStart,
+  );
 
   return {
     origin,
@@ -176,7 +202,7 @@ export async function startInstance(
     database,
     traceStore,
     async close() {
-      web.kill("SIGTERM");
+      web?.kill("SIGTERM");
       await app.close();
       await disconnect();
       await disconnectClickHouse();

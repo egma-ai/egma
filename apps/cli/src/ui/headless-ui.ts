@@ -20,6 +20,7 @@ import { keyAskLines, type KeyAsk } from "../retell/connect.ts";
 import { simulationLine } from "../run/lines.ts";
 import type { RunView } from "../run/view.ts";
 import type { SkillPlaces } from "../skills/install.ts";
+import type { Detection } from "../wizard/detection.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
 import type { TestGate } from "../wizard/gate.ts";
 import type { GenerationProgress } from "../wizard/test-generation.ts";
@@ -28,6 +29,8 @@ import type { AskId, DrivenAgent, GateId, WizardUI } from "./wizard-ui.ts";
 export type HeadlessRecord = {
   drivenAgent: DrivenAgent | null;
   drivenAgentLog: string | null;
+  /** What egma worked out for itself before it asked anybody anything. */
+  detection: Detection | null;
   logins: LoginPrompt[];
   /** Every time a key was asked for, and what was said about it. */
   keyAsks: KeyAsk[];
@@ -59,6 +62,7 @@ export class HeadlessUI implements WizardUI {
   readonly record: HeadlessRecord = {
     drivenAgent: null,
     drivenAgentLog: null,
+    detection: null,
     logins: [],
     keyAsks: [],
     agentChoices: [],
@@ -95,6 +99,19 @@ export class HeadlessUI implements WizardUI {
 
   setDrivenAgentLog(file: string): void {
     this.record.drivenAgentLog = file;
+  }
+
+  /**
+   * Kept, and never printed.
+   *
+   * This exists to fill a screen while a developer is away in a browser, and a
+   * run with nobody watching has neither. It also lands whenever it lands —
+   * nothing waits on it — so printing it would put lines in a promptless run's
+   * output in an order that depends on how fast a disk answered, and one of
+   * those orders is after the exit line.
+   */
+  setDetection(detection: Detection | null): void {
+    this.record.detection = detection;
   }
 
   setLogin(prompt: LoginPrompt | null): void {

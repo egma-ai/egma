@@ -20,7 +20,7 @@ import {
   type TestFile,
 } from "../folder/test-file.ts";
 import {
-  readFolderTests,
+  readFolder,
   writeTestFile,
   type FolderPaths,
   type FolderTest,
@@ -91,7 +91,8 @@ export async function pullTests(options: PullOptions): Promise<PullReport> {
     signedIn,
     ...(fetchImpl === undefined ? [] : ([fetchImpl] as const)),
   );
-  const held = await readFolderTests(paths);
+  const folder = await readFolder(paths);
+  const held = folder.found;
   const resolve = pinsAgainst(
     signedIn,
     platformTests,
@@ -123,7 +124,12 @@ export async function pullTests(options: PullOptions): Promise<PullReport> {
     fileOf.set(testId, file);
   }
 
-  const taken = new Set(held.map((file) => path.basename(file.file)));
+  // Every `.md` name the folder already holds, including a file egma could not
+  // read: a pull that landed a platform test on top of somebody's broken draft
+  // would destroy the one file they most need to look at.
+  const taken = new Set(
+    [...held, ...folder.unreadable].map((file) => path.basename(file.file)),
+  );
   const pulled: PulledTest[] = [];
 
   // Oldest first, so a folder being filled for the first time is named in the

@@ -23,7 +23,7 @@ import { readdir } from "node:fs/promises";
 import {
   createEgmaFolder,
   readConfig,
-  readFolderTests,
+  readFolder,
   updateConfig,
   type FolderPaths,
   type FolderTest,
@@ -96,6 +96,25 @@ export type GenerateStepOptions = {
   /** How many tests a first suite holds. The default when it is left out. */
   readonly howMany?: number;
 };
+
+/**
+ * How this step stops, with the folder counted.
+ *
+ * Everywhere else in the walk a stop leaves nothing behind. Here it leaves
+ * files: the coding agent writes them as it goes, and they are the developer's
+ * the moment they land. So the count is read off the disk at the moment of
+ * stopping and travels with the report, and the exit line says where they are.
+ */
+async function stoppedHere(
+  signal: AbortSignal,
+  drivenAgentName: string,
+  paths: FolderPaths,
+): Promise<ExitReport> {
+  const report = stopReport(signal, drivenAgentName);
+  if (report.kind !== "interrupted") return report;
+  const kept = (await namesInFolder(paths)).length;
+  return kept === 0 ? report : { ...report, testsKept: kept };
+}
 
 /**
  * One dispatch that writes files, with the pane following what really lands.
@@ -202,12 +221,17 @@ async function writeFiles(
       onLogin: (name) =>
         ui.pushStatus(`${ACTION_MARK} ${name} needs you to log in. Handing you to its own login.`),
     });
+    // The agent's last line often arrives without the line ending that would
+    // have finished it, and it is read before the pane comes down.
+    take(markers.flush());
   } finally {
+    // However this ended — a stop, an interruption, or something nobody
+    // planned for — the timer stops and the pane comes down. A timer left
+    // running is a wizard that never leaves.
     clearInterval(watching);
+    ui.setGeneration(null);
+    ui.taskFinished();
   }
-  take(markers.flush());
-  ui.taskFinished();
-  ui.setGeneration(null);
 
   switch (result.kind) {
     case "done":
@@ -220,7 +244,7 @@ async function writeFiles(
       );
       return null;
     case "interrupted":
-      return stopReport(signal, launch.name);
+      return stoppedHere(signal, launch.name, paths);
     case "unreachable":
       return { kind: "no-coding-agent" };
     case "needs-login":
@@ -357,7 +381,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
   // closes the wizard instead of answering has answered too, so the wait ends
   // with the signal and not only with a keystroke.
   const said = await untilAborted(ui.waitForAnswer("existing-tests"), signal);
-  if (signal.aborted) return ending(stopReport(signal, options.launch.name));
+  if (signal.aborted) return ending(await stoppedHere(signal, options.launch.name, paths));
 
   const existing = await readExistingTests(cwd, said ?? null);
   if (existing.kind === "unusable") {
@@ -376,7 +400,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
         cwd,
         shown: existing.shown,
         content: existing.content,
-        taken: namesOf(await readFolderTests(paths)),
+        taken: namesOf((await readFolder(paths)).found),
         personas: PERSONAS_EGMA_HOLDS,
       }),
       // Nobody knows how many rows are in there, least of all egma, so the
@@ -386,7 +410,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
     if (halted !== null) return ending(halted);
   }
 
-  const converted = await readFolderTests(paths);
+  const converted = (await readFolder(paths)).found;
   const missing = Math.max(howMany - converted.length, 0);
   if (missing === 0) {
     ui.pushStatus(
@@ -413,7 +437,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
   }
 
   // What is really on disk, whatever anybody said about it.
-  const gate = gateFrom(await readFolderTests(paths), {
+  const gate = gateFrom(await readFolder(paths), {
     agentName: options.registered.agent.name,
     connectionName: options.registered.connection.name,
     modality: options.registered.connection.modality,
@@ -436,13 +460,16 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
   ui.setGate(null);
 
   if (signal.aborted) {
-    // Closing the wizard here is a decision and not a failure: the files are
-    // written, they are the developer's, and the line has to say where.
-    return ending(
-      stopReasonOf(signal) === "quit"
-        ? { kind: "tests-kept", count: gate.rows.length }
-        : stopReport(signal, options.launch.name),
-    );
+    // Closing the wizard here is a decision and not a failure: nothing is
+    // running, the files are written, and they are the developer's. So Ctrl-C
+    // and `q` leave the same line about where the files are — an interruption
+    // here shut no coding agent down and stopped no task, and saying it did
+    // would be egma telling a story about itself rather than about the run.
+    return ending({
+      kind: "tests-kept",
+      count: gate.rows.length,
+      stopped: stopReasonOf(signal) !== "quit",
+    });
   }
 
   return { ...(await pushGate(options, paths, gate)), suite };

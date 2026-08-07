@@ -16,7 +16,7 @@
  * their file to tidy up egma's own report would be the worse of the two.
  */
 
-import type { FolderTest } from "../folder/egma-folder.ts";
+import type { FolderContents } from "../folder/egma-folder.ts";
 
 /** What a persona column says for a test that names nobody. */
 export const DEFAULT_PERSONA = "default persona";
@@ -24,7 +24,7 @@ export const DEFAULT_PERSONA = "default persona";
 /** One line of the list. */
 export type GateRow = {
   readonly name: string;
-  /** Who calls about it, or the default persona's own words. */
+  /** Who is on the other end of it, or the default persona's own words. */
   readonly persona: string;
   /** `egma/tests/…`, as every report says a path. */
   readonly shown: string;
@@ -52,6 +52,16 @@ export type TestGate = {
 export const NO_BEHAVIORS_REASON =
   "no expected behaviors, so it could never fail. Add one, then run egma push.";
 
+/**
+ * The other way a file in the folder is not a test: egma could not read it at
+ * all. A coding agent writing twelve files writes a broken one sometimes, and
+ * the eleven good ones are not forfeit because of it — so the broken one is
+ * named on the same list, in the same place, for the same reason.
+ */
+export function unreadableReason(problem: string): string {
+  return `egma could not read it — ${problem}. Fix the file, then run egma push.`;
+}
+
 function personaColumn(personas: readonly string[]): string {
   const named = personas.map((persona) => persona.trim()).filter((persona) => persona !== "");
   return named.length === 0 ? DEFAULT_PERSONA : named.join(", ");
@@ -59,7 +69,7 @@ function personaColumn(personas: readonly string[]): string {
 
 /** The list, and what was kept out of it, from what is on disk. */
 export function gateFrom(
-  found: readonly FolderTest[],
+  folder: FolderContents,
   about: {
     readonly agentName: string;
     readonly connectionName: string;
@@ -68,9 +78,12 @@ export function gateFrom(
   },
 ): TestGate {
   const rows: GateRow[] = [];
-  const heldBack: HeldBack[] = [];
+  const heldBack: HeldBack[] = folder.unreadable.map((file) => ({
+    shown: file.shown,
+    reason: unreadableReason(file.reason),
+  }));
 
-  for (const held of found) {
+  for (const held of folder.found) {
     if (held.test.expectedBehaviors.length === 0) {
       heldBack.push({ shown: held.shown, reason: NO_BEHAVIORS_REASON });
       continue;
@@ -82,6 +95,10 @@ export function gateFrom(
       file: held.file,
     });
   }
+
+  // Both lists read in the folder's own order, whichever reason a file was
+  // held back for, so the screen is the folder rather than egma's bookkeeping.
+  heldBack.sort((a, b) => (a.shown < b.shown ? -1 : a.shown > b.shown ? 1 : 0));
 
   return { rows, heldBack, ...about };
 }

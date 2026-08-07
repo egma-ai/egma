@@ -22,6 +22,7 @@ import type { ConnectOptions } from "../retell/connect.ts";
 import { homeIn } from "../skills/install.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
 import { connectStep } from "./connect-step.ts";
+import { detect } from "./detection.ts";
 import { findTheAgent } from "./discovery.ts";
 import { openDrivenAgentLog, type DrivenAgentLog } from "./driven-agent-log.ts";
 import type { ExitReport } from "./exit-line.ts";
@@ -60,8 +61,39 @@ export type WalkOptions = {
   readonly runPollMs?: number;
 };
 
-/** Runs the walk and returns the line the wizard will leave behind. */
+/**
+ * Runs the walk and returns the line the wizard will leave behind.
+ *
+ * The one thing started here rather than inside the walk is the look around
+ * this machine. It is started before the intro is dismissed and shown behind
+ * the browser wait, which is the only dead time the walk has: nothing awaits
+ * it, no step reads it back, and a look that fails costs nothing.
+ *
+ * What it does need is a way to stop mattering. A walk can end — quit,
+ * interrupted, or simply finished — while the look is still going, and by then
+ * the screen it was for is coming down and the exit line is being written under
+ * it. So the answer is dropped rather than pushed at a UI that has nothing left
+ * to draw on.
+ */
 export async function walk(options: WalkOptions): Promise<ExitReport> {
+  const { ui, cwd, launch } = options;
+
+  let walking = true;
+  void detect({ cwd, drivenAgentName: launch.name }).then(
+    (detection) => {
+      if (walking) ui.setDetection(detection);
+    },
+    () => undefined,
+  );
+
+  try {
+    return await walkThrough(options);
+  } finally {
+    walking = false;
+  }
+}
+
+async function walkThrough(options: WalkOptions): Promise<ExitReport> {
   const { ui, launch, cwd, signal } = options;
 
   ui.setDrivenAgent({ id: launch.id, name: launch.name });

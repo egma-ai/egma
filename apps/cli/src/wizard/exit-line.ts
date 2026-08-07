@@ -80,11 +80,18 @@ export type ExitReport =
       readonly skill: SkillOutcome;
     }
   /**
-   * The developer read the list and closed the wizard. Nothing was uploaded and
+   * The developer read the list and did not run them. Nothing was uploaded and
    * nothing was taken away: the files are theirs, in their repository, and the
    * line has to say where.
+   *
+   * `stopped` is Ctrl-C rather than `q`. At this screen the two are the same
+   * decision — nothing is running, the files are written, and the list is
+   * offering `q` beside them — so both leave the same files and the same
+   * sentence about where they are. It is kept apart only because a shell reads
+   * an interruption as an interruption, and a run somebody stopped must not
+   * answer a shell as though it finished.
    */
-  | { readonly kind: "tests-kept"; readonly count: number }
+  | { readonly kind: "tests-kept"; readonly count: number; readonly stopped: boolean }
   /** Nothing here looks like a voice agent, and the pointer did not help. */
   | { readonly kind: "no-agent-context" }
   /** There is no coding agent on this machine for egma to drive. */
@@ -99,7 +106,19 @@ export type ExitReport =
       readonly reason: string;
     }
   | { readonly kind: "quit" }
-  | { readonly kind: "interrupted"; readonly drivenAgentName: string | null }
+  /**
+   * The developer changed their mind while egma was working.
+   *
+   * `testsKept` is how many test files were really on disk when it stopped. A
+   * stop part way through writing a suite leaves files behind, and a line that
+   * only said egma had stopped would leave a developer with a folder they were
+   * never told about. Absent, or zero, means the folder holds nothing to say.
+   */
+  | {
+      readonly kind: "interrupted";
+      readonly drivenAgentName: string | null;
+      readonly testsKept?: number;
+    }
   | { readonly kind: "failed"; readonly reason: string };
 
 /** One line means one line, whatever shape the reason arrived in. */
@@ -155,10 +174,13 @@ export function buildExitLine(report: ExitReport): string {
       return report.count === 1
         ? `egma put 1 test on egma and left it in ${TESTS_FOLDER} — commit it, edit it, then run egma push.`
         : `egma put ${report.count} tests on egma and left them in ${TESTS_FOLDER} — commit them, edit them, then run egma push.`;
-    case "tests-kept":
-      return report.count === 1
-        ? `Nothing was uploaded. Your test is in ${TESTS_FOLDER} — read it, then run egma push.`
-        : `Nothing was uploaded. Your ${report.count} tests are in ${TESTS_FOLDER} — read them, then run egma push.`;
+    case "tests-kept": {
+      const where =
+        report.count === 1
+          ? `Your test is in ${TESTS_FOLDER} — read it, then run egma push.`
+          : `Your ${report.count} tests are in ${TESTS_FOLDER} — read them, then run egma push.`;
+      return report.stopped ? `egma stopped. ${where}` : `Nothing was uploaded. ${where}`;
+    }
     case "no-agent-context":
       return "egma found no voice agent to test. Run egma again where your agent is defined.";
     case "no-coding-agent":
@@ -169,10 +191,19 @@ export function buildExitLine(report: ExitReport): string {
         : `${report.drivenAgentName} stopped before it found your voice agent: ${oneLine(report.reason)}`;
     case "quit":
       return "egma closed. Nothing ran.";
-    case "interrupted":
-      return report.drivenAgentName === null
-        ? "egma stopped before the task finished."
-        : `egma stopped before the task finished, and shut ${report.drivenAgentName} down.`;
+    case "interrupted": {
+      const stopped =
+        report.drivenAgentName === null
+          ? "egma stopped before the task finished."
+          : `egma stopped before the task finished, and shut ${report.drivenAgentName} down.`;
+      const kept = report.testsKept ?? 0;
+      if (kept === 0) return stopped;
+      // The folder is not empty, so the line says so. A developer who finds
+      // files they were never told about has been told a half-truth.
+      return kept === 1
+        ? `${stopped} Your 1 test is in ${TESTS_FOLDER}.`
+        : `${stopped} Your ${kept} tests are in ${TESTS_FOLDER}.`;
+    }
     case "failed":
       return `egma could not finish: ${oneLine(report.reason)}`;
   }

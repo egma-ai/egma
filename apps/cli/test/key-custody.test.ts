@@ -187,6 +187,11 @@ describe("a whole run, swept afterwards", () => {
       const sent = JSON.parse(
         await readFile(path.join(workspace.dir, "fake-agent-report.json"), "utf8"),
       ) as { instructions: string[] };
+      // The sweep is only worth its name if it really saw the task that writes
+      // the tests — that one carries what the provider is running, which is the
+      // one place a key could ride along. A report that had lost it would pass
+      // this check by holding nothing at all.
+      expect(sent.instructions.some((task) => task.includes("Write 12 tests"))).toBe(true);
       expect(sent.instructions.join("\n")).not.toContain(KEY);
     } finally {
       await rm(logFile, { force: true });

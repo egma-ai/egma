@@ -15,6 +15,7 @@ import type { RetellAgent } from "../retell/client.ts";
 import type { KeyAsk } from "../retell/connect.ts";
 import type { RunView } from "../run/view.ts";
 import type { SkillPlaces } from "../skills/install.ts";
+import type { Detection } from "../wizard/detection.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
 import type { TestGate } from "../wizard/gate.ts";
 import type { GenerationProgress } from "../wizard/test-generation.ts";
@@ -61,6 +62,16 @@ export interface WizardUI {
 
   /** Where the coding agent's own output is being kept for this run. */
   setDrivenAgentLog(file: string): void;
+
+  /**
+   * What egma worked out about this machine for itself, or `null` before it
+   * has.
+   *
+   * Nothing in the flow reads this back and nothing waits on it. It is written
+   * once, while the developer is reading, so that the screen they sit in front
+   * of during the browser wait has something true on it rather than a spinner.
+   */
+  setDetection(detection: Detection | null): void;
 
   /**
    * What login is waiting to be approved, or `null` once it no longer is.

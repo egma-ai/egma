@@ -116,12 +116,16 @@ type StoredRun = {
   finishedAt: string | null;
 };
 
-/** One change, in the order it happened. The feed a follower reads. */
-type StoredEvent = {
-  readonly seq: number;
-  readonly runId: string;
-  readonly at: string;
-} & (
+/**
+ * What one change is about: one simulation moving, or the run itself.
+ *
+ * Named on its own rather than written inline, because the two things the
+ * fixture does with an event want different halves of it. `Omit` over a union
+ * keeps only the keys every member shares, so an event this file was about to
+ * write would have been checked against `{ runId, kind }` and nothing else —
+ * a misspelt `simulationId` would have gone in unnoticed.
+ */
+type EventBody =
   | {
       readonly kind: "simulation";
       readonly simulationId: string;
@@ -131,8 +135,16 @@ type StoredEvent = {
       readonly verdict: Verdict | null;
       readonly reason: string | null;
     }
-  | { readonly kind: "run"; readonly status: RunStatus }
-);
+  | { readonly kind: "run"; readonly status: RunStatus };
+
+/** One change, as it is about to be written: which run, and what happened. */
+type NewEvent = { readonly runId: string } & EventBody;
+
+/** One change, in the order it happened. The feed a follower reads. */
+type StoredEvent = {
+  readonly seq: number;
+  readonly at: string;
+} & NewEvent;
 
 /** What a version of a test is, to a run that is about to pin it. */
 export type PinnedVersion = {
@@ -241,8 +253,8 @@ export function runRoutes(options: {
   const events: StoredEvent[] = [];
   const withoutAdapter = new Set<string>();
 
-  const record = (event: Omit<StoredEvent, "seq" | "at">): void => {
-    events.push({ ...event, seq: events.length + 1, at: new Date().toISOString() } as StoredEvent);
+  const record = (event: NewEvent): void => {
+    events.push({ ...event, seq: events.length + 1, at: new Date().toISOString() });
   };
 
   const runById = (id: string): StoredRun | undefined =>

@@ -18,6 +18,7 @@ import type { RetellAgent } from "../../retell/client.ts";
 import type { KeyAsk } from "../../retell/connect.ts";
 import type { RunView } from "../../run/view.ts";
 import type { SkillPlaces } from "../../skills/install.ts";
+import type { Detection } from "../../wizard/detection.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
 import type { TestGate } from "../../wizard/gate.ts";
 import type { GenerationProgress } from "../../wizard/test-generation.ts";
@@ -152,6 +153,10 @@ export class WizardStore {
 
   setDrivenAgentLog(drivenAgentLog: string): void {
     this.change({ drivenAgentLog });
+  }
+
+  setDetection(detection: Detection | null): void {
+    this.change({ detection });
   }
 
   setLogin(login: LoginPrompt | null): void {

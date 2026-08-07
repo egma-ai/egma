@@ -19,6 +19,12 @@
  * a question rather than a default: it is the only thing in the walk that
  * writes outside the repository, and it is asked when the developer has just
  * seen what egma is for and can decide whether they want more of it.
+ *
+ * **A stop from here is still this ending.** Once the run exists, every
+ * promise the walk made has been kept — the tests are on egma and the suite is
+ * going — so Ctrl-C over the run screen or the offer closes a window rather
+ * than cancelling work, and the developer leaves with the address of a live
+ * run in their scrollback. The counts are whatever they were at that moment.
  */
 
 import {
@@ -37,7 +43,7 @@ import {
 import type { WizardUI } from "../ui/wizard-ui.ts";
 import type { ExitReport, SkillOutcome } from "./exit-line.ts";
 import { ACTION_MARK, DETAIL_MARK, FAILURE_MARK } from "./status.ts";
-import { stopReport, untilAborted } from "./stop.ts";
+import { untilAborted } from "./stop.ts";
 
 export type RunStepOptions = {
   readonly ui: WizardUI;
@@ -182,18 +188,32 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
 
   await untilAborted(firstVerdict, signal);
 
+  // From here the walk has done what it set out to do, and it says so however
+  // it ends. The tests are on egma, the run is live, and the screen the
+  // developer is looking at says the suite carries on without this terminal —
+  // so a stop here is them closing a window on work that is still going, and
+  // not egma stopping short. Telling them egma stopped before the task
+  // finished would be telling them something that did not happen, and leaving
+  // the address out would leave them with a run and no way to open it.
+  //
+  // What a stop does change is that nothing is installed: before the question
+  // it is never asked, and at the question an unanswered question is a skip.
   if (signal.aborted) {
     watching.abort();
     signal.removeEventListener("abort", stopWatching);
     await following;
-    return stopReport(signal, null);
+    ui.setRun(viewOf(follower));
+    const stopped = follower.tally;
+    return {
+      kind: "run-started",
+      resultsUrl: follower.resultsUrl,
+      graded: stopped.graded,
+      total: stopped.total,
+      // Never asked, so there is no answer to report.
+      skill: { kind: "not-offered" },
+    };
   }
 
-  // From here the walk has done what it set out to do, and it says so however
-  // it ends. A developer who closes the wizard at the last question has still
-  // got a run going, and telling them egma stopped before the task finished
-  // would be telling them something that did not happen — so the only thing a
-  // stop changes from here is that nothing is installed.
   const places = skillPlacesFor(options.drivenAgentId, {
     repository: options.cwd,
     home: options.home,
