@@ -60,7 +60,9 @@ export {
   NotPermittedError,
   PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
+  TestMovedOnError,
   TraceStoreRefusedError,
+  UnprocessableInputError,
   UnreadableTraceQueryError,
   type TestNamingPersona,
 } from "./errors.ts";
@@ -200,6 +202,7 @@ export {
   getPersona,
   getPersonaVersion,
   listPersonas,
+  resolvePersonaNames,
   VOICE_PROVIDERS,
   type DeletedPersona,
   type NewPersona,

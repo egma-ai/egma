@@ -14,6 +14,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
+import { given } from "../http/reading.ts";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 
 /**
@@ -65,11 +66,6 @@ type Query = {
 
 function invalid(reply: FastifyReply, message: string): FastifyReply {
   return reply.code(400).send({ error: "invalid_request", message });
-}
-
-/** What a caller actually said, as against a parameter that arrived empty. */
-function given(value: string | undefined): string | undefined {
-  return value === undefined || value === "" ? undefined : value;
 }
 
 /**

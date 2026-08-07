@@ -127,6 +127,65 @@ export class PersonaNamedByTestsError extends Error {
 }
 
 /**
+ * A write refused for what it says, rather than for who asked or for what is
+ * there.
+ *
+ * Three refusals answer three different questions and each wants its own words:
+ * who you are, what is there, and what you wrote. This is the third, and it is
+ * the only one about the body — so it is the only one whose sentence a writer
+ * can act on without knowing anything about egma's tables.
+ *
+ * It exists so that a layer above can tell a factory's validation apart from a
+ * fault. Both were plain errors before, and neither answer available then was
+ * right: treating every error as the caller's mistake dresses a bug up as one,
+ * and treating none as theirs throws away the sentence they needed. The sentence
+ * is the factory's own and travels word for word.
+ */
+export class UnprocessableInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnprocessableInputError";
+  }
+}
+
+/**
+ * An edit named the version it was written against, and the test has moved.
+ *
+ * A test is edited by two people who both start from what they last read: a
+ * developer with the file in their repository, and a teammate in the dashboard.
+ * Nothing here merges them, because there is no merge that could be right — two
+ * people saying different things about one test have to settle it between
+ * themselves, and a heuristic that picked one would be egma deciding which of
+ * them was wrong.
+ *
+ * It carries both versions and the test's identity, because the caller's next
+ * move is to go and read the test as it now stands, and a refusal that only said
+ * "somebody else got there first" would send them hunting for which test.
+ */
+export class TestMovedOnError extends Error {
+  readonly testId: string;
+  readonly testName: string;
+  /** The version the edit was written against. */
+  readonly expectedVersionId: string;
+  /** The version the test is on now. */
+  readonly currentVersionId: string;
+
+  constructor(test: { readonly id: string; readonly name: string }, versions: {
+    readonly expected: string;
+    readonly current: string;
+  }) {
+    super(
+      `this edit was written against version ${versions.expected}, and test ${test.id} has moved on to ${versions.current}`,
+    );
+    this.name = "TestMovedOnError";
+    this.testId = test.id;
+    this.testName = test.name;
+    this.expectedVersionId = versions.expected;
+    this.currentVersionId = versions.current;
+  }
+}
+
+/**
  * The trace store read a batch of spans and refused it, and would refuse the
  * identical bytes again.
  *

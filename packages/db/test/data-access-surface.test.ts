@@ -129,6 +129,9 @@ const CONTEXT_REQUIRING = [
   "removeConnection",
   "removeMember",
   "resolveConnectionCredentials",
+  // Names off a reviewed file turned into the identity a version names. It
+  // reads personas and nothing else, and only ones the context already reaches.
+  "resolvePersonaNames",
   "revokeApiKey",
   "startRun",
   "startSimulation",
@@ -158,6 +161,13 @@ const VALUES = [
   "NotPermittedError",
   "PersonaNamedByTestsError",
   "ProjectOutsideOrganizationError",
+  // An edit refused because somebody moved the test since it was written. It
+  // carries both versions and the test's identity, because the caller's next
+  // move is to go and read the test as it now stands.
+  "TestMovedOnError",
+  // A write refused for what it says, told apart from a fault so that a layer
+  // above can relay the factory's sentence instead of answering with a stack.
+  "UnprocessableInputError",
   // The store's answer to a batch it will never take, told apart from a store
   // that is merely unreachable — a door has to answer those two differently,
   // and only the module that owns the client can tell them apart.
