@@ -81,10 +81,18 @@ export type TestNamingPersona = {
   readonly name: string;
 };
 
+/** The same, for the refusal a grader's delete raises. */
+export type TestNamingGrader = {
+  readonly id: string;
+  readonly name: string;
+};
+
 /** How many blocking tests the message spells out before it starts counting. */
 const TESTS_NAMED_IN_MESSAGE = 5;
 
-function spelledOutAndCounted(tests: readonly TestNamingPersona[]): string {
+function spelledOutAndCounted(
+  tests: readonly { readonly id: string; readonly name: string }[],
+): string {
   const named = tests
     .slice(0, TESTS_NAMED_IN_MESSAGE)
     .map((test) => `${test.id} "${test.name}"`)
@@ -122,6 +130,36 @@ export class PersonaNamedByTestsError extends Error {
     );
     this.name = "PersonaNamedByTestsError";
     this.personaId = personaId;
+    this.tests = tests;
+  }
+}
+
+/**
+ * A grader's delete was refused because live tests still name it.
+ *
+ * A test's grader array is what its scenario asks to be judged by on top of the
+ * project's own graders. Letting the delete through would leave each of those
+ * tests quietly checking one thing fewer than it says it checks — a suite going
+ * green because a check disappeared, which is the same false trust the persona's
+ * refusal exists to prevent and the reason it is spelled the same way here.
+ *
+ * It carries every blocking test, because the fix is to go and edit each one and
+ * a refusal that only said "something names it" would send somebody hunting. The
+ * message spells out the first few and counts the rest.
+ */
+export class GraderNamedByTestsError extends Error {
+  readonly graderId: string;
+  /** Every live test whose current version names it, oldest first. */
+  readonly tests: readonly TestNamingGrader[];
+
+  constructor(graderId: string, tests: readonly TestNamingGrader[]) {
+    super(
+      `grader ${graderId} is named by ${tests.length} live ${
+        tests.length === 1 ? "test" : "tests"
+      } (${spelledOutAndCounted(tests)}), and a test must never silently lose one of the checks it was written with; take it off those tests, or delete them, and then delete the grader`,
+    );
+    this.name = "GraderNamedByTestsError";
+    this.graderId = graderId;
     this.tests = tests;
   }
 }

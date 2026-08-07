@@ -264,3 +264,139 @@ describe("the persona rename (0005)", () => {
     ).rejects.toThrow(/persona_id_prefix/);
   });
 });
+
+describe("the persona junction's rename (0008)", () => {
+  let database: EmptyDatabase;
+  let beforeTheRename: string;
+  let client: pg.Client;
+
+  const organizationId = newId("org");
+  const projectId = newId("prj");
+  const personaId = newId("prs");
+  const personaVersionId = newId("prsv");
+  const testId = newId("tst");
+  const testVersionId = newId("tstv");
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("junction_rename");
+
+    // The world as it was: every migration before the rename, in a directory of
+    // its own, so a test_version_persona row can exist for 0008 to carry.
+    beforeTheRename = await mkdtemp(path.join(os.tmpdir(), "egma-before-0008-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0008") {
+        await writeFile(
+          path.join(beforeTheRename, migration.name),
+          migration.sql,
+        );
+      }
+    }
+    await runMigrations(database.url, beforeTheRename);
+
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query("begin");
+    await client.query(
+      "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
+      [organizationId],
+    );
+    await client.query(
+      "insert into project (id, organization_id, name, slug) values ($1, $2, 'Default', 'default')",
+      [projectId, organizationId],
+    );
+    await client.query(
+      `insert into persona (id, organization_id, project_id, name, current_version_id)
+       values ($1, $2, $3, 'Impatient Rita', $4)`,
+      [personaId, organizationId, projectId, personaVersionId],
+    );
+    await client.query(
+      `insert into persona_version (id, persona_id, version, traits)
+       values ($1, $2, 1, '{}'::jsonb)`,
+      [personaVersionId, personaId],
+    );
+    await client.query(
+      `insert into test (id, organization_id, project_id, name, current_version_id)
+       values ($1, $2, $3, 'Reschedules a booked appointment', $4)`,
+      [testId, organizationId, projectId, testVersionId],
+    );
+    await client.query(
+      `insert into test_version (id, test_id, version, content)
+       values ($1, $2, 1, '{"scenario": "moves it", "expectedBehaviors": ["confirms"]}'::jsonb)`,
+      [testVersionId, testId],
+    );
+    await client.query(
+      `insert into test_version_persona (test_version_id, persona_id, position)
+       values ($1, $2, 1)`,
+      [testVersionId, personaId],
+    );
+    await client.query("commit");
+
+    await runMigrations(database.url);
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(beforeTheRename, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("carries the rows across rather than rebuilding the table under them", async () => {
+    const { rows } = await client.query<{
+      test_version_id: string;
+      persona_id: string;
+      position: number;
+    }>("select test_version_id, persona_id, position from test_persona");
+    expect(rows).toEqual([
+      { test_version_id: testVersionId, persona_id: personaId, position: 1 },
+    ]);
+  });
+
+  it("renames the constraints and the index rather than recreating them", async () => {
+    const { rows: constraints } = await client.query<{ conname: string }>(
+      `select con.conname
+         from pg_constraint con
+         join pg_class c on c.oid = con.conrelid
+        where c.relname = 'test_persona' and con.contype in ('p', 'u', 'c', 'f')
+        order by con.conname`,
+    );
+    expect(constraints.map((row) => row.conname)).toEqual([
+      "test_persona_persona_id_persona_id_fk",
+      "test_persona_pk",
+      "test_persona_test_version_id_prefix",
+      "test_persona_test_version_id_test_version_id_fk",
+      "test_persona_version_id_position_unique",
+    ]);
+
+    const { rows: indexes } = await client.query<{ indexname: string }>(
+      `select indexname from pg_indexes
+        where schemaname = 'public' and tablename = 'test_persona'
+        order by indexname`,
+    );
+    expect(indexes.map((row) => row.indexname)).toEqual([
+      "test_persona_persona_id_idx",
+      "test_persona_pk",
+      "test_persona_version_id_position_unique",
+    ]);
+  });
+
+  it("keeps the prefix check the junction was built with", async () => {
+    await expect(
+      client.query(
+        `insert into test_persona (test_version_id, persona_id, position)
+         values ($1, $2, 2)`,
+        [newId("tst"), personaId],
+      ),
+    ).rejects.toThrow(/test_persona_test_version_id_prefix/);
+  });
+
+  it("gives the grader its own deferred current-version pointer, like the test's", async () => {
+    const { rows } = await client.query<{
+      condeferrable: boolean;
+      condeferred: boolean;
+    }>(
+      `select condeferrable, condeferred from pg_constraint
+        where conname = 'grader_current_version_id_grader_version_id_fk'`,
+    );
+    expect(rows).toEqual([{ condeferrable: true, condeferred: true }]);
+  });
+});

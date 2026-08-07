@@ -1,5 +1,12 @@
 import { newId } from "@egma/ids";
-import { createPersona, type AuthContext, type NewTest, type Role } from "@egma/db";
+import {
+  createGrader,
+  createPersona,
+  type AuthContext,
+  type ExpectedBehavior,
+  type NewTest,
+  type Role,
+} from "@egma/db";
 
 import { createConnectedDatabase, type MigratedDatabase } from "./database.ts";
 import { seedOrganization, seedUser } from "./tenancy.ts";
@@ -68,6 +75,17 @@ export const rescheduling = {
   ],
 } as const satisfies NewTest;
 
+/**
+ * The fixture's behaviors as a read hands them back. A behavior written as a
+ * bare string is a P0, so this is the same list said the other way round —
+ * which is what every file that authors strings and reads objects asserts.
+ */
+export function blocking(
+  behaviors: readonly string[],
+): readonly ExpectedBehavior[] {
+  return behaviors.map((behavior) => ({ behavior, priority: "P0" }));
+}
+
 /** Somebody plain, because who the persona is is not under test here. */
 export const neutralTraits = {
   personality: "Speaks plainly, stays patient, asks one question at a time.",
@@ -85,6 +103,23 @@ export async function seedPersona(
   return created.id;
 }
 
+/**
+ * A grader for a test to name. Deterministic and cheap to state, because what
+ * the grader judges by is the grader factory's business — here it is only
+ * something a test's array can point at.
+ */
+export async function seedGrader(
+  auth: AuthContext,
+  name: string,
+): Promise<string> {
+  const created = await createGrader(auth, {
+    name,
+    type: "phrase_match",
+    config: { banned: [{ text: "I promise" }] },
+  });
+  return created.id;
+}
+
 /** What provisioning does when it seeds a project's starter persona. */
 export async function pointProjectAt(
   projectId: string,
@@ -97,13 +132,17 @@ export async function pointProjectAt(
 }
 
 /**
- * How many rows the three tables hold, for the assertions that a refusal wrote
- * nothing. Counted raw, because absence is the one thing no seam can show.
+ * How many rows the tables a write touches hold, for the assertions that a
+ * refusal wrote nothing. Counted raw, because absence is the one thing no seam
+ * can show.
  */
 export async function rowCounts(): Promise<{
   tests: number;
   versions: number;
   named: number;
+  namedGraders: number;
+  graders: number;
+  graderVersions: number;
 }> {
   const count = async (table: string): Promise<number> => {
     const { rows } = await database.sql<{ count: string }>(
@@ -114,7 +153,10 @@ export async function rowCounts(): Promise<{
   return {
     tests: await count("test"),
     versions: await count("test_version"),
-    named: await count("test_version_persona"),
+    named: await count("test_persona"),
+    namedGraders: await count("test_grader"),
+    graders: await count("grader"),
+    graderVersions: await count("grader_version"),
   };
 }
 

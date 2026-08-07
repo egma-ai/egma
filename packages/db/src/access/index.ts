@@ -56,12 +56,14 @@ export type { AuthContext, Role, Via } from "./context.ts";
 export { ROLES, VIA } from "./context.ts";
 export {
   AlreadyBelongsToAnOrganizationError,
+  GraderNamedByTestsError,
   LastAdminError,
   NotPermittedError,
   PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
   TraceStoreRefusedError,
   UnreadableTraceQueryError,
+  type TestNamingGrader,
   type TestNamingPersona,
 } from "./errors.ts";
 
@@ -220,13 +222,56 @@ export {
   getTestVersion,
   listTests,
   type DeletedTest,
+  type ExpectedBehavior,
+  type ExpectedBehaviorInput,
   type NewTest,
   type Test,
   type TestChanges,
+  type TestGrader,
   type TestPage,
   type TestPersona,
   type TestVersion,
 } from "./tests.ts";
+
+export {
+  createGrader,
+  deleteGrader,
+  editGrader,
+  getGrader,
+  getGraderVersion,
+  listGraders,
+  type DeletedGrader,
+  type Grader,
+  type GraderChanges,
+  type GraderConfig,
+  type GraderConfigInput,
+  type GraderJudgment,
+  type GraderPage,
+  type GraderVersion,
+  type JudgeModel,
+  type JudgeProvider,
+  type LlmRubricConfig,
+  type MeasureAggregation,
+  type MetricThresholdConfig,
+  type NewGrader,
+  type NewGraderJudgment,
+  type Phrase,
+  type PhraseInput,
+  type PhraseMatch,
+  type PhraseMatchConfig,
+  type PhraseMatchConfigInput,
+  type PhraseSpeaker,
+  type ThresholdComparator,
+  type ToolCallsConfig,
+  type ToolCallsConfigInput,
+  type ToolExpectation,
+  type ToolExpectationInput,
+} from "./graders.ts";
+export type {
+  GraderScope,
+  GraderType,
+  Priority,
+} from "../schema/graders.ts";
 
 export {
   cancelRun,

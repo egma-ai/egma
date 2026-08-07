@@ -20,8 +20,8 @@ const IDENTIFIER_SQL_TYPE = 'text COLLATE "C"';
  * with the factory.
  *
  * A table whose identity is somebody else's key pins that key's prefix, which
- * is why `organization_settings` pins `org_` and the join table naming a test
- * version's personas pins `tstv_`.
+ * is why `organization_settings` pins `org_` and both junctions naming what a
+ * test version points at pin `tstv_`.
  */
 const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   user: "usr",
@@ -39,9 +39,12 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   persona_version: "prsv",
   agent: "agt",
   connection: "con",
+  grader: "grd",
+  grader_version: "grv",
   test: "tst",
   test_version: "tstv",
-  test_version_persona: "tstv",
+  test_persona: "tstv",
+  test_grader: "tstv",
   run: "run",
   simulation: "sim",
 };
@@ -221,6 +224,9 @@ describe("every enumerated value", () => {
       { table: "connection", column: "type" },
       { table: "connection", column: "modality" },
       { table: "connection", column: "topology" },
+      { table: "grader", column: "type" },
+      { table: "grader", column: "priority" },
+      { table: "grader", column: "scope" },
       { table: "run", column: "status" },
       { table: "run", column: "triggered_via" },
       { table: "simulation", column: "status" },

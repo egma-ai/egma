@@ -4,5 +4,6 @@ export * from "./tenancy.ts";
 export * from "./device.ts";
 export * from "./personas.ts";
 export * from "./agents.ts";
+export * from "./graders.ts";
 export * from "./tests.ts";
 export * from "./runs.ts";
