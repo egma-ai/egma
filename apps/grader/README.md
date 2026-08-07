@@ -1,0 +1,102 @@
+# The grader
+
+The service that judges finished conversations. A simulation reaching its
+terminal transition becomes claimable work in the same commit that lands it;
+this service takes the work, reads the conversation, resolves the graders that
+apply to it, executes each one, and writes a verdict row per judged dimension.
+
+It claims its work rather than being sent it, so it has no inbound surface at
+all: no port, no route, nothing to authenticate, nothing to expose. Scaling it
+is running more copies — they claim from one queue, take what they have room
+for, and distribute between themselves with nothing in front of them.
+
+It sits on the control plane's side of the wire and reads the two stores
+directly. The API process gains nothing from grading existing: no route, no
+fan-out, no judge latency on a request path.
+
+## What it does with one conversation
+
+1. **Claim.** The oldest outstanding job, taken atomically, with a claimant
+   label and a lease. Two copies never take the same conversation, and a copy
+   that dies holding one loses it to whichever copy asks after the lease runs
+   out.
+2. **Read.** The conversation comes off the simulation's own row — transcript,
+   events, measures — which is where a finished simulation already carries it.
+3. **Resolve.** Every grader in the project whose scope includes simulations,
+   plus the graders named by the test version the conversation was executed
+   against. A grader named by both is one grader.
+4. **Execute.** One function per grader type, behind one seam. `metric_threshold`
+   reads a measure off the conversation and applies an aggregation, a comparator
+   and a threshold — in-process, no model, the same answer every time.
+5. **Write.** One row per judged dimension: the verdict word, a score, a
+   one-line rationale, the spans it cites, and the grader's priority as it stood
+   at that moment. **No overall row is written anywhere** — a conversation's
+   answer and a run's are folded from these rows at read time, so a headline can
+   never disagree with the evidence under it.
+
+Two rules run through all of it. **A simulation that never ran is `errored` for
+every grader and never `failed`** — a broken test is not a broken agent. And **a
+check that could not be made says so**: a measure this conversation does not
+have is `skipped` and leaves the score's denominator; a measure recorded in a
+shape egma never writes is `errored`, because a corrupted row and a missing one
+are different facts.
+
+## Configuration
+
+Everything arrives as environment variables.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `DATABASE_URL` | (required) | Where conversations, graders and tests are read from. |
+| `CLICKHOUSE_URL` | (required) | Where verdicts are written. |
+| `EGMA_GRADER_CLAIMANT` | `grader-<host>-<pid>` | The name stamped on claims. |
+| `EGMA_GRADER_CAPACITY` | `4` | Most conversations judged at once. |
+| `EGMA_GRADER_HEARTBEAT_SECONDS` | `15` | How often a copy says it still holds a job. |
+| `EGMA_GRADER_LEASE_SECONDS` | `120` | How long a claim survives a copy's silence. Must be well above the heartbeat. |
+| `EGMA_GRADER_SWEEP_SECONDS` | `30` | The backstop, not the trigger — see below. |
+| `EGMA_GRADER_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARN` or `ERROR`. |
+
+There is deliberately no encryption key here. Grading reads conversations,
+graders and test versions and writes verdicts; it never touches a connection's
+credentials, so it is never handed the key that could unseal one.
+
+There is deliberately no model key either. The grader types v1 executes are
+deterministic and judge in-process. A judge model belongs to the project that
+configured it rather than to a container.
+
+## How work reaches it
+
+The transaction that lands a terminal transition writes the job **and** raises a
+Postgres notification, so a running copy wakes on the commit rather than at the
+top of some interval. Nothing a verdict waits for is on a timer, and this
+service promises no latency anywhere.
+
+`EGMA_GRADER_SWEEP_SECONDS` is the backstop underneath that, not the mechanism:
+a notification raised while every copy happened to be restarting reaches nobody,
+and a lease running out is a clock rather than an event. Both are caught by
+asking again, which costs one indexed query.
+
+## Adding a grader type
+
+One file, one line. `src/graders/contract.ts` says what every type is handed and
+what every one of them answers with; write a module that exports a function of
+that shape and name it in the roster in `src/graders/index.ts`. Nothing else
+changes — the claim, the read, the resolution, the verdict rows and the fold are
+all written once, in the grader's vocabulary rather than in any type's.
+
+A type that is named and has no executor yet answers `errored` rather than
+saying nothing, because a page that goes green because a check quietly judged
+nothing is the exact false trust this product exists to kill.
+
+## Tests
+
+```
+pnpm db:up          # Postgres and ClickHouse, once
+npx vitest run apps/grader
+```
+
+Both stores are real. Everything worth asserting here is one of their
+behaviours: the notification a transaction raises, the lock that keeps two
+copies off one conversation, and the store's identity collapsing a second
+judgment onto the one it repeats rather than filing it beside it. No test needs
+a model key, because nothing under them does.

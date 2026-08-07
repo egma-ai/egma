@@ -1,0 +1,15 @@
+{
+  "name": "@egma/grader",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@egma/db": "workspace:*",
+    "@egma/ids": "workspace:*"
+  }
+}

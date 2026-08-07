@@ -222,6 +222,70 @@ services:
     # is the one place that can act on it, because it is the only side
     # that knows what was claimed.
 
+  # The grader: the service that judges finished conversations. It claims its
+  # work rather than being sent it, so there is no `ports:` here and there
+  # never will be — every arrow points out, exactly as the simulator's do,
+  # and adding this container to a self-host costs no inbound networking at
+  # all. It sits on the control plane's side of the wire, so it reads the two
+  # stores directly rather than through the API; the API gains nothing at all
+  # from grading existing.
+  #
+  # Scaling it is running more copies of it. They claim from one queue, take
+  # what they have room for, and distribute between themselves with nothing in
+  # front of them: `docker compose up --scale grader=3` is the whole dial.
+  grader:
+    build:
+      context: .
+      dockerfile: apps/grader/Dockerfile
+    environment:
+      # The two stores, on the same terms the API reads them: conversations and
+      # graders come out of Postgres, verdicts go into ClickHouse. Both are
+      # required, because a grader that started with nowhere to read from and
+      # nowhere to write to would look healthy and judge nothing.
+      DATABASE_URL: postgres://${POSTGRES_USER:-egma}:${POSTGRES_PASSWORD:-egma}@postgres:5432/${POSTGRES_DB:-egma}
+      CLICKHOUSE_URL: http://${CLICKHOUSE_USER:-egma}:${CLICKHOUSE_PASSWORD:-egma}@clickhouse:8123/${CLICKHOUSE_DB:-egma}
+      # `EGMA_ENCRYPTION_KEY` is deliberately absent, and its absence is the
+      # point: grading reads conversations, graders and test versions, and
+      # writes verdicts. It never touches a connection's credentials, so it is
+      # never handed the key that could unseal one.
+      #
+      # This copy's own name for itself, in claims and in its log. Unset is
+      # fine and usual — it names itself after its host and process, which is
+      # what tells two copies apart.
+      EGMA_GRADER_CLAIMANT: ${EGMA_GRADER_CLAIMANT:-}
+      # How many conversations one copy judges at once. It claims only what it
+      # has room for, so a burst of finished simulations degrades to a queue
+      # rather than to overload — raise this, or start a second copy.
+      EGMA_GRADER_CAPACITY: ${EGMA_GRADER_CAPACITY:-4}
+      # How the claim behaves. A copy says it is still alive every heartbeat
+      # while it holds a conversation, and a copy silent for longer than the
+      # lease loses it to whichever copy asks next — which is how a container
+      # replaced mid-judgment costs one lease and no verdict. The heartbeat
+      # must stay well under the lease.
+      EGMA_GRADER_HEARTBEAT_SECONDS: ${EGMA_GRADER_HEARTBEAT_SECONDS:-}
+      EGMA_GRADER_LEASE_SECONDS: ${EGMA_GRADER_LEASE_SECONDS:-}
+      # The backstop, and **not** how work arrives. A conversation ending wakes
+      # this service on the transaction that ended it, so nothing a verdict
+      # waits for is on a timer. This is for the notification raised while
+      # every copy happened to be restarting: it costs one indexed query and
+      # catches the case that would otherwise look like grading having stopped.
+      EGMA_GRADER_SWEEP_SECONDS: ${EGMA_GRADER_SWEEP_SECONDS:-}
+      EGMA_GRADER_LOG_LEVEL: ${EGMA_GRADER_LOG_LEVEL:-INFO}
+    depends_on:
+      api:
+        condition: service_healthy
+    # No `healthcheck` here, for the reason the simulator has none: nothing
+    # listens. The schema is applied by the API on boot, which is what this
+    # waits for — there is no migration container and no manual step, and a
+    # second migrator racing the first would buy nothing.
+    #
+    # What could go wrong instead is answered elsewhere. Bad configuration
+    # stops it before it claims anything, saying which variable. A store it
+    # cannot reach is in its log. And a copy that dies holding a conversation
+    # is the claim's to notice, by the heartbeats stopping — which is the one
+    # place that can act on it, because it is the only side that knows what
+    # was claimed.
+
 volumes:
   postgres-data:
   clickhouse-data:
