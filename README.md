@@ -50,6 +50,41 @@ It is an override rather than the default because a container may not raise its
 limit past the daemon's own, so a host with a low hard `nofile` would not start
 at all.
 
+## Your first run, from a terminal
+
+With an instance up and an account on it, the walk is one command, run in the
+repository that holds your voice agent:
+
+```bash
+EGMA_URL=http://localhost:3101 npx egma
+```
+
+It signs that machine in — a short code, approved in the browser you signed up
+in — registers your voice agent together with the way egma reaches it, writes a
+first suite of tests with the coding agent you already have, puts them on your
+instance, and starts a run over the exact versions it pushed. Every step is also
+a verb (`egma login`, `egma connect`, `egma push`, `egma run`) that prints one
+fact per line and answers with a number, for a coding agent driving it with
+nobody watching. `apps/cli/README.md` is the whole of it.
+
+**Where it stops today, said plainly.** The run is created and followed live,
+and no verdict arrives: nothing claims a simulation yet, so the run stays
+pending and every simulation stays queued. The simulator below conducts
+conversations already; what is missing between them is the piece that hands it a
+test, and the grader that scores what it did. Both are being built. Everything
+before them is real, and the run you started is yours — at the address the
+terminal printed, with no token on it.
+
+The same walk runs as a check, in two commands from a checkout:
+
+```bash
+pnpm db:up
+pnpm --filter egma-cli smoke:walk
+```
+
+It starts a whole egma of its own, signs in through a real browser, registers,
+pushes, runs and follows — then prints what it proved and what waits.
+
 ## The simulator, and why it publishes nothing
 
 The fifth service conducts simulations: it takes a persona and a scenario and
