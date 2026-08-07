@@ -185,7 +185,7 @@ export async function seedJudge(
   });
 }
 
-/** A latency threshold, which is the one type the skeleton executes. */
+/** A latency threshold: the deterministic type, parameterized. */
 export function aThreshold(
   overrides: Partial<NewGrader> = {},
 ): NewGrader {
@@ -198,6 +198,22 @@ export function aThreshold(
       comparator: "below",
       threshold: 2_000,
     },
+    ...overrides,
+  } as NewGrader;
+}
+
+/**
+ * The criteria a team wrote in their own words, which is the one authored type
+ * that asks a model anything — and the only one that carries a judge model of
+ * its own.
+ */
+export const A_RUBRIC = "The agent acknowledged the caller's frustration.";
+
+export function aRubric(overrides: Partial<NewGrader> = {}): NewGrader {
+  return {
+    name: "Was the agent empathetic",
+    type: "llm_rubric",
+    config: { rubric: A_RUBRIC },
     ...overrides,
   } as NewGrader;
 }
