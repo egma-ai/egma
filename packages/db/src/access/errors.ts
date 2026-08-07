@@ -61,6 +61,49 @@ export class AgentWriteRefusedError extends Error {
 export type AgentWriteRefusal = "not_admitted" | "needs_a_name" | "name_taken";
 
 /**
+ * A run was turned away, and which rule turned it away travels beside the
+ * sentence rather than inside it — the agent factory's arrangement, for the
+ * same reason: an HTTP layer answers the four differently, and reading the
+ * prose to tell them apart would make the prose load-bearing while the prose is
+ * the part deliberately left free to improve.
+ */
+export class RunWriteRefusedError extends Error {
+  readonly reason: RunWriteRefusal;
+
+  constructor(reason: RunWriteRefusal, message: string) {
+    super(message);
+    this.name = "RunWriteRefusedError";
+    this.reason = reason;
+  }
+}
+
+/**
+ * Which rule refused.
+ *
+ * - `no_such_connection` — nothing this credential can see has that id.
+ *   Answered as "there is no such thing", because to this caller that is what
+ *   it is: confirming somebody else's row exists is itself a leak.
+ * - `connection_not_on_agent` — both were named, both are there, and they are
+ *   not each other's. Its own answer rather than the one above, because the
+ *   caller asked for exactly that check and the two mistakes have different
+ *   fixes.
+ * - `no_adapter` — the connection's type has no shipped simulator adapter, so
+ *   the run could never be conducted. Refused at creation rather than left
+ *   queued forever for a conductor that does not exist.
+ * - `not_admitted` — the selection itself: no versions, a version this egma
+ *   never issued, one version named twice, more conversations than a run may
+ *   hold, or a persona a pinned version names who has since been deleted.
+ * - `already_finished` — a cancel arrived after the run had finished, so there
+ *   was nothing left to cancel and the caller missed.
+ */
+export type RunWriteRefusal =
+  | "no_such_connection"
+  | "connection_not_on_agent"
+  | "no_adapter"
+  | "not_admitted"
+  | "already_finished";
+
+/**
  * The person being invited is already in an organization.
  *
  * One person belongs to one organization in this version, so there is no second
