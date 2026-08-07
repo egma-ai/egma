@@ -303,9 +303,17 @@ function validCredentials(
   return { sealed, hint: sealed[rule.hintField]?.slice(-4) ?? "" };
 }
 
+/**
+ * A name, which is the one thing a write cannot go ahead without.
+ *
+ * Its own answer rather than the registry's: nothing about the body could not
+ * be written, so it is what the caller says that cannot be acted on.
+ */
 function validName(name: unknown, what: string): string {
   const trimmed = typeof name === "string" ? name.trim() : "";
-  if (trimmed === "") throw new Refusal(`${what} needs a name`);
+  if (trimmed === "") {
+    throw new Refusal(`${what} needs a name`, { status: 422, code: "unprocessable" });
+  }
   return trimmed;
 }
 
