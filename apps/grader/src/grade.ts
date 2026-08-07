@@ -4,10 +4,16 @@ import {
   type Grader,
   type GradingClaim,
   type NewVerdict,
+  type Priority,
 } from "@egma/db";
 
 import { conversationOf, type Conversation } from "./conversation.ts";
+import {
+  EXPECTED_BEHAVIORS,
+  judgeExpectedBehaviors,
+} from "./graders/expected-behaviors.ts";
 import { execute, theOneCheck, type Judgment } from "./graders/index.ts";
+import { JUDGE_MAKERS, judgeOnce, type JudgeMakers } from "./judge/index.ts";
 import { applicableGraders } from "./resolve.ts";
 
 /**
@@ -23,6 +29,12 @@ import { applicableGraders } from "./resolve.ts";
  * before the write is released and judged again from the beginning — which is
  * safe precisely because writing the same judgment twice at the same grader
  * version replaces rather than doubles.
+ *
+ * **The built-in stands beside the resolved graders and not among them.** The
+ * expected-behaviors grader is never a row and never attachable, so it is never
+ * resolved; it applies because running a test means judging it against what the
+ * test says. That is why it is a second branch of the fan-out below rather than
+ * an entry in the executor roster.
  */
 
 /** What judging one conversation came to. */
@@ -36,7 +48,19 @@ export type Graded = {
 /** Why a job could not be judged, when it could not be. */
 export class NotGradable extends Error {}
 
-export async function gradeClaim(claim: GradingClaim): Promise<Graded> {
+export type GradeOptions = {
+  /**
+   * How each judge provider is spoken to. The default speaks to the real ones;
+   * a test hands over a scripted judge, which is what lets the whole engine
+   * suite run with no key and no network.
+   */
+  readonly makers?: JudgeMakers | undefined;
+};
+
+export async function gradeClaim(
+  claim: GradingClaim,
+  options: GradeOptions = {},
+): Promise<Graded> {
   if (claim.simulationId === null) {
     throw new NotGradable(
       `grading job ${claim.id} names no conversation, and only a simulation's can be judged today`,
@@ -51,27 +75,89 @@ export async function gradeClaim(claim: GradingClaim): Promise<Graded> {
   }
 
   const conversation = conversationOf(simulation);
+  const makers = options.makers ?? JUDGE_MAKERS;
+
+  // The project's judge, shared by everything on this conversation that judges
+  // and resolved only if something does. Nothing here decides whether it is
+  // needed — the things that judge ask, and a conversation where none of them
+  // does never opens the envelope.
+  const judge = judgeOnce(claim.auth);
+
   const graders = await applicableGraders(claim.auth, simulation);
 
-  // In parallel, and not because today's graders are slow — they are instant.
-  // Because the judged types are one model call each, and wall-clock for a
-  // conversation with five checks should be one call rather than five. Building
-  // the fan-out now means the first judge is a new executor rather than a new
-  // shape here.
-  const judged = await Promise.all(
-    graders.map(async (grader) =>
-      (await judgmentsOf(grader, conversation)).map((judgment) =>
-        verdictRow(grader, conversation, judgment),
+  // In parallel, and not because today's deterministic graders are slow — they
+  // are instant. Because the judged types are one model call each, and
+  // wall-clock for a conversation with five checks should be one call rather
+  // than five.
+  const [byGrader, builtIn] = await Promise.all([
+    Promise.all(
+      graders.map(async (grader) =>
+        (await judgmentsOf(grader, conversation)).map((judgment) =>
+          verdictRow(
+            {
+              graderId: grader.id,
+              // The version that judged, which is what keeps this row
+              // interpretable after the grader is tightened: the config it was
+              // decided by is frozen behind this id, and a re-grade at the next
+              // version writes beside rather than over.
+              graderVersionId: grader.versionId,
+              // `engine`, because no model was asked anything. A judge model's
+              // own name goes here when one is used, and `human` when a person
+              // disagrees.
+              judgedBy: "engine",
+              priority: grader.priority,
+            },
+            conversation,
+            judgment,
+          ),
+        ),
       ),
     ),
-  );
-  const rows = judged.flat();
+    judgeExpectedBehaviors({
+      auth: claim.auth,
+      simulationId: simulation.id,
+      conversation,
+      judge,
+      makers,
+    }),
+  ]);
+
+  const behaviorRows =
+    builtIn === undefined
+      ? []
+      : builtIn.judged.map((judged) =>
+          verdictRow(
+            {
+              // The built-in is never a row in any table, so it names itself
+              // with the one word that can never collide with a minted `grd_`
+              // identifier — the same word the grader type roster reserves and
+              // never holds.
+              graderId: EXPECTED_BEHAVIORS,
+              // Its version is the frozen test version whose behaviors it
+              // judged. Nothing else about the built-in can change, and that
+              // list changing is exactly when a verdict written under it stops
+              // meaning what it meant.
+              graderVersionId: builtIn.versionId,
+              judgedBy: builtIn.judgedBy,
+              // Each behavior's own, not one grader's: a nice-to-have behavior
+              // cannot block a release and a must-have one always can.
+              priority: judged.priority,
+            },
+            conversation,
+            judged.judgment,
+          ),
+        );
+
+  const rows = [...byGrader.flat(), ...behaviorRows];
 
   await appendVerdicts(claim.auth, rows);
 
   return {
     simulationId: simulation.id,
-    graders: graders.length,
+    // The built-in counts, because it judged: a conversation judged only against
+    // its test's behaviors was judged, and reporting nothing applied would be
+    // reporting that nothing happened.
+    graders: graders.length + (builtIn === undefined ? 0 : 1),
     verdicts: rows.length,
   };
 }
@@ -88,11 +174,12 @@ export async function gradeClaim(claim: GradingClaim): Promise<Graded> {
  * so that no future grader type can get it wrong.
  *
  * It answers with one row per grader, named by the grader's own one check —
- * which is the honest shape while every type executed makes one. A type that
- * names several dimensions of its own will want one `errored` row per dimension
- * instead, so that a page shows the same list whether the conversation happened
- * or not; that is a question for the type that first has several, and this is
- * where it is asked.
+ * which is the honest shape while every *authored* type executed makes one. The
+ * question this used to ask, of the first type to name several dimensions, is
+ * answered: the built-in expected-behaviors grader names one per behavior and
+ * writes one `errored` row per behavior when the conversation never happened, so
+ * a page shows the same list whether it happened or not. An authored type that
+ * grows several dimensions follows it, in its own module, on the same terms.
  */
 export async function judgmentsOf(
   grader: Grader,
@@ -137,32 +224,39 @@ function couldNotJudge(grader: Grader, rationale: string): Judgment {
   };
 }
 
+/**
+ * Whose judgment this is, and how loudly it speaks — everything a verdict row
+ * needs that the judgment itself deliberately does not carry.
+ *
+ * The priority is **snapshotted, never referenced**: it is a live setting, read
+ * at the moment of judging and written onto the row, so promoting a check to P0
+ * tomorrow cannot reinterpret what today's warning meant.
+ */
+type JudgedBy = {
+  readonly graderId: string;
+  readonly graderVersionId: string;
+  readonly judgedBy: string;
+  readonly priority: Priority;
+};
+
 /** One judgment, as the row that records it. */
 function verdictRow(
-  grader: Grader,
+  by: JudgedBy,
   conversation: Conversation,
   judgment: Judgment,
 ): NewVerdict {
   return {
     traceId: conversation.traceId,
-    graderId: grader.id,
-    // The version that judged, which is what keeps this row interpretable after
-    // the grader is tightened: the config it was decided by is frozen behind
-    // this id, and a re-grade at the next version writes beside rather than over.
-    graderVersionId: grader.versionId,
+    graderId: by.graderId,
+    graderVersionId: by.graderVersionId,
     dimension: judgment.dimension,
     source: conversation.source,
-    // `engine`, because no model was asked anything. A judge model's own name
-    // goes here when one is used, and `human` when a person disagrees.
-    judgedBy: "engine",
+    judgedBy: by.judgedBy,
     verdict: judgment.verdict,
     score: judgment.score,
     rationale: judgment.rationale,
     citedSpanIds: judgment.citedSpanIds,
-    // **Snapshotted, never referenced.** The priority is a live setting: read
-    // here at the moment of judging and written onto the row, so promoting this
-    // check to P0 tomorrow cannot reinterpret what today's warning meant.
-    priority: grader.priority,
+    priority: by.priority,
     runId: conversation.runId,
     agentId: conversation.agentId,
     // Empty, and honestly so: egma does not version agents yet, and a made-up

@@ -244,11 +244,20 @@ services:
       # nowhere to write to would look healthy and judge nothing.
       DATABASE_URL: postgres://${POSTGRES_USER:-egma}:${POSTGRES_PASSWORD:-egma}@postgres:5432/${POSTGRES_DB:-egma}
       CLICKHOUSE_URL: http://${CLICKHOUSE_USER:-egma}:${CLICKHOUSE_PASSWORD:-egma}@clickhouse:8123/${CLICKHOUSE_DB:-egma}
-      # `EGMA_ENCRYPTION_KEY` is deliberately absent, and its absence is the
-      # point: grading reads conversations, graders and test versions, and
-      # writes verdicts. It never touches a connection's credentials, so it is
-      # never handed the key that could unseal one.
+      # The same key the API seals with, because a judged grader has to replay
+      # the project's own judge key to the provider, and the process making the
+      # call is this one. What it can open is held narrow on the other side: a
+      # judge key is resolved through one door that refuses every caller whose
+      # context did not come from a grading claim, and a connection's
+      # credentials sit behind a door asking for a permission the engine's
+      # context does not carry. Leave it unset for a deployment whose projects
+      # configure no judge — the deterministic graders judge for free either
+      # way, and a project that did configure one gets `errored` verdicts saying
+      # the key could not be read rather than a silent green tick.
       #
+      # There is still deliberately no model key here. A judge belongs to the
+      # project that configured it, never to a container.
+      EGMA_ENCRYPTION_KEY: ${EGMA_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
       # This copy's own name for itself, in claims and in its log. Unset is
       # fine and usual — it names itself after its host and process, which is
       # what tells two copies apart.

@@ -18,15 +18,29 @@ import { startService } from "./service.ts";
  * no benefit. It reads a schema somebody else applied, which is the whole reason
  * it can be one more copy rather than one more decision.
  *
- * **No encryption key, either.** Grading reads conversations, graders and test
- * versions, and writes verdicts; it never touches a connection's credentials, so
- * it is never handed the key that would unseal one. A service that cannot
- * decrypt a secret cannot leak one.
+ * **The encryption key, and exactly one thing it opens.** A judged grader has to
+ * replay the project's own judge key to the provider, so this process holds the
+ * key that unseals one — there is no arrangement in which the thing making the
+ * call does not. What it can reach is held narrow on the other side: a judge key
+ * is resolved through one door that refuses every caller whose context did not
+ * come from a grading claim, and a connection's credentials are behind a door
+ * that asks for a permission the engine's context does not carry. So this
+ * service can open the one secret it needs and none of the others.
+ *
+ * It is optional, and its absence is an ordinary deployment: a project that
+ * configured no judge never opens an envelope. One that did, on a grader given
+ * no key, gets `errored` verdicts saying so rather than a service that will not
+ * start.
  */
 const config = loadConfig();
 const log = makeLog(config.logLevel, config.claimant);
 
-connect({ databaseUrl: config.databaseUrl });
+connect({
+  databaseUrl: config.databaseUrl,
+  ...(config.encryptionKey === undefined
+    ? {}
+    : { encryptionKey: config.encryptionKey }),
+});
 connectClickHouse({ clickhouseUrl: config.clickhouseUrl });
 
 const service = startService({ config, log });

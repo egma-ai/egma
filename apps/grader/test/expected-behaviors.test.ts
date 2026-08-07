@@ -1,0 +1,337 @@
+import {
+  listGradingJobsForSimulation,
+  readVerdicts,
+  type RecordedVerdict,
+} from "@egma/db";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import {
+  aConversation,
+  aThreshold,
+  conductSimulation,
+  eventually,
+  makeWorld,
+  runService,
+  seedGrader,
+  seedJudge,
+  seedTest,
+  testConfig,
+  type World,
+} from "./support/world.ts";
+import {
+  cannotDetermine,
+  met,
+  notMet,
+  scriptedJudge,
+  type Scripted,
+} from "./support/scripted-judge.ts";
+import type { Service } from "../src/service.ts";
+
+/**
+ * The built-in grader: a test's expected behaviors, judged one at a time.
+ *
+ * **The contract is the seam.** A finished conversation and a test's behaviors
+ * go in; the assertions are on the verdict rows and on the folded answer over
+ * them. Nothing here asserts how many times anything was called or in what
+ * order — the one thing this file does look at behind the seam is *what each
+ * judge was shown*, because per-behavior isolation is a claim about the input
+ * and there is no way to see it from the rows.
+ *
+ * **No key and no network.** The scripted judge stands in at the provider seam;
+ * everything on this side of it — the project's judge configuration, the sealed
+ * key, the resolution through the one door — is the real path.
+ */
+
+let world: World;
+let service: Service | undefined;
+
+const FIRST = "confirms the new time back before finishing";
+const SECOND = "never quotes a price";
+const THIRD = "offers to send a reminder";
+
+/** The three behaviors, each with its own priority, in the authored order. */
+const THREE = [
+  { behavior: FIRST, priority: "P0" as const },
+  { behavior: SECOND, priority: "P1" as const },
+  { behavior: THIRD, priority: "P2" as const },
+];
+
+async function verdictsOn(
+  simulationId: string,
+  atLeast: number,
+): Promise<readonly RecordedVerdict[]> {
+  return eventually(`${atLeast} verdicts on ${simulationId}`, async () => {
+    const read = await readVerdicts(world.auth, simulationId);
+    return read.verdicts.length >= atLeast ? read.verdicts : undefined;
+  });
+}
+
+/** The behaviors' rows, in dimension order, whatever else judged the same run. */
+function behaviorRows(
+  verdicts: readonly RecordedVerdict[],
+): readonly RecordedVerdict[] {
+  return [...verdicts]
+    .filter((verdict) => verdict.graderId === "expected_behaviors")
+    .sort((left, right) => left.dimension.localeCompare(right.dimension));
+}
+
+/** The running service stopped and waited out, so nothing re-claims behind us. */
+async function stopService(): Promise<void> {
+  if (service === undefined) return;
+  service.stop();
+  await service.finished;
+  service = undefined;
+}
+
+/**
+ * One conversation, judged by a judge that answers as scripted.
+ *
+ * A service per case rather than one for the file, because each case's judge is
+ * its own — and the previous one is stopped first, so exactly one copy is ever
+ * claiming and a case's answers can never land on another case's conversation.
+ */
+async function judgedWith(
+  answers: Readonly<Record<string, Scripted>>,
+  landing: Parameters<typeof conductSimulation>[1] = {},
+): Promise<{
+  readonly simulationId: string;
+  readonly judge: ReturnType<typeof scriptedJudge>;
+  readonly verdicts: readonly RecordedVerdict[];
+}> {
+  await stopService();
+
+  const judge = scriptedJudge({ answers });
+  service = runService(testConfig(), { makers: judge.makers });
+
+  const testId = await seedTest(world, [], THREE);
+  const { simulationId } = await conductSimulation(world, {
+    testId,
+    transcript: aConversation(),
+    ...landing,
+  });
+
+  const verdicts = await verdictsOn(simulationId, THREE.length);
+  // Waited out before the case returns, so the job is finished rather than
+  // merely written: a job still claimable when the next case starts its own
+  // copy would be judged a second time, by a judge scripted for another test.
+  await eventually(`the job for ${simulationId} to be graded`, async () => {
+    const [only] = await listGradingJobsForSimulation(world.auth, simulationId);
+    return only?.status === "graded" ? only : undefined;
+  });
+
+  return { simulationId, judge, verdicts };
+}
+
+beforeAll(async () => {
+  world = await makeWorld("grader_expected_behaviors");
+  await seedJudge(world);
+});
+
+afterAll(async () => {
+  await stopService();
+  await world.drop();
+});
+
+describe("a test with three expected behaviors", () => {
+  it("produces one verdict row per behavior, from three isolated judge inputs", async () => {
+    const { judge, verdicts } = await judgedWith({
+      [FIRST]: met("the agent read the new time back at turn 5.", [5]),
+      [SECOND]: met("no price was mentioned."),
+      [THIRD]: notMet("no reminder was offered."),
+    });
+
+    const rows = behaviorRows(verdicts);
+    expect(rows.map((row) => row.dimension)).toEqual([
+      "behavior_1",
+      "behavior_2",
+      "behavior_3",
+    ]);
+    expect(rows.map((row) => row.verdict)).toEqual([
+      "passed",
+      "passed",
+      "failed",
+    ]);
+
+    // Three calls, three criteria, each the behavior at its own position.
+    expect(judge.asked.map((question) => question.criterion)).toEqual([
+      FIRST,
+      SECOND,
+      THIRD,
+    ]);
+
+    /**
+     * The acceptance box, stated as an assertion: **no behavior's text appears
+     * in another behavior's judge input.** It holds structurally — the evidence
+     * type has nowhere for a second criterion to be — and it is asserted here
+     * because that is the property a future refactor could quietly lose.
+     */
+    for (const question of judge.asked) {
+      const shown = JSON.stringify(question);
+      for (const other of [FIRST, SECOND, THIRD]) {
+        if (other === question.criterion) continue;
+        expect(shown, `${question.criterion} was shown ${other}`).not.toContain(
+          other,
+        );
+      }
+    }
+  });
+
+  it("shows each judge the declared set — the transcript, the outcome, the tools, the measures", async () => {
+    const { judge } = await judgedWith({ [FIRST]: met("read back at turn 5.", [5]) });
+
+    const [shown] = judge.asked;
+    expect(shown?.evidence.transcript).toHaveLength(5);
+    expect(shown?.evidence.transcript[0]).toMatchObject({
+      at: 1,
+      speaker: "agent",
+    });
+    expect(shown?.evidence.outcome).toMatchObject({
+      happened: true,
+      endingReason: "persona_concluded",
+      turns: 5,
+    });
+    // Named and present even when empty, because "no tool calls were recorded"
+    // is evidence and a missing section is not.
+    expect(shown?.evidence.toolCalls).toEqual([]);
+    expect(shown?.evidence.measures).toEqual([
+      { measure: "turn_response_latency", samples: [900, 1_100] },
+    ]);
+  });
+
+  it("lands each behavior's own priority, snapshotted, and the turns it cited", async () => {
+    const { verdicts } = await judgedWith({
+      [FIRST]: met("the agent read the new time back at turn 5.", [5]),
+      [SECOND]: met("no price was mentioned."),
+      [THIRD]: notMet("no reminder was offered.", [3, 5]),
+    });
+
+    const rows = behaviorRows(verdicts);
+    expect(rows.map((row) => row.priority)).toEqual(["P0", "P1", "P2"]);
+    expect(rows[0]?.citedSpanIds).toEqual(["turn:5"]);
+    expect(rows[2]?.citedSpanIds).toEqual(["turn:3", "turn:5"]);
+    expect(rows[0]?.rationale).toBe(
+      "the agent read the new time back at turn 5.",
+    );
+    // The judge that answered, named on every row, and never the account.
+    for (const row of rows) {
+      expect(row.judgedBy).toBe("openai/gpt-4.1-mini");
+    }
+  });
+
+  it("drops a citation pointing at a turn the conversation does not have", async () => {
+    const { verdicts } = await judgedWith({
+      [FIRST]: met("cited past the end.", [5, 99]),
+    });
+
+    expect(behaviorRows(verdicts)[0]?.citedSpanIds).toEqual(["turn:5"]);
+  });
+});
+
+describe("a behavior the judge cannot determine", () => {
+  it("is skipped, and leaves the score's denominator", async () => {
+    const { simulationId, verdicts } = await judgedWith({
+      [FIRST]: met("read back at turn 5."),
+      [SECOND]: cannotDetermine("the conversation never reached prices."),
+      [THIRD]: notMet("no reminder was offered."),
+    });
+
+    expect(behaviorRows(verdicts).map((row) => row.verdict)).toEqual([
+      "passed",
+      "skipped",
+      "failed",
+    ]);
+
+    const read = await readVerdicts(world.auth, simulationId);
+    expect(read.outcome.counts).toMatchObject({
+      passed: 1,
+      failed: 1,
+      skipped: 1,
+      total: 3,
+    });
+    // One passed out of the two that were actually judged, not out of three.
+    expect(read.outcome.score).toBe(0.5);
+    expect(read.outcome.verdict).toBe("failed");
+  });
+});
+
+describe("a judge call that fails after its retries", () => {
+  /**
+   * The reason the fan-out is N independent calls rather than one. A judge that
+   * fell over on the second behavior must not cost the first and third their
+   * answers, and the row it leaves behind must say egma could not make the
+   * check rather than that the agent failed it.
+   */
+  it("errors that behavior alone and leaves its siblings' verdicts intact", async () => {
+    const { verdicts } = await judgedWith({
+      [FIRST]: met("read back at turn 5.", [5]),
+      [SECOND]: new Error("the judge model answered 503: upstream unavailable"),
+      [THIRD]: notMet("no reminder was offered."),
+    });
+
+    const rows = behaviorRows(verdicts);
+    expect(rows.map((row) => row.verdict)).toEqual([
+      "passed",
+      "errored",
+      "failed",
+    ]);
+    expect(rows[1]?.rationale).toContain("could not be judged");
+    expect(rows[1]?.rationale).toContain("503");
+    expect(rows[1]?.score).toBe(0);
+    // The priority is still the behavior's own: a check egma could not make is
+    // still a P1 check egma could not make.
+    expect(rows[1]?.priority).toBe("P1");
+  });
+});
+
+describe("a simulation that never ran", () => {
+  /**
+   * The multi-dimension case the engine left open until a type had several. A
+   * page must show the same three behaviors whether the conversation happened
+   * or not — a test that could not run should look like a test that could not
+   * run, not like a test with nothing in it.
+   */
+  it("is errored once per behavior, with no judge asked at all", async () => {
+    const { judge, verdicts } = await judgedWith(
+      { [FIRST]: met("never reached.") },
+      { failedBecause: "agent_never_joined" },
+    );
+
+    const rows = behaviorRows(verdicts);
+    expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      expect(row.verdict).toBe("errored");
+      expect(row.rationale).toContain("no conversation to judge");
+      expect(row.judgedBy).toBe("engine");
+    }
+    expect(rows.map((row) => row.priority)).toEqual(["P0", "P1", "P2"]);
+    expect(judge.asked).toEqual([]);
+  });
+});
+
+describe("a simulation born from no test", () => {
+  /**
+   * An ordinary case rather than a gap: somebody proving a connection with a
+   * smoke call wrote down no expectations, so there is nothing to judge them
+   * against — and the project's own graders still judge the conversation. The
+   * threshold grader is here so there is a row to wait for, which is what makes
+   * "no behavior rows" an observation rather than a timeout.
+   */
+  it("has no behavior rows at all, which is not the same as failing any", async () => {
+    await stopService();
+
+    const judge = scriptedJudge({ answers: {} });
+    service = runService(testConfig(), { makers: judge.makers });
+    await seedGrader(world, aThreshold({ name: "Latency, on an untested call" }));
+
+    const { simulationId } = await conductSimulation(world, {
+      transcript: aConversation(),
+    });
+    const verdicts = await verdictsOn(simulationId, 1);
+
+    expect(behaviorRows(verdicts)).toEqual([]);
+    expect(verdicts.map((verdict) => verdict.dimension)).toEqual([
+      "metric_threshold",
+    ]);
+    expect(judge.asked).toEqual([]);
+  });
+});

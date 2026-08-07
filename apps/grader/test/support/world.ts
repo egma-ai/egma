@@ -12,9 +12,11 @@ import {
   disconnectClickHouse,
   failSimulation,
   getSimulation,
+  setJudgeConfiguration,
   startRun,
   startSimulation,
   type AuthContext,
+  type ExpectedBehaviorInput,
   type FailedEndingReason,
   type NewGrader,
 } from "@egma/db";
@@ -29,7 +31,8 @@ import {
   type MigratedTraceStore,
 } from "../../../../packages/db/test/support/clickhouse.ts";
 import type { Config } from "../../src/config.ts";
-import { makeLog } from "../../src/log.ts";
+import type { JudgeMakers } from "../../src/judge/index.ts";
+import { makeLog, type Log } from "../../src/log.ts";
 import { startService, type Service } from "../../src/service.ts";
 
 /**
@@ -46,6 +49,8 @@ export type World = {
   readonly database: MigratedDatabase;
   readonly store: MigratedTraceStore;
   readonly auth: AuthContext;
+  /** The same person at the role that may set a project's judge. */
+  readonly adminAuth: AuthContext;
   readonly organizationId: string;
   readonly projectId: string;
   readonly agentId: string;
@@ -60,9 +65,11 @@ export async function makeWorld(label: string): Promise<World> {
   const database = await createMigratedDatabase(label);
   const store = await createMigratedTraceStore(label);
 
-  // The key is here only because seeding an agent seals a connection's
-  // credentials. The deployed service is given none, deliberately — grading
-  // never unseals a secret, so it is never handed the key that could.
+  // The master key, held for the whole world: seeding an agent seals a
+  // connection's credentials, and setting a project's judge seals its key. The
+  // grading service opens exactly one of those two — a judge key resolves only
+  // for a context built from a grading claim, and a connection's credentials
+  // sit behind a permission the engine's context does not carry.
   //
   // And a small pool on purpose: every file here owns two stores, the suite
   // runs files in parallel, and a generous default multiplied by the file count
@@ -128,6 +135,7 @@ export async function makeWorld(label: string): Promise<World> {
     database,
     store,
     auth,
+    adminAuth: { ...auth, role: "admin" },
     organizationId,
     projectId,
     agentId: agent.id,
@@ -148,6 +156,33 @@ export async function seedGrader(
   grader: NewGrader,
 ): Promise<string> {
   return (await createGrader(world.auth, grader)).id;
+}
+
+/**
+ * The one judge key every test in this suite configures, and it is written here
+ * rather than inline so a test can assert it never appears anywhere else.
+ *
+ * Distinctive on purpose: a substring nothing else in the codebase, the
+ * fixtures or the store could produce, so "the key is not in this log" is an
+ * assertion about the key rather than about luck.
+ */
+export const THE_JUDGE_KEY = "sk-egma-test-judge-NEVERLEAKME-9Z8Y7X";
+
+/**
+ * The project's default judge. No judge speaks over the wire in these tests —
+ * the scripted judge stands in at the provider seam — but everything up to that
+ * seam is the real path: the key is sealed on the way in, resolved through the
+ * one door on the way out, and never seen by anything in between.
+ */
+export async function seedJudge(
+  world: World,
+  judge: { readonly model?: string; readonly key?: string } = {},
+): Promise<void> {
+  await setJudgeConfiguration(world.adminAuth, {
+    provider: "openai",
+    model: judge.model ?? "gpt-4.1-mini",
+    key: judge.key ?? THE_JUDGE_KEY,
+  });
 }
 
 /** A latency threshold, which is the one type the skeleton executes. */
@@ -233,19 +268,39 @@ export async function conductSimulation(
   return { runId: started.id, simulationId: only.id };
 }
 
-/** A test with expected behaviors, and the graders its array names. */
+/**
+ * A test with expected behaviors, and the graders its array names.
+ *
+ * The behaviors are the caller's when it has an opinion, because the built-in
+ * grader judges exactly this list and most of what is worth asserting about it
+ * is a question of how many there are and what priorities they carry.
+ */
 export async function seedTest(
   world: World,
   graderIds: readonly string[],
+  expectedBehaviors: readonly ExpectedBehaviorInput[] = [
+    "confirms the new time back before finishing",
+  ],
 ): Promise<string> {
   const test = await createTest(world.auth, {
-    name: "Reschedules a booked appointment",
+    name: `Reschedules a booked appointment ${newId("tst").slice(-8)}`,
     scenario: "Their cleaning has to move to any afternoon next week.",
-    expectedBehaviors: ["confirms the new time back before finishing"],
+    expectedBehaviors: [...expectedBehaviors],
     personaIds: [world.personaId],
     graderIds: [...graderIds],
   });
   return test.id;
+}
+
+/** A transcript with enough turns in it for a judgment to cite one. */
+export function aConversation(): readonly unknown[] {
+  return [
+    { speaker: "agent", text: "Thanks for calling Lakeside Dental." },
+    { speaker: "persona", text: "I need to move my cleaning to Thursday." },
+    { speaker: "agent", text: "Thursday at four works. Shall I move it?" },
+    { speaker: "persona", text: "Yes please." },
+    { speaker: "agent", text: "Booked for Thursday at four. Anything else?" },
+  ];
 }
 
 /**
@@ -257,6 +312,9 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
   return {
     databaseUrl: "",
     clickhouseUrl: "",
+    // The stores are already connected by `makeWorld`, which is also what held
+    // the master key — the service under test never reads either of these.
+    encryptionKey: undefined,
     claimant: "grader-under-test",
     capacity: 4,
     heartbeatSeconds: 1,
@@ -267,8 +325,45 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
   };
 }
 
-export function runService(config: Config): Service {
-  return startService({ config, log: makeLog(config.logLevel, config.claimant) });
+export type ServiceUnderTest = {
+  /** How each judge provider is spoken to; absent means the real ones. */
+  readonly makers?: JudgeMakers | undefined;
+  /** Where the service's own log lines go, for a test that reads them. */
+  readonly log?: Log | undefined;
+};
+
+export function runService(
+  config: Config,
+  options: ServiceUnderTest = {},
+): Service {
+  return startService({
+    config,
+    log: options.log ?? makeLog(config.logLevel, config.claimant),
+    ...(options.makers === undefined ? {} : { makers: options.makers }),
+  });
+}
+
+/**
+ * A log that keeps every line instead of printing it, so a test can assert what
+ * the service said — and, more to the point, what it never said.
+ */
+export function capturedLog(): { readonly log: Log; readonly lines: string[] } {
+  const lines: string[] = [];
+  const at =
+    (level: string) =>
+    (message: string, fields: Record<string, unknown> = {}): void => {
+      lines.push(JSON.stringify({ level, message, ...fields }));
+    };
+
+  return {
+    lines,
+    log: {
+      debug: at("DEBUG"),
+      info: at("INFO"),
+      warn: at("WARN"),
+      error: at("ERROR"),
+    },
+  };
 }
 
 /** Waits for `answer` to stop being undefined, or gives up saying what it wanted. */

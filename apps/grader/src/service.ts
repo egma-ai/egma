@@ -10,6 +10,7 @@ import {
 
 import type { Config } from "./config.ts";
 import { gradeClaim } from "./grade.ts";
+import type { JudgeMakers } from "./judge/index.ts";
 import { saying, type Log } from "./log.ts";
 
 /**
@@ -44,6 +45,14 @@ export type ServiceOptions = {
    * sleeping. Never used in a deployment, and the service does not read it.
    */
   readonly onIdle?: (() => void) | undefined;
+  /**
+   * How each judge provider is spoken to. Absent means the real ones — which is
+   * every deployment. **The judge is a seam**, and this is it: a test hands over
+   * a scripted judge that answers deterministically from memory, so per-behavior
+   * fan-out, the skipped denominator and one-call-failed-and-its-siblings-did-not
+   * are all asserted with no key and no network anywhere under them.
+   */
+  readonly makers?: JudgeMakers | undefined;
 };
 
 export function startService(options: ServiceOptions): Service {
@@ -159,7 +168,7 @@ async function holdAndGrade(
   beating.unref();
 
   try {
-    const graded = await gradeClaim(claim);
+    const graded = await gradeClaim(claim, { makers: options.makers });
     // The verdicts are written before the job is finished, in that order and
     // not the other way round. Between the two this copy could lose the job to
     // an expired lease, and another copy would judge the same conversation

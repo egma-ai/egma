@@ -148,15 +148,24 @@ describe("the grader's place in the deployment", () => {
   });
 
   /**
-   * Absences, and each is load-bearing. The encryption key would let the grader
-   * unseal a customer's provider credentials, and it has no reason to; a model
-   * key would mean a judge configured per container rather than per project, and
-   * v1 executes no judged types at all.
+   * One presence and one absence, and both are load-bearing.
+   *
+   * The encryption key is here because a judged grader replays the project's own
+   * judge key to the provider and this is the process that makes the call. It is
+   * the same key the API seals with, and what this service can open with it is
+   * narrowed where it matters rather than by withholding the key: a judge key
+   * resolves only for a context built from a grading claim, and a connection's
+   * credentials ask for a permission the engine's context does not carry.
+   *
+   * A model key is still absent, and that is the one that must stay absent: a
+   * judge configured per container would be a judge no project chose, spending
+   * an account no project named, on conversations belonging to customers who
+   * never agreed to either.
    */
-  it("is handed no encryption key and no model key", async () => {
+  it("is handed the encryption key it needs, and no model key at all", async () => {
     const block = serviceBlock(await read("docker-compose.yml"), "grader");
     expect(block).toBeDefined();
-    expect(block).not.toContain("EGMA_ENCRYPTION_KEY:");
+    expect(block).toContain("EGMA_ENCRYPTION_KEY:");
     expect(block).not.toMatch(/API_KEY:/);
   });
 

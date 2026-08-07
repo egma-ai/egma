@@ -90,6 +90,15 @@ export type Priority = (typeof PRIORITIES)[number];
 export const GRADER_SCOPES = ["simulations", "production", "both"] as const;
 export type GraderScope = (typeof GRADER_SCOPES)[number];
 
+/**
+ * The judges egma can ask. It grows one provider at a time, behind one seam,
+ * and the list is here beside the other closed vocabularies because two tables
+ * hold it: the project's default judge below, and the per-grader override on a
+ * version row.
+ */
+export const JUDGE_PROVIDERS = ["openai"] as const;
+export type JudgeProvider = (typeof JUDGE_PROVIDERS)[number];
+
 export const grader = pgTable(
   "grader",
   {
@@ -148,6 +157,73 @@ export const grader = pgTable(
     index("grader_organization_id_project_id_idx")
       .on(table.organizationId, table.projectId)
       .where(sql`${table.deletedAt} is null`),
+  ],
+);
+
+/**
+ * The judge a project's judged graders run on, and the one key they speak with.
+ *
+ * **One row per project**, because "which model judges here" is one answer for
+ * a whole product area rather than a decision anybody makes per check. The
+ * `judge_model` on a version row is the exception, written down: it overrides
+ * the provider and the model and never the key, so bringing your own judge
+ * costs one secret rather than one per grader.
+ *
+ * **A table of its own rather than four columns on `project`, and the secret is
+ * the reason.** The project row is read whenever a session is resolved and
+ * whenever a list of projects is drawn; a sealed key sitting on it would be one
+ * careless `select *` away from a log line. The tenancy tables hold no secret
+ * today and this keeps it that way. `organization_settings` is this same shape
+ * one level up and for the same kind of reason: something a tenant may or may
+ * not have configured, keyed by the row it belongs to and read only by what
+ * needs it.
+ *
+ * The sealed envelope is the connection's, verbatim — the same `v1.<iv>.<
+ * ciphertext>.<tag>` under the same master key, opened in one place. A judge key
+ * cannot be hashed for the reason a provider credential cannot: egma has to
+ * replay it to OpenAI every time it judges.
+ */
+export const judgeConfiguration = pgTable(
+  "judge_configuration",
+  {
+    /**
+     * The project this is the judge for, and the row's whole identity — there
+     * is one judge configuration per project or none, so there is no second
+     * identifier to mint and none to name wrongly.
+     */
+    projectId: idText("project_id").primaryKey(),
+    organizationId: idText("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    /** The judge model's own name, as the provider spells it. */
+    model: text("model").notNull(),
+    /**
+     * The sealed envelope, never the key. Never selected by any read; the one
+     * opener is the access layer's judge-key resolver, and the only caller of
+     * that is egma's own grading engine.
+     */
+    credentials: text("credentials").notNull(),
+    /** The last characters of the key, kept so a person can tell two apart. */
+    credentialsHint: text("credentials_hint").notNull(),
+    createdBy: idText("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    prefixCheck("judge_configuration_project_id_prefix", table.projectId, "prj"),
+    oneOf("judge_configuration_provider_allowed", table.provider, [
+      ...JUDGE_PROVIDERS,
+    ]),
+    // The pairing, not each column on its own: a judge configuration cannot
+    // name one organization and another organization's project.
+    foreignKey({
+      name: "judge_configuration_project_organization_fk",
+      columns: [table.projectId, table.organizationId],
+      foreignColumns: [project.id, project.organizationId],
+    }).onDelete("cascade"),
   ],
 );
 

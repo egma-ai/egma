@@ -24,15 +24,16 @@ fan-out, no judge latency on a request path.
    events, measures — which is where a finished simulation already carries it.
 3. **Resolve.** Every grader in the project whose scope includes simulations,
    plus the graders named by the test version the conversation was executed
-   against. A grader named by both is one grader.
+   against. A grader named by both is one grader. Beside them, never among them,
+   stands the built-in below.
 4. **Execute.** One function per grader type, behind one seam. `metric_threshold`
    reads a measure off the conversation and applies an aggregation, a comparator
    and a threshold — in-process, no model, the same answer every time.
 5. **Write.** One row per judged dimension: the verdict word, a score, a
-   one-line rationale, the spans it cites, and the grader's priority as it stood
-   at that moment. **No overall row is written anywhere** — a conversation's
-   answer and a run's are folded from these rows at read time, so a headline can
-   never disagree with the evidence under it.
+   one-line rationale, the turns it cites, and the priority as it stood at that
+   moment. **No overall row is written anywhere** — a conversation's answer and
+   a run's are folded from these rows at read time, so a headline can never
+   disagree with the evidence under it.
 
 Two rules run through all of it. **A simulation that never ran is `errored` for
 every grader and never `failed`** — a broken test is not a broken agent. And **a
@@ -40,6 +41,60 @@ check that could not be made says so**: a measure this conversation does not
 have is `skipped` and leaves the score's denominator; a measure recorded in a
 shape egma never writes is `errored`, because a corrupted row and a missing one
 are different facts.
+
+## The built-in: a test's expected behaviors, judged one at a time
+
+Every test is judged against its own expected behaviors, always. The built-in
+grader that does it is never attached, never detached, and never a row in any
+table — applying it is part of what running a test means, so a test can never be
+made unfalsifiable.
+
+**One independent judge call per behavior**, all in parallel, each producing its
+own verdict row. The alternative — one call that reads the whole list — gives a
+developer one blurred explanation and lets a judge trade a failed behavior off
+against a passed one. Here each row names the behavior's position
+(`behavior_1`, `behavior_2`, …) in the order the author wrote them, and carries
+**the behavior's own priority**, so a nice-to-have cannot block a release and a
+must-have always can.
+
+The isolation is structural: a judge is handed one criterion and the
+conversation's evidence, and the evidence has nowhere for a second criterion to
+be. No behavior's words can reach another behavior's judge.
+
+**What a judge reads is a declared set** — the transcript numbered by turn, how
+the conversation ended, the tools the agent called, and what was measured.
+Text-only today; the recording is designed for and joins the same set when it
+arrives.
+
+**A behavior a judge cannot determine is `skipped`** and leaves the score's
+denominator: a judge that could only say yes or no would guess, and a guess
+dressed as a judgment is the false trust this product exists to kill. **A judge
+call that fails after its retries is `errored` for that behavior alone** — its
+siblings were separate calls and their answers land untouched.
+
+Citations are turn references (`turn:5`) rather than span ids, because a
+simulation read from its own header row has no spans yet. The prefix is what
+lets a reader tell the two apart on the day both are in that column.
+
+## Judges
+
+A judge is the project's: **provider, model, and a key held in the encrypted
+credential store**, set once per project and overridable per grader (a grader
+version may name its own provider and model — never its own key, so no grader
+can move a project's judging onto an account nobody configured).
+
+v1 ships the OpenAI provider and nothing else, behind a provider-shaped seam: a
+second provider is a second file plus a line in one roster. Requests go to
+`https://api.openai.com/v1/chat/completions` — one POST, one JSON body, one JSON
+answer, no SDK.
+
+**The key is read once per conversation, handed to one `fetch`, and written
+nowhere.** It is not in a verdict row, not in a log line, not in a rationale, and
+not in what a refusal says. A verdict names the judge as `openai/<model>`, which
+is what "which judge said this" needs and all it needs.
+
+A project that configured no judge still runs every deterministic grader it has;
+its judged checks come back `errored` saying so, never quietly green.
 
 ## Configuration
 
@@ -49,6 +104,7 @@ Everything arrives as environment variables.
 | --- | --- | --- |
 | `DATABASE_URL` | (required) | Where conversations, graders and tests are read from. |
 | `CLICKHOUSE_URL` | (required) | Where verdicts are written. |
+| `EGMA_ENCRYPTION_KEY` | (unset) | What a project's judge key was sealed with. Only needed once a project configures a judge. |
 | `EGMA_GRADER_CLAIMANT` | `grader-<host>-<pid>` | The name stamped on claims. |
 | `EGMA_GRADER_CAPACITY` | `4` | Most conversations judged at once. |
 | `EGMA_GRADER_HEARTBEAT_SECONDS` | `15` | How often a copy says it still holds a job. |
@@ -56,13 +112,22 @@ Everything arrives as environment variables.
 | `EGMA_GRADER_SWEEP_SECONDS` | `30` | The backstop, not the trigger — see below. |
 | `EGMA_GRADER_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARN` or `ERROR`. |
 
-There is deliberately no encryption key here. Grading reads conversations,
-graders and test versions and writes verdicts; it never touches a connection's
-credentials, so it is never handed the key that could unseal one.
+`EGMA_ENCRYPTION_KEY` is the same key the API seals with, and it is here because
+a judged grader replays the project's own judge key to the provider — the
+process making that call has to be able to open the envelope. What it can open
+is narrowed on the other side rather than by withholding the key: a judge key
+resolves only for a context built from a grading claim, and a connection's
+credentials sit behind a door asking for a permission the engine's context does
+not carry.
 
-There is deliberately no model key either. The grader types v1 executes are
-deterministic and judge in-process. A judge model belongs to the project that
-configured it rather than to a container.
+It is optional, and its absence is an ordinary deployment: a project that
+configured no judge never opens an envelope. A project that did, on a grader
+given no key, gets `errored` verdicts saying the key could not be read — never a
+service that will not start, and never a silent pass.
+
+There is deliberately **no model key** here, and that one stays absent. A judge
+configured per container would be a judge no project chose, spending an account
+no project named. The judge belongs to the project.
 
 ## How work reaches it
 
@@ -88,6 +153,28 @@ A type that is named and has no executor yet answers `errored` rather than
 saying nothing, because a page that goes green because a check quietly judged
 nothing is the exact false trust this product exists to kill.
 
+A type that judges with a model asks for one through `src/judge/`. `judgeOnce`
+gives the engine a resolution it can pass around; calling it reads the project's
+configuration and unseals its key at most once per conversation, and only if
+something actually judges. What comes back answers `judging(override, makers)`
+with two things and no more: **`ask`**, a function that decides one criterion,
+and **`name`**, the `provider/model` string a verdict row carries as its
+`judged_by`. Pass a grader version's `judgeModel` as the override, or `null` for
+the project's own — the built-in passes `null`, because it is nobody's to
+configure.
+
+The key is not on that pair, and that is the point: nothing under `src/graders/`
+can reach one, so no grader type — today's or tomorrow's — can put a key in a
+rationale, a row or a log.
+
+## Adding a judge provider
+
+One file, one line, on the same terms. `src/judge/contract.ts` says what a judge
+is asked and what it answers; write a module beside `src/judge/openai.ts` and
+name it in the roster in `src/judge/index.ts`. The roster is keyed by the closed
+provider list the database checks against, so a provider added there refuses to
+build until it is told how to ask.
+
 ## Tests
 
 ```
@@ -98,5 +185,13 @@ npx vitest run apps/grader
 Both stores are real. Everything worth asserting here is one of their
 behaviours: the notification a transaction raises, the lock that keeps two
 copies off one conversation, and the store's identity collapsing a second
-judgment onto the one it repeats rather than filing it beside it. No test needs
-a model key, because nothing under them does.
+judgment onto the one it repeats rather than filing it beside it.
+
+**The judge is a seam, and the whole suite runs on a scripted one** — answers
+from memory, no key, no network. What that leaves untested is the wire, so one
+live smoke asks a real OpenAI judge one question. It is opt-in, and with no key
+in the environment it skips visibly rather than failing:
+
+```
+TEST_OPENAI_API_KEY=sk-... npx vitest run apps/grader/test/live-openai
+```

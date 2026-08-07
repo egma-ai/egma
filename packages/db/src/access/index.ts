@@ -304,6 +304,20 @@ export type {
   Priority,
 } from "../schema/graders.ts";
 
+/**
+ * The project's default judge. `resolveJudgeKey` is the one door to the
+ * plaintext of a judge key and it takes the context like everything else — and
+ * then refuses every context that did not come from a grading claim, because
+ * judging is the only thing egma does with one.
+ */
+export {
+  getJudgeConfiguration,
+  resolveJudgeKey,
+  setJudgeConfiguration,
+  type JudgeConfiguration,
+  type NewJudgeConfiguration,
+} from "./judges.ts";
+
 export {
   cancelRun,
   claimSimulations,

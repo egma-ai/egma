@@ -12,6 +12,21 @@ import { hostname } from "node:os";
 export type Config = {
   readonly databaseUrl: string;
   readonly clickhouseUrl: string;
+  /**
+   * What a project's judge key was sealed with, or absent.
+   *
+   * **Optional, and the absence is a real deployment rather than a mistake.**
+   * A deployment whose projects configured no judge never opens an envelope, so
+   * insisting on the key at boot would refuse to start a perfectly good grader
+   * over a secret it will never use. A deployment that *has* configured one and
+   * forgot this gets the truth at the moment it matters: the judged dimensions
+   * come back `errored`, saying the key could not be read, which is the same
+   * sentence a page shows and never a green tick.
+   *
+   * It is checked here rather than at first use, so a value that is not a key
+   * at all is caught at boot like every other bad configuration.
+   */
+  readonly encryptionKey: string | undefined;
   /** This copy's own name for itself, in claims and in the log. */
   readonly claimant: string;
   /** How many conversations this copy judges at once. */
@@ -106,12 +121,26 @@ function defaultClaimant(): string {
   return `grader-${hostname()}-${process.pid}`;
 }
 
+/** Absent, or 32 bytes of hex; anything else is refused at boot. */
+function encryptionKey(): string | undefined {
+  const written = process.env["EGMA_ENCRYPTION_KEY"]?.trim();
+  if (written === undefined || written === "") return undefined;
+
+  if (!/^[0-9a-f]{64}$/i.test(written)) {
+    throw new Error(
+      "EGMA_ENCRYPTION_KEY must be 32 random bytes written as 64 hex characters, and this is not one — a grader given a wrong key would start and then fail to open every judge key it was ever asked for",
+    );
+  }
+  return written;
+}
+
 export function loadConfig(): Config {
   const claimant = process.env["EGMA_GRADER_CLAIMANT"]?.trim();
 
   const config: Config = {
     databaseUrl: required("DATABASE_URL"),
     clickhouseUrl: required("CLICKHOUSE_URL"),
+    encryptionKey: encryptionKey(),
     claimant: claimant === undefined || claimant === "" ? defaultClaimant() : claimant,
     capacity: positiveWholeNumber("EGMA_GRADER_CAPACITY", DEFAULT_CAPACITY),
     heartbeatSeconds: positiveWholeNumber(

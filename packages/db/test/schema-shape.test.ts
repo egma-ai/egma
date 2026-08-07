@@ -41,6 +41,8 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   connection: "con",
   grader: "grd",
   grader_version: "grv",
+  // The project's default judge, keyed by the project it is the judge for.
+  judge_configuration: "prj",
   test: "tst",
   test_version: "tstv",
   test_persona: "tstv",
@@ -299,6 +301,7 @@ describe("every enumerated value", () => {
       { table: "grader", column: "type" },
       { table: "grader", column: "priority" },
       { table: "grader", column: "scope" },
+      { table: "judge_configuration", column: "provider" },
       { table: "run", column: "status" },
       { table: "run", column: "triggered_via" },
       { table: "simulation", column: "status" },

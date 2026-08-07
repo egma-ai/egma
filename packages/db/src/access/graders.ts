@@ -7,9 +7,11 @@ import {
   graderVersion,
   GRADER_SCOPES,
   GRADER_TYPES,
+  JUDGE_PROVIDERS,
   PRIORITIES,
   type GraderScope,
   type GraderType,
+  type JudgeProvider,
   type Priority,
 } from "../schema/graders.ts";
 import type { AuthContext } from "./context.ts";
@@ -87,9 +89,12 @@ export type PhraseMatch = (typeof PHRASE_MATCHES)[number];
 const PHRASE_SPEAKERS = ["agent", "persona", "either"] as const;
 export type PhraseSpeaker = (typeof PHRASE_SPEAKERS)[number];
 
-/** The judges egma can ask. Grows one provider at a time, behind one seam. */
-const JUDGE_PROVIDERS = ["openai"] as const;
-export type JudgeProvider = (typeof JUDGE_PROVIDERS)[number];
+/**
+ * The judges egma can ask live beside the other closed vocabularies, in the
+ * schema, because the project's default judge is a table of its own and the two
+ * must name the same list.
+ */
+export type { JudgeProvider };
 
 /**
  * The judge this grader insists on, instead of the project's default. Provider

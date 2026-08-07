@@ -78,6 +78,13 @@
       "when": 1786118174525,
       "tag": "0010_grading_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786121620948,
+      "tag": "0011_judge_configuration",
+      "breakpoints": true
     }
   ]
 }
