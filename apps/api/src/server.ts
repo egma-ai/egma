@@ -223,8 +223,15 @@ export function buildApi(options: ServerOptions): Api {
   // The OTLP door, registered without `fastify-plugin` for the same reason the
   // provider's adapter is: it replaces every body parser inside its own scope
   // so that telemetry arrives as the bytes that were sent, and encapsulation is
-  // what stops that reaching the JSON routes above.
-  void app.register(traceRoutes, { provider: identity.provider, rateLimit });
+  // what stops that reaching the JSON routes above. It takes the service token
+  // beside the customer credentials because it is the one door with two: a
+  // customer key files an agent's traces, and the simulator's own spans arrive
+  // through this same door naming the simulation they are evidence of.
+  void app.register(traceRoutes, {
+    provider: identity.provider,
+    rateLimit,
+    serviceToken: config.simulatorServiceToken,
+  });
 
   // The v1 read surface, in its own scope beside the door rather than inside
   // it. It shares the `/v1/traces` path and none of the door's arrangements: a

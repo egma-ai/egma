@@ -61,3 +61,15 @@ export function acceptsServiceToken(
     createHash("sha256").update(value, "utf8").digest();
   return timingSafeEqual(digest(presented), digest(configured));
 }
+
+/**
+ * Whether this request is at least *trying* to be the service — a bearer
+ * wearing the service prefix, whatever its secret. On a door that serves the
+ * service token beside customer credentials, this is what lets a stale or
+ * mistyped token be refused in the service's own vocabulary instead of being
+ * told to sign in: the prefix means it can never be a customer key, so the
+ * advice a customer needs would send the simulator's operator the wrong way.
+ */
+export function wearsServiceTokenPrefix(header: string | undefined): boolean {
+  return serviceTokenOn(header) !== null;
+}
