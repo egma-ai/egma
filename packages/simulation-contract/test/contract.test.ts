@@ -7,7 +7,7 @@ import ajvFormats from "ajv-formats";
 import type { FormatsPlugin } from "ajv-formats";
 import { describe, expect, it } from "vitest";
 
-import { specComplaints } from "@egma/simulation-contract";
+import { reportComplaints, specComplaints } from "@egma/simulation-contract";
 
 // ajv-formats ships CommonJS whose module.exports is the plugin function
 // itself; under NodeNext TypeScript types the default import as a namespace,
@@ -425,5 +425,72 @@ describe("the exported spec check, which the control plane sends through", () =>
   it("complains about a document that is not an object at all", () => {
     expect(specComplaints(null).length).toBeGreaterThan(0);
     expect(specComplaints("a string").length).toBeGreaterThan(0);
+  });
+});
+
+describe("the exported report check, which the report route reads through", () => {
+  it("has no complaints about any valid golden fixture", async () => {
+    for (const fixture of await fixturesUnder("report", "valid")) {
+      expect(reportComplaints(fixture.document), fixture.name).toEqual([]);
+    }
+  });
+
+  it("complains about every deliberately invalid fixture", async () => {
+    for (const fixture of await fixturesUnder("report", "invalid")) {
+      expect(
+        reportComplaints(fixture.document).length,
+        `${fixture.name} raised no complaint`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("names the place a document is wrong, in the shape the spec check uses", async () => {
+    const carried = await readJson(
+      "fixtures",
+      "report",
+      "valid",
+      "completed-chat.json",
+    );
+
+    const { events: _events, ...missingEvents } = carried;
+    expect(reportComplaints(missingEvents)).toEqual([
+      ": must have required property 'events'",
+    ]);
+  });
+
+  it("refuses the endings that are the platform's own words, never a reporter's", async () => {
+    // `orphaned` is the sweep's verdict on a simulator that went silent, and
+    // a simulator still talking cannot claim it; `dispatch_failed` is the
+    // claim path's own landing for work it could not hand over. The wire's
+    // vocabulary carries neither, so a report claiming either is refused at
+    // validation — before any route has to reason about it.
+    const carried = await readJson(
+      "fixtures",
+      "report",
+      "valid",
+      "failed-agent-never-joined.json",
+    );
+
+    for (const ending of ["orphaned", "dispatch_failed", "capacity"]) {
+      const claiming = {
+        ...carried,
+        events: (carried.events as Record<string, unknown>[]).map((event) => ({
+          ...event,
+          facts: {
+            ...(event.facts as Record<string, unknown>),
+            ending,
+          },
+        })),
+      };
+      expect(
+        reportComplaints(claiming).length,
+        `a report claiming "${ending}" raised no complaint`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("complains about a document that is not an object at all", () => {
+    expect(reportComplaints(null).length).toBeGreaterThan(0);
+    expect(reportComplaints("a string").length).toBeGreaterThan(0);
   });
 });
