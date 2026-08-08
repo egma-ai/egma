@@ -50,7 +50,9 @@ the two cannot disagree about which dispatch style is being exercised.
 
 The last two are egma's, not this agent's: the persona is a synthetic
 caller and needs its own speech, billed to you by those providers. The
-OpenAI key is this agent's alone and the simulator never sees it.
+OpenAI key is this agent's alone — sourcing one file puts it in both
+processes, but egma reads no such variable and the persona never speaks
+through it.
 
 With the worker running, from the repository root:
 
