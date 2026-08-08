@@ -37,6 +37,21 @@ reported from where the audio is actually observed — the pipeline — because
 a transcript cannot carry it and a clock around the turn would be timing
 this process rather than the conversation."""
 
+OnAnswered = Callable[[], Awaitable[None]]
+"""Everything one agent answer produced is on the record — the words it
+carried, the tool calls it made, the time it took.
+
+It carries nothing, because it is not an observation: it is the boundary
+between one answer and the next, and turn-taking is the only thing that
+knows where that falls. An answer that produced no words is still an
+answer that ended, which is exactly the case a reader of the turns alone
+would miss. An agent that speaks first has finished saying its piece the
+same way, so the opening counts as one.
+
+The last answer of a conversation is deliberately not announced: the walk
+is over, and whatever it produced belongs with the record of the whole
+thing rather than in a boundary of its own."""
+
 # The two causes a WalkControls can carry. Writer and reader both name
 # these constants, so a stop can never be misread as the other cause.
 CANCEL_DIRECTIVE = "cancel directive"
@@ -127,6 +142,7 @@ async def conduct(
     controls: WalkControls,
     name: str,
     on_tool_call: OnToolCall | None = None,
+    on_answered: OnAnswered | None = None,
 ) -> Conducted:
     """Walk one simulation through one exchange, and say how it went."""
     loop = asyncio.get_running_loop()
@@ -135,6 +151,10 @@ async def conduct(
     async def record(speaker: str, text: str) -> None:
         history.append(Turn(speaker, text))
         await on_turn(speaker, text)
+
+    async def answered() -> None:
+        if on_answered is not None:
+            await on_answered()
 
     def budget_spent() -> bool:
         return len(history) >= max_turns
@@ -158,6 +178,7 @@ async def conduct(
         greeting = await controls.guard(plug.open())
         if greeting is not None:
             await record("agent", greeting)
+        await answered()
 
         while True:
             # The persona's move — unless the budget is already spent.
@@ -191,6 +212,11 @@ async def conduct(
                 await record("agent", answer.text)
             if answer.ended:
                 return ended("agent_ended", "the agent ended the exchange")
+            # The answer is whole, whatever it turned out to carry. Said
+            # here rather than beside the turn above, because an answer
+            # with no words is still an answer, and a boundary read off
+            # the transcript alone would miss exactly that one.
+            await answered()
     except _WalkStopped:
         if controls.cause == CANCEL_DIRECTIVE:
             return Conducted(

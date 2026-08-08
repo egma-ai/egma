@@ -1300,3 +1300,80 @@ async def test_a_voice_simulation_produces_the_same_shapes_plus_its_audio_facts(
 
     # A persona turn is exactly as long as the audio the persona spoke.
     assert durations("persona_speech_duration") == durations("human_turn")[:-1]
+
+
+async def test_an_answer_that_only_called_a_tool_is_flushed_like_any_other(
+    workbench, start_simulator
+):
+    """A flush closes an answer, not a turn.
+
+    An agent that calls a tool and says nothing produces no transcript
+    turn, so a flush keyed on turns would leave that answer's tool calls
+    and its measurement sitting in a buffer until the agent next spoke —
+    or until the conversation was over, which is the one moment live
+    evidence is no longer live.
+    """
+    spec = scripted_spec(
+        "sim-spans-tool-only",
+        scenario="Move my Tuesday cleaning to Thursday. Any afternoon suits.",
+        greeting="Lakeside Dental, how can I help?",
+        replies=[None, "Moved — Thursday at three."],
+        tool_calls=[
+            {
+                "name": "reschedule_appointment",
+                "arguments": '{"appointment_id":"apt-88213"}',
+            }
+        ],
+    )
+    await workbench.offer(spec)
+    start_simulator(workbench)
+
+    records = await workbench.wait_for(has_terminal("sim-spans-tool-only"))
+    recorded = spans_for(records, "sim-spans-tool-only")
+
+    # The wordless answer said nothing, so the transcript never mentions
+    # it — the agent's two turns are the greeting and the later words.
+    turns = events_for(records, "sim-spans-tool-only", "turn")
+    assert [turn["text"] for turn in turns if turn["speaker"] == "agent"] == [
+        "Lakeside Dental, how can I help?",
+        "Moved — Thursday at three.",
+    ]
+
+    def flush_carrying(name: str, said: str | None = None) -> int:
+        for record in recorded:
+            span = record["span"]
+            if span["name"] != name:
+                continue
+            if said is not None and span_attribute(span, "egma.turn.text") != said:
+                continue
+            return record["flush"]
+        raise AssertionError(f"no {name} span was ever recorded")
+
+    tool_flush = flush_carrying("tool_call")
+    words_flush = flush_carrying("agent_turn", "Moved — Thursday at three.")
+    root_flush = flush_carrying("simulation")
+
+    # It left while the conversation was still going, not with the root.
+    assert tool_flush < root_flush
+    # And on its own account: the words that came an answer later rode a
+    # later flush, so nothing swept the tool call along with them.
+    assert tool_flush < words_flush
+
+    # The whole answer went together — its measurement rode the same flush
+    # as the call it measured, which is what "a flush is an answer" means.
+    assert any(
+        record["flush"] == tool_flush
+        and record["span"]["name"] == "turn_response_latency"
+        for record in recorded
+    ), "the wordless answer's measurement was split from its tool call"
+
+    # The invariants the design rests on, unchanged by the extra flush.
+    by_flush: dict[int, set[str]] = {}
+    for record in recorded:
+        by_flush.setdefault(record["flush"], set()).add(record["span"]["spanId"])
+    seen: set[str] = set()
+    for ids in by_flush.values():
+        assert seen.isdisjoint(ids)
+        seen |= ids
+    assert [record["span"]["name"] for record in recorded][-1] == "simulation"
+    assert [record for record in records if record["kind"] == "refusal"] == []

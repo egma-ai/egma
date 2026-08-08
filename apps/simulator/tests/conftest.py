@@ -289,7 +289,7 @@ def scripted_spec(
     scenario: str = A_SCENARIO,
     personality: str = A_PERSONALITY,
     greeting: str | None = None,
-    replies: list[str] | None = None,
+    replies: list[str | None] | None = None,
     ends_after_replies: bool = False,
     turn_seconds: float = 0.0,
     provider_reference: str | None = None,

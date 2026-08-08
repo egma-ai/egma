@@ -10,8 +10,10 @@ Its config keys, like every plug's, are its own:
 
 - ``greeting`` (string, optional) — spoken by the agent the moment the
   exchange opens. Absent: the persona speaks first.
-- ``replies`` (list of strings, default empty) — the agent's answers, in
-  order, one per persona turn.
+- ``replies`` (list, default empty) — the agent's answers, in order, one
+  per persona turn. An entry may be ``null`` instead of a string, which
+  is an answer that carried no words — what a real platform hands back
+  when its agent called a tool and said nothing.
 - ``ends_after_replies`` (bool, default false) — when true, the last
   scripted reply ends the exchange (with no replies at all, the exchange
   ends silently on the first persona turn). When false, a spent script
@@ -78,9 +80,12 @@ class ScriptedCounterpart:
 
         replies = config.get("replies", [])
         if not isinstance(replies, list) or not all(
-            isinstance(reply, str) for reply in replies
+            reply is None or isinstance(reply, str) for reply in replies
         ):
-            raise PlugError("scripted config: replies must be a list of strings")
+            raise PlugError(
+                "scripted config: replies must be a list of strings, with "
+                "null for an answer that carried no words"
+            )
 
         ends_after_replies = config.get("ends_after_replies", False)
         if not isinstance(ends_after_replies, bool):

@@ -231,6 +231,7 @@ class RunningSimulation:
                     on_turn=self._on_turn,
                     on_timing=self._on_timing,
                     on_tool_call=self._on_tool_call,
+                    on_answered=self._on_answered,
                     controls=self._controls,
                     name=f"sim:{self.simulation_id}",
                 )
@@ -286,14 +287,21 @@ class RunningSimulation:
             self._reporter.timing("first_response_latency", elapsed_ms)
             self._spans.measure("first_response_latency", elapsed_ms)
 
-        if speaker == "agent":
-            # One flush per exchange, which is where the conversation
-            # actually has a seam: the persona's turn, whatever the agent
-            # did while answering, and the answer itself go together, and
-            # the flush after them is the moment a reader could watch this
-            # simulation live. Finer would be a request per span; coarser
-            # would be a transcript that only exists once it is over.
-            self._spans.flush()
+    async def _on_answered(self) -> None:
+        """One flush per answer, which is where the conversation actually
+        has a seam: the persona's turn, whatever the agent did while
+        answering, and the answer itself go together, and the flush after
+        them is the moment a reader could watch this simulation live.
+        Finer would be a request per span; coarser would be a transcript
+        that only exists once it is over.
+
+        The walk says when an answer is whole rather than this file
+        inferring it from a turn arriving, because an answer that made a
+        tool call and said nothing produces no turn — and it is precisely
+        that answer whose evidence must not sit in a buffer waiting for
+        the agent to speak again.
+        """
+        self._spans.flush()
 
     async def _on_timing(self, measure: str, milliseconds: float) -> None:
         self._reporter.timing(measure, milliseconds)
