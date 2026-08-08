@@ -112,6 +112,12 @@ class StubRoom:
             answered_by=self._backend.answer_to,
         )
         self._backend.stub.sessions.append(self._session)
+        # Where egma minted its own token, the worker is on its way because
+        # egma asked for it. Where it did not, nobody asked and nobody
+        # could: the endpoint that minted the token is what dispatches, so
+        # from the room's side the agent simply turns up — or does not.
+        if self._backend.endpoint_dispatches:
+            self._backend.agent_is_coming = self._backend.stub.agent_joins
         if self._backend.agent_is_coming:
             self.agent_arrives()
         return self._session
@@ -140,13 +146,25 @@ class StubRoom:
 
 
 class RoomStubBackend(LiveKitRoomBackend):
-    """The real room driver, with its three network calls answered here."""
+    """The real room driver, with its three network calls answered here.
+
+    The token request is deliberately not among them: a connection that
+    asks an endpoint for one really asks, over a socket, of the fake
+    endpoint in :mod:`token_endpoint_stub`. So what CI proves about the
+    request egma sends and the answers it will take is proved about the
+    driver's own HTTP code rather than about a stand-in for it.
+    """
 
     def __init__(self, stub: RoomStub, **built: object) -> None:
         super().__init__(**built)
         self.stub = stub
         self.agent_is_coming = False
         self._delivered = 0
+
+    @property
+    def endpoint_dispatches(self) -> bool:
+        """Whether getting the agent in was somebody else's job."""
+        return not self._settings.mints_its_own
 
     # -- Where the driver reaches a LiveKit, and this stands in for one -------
 
@@ -159,7 +177,12 @@ class RoomStubBackend(LiveKitRoomBackend):
         else:
             self._agent_asked_for(request, what_failed)
 
-    def _joined_room(self) -> StubRoom:
+    def _joined_room(self, way_in: object) -> StubRoom:
+        # Recorded rather than used: what a real join would have been
+        # handed is the only way to see that a token fetched from an
+        # endpoint, and the server URL that answer named, are what egma
+        # really went to the room with.
+        self.stub.joined_with.append(way_in)
         return StubRoom(self, band_hz=self._band_hz)
 
     async def _delete_room(self) -> None:
@@ -248,7 +271,12 @@ class RoomStub:
     for, because the room itself was the request."""
 
     deleted: list[str] = field(default_factory=list)
-    """Every room it was asked to delete, in order."""
+    """Every room it was asked to delete, in order. Empty is what a
+    connection with no power to delete looks like from the server's side:
+    egma left, and the room's own empty timeout closes it."""
+
+    joined_with: list[object] = field(default_factory=list)
+    """The token and server URL egma really went into each room with."""
 
     sessions: list[StubSession] = field(default_factory=list)
     """The audio of every room that was joined — what a test asks when it
