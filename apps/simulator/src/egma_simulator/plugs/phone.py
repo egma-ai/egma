@@ -90,8 +90,14 @@ class PhoneCall:
         modality: str,
         config: dict[str, Any],
         credentials: object,
+        simulation_id: str | None = None,
         media: MediaSettings | None = None,
     ) -> None:
+        # A phone call is reached over the public telephone network, which
+        # has never carried anything but a number, so this plug has
+        # nothing to tell the far end about the simulation.
+        del simulation_id
+
         # Which bridge and which trunk were checked at startup; this reads
         # the result rather than the environment, so nothing here can be
         # the first to discover a deployment cannot dial. The keyword is

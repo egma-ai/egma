@@ -77,8 +77,17 @@ class RetellChat:
     """One Retell chat, opened and conducted and ended, per instance."""
 
     def __init__(
-        self, *, modality: str, config: dict[str, Any], credentials: object
+        self,
+        *,
+        modality: str,
+        config: dict[str, Any],
+        credentials: object,
+        simulation_id: str | None = None,
     ) -> None:
+        # Retell mints its own chat id and that is what a report joins on,
+        # so this plug has nothing to tell it about the simulation.
+        del simulation_id
+
         if modality != "chat":
             raise PlugError(
                 f"the retell chat plug speaks chat only; a {modality!r} "
