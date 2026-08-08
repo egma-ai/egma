@@ -8,9 +8,9 @@ there. What a spec names is a server, a key pair, and — where the
 customer runs more than one agent — which agent to ask for.
 
 The room itself is a media driver's job — see
-:mod:`egma_simulator.media.livekit_room`, which owns the room whole:
-create it, mint the token, join outbound, dispatch the agent, learn that
-it really turned up, and delete the room whatever happened. This module
+:mod:`egma_simulator.media.livekit_room`, which owns the room whole: come
+by a token and a room, join outbound, get the agent in where it can, learn
+that it really turned up, and tidy up whatever happened. This module
 owns the *lifecycle* above that seam, and it is deliberately thin: open,
 carry the persona's speech out and the agent's speech back, notice the
 agent leaving, end deliberately, and offer the room's name as the
@@ -18,7 +18,12 @@ provider reference — the one join between egma's record and the
 platform's own telemetry.
 
 Its config keys, like every plug's, are its own, and they are read by the
-driver that uses them:
+driver that uses them. There are two shapes of them, told apart by whether
+``tokenEndpoint`` is there, and they are two answers to one question: who
+mints the token that opens the room.
+
+**egma mints it.** The connection carries the project's key pair, and egma
+creates the room, dispatches the worker and deletes the room at the end:
 
 - ``url`` (string, required) — the customer's LiveKit, ``ws``/``wss`` or
   ``http``/``https``. Cloud and self-hosted are the same URL and the same
@@ -33,6 +38,21 @@ Its credentials are the customer's LiveKit ``apiKey`` and ``apiSecret``.
 Unlike a phone connection, a room connection carries its own: the room is
 the customer's project, not this deployment's, so nothing about reaching
 it comes from the environment.
+
+**The customer mints it.** The connection names where egma asks instead,
+and the secret that signs tokens for the whole project never leaves the
+customer's side:
+
+- ``url`` (string, required) — as above, and what the join falls back on
+  where the endpoint's answer names no server of its own.
+- ``tokenEndpoint`` (string, required) — an ``http`` or ``https`` address
+  egma POSTs to, once per simulation.
+
+Its credentials are that endpoint's auth ``headers``, and they may be
+absent where the endpoint is open to egma alone. There is no agent name
+and no metadata, because both are powers a key pair buys: this shape holds
+none, so **dispatching is the endpoint's job** — and a room nobody joined
+says exactly that.
 
 ## The band an exchange in a room is carried at
 

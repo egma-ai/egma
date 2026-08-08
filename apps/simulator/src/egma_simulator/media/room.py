@@ -58,6 +58,28 @@ def fresh_room_name() -> str:
     return f"{ROOM_PREFIX}-{uuid.uuid4().hex}"
 
 
+def room_name_for(simulation_id: str) -> str:
+    """The room one simulation is conducted in, named after it.
+
+    For the connections where egma does not open the room itself but asks
+    somebody else for a token into it. The name has to be one the other
+    side can check rather than one only egma knows, and a simulation's own
+    id is exactly that: unique because a simulation is, and derived from
+    what egma is about to ask for, so an endpoint can hold egma to it.
+    """
+    return f"{ROOM_PREFIX}-{simulation_id}"
+
+
+def persona_name_for(simulation_id: str) -> str:
+    """Who the simulator is in that room — the caller, never the agent.
+
+    Carries the simulation's id for the same reason the room name does: it
+    is asked for by name, so it has to be a name that names one simulation
+    and a token can be minted for exactly it.
+    """
+    return f"{PERSONA_IDENTITY}-{simulation_id}"
+
+
 async def first_of(*events: asyncio.Event, within: float) -> bool:
     """Wait until one of these happens, or say that none did."""
     waiting = [asyncio.ensure_future(event.wait()) for event in events]

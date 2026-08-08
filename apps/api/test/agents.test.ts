@@ -409,6 +409,79 @@ describe("a livekit connection", () => {
   });
 
   /**
+   * The second shape through the same door: a connection that names where to
+   * ask for a token instead of carrying the key pair that would mint one.
+   *
+   * What a read shows is the whole point of the shape. The endpoint is
+   * configuration and comes back; the headers that authenticate egma to it are
+   * a credential and do not, hinted by their names — which is what a person
+   * needs to recognise the connection, and is not a secret, where the last
+   * four characters of a bearer token would be four real characters of one.
+   */
+  it("is registered with a token endpoint instead of a key pair", async () => {
+    api = await createApi("agents_livekit_endpoint");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const registered = await post("/api/agents", withKey(ada.secret), {
+      name: "Production agent",
+      connection: {
+        type: "livekit",
+        modality: "voice",
+        config: {
+          url: "wss://acme.livekit.cloud",
+          tokenEndpoint: "https://acme.example/egma/livekit-token",
+        },
+        credentials: { headers: '{"Authorization":"Bearer not-a-real-token"}' },
+      },
+    });
+
+    expect(registered.status).toBe(201);
+    expect(connectionOf(registered)).toMatchObject({
+      type: "livekit",
+      modality: "voice",
+      topology: "agent-dials-out",
+      config: {
+        url: "wss://acme.livekit.cloud",
+        tokenEndpoint: "https://acme.example/egma/livekit-token",
+      },
+      credentials_hint: "Authorization",
+    });
+    expect(connectionOf(registered)).not.toHaveProperty("credentials");
+  });
+
+  /**
+   * An endpoint on a private network can be reachable only from egma and open
+   * to it. The hardening recipe says not to leave it that way and says what an
+   * open one means, but the door cannot see whose network the endpoint is on,
+   * so it does not turn that advice into a rule it would be lying about.
+   */
+  it("is registered with no credentials at all, when the endpoint is open", async () => {
+    api = await createApi("agents_livekit_open_endpoint");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const registered = await post("/api/agents", withKey(ada.secret), {
+      name: "Private-network agent",
+      connection: {
+        type: "livekit",
+        modality: "voice",
+        config: {
+          url: "ws://livekit.internal:7880",
+          tokenEndpoint: "http://tokens.internal/egma",
+        },
+      },
+    });
+
+    expect(registered.status).toBe(201);
+    expect(connectionOf(registered)).toMatchObject({
+      config: {
+        url: "ws://livekit.internal:7880",
+        tokenEndpoint: "http://tokens.internal/egma",
+      },
+      credentials_hint: null,
+    });
+  });
+
+  /**
    * Every way a livekit payload can be wrong, and the sentence each one gets.
    * Word for word: a client relays these to a terminal a coding agent reads,
    * and the fix it picks comes out of the wording.
@@ -476,11 +549,94 @@ describe("a livekit connection", () => {
         "agentName (optional), metadata (optional)",
     },
     {
+      // Neither of the two shapes: no key pair, and no endpoint to ask for a
+      // token either. The sentence names both doors, because either is a
+      // whole answer and a caller who read about one may have missed the
+      // other.
       named: "no credentials at all",
       slug: "no_credentials",
       payload: { credentials: undefined },
       message:
-        "a livekit connection needs credentials shaped { apiKey, apiSecret }",
+        "a livekit connection mints its own tokens, so it needs the " +
+        "project's apiKey and apiSecret. Send the pair, or name a " +
+        "tokenEndpoint in the config and egma will ask that endpoint for a " +
+        "token instead — which is the shape where the project's secret " +
+        "never leaves the customer.",
+    },
+    {
+      named: "a key pair sent alongside a token endpoint",
+      slug: "pair_and_endpoint",
+      payload: {
+        config: {
+          url: "wss://acme.livekit.cloud",
+          tokenEndpoint: "https://acme.example/egma/livekit-token",
+        },
+      },
+      message:
+        "a livekit connection whose config names a tokenEndpoint asks that " +
+        "endpoint for every token, so it holds no key pair of its own: its " +
+        "credentials are the endpoint's auth headers, shaped { headers }. " +
+        "Send those, or drop the tokenEndpoint and egma will mint its own " +
+        "tokens from an apiKey and apiSecret.",
+    },
+    {
+      named: "endpoint headers on a connection that names no endpoint",
+      slug: "headers_no_endpoint",
+      payload: {
+        credentials: { headers: '{"Authorization":"Bearer not-real"}' },
+      },
+      message:
+        "a livekit connection mints its own tokens, so it needs the " +
+        "project's apiKey and apiSecret. Send the pair, or name a " +
+        "tokenEndpoint in the config and egma will ask that endpoint for a " +
+        "token instead — which is the shape where the project's secret " +
+        "never leaves the customer.",
+    },
+    {
+      // The two URL keys pasted the wrong way round: egma POSTs to this one.
+      named: "a token endpoint in a scheme egma cannot post to",
+      slug: "bad_token_endpoint",
+      payload: {
+        config: {
+          url: "wss://acme.livekit.cloud",
+          tokenEndpoint: "wss://acme.livekit.cloud",
+        },
+        credentials: { headers: '{"Authorization":"Bearer not-real"}' },
+      },
+      message:
+        "the config's tokenEndpoint must be an http or https URL, which " +
+        "looks like https://example.com/egma/livekit-token",
+    },
+    {
+      // Dispatching is a power a key pair buys, and this shape has none.
+      named: "an agent to dispatch on a connection that cannot dispatch",
+      slug: "agent_name_with_endpoint",
+      payload: {
+        config: {
+          url: "wss://acme.livekit.cloud",
+          tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
+        },
+        credentials: { headers: '{"Authorization":"Bearer not-real"}' },
+      },
+      message:
+        'a token-endpoint livekit connection\'s config has no key "agentName"; ' +
+        "it holds url, tokenEndpoint",
+    },
+    {
+      named: "headers that are not a JSON object of name to value",
+      slug: "bad_headers",
+      payload: {
+        config: {
+          url: "wss://acme.livekit.cloud",
+          tokenEndpoint: "https://acme.example/egma/livekit-token",
+        },
+        credentials: { headers: "Authorization: Bearer not-real" },
+      },
+      message:
+        "a token-endpoint livekit connection's credentials need headers to " +
+        "be a JSON object of header name to header value, written in a " +
+        'string, which looks like {"Authorization":"Bearer …"}',
     },
     {
       named: "only half the credential",
@@ -607,6 +763,94 @@ describe("a livekit connection", () => {
     expect(rows[0]?.credentials).toMatch(/^v1\./);
     expect(rows[0]?.credentials_hint).toBe("WXYZ");
     expect(JSON.stringify(rows[0]?.config)).not.toContain(API_SECRET);
+  });
+
+  /**
+   * The same walk for the other shape's secret.
+   *
+   * An `Authorization: Bearer …` header is a reusable credential: whoever
+   * holds it can ask the customer's endpoint for a token into any room it will
+   * mint one for. So it lives where credentials live and is followed the same
+   * way — through a registration that works, a read, a list, and every refusal
+   * carrying it — and what a read shows of it is the header's *name*, which is
+   * not a secret, rather than a tail of its value, which is.
+   */
+  it("keeps an endpoint's auth header out of every answer, log, read and row", async () => {
+    const HEADER_SECRET = "SENTINEL-endpoint-bearer-4c81ea";
+    const headers = `{"Authorization":"Bearer ${HEADER_SECRET}"}`;
+    const endpointPayload = (
+      overrides: Record<string, unknown> = {},
+    ): Record<string, unknown> => ({
+      type: "livekit",
+      modality: "voice",
+      config: {
+        url: "wss://acme.livekit.cloud",
+        tokenEndpoint: "https://acme.example/egma/livekit-token",
+      },
+      credentials: { headers },
+      ...overrides,
+    });
+
+    const lines: string[] = [];
+    api = await createApi("agents_livekit_header", {
+      logTo: {
+        write(line) {
+          lines.push(line);
+        },
+      },
+    });
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const answers = [
+      await post("/api/agents", withKey(ada.secret), {
+        name: "Production agent",
+        connection: endpointPayload(),
+      }),
+      // And the refusals, each with the header sitting in the body: a refusal
+      // is where a value gets quoted back to explain what was wrong with it.
+      await post("/api/agents", withKey(ada.secret), {
+        name: "Refused for a stray credential key",
+        connection: endpointPayload({
+          credentials: { headers, apiKey: "APIsomethingelse" },
+        }),
+      }),
+      await post("/api/agents", withKey(ada.secret), {
+        name: "Refused for a modality it does not speak",
+        connection: endpointPayload({ modality: "chat" }),
+      }),
+      await post("/api/agents", withKey(ada.secret), {
+        name: "Refused for headers with no endpoint",
+        connection: endpointPayload({
+          config: { url: "wss://acme.livekit.cloud" },
+        }),
+      }),
+    ];
+
+    const registered = answers[0];
+    if (registered === undefined) throw new Error("nothing was registered");
+    expect(registered.status).toBe(201);
+    const agentId = String(agentOf(registered).id);
+    answers.push(await get(`/api/agents/${agentId}`, withKey(ada.secret)));
+    answers.push(await get("/api/agents", withKey(ada.secret)));
+
+    for (const answer of answers) {
+      expect(JSON.stringify(answer.body)).not.toContain(HEADER_SECRET);
+    }
+
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.join("\n")).not.toContain(HEADER_SECRET);
+
+    const { rows } = await api.database.sql<{
+      credentials: string;
+      credentials_hint: string;
+      config: Record<string, string>;
+    }>("select credentials, credentials_hint, config from connection");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.credentials).not.toContain(HEADER_SECRET);
+    expect(rows[0]?.credentials).toMatch(/^v1\./);
+    // The name, and nothing of the value it authenticates with.
+    expect(rows[0]?.credentials_hint).toBe("Authorization");
+    expect(JSON.stringify(rows[0]?.config)).not.toContain(HEADER_SECRET);
   });
 });
 
