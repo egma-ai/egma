@@ -2,8 +2,10 @@ import {
   claimSimulations,
   completeSimulation,
   createPersona,
+  failSimulationDispatch,
   getSimulation,
   startSimulation,
+  type SimulationClaim,
 } from "@egma/db";
 import { newId } from "@egma/ids";
 import { afterEach, describe, expect, it } from "vitest";
@@ -132,11 +134,12 @@ async function aClaimedRun(
   key: string,
   connectionId: string,
   versionId: string,
-): Promise<{ runId: string; simulationId: string }> {
+): Promise<{ runId: string; simulationId: string; claim: SimulationClaim }> {
   const queued = await aQueuedRun(key, connectionId, versionId);
   const claims = await claimSimulations({ claimant: SIMULATOR, capacity: 50 });
-  expect(claims.map((claim) => claim.id)).toContain(queued.simulationId);
-  return queued;
+  const claim = claims.find((one) => one.id === queued.simulationId);
+  if (claim === undefined) throw new Error("the claim missed the run under test");
+  return { ...queued, claim };
 }
 
 describe("the token gate", () => {
@@ -314,6 +317,21 @@ describe("the steering matrix", () => {
     const late = await beat(token, held.simulationId, { claimant: SIMULATOR });
     expect(late.statusCode).toBe(200);
     expect(late.body).toEqual({ directive: "cancel" });
+
+    // And the platform's own landing is terminal like any other: a claimed
+    // simulation that could not be handed over reads dispatch_failed on the
+    // row, and its claimant's next beat is steered to stop the same way.
+    const doomed = await aClaimedRun(key, connectionId, versionId);
+    await failSimulationDispatch(
+      doomed.claim.auth,
+      doomed.claim.id,
+      doomed.claim.claimedBy,
+    );
+    const undispatched = await beat(token, doomed.simulationId, {
+      claimant: SIMULATOR,
+    });
+    expect(undispatched.statusCode).toBe(200);
+    expect(undispatched.body).toEqual({ directive: "cancel" });
   });
 });
 
