@@ -8,6 +8,23 @@
  * output to a headless terminal emulator, and lets a test read either screen:
  * the alternate one the wizard draws on, or the ordinary one whose contents are
  * what a developer scrolls back through.
+ *
+ * A frame does not arrive whole. A pseudo-terminal hands its output over in
+ * chunks of about a kilobyte, and one drawn screen is several of those, so a
+ * test that polls the screen on a timer can read a frame that is half painted:
+ * the first line of the wizard is there and the rest of it is still in flight.
+ * The emulator parses each chunk asynchronously as well, so even a chunk that
+ * has arrived may not be on the screen yet.
+ *
+ * `waitFor` closes both gaps. It is told when a chunk has been *parsed* rather
+ * than when it arrived, and it checks the condition then — so a test waits for
+ * everything it is about to assert, in one condition, and reads the screen that
+ * satisfied it. `showing` is the way to spell that, and every check here uses
+ * it rather than polling a screen on a timer.
+ *
+ * `kill` waits for the command to actually be gone. A test removes the folder
+ * the command was running in as soon as it returns, and a process still writing
+ * its log into a folder being deleted is a folder that will not delete.
  */
 
 import { chmodSync, existsSync } from "node:fs";
@@ -51,9 +68,30 @@ export type TerminalRun = {
   write(input: string): void;
   /** Everything the command has written, escape codes and all. */
   raw(): string;
-  kill(): void;
+  /**
+   * Settles as soon as the condition holds, checked every time a chunk has been
+   * parsed onto the screen. `false` means the budget ran out first.
+   */
+  waitFor(condition: () => boolean, timeoutMs?: number): Promise<boolean>;
+  /** Stops the command and settles once it is gone and its last words are read. */
+  kill(): Promise<void>;
+  /** The exit code, once everything the command wrote is on the screen. */
   exited: Promise<number>;
 };
+
+/**
+ * How long a condition is given.
+ *
+ * Generous on purpose: this is a real subprocess starting a real Node runtime
+ * inside a test run that is using every core, so the honest budget is one that
+ * cannot be reached by a machine merely being busy. A test that is going to
+ * fail still fails at once, because the condition is checked on every chunk.
+ * Sixty seconds because twenty was reached: a full-repository run beside other
+ * work on the same machine held a whole-walk test past it while every check
+ * still eventually passed. A wait ends the moment its content paints, so a
+ * bigger budget costs a healthy run nothing.
+ */
+const WAIT_BUDGET_MS = 60_000;
 
 export function runInTerminal(options: {
   readonly command: string;
@@ -83,16 +121,64 @@ export function runInTerminal(options: {
     env: env as Record<string, string>,
   });
 
+  /** Told every time the screen has changed, not every time bytes arrived. */
+  const watchers = new Set<() => void>();
+  const tell = (): void => {
+    for (const watcher of [...watchers]) watcher();
+  };
+
+  /** Chunks the emulator has been handed and has not parsed yet. */
+  let unparsed = 0;
+
   child.onData((chunk) => {
     raw += chunk;
-    terminal.write(chunk);
+    unparsed += 1;
+    terminal.write(chunk, () => {
+      unparsed -= 1;
+      tell();
+    });
   });
 
+  const waitFor = (condition: () => boolean, timeoutMs = WAIT_BUDGET_MS): Promise<boolean> =>
+    new Promise<boolean>((resolve) => {
+      let done = false;
+      const finish = (held: boolean): void => {
+        if (done) return;
+        done = true;
+        watchers.delete(check);
+        clearInterval(tick);
+        clearTimeout(budget);
+        resolve(held);
+      };
+      function check(): void {
+        if (condition()) finish(true);
+      }
+      // A backstop for a condition that does not depend on the screen at all;
+      // the chunk callbacks are what make this prompt.
+      const tick = setInterval(check, 100);
+      const budget = setTimeout(() => finish(false), timeoutMs);
+      watchers.add(check);
+      check();
+    });
+
   let settle!: (code: number) => void;
-  const exited = new Promise<number>((resolve) => {
+  let gone = false;
+  const finished = new Promise<number>((resolve) => {
     settle = resolve;
   });
-  child.onExit(({ exitCode }) => settle(exitCode));
+  child.onExit(({ exitCode }) => {
+    gone = true;
+    settle(exitCode);
+    tell();
+  });
+
+  // A command's last words can still be inside the emulator when it exits, and
+  // scrollback is the thing tests read afterwards. So the code arrives once the
+  // screen is caught up with it.
+  const exited = finished.then(async (code) => {
+    await waitFor(() => unparsed === 0, 5_000);
+    return code;
+  });
 
   const readBuffer = (buffer: IBuffer): string => {
     const lines: string[] = [];
@@ -109,14 +195,66 @@ export function runInTerminal(options: {
     screen: () => readBuffer(terminal.buffer.active),
     scrollback: () => readBuffer(terminal.buffer.normal),
     raw: () => raw,
+    waitFor,
     write: (input) => child.write(input),
-    kill: () => {
-      try {
-        child.kill();
-      } catch {
-        // Already gone.
+    async kill() {
+      // Asked once, then insisted upon. A command that is shutting a coding
+      // agent down of its own accord is given a moment to finish doing it.
+      for (const signal of ["SIGHUP", "SIGKILL"]) {
+        if (gone) break;
+        try {
+          child.kill(signal);
+        } catch {
+          break;
+        }
+        if (await waitFor(() => gone, 2_000)) break;
       }
+      // And its last words are on the screen before anything reads the screen
+      // or removes the folder it was running in.
+      await waitFor(() => unparsed === 0, 2_000);
     },
     exited,
   };
+}
+
+/**
+ * Waits until the screen, read the given way, holds every one of these, and
+ * answers the screen itself.
+ *
+ * The screen is captured at the moment the condition held, so a redraw that
+ * starts immediately afterwards cannot take a line back out from under the
+ * assertions. Ask for **everything** the assertions after it will read: waiting
+ * for a frame's first line and then asserting on its last is a race the machine
+ * wins whenever it is busy.
+ *
+ * `read` is there for a terminal too narrow to hold a line whole. Every line of
+ * such a screen is wrapped, so a phrase is looked for in the screen run
+ * together rather than line by line.
+ */
+export async function showingIn(
+  terminal: TerminalRun,
+  read: (screen: string) => string,
+  ...parts: readonly string[]
+): Promise<string> {
+  let held = "";
+  const shown = await terminal.waitFor(() => {
+    const screen = terminal.screen();
+    if (!parts.every((part) => read(screen).includes(part))) return false;
+    held = screen;
+    return true;
+  });
+  if (!shown) {
+    throw new Error(
+      `the terminal never showed all of: ${parts.join(" | ")}\n\nlast screen:\n${terminal.screen()}`,
+    );
+  }
+  return held;
+}
+
+/** The same, reading the screen as it is drawn. */
+export async function showing(
+  terminal: TerminalRun,
+  ...parts: readonly string[]
+): Promise<string> {
+  return showingIn(terminal, (screen) => screen, ...parts);
 }

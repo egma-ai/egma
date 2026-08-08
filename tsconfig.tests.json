@@ -22,5 +22,10 @@
     "apps/grader/test/**/*.ts",
     "apps/cli/test/**/*.ts",
     "apps/cli/smoke/**/*.ts"
+  ],
+  "exclude": [
+    // A committed fixture repository is another project's source, kept as it
+    // would really be written. It is read by tests, never compiled with them.
+    "apps/cli/test/fixtures/**"
   ]
 }

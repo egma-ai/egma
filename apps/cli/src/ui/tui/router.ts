@@ -15,7 +15,18 @@
 
 import type { WizardState } from "./state.ts";
 
-export type ScreenId = "intro" | "task";
+export type ScreenId =
+  | "intro"
+  | "login"
+  | "prompts-pointer"
+  | "retell-key"
+  | "retell-agent"
+  | "existing-tests"
+  | "generating"
+  | "gate"
+  | "run"
+  | "skills-offer"
+  | "task";
 
 /** An interruption drawn over the flow. The stack is empty in the walk. */
 export type OverlayId = never;

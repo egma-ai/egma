@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   MIGRATION_ADVISORY_LOCK,
+  MIGRATIONS_DIRECTORY,
   readMigrations,
   runMigrations,
 } from "../src/migrate.ts";
@@ -30,6 +31,45 @@ describe("the migration files", () => {
     const [first] = await readMigrations();
     expect(first?.name).toBe("0000_extensions.sql");
     expect(first?.sql).toMatch(/create extension if not exists citext/i);
+  });
+
+  /**
+   * **One sequence, counted from zero with no gaps.** Two efforts landing at
+   * once is exactly how a repository ends up with two migrations wearing one
+   * number: each takes the next free one from where it was standing, and a
+   * self-hoster upgrading across both applies whichever of them sorted first
+   * and never learns the other existed. So the numbers are held dense and
+   * unrepeated here, where a merge that doubled one fails rather than ships.
+   */
+  it("are one dense sequence, each number used once", async () => {
+    const numbers = (await readMigrations()).map((migration) =>
+      Number(migration.name.slice(0, 4)),
+    );
+    expect(numbers).toEqual(numbers.map((_, index) => index));
+  });
+
+  /**
+   * The journal is drizzle's own bookkeeping — nothing applies from it, the
+   * plain SQL above is what boot reads — and it is what the generator diffs the
+   * next migration against. A journal that disagrees with the files is a
+   * generator working from a schema no instance ever had, so it is held to the
+   * same story: the same tags, in the same order, one entry each.
+   */
+  it("are the same story the generator's journal tells", async () => {
+    const journal = JSON.parse(
+      await readFile(
+        path.join(MIGRATIONS_DIRECTORY, "meta", "_journal.json"),
+        "utf8",
+      ),
+    ) as { entries: readonly { idx: number; tag: string }[] };
+    const files = (await readMigrations()).map((migration) =>
+      migration.name.replace(/\.sql$/, ""),
+    );
+
+    expect(journal.entries.map((entry) => entry.tag)).toEqual(files);
+    expect(journal.entries.map((entry) => entry.idx)).toEqual(
+      files.map((_, index) => index),
+    );
   });
 });
 
@@ -664,5 +704,177 @@ describe("the re-grade's narrowing (0013)", () => {
     expect(rows[0]?.definition).toMatch(
       /FOREIGN KEY \(regrade_grader_id\) REFERENCES grader\(id\)/,
     );
+  });
+});
+
+/**
+ * An instance that has been running since before a migration is the case a
+ * migration is actually for, and it is the one an empty database never tests:
+ * every check above starts from nothing, where a column added `not null` with
+ * no default lands happily and would fail the moment a single row existed.
+ *
+ * So this applies the schema as it stood one migration ago, puts a customer's
+ * work into it, and then upgrades — which is what a self-hoster's `docker
+ * compose pull` does on a Tuesday morning.
+ */
+describe("upgrading an instance that already holds work", () => {
+  let database: EmptyDatabase;
+  /** The migration files, minus the newest, as an earlier release shipped them. */
+  let asItWas: string;
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("upgrade");
+    asItWas = await mkdtemp(path.join(os.tmpdir(), "egma-upgrade-"));
+  });
+
+  afterAll(async () => {
+    await database.drop();
+    await rm(asItWas, { recursive: true, force: true });
+  });
+
+  it("applies the newest migration over rows the release before it wrote", async () => {
+    const migrations = await readMigrations();
+    const newest = migrations.at(-1);
+    if (newest === undefined) throw new Error("there are no migrations");
+
+    for (const migration of migrations.slice(0, -1)) {
+      await writeFile(path.join(asItWas, migration.name), migration.sql);
+    }
+    const before = await runMigrations(database.url, asItWas);
+    expect(before.applied).toEqual(
+      migrations.slice(0, -1).map((migration) => migration.name),
+    );
+
+    // A customer's work, written the way the release before this one wrote it:
+    // a run over a connection, and one conversation inside it.
+    const client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    const organization = newId("org");
+    const project = newId("prj");
+    const agent = newId("agt");
+    const connection = newId("con");
+    const personaId = newId("prs");
+    const personaVersion = newId("prsv");
+    const run = newId("run");
+    const simulation = newId("sim");
+    try {
+      await client.query(
+        "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
+        [organization],
+      );
+      await client.query(
+        "insert into project (id, organization_id, name, slug) values ($1, $2, 'Default', 'default')",
+        [project, organization],
+      );
+      await client.query(
+        "insert into agent (id, organization_id, project_id, name) values ($1, $2, $3, 'Front desk')",
+        [agent, organization, project],
+      );
+      await client.query(
+        `insert into connection
+           (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
+         values ($1, $2, $3, $4, 'retell-1', 'retell', 'chat', 'hosted-broker', '{}'::jsonb)`,
+        [connection, organization, project, agent],
+      );
+      await client.query("begin");
+      await client.query(
+        `insert into persona (id, organization_id, project_id, name, current_version_id)
+         values ($1, $2, $3, 'Impatient Rita', $4)`,
+        [personaId, organization, project, personaVersion],
+      );
+      await client.query(
+        "insert into persona_version (id, persona_id, version, traits) values ($1, $2, 1, '{}'::jsonb)",
+        [personaVersion, personaId],
+      );
+      await client.query("commit");
+      await client.query(
+        `insert into run
+           (id, organization_id, project_id, agent_id, connection_id, status,
+            triggered_via, requested_personas, connection_snapshot, expected_simulation_count)
+         values ($1, $2, $3, $4, $5, 'pending', 'manual', $6::jsonb, $7::jsonb, 1)`,
+        [
+          run,
+          organization,
+          project,
+          agent,
+          connection,
+          JSON.stringify({ personaIds: [personaId] }),
+          JSON.stringify({
+            type: "retell",
+            modality: "chat",
+            topology: "hosted-broker",
+            environment: null,
+            config: {},
+          }),
+        ],
+      );
+      await client.query(
+        `insert into simulation
+           (id, run_id, organization_id, project_id, agent_id, connection_id,
+            persona_id, persona_version_id, position, connection_type, modality, status)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, 1, 'retell', 'chat', 'queued')`,
+        [
+          simulation,
+          run,
+          organization,
+          project,
+          agent,
+          connection,
+          personaId,
+          personaVersion,
+        ],
+      );
+
+      // The upgrade itself, with that work sitting in the tables.
+      await writeFile(path.join(asItWas, newest.name), newest.sql);
+      const upgraded = await runMigrations(database.url, asItWas);
+      expect(upgraded.applied).toEqual([newest.name]);
+
+      // The run is still there, and it says what is true of it: it pinned no
+      // version, because no run could when it was started.
+      const { rows: runs } = await client.query<{
+        id: string;
+        pinned_test_versions: { testVersionIds: string[] };
+      }>("select id, pinned_test_versions from run where id = $1", [run]);
+      expect(runs[0]?.pinned_test_versions).toEqual({ testVersionIds: [] });
+
+      // And so does its conversation: no test, rather than one invented for it.
+      const { rows: simulations } = await client.query<{
+        test_id: string | null;
+        test_version_id: string | null;
+      }>("select test_id, test_version_id from simulation where id = $1", [
+        simulation,
+      ]);
+      expect(simulations[0]).toEqual({ test_id: null, test_version_id: null });
+
+      // The default is gone with the backfill, so the next run has to say what
+      // it pinned rather than inheriting a blank.
+      await expect(
+        client.query(
+          `insert into run
+             (id, organization_id, project_id, agent_id, connection_id, status,
+              triggered_via, requested_personas, connection_snapshot, expected_simulation_count)
+           values ($1, $2, $3, $4, $5, 'pending', 'manual', '{}'::jsonb, '{}'::jsonb, 1)`,
+          [newId("run"), organization, project, agent, connection],
+        ),
+      ).rejects.toThrow(/pinned_test_versions/u);
+
+      // And the record the upgrade brings is a record: an event written over
+      // the work that was already here cannot be rewritten afterwards.
+      await client.query(
+        `insert into run_event
+           (run_id, seq, organization_id, project_id, kind, status)
+         values ($1, 1, $2, $3, 'run', 'pending')`,
+        [run, organization, project],
+      );
+      await expect(
+        client.query(
+          "update run_event set status = 'running' where run_id = $1 and seq = 1",
+          [run],
+        ),
+      ).rejects.toThrow(/is written once/u);
+    } finally {
+      await client.end();
+    }
   });
 });

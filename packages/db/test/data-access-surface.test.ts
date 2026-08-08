@@ -165,6 +165,10 @@ const CONTEXT_REQUIRING = [
   "listPendingInvitations",
   "listPersonas",
   "listProjects",
+  // Everything that has changed about one run since a point, in the order it
+  // changed. The read a follower resumes from after a crash, and the reason
+  // the events are a record rather than a rendering of the mutable rows.
+  "listRunEvents",
   "listRuns",
   "listSimulations",
   "listTests",
@@ -180,6 +184,7 @@ const CONTEXT_REQUIRING = [
   "recordGradingHeartbeat",
   "recordProductionTraces",
   "recordSimulationHeartbeat",
+  "registerAgent",
   "regrade",
   "releaseGradingJob",
   "removeConnection",
@@ -189,6 +194,9 @@ const CONTEXT_REQUIRING = [
   // The second secret egma holds, on the first one's terms: the read answers a
   // reference and a hint, and this is the one door to the plaintext behind it.
   "resolveJudgeKey",
+  // Names off a reviewed file turned into the identity a version names. It
+  // reads personas and nothing else, and only ones the context already reaches.
+  "resolvePersonaNames",
   "revokeApiKey",
   "setJudgeConfiguration",
   "startRun",
@@ -214,6 +222,10 @@ const PERMISSION = [
 
 /** Vocabulary: the table definitions, how a caller proved who they are, and the refusals. */
 const VALUES = [
+  // The agent factory's own refusal, carrying which of its three rules turned
+  // a write away: an HTTP layer answers the three differently and must not
+  // have to read the sentence to tell them apart.
+  "AgentWriteRefusedError",
   "AlreadyBelongsToAnOrganizationError",
   // The grader factory's one refusal, beside the persona factory's: a delete
   // that would leave a live test checking one thing fewer than it says it does.
@@ -222,6 +234,20 @@ const VALUES = [
   "NotPermittedError",
   "PersonaNamedByTestsError",
   "ProjectOutsideOrganizationError",
+  // A run turned away, carrying which rule turned it away: a connection
+  // nobody can see, one that is not on the agent that was named, a type no
+  // simulator adapter has shipped for, a selection that cannot be conducted,
+  // and a cancel that arrived after the run had already finished. Five rules,
+  // four codes between them, and a sentence apiece — which is why the reason
+  // travels as a value rather than being read back out of the prose.
+  "RunWriteRefusedError",
+  // An edit refused because somebody moved the test since it was written. It
+  // carries both versions and the test's identity, because the caller's next
+  // move is to go and read the test as it now stands.
+  "TestMovedOnError",
+  // A write refused for what it says, told apart from a fault so that a layer
+  // above can relay the factory's sentence instead of answering with a stack.
+  "UnprocessableInputError",
   // The store's answer to a batch it will never take, told apart from a store
   // that is merely unreachable — a door has to answer those two differently,
   // and only the module that owns the client can tell them apart.

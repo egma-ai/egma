@@ -26,6 +26,85 @@ export class ProjectOutsideOrganizationError extends Error {
 }
 
 /**
+ * The agent factory turned a write away, and which rule turned it away is
+ * carried beside the sentence rather than hidden inside it.
+ *
+ * Three rules refuse a write here and they are three different answers to
+ * whoever asked: a connection payload the type's own registry entry will not
+ * take, something the factory needs a name for and did not get one for, and a
+ * name a living row already holds. An HTTP layer has to tell them apart, and
+ * reading the sentence to do it would make the prose load-bearing — while the
+ * sentence is the part deliberately left free to improve. So the reason
+ * travels as a value and the sentence travels untouched, to be relayed word
+ * for word to whoever asked.
+ */
+export class AgentWriteRefusedError extends Error {
+  readonly reason: AgentWriteRefusal;
+
+  constructor(reason: AgentWriteRefusal, message: string) {
+    super(message);
+    this.name = "AgentWriteRefusedError";
+    this.reason = reason;
+  }
+}
+
+/**
+ * Which rule refused.
+ *
+ * - `not_admitted` — the connection registry's per-type gate: an unknown type,
+ *   a modality the type does not speak, a config key it has no place for, a
+ *   credential where none belongs or none where one is required.
+ * - `needs_a_name` — an agent or a connection arrived without a usable name.
+ * - `name_taken` — a living agent in the project, or a living connection on
+ *   the agent, already holds the name.
+ */
+export type AgentWriteRefusal = "not_admitted" | "needs_a_name" | "name_taken";
+
+/**
+ * A run was turned away, and which rule turned it away travels beside the
+ * sentence rather than inside it — the agent factory's arrangement, for the
+ * same reason: an HTTP layer answers each of them differently, and reading the
+ * prose to tell them apart would make the prose load-bearing while the prose is
+ * the part deliberately left free to improve. The sentence is whole where it is
+ * written and is relayed word for word, never finished off somewhere else.
+ */
+export class RunWriteRefusedError extends Error {
+  readonly reason: RunWriteRefusal;
+
+  constructor(reason: RunWriteRefusal, message: string) {
+    super(message);
+    this.name = "RunWriteRefusedError";
+    this.reason = reason;
+  }
+}
+
+/**
+ * Which rule refused.
+ *
+ * - `no_such_connection` — nothing this credential can see has that id.
+ *   Answered as "there is no such thing", because to this caller that is what
+ *   it is: confirming somebody else's row exists is itself a leak.
+ * - `connection_not_on_agent` — both were named, both are there, and they are
+ *   not each other's. Its own answer rather than the one above, because the
+ *   caller asked for exactly that check and the two mistakes have different
+ *   fixes.
+ * - `no_adapter` — the connection's type has no shipped simulator adapter, so
+ *   the run could never be conducted. Refused at creation rather than left
+ *   queued forever for a conductor that does not exist.
+ * - `not_admitted` — the selection itself: no versions, a version this egma
+ *   never issued, one version named twice, more conversations than a run may
+ *   hold, or a persona a pinned version names who has since been deleted.
+ * - `already_finished` — a cancel arrived after the run had finished, so there
+ *   was nothing left to cancel and the caller missed.
+ */
+export type RunWriteRefusal =
+  | "no_such_connection"
+  | "connection_not_on_agent"
+  | "no_adapter"
+  | "not_admitted"
+  | "already_finished";
+
+/**
  * The person being invited is already in an organization.
  *
  * One person belongs to one organization in this version, so there is no second
@@ -131,6 +210,65 @@ export class PersonaNamedByTestsError extends Error {
     this.name = "PersonaNamedByTestsError";
     this.personaId = personaId;
     this.tests = tests;
+  }
+}
+
+/**
+ * A write refused for what it says, rather than for who asked or for what is
+ * there.
+ *
+ * Three refusals answer three different questions and each wants its own words:
+ * who you are, what is there, and what you wrote. This is the third, and it is
+ * the only one about the body — so it is the only one whose sentence a writer
+ * can act on without knowing anything about egma's tables.
+ *
+ * It exists so that a layer above can tell a factory's validation apart from a
+ * fault. Both were plain errors before, and neither answer available then was
+ * right: treating every error as the caller's mistake dresses a bug up as one,
+ * and treating none as theirs throws away the sentence they needed. The sentence
+ * is the factory's own and travels word for word.
+ */
+export class UnprocessableInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnprocessableInputError";
+  }
+}
+
+/**
+ * An edit named the version it was written against, and the test has moved.
+ *
+ * A test is edited by two people who both start from what they last read: a
+ * developer with the file in their repository, and a teammate in the dashboard.
+ * Nothing here merges them, because there is no merge that could be right — two
+ * people saying different things about one test have to settle it between
+ * themselves, and a heuristic that picked one would be egma deciding which of
+ * them was wrong.
+ *
+ * It carries both versions and the test's identity, because the caller's next
+ * move is to go and read the test as it now stands, and a refusal that only said
+ * "somebody else got there first" would send them hunting for which test.
+ */
+export class TestMovedOnError extends Error {
+  readonly testId: string;
+  readonly testName: string;
+  /** The version the edit was written against. */
+  readonly expectedVersionId: string;
+  /** The version the test is on now. */
+  readonly currentVersionId: string;
+
+  constructor(test: { readonly id: string; readonly name: string }, versions: {
+    readonly expected: string;
+    readonly current: string;
+  }) {
+    super(
+      `this edit was written against version ${versions.expected}, and test ${test.id} has moved on to ${versions.current}`,
+    );
+    this.name = "TestMovedOnError";
+    this.testId = test.id;
+    this.testName = test.name;
+    this.expectedVersionId = versions.expected;
+    this.currentVersionId = versions.current;
   }
 }
 

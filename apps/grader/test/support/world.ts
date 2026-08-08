@@ -14,6 +14,7 @@ import {
   failSimulation,
   getGradingJobForTrace,
   getSimulation,
+  getTest,
   listGradingJobsForSimulation,
   readVerdicts,
   recordProductionTraces,
@@ -71,6 +72,13 @@ export type World = {
   readonly agentId: string;
   readonly connectionId: string;
   readonly personaId: string;
+  /**
+   * A version naming the world's persona and nothing else, so a conduct that
+   * has no opinion about the test still has something for a run to execute.
+   * A run pins frozen versions now, and there is no such thing as a run that
+   * names none.
+   */
+  readonly bareTestVersionId: string;
   drop(): Promise<void>;
 };
 
@@ -146,6 +154,13 @@ export async function makeWorld(label: string): Promise<World> {
     },
   });
 
+  const bare = await createTest(auth, {
+    name: "A conversation with nothing named about it",
+    scenario: "Their cleaning has to move to any afternoon next week.",
+    expectedBehaviors: ["confirms the new time back before finishing"],
+    personaIds: [persona.id],
+  });
+
   return {
     database,
     store,
@@ -156,6 +171,7 @@ export async function makeWorld(label: string): Promise<World> {
     agentId: agent.id,
     connectionId: agent.connection?.id ?? "",
     personaId: persona.id,
+    bareTestVersionId: bare.versionId,
     async drop() {
       await disconnect();
       await disconnectClickHouse();
@@ -253,14 +269,30 @@ export async function conductSimulation(
   } = {},
 ): Promise<ConductedSimulation> {
   const claimant = "simulator-1";
+  const pinned =
+    landing.testId === undefined
+      ? world.bareTestVersionId
+      : ((await getTest(world.auth, landing.testId))?.versionId ??
+        world.bareTestVersionId);
   const started = await startRun(world.auth, {
     agentId: world.agentId,
     connectionId: world.connectionId,
-    personaIds: [world.personaId],
-    ...(landing.testId === undefined ? {} : { testId: landing.testId }),
+    testVersionIds: [pinned],
   });
   const [only] = started.simulations;
   if (only === undefined) throw new Error("the run has no simulation");
+
+  // A conduct that named no test wants a conversation with nothing to judge it
+  // against — the row an instance upgraded across the pin's migration holds.
+  // No verb writes one any more, because `startRun` names a version for every
+  // conversation it creates, so it is written here by hand and before the
+  // landing that makes this conversation grading work.
+  if (landing.testId === undefined) {
+    await world.database.sql(
+      "update simulation set test_id = null, test_version_id = null where id = $1",
+      [only.id],
+    );
+  }
 
   // The claim takes the oldest queued rows rather than this caller's, and it
   // skips whatever another claim holds locked — so two conducts running at once

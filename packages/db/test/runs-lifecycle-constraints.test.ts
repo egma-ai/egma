@@ -102,7 +102,7 @@ async function seedPersona(
 }
 
 async function seedTest(
-  test: string,
+  id: string,
   version: string,
   organization: string,
   project: string,
@@ -112,12 +112,12 @@ async function seedTest(
   await db.sql(
     `insert into test (id, organization_id, project_id, name, current_version_id)
      values ($1, $2, $3, 'Reschedules a booked appointment', $4)`,
-    [test, organization, project, version],
+    [id, organization, project, version],
   );
   await db.sql(
     `insert into test_version (id, test_id, version, content)
      values ($1, $2, 1, '{"scenario": "Moves a booking", "expectedBehaviors": ["verifies who it is speaking to"]}'::jsonb)`,
-    [version, test],
+    [version, id],
   );
   await db.sql("commit");
 }
@@ -134,6 +134,7 @@ async function insertRun(overrides: RunOverrides = {}): Promise<string> {
     connection_id: connectionId,
     status: "pending",
     triggered_via: "manual",
+    pinned_test_versions: JSON.stringify({ testVersionIds: [testVersionId] }),
     requested_personas: JSON.stringify({ personaIds: [personaId] }),
     connection_snapshot: JSON.stringify({
       type: "retell",
@@ -201,6 +202,8 @@ async function insertSimulation(
     connection_id: connectionId,
     persona_id: personaId,
     persona_version_id: personaVersionId,
+    test_id: testId,
+    test_version_id: testVersionId,
     position: 1,
     connection_type: "retell",
     modality: "chat",
@@ -502,19 +505,19 @@ describe("what a simulation cannot name", () => {
 
   it("half a test pin: an identity without a version, or a version without one", async () => {
     await expect(
-      insertSimulation("queued", { test_id: testId }),
+      insertSimulation("queued", { test_id: testId, test_version_id: null }),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
     );
 
     await expect(
-      insertSimulation("queued", { test_version_id: testVersionId }),
+      insertSimulation("queued", { test_id: null, test_version_id: testVersionId }),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
     );
   });
 
-  it("still writes the pin that is real, and the empty pin of a run born from no test", async () => {
+  it("still writes the pin that is real, and the empty pin an upgraded instance holds", async () => {
     await expect(
       insertSimulation("queued", {
         test_id: testId,
@@ -522,7 +525,9 @@ describe("what a simulation cannot name", () => {
       }),
     ).resolves.toBeDefined();
 
-    await expect(insertSimulation("queued")).resolves.toBeDefined();
+    await expect(
+      insertSimulation("queued", { test_id: null, test_version_id: null }),
+    ).resolves.toBeDefined();
   });
 });
 
@@ -579,6 +584,139 @@ describe("the run header", () => {
       (error) =>
         errorCodeOf(error) === POSTGRES_ERROR.raiseException &&
         String(error).includes("set once at start"),
+    );
+  });
+});
+
+/**
+ * The events record's own door. A verdict is what the graders make of a
+ * conversation, and they write it to their own tables; the day the feed starts
+ * carrying one, these are the checks it will meet. Held here by raw SQL for the
+ * same reason as everything else in this file: the paths that never pass
+ * through the application are exactly the ones a constraint has to defend.
+ */
+describe("a run event", () => {
+  /** One simulation, and the run it belongs to. */
+  async function aConversation(): Promise<{ run: string; simulation: string }> {
+    const simulationId = await insertSimulation("queued");
+    const { rows } = await db.sql<{ run_id: string }>(
+      "select run_id from simulation where id = $1",
+      [simulationId],
+    );
+    return { run: rows[0]?.run_id ?? "", simulation: simulationId };
+  }
+
+  async function record(
+    where: { run: string; simulation?: string | undefined },
+    event: {
+      seq: number;
+      kind: string;
+      status: string;
+      verdict?: string;
+      reason?: string;
+    },
+  ): Promise<void> {
+    await db.sql(
+      `insert into run_event
+         (run_id, seq, organization_id, project_id, kind, simulation_id, status, verdict, reason)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        where.run,
+        event.seq,
+        acme.organization,
+        acme.project,
+        event.kind,
+        where.simulation ?? null,
+        event.status,
+        event.verdict ?? null,
+        event.reason ?? null,
+      ],
+    );
+  }
+
+  it("cannot be numbered twice within one run", async () => {
+    const { run, simulation } = await aConversation();
+    await record({ run, simulation }, { seq: 1, kind: "simulation", status: "claimed" });
+
+    await expect(
+      record({ run, simulation }, { seq: 1, kind: "simulation", status: "running" }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.uniqueViolation,
+    );
+  });
+
+  it("is written once: what happened cannot be rewritten afterwards", async () => {
+    const { run, simulation } = await aConversation();
+    await record({ run, simulation }, { seq: 1, kind: "simulation", status: "claimed" });
+
+    await expect(
+      db.sql("update run_event set status = 'running' where run_id = $1", [run]),
+    ).rejects.toSatisfy(
+      (error) =>
+        errorCodeOf(error) === POSTGRES_ERROR.raiseException &&
+        String(error).includes("written once"),
+    );
+  });
+
+  it("pairs a verdict with the ending it belongs to, and never folds skipped or errored into failed", async () => {
+    const { run, simulation } = await aConversation();
+
+    // The three honest pairings, each written without complaint.
+    await record({ run, simulation }, { seq: 1, kind: "simulation", status: "completed", verdict: "passed", reason: "agent_ended" });
+    await record({ run, simulation }, { seq: 2, kind: "simulation", status: "completed", verdict: "skipped", reason: "agent_ended" });
+    await record({ run, simulation }, { seq: 3, kind: "simulation", status: "failed", verdict: "errored", reason: "simulator_error" });
+    await record({ run, simulation }, { seq: 4, kind: "simulation", status: "canceled", verdict: "skipped" });
+
+    // A simulation that never ran is not a simulation that failed, and this is
+    // where saying otherwise becomes unwritable.
+    for (const [status, verdict] of [
+      ["failed", "failed"],
+      ["failed", "skipped"],
+      ["canceled", "failed"],
+      ["canceled", "errored"],
+      ["running", "passed"],
+      ["queued", "skipped"],
+    ] as const) {
+      await expect(
+        record({ run, simulation }, { seq: 9, kind: "simulation", status, verdict }),
+      ).rejects.toSatisfy(
+        (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+      );
+    }
+  });
+
+  it("keeps each kind to its own vocabulary", async () => {
+    const { run, simulation } = await aConversation();
+
+    // A run event is about the header: no simulation, no judgement of one.
+    await expect(
+      record({ run, simulation }, { seq: 1, kind: "run", status: "running" }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+
+    // And a run never wears a simulation's status.
+    await expect(
+      record({ run }, { seq: 1, kind: "run", status: "queued" }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+
+    // A simulation event always names the conversation it is about.
+    await expect(
+      record({ run }, { seq: 1, kind: "simulation", status: "claimed" }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+  });
+
+  it("keeps an ending reason in the class its status belongs to", async () => {
+    const { run, simulation } = await aConversation();
+
+    await expect(
+      record({ run, simulation }, { seq: 1, kind: "simulation", status: "completed", reason: "orphaned" }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
     );
   });
 });

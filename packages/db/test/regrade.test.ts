@@ -8,6 +8,7 @@ import {
   createAgent,
   createGrader,
   createPersona,
+  createTest,
   deleteGrader,
   finishGradingJob,
   getGradingJob,
@@ -72,6 +73,8 @@ const outsider: AuthContext = {
 let agentId: string;
 let connectionId: string;
 let personaId: string;
+/** What a run executes: a run pins frozen versions, and never names none. */
+let testVersionId: string;
 /** One of this project's graders, for the asks that narrow to one. */
 let graderId: string;
 
@@ -110,7 +113,7 @@ async function aFinishedSimulation(): Promise<Conducted> {
   const started = await startRun(auth, {
     agentId,
     connectionId,
-    personaIds: [personaId],
+    testVersionIds: [testVersionId],
   });
   const [only] = started.simulations;
   if (only === undefined) throw new Error("the run has no simulation");
@@ -201,6 +204,15 @@ beforeAll(async () => {
       },
     })
   ).id;
+
+  testVersionId = (
+    await createTest(auth, {
+      name: "Reschedules a booked appointment",
+      scenario: "Their cleaning has to move to any afternoon next week.",
+      expectedBehaviors: ["confirms the new time back before finishing"],
+      personaIds: [personaId],
+    })
+  ).versionId;
 
   graderId = await aGrader();
 });

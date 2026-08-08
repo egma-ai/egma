@@ -14,6 +14,8 @@ import {
 import type { AuthContext } from "./context.ts";
 import {
   ProjectOutsideOrganizationError,
+  TestMovedOnError,
+  UnprocessableInputError,
   type TestNamingGrader,
   type TestNamingPersona,
 } from "./errors.ts";
@@ -171,13 +173,37 @@ export type TestChanges = {
    * the array, and leaving the field out keeps it.
    */
   readonly graderIds?: readonly string[];
+  /**
+   * The version this edit was written against, when the writer knows it.
+   *
+   * A precondition rather than a change, and it rides here because it belongs
+   * to the same write: it is compared under the lock the edit already takes, so
+   * there is no moment between checking and writing for a second writer to
+   * arrive in. A mismatch refuses everything with `TestMovedOnError`.
+   *
+   * Left out, nothing is compared — which is only ever right for a writer that
+   * is the sole writer, such as a migration or a development script. Anything
+   * serving more than one names it, and the public route requires it.
+   */
+  readonly expectedVersionId?: string;
 };
 
 /** One version, frozen: the test exactly as some simulation executed it. */
 export type TestVersion = {
   readonly id: string;
   readonly testId: string;
+  /**
+   * What the test is called now. Identity is never versioned, so this is the
+   * test's current name rather than the name it carried when this version was
+   * written — the only name that would help somebody go and find it.
+   */
+  readonly testName: string;
   readonly version: number;
+  /**
+   * Whether the test still stands on this version. False once a later one
+   * exists, which is what tells a stale pin from a live one.
+   */
+  readonly current: boolean;
   readonly scenario: string;
   readonly expectedBehaviors: readonly ExpectedBehavior[];
   /** By identity, in the order they were authored. */
@@ -212,7 +238,7 @@ const DEFAULT_BEHAVIOR_PRIORITY: Priority = "P0";
  */
 function validName(name: string): string {
   const trimmed = name.trim();
-  if (trimmed === "") throw new Error("a test needs a name");
+  if (trimmed === "") throw new UnprocessableInputError("a test needs a name");
   return trimmed;
 }
 
@@ -236,11 +262,13 @@ function validContent(input: {
 }): TestContent {
   const scenario = input.scenario.trim();
   if (scenario === "") {
-    throw new Error("a test needs a scenario: the situation the agent is put in");
+    throw new UnprocessableInputError(
+      "a test needs a scenario: the situation the agent is put in",
+    );
   }
 
   if (input.expectedBehaviors.length === 0) {
-    throw new Error(
+    throw new UnprocessableInputError(
       "a test needs at least one expected behavior, because a test that cannot fail is not a test",
     );
   }
@@ -248,12 +276,14 @@ function validContent(input: {
     const written = typeof entry === "string" ? entry : entry.behavior;
     const behavior = typeof written === "string" ? written.trim() : "";
     if (behavior === "") {
-      throw new Error("an expected behavior needs to say something");
+      throw new UnprocessableInputError(
+        "an expected behavior needs to say something",
+      );
     }
     const priority =
       typeof entry === "string" ? undefined : entry.priority;
     if (priority !== undefined && !PRIORITIES.includes(priority)) {
-      throw new Error(
+      throw new UnprocessableInputError(
         `"${priority}" is not a priority egma knows; expected one of ${PRIORITIES.join(", ")}`,
       );
     }
@@ -261,7 +291,7 @@ function validContent(input: {
   });
 
   if (!expectedBehaviors.some((behavior) => behavior.priority === "P0")) {
-    throw new Error(
+    throw new UnprocessableInputError(
       "a test needs at least one P0 expected behavior, because falsifiability cannot be downgraded away",
     );
   }
@@ -280,10 +310,12 @@ function validatePersonaIds(ids: readonly string[]): void {
   const seen = new Set<string>();
   for (const id of ids) {
     if (!isId("prs", id)) {
-      throw new Error(`"${id}" is not a persona id`);
+      throw new UnprocessableInputError(`"${id}" is not a persona id`);
     }
     if (seen.has(id)) {
-      throw new Error(`persona ${id} is named twice on one test`);
+      throw new UnprocessableInputError(
+        `persona ${id} is named twice on one test; name each persona once`,
+      );
     }
     seen.add(id);
   }
@@ -473,10 +505,12 @@ async function validateNamedPersonas(
 
   for (const id of ids) {
     if (!found.has(id)) {
-      throw new Error(`there is no persona ${id} in this project`);
+      throw new UnprocessableInputError(
+        `there is no persona ${id} in this project`,
+      );
     }
     if (found.get(id) !== null) {
-      throw new Error(
+      throw new UnprocessableInputError(
         `persona ${id} is deleted, and a test cannot name a deleted persona`,
       );
     }
@@ -547,6 +581,13 @@ async function validateNamedGraders(
  * somewhere real. Reading the row without the deleted filter is what lets the
  * two be told apart, instead of reporting every reachable failure as a
  * deletion.
+ *
+ * **Every way this fails is the instance's fault rather than the writer's**, and
+ * these stay plain errors for that reason. Signup seeds a project's persona and
+ * points the project at them in the same transaction that makes the project, so
+ * a project pointing at nobody is a project something else broke — and a write
+ * answered as though the body were at fault would send the writer looking at
+ * their own file for a problem that is not in it.
  *
  * Every way this fails says what to do about it and writes nothing: a test
  * whose persona egma picked for itself would be a test nobody authored.
@@ -905,6 +946,13 @@ export async function getTest(
  * them, so no version can come to name one that is missing, deleted, or another
  * project's.
  *
+ * **`expectedVersionId` is compared inside that same transaction, on the row
+ * this edit has already locked**, and a mismatch refuses the whole edit with
+ * `TestMovedOnError`. Where the comparison happens is the whole guarantee: a
+ * caller that read the current version and then called this would have a window
+ * between the two, and a second writer walks straight through it — both edits
+ * would be accepted, and the later one would quietly become what the test says.
+ *
  * Editing what the caller cannot see returns what reading it would have:
  * `undefined`, with nothing disturbed.
  */
@@ -933,6 +981,19 @@ export async function editTest(
 
     if (locked === undefined) return undefined;
     const { currentVersionId, ...current } = locked;
+
+    // Before anything is read about the content, and inside the lock. Nothing
+    // has been written yet, and returning through a throw takes the transaction
+    // with it, so a refused edit leaves the test exactly as it found it.
+    if (
+      changes.expectedVersionId !== undefined &&
+      changes.expectedVersionId !== currentVersionId
+    ) {
+      throw new TestMovedOnError(current, {
+        expected: changes.expectedVersionId,
+        current: currentVersionId,
+      });
+    }
 
     // This select and the update below are the two `where`s in this file that
     // start from a bare `eq` rather than `within`: each names an id that just
@@ -1047,6 +1108,14 @@ export async function editTest(
  * authored. Which version of each of them a simulation met is the run's to pin,
  * never this row's.
  *
+ * It also answers the two things about the test itself that whoever holds only a
+ * version id cannot get anywhere else: what the test is called, and whether it
+ * still stands here. Both come off the row this read already joins, so a caller
+ * holding a version somebody committed months ago learns in one request whether
+ * it is the current one and, when it is not, which test to go and look at. A
+ * second fetch would answer neither for a version of a test that has since been
+ * deleted.
+ *
  * Deliberately no deleted filter: versions outlive their test's deletion, so a
  * run that pinned one can always say exactly what it executed.
  */
@@ -1060,6 +1129,8 @@ export async function getTestVersion(
     .select({
       id: testVersion.id,
       testId: testVersion.testId,
+      testName: test.name,
+      currentVersionId: test.currentVersionId,
       version: testVersion.version,
       content: testVersion.content,
       createdAt: testVersion.createdAt,
@@ -1077,9 +1148,10 @@ export async function getTestVersion(
 
   if (row === undefined) return undefined;
 
-  const { content, ...rest } = row;
+  const { content, currentVersionId, ...rest } = row;
   return {
     ...rest,
+    current: currentVersionId === row.id,
     ...contentFromRow(content, row.id),
     personas: await personasOf(db(), row.id),
     graders: await gradersOf(db(), row.id),

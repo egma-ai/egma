@@ -1,0 +1,860 @@
+/**
+ * The agent and connection endpoints of the fixture platform.
+ *
+ * This is the contract the CLI is built against, written down as something that
+ * runs: register a voice agent together with the first way of reaching it, read
+ * it back, and attach another connection later.
+ *
+ * It answers what the real instance answers, including which refusal goes with
+ * which mistake, because a fixture that is kinder than the real thing is a
+ * fixture that hides bugs. Everything it refuses, the access layer behind the
+ * seam refuses for the same reason: a modality the type does not speak, a
+ * config key the type has no place for, a credential where none belongs or none
+ * where one is required, and a name a living row already holds.
+ *
+ * Three shapes are load-bearing and none of them is this file's to change:
+ *
+ * - **No resource is rooted at a project.** An agent is `/api/agents/:agentId`
+ *   and never `/api/projects/:projectId/agents/…`. A write may *name* a project
+ *   in its body; a read filters by one in the query.
+ * - **The organization never appears in an address.** Which customer this is
+ *   comes from the key and from nowhere else, which is what stops a copied key
+ *   writing into somebody else's account by asking nicely.
+ * - **A sealed secret never comes back.** What a caller sends is stored sealed
+ *   and answered as its last four characters and nothing more.
+ *
+ * Two more are the public API's rather than the factory's, and both are here
+ * because a client that guessed at either would fail in somebody's terminal:
+ *
+ * - **Registering is retry-safe by construction.** A registration carrying an
+ *   inline connection goes through the per-type reuse rule, and the reply's
+ *   `result` says which of the three things happened — created, reused, or the
+ *   same agent reached a new way. A `reused` registration wrote no row, so it
+ *   rides a 200 where the other two ride a 201.
+ * - **An unknown key is refused by name.** That is what turns a typo into an
+ *   answer a coding agent can act on, and it is what makes the dropped vendor
+ *   payload loud: a client still sending what was pulled from the provider
+ *   hears so, instead of watching egma quietly keep nothing.
+ */
+
+import { given, isId, newId, NOT_AUTHENTICATED, PAGE_SIZE } from "./reading.ts";
+import type { FixtureAnswer, RouteGroup } from "./server.ts";
+
+/** The floor under a credential field, so a last-4 hint stays a hint. */
+const SHORTEST_CREDENTIAL = 8;
+
+type ConfigGate = (key: string, value: unknown) => string;
+
+type Descriptor = {
+  readonly modalities: readonly string[];
+  readonly topology: string;
+  readonly config: Readonly<Record<string, ConfigGate>>;
+  readonly credentials:
+    | { readonly required: true; readonly fields: readonly string[]; readonly hintField: string }
+    | { readonly required: false; readonly refusal: string };
+  /**
+   * Which config key decides that two registrations are about one vendor
+   * agent. A type that cannot answer that — a framework the customer runs
+   * themselves has no vendor identifier — declares none and always creates.
+   */
+  readonly reuseKey?: string;
+  /** Whether anything can conduct a run over this type today. */
+  readonly simulatorAdapter: boolean;
+};
+
+function nonEmptyString(key: string, value: unknown): string {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Refusal(`the config's ${key} must be a non-empty string`);
+  }
+  return value.trim();
+}
+
+/** E.164: a plus, then up to fifteen digits with no leading zero. */
+const E164 = /^\+[1-9]\d{1,14}$/u;
+
+function e164PhoneNumber(key: string, value: unknown): string {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  if (!E164.test(candidate)) {
+    throw new Refusal(
+      `the config's ${key} must be an E.164 phone number, which looks like +15551234567`,
+    );
+  }
+  return candidate;
+}
+
+/**
+ * What each connection type is made of, mirroring the registry behind the seam.
+ *
+ * `phone` is here although the CLI never writes one: it is what makes the
+ * checks about per-type validation real rather than a single type agreeing
+ * with itself.
+ */
+const REGISTRY: Readonly<Record<string, Descriptor>> = {
+  retell: {
+    modalities: ["chat", "voice"],
+    topology: "hosted-broker",
+    config: { retellAgentId: nonEmptyString },
+    credentials: { required: true, fields: ["apiKey"], hintField: "apiKey" },
+    // The provider's own agent id: the first vendor to carry a reuse rule.
+    reuseKey: "retellAgentId",
+    simulatorAdapter: true,
+  },
+  phone: {
+    modalities: ["voice"],
+    topology: "egma-dials-in",
+    config: { phoneNumber: e164PhoneNumber },
+    // No reuse rule, deliberately: a number is where egma dials, not who
+    // answers, and two agents can legitimately share one.
+    simulatorAdapter: false,
+    credentials: {
+      required: false,
+      refusal:
+        "a phone connection takes no credential: the customer supplies a public number, " +
+        "and egma dials it with its own telephony configuration",
+    },
+  },
+};
+
+const CONNECTION_TYPES = Object.keys(REGISTRY);
+
+/**
+ * The types something can actually conduct a run over today.
+ *
+ * Read off the registry rather than written out, so a refusal naming what works
+ * can never name an adapter that has not shipped or miss one that has.
+ */
+export const CONDUCTABLE_TYPES: readonly string[] = CONNECTION_TYPES.filter(
+  (type) => (REGISTRY[type] as Descriptor).simulatorAdapter,
+);
+
+/** What a registration holds, and what a connection holds. Nothing else. */
+const AGENT_KEYS = ["name", "description", "project", "connection"] as const;
+const CONNECTION_KEYS = [
+  "name",
+  "type",
+  "modality",
+  "environment",
+  "config",
+  "credentials",
+] as const;
+
+/** A refusal with a sentence in it, turned into an answer at the door. */
+class Refusal extends Error {
+  readonly status: number;
+  readonly code: string;
+
+  constructor(message: string, options: { status?: number; code?: string } = {}) {
+    super(message);
+    this.name = "Refusal";
+    this.status = options.status ?? 400;
+    this.code = options.code ?? "invalid_request";
+  }
+}
+
+/**
+ * The unknown-key gate, written once for both objects a registration carries.
+ *
+ * Refusing by name rather than ignoring is what turns a typo into an answer a
+ * coding agent can act on. And it is what makes the dropped vendor payload
+ * loud: egma no longer keeps what was pulled from the provider — the agent's
+ * content stays where it lives and is read fresh through the sealed credential
+ * — so a client still sending a copy of it is told, rather than left believing
+ * egma holds something it does not.
+ */
+function refuseUnknownKeyIn(
+  body: Record<string, unknown>,
+  held: readonly string[],
+  what: string,
+): void {
+  for (const key of Object.keys(body)) {
+    if (held.includes(key)) continue;
+    if (key === "pulled") {
+      throw new Refusal(
+        `egma no longer keeps what was pulled from the provider, so ${what} ` +
+          'has no "pulled" key. Drop it and send ' +
+          `${held.join(", ")}; the agent's content stays at the provider, ` +
+          "where egma reads it fresh rather than out of a copy that would go " +
+          "stale.",
+      );
+    }
+    throw new Refusal(`${what} has no key "${key}"; it holds ${held.join(", ")}`);
+  }
+}
+
+function descriptorOf(type: unknown): Descriptor {
+  const named = typeof type === "string" ? type : "";
+  const descriptor = REGISTRY[named];
+  if (descriptor === undefined) {
+    throw new Refusal(
+      `"${named}" is not a connection type egma knows; expected one of ${CONNECTION_TYPES.join(", ")}`,
+    );
+  }
+  return descriptor;
+}
+
+function validModality(type: string, modality: unknown): string {
+  const descriptor = descriptorOf(type);
+  const named = typeof modality === "string" ? modality : "";
+  if (!descriptor.modalities.includes(named)) {
+    throw new Refusal(
+      `a ${type} connection speaks ${descriptor.modalities.join(" or ")}, and this one was asked for ${named}`,
+    );
+  }
+  return named;
+}
+
+function validConfig(type: string, config: unknown): Record<string, string> {
+  const gates = descriptorOf(type).config;
+  const demanded = Object.keys(gates);
+
+  if (typeof config !== "object" || config === null || Array.isArray(config)) {
+    throw new Refusal(`a ${type} connection's config is an object holding ${demanded.join(", ")}`);
+  }
+
+  for (const key of Object.keys(config)) {
+    if (!(key in gates)) {
+      throw new Refusal(
+        `a ${type} connection's config has no key "${key}"; it holds ${demanded.join(", ")}`,
+      );
+    }
+  }
+
+  const stored: Record<string, string> = {};
+  for (const [key, gate] of Object.entries(gates)) {
+    const value = (config as Record<string, unknown>)[key];
+    if (value === undefined) throw new Refusal(`a ${type} connection's config needs ${key}`);
+    stored[key] = gate(key, value);
+  }
+  return stored;
+}
+
+function validCredentials(
+  type: string,
+  credentials: unknown,
+): { readonly sealed: Record<string, string>; readonly hint: string } | null {
+  const rule = descriptorOf(type).credentials;
+
+  if (!rule.required) {
+    if (credentials !== undefined) throw new Refusal(rule.refusal);
+    return null;
+  }
+
+  const shape = `{ ${rule.fields.join(", ")} }`;
+  if (
+    credentials === undefined ||
+    typeof credentials !== "object" ||
+    credentials === null ||
+    Array.isArray(credentials)
+  ) {
+    throw new Refusal(`a ${type} connection needs credentials shaped ${shape}`);
+  }
+
+  for (const key of Object.keys(credentials)) {
+    if (!rule.fields.includes(key)) {
+      throw new Refusal(
+        `a ${type} connection's credentials have no key "${key}"; they are shaped ${shape}`,
+      );
+    }
+  }
+
+  const sealed: Record<string, string> = {};
+  for (const field of rule.fields) {
+    const value = (credentials as Record<string, unknown>)[field];
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    if (trimmed === "") {
+      throw new Refusal(
+        `a ${type} connection's credentials need ${field} to be a non-empty string`,
+      );
+    }
+    if (trimmed.length < SHORTEST_CREDENTIAL) {
+      throw new Refusal(
+        `a ${type} connection's credentials need ${field} to be at least ${SHORTEST_CREDENTIAL} characters`,
+      );
+    }
+    sealed[field] = trimmed;
+  }
+
+  return { sealed, hint: sealed[rule.hintField]?.slice(-4) ?? "" };
+}
+
+/**
+ * A name, which is the one thing a write cannot go ahead without.
+ *
+ * Its own answer rather than the registry's: nothing about the body could not
+ * be written, so it is what the caller says that cannot be acted on.
+ */
+function validName(name: unknown, what: string): string {
+  const trimmed = typeof name === "string" ? name.trim() : "";
+  if (trimmed === "") {
+    throw new Refusal(`${what} needs a name`, { status: 422, code: "unprocessable" });
+  }
+  return trimmed;
+}
+
+/**
+ * A connection payload the registry has already taken, on its way to a row.
+ *
+ * It exists so that the whole of the checking happens once, before anything
+ * decides whether this registration creates, reuses or extends. Every branch
+ * then works from the same admitted payload, which is what makes "a reuse is
+ * held to exactly what a create is held to" true by construction rather than by
+ * two lists somebody keeps in step.
+ */
+type Admitted = {
+  /** Absent means the smallest free numbered name for the type. */
+  readonly name: string | undefined;
+  readonly type: string;
+  readonly modality: string;
+  /** Derived from the type, never caller-supplied. */
+  readonly topology: string;
+  readonly environment: string | null;
+  readonly config: Readonly<Record<string, string>>;
+  readonly credentials: {
+    readonly sealed: Record<string, string>;
+    readonly hint: string;
+  } | null;
+};
+
+type StoredConnection = {
+  readonly id: string;
+  readonly agentId: string;
+  readonly projectId: string;
+  readonly name: string;
+  readonly type: string;
+  readonly modality: string;
+  readonly topology: string;
+  readonly environment: string | null;
+  readonly config: Readonly<Record<string, string>>;
+  /** Sealed. Nothing outside this file ever reads it back through a route. */
+  credentials: Readonly<Record<string, string>> | null;
+  credentialsHint: string | null;
+  readonly createdAt: string;
+  updatedAt: string;
+};
+
+type StoredAgent = {
+  readonly id: string;
+  readonly projectId: string;
+  name: string;
+  description: string | null;
+  readonly createdAt: string;
+  updatedAt: string;
+};
+
+/** An agent, as every read of one describes it. */
+function agentOut(agent: StoredAgent): Record<string, unknown> {
+  return {
+    id: agent.id,
+    project_id: agent.projectId,
+    name: agent.name,
+    description: agent.description,
+    created_at: agent.createdAt,
+    updated_at: agent.updatedAt,
+  };
+}
+
+/**
+ * A connection, as every read of one describes it.
+ *
+ * The sealed envelope has no line here, so there is no serializer to remember
+ * to strip it in. `credentials_hint` is the whole of what comes back: enough to
+ * tell one provider key from another, and enough to see that a rotation landed.
+ */
+function connectionOut(connection: StoredConnection): Record<string, unknown> {
+  return {
+    id: connection.id,
+    agent_id: connection.agentId,
+    project_id: connection.projectId,
+    name: connection.name,
+    type: connection.type,
+    modality: connection.modality,
+    topology: connection.topology,
+    environment: connection.environment,
+    config: connection.config,
+    credentials_hint: connection.credentialsHint,
+    capabilities: null,
+    created_at: connection.createdAt,
+    updated_at: connection.updatedAt,
+  };
+}
+
+export type AgentControls = {
+  /** Every agent written, oldest first. */
+  readonly agents: readonly StoredAgent[];
+  /** Every connection written, oldest first. */
+  readonly connections: readonly StoredConnection[];
+  /**
+   * Every secret this fixture was handed, in the order it arrived.
+   *
+   * A check asserting the key reached the platform reads it here. It exists
+   * because the alternative — asserting on a request body a test recorded —
+   * would put the secret somewhere a failing test prints.
+   */
+  readonly sealed: readonly string[];
+  /** The project a write named, or `null`, per write. */
+  readonly projectsNamed: readonly (string | null)[];
+};
+
+/**
+ * A key minted for one project, asked to act in a different one.
+ *
+ * The verb is passed in because that is the only word that differs between the
+ * read and the write — and two sentences kept in step by hand is how contract
+ * wording drifts.
+ */
+function credentialActsElsewhere(
+  scoped: string,
+  named: string,
+  verb: "writes into" | "reads",
+): Refusal {
+  return new Refusal(
+    `this credential acts in project ${scoped}, and the request named ` +
+      `${named}. A key minted for one product area ${verb} that one; drop ` +
+      "the project, or use a key for the whole organization.",
+    { status: 403, code: "not_permitted" },
+  );
+}
+
+/**
+ * One connection, as the run endpoints need it: which agent it reaches, and
+ * what egma would have to speak to conduct a simulation over it.
+ */
+export type ConnectionLookup = (connectionId: string) => {
+  readonly id: string;
+  readonly agentId: string;
+  readonly type: string;
+  readonly modality: string;
+} | null;
+
+export function agentRoutes(options: {
+  /** Whether the key a request carries is one this instance minted. */
+  readonly knowsKey: (key: string) => boolean;
+  /**
+   * The one project this key acts in.
+   *
+   * Handed in rather than minted here, so every group of this fixture agrees
+   * about which project this is — a fixture whose halves each believed in a
+   * different project could not say anything true about a request that named
+   * one.
+   */
+  readonly projectId: string;
+}): {
+  readonly group: RouteGroup;
+  readonly controls: AgentControls;
+  /** How a run resolves the connection it will execute over. */
+  readonly connectionById: ConnectionLookup;
+} {
+  const agents: StoredAgent[] = [];
+  const connections: StoredConnection[] = [];
+  const sealed: string[] = [];
+  const projectsNamed: (string | null)[] = [];
+
+  /** The project everything lands in, named or not. */
+  const HOME_PROJECT = options.projectId;
+
+  /**
+   * The project a request named, checked against what this key may reach.
+   *
+   * One rule for reads and writes. A surface that refused a stranger's project
+   * on a write and answered an empty list on a read has two rules, and the
+   * empty list is the worse half: it reads as "you have no agents there"
+   * rather than as "that is not yours to ask about".
+   */
+  const projectNamed = (
+    named: string | undefined,
+    verb: "writes into" | "reads",
+  ): string => {
+    if (named !== undefined && named !== HOME_PROJECT) {
+      throw credentialActsElsewhere(HOME_PROJECT, named, verb);
+    }
+    return HOME_PROJECT;
+  };
+
+  const authorized = (headers: Record<string, string | undefined>): boolean => {
+    const offered = (headers["authorization"] ?? "").replace(/^Bearer\s+/iu, "");
+    return offered !== "" && options.knowsKey(offered);
+  };
+
+  const notAuthenticated: FixtureAnswer = { status: 401, body: NOT_AUTHENTICATED };
+
+  /**
+   * An agent nobody can see reads exactly like an agent nobody wrote. Existence
+   * is never confirmed to somebody who could not have seen the thing anyway, so
+   * another customer's id and a made-up one get the same sentence.
+   */
+  const noSuchAgent: FixtureAnswer = {
+    status: 404,
+    body: {
+      error: "not_found",
+      message:
+        "no agent of yours has that id. Check the id, or list your agents with " +
+        "GET /api/agents.",
+    },
+  };
+
+  const answering = (make: () => FixtureAnswer): FixtureAnswer => {
+    try {
+      return make();
+    } catch (error) {
+      if (error instanceof Refusal) {
+        return { status: error.status, body: { error: error.code, message: error.message } };
+      }
+      throw error;
+    }
+  };
+
+  /** The smallest free `<type>-<n>` among an agent's living connections. */
+  const freeConnectionName = (agentId: string, type: string): string => {
+    const taken = new Set(
+      connections.filter((held) => held.agentId === agentId).map((held) => held.name),
+    );
+    for (let n = 1; ; n += 1) {
+      const candidate = `${type}-${n}`;
+      if (!taken.has(candidate)) return candidate;
+    }
+  };
+
+  /**
+   * One connection payload's envelope, read the one way — inline on a
+   * registration and standalone on an attach. Two dialects for one thing is how
+   * a client comes to work on one path and fail on the other.
+   *
+   * Only the envelope: which keys exist at all. What a type's config holds and
+   * which modalities it speaks belong to the registry, one step further in.
+   */
+  const connectionIn = (value: unknown): Record<string, unknown> => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      throw new Refusal("a connection is an object, or is left out entirely");
+    }
+    const body = value as Record<string, unknown>;
+    // Topology is not in the list on purpose: it is derived from the type, so a
+    // supplied one is refused as the unknown key it is.
+    refuseUnknownKeyIn(body, CONNECTION_KEYS, "a connection");
+    return body;
+  };
+
+  /**
+   * A connection payload the registry will take, checked whole.
+   *
+   * Pure: nothing here reads or writes anything, which is what lets it happen
+   * before the outcome is decided. **Every path runs it, and runs all of it.**
+   * A registration that turns out to be a reuse is held to exactly what a
+   * registration that turns out to be a create is held to — otherwise a body
+   * egma would refuse from a new customer would rotate a live credential for an
+   * old one, and the same client would work on one machine and fail on the
+   * next.
+   *
+   * The order is the registry's own and it is contract: the type, then the
+   * modality it speaks, then its config, then its credentials, then the name.
+   */
+  const admitConnection = (input: Record<string, unknown>): Admitted => {
+    const descriptor = descriptorOf(input["type"]);
+    const type = input["type"] as string;
+    const modality = validModality(type, input["modality"]);
+    const config = validConfig(type, input["config"]);
+    const credentials = validCredentials(type, input["credentials"]);
+    return {
+      // A name sent blank is refused rather than dropped; absent is different
+      // and means the smallest free numbered name.
+      name: input["name"] === undefined ? undefined : validName(input["name"], "a connection"),
+      type,
+      modality,
+      topology: descriptor.topology,
+      environment: typeof input["environment"] === "string" ? input["environment"] : null,
+      config,
+      credentials,
+    };
+  };
+
+  const writeConnection = (agent: StoredAgent, input: Admitted): StoredConnection => {
+    const { type, modality, config, credentials } = input;
+    const name = input.name ?? freeConnectionName(agent.id, type);
+    if (connections.some((held) => held.agentId === agent.id && held.name === name)) {
+      throw new Refusal(`a connection named "${name}" already exists on this agent`, {
+        status: 409,
+        code: "name_taken",
+      });
+    }
+
+    if (credentials !== null) sealed.push(...Object.values(credentials.sealed));
+
+    const written: StoredConnection = {
+      id: newId("con"),
+      agentId: agent.id,
+      projectId: agent.projectId,
+      name,
+      type,
+      modality,
+      // Derived from the type, never caller-supplied.
+      topology: input.topology,
+      environment: input.environment,
+      config,
+      credentials: credentials === null ? null : credentials.sealed,
+      credentialsHint: credentials === null ? null : credentials.hint,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    connections.push(written);
+    return written;
+  };
+
+  /**
+   * The living connection in this project that is about the same vendor agent,
+   * if there is one — the whole of what makes registering retry-safe.
+   *
+   * Oldest first, so which agent a second modality attaches to is the same
+   * answer every time.
+   */
+  const sameVendorAgent = (
+    projectId: string,
+    input: Admitted,
+  ): readonly StoredConnection[] => {
+    const { type } = input;
+    const reuseKey = REGISTRY[type]?.reuseKey;
+    if (reuseKey === undefined) return [];
+
+    const named = input.config[reuseKey];
+    if (named === undefined || named.trim() === "") return [];
+
+    // Oldest first, so which agent gains a second way of being reached is the
+    // same answer every time. The ids sort by mint time, so the order they were
+    // written in and the order the real instance sorts them by are one thing.
+    return connections.filter(
+      (held) =>
+        held.projectId === projectId &&
+        held.type === type &&
+        held.config[reuseKey] === named.trim(),
+    );
+  };
+
+  const group: RouteGroup = {
+    name: "agents",
+    routes: [
+      {
+        /**
+         * Register a voice agent, with the first way of reaching it written in
+         * the same request: an agent nothing can reach is not worth having, so
+         * the happy path never produces one.
+         *
+         * Both rows or neither, and the reuse rule runs in the same breath:
+         * a living connection about the same vendor agent decides the outcome.
+         * Same modality answers what is there with the credential rotated
+         * whole; a different modality gives that same agent another way of
+         * being reached; no match writes both. `result` says which.
+         */
+        method: "POST",
+        path: "/api/agents",
+        handle: (request) => {
+          if (!authorized(request.headers)) return notAuthenticated;
+          return answering(() => {
+            const body = request.body ?? {};
+
+            // The order below is the route's, then the factory's, and it is
+            // contract: the envelopes first, because they are answerable
+            // without knowing anything; then which project this is; then the
+            // agent's name and the whole connection payload. Only after all of
+            // that does anything look at what is already there — so what egma
+            // will take is decided before what egma will do is.
+            refuseUnknownKeyIn(body, AGENT_KEYS, "a registration");
+            const envelope =
+              body["connection"] === undefined ? undefined : connectionIn(body["connection"]);
+
+            // A write may name a project in its body. It never names one in
+            // its address, and it never names an organization anywhere.
+            const named = typeof body["project"] === "string" ? body["project"] : null;
+            projectsNamed.push(named);
+            const projectId = projectNamed(given(named), "writes into");
+
+            const name = validName(body["name"], "an agent");
+            const inline = envelope === undefined ? undefined : admitConnection(envelope);
+
+            if (inline !== undefined) {
+              const living = sameVendorAgent(projectId, inline);
+              const same = living.find((held) => held.modality === inline.modality);
+
+              if (same !== undefined) {
+                // Whole, never merged: what arrived replaces what is stored.
+                // Nothing about the body is checked here, because all of it was
+                // checked above — a registration egma would refuse never gets
+                // as far as rotating a live credential.
+                const { credentials } = inline;
+                if (credentials !== null) sealed.push(...Object.values(credentials.sealed));
+                same.credentials = credentials === null ? null : credentials.sealed;
+                same.credentialsHint = credentials === null ? null : credentials.hint;
+                same.updatedAt = new Date().toISOString();
+
+                const owner = agents.find((held) => held.id === same.agentId) as StoredAgent;
+                // No row was written, and saying 201 would be the protocol
+                // claiming something the `result` field is there to deny.
+                return {
+                  status: 200,
+                  body: {
+                    result: "reused",
+                    agent: agentOut(owner),
+                    connection: connectionOut(same),
+                  },
+                };
+              }
+
+              const known = living[0];
+              if (known !== undefined) {
+                const owner = agents.find((held) => held.id === known.agentId) as StoredAgent;
+                return {
+                  status: 201,
+                  body: {
+                    result: "connection_added",
+                    agent: agentOut(owner),
+                    connection: connectionOut(writeConnection(owner, inline)),
+                  },
+                };
+              }
+            }
+
+            if (agents.some((held) => held.projectId === projectId && held.name === name)) {
+              throw new Refusal(`an agent named "${name}" already exists in this project`, {
+                status: 409,
+                code: "name_taken",
+              });
+            }
+
+            // Both rows or neither: a connection payload the registry turns
+            // away leaves no agent behind, so nothing is kept until both are.
+            const agent: StoredAgent = {
+              id: newId("agt"),
+              projectId,
+              name,
+              description: typeof body["description"] === "string" ? body["description"] : null,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+
+            if (inline === undefined) {
+              agents.push(agent);
+              return { status: 201, body: { result: "created", agent: agentOut(agent) } };
+            }
+
+            const before = connections.length;
+            let connection: StoredConnection;
+            try {
+              connection = writeConnection(agent, inline);
+            } catch (error) {
+              connections.length = before;
+              throw error;
+            }
+            agents.push(agent);
+
+            return {
+              status: 201,
+              body: {
+                result: "created",
+                agent: agentOut(agent),
+                connection: connectionOut(connection),
+              },
+            };
+          });
+        },
+      },
+      {
+        /**
+         * One page of the agents this key can reach, newest first. A project is
+         * a filter in the query and never a level in the address, and there is
+         * no page-size parameter: a page is a page, and the cursor is what
+         * carries a reader through the rest.
+         */
+        method: "GET",
+        path: "/api/agents",
+        handle: (request) => {
+          if (!authorized(request.headers)) return notAuthenticated;
+          return answering(() => {
+            const project = projectNamed(
+              given(request.url.searchParams.get("project")),
+              "reads",
+            );
+            const cursor = given(request.url.searchParams.get("cursor"));
+            if (cursor !== undefined && !isId("agt", cursor)) {
+              throw new Refusal(
+                `"${cursor}" is not an agent id, so it cannot be a cursor. Send ` +
+                  "back the next_cursor from the page before this one, or leave it " +
+                  "out to start at the newest.",
+              );
+            }
+
+            // Newest first, because the agent somebody is looking for is
+            // usually the one they just registered. The ids sort by mint time,
+            // so reversing what was written is the order the real instance
+            // reads them in.
+            const mine = agents.filter((agent) => agent.projectId === project).reverse();
+            const from =
+              cursor === undefined ? 0 : mine.findIndex((held) => held.id === cursor) + 1;
+            const page = mine.slice(from, from + PAGE_SIZE);
+            const more = mine.length > from + page.length;
+
+            return {
+              status: 200,
+              body: {
+                items: page.map(agentOut),
+                next_cursor: more ? (page.at(-1)?.id ?? null) : null,
+              },
+            };
+          });
+        },
+      },
+      {
+        // The agent, and every living way of reaching it. A connection is only
+        // ever reached through its agent.
+        method: "GET",
+        path: "/api/agents/:agentId",
+        handle: (request) => {
+          if (!authorized(request.headers)) return notAuthenticated;
+          const agent = agents.find((held) => held.id === request.params["agentId"]);
+          if (agent === undefined) return noSuchAgent;
+          return {
+            status: 200,
+            body: {
+              agent: agentOut(agent),
+              connections: connections
+                .filter((held) => held.agentId === agent.id)
+                .map(connectionOut),
+            },
+          };
+        },
+      },
+      {
+        // Another way of reaching an agent that already exists. Same body shape,
+        // and the same defaulted name one number further along.
+        method: "POST",
+        path: "/api/agents/:agentId/connections",
+        handle: (request) => {
+          if (!authorized(request.headers)) return notAuthenticated;
+          const agent = agents.find((held) => held.id === request.params["agentId"]);
+          if (agent === undefined) return noSuchAgent;
+          return answering(() => ({
+            status: 201,
+            body: {
+              connection: connectionOut(
+                writeConnection(agent, admitConnection(connectionIn(request.body ?? {}))),
+              ),
+            },
+          }));
+        },
+      },
+    ],
+  };
+
+  const connectionById: ConnectionLookup = (connectionId) => {
+    const held = connections.find((one) => one.id === connectionId);
+    if (held === undefined) return null;
+    return {
+      id: held.id,
+      agentId: held.agentId,
+      type: held.type,
+      modality: held.modality,
+    };
+  };
+
+  return {
+    group,
+    controls: { agents, connections, sealed, projectsNamed },
+    connectionById,
+  };
+}

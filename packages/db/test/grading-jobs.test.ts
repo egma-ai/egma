@@ -8,6 +8,7 @@ import {
   completeSimulation,
   createAgent,
   createPersona,
+  createTest,
   failSimulation,
   finishGradingJob,
   getGradingJob,
@@ -78,13 +79,15 @@ const auth = actingAsAcme();
 let agentId: string;
 let connectionId: string;
 let personaId: string;
+/** What a run executes: a run pins frozen versions, and never names none. */
+let testVersionId: string;
 
 /** One conversation, conducted as far as the caller asks and no further. */
 async function aSimulation(): Promise<string> {
   const started = await startRun(auth, {
     agentId,
     connectionId,
-    personaIds: [personaId],
+    testVersionIds: [testVersionId],
   });
   const [only] = started.simulations;
   if (only === undefined) throw new Error("the run has no simulation");
@@ -160,6 +163,15 @@ beforeAll(async () => {
       },
     })
   ).id;
+
+  testVersionId = (
+    await createTest(auth, {
+      name: "Reschedules a booked appointment",
+      scenario: "Their cleaning has to move to any afternoon next week.",
+      expectedBehaviors: ["confirms the new time back before finishing"],
+      personaIds: [personaId],
+    })
+  ).versionId;
 });
 
 afterAll(async () => {
@@ -279,7 +291,7 @@ describe("a terminal transition", () => {
     const started = await startRun(auth, {
       agentId,
       connectionId,
-      personaIds: [personaId],
+      testVersionIds: [testVersionId],
     });
     const [only] = started.simulations;
     if (only === undefined) throw new Error("the run has no simulation");
@@ -604,10 +616,16 @@ describe("the claim", () => {
         },
       },
     });
+    const globexTest = await createTest(globexAuth, {
+      name: "Cancels a booking",
+      scenario: "Their cleaning has to be called off.",
+      expectedBehaviors: ["confirms the booking is gone before finishing"],
+      personaIds: [grace.id],
+    });
     const started = await startRun(globexAuth, {
       agentId: globexAgent.id,
       connectionId: globexAgent.connection?.id ?? "",
-      personaIds: [grace.id],
+      testVersionIds: [globexTest.versionId],
     });
     const [conversation] = started.simulations;
     if (conversation === undefined) throw new Error("no simulation");

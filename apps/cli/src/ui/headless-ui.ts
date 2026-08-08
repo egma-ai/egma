@@ -8,41 +8,81 @@
  * path. Because every gate opens itself, nothing here may ever be reached
  * without that word from the developer: the gate is where consent is given,
  * and this UI answers it on their behalf.
+ *
+ * A gate carrying a value is different. Consent can be given in advance;
+ * knowledge cannot. So an answer nobody supplied is `null`, and the flow takes
+ * the branch it takes when a developer has nothing to add.
  */
 
+import { loginLines, type LoginPrompt } from "../platform/login.ts";
+import type { RetellAgent } from "../retell/client.ts";
+import { keyAskLines, type KeyAsk } from "../retell/connect.ts";
+import { simulationLine } from "../run/lines.ts";
+import type { RunView } from "../run/view.ts";
+import type { SkillPlaces } from "../skills/install.ts";
+import type { Detection } from "../wizard/detection.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
-import type { DrivenAgent, GateId, WizardUI } from "./wizard-ui.ts";
+import type { TestGate } from "../wizard/gate.ts";
+import type { GenerationProgress } from "../wizard/test-generation.ts";
+import type { AskId, DrivenAgent, GateId, WizardUI } from "./wizard-ui.ts";
 
 export type HeadlessRecord = {
   drivenAgent: DrivenAgent | null;
   drivenAgentLog: string | null;
-  taskFile: string | null;
+  /** What egma worked out for itself before it asked anybody anything. */
+  detection: Detection | null;
+  logins: LoginPrompt[];
+  /** Every time a key was asked for, and what was said about it. */
+  keyAsks: KeyAsk[];
+  /** The agents a choice was offered between, when one was. */
+  agentChoices: RetellAgent[];
   statuses: string[];
   summary: string;
+  /** Every test the coding agent said it had written, in the order it said so. */
+  written: string[];
+  /** The list that waited on one keystroke, when one did. */
+  gate: TestGate | null;
+  /** The run, as it stood the last time the flow said anything about it. */
+  run: RunView | null;
+  /** Where the skill was offered, when it was offered. */
+  skillPlaces: SkillPlaces | null;
   exit: ExitReport | null;
   gatesOpened: GateId[];
+  asked: AskId[];
 };
 
 export type HeadlessOptions = {
   /** Where plain lines go. Omit to keep the run silent. */
   readonly write?: (line: string) => void;
+  /** What the developer would have said, for a run where nobody is asked. */
+  readonly answers?: Partial<Readonly<Record<AskId, string>>>;
 };
 
 export class HeadlessUI implements WizardUI {
   readonly record: HeadlessRecord = {
     drivenAgent: null,
     drivenAgentLog: null,
-    taskFile: null,
+    detection: null,
+    logins: [],
+    keyAsks: [],
+    agentChoices: [],
     statuses: [],
     summary: "",
+    written: [],
+    gate: null,
+    run: null,
+    skillPlaces: null,
     exit: null,
     gatesOpened: [],
+    asked: [],
   };
 
   private readonly write: (line: string) => void;
+  private readonly answers: Partial<Readonly<Record<AskId, string>>>;
 
   constructor(options: HeadlessOptions = {}) {
     this.write = options.write ?? (() => undefined);
+    this.answers = options.answers ?? {};
   }
 
   readonly log = {
@@ -61,14 +101,57 @@ export class HeadlessUI implements WizardUI {
     this.record.drivenAgentLog = file;
   }
 
-  setTaskFile(file: string): void {
-    this.record.taskFile = file;
-    this.write(`Task: read ${file} and say what it is`);
+  /**
+   * Kept, and never printed.
+   *
+   * This exists to fill a screen while a developer is away in a browser, and a
+   * run with nobody watching has neither. It also lands whenever it lands —
+   * nothing waits on it — so printing it would put lines in a promptless run's
+   * output in an order that depends on how fast a disk answered, and one of
+   * those orders is after the exit line.
+   */
+  setDetection(detection: Detection | null): void {
+    this.record.detection = detection;
+  }
+
+  setLogin(prompt: LoginPrompt | null): void {
+    if (prompt === null) return;
+    this.record.logins.push(prompt);
+    // The same lines `egma login` prints, from the same place, so the two
+    // promptless surfaces cannot drift apart.
+    for (const line of loginLines(prompt)) this.write(line);
+  }
+
+  setKeyAsk(ask: KeyAsk | null): void {
+    if (ask === null) return;
+    this.record.keyAsks.push(ask);
+    // The same lines the wizard's screen draws, from the same place, so the two
+    // promptless surfaces cannot drift apart. The key itself is never among
+    // them: it is typed, not printed.
+    for (const line of keyAskLines(ask)) this.write(line);
+  }
+
+  setAgentChoices(agents: readonly RetellAgent[] | null): void {
+    if (agents === null) return;
+    this.record.agentChoices = [...agents];
+    for (const agent of agents) {
+      this.write(`retell_agent: ${agent.id} ${agent.name}`.trimEnd());
+    }
+  }
+
+  /** Nobody is at this keyboard, so nothing is ever pasted at it. */
+  takeLoginPaste(): string | null {
+    return null;
   }
 
   waitForGate(gate: GateId): Promise<void> {
     this.record.gatesOpened.push(gate);
     return Promise.resolve();
+  }
+
+  waitForAnswer(ask: AskId): Promise<string | null> {
+    this.record.asked.push(ask);
+    return Promise.resolve(this.answers[ask] ?? null);
   }
 
   taskStarted(): void {
@@ -77,6 +160,62 @@ export class HeadlessUI implements WizardUI {
 
   taskFinished(): void {
     this.write("The task is over.");
+  }
+
+  /**
+   * A pane cannot be drawn where there is no screen, so what is printed is the
+   * one thing that is news: a file that has just landed. Every other change is
+   * the same list said again, and a run with nobody watching does not need it
+   * said twice.
+   */
+  setGeneration(progress: GenerationProgress | null): void {
+    if (progress === null) return;
+    for (const test of progress.tests) {
+      if (test.state !== "written" || this.record.written.includes(test.name)) continue;
+      this.record.written.push(test.name);
+      this.write(`written: ${test.name}`);
+    }
+  }
+
+  setGate(gate: TestGate | null): void {
+    if (gate === null) return;
+    this.record.gate = gate;
+    for (const row of gate.rows) this.write(`test: ${row.name} ${row.persona}`);
+    for (const held of gate.heldBack) this.write(`held-back: ${held.shown} ${held.reason}`);
+    this.write(`tests: ${gate.rows.length}`);
+  }
+
+  /**
+   * A list cannot be drawn where there is no screen, so what is printed is the
+   * one thing that is news: a simulation that has moved since the last look.
+   *
+   * The lines are the same ones `egma run` prints, from the same place, so the
+   * two promptless surfaces cannot drift apart.
+   */
+  setRun(run: RunView | null): void {
+    if (run === null) return;
+    const before = new Map(
+      (this.record.run?.rows ?? []).map((row) => [row.id, row] as const),
+    );
+    for (const row of run.rows) {
+      const held = before.get(row.id);
+      if (held !== undefined && held.status === row.status && held.verdict === row.verdict) {
+        continue;
+      }
+      this.write(simulationLine(row));
+      if (row.verdict !== null && held?.verdict !== row.verdict) {
+        this.write(`verdict: ${row.name} ${row.persona} ${row.verdict}`);
+        if (row.first) this.write(`first-verdict: ${row.name} ${row.persona} ${row.verdict}`);
+      }
+    }
+    this.record.run = run;
+  }
+
+  setSkillPlaces(places: SkillPlaces | null): void {
+    if (places === null) return;
+    this.record.skillPlaces = places;
+    this.write(`skill_project: ${places.project}`);
+    this.write(`skill_global: ${places.global}`);
   }
 
   pushStatus(line: string): void {

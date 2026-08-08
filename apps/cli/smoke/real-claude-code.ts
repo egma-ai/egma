@@ -11,49 +11,25 @@
  * It needs Claude Code logged in, and it needs the network the first time.
  */
 
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { runInTerminal } from "../test/support/pty.ts";
+import { RETELL_FIXTURE_REPO } from "../test/support/workspace.ts";
+import { say, waitUntil } from "./support/report.ts";
 
 const CLI_ENTRY = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
-
-const MANIFEST = `${JSON.stringify(
-  {
-    name: "egma-smoke-repo",
-    version: "1.0.0",
-    description: "A tiny repository that exists so an agent has something to read.",
-  },
-  null,
-  2,
-)}\n`;
 
 /** npx may have to fetch the adapter the first time, so this is generous. */
 const OVERALL_TIMEOUT_MS = 6 * 60_000;
 
-function say(message: string): void {
-  process.stdout.write(`${message}\n`);
-}
-
-async function waitFor(
-  condition: () => boolean,
-  timeoutMs: number,
-  what: string,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    if (condition()) return;
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-}
-
 async function main(): Promise<void> {
   const dir = await mkdtemp(path.join(tmpdir(), "egma-smoke-"));
-  await writeFile(path.join(dir, "package.json"), MANIFEST, "utf8");
+  // The committed fixture repository, so there is a real voice agent to find.
+  await cp(RETELL_FIXTURE_REPO, dir, { recursive: true });
   // A secret in the folder, so the fence has something real to stand in front of.
   await writeFile(path.join(dir, ".env"), "SMOKE_SECRET=never-read-this\n", "utf8");
 
@@ -74,7 +50,7 @@ async function main(): Promise<void> {
   let keystrokes = 0;
 
   try {
-    await waitFor(
+    await waitUntil(
       () => terminal.screen().includes("[enter] begin"),
       60_000,
       "the intro screen",
@@ -85,14 +61,14 @@ async function main(): Promise<void> {
     terminal.write("\r");
     keystrokes += 1;
 
-    await waitFor(
+    await waitUntil(
       () => terminal.screen().includes("◆"),
       OVERALL_TIMEOUT_MS,
       "the first action to stream",
     );
-    // Give the agent a moment to say which file it means, so the captured
-    // frame shows the whole action rather than only its first line.
-    await waitFor(() => terminal.screen().includes("┊"), 15_000, "the file").catch(
+    // Give the agent a moment to report its first fact, so the captured frame
+    // shows the step working rather than only starting.
+    await waitUntil(() => terminal.screen().includes("┊"), 120_000, "the first fact").catch(
       () => undefined,
     );
     working = terminal.screen();
@@ -129,9 +105,8 @@ async function main(): Promise<void> {
     const problems: string[] = [];
     if (code !== 0) problems.push(`exit code was ${code}, expected 0`);
     if (keystrokes !== 1) problems.push(`${keystrokes} keystrokes were needed, expected 1`);
-    if (scrollback.split("\n").length !== 1) problems.push("scrollback is not one line");
-    if (!scrollback.includes("read package.json for egma")) {
-      problems.push("the exit line does not say the task was done");
+    if (!scrollback.includes("egma found your voice agent")) {
+      problems.push("the exit line does not say a voice agent was found");
     }
     if (!working.includes("◆")) problems.push("no action streamed while the agent worked");
 

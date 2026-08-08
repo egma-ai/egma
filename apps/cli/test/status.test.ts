@@ -55,6 +55,76 @@ describe("what the developer is shown while the agent works", () => {
     ).toEqual([]);
   });
 
+  /**
+   * `◆ Terminal` is a line nobody can check. The command is the whole content
+   * of a terminal action, and a run that shows seven of these shows nothing
+   * seven times.
+   */
+  it("names the command a terminal action runs", () => {
+    const actions = new ActionStream(CWD);
+
+    expect(
+      actions.lines({
+        sessionUpdate: "tool_call",
+        toolCallId: "t1",
+        title: "Terminal",
+        kind: "execute",
+        status: "in_progress",
+        rawInput: { command: "rg -l retell-sdk src", description: "Look for the SDK" },
+      }),
+    ).toEqual(["◆ Terminal ┊ rg -l retell-sdk src"]);
+  });
+
+  it("finds the command wherever the adapter buried it, and keeps it to one line", () => {
+    const actions = new ActionStream(CWD);
+
+    // Split into words by one agent, nested by another, and wrapped by a third.
+    expect(
+      actions.lines({
+        sessionUpdate: "tool_call",
+        toolCallId: "t1",
+        title: "Terminal",
+        kind: "execute",
+        status: "in_progress",
+        rawInput: { tool: { input: { terminal: { command: ["cat", "package.json"] } } } },
+      }),
+    ).toEqual(["◆ Terminal ┊ cat package.json"]);
+
+    expect(
+      actions.lines({
+        sessionUpdate: "tool_call",
+        toolCallId: "t2",
+        title: "Terminal",
+        kind: "execute",
+        status: "in_progress",
+        rawInput: { command: `grep -rn "retell"\n  --include=*.ts\n  ${"src/".repeat(30)}` },
+      })[0]?.split("\n"),
+    ).toHaveLength(1);
+  });
+
+  it("says the command as soon as the agent names it, when it comes later", () => {
+    const actions = new ActionStream(CWD);
+
+    expect(
+      actions.lines({
+        sessionUpdate: "tool_call",
+        toolCallId: "t1",
+        title: "Terminal",
+        kind: "execute",
+        status: "pending",
+        rawInput: {},
+      }),
+    ).toEqual(["◆ Terminal"]);
+
+    expect(
+      actions.lines({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "t1",
+        rawInput: { command: "ls prompts" },
+      }),
+    ).toEqual(["┊ ls prompts"]);
+  });
+
   it("shows an action that never names a file rather than swallowing it", () => {
     const actions = new ActionStream(CWD);
 

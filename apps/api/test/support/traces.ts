@@ -1,3 +1,4 @@
+import type { AuthContext, PersonaTraits, Role } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 import { expect } from "vitest";
 
@@ -68,6 +69,105 @@ export async function mintKey(
   });
   expect(minted.statusCode, minted.body).toBe(201);
   return (minted.json() as { secret: string }).secret;
+}
+
+/**
+ * A colleague at a named role, added the way the product adds one: invited,
+ * and they follow the link. They come away holding a key of their own, and
+ * minting it through the product is what makes the role real — a key carries
+ * no role, it acts at its creator's current one.
+ */
+export async function colleagueOf(
+  app: FastifyInstance,
+  host: Customer,
+  email: string,
+  role: Role,
+): Promise<Customer> {
+  const invited = await app.inject({
+    method: "POST",
+    url: "/api/invitations",
+    headers: { cookie: host.cookie },
+    payload: { email, role },
+  });
+  expect(invited.statusCode, invited.body).toBe(201);
+
+  const link = (invited.json() as { accept_url: string }).accept_url;
+  const joined = await app.inject({
+    method: "POST",
+    url: "/api/signup",
+    payload: {
+      email,
+      password: "a-long-enough-password",
+      invitationToken: new URL(link).searchParams.get("token"),
+    },
+  });
+  expect(joined.statusCode, joined.body).toBe(201);
+  const cookie = cookiesFrom(joined.headers["set-cookie"]);
+
+  return {
+    userId: (joined.json() as { userId: string }).userId,
+    organizationId: host.organizationId,
+    projectId: host.projectId,
+    cookie,
+    secret: await mintKey(app, cookie, email),
+  };
+}
+
+/**
+ * The context this person acts in at a named role, for the seams that take one
+ * directly — authoring a persona, driving a simulation the way a simulator
+ * would. The role is passed rather than read, because a key acts at its
+ * creator's current role and a test says which one it is asking about.
+ */
+export function contextFor(person: Customer, role: Role): AuthContext {
+  return {
+    userId: person.userId,
+    organizationId: person.organizationId,
+    projectId: person.projectId,
+    role,
+    via: "session",
+  };
+}
+
+/** A key as `egma login` leaves one: minted for the project a terminal names. */
+export function projectKeyFor(
+  app: FastifyInstance,
+  person: Customer,
+): Promise<string> {
+  return mintKey(app, person.cookie, "a terminal", person.projectId);
+}
+
+/** Somebody plain, for the tests where who the persona is is not the question. */
+export const NEUTRAL_TRAITS: PersonaTraits = {
+  personality: "Speaks plainly, stays patient, asks one question at a time.",
+  language: "en-US",
+  voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
+};
+
+/** A status and a parsed body, which is all these suites ever assert on. */
+export type Answer = {
+  readonly statusCode: number;
+  readonly body: Record<string, unknown>;
+};
+
+/** One request with a key on it, answered by the API in this process. */
+export async function request(
+  app: FastifyInstance,
+  method: "GET" | "POST" | "PATCH",
+  url: string,
+  key: string,
+  payload?: Record<string, unknown>,
+): Promise<Answer> {
+  const response = await app.inject({
+    method,
+    url,
+    headers: { authorization: `Bearer ${key}` },
+    ...(payload === undefined ? {} : { payload }),
+  });
+  return {
+    statusCode: response.statusCode,
+    body: response.json() as Record<string, unknown>,
+  };
 }
 
 /* ------------------------------------------------------------------ *

@@ -9,6 +9,7 @@ import {
   createAgent,
   createPersona,
   createTest,
+  deletePersona,
   deleteTest,
   editPersona,
   editTest,
@@ -48,7 +49,9 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
  *
  * Two customers exist throughout, because a test with one organization cannot
  * fail the way that matters. Raw SQL appears only to check what landed in a
- * table, and to backdate a heartbeat, which no seam should offer.
+ * table, to backdate a heartbeat, and to write the one row no verb writes any
+ * more — a conversation with no test pinned, which only an instance upgraded
+ * across the pin's migration still holds.
  */
 
 let database: MigratedDatabase;
@@ -90,21 +93,26 @@ const neutralTraits = {
   voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
 } as const;
 
-/** Acme's wired agent, and the personas its runs conduct. */
+/** Acme's wired agent, the personas its runs conduct, and what they check. */
 let agentId: string;
 let connectionId: string;
 let rita: string; // a persona of Acme's default project
-let sam: string; // a second one, so a run can hold two simulations
+let sam: string; // a second one, so a version can hold two simulations
 let graceOwn: string; // Globex's persona, for the cross-tenant refusals
-let rescheduling: string; // a test of Acme's, for the runs born from one
-let graceOwnTest: string; // Globex's, for the cross-tenant refusals
+let oneCaller: string; // a test version naming rita alone
+let twoCallers: string; // a test version naming both, so a run holds two
+let globexOwn: string; // a test version of Globex's, for the same refusals
 
 async function seedPersona(auth: AuthContext, name: string): Promise<string> {
   return (await createPersona(auth, { name, traits: neutralTraits })).id;
 }
 
-/** A scenario whole enough that resolving it back says something. */
-async function seedTest(
+/**
+ * A test, authored the way one is, and the frozen version a run pins. The
+ * scenario is whole enough that resolving it back off a conversation says
+ * something.
+ */
+async function seedTestVersion(
   auth: AuthContext,
   name: string,
   personaIds: readonly string[],
@@ -119,14 +127,14 @@ async function seedTest(
     ],
     personaIds: [...personaIds],
   });
-  return created.id;
+  return created.versionId;
 }
 
 function aRun(overrides: Partial<NewRun> = {}): NewRun {
   return {
     agentId,
     connectionId,
-    personaIds: [rita],
+    testVersionIds: [oneCaller],
     ...overrides,
   };
 }
@@ -147,6 +155,17 @@ async function claimOwn(
   const ours = claimed.find((simulation) => simulation.runId === runId);
   if (ours === undefined) throw new Error("the claim missed the run under test");
   return ours;
+}
+
+/** Which test a version belongs to — a fact the seeds above do not hand back. */
+async function testOf(versionId: string): Promise<string> {
+  const { rows } = await database.sql<{ test_id: string }>(
+    "select test_id from test_version where id = $1",
+    [versionId],
+  );
+  const found = rows[0]?.test_id;
+  if (found === undefined) throw new Error("no such version");
+  return found;
 }
 
 /** How many rows the two tables hold, for the proofs a refusal wrote nothing. */
@@ -190,14 +209,16 @@ beforeAll(async () => {
   sam = await seedPersona(actingAsAcme(), "Deliberate Sam");
   graceOwn = await seedPersona(actingAsGlobex(), "Careful Grace");
 
-  rescheduling = await seedTest(
+  oneCaller = await seedTestVersion(
     actingAsAcme(),
     "Reschedules a booked appointment",
     [rita],
   );
-  graceOwnTest = await seedTest(actingAsGlobex(), "Cancels a booking", [
-    graceOwn,
+  twoCallers = await seedTestVersion(actingAsAcme(), "Cancels a booking", [
+    rita,
+    sam,
   ]);
+  globexOwn = await seedTestVersion(actingAsGlobex(), "Reschedules", [graceOwn]);
 });
 
 afterAll(async () => {
@@ -206,13 +227,17 @@ afterAll(async () => {
 
 describe("starting a run", () => {
   it("creates the run and its simulations together, each born queued", async () => {
-    const started = await startRun(actingAsAcme(), aRun({ personaIds: [rita, sam] }));
+    const started = await startRun(
+      actingAsAcme(),
+      aRun({ testVersionIds: [twoCallers] }),
+    );
 
     expect(started.id).toMatch(/^run_/);
     expect(started.status).toBe("pending");
     expect(started.expectedSimulationCount).toBe(2);
     expect(started.triggeredVia).toBe("manual");
     expect(started.triggeredBy).toBe(ada);
+    expect(started.pinnedTestVersionIds).toEqual([twoCallers]);
     expect(started.requestedPersonaIds).toEqual([rita, sam]);
     expect(started.completedCount).toBeNull();
     expect(started.finishedAt).toBeNull();
@@ -231,6 +256,10 @@ describe("starting a run", () => {
       expect(simulation.connectionId).toBe(connectionId);
       expect(simulation.claimedBy).toBeNull();
       expect(simulation.endingReason).toBeNull();
+      // Both pins, on every conversation: what is being checked, and who is
+      // calling about it.
+      expect(simulation.testVersionId).toBe(twoCallers);
+      expect(simulation.testName).toBe("Cancels a booking");
     }
   });
 
@@ -249,19 +278,19 @@ describe("starting a run", () => {
     expect(simulations?.[0]?.personaVersionId).toBe(before?.versionId);
   });
 
-  it("pins every simulation it creates to the named test's current version", async () => {
-    const before = await getTest(actingAsAcme(), rescheduling);
+  it("pins every simulation it creates to the version the run named", async () => {
+    const pinnedTest = await testOf(twoCallers);
     const started = await startRun(
       actingAsAcme(),
-      aRun({ personaIds: [rita, sam], testId: rescheduling }),
+      aRun({ testVersionIds: [twoCallers] }),
     );
 
-    // Every one of them, not the first: the run is what names the test, so a
-    // conversation of it that pinned nothing would be one nothing can judge.
+    // Every one of them, not the first: the run is what names the version, so
+    // a conversation of it that pinned nothing would be one nothing can judge.
     expect(started.simulations).toHaveLength(2);
     for (const conducted of started.simulations) {
-      expect(conducted.testId).toBe(rescheduling);
-      expect(conducted.testVersionId).toBe(before?.versionId);
+      expect(conducted.testId).toBe(pinnedTest);
+      expect(conducted.testVersionId).toBe(twoCallers);
     }
 
     // And it landed in the table, not only in the answer.
@@ -273,65 +302,47 @@ describe("starting a run", () => {
     ]);
     expect(rows).toHaveLength(2);
     for (const row of rows) {
-      expect(row.test_id).toBe(rescheduling);
-      expect(row.test_version_id).toBe(before?.versionId ?? null);
+      expect(row.test_id).toBe(pinnedTest);
+      expect(row.test_version_id).toBe(twoCallers);
     }
+
+    // The header keeps the selection whole beside them, which is what the
+    // request asked for rather than what each conversation carries.
+    expect(started.pinnedTestVersionIds).toEqual([twoCallers]);
   });
 
   it("keeps that pin when the test moves on, so a later edit rewrites nothing", async () => {
-    const before = await getTest(actingAsAcme(), rescheduling);
+    const moving = await seedTestVersion(actingAsAcme(), "Moves on", [rita]);
+    const movingTest = await testOf(moving);
     const started = await startRun(
       actingAsAcme(),
-      aRun({ testId: rescheduling }),
+      aRun({ testVersionIds: [moving] }),
     );
 
-    await editTest(actingAsAcme(), rescheduling, {
+    await editTest(actingAsAcme(), movingTest, {
       expectedBehaviors: [
         "verifies who it is speaking to before discussing the booking",
         "offers at least one afternoon slot next week",
         "confirms the new time back before finishing",
       ],
     });
-    const after = await getTest(actingAsAcme(), rescheduling);
-    expect(after?.versionId).not.toBe(before?.versionId);
+    const after = await getTest(actingAsAcme(), movingTest);
+    expect(after?.versionId).not.toBe(moving);
 
     const simulations = await listSimulations(actingAsAcme(), started.id);
-    expect(simulations?.[0]?.testId).toBe(rescheduling);
-    expect(simulations?.[0]?.testVersionId).toBe(before?.versionId);
+    expect(simulations?.[0]?.testId).toBe(movingTest);
+    expect(simulations?.[0]?.testVersionId).toBe(moving);
   });
 
-  it("leaves the pin empty for a run that named no test", async () => {
-    const started = await startRun(actingAsAcme(), aRun());
+  it("executes a version whose test has since been deleted, because the version is what was pinned", async () => {
+    const abandoned = await seedTestVersion(actingAsAcme(), "Abandoned", [rita]);
+    await deleteTest(actingAsAcme(), await testOf(abandoned));
 
-    expect(started.simulations[0]?.testId).toBeNull();
-    expect(started.simulations[0]?.testVersionId).toBeNull();
-  });
-
-  it("refuses a test that is missing, another customer's, deleted, or not a test id — writing nothing", async () => {
-    const before = await rowCounts();
-
-    const missing = newId("tst");
-    await expect(
-      startRun(actingAsAcme(), aRun({ testId: missing })),
-    ).rejects.toThrow(`there is no test ${missing} in this project`);
-
-    // Another customer's test is refused in the same words as one that never
-    // existed, because confirming somebody else's row exists is a leak.
-    await expect(
-      startRun(actingAsAcme(), aRun({ testId: graceOwnTest })),
-    ).rejects.toThrow(`there is no test ${graceOwnTest} in this project`);
-
-    const abandoned = await seedTest(actingAsAcme(), "Abandoned", [rita]);
-    await deleteTest(actingAsAcme(), abandoned);
-    await expect(
-      startRun(actingAsAcme(), aRun({ testId: abandoned })),
-    ).rejects.toThrow(`test ${abandoned} is deleted`);
-
-    await expect(
-      startRun(actingAsAcme(), aRun({ testId: rita })),
-    ).rejects.toThrow(`"${rita}" is not a test id`);
-
-    expect(await rowCounts()).toEqual(before);
+    const started = await startRun(
+      actingAsAcme(),
+      aRun({ testVersionIds: [abandoned] }),
+    );
+    expect(started.simulations[0]?.testVersionId).toBe(abandoned);
   });
 
   it("stamps the connection's shape at start, so editing the connection rewrites nothing", async () => {
@@ -393,29 +404,51 @@ describe("starting a run", () => {
     );
   });
 
-  it("refuses a persona that is missing, another customer's, or named twice — writing nothing", async () => {
+  it("refuses a version that is missing, another customer's, or pinned twice — writing nothing", async () => {
     const before = await rowCounts();
 
-    const missing = newId("prs");
+    const missing = newId("tstv");
     await expect(
-      startRun(actingAsAcme(), aRun({ personaIds: [missing] })),
-    ).rejects.toThrow(`there is no persona ${missing} in this project`);
+      startRun(actingAsAcme(), aRun({ testVersionIds: [missing] })),
+    ).rejects.toThrow(`there is no test version ${missing} on this egma`);
 
-    // Another customer's persona is refused in the same words as one that
+    // Another customer's version is refused in the same words as one that
     // never existed, because confirming somebody else's row exists is a leak.
     await expect(
-      startRun(actingAsAcme(), aRun({ personaIds: [graceOwn] })),
-    ).rejects.toThrow(`there is no persona ${graceOwn} in this project`);
+      startRun(actingAsAcme(), aRun({ testVersionIds: [globexOwn] })),
+    ).rejects.toThrow(`there is no test version ${globexOwn} on this egma`);
 
     await expect(
-      startRun(actingAsAcme(), aRun({ personaIds: [rita, rita] })),
-    ).rejects.toThrow(`persona ${rita} is named twice on one run`);
+      startRun(actingAsAcme(), aRun({ testVersionIds: [oneCaller, oneCaller] })),
+    ).rejects.toThrow(`test version ${oneCaller} is pinned twice on one run`);
 
     await expect(
-      startRun(actingAsAcme(), aRun({ personaIds: [] })),
-    ).rejects.toThrow(/at least one persona/);
+      startRun(actingAsAcme(), aRun({ testVersionIds: [] })),
+    ).rejects.toThrow(/at least one test version/);
+
+    // And one good id beside one bad one takes the whole creation with it,
+    // rather than running most of what was asked for.
+    await expect(
+      startRun(actingAsAcme(), aRun({ testVersionIds: [oneCaller, missing] })),
+    ).rejects.toThrow(`there is no test version ${missing} on this egma`);
 
     expect(await rowCounts()).toEqual(before);
+  });
+
+  it("refuses a version whose persona has since been deleted, rather than conducting one fewer", async () => {
+    const leaving = await seedPersona(actingAsAcme(), "Departing Dara");
+    const pinned = await seedTestVersion(actingAsAcme(), "Asks twice", [leaving]);
+
+    // The test moves off them first: a live test naming somebody is what
+    // refuses their delete, and the old version goes on naming them.
+    await editTest(actingAsAcme(), await testOf(pinned), {
+      personaIds: [rita],
+    });
+    await deletePersona(actingAsAcme(), leaving);
+
+    await expect(
+      startRun(actingAsAcme(), aRun({ testVersionIds: [pinned] })),
+    ).rejects.toThrow(`persona ${leaving} is deleted`);
   });
 
   it("refuses a connection that is not the named agent's", async () => {
@@ -435,7 +468,7 @@ describe("starting a run", () => {
         aRun({ agentId: other.id, connectionId }),
       ),
     ).rejects.toThrow(
-      `there is no connection ${connectionId} on agent ${other.id} in this project`,
+      `connection ${connectionId} is not on agent ${other.id}`,
     );
   });
 });
@@ -486,10 +519,26 @@ describe("reading runs", () => {
  * judging one has to know how the test tables are shaped.
  */
 describe("resolving what a simulation was executed against", () => {
-  /** One run, conducted through to a completed conversation. */
-  async function conducted(input: Partial<NewRun>): Promise<string> {
-    const started = await startRun(actingAsAcme(), aRun(input));
+  /**
+   * One run of the named version, conducted through to a completed
+   * conversation. `unpin` clears the pin while the conversation is still
+   * running, because a terminal simulation is written once.
+   */
+  async function conducted(
+    versionId: string,
+    unpin = false,
+  ): Promise<string> {
+    const started = await startRun(
+      actingAsAcme(),
+      aRun({ testVersionIds: [versionId] }),
+    );
     const simulationId = (await claimOwn(started.id)).id;
+    if (unpin) {
+      await database.sql(
+        "update simulation set test_id = null, test_version_id = null where id = $1",
+        [simulationId],
+      );
+    }
     await startSimulation(actingAsAcme(), simulationId, "simulator-blue-1");
     await completeSimulation(actingAsAcme(), simulationId, "simulator-blue-1", {
       endingReason: "persona_concluded",
@@ -499,37 +548,50 @@ describe("resolving what a simulation was executed against", () => {
   }
 
   it("answers with the pinned version's expected behaviors, in the order authored", async () => {
-    const pinned = await getTest(actingAsAcme(), rescheduling);
-    const simulationId = await conducted({ testId: rescheduling });
+    const versionId = await seedTestVersion(actingAsAcme(), "Resolves whole", [
+      rita,
+    ]);
+    const testId = await testOf(versionId);
+    const pinned = await getTest(actingAsAcme(), testId);
+    const simulationId = await conducted(versionId);
 
     const version = await getSimulationTestVersion(actingAsAcme(), simulationId);
-    expect(version?.id).toBe(pinned?.versionId);
-    expect(version?.testId).toBe(rescheduling);
+    expect(version?.id).toBe(versionId);
+    expect(version?.testId).toBe(testId);
     expect(version?.expectedBehaviors).toEqual(pinned?.expectedBehaviors);
     expect(version?.scenario).toBe(pinned?.scenario);
     expect(version?.personas.map((who) => who.id)).toEqual([rita]);
   });
 
   it("answers the version as it was, never the test as it is now", async () => {
-    const before = await getTest(actingAsAcme(), rescheduling);
-    const simulationId = await conducted({ testId: rescheduling });
+    const versionId = await seedTestVersion(actingAsAcme(), "Moves after", [
+      rita,
+    ]);
+    const testId = await testOf(versionId);
+    const before = await getTest(actingAsAcme(), testId);
+    const simulationId = await conducted(versionId);
 
-    await editTest(actingAsAcme(), rescheduling, {
+    await editTest(actingAsAcme(), testId, {
       expectedBehaviors: ["says nothing about bookings at all"],
     });
 
     const version = await getSimulationTestVersion(actingAsAcme(), simulationId);
-    expect(version?.id).toBe(before?.versionId);
+    expect(version?.id).toBe(versionId);
     expect(version?.expectedBehaviors).toEqual(before?.expectedBehaviors);
   });
 
   it("goes on answering after the test is deleted, because the run outlives it", async () => {
-    const abandoned = await seedTest(actingAsAcme(), "Abandoned but run", [rita]);
-    const pinned = await getTest(actingAsAcme(), abandoned);
-    const simulationId = await conducted({ testId: abandoned });
+    const versionId = await seedTestVersion(
+      actingAsAcme(),
+      "Abandoned but run",
+      [rita],
+    );
+    const testId = await testOf(versionId);
+    const pinned = await getTest(actingAsAcme(), testId);
+    const simulationId = await conducted(versionId);
 
-    await deleteTest(actingAsAcme(), abandoned);
-    expect(await getTest(actingAsAcme(), abandoned)).toBeUndefined();
+    await deleteTest(actingAsAcme(), testId);
+    expect(await getTest(actingAsAcme(), testId)).toBeUndefined();
 
     const version = await getSimulationTestVersion(actingAsAcme(), simulationId);
     expect(version?.id).toBe(pinned?.versionId);
@@ -537,7 +599,11 @@ describe("resolving what a simulation was executed against", () => {
   });
 
   it("answers nothing for a simulation that pinned no test", async () => {
-    const simulationId = await conducted({});
+    // No verb can write one: `startRun` names a version for every conversation
+    // it creates. The row an instance upgraded across the pin's migration
+    // holds is written here by hand, because it is the only shape of the
+    // question that still exists and the answer still has to be right.
+    const simulationId = await conducted(oneCaller, true);
 
     expect(
       await getSimulationTestVersion(actingAsAcme(), simulationId),
@@ -545,7 +611,7 @@ describe("resolving what a simulation was executed against", () => {
   });
 
   it("answers another customer nothing, in the words nothing uses", async () => {
-    const simulationId = await conducted({ testId: rescheduling });
+    const simulationId = await conducted(oneCaller);
 
     expect(
       await getSimulationTestVersion(actingAsGlobex(), simulationId),
@@ -553,13 +619,13 @@ describe("resolving what a simulation was executed against", () => {
   });
 
   it("is a read, so a viewer gets it like every other read", async () => {
-    const simulationId = await conducted({ testId: rescheduling });
+    const simulationId = await conducted(oneCaller);
 
     const version = await getSimulationTestVersion(
       actingAsAcme("viewer"),
       simulationId,
     );
-    expect(version?.testId).toBe(rescheduling);
+    expect(version?.testId).toBe(await testOf(oneCaller));
   });
 });
 
@@ -714,7 +780,10 @@ describe("canceling a run", () => {
   const simulator = "simulator-blue-1";
 
   it("ends queued simulations at once, and they can never be claimed", async () => {
-    const started = await startRun(actingAsAcme(), aRun({ personaIds: [rita, sam] }));
+    const started = await startRun(
+      actingAsAcme(),
+      aRun({ testVersionIds: [twoCallers] }),
+    );
 
     const canceled = await cancelRun(actingAsAcme(), started.id);
     expect(canceled?.status).toBe("canceled");

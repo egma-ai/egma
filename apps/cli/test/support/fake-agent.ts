@@ -28,6 +28,8 @@ export type FakeStep =
       title: string;
       toolKind?: acp.ToolKind;
       locations?: Location[];
+      /** The arguments the call carries — a terminal call's command lives here. */
+      rawInput?: Record<string, unknown>;
     }
   | { kind: "tool-call-update"; id: string; status: acp.ToolCallStatus; title?: string }
   | {
@@ -53,7 +55,29 @@ export type FakeScript = {
   spawnChild?: boolean;
   /** Where the record of what happened is written, relative to the folder. */
   reportFile?: string;
+  /**
+   * Refuse the first session with "log in first", the way a cold machine does,
+   * and work normally once the client has authenticated. The login methods the
+   * agent advertises; omit for the ordinary one it runs itself.
+   */
+  authRequiredUntilLogin?: { methods?: acp.AuthMethod[] };
   steps: FakeStep[];
+  /**
+   * Steps to play instead when the session's folder contains this fragment.
+   * A repository whose prompts live somewhere else is two folders and two
+   * answers, and one scripted agent has to give both.
+   */
+  stepsByFolder?: { contains: string; steps: FakeStep[] }[];
+  /**
+   * Steps to play instead when the instructions contain this fragment.
+   *
+   * One walk sends the same agent several tasks in the same folder — find the
+   * voice agent, turn what the developer already had into files, write the
+   * rest — and a scripted agent has to answer each of them differently. The
+   * fragment is matched against the task egma actually sent, so a check says
+   * which task it is scripting rather than counting turns.
+   */
+  stepsByTask?: { contains: string; steps: FakeStep[] }[];
 };
 
 const DEFAULT_REPORT_FILE = "fake-agent-report.json";
@@ -70,19 +94,47 @@ type Report = {
   modeSetTo: string | null;
   observations: Record<string, unknown>;
   childPid: number | null;
+  /** Every set of instructions the client sent, in order. */
+  instructions: string[];
+  /** The folder of each session the client opened, in order. */
+  folders: string[];
+  /** Which login method the client picked, if it had to log in at all. */
+  loggedInWith: string | null;
 };
 
-async function run(): Promise<void> {
-  const script = loadScript();
-  const report: Report = {
+/**
+ * The report this run adds to, which may already have somebody else's in it.
+ *
+ * One walk dispatches several tasks and each one starts a fresh agent, so a
+ * report that began empty every time would leave a check able to see only the
+ * last task. It is read back and carried on instead, which is what makes
+ * "every set of instructions the client sent, in order" true across a walk.
+ */
+function reportSoFar(file: string): Report {
+  const fresh: Report = {
     protocolVersion: null,
     clientCapabilities: null,
     modeSetTo: null,
     observations: {},
     childPid: null,
+    instructions: [],
+    folders: [],
+    loggedInWith: null,
   };
+  try {
+    return { ...fresh, ...(JSON.parse(readFileSync(file, "utf8")) as Partial<Report>) };
+  } catch {
+    return fresh;
+  }
+}
+
+async function run(): Promise<void> {
+  const script = loadScript();
 
   let cwd = process.cwd();
+  const report = reportSoFar(
+    path.resolve(cwd, script.reportFile ?? DEFAULT_REPORT_FILE),
+  );
   const reportPath = (): string => path.resolve(cwd, script.reportFile ?? DEFAULT_REPORT_FILE);
   const flush = (): void => {
     writeFileSync(reportPath(), `${JSON.stringify(report, null, 2)}\n`, "utf8");
@@ -104,9 +156,24 @@ async function run(): Promise<void> {
   };
 
   let sessionId = "";
+  let loggedIn = script.authRequiredUntilLogin === undefined;
 
-  async function play(client: acp.AgentContext, signal: AbortSignal): Promise<acp.StopReason> {
-    for (const step of script.steps) {
+  /** The steps for this task, in the folder the session was opened in. */
+  function stepsFor(folder: string, instructions: string): FakeStep[] {
+    const byTask = (script.stepsByTask ?? []).find((entry) =>
+      instructions.includes(entry.contains),
+    );
+    if (byTask !== undefined) return byTask.steps;
+    const matched = (script.stepsByFolder ?? []).find((entry) => folder.includes(entry.contains));
+    return matched?.steps ?? script.steps;
+  }
+
+  async function play(
+    client: acp.AgentContext,
+    signal: AbortSignal,
+    instructions: string,
+  ): Promise<acp.StopReason> {
+    for (const step of stepsFor(cwd, instructions)) {
       if (signal.aborted) return "cancelled";
 
       switch (step.kind) {
@@ -130,6 +197,7 @@ async function run(): Promise<void> {
               kind: step.toolKind ?? "read",
               status: "in_progress",
               locations: step.locations ?? [],
+              ...(step.rawInput === undefined ? {} : { rawInput: step.rawInput }),
             },
           });
           break;
@@ -233,14 +301,28 @@ async function run(): Promise<void> {
     .onRequest(acp.methods.agent.initialize, (ctx) => {
       report.protocolVersion = Math.min(ctx.params.protocolVersion, acp.PROTOCOL_VERSION);
       report.clientCapabilities = ctx.params.clientCapabilities ?? null;
+      const login = script.authRequiredUntilLogin;
       return {
         protocolVersion: report.protocolVersion,
         agentCapabilities: { loadSession: false },
+        ...(login === undefined
+          ? {}
+          : { authMethods: login.methods ?? [{ id: "own-login", name: "Log in to Fake Agent" }] }),
       };
     })
+    .onRequest(acp.methods.agent.authenticate, (ctx) => {
+      report.loggedInWith = ctx.params.methodId;
+      loggedIn = true;
+      flush();
+      return {};
+    })
     .onRequest(acp.methods.agent.session.new, (ctx) => {
+      // A cold machine says this before it says anything else, and says it
+      // once: after its own login has run, the same request works.
+      if (!loggedIn) throw new acp.RequestError(-32000, "Authentication required");
       cwd = ctx.params.cwd;
       sessionId = "fake-1";
+      report.folders.push(cwd);
       flush();
       return { sessionId, modes };
     })
@@ -250,9 +332,17 @@ async function run(): Promise<void> {
       return {};
     })
     .onRequest(acp.methods.agent.session.prompt, async (ctx) => {
+      let instructions = "";
+      for (const block of ctx.params.prompt) {
+        if (block.type === "text") {
+          report.instructions.push(block.text);
+          instructions += block.text;
+        }
+      }
+      flush();
       const controller = new AbortController();
       running.set(sessionId, controller);
-      const stopReason = await play(ctx.client, controller.signal);
+      const stopReason = await play(ctx.client, controller.signal, instructions);
       running.delete(sessionId);
       flush();
       return { stopReason };

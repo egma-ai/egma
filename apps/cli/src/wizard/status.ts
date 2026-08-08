@@ -11,6 +11,11 @@
  * which file it means. Nothing is held back waiting for that: the action is
  * shown the moment it starts, and the file follows on its own line as soon as
  * the agent says which one it is.
+ *
+ * Not every action has a file. A terminal call has a command line instead, and
+ * `◆ Terminal` on its own says nothing a developer can check — seven of them in
+ * one run says nothing seven times. So the command is read out of the raw
+ * arguments the same way the fence reads them, and shown beside the title.
  */
 
 import path from "node:path";
@@ -28,6 +33,15 @@ export const FAILURE_MARK = "✗";
 
 /** Keys an agent names a file with in a tool call's raw arguments. */
 const PATH_KEYS = ["file_path", "filePath", "path", "notebook_path", "abs_path"];
+
+/** Keys an agent names a command with in a tool call's raw arguments. */
+const COMMAND_KEYS = ["command", "cmd", "commandLine", "command_line", "script"];
+
+/** How deep into nested raw arguments a command is looked for. */
+const MAX_DEPTH = 8;
+
+/** How much of a command line one status line carries. */
+const COMMAND_WIDTH = 72;
 
 type Located = {
   readonly locations?: readonly { readonly path?: string }[] | null;
@@ -55,13 +69,57 @@ export function fileNamedBy(update: Located): string | null {
   return null;
 }
 
-function describe(title: string, file: string | null, cwd: string): string {
-  if (file === null) return title;
-  const shortened = shorten(file, cwd);
-  return title.includes(shortened) ? title : `${title} ${shortened}`;
+/** One command, on one line, short enough to sit beside a title. */
+function oneLine(command: string): string {
+  const collapsed = command.replace(/\s+/g, " ").trim();
+  if (collapsed.length <= COMMAND_WIDTH) return collapsed;
+  return `${collapsed.slice(0, COMMAND_WIDTH - 1).trimEnd()}…`;
 }
 
-type Action = { title: string; file: string | null; failureShown: boolean };
+function commandIn(value: unknown, depth: number): string | null {
+  if (value === null || typeof value !== "object" || depth >= MAX_DEPTH) return null;
+  const held = value as Record<string, unknown>;
+
+  for (const key of COMMAND_KEYS) {
+    const named = held[key];
+    if (typeof named === "string" && named.trim() !== "") return named;
+    if (Array.isArray(named)) {
+      // Some agents send the command already split into its words.
+      const words = named.filter((word): word is string => typeof word === "string");
+      if (words.length > 0) return words.join(" ");
+    }
+  }
+
+  // An adapter can bury the call one or two objects down, so the search goes
+  // as deep as the fence's does rather than only reading the top level.
+  for (const nested of Object.values(held)) {
+    const found = commandIn(nested, depth + 1);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+/** The command a tool call is about to run, or `null` when it runs none. */
+export function commandNamedBy(update: Located): string | null {
+  const found = commandIn(update.rawInput, 0);
+  return found === null ? null : oneLine(found);
+}
+
+type Action = {
+  title: string;
+  file: string | null;
+  command: string | null;
+  failureShown: boolean;
+};
+
+function describe(action: Action, cwd: string): string {
+  if (action.file !== null) {
+    const shortened = shorten(action.file, cwd);
+    return action.title.includes(shortened) ? action.title : `${action.title} ${shortened}`;
+  }
+  if (action.command !== null) return `${action.title} ${DETAIL_MARK} ${action.command}`;
+  return action.title;
+}
 
 /** One task's worth of actions, turned into lines as the agent takes them. */
 export class ActionStream {
@@ -78,10 +136,11 @@ export class ActionStream {
       const action: Action = {
         title: update.title,
         file: fileNamedBy(update),
+        command: commandNamedBy(update),
         failureShown: false,
       };
       this.actions.set(update.toolCallId, action);
-      return [`${ACTION_MARK} ${describe(action.title, action.file, this.cwd)}`];
+      return [`${ACTION_MARK} ${describe(action, this.cwd)}`];
     }
 
     if (update.sessionUpdate !== "tool_call_update") return [];
@@ -89,20 +148,31 @@ export class ActionStream {
     const lines: string[] = [];
     let action = this.actions.get(update.toolCallId) ?? null;
     if (action === null) {
-      action = { title: update.title ?? "Working", file: fileNamedBy(update), failureShown: false };
+      action = {
+        title: update.title ?? "Working",
+        file: fileNamedBy(update),
+        command: commandNamedBy(update),
+        failureShown: false,
+      };
       this.actions.set(update.toolCallId, action);
-      lines.push(`${ACTION_MARK} ${describe(action.title, action.file, this.cwd)}`);
+      lines.push(`${ACTION_MARK} ${describe(action, this.cwd)}`);
     } else if (action.file === null) {
       const named = fileNamedBy(update);
       if (named !== null) {
         action.file = named;
         lines.push(`${DETAIL_MARK} ${shorten(named, this.cwd)}`);
+      } else if (action.command === null) {
+        const command = commandNamedBy(update);
+        if (command !== null) {
+          action.command = command;
+          lines.push(`${DETAIL_MARK} ${command}`);
+        }
       }
     }
 
     if (update.status === "failed" && !action.failureShown) {
       action.failureShown = true;
-      lines.push(`${FAILURE_MARK} ${describe(action.title, action.file, this.cwd)} did not work`);
+      lines.push(`${FAILURE_MARK} ${describe(action, this.cwd)} did not work`);
     }
 
     return lines;
