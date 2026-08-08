@@ -6,6 +6,7 @@ import {
   createAgent,
   createPersona,
   createTest,
+  getSimulation,
   startRun,
   type AuthContext,
 } from "@egma/db";
@@ -17,10 +18,11 @@ import {
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
- * Two simulators, one queue. The claim is atomic — `SKIP LOCKED` underneath —
- * so racing claimants split the queue between them and never take the same
- * conversation twice. These tests race real transactions on a real Postgres,
- * because the guarantee under test is Postgres's locking, not egma's code.
+ * Two simulators, one queue — the deployment's whole queue, because the claim
+ * is instance-wide. The claim is atomic — `SKIP LOCKED` underneath — so racing
+ * claimants split it between them and never take the same conversation twice.
+ * These tests race real transactions on a real Postgres, because the guarantee
+ * under test is Postgres's locking, not egma's code.
  */
 
 let database: MigratedDatabase;
@@ -107,12 +109,12 @@ describe("two claimants on one queued simulation", () => {
     const simulationId = await oneQueuedSimulation();
 
     const [blue, green] = await Promise.all([
-      claimSimulations(auth, { claimant: "simulator-blue-1", capacity: 1 }),
-      claimSimulations(auth, { claimant: "simulator-green-2", capacity: 1 }),
+      claimSimulations({ claimant: "simulator-blue-1", capacity: 1 }),
+      claimSimulations({ claimant: "simulator-green-2", capacity: 1 }),
     ]);
 
     const claims = [...blue, ...green].filter(
-      (simulation) => simulation.id === simulationId,
+      (claim) => claim.id === simulationId,
     );
     expect(claims).toHaveLength(1);
     expect([blue.length, green.length].sort()).toEqual([0, 1]);
@@ -128,11 +130,11 @@ describe("a fleet draining a queue", () => {
 
     const fleet = await Promise.all(
       ["simulator-a", "simulator-b", "simulator-c"].map((claimant) =>
-        claimSimulations(auth, { claimant, capacity: 2 }),
+        claimSimulations({ claimant, capacity: 2 }),
       ),
     );
 
-    const taken = fleet.flat().map((simulation) => simulation.id);
+    const taken = fleet.flat().map((claim) => claim.id);
     // No conversation twice, and every claimed one was really queued.
     expect(new Set(taken).size).toBe(taken.length);
     for (const id of taken) {
@@ -141,12 +143,12 @@ describe("a fleet draining a queue", () => {
     // Three claimants of capacity two drain all six between them.
     expect(taken.length).toBe(6);
 
-    // And each claimed row says who holds it.
+    // And each claim says who holds it, on the answer and on the row.
     for (const [index, claims] of fleet.entries()) {
       const claimant = ["simulator-a", "simulator-b", "simulator-c"][index];
-      for (const simulation of claims) {
-        expect(simulation.claimedBy).toBe(claimant);
-        expect(simulation.status).toBe("claimed");
+      for (const claim of claims) {
+        expect(claim.claimedBy).toBe(claimant);
+        expect((await getSimulation(auth, claim.id))?.status).toBe("claimed");
       }
     }
   });

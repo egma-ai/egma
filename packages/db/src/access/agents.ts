@@ -276,8 +276,13 @@ async function visibleAgent(
  * fail here, loudly and naming itself, rather than leak into a caller as a
  * shape it isn't. Shape only, deliberately: the registry's demands may
  * tighten later, and an old row must stay readable exactly as it was written.
+ *
+ * Exported for the one sibling that also reads a connection's stored shapes —
+ * the simulator's connection door in `runs.ts` — so the two files cannot
+ * drift into two ideas of what a well-formed row is. It is not on the
+ * package's surface.
  */
-function stringRecordFromRow(
+export function stringRecordFromRow(
   value: unknown,
   malformed: () => Error,
 ): Record<string, string> {

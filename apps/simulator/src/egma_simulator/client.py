@@ -64,6 +64,11 @@ class ControlPlaneClient:
         service_token: str | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
+        # Sent on every claim as ``wait_seconds`` and enforced locally as the
+        # timeout below: the control plane holds an empty-queue claim open no
+        # longer than the client says it will wait, so the two ends agree and
+        # a quiet queue can never read as a client-side timeout.
+        self._claim_wait_seconds = claim_wait_seconds
         self._claim_timeout = aiohttp.ClientTimeout(
             total=claim_wait_seconds + CLAIM_TIMEOUT_MARGIN_SECONDS
         )
@@ -98,7 +103,11 @@ class ControlPlaneClient:
         try:
             async with self._live_session().post(
                 f"{self._base_url}/v1/claims",
-                json={"claimant": claimant, "capacity": capacity},
+                json={
+                    "claimant": claimant,
+                    "capacity": capacity,
+                    "wait_seconds": self._claim_wait_seconds,
+                },
                 timeout=self._claim_timeout,
             ) as response:
                 if response.status != 200:

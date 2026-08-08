@@ -31,7 +31,7 @@ import {
   type AuthContext,
   type NewRun,
   type Role,
-  type Simulation,
+  type SimulationClaim,
   type StartedRun,
 } from "@egma/db";
 
@@ -141,18 +141,15 @@ function aRun(overrides: Partial<NewRun> = {}): NewRun {
 
 /**
  * Claim for one run under test. A claim takes the oldest queued simulations
- * of the whole customer, and earlier tests leave some behind on purpose, so
+ * of the whole deployment, and earlier tests leave some behind on purpose, so
  * every test names its own run and fishes its own simulation out.
  */
 async function claimOwn(
   runId: string,
   claimant = "simulator-blue-1",
-): Promise<Simulation> {
-  const claimed = await claimSimulations(actingAsAcme(), {
-    claimant,
-    capacity: 50,
-  });
-  const ours = claimed.find((simulation) => simulation.runId === runId);
+): Promise<SimulationClaim> {
+  const claimed = await claimSimulations({ claimant, capacity: 50 });
+  const ours = claimed.find((claim) => claim.runId === runId);
   if (ours === undefined) throw new Error("the claim missed the run under test");
   return ours;
 }
@@ -797,13 +794,11 @@ describe("canceling a run", () => {
       expect(simulation.cancelRequestedAt).toBeInstanceOf(Date);
     }
 
-    const claimed = await claimSimulations(actingAsAcme(), {
+    const claimed = await claimSimulations({
       claimant: simulator,
       capacity: 50,
     });
-    expect(
-      claimed.filter((simulation) => simulation.runId === started.id),
-    ).toEqual([]);
+    expect(claimed.filter((claim) => claim.runId === started.id)).toEqual([]);
   });
 
   it("stamps the intent on a claimed simulation, and the next heartbeat carries it", async () => {

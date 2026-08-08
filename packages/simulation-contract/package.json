@@ -10,11 +10,15 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist", "schemas", "measure-catalog.md"],
+  "files": [
+    "dist",
+    "schemas",
+    "measure-catalog.md"
+  ],
   "scripts": {
     "build": "tsc -b"
   },
-  "devDependencies": {
+  "dependencies": {
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1"
   }

@@ -70,6 +70,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
       CLICKHOUSE_URL: "http://unused/unused",
       EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
       EGMA_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
+      EGMA_SIMULATOR_SERVICE_TOKEN: "egma_st_held-by-this-test-suite-alone",
       EGMA_BASE_URL: "http://localhost:3101",
     }),
     ...overrides,

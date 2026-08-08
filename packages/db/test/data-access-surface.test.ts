@@ -69,18 +69,24 @@ const CONTEXT_ESTABLISHING = [
 const INSTANCE_SCOPED = ["instanceIsClaimed"];
 
 /**
- * What hands egma's own engine its work. The grader service stands behind every
- * organization on the deployment at once and holds no credential, because there
- * is no honest one to give it — so it is handed work rather than asked for one.
+ * What hands egma's own services their work. The grader and the simulator each
+ * stand behind every organization on the deployment at once and hold no
+ * credential, because there is no honest one to give them — so each is handed
+ * work rather than asked for one.
  *
- * Two names, and a third is a decision somebody makes on purpose. Neither takes
+ * Three names, and a fourth is a decision somebody makes on purpose. None takes
  * an argument by which a caller could name a customer, and a build rule refuses
- * one that grows one; the only table either reaches is egma's own grading queue;
- * and every claim arrives carrying the `AuthContext` narrowed to that job's own
- * organization and project, which is what all of the grading afterwards goes
+ * one that grows one; the only rows any of them reaches are egma's own queues —
+ * grading jobs, and the simulations egma itself wrote as queued; and every
+ * claim arrives carrying the `AuthContext` narrowed to that row's own
+ * organization and project, which is what all of the work afterwards goes
  * through.
  */
-const WORK_DISPATCHING = ["claimGradingJobs", "watchGradingWork"];
+const WORK_DISPATCHING = [
+  "claimGradingJobs",
+  "claimSimulations",
+  "watchGradingWork",
+];
 
 /**
  * Everything that touches a customer's data. All of it needs the context.
@@ -120,7 +126,6 @@ const CONTEXT_REQUIRING = [
   "appendVerdicts",
   "cancelRun",
   "changeRole",
-  "claimSimulations",
   "clonePersona",
   "cloneTest",
   "completeSimulation",
@@ -197,6 +202,11 @@ const CONTEXT_REQUIRING = [
   // Names off a reviewed file turned into the identity a version names. It
   // reads personas and nothing else, and only ones the context already reaches.
   "resolvePersonaNames",
+  // The dispatch path's door to a connection's plaintext. It takes the context
+  // like everything else — and then refuses every one that did not come from a
+  // simulation claim, because conducting is the only thing egma does with a
+  // connection's credentials at this seam.
+  "resolveSimulationConnection",
   "revokeApiKey",
   "setJudgeConfiguration",
   "startRun",

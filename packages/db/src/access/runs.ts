@@ -23,6 +23,7 @@ import {
   type Topology,
 } from "../schema/agents.ts";
 import { persona } from "../schema/personas.ts";
+import { openCredentials } from "../sealing.ts";
 import { test, testVersion, testPersona } from "../schema/tests.ts";
 import {
   COMPLETED_ENDING_REASONS,
@@ -37,6 +38,7 @@ import {
   type SimulationStatus,
   type Verdict,
 } from "../schema/runs.ts";
+import { stringRecordFromRow } from "./agents.ts";
 import { validClaimant } from "./claimants.ts";
 import { descriptorOf, noSimulatorAdapterMessage } from "./connection-registry.ts";
 import type { AuthContext } from "./context.ts";
@@ -57,6 +59,17 @@ import { within } from "./within.ts";
  * same seam on the same terms: every function takes the context, and the run
  * machinery is gated by `start_and_cancel_runs` throughout, because claiming
  * and reporting a simulation *is* conducting the run somebody started.
+ *
+ * One exception, drawn on the grading queue's precedent and as narrowly:
+ * `claimSimulations` takes no context and cannot be given one, because the
+ * simulator stands behind every organization on the deployment at once and
+ * there is no honest credential to give it. It reaches only the queue of
+ * simulations egma itself wrote, carries out identifiers and no content, and
+ * hands back with every claim the context the conducting is then done under —
+ * built from the claimed row's own tenancy and from nothing the service said.
+ * `resolveSimulationConnection` is the one door such a context is for, and it
+ * refuses every other kind. The whole argument is written out on the two
+ * functions.
  *
  * Writers keep to one lock order — simulation rows first, the run header last
  * — so the claim path, the cancel path and the report path do not deadlock
@@ -1413,25 +1426,134 @@ export async function cancelRun(
 }
 
 /**
- * The atomic claim. Up to `capacity` of the oldest queued simulations the
- * caller can reach move to `claimed` in one transaction, stamped with the
- * claimant and their first heartbeat; whatever another claimant holds locked
- * is skipped rather than waited on, so two simulators drain one queue without
- * ever taking the same conversation. The capacity is the simulator's own
- * declaration of what it can hold — a big run degrades to a queue, never to
- * overload.
+ * What a claim answers with, and no more — identifiers, tenancy, the two
+ * stamps the claim itself wrote, and the pins a spec is assembled from.
+ *
+ * Deliberately not the `Simulation` shape: a claim crosses every customer on
+ * the deployment, so what it carries out is held to what the assembly needs
+ * to *ask for* — never the asked-for things themselves. No transcript, no
+ * configuration, no credentials, nothing a customer wrote. Each of those is
+ * read afterwards through the ordinary scoped surface, under `auth`.
+ */
+export type SimulationClaim = {
+  readonly id: string;
+  readonly runId: string;
+  readonly organizationId: string;
+  readonly projectId: string;
+  readonly agentId: string;
+  readonly connectionId: string;
+  /** Who calls, by identity, and the pin the traits are read from. */
+  readonly personaId: string;
+  readonly personaVersionId: string;
+  /** What is being checked; both absent only on an upgraded instance's history. */
+  readonly testId: string | null;
+  readonly testVersionId: string | null;
+  readonly connectionType: ConnectionType;
+  readonly modality: Modality;
+  readonly claimedBy: string;
+  readonly claimedAt: Date;
+  /**
+   * Narrowed to this simulation's own organization and project, built here
+   * from the claimed row and from nothing the claimant said. It is what every
+   * read the spec assembly makes goes through, so the conducting happens
+   * inside one customer even though the claim that found the work was not.
+   */
+  readonly auth: AuthContext;
+};
+
+const SIMULATION_CLAIM_COLUMNS = {
+  id: simulation.id,
+  runId: simulation.runId,
+  organizationId: simulation.organizationId,
+  projectId: simulation.projectId,
+  agentId: simulation.agentId,
+  connectionId: simulation.connectionId,
+  personaId: simulation.personaId,
+  personaVersionId: simulation.personaVersionId,
+  testId: simulation.testId,
+  testVersionId: simulation.testVersionId,
+  connectionType: simulation.connectionType,
+  modality: simulation.modality,
+  claimedBy: simulation.claimedBy,
+  claimedAt: simulation.claimedAt,
+} as const;
+
+/**
+ * The name the simulator's context wears where a person's id would be.
+ *
+ * The same shape as the grading queue's `engine`, for the same reason: the
+ * simulator is a process, and the conversations it conducts were asked for by
+ * whoever started the run rather than by it. Deliberately not shaped like an
+ * identifier, so anything that ever tried to write it as one is refused out
+ * loud by the foreign key to `user` rather than quietly attributing a
+ * machine's act to a person.
+ */
+const THE_SIMULATOR = "simulator";
+
+/**
+ * The context one claimed simulation is conducted under.
+ *
+ * `member`, where the grading engine's is `viewer`, and the difference is the
+ * work: the engine only reads and writes egma's own records, while conducting
+ * moves the simulation row itself through the machinery this file gates with
+ * `start_and_cancel_runs` — because claiming and reporting a simulation *is*
+ * conducting the run somebody started. What keeps the context narrower than a
+ * person holding the same role is not the role at all: every write requires
+ * the claimant's own name on the row, and the one secret it can ask for sits
+ * behind a door that checks how the context came to exist, not what its role
+ * permits.
+ */
+function conductingContext(
+  organizationId: string,
+  projectId: string,
+): AuthContext {
+  return {
+    userId: THE_SIMULATOR,
+    organizationId,
+    projectId,
+    role: "member",
+    via: "simulator",
+  };
+}
+
+export type SimulationClaimRequest = {
+  /** This simulator's own name for itself. */
+  readonly claimant: string;
+  /** How many conversations it has room to conduct at once. */
+  readonly capacity: number;
+};
+
+/**
+ * The atomic claim, across every organization on this deployment.
+ *
+ * Up to `capacity` of the oldest queued simulations move to `claimed` in one
+ * transaction, stamped with the claimant and their first heartbeat; whatever
+ * another claimant holds locked is skipped rather than waited on, so two
+ * simulators drain one queue without ever taking the same conversation.
+ * `SKIP LOCKED`, exactly as `claimGradingJobs` does it, because it is exactly
+ * the same problem. The capacity is the simulator's own declaration of what
+ * it can hold — a big run degrades to a queue, never to overload.
  *
  * Every claimed simulation's run leaves `pending` here, because a run has
  * started when its first conversation is someone's to conduct.
+ *
+ * **It takes no `AuthContext` and cannot be given one.** See the note at the
+ * top of this file, and the grading queue's, whose reasoning this claim
+ * inherits whole: it is the one call in this file that reaches across
+ * customers; the only rows it moves are egma's own queue of simulations; it
+ * takes a claimant's name and a capacity, and there is no argument by which a
+ * caller could name whose work they want — a build rule holds it to that; it
+ * carries out identifiers and no content; and every claim arrives with the
+ * narrowed context the conducting is actually done under. There is no
+ * tenancy-scoped claim beside it, deliberately — a claim a customer's
+ * credential could make would be a claim that has to answer which customers
+ * it serves, and the honest answer is all of them.
  */
 export async function claimSimulations(
-  auth: AuthContext,
-  input: { readonly claimant: string; readonly capacity: number },
-): Promise<readonly Simulation[]> {
-  authorize(auth, "start_and_cancel_runs", here(auth));
-
-  const claimant = validClaimant(input.claimant);
-  const { capacity } = input;
+  request: SimulationClaimRequest,
+): Promise<readonly SimulationClaim[]> {
+  const claimant = validClaimant(request.claimant);
+  const { capacity } = request;
   if (
     !Number.isInteger(capacity) ||
     capacity < 1 ||
@@ -1448,22 +1570,16 @@ export async function claimSimulations(
     const candidates = await tx
       .select({ id: simulation.id })
       .from(simulation)
-      .where(
-        within(
-          auth,
-          simulation,
-          and(
-            eq(simulation.status, "queued"),
-            inActingProject(auth, simulation),
-          ),
-        ),
-      )
+      .where(eq(simulation.status, "queued"))
       .orderBy(asc(simulation.id))
       .limit(capacity)
       .for("update", { skipLocked: true });
 
     if (candidates.length === 0) return [];
 
+    // Bare `eq`s and `inArray`s from here down: every id came off the rows
+    // locked just above, in this same transaction, so nothing below reaches
+    // further than that select already did.
     const rows = await tx
       .update(simulation)
       .set({
@@ -1478,11 +1594,10 @@ export async function claimSimulations(
           candidates.map((candidate) => candidate.id),
         ),
       )
-      .returning(SIMULATION_COLUMNS);
+      .returning(SIMULATION_CLAIM_COLUMNS);
 
     // The runs these came from, each flipped at most once, one at a time in
     // one order — so two claimants touching the same runs cannot deadlock.
-    // Bare `eq`s: every id came off the tenancy-checked rows just claimed.
     // Each run's events go in beside its own flip, in the same order: the
     // conversations that were picked up, and then the run that started
     // because they were.
@@ -1515,8 +1630,122 @@ export async function claimSimulations(
   });
 
   return claimed
-    .map(simulationFromRow)
+    .map((row) => ({
+      id: row.id,
+      runId: row.runId,
+      organizationId: row.organizationId,
+      projectId: row.projectId,
+      agentId: row.agentId,
+      connectionId: row.connectionId,
+      personaId: row.personaId,
+      personaVersionId: row.personaVersionId,
+      testId: row.testId,
+      testVersionId: row.testVersionId,
+      connectionType: row.connectionType as ConnectionType,
+      modality: row.modality as Modality,
+      claimedBy: row.claimedBy ?? claimant,
+      claimedAt: row.claimedAt ?? now,
+      auth: conductingContext(row.organizationId, row.projectId),
+    }))
     .sort((a, b) => (a.id < b.id ? -1 : 1));
+}
+
+/**
+ * How the simulator reaches the agent of one claimed simulation: the
+ * connection's type, its non-secret config, and the credentials unsealed — or
+ * null where the customer supplies no secret for the type.
+ */
+export type SimulationConnection = {
+  readonly connectionId: string;
+  readonly type: ConnectionType;
+  readonly config: Readonly<Record<string, string>>;
+  readonly credentials: Readonly<Record<string, string>> | null;
+};
+
+/**
+ * The one door to a connection's plaintext on the dispatch path, and **egma's
+ * own simulator is the only thing that may knock.**
+ *
+ * The gate is narrower than a role, on the terms `resolveJudgeKey` drew for
+ * the other secret egma holds: the only thing egma ever does with a
+ * connection's credentials at this seam is conduct a simulation over them,
+ * and the only thing that conducts is the simulator. So the check is on how
+ * the caller came to exist rather than on what their role permits — a context
+ * built from a claim says `simulator` on its face, and every other context in
+ * the product, a person's session and an API key and the grading engine
+ * alike, is refused out loud.
+ *
+ * It is asked with a simulation, never with a connection, and that is the
+ * second half of the door: the row names the connection it was pinned to when
+ * the run started, so there is no argument by which a caller could point the
+ * unsealing at a connection the claimed row does not name. And it answers
+ * only while the row stands `claimed` — the one moment a spec is assembled.
+ * Before the claim there is nobody to hand a secret to, and after the
+ * conversation starts nothing asks again.
+ *
+ * `undefined` answers three absences alike — a simulation out of the
+ * context's tenancy, one not standing claimed, and a connection since deleted
+ * — because telling them apart at this seam would confirm rows the context
+ * cannot see. A caller who needs the difference is holding the claim, which
+ * already says what was claimed; a connection gone mid-flight is the one case
+ * left, and it is exactly the "could not be handed over" the dispatch path
+ * answers for out loud.
+ */
+export async function resolveSimulationConnection(
+  auth: AuthContext,
+  simulationId: string,
+): Promise<SimulationConnection | undefined> {
+  authorize(auth, "read", here(auth));
+
+  if (auth.via !== "simulator") {
+    throw new Error(
+      "a connection's credentials are unsealed for egma's own simulator and for nothing else, because conducting is the only thing egma does with them",
+    );
+  }
+
+  const [row] = await db()
+    .select({
+      connectionId: connection.id,
+      type: connection.type,
+      config: connection.config,
+      credentials: connection.credentials,
+    })
+    .from(simulation)
+    .innerJoin(connection, eq(simulation.connectionId, connection.id))
+    .where(
+      within(
+        auth,
+        simulation,
+        and(
+          eq(simulation.id, simulationId),
+          eq(simulation.status, "claimed"),
+          isNull(connection.deletedAt),
+          inActingProject(auth, simulation),
+        ),
+      ),
+    )
+    .limit(1);
+
+  if (row === undefined) return undefined;
+
+  const malformed = (held: string) => () =>
+    new Error(
+      `connection ${row.connectionId} holds ${held} in a shape egma never ` +
+        `writes; the row needs repairing before anybody can conduct over it`,
+    );
+
+  return {
+    connectionId: row.connectionId,
+    type: row.type as ConnectionType,
+    config: stringRecordFromRow(row.config, malformed("config")),
+    credentials:
+      row.credentials === null
+        ? null
+        : stringRecordFromRow(
+            openCredentials(row.credentials),
+            malformed("credentials"),
+          ),
+  };
 }
 
 /**

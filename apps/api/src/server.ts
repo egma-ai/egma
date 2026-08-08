@@ -10,6 +10,7 @@ import {
 import { admitIdentity, onIdentityCreated } from "./auth/provisioning.ts";
 import { agentRoutes } from "./routes/agents.ts";
 import { apiKeyRoutes } from "./routes/api-keys.ts";
+import { claimRoutes } from "./routes/claims.ts";
 import { deviceRoutes } from "./routes/device.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
@@ -186,6 +187,15 @@ export function buildApi(options: ServerOptions): Api {
     provider: identity.provider,
     rateLimit,
     baseUrl: config.baseUrl,
+  });
+
+  // The simulator's claim door. Outside the credentialed scope and the
+  // per-organization rate limit on purpose: the caller is egma's own
+  // simulator, whose service token is the whole gate and resolves to no
+  // customer — so there is no organization to key a budget on, and a busy
+  // run can never eat a customer's request budget from the inside.
+  void app.register(claimRoutes, {
+    serviceToken: config.simulatorServiceToken,
   });
 
   // The OTLP door, registered without `fastify-plugin` for the same reason the

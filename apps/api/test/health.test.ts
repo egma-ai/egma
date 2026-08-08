@@ -30,6 +30,7 @@ const enough = {
   CLICKHOUSE_URL: "http://x:8123/y",
   EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
   EGMA_ENCRYPTION_KEY: "0123456789abcdef".repeat(4),
+  EGMA_SIMULATOR_SERVICE_TOKEN: "egma_st_held-by-this-test-suite-alone",
 };
 
 describe("configuration", () => {
@@ -83,6 +84,24 @@ describe("configuration", () => {
         EGMA_ENCRYPTION_KEY: "not-hex-but-sixty-four-characters-long-oh-dear!!".padEnd(64, "x"),
       }),
     ).toThrow(/64 hex characters/);
+  });
+
+  /**
+   * On the auth secret's terms exactly: the claim door hands out customers'
+   * live provider credentials, so an instance may not start with that door
+   * unguarded — and a token the door could never match (the claim path only
+   * reads bearers with the service prefix) is refused as loudly as none.
+   */
+  it("refuses to start without a usable simulator service token", () => {
+    expect(() =>
+      loadConfig({ ...enough, EGMA_SIMULATOR_SERVICE_TOKEN: "" }),
+    ).toThrow(/EGMA_SIMULATOR_SERVICE_TOKEN is required/);
+    expect(() =>
+      loadConfig({
+        ...enough,
+        EGMA_SIMULATOR_SERVICE_TOKEN: "prefixless-token",
+      }),
+    ).toThrow(/must start with egma_st_/);
   });
 
   it("refuses a port that is not a port", () => {

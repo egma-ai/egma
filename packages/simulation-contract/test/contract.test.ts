@@ -7,6 +7,8 @@ import ajvFormats from "ajv-formats";
 import type { FormatsPlugin } from "ajv-formats";
 import { describe, expect, it } from "vitest";
 
+import { specComplaints } from "@egma/simulation-contract";
+
 // ajv-formats ships CommonJS whose module.exports is the plugin function
 // itself; under NodeNext TypeScript types the default import as a namespace,
 // so the callable gets its name here.
@@ -387,5 +389,41 @@ describe("the report schema structurally forbids credential material", () => {
         "must NOT have additional properties",
       );
     }
+  });
+});
+
+describe("the exported spec check, which the control plane sends through", () => {
+  it("has no complaints about any valid golden fixture", async () => {
+    for (const fixture of await fixturesUnder("spec", "valid")) {
+      expect(specComplaints(fixture.document), fixture.name).toEqual([]);
+    }
+  });
+
+  it("complains about every deliberately invalid fixture", async () => {
+    for (const fixture of await fixturesUnder("spec", "invalid")) {
+      expect(
+        specComplaints(fixture.document).length,
+        `${fixture.name} raised no complaint`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("names the place a document is wrong, the way the simulator's check does", async () => {
+    const [valid] = await fixturesUnder("spec", "valid");
+    if (valid === undefined) throw new Error("no valid spec fixture");
+
+    const { limits: _limits, ...missingLimits } = valid.document;
+    expect(specComplaints(missingLimits)).toEqual([
+      ": must have required property 'limits'",
+    ]);
+
+    expect(
+      specComplaints({ ...valid.document, modality: "carrier-pigeon" }),
+    ).toEqual(["/modality: must be equal to one of the allowed values"]);
+  });
+
+  it("complains about a document that is not an object at all", () => {
+    expect(specComplaints(null).length).toBeGreaterThan(0);
+    expect(specComplaints("a string").length).toBeGreaterThan(0);
   });
 });
