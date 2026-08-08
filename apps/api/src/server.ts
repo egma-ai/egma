@@ -24,6 +24,7 @@ import { traceReadRoutes } from "./routes/trace-reads.ts";
 import { traceRoutes } from "./routes/traces.ts";
 import { fixedWindowRateLimit, type RateLimit } from "./http/rate-limit.ts";
 import { webHandler } from "./http/web-handler.ts";
+import { startOrphanSweep, type OrphanSweep } from "./simulation-sweep.ts";
 import type { Config } from "./config.ts";
 
 /** Where the auth provider's own endpoints live, under the shared origin. */
@@ -43,6 +44,11 @@ export type ServerOptions = {
    * suite wait out a window.
    */
   readonly rateLimit?: RateLimit;
+  /**
+   * How often the standing orphan sweep runs. Defaults to the ~30s cadence; a
+   * test hands in a shorter one rather than watching a real clock.
+   */
+  readonly orphanSweepIntervalMilliseconds?: number;
 };
 
 export type Api = {
@@ -225,6 +231,22 @@ export function buildApi(options: ServerOptions): Api {
   // invitation has no membership, so there is no context to resolve them into
   // and no organization to key a budget on. The token is the credential there.
   void app.register(invitationRoutes, { provider: identity.provider });
+
+  // The standing orphan sweep, started with the server and stopped with it.
+  // Its timer is unref'd, so a shutdown never waits on a sweep that has not
+  // happened; every replica runs one, which the seam makes harmless.
+  let orphanSweep: OrphanSweep | undefined;
+  app.addHook("onReady", async () => {
+    orphanSweep = startOrphanSweep({
+      log: app.log,
+      ...(options.orphanSweepIntervalMilliseconds === undefined
+        ? {}
+        : { intervalMilliseconds: options.orphanSweepIntervalMilliseconds }),
+    });
+  });
+  app.addHook("onClose", async () => {
+    orphanSweep?.stop();
+  });
 
   return { app, identity };
 }
