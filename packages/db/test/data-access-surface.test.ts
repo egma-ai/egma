@@ -146,6 +146,13 @@ const CONTEXT_REQUIRING = [
   "editPersona",
   "editTest",
   "failSimulation",
+  // The claim path's own landing, for a claimed simulation the platform could
+  // not hand over. It writes a failed-class reason no simulator may report,
+  // so it is a door of its own rather than a word added to `failSimulation` —
+  // and it refuses every context that did not come from a claim, because
+  // dispatch failure is the platform's confession, not a report anybody
+  // files.
+  "failSimulationDispatch",
   "finishGradingJob",
   "getAgent",
   "getConnection",

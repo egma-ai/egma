@@ -790,14 +790,17 @@ describe("upgrading an instance that already holds work", () => {
       await client.query(
         `insert into run
            (id, organization_id, project_id, agent_id, connection_id, status,
-            triggered_via, requested_personas, connection_snapshot, expected_simulation_count)
-         values ($1, $2, $3, $4, $5, 'pending', 'manual', $6::jsonb, $7::jsonb, 1)`,
+            triggered_via, pinned_test_versions, requested_personas,
+            connection_snapshot, expected_simulation_count)
+         values ($1, $2, $3, $4, $5, 'pending', 'manual', $6::jsonb, $7::jsonb,
+            $8::jsonb, 2)`,
         [
           run,
           organization,
           project,
           agent,
           connection,
+          JSON.stringify({ testVersionIds: [] }),
           JSON.stringify({ personaIds: [personaId] }),
           JSON.stringify({
             type: "retell",
@@ -824,52 +827,97 @@ describe("upgrading an instance that already holds work", () => {
           personaVersion,
         ],
       );
+      // A conversation that already landed, wearing the old vocabulary. The
+      // upgrade re-validates its widened checks over every row that exists,
+      // so it has to hold for what the old release wrote, not just for what
+      // the new one will write.
+      const landed = newId("sim");
+      await client.query(
+        `insert into simulation
+           (id, run_id, organization_id, project_id, agent_id, connection_id,
+            persona_id, persona_version_id, position, connection_type, modality,
+            status, ending_reason, claimed_by, claimed_at, heartbeat_at, ended_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, 2, 'retell', 'chat',
+            'failed', 'simulator_error', 'simulator-blue-1', now(), now(), now())`,
+        [
+          landed,
+          run,
+          organization,
+          project,
+          agent,
+          connection,
+          personaId,
+          personaVersion,
+        ],
+      );
 
       // The upgrade itself, with that work sitting in the tables.
       await writeFile(path.join(asItWas, newest.name), newest.sql);
       const upgraded = await runMigrations(database.url, asItWas);
       expect(upgraded.applied).toEqual([newest.name]);
 
-      // The run is still there, and it says what is true of it: it pinned no
-      // version, because no run could when it was started.
-      const { rows: runs } = await client.query<{
-        id: string;
-        pinned_test_versions: { testVersionIds: string[] };
-      }>("select id, pinned_test_versions from run where id = $1", [run]);
-      expect(runs[0]?.pinned_test_versions).toEqual({ testVersionIds: [] });
+      // What was already true stays true: the conversation that landed under
+      // the old release keeps the reason it landed with.
+      const { rows: kept } = await client.query<{ ending_reason: string }>(
+        "select ending_reason from simulation where id = $1",
+        [landed],
+      );
+      expect(kept[0]?.ending_reason).toBe("simulator_error");
 
-      // And so does its conversation: no test, rather than one invented for it.
-      const { rows: simulations } = await client.query<{
-        test_id: string | null;
-        test_version_id: string | null;
-      }>("select test_id, test_version_id from simulation where id = $1", [
-        simulation,
-      ]);
-      expect(simulations[0]).toEqual({ test_id: null, test_version_id: null });
+      // And the queued one the old release wrote can take the landing the
+      // upgrade brings: claimed, then failed with the platform's own
+      // dispatch_failed — each step through the same lifecycle guard as ever.
+      await client.query(
+        `update simulation
+         set status = 'claimed', claimed_by = 'simulator-blue-1',
+             claimed_at = now(), heartbeat_at = now()
+         where id = $1`,
+        [simulation],
+      );
+      await client.query(
+        `update simulation
+         set status = 'failed', ending_reason = 'dispatch_failed', ended_at = now()
+         where id = $1`,
+        [simulation],
+      );
 
-      // The default is gone with the backfill, so the next run has to say what
-      // it pinned rather than inheriting a blank.
+      // The widened word keeps to its class: a way to have failed, and still
+      // no way for a conversation to have ended.
       await expect(
         client.query(
-          `insert into run
-             (id, organization_id, project_id, agent_id, connection_id, status,
-              triggered_via, requested_personas, connection_snapshot, expected_simulation_count)
-           values ($1, $2, $3, $4, $5, 'pending', 'manual', '{}'::jsonb, '{}'::jsonb, 1)`,
-          [newId("run"), organization, project, agent, connection],
+          `insert into simulation
+             (id, run_id, organization_id, project_id, agent_id, connection_id,
+              persona_id, persona_version_id, position, connection_type, modality,
+              status, ending_reason, claimed_by, claimed_at, heartbeat_at,
+              started_at, ended_at)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, 3, 'retell', 'chat',
+              'completed', 'dispatch_failed', 'simulator-blue-1', now(), now(),
+              now(), now())`,
+          [
+            newId("sim"),
+            run,
+            organization,
+            project,
+            agent,
+            connection,
+            personaId,
+            personaVersion,
+          ],
         ),
-      ).rejects.toThrow(/pinned_test_versions/u);
+      ).rejects.toThrow(/simulation_ending_reason_agrees/u);
 
-      // And the record the upgrade brings is a record: an event written over
-      // the work that was already here cannot be rewritten afterwards.
+      // The record of that landing speaks the widened word too — and stays a
+      // record: written over the work that was already here, and never
+      // rewritten afterwards.
       await client.query(
         `insert into run_event
-           (run_id, seq, organization_id, project_id, kind, status)
-         values ($1, 1, $2, $3, 'run', 'pending')`,
-        [run, organization, project],
+           (run_id, seq, organization_id, project_id, kind, simulation_id, status, reason)
+         values ($1, 1, $2, $3, 'simulation', $4, 'failed', 'dispatch_failed')`,
+        [run, organization, project, simulation],
       );
       await expect(
         client.query(
-          "update run_event set status = 'running' where run_id = $1 and seq = 1",
+          "update run_event set reason = 'simulator_error' where run_id = $1 and seq = 1",
           [run],
         ),
       ).rejects.toThrow(/is written once/u);

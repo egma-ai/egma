@@ -3,16 +3,21 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   claimSimulations,
+  completeSimulation,
   createAgent,
   createPersona,
   createTest,
+  failSimulationDispatch,
   getPersonaVersion,
   getRun,
   getSimulation,
   getSimulationTestVersion,
+  listGradingJobsForSimulation,
+  listRunEvents,
   removeConnection,
   resolveSimulationConnection,
   startRun,
+  startSimulation,
   updateConnection,
   type AuthContext,
   type SimulationClaim,
@@ -400,5 +405,156 @@ describe("the connection door", () => {
     expect(reached?.credentials).toEqual({
       apiKey: "retell-secret-rotated-9999ABCD",
     });
+  });
+});
+
+describe("the dispatch-failure landing", () => {
+  it("lands the claim the platform could not hand over: failed, dispatch_failed, judged, counted", async () => {
+    const { runId, simulationId } = await oneQueuedSimulation(
+      actingAsAcme(),
+      acmeSeed,
+    );
+    const claim = await claimOne(simulationId);
+
+    const landed = await failSimulationDispatch(
+      claim.auth,
+      claim.id,
+      claim.claimedBy,
+    );
+    expect(landed?.status).toBe("failed");
+    expect(landed?.endingReason).toBe("dispatch_failed");
+    expect(landed?.endedAt).toBeInstanceOf(Date);
+
+    // Terminal like any other landing. The judgement is minted beside it —
+    // a simulation that never ran is judged errored, never left unjudged…
+    const jobs = await listGradingJobsForSimulation(actingAsAcme(), simulationId);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.status).toBe("pending");
+
+    // …the run it was the last conversation of settles with counts that say
+    // what happened — nothing completed, nothing pretending to have…
+    const header = await getRun(actingAsAcme(), runId);
+    expect(header?.status).toBe("completed");
+    expect(header?.completedCount).toBe(0);
+    expect(header?.failedCount).toBe(1);
+    expect(header?.canceledCount).toBe(0);
+    expect(header?.finishedAt).toBeInstanceOf(Date);
+
+    // …and the record says so in the same words, in the same transaction.
+    const feed = await listRunEvents(actingAsAcme(), runId, { after: 0 });
+    expect(feed?.events.at(-2)?.status).toBe("failed");
+    expect(feed?.events.at(-2)?.reason).toBe("dispatch_failed");
+    expect(feed?.events.at(-1)?.status).toBe("completed");
+  });
+
+  it("fails one conversation, never the batch's run: the counts stay truthful around it", async () => {
+    // A second caller on the same test, so one run holds two conversations —
+    // one the platform hands over and one it cannot.
+    const rosa = await createPersona(actingAsAcme(), {
+      name: "Retired Rosa",
+      traits: NEUTRAL_TRAITS,
+    });
+    const twoCallers = (
+      await createTest(actingAsAcme(), {
+        name: "Reschedules, twice over",
+        scenario: SCENARIO,
+        expectedBehaviors: ["confirms the new time back before finishing"],
+        personaIds: [acmeSeed.personaId, rosa.id],
+      })
+    ).versionId;
+
+    const started = await startRun(actingAsAcme(), {
+      connectionId: acmeSeed.connectionId,
+      testVersionIds: [twoCallers],
+    });
+    expect(started.simulations).toHaveLength(2);
+
+    const claims = await claimSimulations({
+      claimant: "simulator-blue-1",
+      capacity: 50,
+    });
+    const [conducted, unbuildable] = started.simulations.map((simulation) =>
+      claims.find((claim) => claim.id === simulation.id),
+    );
+    if (conducted === undefined || unbuildable === undefined) {
+      throw new Error("the claim missed one of the run's simulations");
+    }
+
+    // The first conversation happens; the second cannot be handed over. The
+    // dispatch landing is the run's last, so it is the one that settles it.
+    await startSimulation(conducted.auth, conducted.id, conducted.claimedBy);
+    await completeSimulation(conducted.auth, conducted.id, conducted.claimedBy, {
+      endingReason: "persona_concluded",
+      transcript: [{ speaker: "human", text: "Thanks, that is everything." }],
+    });
+    await failSimulationDispatch(
+      unbuildable.auth,
+      unbuildable.id,
+      unbuildable.claimedBy,
+    );
+
+    const header = await getRun(actingAsAcme(), started.id);
+    expect(header?.status).toBe("completed");
+    expect(header?.completedCount).toBe(1);
+    expect(header?.failedCount).toBe(1);
+    expect(header?.canceledCount).toBe(0);
+  });
+
+  it("refuses every context that did not come from a claim", async () => {
+    const { simulationId } = await oneQueuedSimulation(actingAsAcme(), acmeSeed);
+    const claim = await claimOne(simulationId);
+
+    // A person's session, a key, and the grading engine: each may fail plenty
+    // of its own, and none of them stands where dispatch happens — so none of
+    // them may put the platform's confession on a row. The engine falls at
+    // the permission gate before the door even asks how it came to exist,
+    // because a viewer conducts nothing.
+    const session = actingAsAcme();
+    const apiKey: AuthContext = { ...session, via: "api_key" };
+    const engine: AuthContext = {
+      userId: "engine",
+      organizationId: acme.organization,
+      projectId: acme.project,
+      role: "viewer",
+      via: "engine",
+    };
+
+    for (const auth of [session, apiKey]) {
+      await expect(
+        failSimulationDispatch(auth, claim.id, claim.claimedBy),
+      ).rejects.toThrow(/simulator/);
+    }
+    await expect(
+      failSimulationDispatch(engine, claim.id, claim.claimedBy),
+    ).rejects.toThrow(/may not start_and_cancel_runs/);
+    expect(
+      (await getSimulation(actingAsAcme(), simulationId))?.status,
+    ).toBe("claimed");
+
+    // Leave nothing half-open behind for the claims that follow.
+    await failSimulationDispatch(claim.auth, claim.id, claim.claimedBy);
+  });
+
+  it("moves nothing for a stranger's claim, and nothing past the claimed moment", async () => {
+    const { simulationId } = await oneQueuedSimulation(actingAsAcme(), acmeSeed);
+    const claim = await claimOne(simulationId);
+
+    // Another claimant's name on the ask: as absent as a row that never was.
+    expect(
+      await failSimulationDispatch(claim.auth, claim.id, "simulator-green-2"),
+    ).toBeUndefined();
+    expect(
+      (await getSimulation(actingAsAcme(), simulationId))?.status,
+    ).toBe("claimed");
+
+    // And once the conversation is underway, dispatch already happened: a
+    // failure from here is the simulator's to report, never this landing's.
+    await startSimulation(claim.auth, claim.id, claim.claimedBy);
+    expect(
+      await failSimulationDispatch(claim.auth, claim.id, claim.claimedBy),
+    ).toBeUndefined();
+    expect(
+      (await getSimulation(actingAsAcme(), simulationId))?.status,
+    ).toBe("running");
   });
 });

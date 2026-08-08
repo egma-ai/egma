@@ -367,6 +367,7 @@ export {
   claimSimulations,
   completeSimulation,
   failSimulation,
+  failSimulationDispatch,
   getRun,
   getSimulation,
   getSimulationTestVersion,

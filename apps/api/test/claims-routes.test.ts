@@ -389,7 +389,7 @@ describe("what the claim door never touches", () => {
 });
 
 describe("a simulation the platform cannot hand over", () => {
-  it("is skipped out loud while the rest of the batch still dispatches", async () => {
+  it("lands as dispatch_failed at once, while the rest of the batch still dispatches", async () => {
     const { ada, key, agentId, connectionId, versionId } =
       await aCustomerReadyToRun("claims_skip");
 
@@ -417,8 +417,15 @@ describe("a simulation the platform cannot hand over", () => {
       healthy.simulationId,
     ]);
 
-    // The unbuildable row was claimed and stays claimed rather than looping
-    // through the queue: a second ask does not see it again.
+    // The unbuildable row landed terminal at claim time: failed with the
+    // platform's own reason, never blamed on the simulator, never left for
+    // the sweep to misname orphaned — and never back through the queue, so a
+    // second ask does not see it again.
+    const row = await getSimulation(contextFor(ada, "member"), doomed.simulationId);
+    expect(row?.status).toBe("failed");
+    expect(row?.endingReason).toBe("dispatch_failed");
+    expect(row?.endedAt).toBeInstanceOf(Date);
+
     const again = await claim(api.config.simulatorServiceToken, {
       claimant: "sim-under-test",
       capacity: 4,
@@ -426,11 +433,16 @@ describe("a simulation the platform cannot hand over", () => {
     });
     expect(again.body.specs).toEqual([]);
 
-    const row = await getSimulation(contextFor(ada, "member"), doomed.simulationId);
-    expect(row?.status).toBe("claimed");
+    // That landing was the doomed run's last outstanding conversation, so
+    // the run settles now, with counts that say what happened.
+    const header = await ask(api.app, "GET", `/api/runs/${doomed.runId}`, key);
+    expect(header.body.status).toBe("completed");
+    expect(header.body.completed_count).toBe(0);
+    expect(header.body.failed_count).toBe(1);
+    expect(header.body.canceled_count).toBe(0);
   });
 
-  it("skips a credential that will not unseal, and the batch still dispatches", async () => {
+  it("lands a credential that will not unseal the same way, and the batch dispatches whole", async () => {
     const { ada, key, connectionId, versionId } =
       await aCustomerReadyToRun("claims_corrupt");
 
@@ -463,12 +475,13 @@ describe("a simulation the platform cannot hand over", () => {
       healthy.simulationId,
     ]);
 
-    // The unopenable row was claimed and stays that way for the sweep; the
-    // batch around it went out whole.
+    // The unopenable row took the same honest landing — the throw cost one
+    // row its dispatch, and the batch around it went out whole.
     const row = await getSimulation(
       contextFor(ada, "member"),
       doomed.simulationId,
     );
-    expect(row?.status).toBe("claimed");
+    expect(row?.status).toBe("failed");
+    expect(row?.endingReason).toBe("dispatch_failed");
   });
 });

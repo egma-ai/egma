@@ -23,11 +23,11 @@ import {
   startSimulation,
   type AuthContext,
   type ExpectedBehaviorInput,
-  type FailedEndingReason,
   type GradingJob,
   type NewGrader,
   type NewSpan,
   type RecordedVerdict,
+  type SimulationFailure,
 } from "@egma/db";
 
 import {
@@ -263,8 +263,11 @@ export async function conductSimulation(
   landing: {
     readonly metrics?: unknown;
     readonly transcript?: unknown;
-    /** Absent means it happened; a reason means it never ran. */
-    readonly failedBecause?: FailedEndingReason | undefined;
+    /**
+     * Absent means it happened; a reason means it never ran. Typed as what a
+     * simulator may report, because that is who this helper is playing.
+     */
+    readonly failedBecause?: SimulationFailure["reason"] | undefined;
     readonly testId?: string | undefined;
   } = {},
 ): Promise<ConductedSimulation> {
@@ -315,7 +318,7 @@ export async function conductSimulation(
   const landed =
     landing.failedBecause !== undefined
       ? await failSimulation(world.auth, only.id, claimant, {
-          reason: landing.failedBecause as Exclude<FailedEndingReason, "orphaned">,
+          reason: landing.failedBecause,
         })
       : await completeSimulation(world.auth, only.id, claimant, {
           endingReason: "persona_concluded",
