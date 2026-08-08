@@ -14,10 +14,12 @@ import {
   getSimulationTestVersion,
   listGradingJobsForSimulation,
   listRunEvents,
+  recordSimulationHeartbeat,
   removeConnection,
   resolveSimulationConnection,
   startRun,
   startSimulation,
+  sweepOrphanedSimulations,
   updateConnection,
   type AuthContext,
   type SimulationClaim,
@@ -284,6 +286,52 @@ describe("the instance-wide claim", () => {
     await expect(
       claimSimulations({ claimant: "   ", capacity: 1 }),
     ).rejects.toThrow(/needs a name/);
+  });
+});
+
+describe("the instance-wide heartbeat and sweep", () => {
+  it("reach every customer's held rows with no context at all, and answer no content", async () => {
+    const acmeRun = await oneQueuedSimulation(actingAsAcme(), acmeSeed);
+    const globexRun = await oneQueuedSimulation(actingAsGlobex(), globexSeed);
+    await claimSimulations({ claimant: "simulator-blue-1", capacity: 50 });
+
+    // A beat for each customer's row, made from nothing but the row's own id
+    // and the claimant's name — the two things the wire actually carries.
+    for (const simulationId of [acmeRun.simulationId, globexRun.simulationId]) {
+      expect(
+        await recordSimulationHeartbeat({
+          simulationId,
+          claimant: "simulator-blue-1",
+        }),
+      ).toEqual({ cancelRequested: false });
+    }
+
+    // Silence both, and one ask accounts for both customers — the sweep
+    // stands where the simulator does, behind every organization at once.
+    await database.sql(
+      "update simulation set heartbeat_at = now() - interval '10 minutes' where id = any($1)",
+      [[acmeRun.simulationId, globexRun.simulationId]],
+    );
+    const swept = await sweepOrphanedSimulations();
+    const ids = swept.map((simulation) => simulation.id);
+    expect(ids).toContain(acmeRun.simulationId);
+    expect(ids).toContain(globexRun.simulationId);
+
+    // Identifiers and no content: the answer names the row and its run so a
+    // caller can say what it did, and carries nothing a customer wrote.
+    for (const simulation of swept) {
+      expect(Object.keys(simulation).sort()).toEqual(["id", "runId"]);
+    }
+
+    // And each customer's record landed inside that customer, as their own
+    // reads tell it.
+    expect(
+      (await getSimulation(actingAsAcme(), acmeRun.simulationId))?.endingReason,
+    ).toBe("orphaned");
+    expect(
+      (await getSimulation(actingAsGlobex(), globexRun.simulationId))
+        ?.endingReason,
+    ).toBe("orphaned");
   });
 });
 

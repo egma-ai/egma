@@ -60,18 +60,23 @@ import { within } from "./within.ts";
  * machinery is gated by `start_and_cancel_runs` throughout, because claiming
  * and reporting a simulation *is* conducting the run somebody started.
  *
- * One exception, drawn on the grading queue's precedent and as narrowly:
- * `claimSimulations` takes no context and cannot be given one, because the
- * simulator stands behind every organization on the deployment at once and
- * there is no honest credential to give it. It reaches only the queue of
- * simulations egma itself wrote, carries out identifiers and no content, and
- * hands back with every claim the context the conducting is then done under —
- * built from the claimed row's own tenancy and from nothing the service said.
+ * Three exceptions, drawn on the grading queue's precedent and as narrowly:
+ * `claimSimulations`, `recordSimulationHeartbeat` and
+ * `sweepOrphanedSimulations` take no context and cannot be given one, because
+ * each stands where the simulator does — behind every organization on the
+ * deployment at once, with no honest credential to give it. The claim hands
+ * work out; the heartbeat keeps one dispatch alive and steers it; the sweep
+ * accounts for dispatches whose simulator died. All three reach only rows
+ * egma's own machinery wrote — the queue, and the claims made from it — and
+ * carry out identifiers and no content. The claim hands back with every row
+ * the context the conducting is then done under, built from the row's own
+ * tenancy and from nothing the service said; the other two derive their
+ * narrowness the same way, from the row rather than from any caller.
  * `resolveSimulationConnection` and `failSimulationDispatch` are the two
- * doors only such a context may open — the secret the dispatch needs, and
- * the honest landing when the dispatch cannot happen — and each refuses
- * every other kind. The whole argument is written out on the three
- * functions.
+ * doors only such a claim-minted context may open — the secret the dispatch
+ * needs, and the honest landing when the dispatch cannot happen — and each
+ * refuses every other kind. The whole argument is written out on the
+ * functions themselves.
  *
  * Writers keep to one lock order — simulation rows first, the run header last
  * — so the claim path, the cancel path and the report path do not deadlock
@@ -326,8 +331,22 @@ const MOST_SIMULATIONS_PER_RUN = 200;
 /** How many queued simulations one claim may take, however large the fleet. */
 const LARGEST_CLAIM_CAPACITY = 50;
 
-/** How long a claimed simulation may go silent before the sweep calls it. */
-const DEFAULT_STALE_AFTER_SECONDS = 60;
+/**
+ * How long a claimed or running simulation may go silent before the sweep
+ * calls it orphaned.
+ *
+ * The window is set against the report, not the heartbeat. The simulator's
+ * report sender retries a terminal document for up to two minutes before it
+ * abandons delivery, so a partition can swallow every heartbeat and still end
+ * in time for the report to land — and a window shorter than that deadline
+ * would let the sweep write `orphaned` over a conversation that genuinely
+ * finished, minutes before its own record arrived to say so. 150 seconds
+ * outlasts the retrying with room to spare, and against a beat every few
+ * seconds it is dozens of missed beats — never a simulator that is merely
+ * slow. The cost, accepted: a truly crashed simulator's rows stay `running`
+ * for up to about three minutes before the honest `failed`.
+ */
+const DEFAULT_STALE_AFTER_SECONDS = 150;
 
 /**
  * The failure reasons a simulator may give — everything but the platform's
@@ -584,22 +603,26 @@ function isGradable(status: SimulationStatus): boolean {
  * for a sweep of forgotten simulations to exist in. The notification the
  * enqueue raises travels on the same transaction and so reaches a listening
  * grader the moment the transition is visible to it.
+ *
+ * The tenancy the work is filed under comes in with the row rather than from
+ * any context, because not every caller has one: a landing reached its row
+ * through `within` and passes the context's organization, which is the row's
+ * by construction; the sweep holds no context at all and passes what the row
+ * itself says — either way, the job lands inside the customer the simulation
+ * belongs to.
  */
 async function makeGradable(
   tx: Transaction,
-  auth: AuthContext,
   row: {
     readonly id: string;
     readonly status: string;
+    readonly organizationId: string;
     readonly projectId: string;
   },
 ): Promise<void> {
   if (!isGradable(row.status as SimulationStatus)) return;
-  // The organization comes off the context rather than off the row: the row was
-  // reached through `within`, so its organization is this one by construction,
-  // and the answer's columns stay the tenant-free view they are everywhere else.
   await enqueueGradingJob(tx, {
-    organizationId: auth.organizationId,
+    organizationId: row.organizationId,
     projectId: row.projectId,
     source: "simulation",
     simulationId: row.id,
@@ -1756,33 +1779,40 @@ export async function resolveSimulationConnection(
   };
 }
 
+/** One beat, as the wire carries it: which simulation, and who is conducting. */
+export type SimulationHeartbeat = {
+  readonly simulationId: string;
+  /** This simulator's own name for itself — the name the claim stamped. */
+  readonly claimant: string;
+};
+
 /**
  * Still alive, still holding this conversation — and the answer carries the
  * one directive that travels back on a heartbeat: whether cancellation has
- * been requested. `undefined` is a heartbeat with nothing under it: a
- * simulation out of reach, not this claimant's, or no longer moving — the
- * signal to stop, not to retry.
+ * been requested. `undefined` is a heartbeat with nothing under it: an id
+ * this egma never issued, another claimant's row, or one no longer moving —
+ * the signal to stop, not to retry.
+ *
+ * **It takes no `AuthContext` and cannot be given one**, on the claim's exact
+ * terms (see the note at the top of this file): the beat comes from egma's
+ * own simulator, which stands behind every organization at once and holds no
+ * credential to build a context from. What keeps it narrow is the guarded
+ * update itself — the only row it can touch is one the caller's own name is
+ * already stamped on, in a state only egma's claim machinery writes — and the
+ * answer is a single boolean egma itself stamped. Nothing a customer authored
+ * goes in or comes out.
  */
 export async function recordSimulationHeartbeat(
-  auth: AuthContext,
-  id: string,
-  claimant: string,
+  beat: SimulationHeartbeat,
 ): Promise<{ readonly cancelRequested: boolean } | undefined> {
-  authorize(auth, "start_and_cancel_runs", here(auth));
-
   const [row] = await db()
     .update(simulation)
     .set({ heartbeatAt: new Date() })
     .where(
-      within(
-        auth,
-        simulation,
-        and(
-          eq(simulation.id, id),
-          eq(simulation.claimedBy, validClaimant(claimant)),
-          inArray(simulation.status, ["claimed", "running"]),
-          inActingProject(auth, simulation),
-        ),
+      and(
+        eq(simulation.id, beat.simulationId),
+        eq(simulation.claimedBy, validClaimant(beat.claimant)),
+        inArray(simulation.status, ["claimed", "running"]),
       ),
     )
     .returning({ cancelRequestedAt: simulation.cancelRequestedAt });
@@ -1882,7 +1912,10 @@ async function landSimulation(
 
     // The judgement is queued in the same transaction as the landing, so a
     // conversation that ended is never recorded without the work to judge it.
-    await makeGradable(tx, auth, row);
+    // The organization comes off the context: the row was reached through
+    // `within`, so its organization is this one by construction, and the
+    // answer's columns stay the tenant-free view they are everywhere else.
+    await makeGradable(tx, { ...row, organizationId: auth.organizationId });
     const settled = await finalizeRunIfDone(tx, row.runId, now);
     await appendRunEvents(tx, row.runId, now, [
       {
@@ -2032,22 +2065,48 @@ export async function markSimulationCanceled(
 }
 
 /**
+ * What the sweep answers with: which rows it ended, named and nothing more.
+ * The caller's whole use for the answer is to say what happened — anything
+ * fuller would carry customers' content out of a call that has no context
+ * to hold it to one customer.
+ */
+export type SweptSimulation = {
+  readonly id: string;
+  readonly runId: string;
+};
+
+/**
  * The orphan sweep: every claimed or running simulation whose simulator has
  * been silent past the staleness window is marked `failed` with reason
  * `orphaned` — an honest "started, never finished" instead of a row stuck
  * running forever — and any run that was waiting only on orphans is
  * finalized. Returns what it swept, so the caller can say what it did.
  *
+ * **It takes no `AuthContext` and cannot be given one**, on the claim's exact
+ * terms (see the note at the top of this file): silence is noticed by egma
+ * standing behind every organization at once, because the simulator whose
+ * silence this is stood there too. The only rows it moves are ones egma's own
+ * claim machinery stamped, each orphan's grading work is filed under the
+ * tenancy the row itself carries, and the answer is identifiers and no
+ * content.
+ *
+ * **Racing sweeps collide harmlessly**, which is what makes it safe to run on
+ * an interval in every replica with nothing elected to go first. The guarded
+ * update is the whole arbiter: of two sweeps reaching one row, whichever
+ * arrives second re-reads it after the first commits, finds it no longer
+ * `claimed` or `running`, and leaves it alone — so a row is ended once, its
+ * grading work enqueued once, its run finalized once. And the after-work
+ * walks rows and runs in id order, so two sweeps over one set cannot
+ * deadlock over the order they took things in.
+ *
  * The staleness window is measured in whole seconds against the last
- * heartbeat. The default is generous next to the heartbeat interval, because
- * the sweep's one sin would be calling a slow simulator dead.
+ * heartbeat. The default is `DEFAULT_STALE_AFTER_SECONDS`, set where it is so
+ * a partition cannot out-wait a report that is still coming; the sweep's one
+ * sin would be calling a simulator dead that isn't.
  */
 export async function sweepOrphanedSimulations(
-  auth: AuthContext,
   options?: { readonly staleAfterSeconds?: number | undefined },
-): Promise<readonly Simulation[]> {
-  authorize(auth, "start_and_cancel_runs", here(auth));
-
+): Promise<readonly SweptSimulation[]> {
   const staleAfterSeconds =
     options?.staleAfterSeconds ?? DEFAULT_STALE_AFTER_SECONDS;
   if (!Number.isInteger(staleAfterSeconds) || staleAfterSeconds < 1) {
@@ -2062,25 +2121,27 @@ export async function sweepOrphanedSimulations(
       .update(simulation)
       .set({ status: "failed", endingReason: "orphaned", endedAt: now })
       .where(
-        within(
-          auth,
-          simulation,
-          and(
-            inArray(simulation.status, ["claimed", "running"]),
-            lt(simulation.heartbeatAt, silentSince),
-            inActingProject(auth, simulation),
-          ),
+        and(
+          inArray(simulation.status, ["claimed", "running"]),
+          lt(simulation.heartbeatAt, silentSince),
         ),
       )
-      .returning(SIMULATION_COLUMNS);
+      .returning({
+        id: simulation.id,
+        runId: simulation.runId,
+        organizationId: simulation.organizationId,
+        projectId: simulation.projectId,
+        status: simulation.status,
+      });
 
     // An orphan is a terminal transition like any other, so it becomes work
     // like any other: a simulator that died mid-conversation produces a `failed`
     // simulation, and a `failed` simulation is judged `errored` rather than left
     // unjudged. In id order, so two sweeps racing over one set take the rows in
-    // one order and cannot deadlock over them.
+    // one order and cannot deadlock over them. The tenancy each job is filed
+    // under is the row's own — the one thing here `within` would otherwise say.
     for (const row of [...rows].sort((a, b) => (a.id < b.id ? -1 : 1))) {
-      await makeGradable(tx, auth, row);
+      await makeGradable(tx, row);
     }
 
     // Each affected run at most once, in one order, as everywhere else — and
@@ -2109,7 +2170,7 @@ export async function sweepOrphanedSimulations(
     return rows;
   });
 
-  return swept.map(simulationFromRow);
+  return swept.map((row) => ({ id: row.id, runId: row.runId }));
 }
 
 /**

@@ -659,11 +659,10 @@ describe("the lifecycle, conducted by a claimant", () => {
     expect(running?.status).toBe("running");
     expect(running?.startedAt).toBeInstanceOf(Date);
 
-    const beat = await recordSimulationHeartbeat(
-      actingAsAcme(),
+    const beat = await recordSimulationHeartbeat({
       simulationId,
-      simulator,
-    );
+      claimant: simulator,
+    });
     expect(beat).toEqual({ cancelRequested: false });
 
     // A chat simulation reports no audio facts — the row would refuse them.
@@ -722,21 +721,23 @@ describe("the lifecycle, conducted by a claimant", () => {
 
   it("answers a stranger's report with undefined and moves nothing", async () => {
     const { simulationId } = await claimedOne();
+    const before = await getSimulation(actingAsAcme(), simulationId);
 
     expect(
       await startSimulation(actingAsAcme(), simulationId, "simulator-green-2"),
     ).toBeUndefined();
     expect(
-      await recordSimulationHeartbeat(
-        actingAsAcme(),
+      await recordSimulationHeartbeat({
         simulationId,
-        "simulator-green-2",
-      ),
+        claimant: "simulator-green-2",
+      }),
     ).toBeUndefined();
 
-    expect(
-      (await getSimulation(actingAsAcme(), simulationId))?.status,
-    ).toBe("claimed");
+    // Not moved, and not stamped either: a stranger's beat must not keep a
+    // row alive that its own claimant has gone silent on.
+    const after = await getSimulation(actingAsAcme(), simulationId);
+    expect(after?.status).toBe("claimed");
+    expect(after?.heartbeatAt).toEqual(before?.heartbeatAt);
   });
 
   it("narrows the claimant's writes to the acting project, like every other verb", async () => {
@@ -745,9 +746,6 @@ describe("the lifecycle, conducted by a claimant", () => {
     // The right claimant, the wrong project: a credential acting in the
     // sibling reaches nothing, even inside its own organization.
     const actingInSibling = { ...actingAsAcme(), projectId: acme.outbound };
-    expect(
-      await recordSimulationHeartbeat(actingInSibling, simulationId, simulator),
-    ).toBeUndefined();
     expect(
       await startSimulation(actingInSibling, simulationId, simulator),
     ).toBeUndefined();
@@ -760,6 +758,71 @@ describe("the lifecycle, conducted by a claimant", () => {
     expect(
       (await getSimulation(actingAsAcme(), simulationId))?.status,
     ).toBe("claimed");
+  });
+
+  it("stamps the row on a healthy beat, which is what keeps the sweep away", async () => {
+    const { simulationId } = await claimedOne();
+
+    // An old stamp, then a beat: the row's heartbeat has to move forward,
+    // because the stamp is the one fact the orphan sweep reads.
+    await database.sql(
+      "update simulation set heartbeat_at = now() - interval '120 seconds' where id = $1",
+      [simulationId],
+    );
+    const before = await getSimulation(actingAsAcme(), simulationId);
+
+    const beat = await recordSimulationHeartbeat({
+      simulationId,
+      claimant: simulator,
+    });
+    expect(beat).toEqual({ cancelRequested: false });
+
+    const after = await getSimulation(actingAsAcme(), simulationId);
+    expect(after?.heartbeatAt?.getTime() ?? 0).toBeGreaterThan(
+      before?.heartbeatAt?.getTime() ?? 0,
+    );
+
+    // Leave nothing claimed behind for the claim-shaped tests that follow.
+    await failSimulation(actingAsAcme(), simulationId, simulator, {
+      reason: "simulator_error",
+    });
+  });
+
+  it("answers a heartbeat for a simulation beyond help with nothing under it", async () => {
+    // Unknown: an id this egma never issued a row for.
+    expect(
+      await recordSimulationHeartbeat({
+        simulationId: newId("sim"),
+        claimant: simulator,
+      }),
+    ).toBeUndefined();
+
+    // Queued: a row nobody holds, so there is no claimant to stamp for.
+    const queued = await startRun(actingAsAcme(), aRun());
+    const queuedId = queued.simulations[0]?.id ?? "";
+    expect(
+      await recordSimulationHeartbeat({
+        simulationId: queuedId,
+        claimant: simulator,
+      }),
+    ).toBeUndefined();
+    await cancelRun(actingAsAcme(), queued.id);
+
+    // Terminal: the conversation is over, even for the claimant that
+    // conducted it — a late beat after landing is a signal to stop, not a
+    // row to revive.
+    const { simulationId } = await claimedOne();
+    await startSimulation(actingAsAcme(), simulationId, simulator);
+    await completeSimulation(actingAsAcme(), simulationId, simulator, {
+      endingReason: "persona_concluded",
+      transcript: [],
+    });
+    expect(
+      await recordSimulationHeartbeat({
+        simulationId,
+        claimant: simulator,
+      }),
+    ).toBeUndefined();
   });
 
   it("keeps a completed simulation's report readable exactly as reported", async () => {
@@ -815,11 +878,10 @@ describe("canceling a run", () => {
     // counts wait for the straggler.
     expect(canceled?.finishedAt).toBeNull();
 
-    const beat = await recordSimulationHeartbeat(
-      actingAsAcme(),
-      claimed.id,
-      simulator,
-    );
+    const beat = await recordSimulationHeartbeat({
+      simulationId: claimed.id,
+      claimant: simulator,
+    });
     expect(beat).toEqual({ cancelRequested: true });
 
     const landed = await markSimulationCanceled(
@@ -887,16 +949,14 @@ describe("the orphan sweep", () => {
     const claimed = await claimOwn(started.id);
     await startSimulation(actingAsAcme(), claimed.id, simulator);
 
-    // The one write no seam should offer: a heartbeat two minutes into the
+    // The one write no seam should offer: a heartbeat three minutes into the
     // past, which is what a dead simulator leaves behind.
     await database.sql(
-      "update simulation set heartbeat_at = now() - interval '120 seconds' where id = $1",
+      "update simulation set heartbeat_at = now() - interval '180 seconds' where id = $1",
       [claimed.id],
     );
 
-    const swept = await sweepOrphanedSimulations(actingAsAcme(), {
-      staleAfterSeconds: 60,
-    });
+    const swept = await sweepOrphanedSimulations({ staleAfterSeconds: 60 });
     expect(swept.map((simulation) => simulation.id)).toContain(claimed.id);
 
     const orphaned = await getSimulation(actingAsAcme(), claimed.id);
@@ -908,13 +968,58 @@ describe("the orphan sweep", () => {
     expect(header?.failedCount).toBe(1);
   });
 
+  it("answers what it swept as identifiers, and nothing a customer wrote", async () => {
+    const started = await startRun(actingAsAcme(), aRun());
+    const claimed = await claimOwn(started.id);
+    await database.sql(
+      "update simulation set heartbeat_at = now() - interval '180 seconds' where id = $1",
+      [claimed.id],
+    );
+
+    const swept = await sweepOrphanedSimulations({ staleAfterSeconds: 60 });
+    const ours = swept.find((simulation) => simulation.id === claimed.id);
+    expect(ours).toEqual({ id: claimed.id, runId: started.id });
+  });
+
+  it("calls nothing dead inside 150 seconds of silence, and everything past it", async () => {
+    // The window under test is the default one, so neither sweep names a
+    // window here — what this pins is the shipped number itself, one second
+    // each side of it.
+    const slow = await claimOwn((await startRun(actingAsAcme(), aRun())).id);
+    const dead = await claimOwn((await startRun(actingAsAcme(), aRun())).id);
+    await database.sql(
+      "update simulation set heartbeat_at = now() - interval '149 seconds' where id = $1",
+      [slow.id],
+    );
+    await database.sql(
+      "update simulation set heartbeat_at = now() - interval '151 seconds' where id = $1",
+      [dead.id],
+    );
+
+    const swept = await sweepOrphanedSimulations();
+    const ids = swept.map((simulation) => simulation.id);
+    expect(ids).toContain(dead.id);
+    expect(ids).not.toContain(slow.id);
+
+    // The slow-but-alive one is untouched, not merely unreported.
+    expect((await getSimulation(actingAsAcme(), slow.id))?.status).toBe(
+      "claimed",
+    );
+    expect((await getSimulation(actingAsAcme(), dead.id))?.endingReason).toBe(
+      "orphaned",
+    );
+
+    // Leave nothing claimed behind for the claim-shaped tests that follow.
+    await failSimulation(actingAsAcme(), slow.id, simulator, {
+      reason: "simulator_error",
+    });
+  });
+
   it("leaves a simulator that is still talking alone", async () => {
     const started = await startRun(actingAsAcme(), aRun());
     const claimed = await claimOwn(started.id);
 
-    const swept = await sweepOrphanedSimulations(actingAsAcme(), {
-      staleAfterSeconds: 60,
-    });
+    const swept = await sweepOrphanedSimulations({ staleAfterSeconds: 60 });
     expect(swept.map((simulation) => simulation.id)).not.toContain(claimed.id);
     expect((await getSimulation(actingAsAcme(), claimed.id))?.status).toBe(
       "claimed",

@@ -394,8 +394,10 @@ export {
   type SimulationClaimRequest,
   type SimulationConnection,
   type SimulationFailure,
+  type SimulationHeartbeat,
   type SimulationReport,
   type StartedRun,
+  type SweptSimulation,
 } from "./runs.ts";
 export type {
   RunEventKind,
