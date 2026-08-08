@@ -275,7 +275,17 @@ export async function claimRoutes(
 
     const specs: Record<string, unknown>[] = [];
     for (const claim of claims) {
-      const spec = await assembledSpec(claim);
+      // A row whose stored shapes will not open — a sealed envelope that no
+      // longer decrypts, a column holding something egma never writes —
+      // throws from the reads rather than answering empty. Caught here,
+      // because that too is one row's fault and never the batch's: an
+      // escape would abort the whole response and withhold every valid
+      // claim beside it from a simulator standing ready to conduct them.
+      const spec = await assembledSpec(claim).catch(
+        (fault: unknown): { readonly unbuildable: string } => ({
+          unbuildable: fault instanceof Error ? fault.message : String(fault),
+        }),
+      );
       if ("unbuildable" in spec) {
         // Fail loudly on this side and keep dispatching the rest: one
         // corrupt row must not hold up the batch, and the simulator is

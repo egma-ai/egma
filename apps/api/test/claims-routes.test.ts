@@ -429,4 +429,46 @@ describe("a simulation the platform cannot hand over", () => {
     const row = await getSimulation(contextFor(ada, "member"), doomed.simulationId);
     expect(row?.status).toBe("claimed");
   });
+
+  it("skips a credential that will not unseal, and the batch still dispatches", async () => {
+    const { ada, key, connectionId, versionId } =
+      await aCustomerReadyToRun("claims_corrupt");
+
+    const doomed = await aQueuedRun(key, connectionId, versionId);
+    const registered = await ask(api.app, "POST", "/api/agents", key, {
+      name: "Second desk",
+      connection: { ...RETELL, config: { retellAgentId: "agent_in_retell_2" } },
+    });
+    const secondConnection = (registered.body.connection as { id: string }).id;
+    const healthy = await aQueuedRun(key, secondConnection, versionId);
+
+    // The one write no seam should offer: a sealed envelope replaced with
+    // bytes that will never decrypt, which is what a lost encryption key or
+    // a hand-edited row leaves behind. Unsealing it throws rather than
+    // answering empty, and that throw must cost one row, not the batch.
+    await api.database.sql(
+      "update connection set credentials = 'not-an-envelope-at-all' where id = $1",
+      [connectionId],
+    );
+
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 4,
+      wait_seconds: 0,
+    });
+    expect(answered.statusCode).toBe(200);
+
+    const specs = answered.body.specs as { simulation_id: string }[];
+    expect(specs.map((spec) => spec.simulation_id)).toEqual([
+      healthy.simulationId,
+    ]);
+
+    // The unopenable row was claimed and stays that way for the sweep; the
+    // batch around it went out whole.
+    const row = await getSimulation(
+      contextFor(ada, "member"),
+      doomed.simulationId,
+    );
+    expect(row?.status).toBe("claimed");
+  });
 });
