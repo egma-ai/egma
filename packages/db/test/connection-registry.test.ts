@@ -5,6 +5,8 @@ import {
   descriptorOf,
   gatedConfig,
   optional,
+  shapeChosen,
+  shapeOf,
   validConfig,
   validCredentials,
   validModality,
@@ -46,6 +48,10 @@ const GATES = { room: shouted, nickname: optional(shouted) };
 
 /** What the gates are asked about, in the wording a real refusal carries. */
 const WHAT = "a made-up connection";
+
+/** One livekit connection's two config keys, in each of its two shapes. */
+const A_URL = "wss://acme.livekit.cloud";
+const AN_ENDPOINT = "https://acme.example/egma/livekit-token";
 
 describe("a config gate marked optional", () => {
   it("admits a config that leaves the key out entirely", () => {
@@ -97,6 +103,57 @@ describe("a config gate marked optional", () => {
   });
 });
 
+/**
+ * The shapes machinery, exercised through made-up shapes for the same reason
+ * the optional-gate machinery is: what is under test is the rule — one config
+ * key tells the shapes apart, and a config naming none of them lands on the
+ * first — and a test written against whichever real type happens to carry two
+ * shapes today would start measuring that type instead.
+ */
+describe("choosing which shape a connection is in", () => {
+  const PLAIN = {
+    named: "a made-up connection",
+    config: { room: shouted },
+    credentials: { required: false, refusal: "no" },
+  } as const;
+
+  const BY_ENDPOINT = {
+    named: "a made-up connection with an endpoint",
+    chosenBy: "endpoint",
+    config: { room: shouted, endpoint: shouted },
+    credentials: { required: false, refusal: "no" },
+  } as const;
+
+  const SHAPES = [PLAIN, BY_ENDPOINT] as const;
+
+  it("takes the shape whose key the config names", () => {
+    expect(shapeChosen(SHAPES, { room: "lobby", endpoint: "https://x" })).toBe(
+      BY_ENDPOINT,
+    );
+  });
+
+  it("falls to the first shape when the config names none of the keys", () => {
+    expect(shapeChosen(SHAPES, { room: "lobby" })).toBe(PLAIN);
+  });
+
+  /**
+   * A key written out as `undefined` is a key the caller left out — the same
+   * reading the config gates take — so it must not choose a shape whose whole
+   * point is that the key is there.
+   */
+  it("reads a key written as undefined as a key that was left out", () => {
+    expect(shapeChosen(SHAPES, { room: "lobby", endpoint: undefined })).toBe(
+      PLAIN,
+    );
+  });
+
+  it("falls to the first shape for a config that is not an object at all", () => {
+    for (const notAnObject of [undefined, null, "room=lobby", ["lobby"]]) {
+      expect(shapeChosen(SHAPES, notAnObject)).toBe(PLAIN);
+    }
+  });
+});
+
 describe("the types that carry no optional key", () => {
   it("still demand every key they hold, retell's and phone's alike", () => {
     expect(() => validConfig("retell", {})).toThrow(
@@ -131,11 +188,29 @@ describe("what a livekit connection is made of", () => {
     // Derived from the type: a livekit agent joins the room egma opened, so
     // egma never has to reach a laptop.
     expect(descriptor.topology).toBe("agent-dials-out");
-    expect(descriptor.credentials).toMatchObject({
+    expect(shapeOf("livekit", { url: A_URL }).credentials).toMatchObject({
       required: true,
       fields: ["apiKey", "apiSecret"],
-      hintField: "apiKey",
     });
+  });
+
+  /**
+   * The two shapes are two answers to one question — who mints the token that
+   * opens the room — and the config key that names an endpoint is the whole of
+   * what tells them apart.
+   */
+  it("comes in two shapes, told apart by a tokenEndpoint in the config", () => {
+    expect(shapeOf("livekit", { url: A_URL }).named).toBeUndefined();
+    expect(
+      shapeOf("livekit", { url: A_URL, tokenEndpoint: AN_ENDPOINT }).named,
+    ).toBe("a token-endpoint livekit connection");
+  });
+
+  it("holds no key pair on the shape that asks an endpoint for tokens", () => {
+    expect(
+      shapeOf("livekit", { url: A_URL, tokenEndpoint: AN_ENDPOINT })
+        .credentials,
+    ).toMatchObject({ required: "if-sent", fields: ["headers"] });
   });
 
   it("has no reuse rule: nothing in the config names one agent", () => {
@@ -262,23 +337,23 @@ describe("a livekit connection's modality", () => {
 
 describe("a livekit connection's credentials", () => {
   const KEYS = { apiKey: "APIhx4bmvHnLcWXYZ", apiSecret: "livekit-secret-9f2c1d" };
+  const MINTING = { url: A_URL };
 
   it("seal both fields, and the hint is the last four of the key", () => {
-    expect(validCredentials("livekit", KEYS)).toEqual({
+    expect(validCredentials("livekit", MINTING, KEYS)).toEqual({
       sealed: KEYS,
       hint: "WXYZ",
     });
   });
 
   it("refuses a pair with either half missing, naming the shape", () => {
-    expect(() => validCredentials("livekit", undefined)).toThrow(
-      "a livekit connection needs credentials shaped { apiKey, apiSecret }",
-    );
-    expect(() => validCredentials("livekit", { apiKey: KEYS.apiKey })).toThrow(
+    expect(() =>
+      validCredentials("livekit", MINTING, { apiKey: KEYS.apiKey }),
+    ).toThrow(
       "a livekit connection's credentials need apiSecret to be a non-empty string",
     );
     expect(() =>
-      validCredentials("livekit", { apiSecret: KEYS.apiSecret }),
+      validCredentials("livekit", MINTING, { apiSecret: KEYS.apiSecret }),
     ).toThrow(
       "a livekit connection's credentials need apiKey to be a non-empty string",
     );
@@ -286,7 +361,7 @@ describe("a livekit connection's credentials", () => {
 
   it("refuses a key that does not belong, naming it and the shape", () => {
     expect(() =>
-      validCredentials("livekit", { ...KEYS, apiToken: "extra" }),
+      validCredentials("livekit", MINTING, { ...KEYS, apiToken: "extra" }),
     ).toThrow(
       'a livekit connection\'s credentials have no key "apiToken"; they are ' +
         "shaped { apiKey, apiSecret }",
@@ -295,9 +370,167 @@ describe("a livekit connection's credentials", () => {
 
   it("refuses either half so short its last-4 hint would give it away", () => {
     expect(() =>
-      validCredentials("livekit", { ...KEYS, apiSecret: "abcd" }),
+      validCredentials("livekit", MINTING, { ...KEYS, apiSecret: "abcd" }),
     ).toThrow(
       "a livekit connection's credentials need apiSecret to be at least 8 characters",
     );
+  });
+});
+
+/**
+ * The second shape, whole: what its config holds, what its credentials hold,
+ * and what it will not hold because it has no power to use it.
+ */
+describe("a livekit connection that names a token endpoint", () => {
+  const AT = { url: A_URL, tokenEndpoint: AN_ENDPOINT };
+  const HEADERS = { headers: '{"Authorization":"Bearer sentinel-not-real"}' };
+
+  it("holds a url and an endpoint, both stored as they were written", () => {
+    expect(validConfig("livekit", AT)).toEqual(AT);
+    expect(
+      validConfig("livekit", { url: A_URL, tokenEndpoint: `  ${AN_ENDPOINT}  ` }),
+    ).toEqual(AT);
+  });
+
+  it("takes an endpoint over http or https and nothing else", () => {
+    expect(
+      validConfig("livekit", { url: A_URL, tokenEndpoint: "http://10.0.0.4/t" }),
+    ).toEqual({ url: A_URL, tokenEndpoint: "http://10.0.0.4/t" });
+
+    for (const tokenEndpoint of [
+      // The server URL's own schemes: egma POSTs to this one, so a websocket
+      // address here is the two keys pasted the wrong way round.
+      "wss://acme.livekit.cloud",
+      "ws://127.0.0.1:7880",
+      "acme.example/token",
+      "https:acme.example",
+      "",
+    ]) {
+      expect(() => validConfig("livekit", { url: A_URL, tokenEndpoint })).toThrow(
+        "the config's tokenEndpoint must be an http or https URL, which " +
+          "looks like https://example.com/egma/livekit-token",
+      );
+    }
+  });
+
+  /**
+   * Both are powers a key pair buys, and this shape has no key pair: it cannot
+   * create the room that would carry the metadata, and cannot dispatch the
+   * agent that would be named. A key egma would silently ignore is worse than
+   * one it refuses by name.
+   */
+  it("has no place for an agent name or metadata, and says which keys it holds", () => {
+    for (const key of ["agentName", "metadata"]) {
+      expect(() => validConfig("livekit", { ...AT, [key]: "front-desk" })).toThrow(
+        `a token-endpoint livekit connection's config has no key "${key}"; ` +
+          "it holds url, tokenEndpoint",
+      );
+    }
+  });
+
+  it("seals the headers, and hints at their names and never their values", () => {
+    expect(validCredentials("livekit", AT, HEADERS)).toEqual({
+      sealed: HEADERS,
+      hint: "Authorization",
+    });
+    expect(
+      validCredentials("livekit", AT, {
+        headers: '{"Authorization":"Bearer x0","X-Tenant":"acme"}',
+      })?.hint,
+    ).toBe("Authorization, X-Tenant");
+  });
+
+  it("never lets a value into the hint, however short the header is", () => {
+    const hint = validCredentials("livekit", AT, {
+      headers: '{"X-Key":"abcdefgh"}',
+    })?.hint;
+    expect(hint).toBe("X-Key");
+    expect(hint).not.toContain("abcd");
+  });
+
+  it("takes no credentials at all, because an open endpoint is a deployment", () => {
+    expect(validCredentials("livekit", AT, undefined)).toBeNull();
+  });
+
+  it("refuses headers that are not a JSON object of name to value", () => {
+    for (const headers of [
+      "Authorization: Bearer x",
+      '{"Authorization":"Bearer x"',
+      '{"Authorization":7}',
+      '{"Authorization":""}',
+      '{"":"Bearer x"}',
+      "{}",
+      "[1,2]",
+      "",
+      7,
+    ]) {
+      expect(() => validCredentials("livekit", AT, { headers })).toThrow(
+        "a token-endpoint livekit connection's credentials need headers to " +
+          "be a JSON object of header name to header value, written in a " +
+          'string, which looks like {"Authorization":"Bearer …"}',
+      );
+    }
+  });
+
+  it("never quotes a header value back in the refusal about it", () => {
+    const secret = "SENTINEL-header-value-9f2c";
+    let told = "";
+    try {
+      validCredentials("livekit", AT, {
+        headers: `Authorization: ${secret}`,
+      });
+    } catch (refusal) {
+      told = String(refusal);
+    }
+    expect(told).toContain("headers");
+    expect(told).not.toContain(secret);
+  });
+});
+
+/**
+ * The incoherent mixes, each refused at create by a sentence that names both
+ * doors. A caller who pastes a key pair under a token endpoint has mixed up
+ * two whole ways of working; telling them `"apiKey"` is not a field would send
+ * them looking for a typo that is not there.
+ */
+describe("a livekit connection that is half of each shape", () => {
+  const AT = { url: A_URL, tokenEndpoint: AN_ENDPOINT };
+  const KEYS = { apiKey: "APIhx4bmvHnLcWXYZ", apiSecret: "livekit-secret-9f2c1d" };
+  const HEADERS = { headers: '{"Authorization":"Bearer sentinel-not-real"}' };
+
+  it("refuses a key pair sent alongside a token endpoint", () => {
+    expect(() => validCredentials("livekit", AT, KEYS)).toThrow(
+      "a livekit connection whose config names a tokenEndpoint asks that " +
+        "endpoint for every token, so it holds no key pair of its own: its " +
+        "credentials are the endpoint's auth headers, shaped { headers }. " +
+        "Send those, or drop the tokenEndpoint and egma will mint its own " +
+        "tokens from an apiKey and apiSecret.",
+    );
+  });
+
+  it("refuses endpoint headers on a connection that names no endpoint", () => {
+    expect(() => validCredentials("livekit", { url: A_URL }, HEADERS)).toThrow(
+      "a livekit connection mints its own tokens, so it needs the project's " +
+        "apiKey and apiSecret. Send the pair, or name a tokenEndpoint in the " +
+        "config and egma will ask that endpoint for a token instead — which " +
+        "is the shape where the project's secret never leaves the customer.",
+    );
+  });
+
+  it("refuses a connection carrying neither auth shape, naming both", () => {
+    expect(() =>
+      validCredentials("livekit", { url: A_URL }, undefined),
+    ).toThrow(/Send the pair, or name a tokenEndpoint in the config/);
+  });
+
+  /**
+   * A stray key is a typo, not a mix, and it has to keep reading like one:
+   * pointing somebody at the other shape would be egma guessing at an
+   * intention nothing in the payload supports.
+   */
+  it("still calls a stray credential key a stray key", () => {
+    expect(() =>
+      validCredentials("livekit", { url: A_URL }, { ...KEYS, apiToken: "x" }),
+    ).toThrow(/have no key "apiToken"/);
   });
 });
