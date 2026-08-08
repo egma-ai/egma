@@ -1,0 +1,6 @@
+[project]
+name = "egma-livekit-dumb-agent"
+version = "0.1.0"
+description = "A deliberately boring LiveKit agent for egma to simulate against"
+requires-python = ">=3.11"
+dependencies = ["livekit-agents[openai,silero]==1.6.7"]
