@@ -347,8 +347,12 @@ describe("push, against a real instance", () => {
       {
         name: FILE.name,
         shown: "egma/tests/reschedules.md",
+        file: fileAt("reschedules.md"),
         reason:
           'egma has no persona called "Nobody At All" in this project. Name a persona this project already has, or name none and egma takes the project\'s default.',
+        // The door's refusal, not the client's belt — which is the point of
+        // this check: the real instance said it, and the words are its own.
+        refusedBy: "platform",
       },
     ]);
   });

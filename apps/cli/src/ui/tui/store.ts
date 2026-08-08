@@ -265,6 +265,22 @@ export class WizardStore {
    * The list is the tests going up and the files being held back, in that
    * order: both are files, and the key that opens one opens the other.
    */
+  /**
+   * The file the gate's selection is on right now — read at the moment a key
+   * asks, never from a screen's render. Two keystrokes can arrive in one
+   * chunk (a fast hand, a paste, a busy machine), and the second is handled
+   * before the screen has drawn the first: a render-time selection would open
+   * the file the arrow had already moved off.
+   */
+  selectedGateFile(): string | null {
+    const gate = this.state.gate;
+    if (gate === null) return null;
+    const openable = [...gate.rows, ...gate.heldBack];
+    if (openable.length === 0) return null;
+    const at = Math.min(Math.max(this.state.gateAt, 0), openable.length - 1);
+    return openable[at]?.file ?? null;
+  }
+
   moveGate(by: number): void {
     const gate = this.state.gate;
     const lines = (gate?.rows.length ?? 0) + (gate?.heldBack.length ?? 0);

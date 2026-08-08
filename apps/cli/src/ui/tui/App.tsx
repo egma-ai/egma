@@ -94,7 +94,9 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
         onMove={(by) => store.moveGate(by)}
         onRun={() => store.runTests()}
         onQuit={onQuit}
-        onEdit={(file) => {
+        onEdit={() => {
+          const file = store.selectedGateFile();
+          if (file === null) return;
           // The editor owns the terminal while it runs, so egma owns none of
           // it: Ink is suspended, egma's own alternate screen comes off, and
           // both are put back when the child is gone.

@@ -31,7 +31,12 @@ export type GateScreenProps = {
   readonly problem: string | null;
   readonly onMove: (by: number) => void;
   readonly onRun: () => void;
-  readonly onEdit: (file: string) => void;
+  /**
+   * Takes no file: the caller reads the selection at the moment of the press.
+   * This render's idea of what is selected can be one keystroke behind when
+   * two keys arrive in one chunk.
+   */
+  readonly onEdit: () => void;
   readonly onQuit: () => void;
 };
 
@@ -58,7 +63,6 @@ export function GateScreen({
   // already refused something from, it is the one they came back to fix.
   const openable = [...gate.rows, ...gate.heldBack];
   const on = Math.min(Math.max(at, 0), Math.max(openable.length - 1, 0));
-  const selected = openable[on];
 
   const bindings: KeyBinding[] = [
     { match: "upArrow", label: "↑↓", action: "browse", hidden: true, handler: () => onMove(-1) },
@@ -69,9 +73,7 @@ export function GateScreen({
       label: "e",
       action: "edit first",
       priority: 1,
-      handler: () => {
-        if (selected !== undefined) onEdit(selected.file);
-      },
+      handler: () => onEdit(),
     },
     { match: "q", label: "q", action: "quit", priority: 2, handler: onQuit },
   ];
