@@ -150,6 +150,67 @@ function e164PhoneNumber(key: string, value: unknown): string {
   return candidate;
 }
 
+/**
+ * The four schemes a LiveKit server URL is written in. All four are accepted
+ * because all four are correct: the SDKs normalise between the websocket pair
+ * and the HTTP pair themselves, so refusing the one a customer copied out of
+ * their dashboard would be egma inventing a rule LiveKit does not have.
+ */
+const LIVEKIT_URL_SCHEMES = ["ws:", "wss:", "http:", "https:"];
+
+/**
+ * Stored as it was written rather than as `URL` would rewrite it: what goes to
+ * the SDK should be what the customer pasted, so a support conversation is
+ * about the string they can see in their own dashboard.
+ */
+function livekitServerUrl(key: string, value: unknown): string {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  let scheme: string | undefined;
+  try {
+    scheme = new URL(candidate).protocol;
+  } catch {
+    scheme = undefined;
+  }
+
+  if (scheme === undefined || !LIVEKIT_URL_SCHEMES.includes(scheme)) {
+    throw new AgentWriteRefusedError(
+      "not_admitted",
+      `the config's ${key} must be a ws, wss, http or https URL, which looks ` +
+        `like wss://example.livekit.cloud`,
+    );
+  }
+  return candidate;
+}
+
+/**
+ * A JSON object, carried as the text it was written as.
+ *
+ * Text rather than a parsed object because it travels verbatim — it is handed
+ * to the agent as the room's metadata exactly as it arrives, and re-serialising
+ * it here would hand over something the customer never wrote. Checked all the
+ * same, and checked at create: a stray comma refused here is a person looking
+ * at their own mistake, while the same comma refused at dispatch is a run that
+ * has already started and an agent left to make sense of it.
+ */
+function jsonObjectText(key: string, value: unknown): string {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(candidate);
+  } catch {
+    parsed = undefined;
+  }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new AgentWriteRefusedError(
+      "not_admitted",
+      `the config's ${key} must be a JSON object written in a string, which ` +
+        `looks like {"tenant":"acme"}`,
+    );
+  }
+  return candidate;
+}
+
 export const CONNECTION_REGISTRY: Readonly<
   Record<ConnectionType, ConnectionDescriptor>
 > = {
@@ -180,6 +241,41 @@ export const CONNECTION_REGISTRY: Readonly<
         "public number, and egma dials it with its own telephony " +
         "configuration",
     },
+  },
+  livekit: {
+    // Voice only, and only because voice is the lane that exists. The registry
+    // may not claim what no code can run, so `chat` arrives here in the same
+    // commit as the code that conducts a livekit chat.
+    modalities: ["voice"],
+    // The first occupant of this topology: egma opens a room and the
+    // customer's agent joins it. That is what makes an agent running on a
+    // laptop reachable at all — nothing has to dial in to it.
+    topology: "agent-dials-out",
+    config: {
+      // The LiveKit server: a customer's cloud project, or the one they run.
+      url: livekitServerUrl,
+      // Which worker to dispatch. Left out on purpose by most: a blank agent
+      // name means automatic dispatch, where whichever worker is listening
+      // takes the room, and that is the state every quickstart agent runs in.
+      agentName: optional(nonEmptyString),
+      // Handed to the agent as the room's metadata, exactly as written.
+      metadata: optional(jsonObjectText),
+    },
+    credentials: {
+      required: true,
+      fields: ["apiKey", "apiSecret"],
+      // The key, never the secret: a key is the half a customer can read back
+      // off their own dashboard to tell two projects apart.
+      hintField: "apiKey",
+    },
+    // Nothing conducts a livekit room yet, so a run over one is refused at
+    // creation rather than queued for a conductor that does not exist. It
+    // flips to `true` in the same commit as the adapter.
+    simulatorAdapter: false,
+    // No reuse rule, deliberately: the url names a server rather than an
+    // agent, whole teams share one, and the agent name is absent in the
+    // ordinary case. There is nothing here that could honestly say two
+    // registrations are about one agent, so each registration creates.
   },
 };
 

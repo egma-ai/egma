@@ -73,6 +73,24 @@ function retellConnection(overrides: Partial<NewConnection> = {}): NewConnection
   };
 }
 
+/**
+ * A live livekit payload. The credential halves carry distinct tails so a
+ * hint, an envelope and a resolved pair can each be told apart at a glance.
+ */
+function livekitConnection(overrides: Partial<NewConnection> = {}): NewConnection {
+  return {
+    name: `livekit-${newId("con").slice(-8)}`,
+    type: "livekit",
+    modality: "voice",
+    config: { url: "wss://acme.livekit.cloud" },
+    credentials: {
+      apiKey: "livekit-key-A1B2C3D4WXYZ",
+      apiSecret: "livekit-secret-E5F6G7H8QRST",
+    },
+    ...overrides,
+  };
+}
+
 async function agentNamed(name: string): Promise<string> {
   const created = await createAgent(actingAsAcme(), { name });
   return created.id;
@@ -255,6 +273,114 @@ describe("what the registry refuses at the door, by name", () => {
         retellConnection({ credentials: { apiKey: "abcd" } }),
       ),
     ).rejects.toThrow(/at least 8 characters/);
+  });
+});
+
+/**
+ * The livekit type end to end through the store. What a payload is allowed to
+ * say is the registry's story and is checked where the registry lives, with no
+ * database in the way; what is here is only what a row can prove — that the
+ * type lands, that its topology is derived, and that both credential halves go
+ * in sealed and come back only through the one door.
+ */
+describe("a livekit connection", () => {
+  it("lands with url alone, dialling out, and reads back with the hint", async () => {
+    const agentId = await agentNamed("LiveKit Bare");
+
+    const added = await addConnection(
+      actingAsAcme(),
+      agentId,
+      livekitConnection({ name: "quickstart" }),
+    );
+
+    const fetched = await getConnection(actingAsAcme(), agentId, added?.id ?? "");
+    expect(fetched).toMatchObject({
+      name: "quickstart",
+      type: "livekit",
+      modality: "voice",
+      // Derived from the type: the agent joins the room egma opened.
+      topology: "agent-dials-out",
+      config: { url: "wss://acme.livekit.cloud" },
+      // The last four of the key, never of the secret.
+      credentialsHint: "WXYZ",
+    });
+    expect(fetched).not.toHaveProperty("credentials");
+  });
+
+  it("lands with an agent name and metadata too, both read back whole", async () => {
+    const agentId = await agentNamed("LiveKit Dispatched");
+
+    const added = await addConnection(
+      actingAsAcme(),
+      agentId,
+      livekitConnection({
+        config: {
+          url: "wss://acme.livekit.cloud",
+          agentName: "front-desk",
+          metadata: '{"tenant":"acme"}',
+        },
+      }),
+    );
+
+    expect(added?.config).toEqual({
+      url: "wss://acme.livekit.cloud",
+      agentName: "front-desk",
+      metadata: '{"tenant":"acme"}',
+    });
+  });
+
+  it("defaults its name from the type, like every other", async () => {
+    const agentId = await agentNamed("LiveKit Unnamed");
+
+    const first = await addConnection(
+      actingAsAcme(),
+      agentId,
+      livekitConnection({ name: undefined }),
+    );
+    expect(first?.name).toBe("livekit-1");
+  });
+
+  it("seals both halves, and neither is in the row", async () => {
+    const agentId = await agentNamed("LiveKit Sealed");
+    const added = await addConnection(actingAsAcme(), agentId, livekitConnection());
+
+    const { rows } = await database.sql<{
+      credentials: string;
+      credentials_hint: string;
+    }>("select credentials, credentials_hint from connection where id = $1", [
+      added?.id,
+    ]);
+
+    expect(rows[0]?.credentials).toMatch(/^v1\./);
+    expect(rows[0]?.credentials).not.toContain("livekit-key");
+    expect(rows[0]?.credentials).not.toContain("livekit-secret");
+    expect(rows[0]?.credentials_hint).toBe("WXYZ");
+  });
+
+  it("hands both halves back through the resolver, and only through it", async () => {
+    const agentId = await agentNamed("LiveKit Resolved");
+    const added = await addConnection(actingAsAcme(), agentId, livekitConnection());
+
+    expect(
+      await resolveConnectionCredentials(actingAsAcme(), agentId, added?.id ?? ""),
+    ).toEqual({
+      apiKey: "livekit-key-A1B2C3D4WXYZ",
+      apiSecret: "livekit-secret-E5F6G7H8QRST",
+    });
+  });
+
+  it("leaves nothing behind when the payload is refused", async () => {
+    const agentId = await agentNamed("LiveKit Refused");
+
+    await expect(
+      addConnection(
+        actingAsAcme(),
+        agentId,
+        livekitConnection({ config: { url: "wss://acme.livekit.cloud", agentName: "" } }),
+      ),
+    ).rejects.toThrow(/agentName/);
+
+    expect(await listConnections(actingAsAcme(), agentId)).toEqual([]);
   });
 });
 

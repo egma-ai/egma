@@ -707,19 +707,141 @@ describe("the re-grade's narrowing (0013)", () => {
   });
 });
 
+describe("the livekit connection type (0015)", () => {
+  let database: EmptyDatabase;
+  let beforeLiveKit: string;
+  let client: pg.Client;
+
+  const organizationId = newId("org");
+  const projectId = newId("prj");
+  const agentId = newId("agt");
+  const retellId = newId("con");
+
+  /** A connection row, written straight past the access layer's own gates. */
+  async function connectionOfType(id: string, type: string): Promise<void> {
+    await client.query(
+      `insert into connection
+         (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
+       values ($1, $2, $3, $4, $5, $6, 'voice', 'agent-dials-out', '{}'::jsonb)`,
+      [id, organizationId, projectId, agentId, `${type}-1`, type],
+    );
+  }
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("livekit_type");
+
+    // The world as it was: a customer already reaching an agent the ways egma
+    // knew, so the widening lands on a table that is not empty.
+    beforeLiveKit = await mkdtemp(path.join(os.tmpdir(), "egma-before-0015-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0015") {
+        await writeFile(path.join(beforeLiveKit, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, beforeLiveKit);
+
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query(
+      "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
+      [organizationId],
+    );
+    await client.query(
+      "insert into project (id, organization_id, name, slug) values ($1, $2, 'Default', 'default')",
+      [projectId, organizationId],
+    );
+    await client.query(
+      "insert into agent (id, organization_id, project_id, name) values ($1, $2, $3, 'Front desk')",
+      [agentId, organizationId, projectId],
+    );
+    await client.query(
+      `insert into connection
+         (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
+       values ($1, $2, $3, $4, 'retell-1', 'retell', 'chat', 'hosted-broker', '{}'::jsonb)`,
+      [retellId, organizationId, projectId, agentId],
+    );
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(beforeLiveKit, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("is what the database refuses until the migration arrives", async () => {
+    await expect(connectionOfType(newId("con"), "livekit")).rejects.toThrow(
+      /connection_type_allowed/u,
+    );
+  });
+
+  it("is what is still pending on a database that already holds connections", async () => {
+    const result = await runMigrations(database.url);
+    expect(result.applied).toEqual(["0015_livekit_connection_type.sql"]);
+  });
+
+  it("adds livekit to the two checks the one list of types feeds, and nothing else", async () => {
+    const { rows } = await client.query<{ name: string; definition: string }>(
+      `select conname as name, pg_get_constraintdef(oid) as definition
+         from pg_constraint
+        where conname in ('connection_type_allowed', 'simulation_connection_type_allowed')
+        order by conname`,
+    );
+
+    expect(rows.map((row) => row.name)).toEqual([
+      "connection_type_allowed",
+      "simulation_connection_type_allowed",
+    ]);
+    for (const row of rows) {
+      // The whole list rather than a search for "livekit": what a widening
+      // must never do is quietly drop a type somebody is already reaching an
+      // agent through.
+      expect(row.definition).toContain(
+        "ARRAY['retell'::text, 'phone'::text, 'livekit'::text]",
+      );
+    }
+  });
+
+  it("leaves the connections that were already there exactly as they were", async () => {
+    const { rows } = await client.query<{ id: string; type: string }>(
+      "select id, type from connection",
+    );
+    expect(rows).toEqual([{ id: retellId, type: "retell" }]);
+  });
+
+  it("takes a livekit connection once it has run", async () => {
+    const livekitId = newId("con");
+    await connectionOfType(livekitId, "livekit");
+
+    const { rows } = await client.query<{ type: string }>(
+      "select type from connection where id = $1",
+      [livekitId],
+    );
+    expect(rows).toEqual([{ type: "livekit" }]);
+  });
+});
+
 /**
  * An instance that has been running since before a migration is the case a
  * migration is actually for, and it is the one an empty database never tests:
  * every check above starts from nothing, where a column added `not null` with
  * no default lands happily and would fail the moment a single row existed.
  *
- * So this applies the schema as it stood one migration ago, puts a customer's
- * work into it, and then upgrades — which is what a self-hoster's `docker
- * compose pull` does on a Tuesday morning.
+ * So this applies the schema as it stood before run events landed, puts a
+ * customer's work into it, and then upgrades — which is what a self-hoster's
+ * `docker compose pull` does on a Tuesday morning.
+ *
+ * The upgrade runs everything from there to the newest file rather than one
+ * migration, so a migration written after this was is exercised over a
+ * customer's rows too, instead of only over the empty database above. The
+ * assertions underneath are about what 0014 did, because a migration that
+ * backfills and then drops a default is the shape this whole file exists for;
+ * a later one that changed any of them would fail here, which is the point.
  */
+const RUN_EVENTS = "0014";
+
 describe("upgrading an instance that already holds work", () => {
   let database: EmptyDatabase;
-  /** The migration files, minus the newest, as an earlier release shipped them. */
+  /** The migration files before run events, as that earlier release shipped them. */
   let asItWas: string;
 
   beforeAll(async () => {
@@ -732,18 +854,17 @@ describe("upgrading an instance that already holds work", () => {
     await rm(asItWas, { recursive: true, force: true });
   });
 
-  it("applies the newest migration over rows the release before it wrote", async () => {
+  it("applies every migration since over rows an earlier release wrote", async () => {
     const migrations = await readMigrations();
-    const newest = migrations.at(-1);
-    if (newest === undefined) throw new Error("there are no migrations");
+    const earlier = migrations.filter((one) => one.name < RUN_EVENTS);
+    const since = migrations.filter((one) => one.name >= RUN_EVENTS);
+    expect(since.length).toBeGreaterThan(0);
 
-    for (const migration of migrations.slice(0, -1)) {
+    for (const migration of earlier) {
       await writeFile(path.join(asItWas, migration.name), migration.sql);
     }
     const before = await runMigrations(database.url, asItWas);
-    expect(before.applied).toEqual(
-      migrations.slice(0, -1).map((migration) => migration.name),
-    );
+    expect(before.applied).toEqual(earlier.map((migration) => migration.name));
 
     // A customer's work, written the way the release before this one wrote it:
     // a run over a connection, and one conversation inside it.
@@ -826,9 +947,11 @@ describe("upgrading an instance that already holds work", () => {
       );
 
       // The upgrade itself, with that work sitting in the tables.
-      await writeFile(path.join(asItWas, newest.name), newest.sql);
+      for (const migration of since) {
+        await writeFile(path.join(asItWas, migration.name), migration.sql);
+      }
       const upgraded = await runMigrations(database.url, asItWas);
-      expect(upgraded.applied).toEqual([newest.name]);
+      expect(upgraded.applied).toEqual(since.map((migration) => migration.name));
 
       // The run is still there, and it says what is true of it: it pinned no
       // version, because no run could when it was started.

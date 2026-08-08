@@ -38,7 +38,7 @@ import {
  */
 
 /** The ways egma can reach an agent today. Grows one adapter at a time. */
-export const CONNECTION_TYPES = ["retell", "phone"] as const;
+export const CONNECTION_TYPES = ["retell", "phone", "livekit"] as const;
 export type ConnectionType = (typeof CONNECTION_TYPES)[number];
 
 /**
