@@ -302,7 +302,7 @@ export async function conductSimulation(
   // itself reliable. A real simulator has the same shape and does not care,
   // because it conducts whatever it claimed rather than one row it named.
   await eventually(`simulation ${only.id} to be claimed`, async () => {
-    await claimSimulations(world.auth, { claimant, capacity: 50 });
+    await claimSimulations({ claimant, capacity: 50 });
     const now = await getSimulation(world.auth, only.id);
     return now?.status === "claimed" ? now : undefined;
   });

@@ -104,6 +104,23 @@ export function notAuthenticated(reply: FastifyReply): FastifyReply {
   );
 }
 
+/**
+ * No usable service token, on the routes egma's own simulator claims work
+ * through. The same code as the door above and a different sentence, because
+ * the caller's next move is different in kind: no sign-in and no customer key
+ * can ever open this one — the deployment's own secret is the whole gate.
+ */
+export function notTheService(reply: FastifyReply): FastifyReply {
+  return refuse(
+    reply,
+    "not_authenticated",
+    "this route hands out simulation work and answers only to egma's own " +
+      "simulator. Send Authorization: Bearer with the deployment's " +
+      "EGMA_SIMULATOR_SERVICE_TOKEN — the same value the api and simulator " +
+      "containers were started with. A customer API key can never open it.",
+  );
+}
+
 /** The organization's request budget is spent; the header says when to retry. */
 export function tooManyRequests(
   reply: FastifyReply,

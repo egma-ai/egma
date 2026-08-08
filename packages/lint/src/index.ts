@@ -97,11 +97,16 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
 /**
  * The exports that dispatch egma's own work across the whole deployment.
  *
- * The grader service stands behind every organization at once and holds no
- * credential, because there is no honest one to give it: an API key minted
- * inside one customer would either see too little to do the job or be shared
- * between customers to do it. So it is handed work instead of asked for a
- * credential — and the two calls that hand it out are these.
+ * The grader and the simulator each stand behind every organization at once
+ * and hold no credential, because there is no honest one to give them: an API
+ * key minted inside one customer would either see too little to do the job or
+ * be shared between customers to do it. So each is handed work instead of
+ * asked for a credential — and the three calls that hand it out are these.
+ *
+ * `claimSimulations` was added on 2026-08-08 with the simulator's claim door,
+ * deliberately and after the rule stopped the build: the tenancy-scoped claim
+ * it replaced had no production caller, and the real one reaches every
+ * customer's queue on the grading claim's exact terms.
  *
  * This category is narrower than it looks, and the rule enforces the property
  * that makes it safe: **nothing here may take an argument by which a caller
@@ -110,15 +115,20 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
  * here that grew an `organizationId` or a `projectId` would be an ordinary
  * cross-tenant read wearing an exemption, and the rule refuses it.
  *
- * The rest of what makes it safe is not mechanical and is written out where the
- * functions live: the only table either reaches is egma's own grading queue, a
- * claim carries identifiers and tenancy rather than anything a customer wrote,
- * and every claim arrives with the `AuthContext` narrowed to that job's own
- * organization and project — which is what the grading itself goes through.
+ * The rest of what makes it safe is not mechanical and is written out where
+ * the functions live: the only rows any of them reaches are egma's own queues
+ * — grading jobs, and the simulations egma itself wrote as queued — a claim
+ * carries identifiers and tenancy rather than anything a customer wrote, and
+ * every claim arrives with the `AuthContext` narrowed to that row's own
+ * organization and project — which is what the work itself goes through.
  *
- * A third name here is a decision somebody has to make on purpose.
+ * A fourth name here is a decision somebody has to make on purpose.
  */
-const WORK_DISPATCHING = ["claimGradingJobs", "watchGradingWork"];
+const WORK_DISPATCHING = [
+  "claimGradingJobs",
+  "claimSimulations",
+  "watchGradingWork",
+];
 
 /**
  * What a work-dispatching export may not be handed, in any position: an

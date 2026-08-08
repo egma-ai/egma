@@ -38,6 +38,14 @@ environment; see `.env.example` for the names and their defaults.
 one.** Compose supplies a development default so that `docker compose up` works
 out of the box. Change it before anybody else can reach your instance.
 
+**`EGMA_SIMULATOR_SERVICE_TOKEN` is what the simulator shows the API to claim
+work, and the API refuses to start without one.** The answers to a claim carry
+your live provider credentials, and port 3100 is published on the host, so the
+check is always on. Compose supplies one development default to both
+containers so they match out of the box. Change it — one line in `.env` covers
+both — before anybody else can reach your instance:
+`echo "egma_st_$(openssl rand -hex 32)"` makes one.
+
 Email is optional, and this is load-bearing rather than a convenience. See
 [Adding a second person](#adding-a-second-person).
 

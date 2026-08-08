@@ -6,5 +6,9 @@
     "tsBuildInfoFile": "./dist/.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../../packages/ids" }, { "path": "../../packages/db" }]
+  "references": [
+    { "path": "../../packages/ids" },
+    { "path": "../../packages/db" },
+    { "path": "../../packages/simulation-contract" }
+  ]
 }

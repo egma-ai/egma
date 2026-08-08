@@ -118,7 +118,7 @@ async function aFinishedSimulation(): Promise<Conducted> {
   const [only] = started.simulations;
   if (only === undefined) throw new Error("the run has no simulation");
 
-  await claimSimulations(auth, { claimant, capacity: 50 });
+  await claimSimulations({ claimant, capacity: 50 });
   await startSimulation(auth, only.id, claimant);
   await completeSimulation(auth, only.id, claimant, {
     endingReason: "persona_concluded",

@@ -18,7 +18,7 @@ import {
   sweepOrphanedSimulations,
   type AuthContext,
   type RunEvent,
-  type Simulation,
+  type SimulationClaim,
 } from "@egma/db";
 
 import {
@@ -90,13 +90,13 @@ async function aRun(testVersionIds: readonly string[] = [oneCaller]) {
   return startRun(actingAsAcme(), { agentId, connectionId, testVersionIds });
 }
 
-/** Claim for one run under test; the queue is the whole customer's. */
-async function claimOwn(runId: string): Promise<readonly Simulation[]> {
-  const claimed = await claimSimulations(actingAsAcme(), {
+/** Claim for one run under test; the queue is the whole deployment's. */
+async function claimOwn(runId: string): Promise<readonly SimulationClaim[]> {
+  const claimed = await claimSimulations({
     claimant: CLAIMANT,
     capacity: 50,
   });
-  return claimed.filter((simulation) => simulation.runId === runId);
+  return claimed.filter((claim) => claim.runId === runId);
 }
 
 async function feedOf(runId: string, after = 0) {
