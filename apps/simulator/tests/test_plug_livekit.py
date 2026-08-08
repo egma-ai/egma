@@ -574,10 +574,19 @@ async def test_a_room_the_platform_refuses_is_a_fault_in_its_words(
     assert stub.deleted
 
 
-async def test_a_livekit_that_answers_nowhere_fails_without_a_credential():
+async def test_a_livekit_that_answers_nowhere_fails_without_a_credential(
+    caplog: pytest.LogCaptureFixture,
+):
     """The failure a wrong URL really hits, hermetically and through the
     real driver: a closed port on loopback, a real key pair in hand, and a
-    refusal that names what could not be reached and no secret at all."""
+    refusal that names what could not be reached and no secret at all.
+
+    Tearing down then asks the same unreachable server to delete a room it
+    never made, which is the one path in this driver that logs the
+    platform's words rather than raising them — so the log line it writes
+    is scanned here too.
+    """
+    caplog.set_level(logging.INFO)
     settings = RoomSettings.from_connection(
         {"url": "http://127.0.0.1:1"},
         {"apiKey": A_KEY, "apiSecret": A_SECRET},
@@ -592,8 +601,14 @@ async def test_a_livekit_that_answers_nowhere_fails_without_a_credential():
 
     told = str(refusal.value)
     assert "127.0.0.1:1" in told, "the reason has to name what could not be reached"
-    assert refusal.value.ending == ERROR
+    assert failed_ending(refusal.value) == ERROR
     assert A_SECRET not in told
+    assert A_SECRET not in repr(refusal.value.__cause__)
+
+    logged = [record.getMessage() for record in caplog.records]
+    assert any("was not deleted" in line for line in logged), logged
+    for line in logged:
+        assert A_SECRET not in line
 
 
 async def test_a_platform_that_says_the_secret_back_still_leaks_nothing(
@@ -617,34 +632,44 @@ async def test_a_platform_that_says_the_secret_back_still_leaks_nothing(
 
 
 @pytest.mark.parametrize("agent_joins", [True, False])
-async def test_no_line_a_simulation_writes_carries_the_api_secret(
+async def test_nothing_a_simulation_produces_carries_the_api_secret(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
     agent_joins: bool,
 ):
-    """The sentinel scan, on the path that works and the path that does
-    not: a whole simulation runs with the customer's secret really in the
-    process, and no log line, no reason and no exception carries it."""
+    """The sentinel scan, on the path that works and the path that does not.
+
+    A whole simulation runs with the customer's secret really in the
+    process, and then everything it produced is read for it: every log
+    line, both metadata channels, the driver printed out, the refusal and
+    the exception under it, and — where there was one — every byte of the
+    recording.
+    """
     monkeypatch.setattr(livekit_plug, "AGENT_JOIN_SECONDS", 0.05)
     caplog.set_level(logging.DEBUG)
     stub = RoomStub(
         greeting="Front desk.", replies=["Noted."], agent_joins=agent_joins
     )
 
+    produced: list[str] = []
     try:
-        await room_walk(
+        _conducted, _turns, _measures, assembled = await room_walk(
             tmp_path, stub, monkeypatch, agent_name="front-desk", scenario="One point."
         )
+        recording = (tmp_path / assembled.audio["recording"]).read_bytes()
+        produced.append(recording.decode("latin-1"))
     except PlugError as refused:
-        assert A_SECRET not in str(refused)
-        assert A_SECRET not in repr(refused.__cause__)
+        produced += [str(refused), repr(refused.__cause__)]
 
-    logged = "\n".join(record.getMessage() for record in caplog.records)
-    assert A_SECRET not in logged
-    assert A_SECRET not in json.dumps(
-        [stub.rooms[0].metadata, *[d.metadata for d in stub.dispatches]]
-    )
+    produced += [record.getMessage() for record in caplog.records]
+    produced += [created.metadata for created in stub.rooms]
+    produced += [dispatch.metadata for dispatch in stub.dispatches]
+    produced.append(repr(stub.backends[0]))
+
+    assert any(produced), "there was nothing to scan, which always passes"
+    for piece in produced:
+        assert A_SECRET not in piece
 
 
 # -- The room is always cleaned up -------------------------------------------
