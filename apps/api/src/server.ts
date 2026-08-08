@@ -16,6 +16,7 @@ import { heartbeatRoutes } from "./routes/heartbeats.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
+import { reportRoutes } from "./routes/reports.ts";
 import { runRoutes } from "./routes/runs.ts";
 import { signOutRoutes } from "./routes/sign-out.ts";
 import { signupRoutes } from "./routes/signup.ts";
@@ -209,6 +210,13 @@ export function buildApi(options: ServerOptions): Api {
   // the more so, because a busy run beats every few seconds per conversation,
   // which is exactly the traffic a per-organization budget must never see.
   void app.register(heartbeatRoutes, {
+    serviceToken: config.simulatorServiceToken,
+  });
+
+  // And the report door, on the claim door's exact terms: the same gate,
+  // the same exemption, and each row's own claimant naming whose
+  // conversation a document may land.
+  void app.register(reportRoutes, {
     serviceToken: config.simulatorServiceToken,
   });
 
