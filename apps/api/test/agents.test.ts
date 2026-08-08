@@ -245,7 +245,7 @@ describe("a connection payload its type will not take", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        '"vapi" is not a connection type egma knows; expected one of retell, phone',
+        '"vapi" is not a connection type egma knows; expected one of retell, phone, livekit',
     });
     expect(await agentRowCount()).toBe(0);
   });
@@ -323,6 +323,267 @@ describe("a connection payload its type will not take", () => {
       message: "a connection needs a name",
     });
     expect(await agentRowCount()).toBe(0);
+  });
+});
+
+/**
+ * The livekit type through the door a developer actually knocks on.
+ *
+ * A LiveKit connection is the first one where egma opens the room and the
+ * customer's agent joins it, which is what makes an agent running on a laptop
+ * reachable at all. Two things are asserted here rather than only at the seam:
+ * the sentences, because the one a terminal prints is the one that came over
+ * the wire; and the secret, because this is the door it arrives through.
+ */
+describe("a livekit connection", () => {
+  /** The credential halves, each tailed so a hint can only come from the key. */
+  const API_KEY = "APIsentinelkey0WXYZ";
+  const API_SECRET = "SENTINEL-livekit-secret-3f9c2a7e";
+
+  function livekitPayload(
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    return {
+      type: "livekit",
+      modality: "voice",
+      config: { url: "wss://acme.livekit.cloud" },
+      credentials: { apiKey: API_KEY, apiSecret: API_SECRET },
+      ...overrides,
+    };
+  }
+
+  it("is registered with a url alone, and dials out", async () => {
+    api = await createApi("agents_livekit_bare");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const registered = await post("/api/agents", withKey(ada.secret), {
+      name: "Quickstart agent",
+      connection: livekitPayload(),
+    });
+
+    expect(registered.status).toBe(201);
+    expect(connectionOf(registered)).toMatchObject({
+      name: "livekit-1",
+      type: "livekit",
+      modality: "voice",
+      // Derived from the type, never caller-supplied.
+      topology: "agent-dials-out",
+      config: { url: "wss://acme.livekit.cloud" },
+      // The last four of the key. The secret has no hint and no line at all.
+      credentials_hint: "WXYZ",
+    });
+    expect(connectionOf(registered)).not.toHaveProperty("credentials");
+  });
+
+  it("is registered with an agent name and metadata too, and reads both back", async () => {
+    api = await createApi("agents_livekit_dispatched");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const registered = await post("/api/agents", withKey(ada.secret), {
+      name: "Dispatched agent",
+      connection: livekitPayload({
+        config: {
+          url: "wss://acme.livekit.cloud",
+          agentName: "front-desk",
+          metadata: '{"tenant":"acme"}',
+        },
+      }),
+    });
+
+    expect(registered.status).toBe(201);
+
+    const one = await get(
+      `/api/agents/${String(agentOf(registered).id)}`,
+      withKey(ada.secret),
+    );
+    const [reached] = one.body.connections as Record<string, unknown>[];
+    expect(reached).toMatchObject({
+      config: {
+        url: "wss://acme.livekit.cloud",
+        agentName: "front-desk",
+        metadata: '{"tenant":"acme"}',
+      },
+      credentials_hint: "WXYZ",
+    });
+    expect(reached).not.toHaveProperty("credentials");
+  });
+
+  /**
+   * Every way a livekit payload can be wrong, and the sentence each one gets.
+   * Word for word: a client relays these to a terminal a coding agent reads,
+   * and the fix it picks comes out of the wording.
+   */
+  const REFUSED: readonly {
+    readonly named: string;
+    readonly payload: Record<string, unknown>;
+    readonly message: string;
+  }[] = [
+    {
+      named: "a modality a livekit connection does not speak",
+      payload: { modality: "chat" },
+      message:
+        "a livekit connection speaks voice, and this one was asked for chat",
+    },
+    {
+      named: "a word that is not a modality at all",
+      payload: { modality: "telepathy" },
+      message: '"telepathy" is not a modality; a livekit connection speaks voice',
+    },
+    {
+      named: "no url",
+      payload: { config: {} },
+      message: "a livekit connection's config needs url",
+    },
+    {
+      named: "a url in a scheme the SDKs do not take",
+      payload: { config: { url: "sip:acme.livekit.cloud" } },
+      message:
+        "the config's url must be a ws, wss, http or https URL, which looks " +
+        "like wss://example.livekit.cloud",
+    },
+    {
+      named: "an agent name that is there but blank",
+      payload: {
+        config: { url: "wss://acme.livekit.cloud", agentName: "   " },
+      },
+      message: "the config's agentName must be a non-empty string",
+    },
+    {
+      named: "metadata that is not a JSON object",
+      payload: {
+        config: { url: "wss://acme.livekit.cloud", metadata: "tenant=acme" },
+      },
+      message:
+        "the config's metadata must be a JSON object written in a string, " +
+        'which looks like {"tenant":"acme"}',
+    },
+    {
+      named: "a config key a livekit connection has no place for",
+      payload: {
+        config: { url: "wss://acme.livekit.cloud", roomName: "lobby" },
+      },
+      message:
+        'a livekit connection\'s config has no key "roomName"; it holds url, ' +
+        "agentName (optional), metadata (optional)",
+    },
+    {
+      named: "no credentials at all",
+      payload: { credentials: undefined },
+      message:
+        "a livekit connection needs credentials shaped { apiKey, apiSecret }",
+    },
+    {
+      named: "only half the credential",
+      payload: { credentials: { apiKey: API_KEY } },
+      message:
+        "a livekit connection's credentials need apiSecret to be a non-empty string",
+    },
+    {
+      named: "a credential half too short for its hint to stay a hint",
+      payload: { credentials: { apiKey: API_KEY, apiSecret: "abcd" } },
+      message:
+        "a livekit connection's credentials need apiSecret to be at least 8 characters",
+    },
+    {
+      named: "a credential key that does not belong",
+      payload: {
+        credentials: {
+          apiKey: API_KEY,
+          apiSecret: API_SECRET,
+          apiToken: "sentinel-token-not-a-field",
+        },
+      },
+      message:
+        'a livekit connection\'s credentials have no key "apiToken"; they are ' +
+        "shaped { apiKey, apiSecret }",
+    },
+  ];
+
+  it.each(REFUSED)("is refused for $named, naming it", async (refusal) => {
+    api = await createApi(`agents_livekit_${refusal.named.replaceAll(" ", "_")}`);
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const refused = await post("/api/agents", withKey(ada.secret), {
+      name: "Quickstart agent",
+      connection: livekitPayload(refusal.payload),
+    });
+
+    expect(refused.status).toBe(400);
+    expect(refused.body).toEqual({
+      error: "invalid_request",
+      message: refusal.message,
+    });
+    expect(await agentRowCount()).toBe(0);
+  });
+
+  /**
+   * The secret half, followed everywhere it could surface.
+   *
+   * `apiSecret` is the one field on a livekit connection that egma can never
+   * hand back and can never write down in the clear: it signs the tokens that
+   * open rooms on the customer's own LiveKit project. So this drives a
+   * registration that works and several that are refused, all carrying the
+   * same sentinel, and then looks for that sentinel in every place a value can
+   * end up — the answers, the log, the read models and the row itself.
+   *
+   * The refused ones matter more than the one that worked. A refusal is where
+   * a value gets quoted back to explain what was wrong with it, and it is
+   * where an error carrying a payload gets written to a log.
+   */
+  it("never appears in an answer, a log line, a read or a row", async () => {
+    const lines: string[] = [];
+    api = await createApi("agents_livekit_secret", {
+      logTo: {
+        write(line) {
+          lines.push(line);
+        },
+      },
+    });
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const answers = [
+      // The one that works, so the sealing path is walked too.
+      await post("/api/agents", withKey(ada.secret), {
+        name: "Quickstart agent",
+        connection: livekitPayload(),
+      }),
+      // And the refusals, each with the secret sitting in the body.
+      ...(await Promise.all(
+        REFUSED.map((refusal) =>
+          post("/api/agents", withKey(ada.secret), {
+            name: `Refused ${refusal.named}`,
+            connection: livekitPayload(refusal.payload),
+          }),
+        ),
+      )),
+    ];
+
+    const registered = answers[0];
+    if (registered === undefined) throw new Error("nothing was registered");
+    const agentId = String(agentOf(registered).id);
+    answers.push(await get(`/api/agents/${agentId}`, withKey(ada.secret)));
+    answers.push(await get("/api/agents", withKey(ada.secret)));
+
+    for (const answer of answers) {
+      expect(JSON.stringify(answer.body)).not.toContain(API_SECRET);
+    }
+
+    // The log, which is the output nobody reads until something has gone
+    // wrong — and by then the secret would be sitting in a shipped file.
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.join("\n")).not.toContain(API_SECRET);
+
+    // And the row underneath, where only the sealed envelope belongs.
+    const { rows } = await api.database.sql<{
+      credentials: string;
+      credentials_hint: string;
+      config: Record<string, string>;
+    }>("select credentials, credentials_hint, config from connection");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.credentials).not.toContain(API_SECRET);
+    expect(rows[0]?.credentials).toMatch(/^v1\./);
+    expect(rows[0]?.credentials_hint).toBe("WXYZ");
+    expect(JSON.stringify(rows[0]?.config)).not.toContain(API_SECRET);
   });
 });
 
