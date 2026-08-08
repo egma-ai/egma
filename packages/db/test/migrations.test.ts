@@ -707,6 +707,353 @@ describe("the re-grade's narrowing (0013)", () => {
   });
 });
 
+describe("the run-events record and the run's pin (0014)", () => {
+  let database: EmptyDatabase;
+  /** The schema as it stood before the record, in a directory of its own. */
+  let beforeTheRecord: string;
+  let client: pg.Client;
+
+  const organization = newId("org");
+  const project = newId("prj");
+  const agent = newId("agt");
+  const connection = newId("con");
+  const personaId = newId("prs");
+  const personaVersion = newId("prsv");
+  const run = newId("run");
+  const simulation = newId("sim");
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("run_events_upgrade");
+    beforeTheRecord = await mkdtemp(path.join(os.tmpdir(), "egma-before-0014-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0014") {
+        await writeFile(
+          path.join(beforeTheRecord, migration.name),
+          migration.sql,
+        );
+      }
+    }
+    await runMigrations(database.url, beforeTheRecord);
+
+    // A customer's work, written the way that release wrote it: a run over a
+    // connection, one conversation inside it, and no pinned-version column
+    // anywhere — which is exactly what 0014 has to upgrade over.
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query(
+      "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
+      [organization],
+    );
+    await client.query(
+      "insert into project (id, organization_id, name, slug) values ($1, $2, 'Default', 'default')",
+      [project, organization],
+    );
+    await client.query(
+      "insert into agent (id, organization_id, project_id, name) values ($1, $2, $3, 'Front desk')",
+      [agent, organization, project],
+    );
+    await client.query(
+      `insert into connection
+         (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
+       values ($1, $2, $3, $4, 'retell-1', 'retell', 'chat', 'hosted-broker', '{}'::jsonb)`,
+      [connection, organization, project, agent],
+    );
+    await client.query("begin");
+    await client.query(
+      `insert into persona (id, organization_id, project_id, name, current_version_id)
+       values ($1, $2, $3, 'Impatient Rita', $4)`,
+      [personaId, organization, project, personaVersion],
+    );
+    await client.query(
+      "insert into persona_version (id, persona_id, version, traits) values ($1, $2, 1, '{}'::jsonb)",
+      [personaVersion, personaId],
+    );
+    await client.query("commit");
+    await client.query(
+      `insert into run
+         (id, organization_id, project_id, agent_id, connection_id, status,
+          triggered_via, requested_personas, connection_snapshot, expected_simulation_count)
+       values ($1, $2, $3, $4, $5, 'pending', 'manual', $6::jsonb, $7::jsonb, 1)`,
+      [
+        run,
+        organization,
+        project,
+        agent,
+        connection,
+        JSON.stringify({ personaIds: [personaId] }),
+        JSON.stringify({
+          type: "retell",
+          modality: "chat",
+          topology: "hosted-broker",
+          environment: null,
+          config: {},
+        }),
+      ],
+    );
+    await client.query(
+      `insert into simulation
+         (id, run_id, organization_id, project_id, agent_id, connection_id,
+          persona_id, persona_version_id, position, connection_type, modality, status)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, 1, 'retell', 'chat', 'queued')`,
+      [
+        simulation,
+        run,
+        organization,
+        project,
+        agent,
+        connection,
+        personaId,
+        personaVersion,
+      ],
+    );
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(beforeTheRecord, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("is what is still pending on a database that already holds work", async () => {
+    const result = await runMigrations(database.url);
+    expect(result.applied[0]).toBe("0014_run_events.sql");
+    expect(result.applied.every((name) => name >= "0014")).toBe(true);
+  });
+
+  it("says what is true of the run that was already there: it pinned no version", async () => {
+    const { rows } = await client.query<{
+      pinned_test_versions: { testVersionIds: string[] };
+    }>("select pinned_test_versions from run where id = $1", [run]);
+    expect(rows[0]?.pinned_test_versions).toEqual({ testVersionIds: [] });
+  });
+
+  it("drops the backfill's default, so the next run has to say what it pinned", async () => {
+    await expect(
+      client.query(
+        `insert into run
+           (id, organization_id, project_id, agent_id, connection_id, status,
+            triggered_via, requested_personas, connection_snapshot, expected_simulation_count)
+         values ($1, $2, $3, $4, $5, 'pending', 'manual', '{}'::jsonb, '{}'::jsonb, 1)`,
+        [newId("run"), organization, project, agent, connection],
+      ),
+    ).rejects.toThrow(/pinned_test_versions/u);
+  });
+
+  it("brings a record that is a record: an event cannot be rewritten afterwards", async () => {
+    await client.query(
+      `insert into run_event
+         (run_id, seq, organization_id, project_id, kind, status)
+       values ($1, 1, $2, $3, 'run', 'pending')`,
+      [run, organization, project],
+    );
+    await expect(
+      client.query(
+        "update run_event set status = 'running' where run_id = $1 and seq = 1",
+        [run],
+      ),
+    ).rejects.toThrow(/is written once/u);
+  });
+});
+
+
+describe("the dispatch-failure vocabulary (0015)", () => {
+  let database: EmptyDatabase;
+  /** The schema as it stood before the widened word, in a directory of its own. */
+  let beforeTheWord: string;
+  let client: pg.Client;
+
+  const organization = newId("org");
+  const project = newId("prj");
+  const agent = newId("agt");
+  const connection = newId("con");
+  const personaId = newId("prs");
+  const personaVersion = newId("prsv");
+  const run = newId("run");
+  const claimed = newId("sim");
+  const landed = newId("sim");
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("dispatch_failure_upgrade");
+    beforeTheWord = await mkdtemp(path.join(os.tmpdir(), "egma-before-0015-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0015") {
+        await writeFile(path.join(beforeTheWord, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, beforeTheWord);
+
+    // A customer's work as that release wrote it: a run over a connection,
+    // one conversation still queued, and one already landed with the old
+    // vocabulary — because 0015 re-validates the widened checks over every
+    // row that exists, so they have to hold for what the old release wrote.
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query(
+      "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
+      [organization],
+    );
+    await client.query(
+      "insert into project (id, organization_id, name, slug) values ($1, $2, 'Default', 'default')",
+      [project, organization],
+    );
+    await client.query(
+      "insert into agent (id, organization_id, project_id, name) values ($1, $2, $3, 'Front desk')",
+      [agent, organization, project],
+    );
+    await client.query(
+      `insert into connection
+         (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
+       values ($1, $2, $3, $4, 'retell-1', 'retell', 'chat', 'hosted-broker', '{}'::jsonb)`,
+      [connection, organization, project, agent],
+    );
+    await client.query("begin");
+    await client.query(
+      `insert into persona (id, organization_id, project_id, name, current_version_id)
+       values ($1, $2, $3, 'Impatient Rita', $4)`,
+      [personaId, organization, project, personaVersion],
+    );
+    await client.query(
+      "insert into persona_version (id, persona_id, version, traits) values ($1, $2, 1, '{}'::jsonb)",
+      [personaVersion, personaId],
+    );
+    await client.query("commit");
+    await client.query(
+      `insert into run
+         (id, organization_id, project_id, agent_id, connection_id, status,
+          triggered_via, pinned_test_versions, requested_personas,
+          connection_snapshot, expected_simulation_count)
+       values ($1, $2, $3, $4, $5, 'pending', 'manual', $6::jsonb, $7::jsonb,
+          $8::jsonb, 2)`,
+      [
+        run,
+        organization,
+        project,
+        agent,
+        connection,
+        JSON.stringify({ testVersionIds: [] }),
+        JSON.stringify({ personaIds: [personaId] }),
+        JSON.stringify({
+          type: "retell",
+          modality: "chat",
+          topology: "hosted-broker",
+          environment: null,
+          config: {},
+        }),
+      ],
+    );
+    await client.query(
+      `insert into simulation
+         (id, run_id, organization_id, project_id, agent_id, connection_id,
+          persona_id, persona_version_id, position, connection_type, modality,
+          status, claimed_by, claimed_at, heartbeat_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, 1, 'retell', 'chat', 'claimed',
+          'simulator-blue-1', now(), now())`,
+      [
+        claimed,
+        run,
+        organization,
+        project,
+        agent,
+        connection,
+        personaId,
+        personaVersion,
+      ],
+    );
+    await client.query(
+      `insert into simulation
+         (id, run_id, organization_id, project_id, agent_id, connection_id,
+          persona_id, persona_version_id, position, connection_type, modality,
+          status, ending_reason, claimed_by, claimed_at, heartbeat_at, ended_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, 2, 'retell', 'chat',
+          'failed', 'simulator_error', 'simulator-blue-1', now(), now(), now())`,
+      [
+        landed,
+        run,
+        organization,
+        project,
+        agent,
+        connection,
+        personaId,
+        personaVersion,
+      ],
+    );
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(beforeTheWord, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("is what is still pending on a database that already holds landed work", async () => {
+    const result = await runMigrations(database.url);
+    expect(result.applied[0]).toBe("0015_dispatch_failure.sql");
+    expect(result.applied.every((name) => name >= "0015")).toBe(true);
+  });
+
+  it("keeps what was already true: the landed conversation keeps its reason", async () => {
+    const { rows } = await client.query<{ ending_reason: string }>(
+      "select ending_reason from simulation where id = $1",
+      [landed],
+    );
+    expect(rows[0]?.ending_reason).toBe("simulator_error");
+  });
+
+  it("lets a claimed row the old release wrote take the landing the upgrade brings", async () => {
+    await client.query(
+      `update simulation
+       set status = 'failed', ending_reason = 'dispatch_failed', ended_at = now()
+       where id = $1`,
+      [claimed],
+    );
+    const { rows } = await client.query<{ ending_reason: string }>(
+      "select ending_reason from simulation where id = $1",
+      [claimed],
+    );
+    expect(rows[0]?.ending_reason).toBe("dispatch_failed");
+  });
+
+  it("holds the widened word to its class: a way to have failed, never to have ended", async () => {
+    await expect(
+      client.query(
+        `insert into simulation
+           (id, run_id, organization_id, project_id, agent_id, connection_id,
+            persona_id, persona_version_id, position, connection_type, modality,
+            status, ending_reason, claimed_by, claimed_at, heartbeat_at,
+            started_at, ended_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, 3, 'retell', 'chat',
+            'completed', 'dispatch_failed', 'simulator-blue-1', now(), now(),
+            now(), now())`,
+        [
+          newId("sim"),
+          run,
+          organization,
+          project,
+          agent,
+          connection,
+          personaId,
+          personaVersion,
+        ],
+      ),
+    ).rejects.toThrow(/simulation_ending_reason_agrees/u);
+  });
+
+  it("lets the record speak the widened word, and stay a record", async () => {
+    await client.query(
+      `insert into run_event
+         (run_id, seq, organization_id, project_id, kind, simulation_id, status, reason)
+       values ($1, 1, $2, $3, 'simulation', $4, 'failed', 'dispatch_failed')`,
+      [run, organization, project, claimed],
+    );
+    await expect(
+      client.query(
+        "update run_event set reason = 'simulator_error' where run_id = $1 and seq = 1",
+        [run],
+      ),
+    ).rejects.toThrow(/is written once/u);
+  });
+});
+
 /**
  * An instance that has been running since before a migration is the case a
  * migration is actually for, and it is the one an empty database never tests:
@@ -715,7 +1062,10 @@ describe("the re-grade's narrowing (0013)", () => {
  *
  * So this applies the schema as it stood one migration ago, puts a customer's
  * work into it, and then upgrades — which is what a self-hoster's `docker
- * compose pull` does on a Tuesday morning.
+ * compose pull` does on a Tuesday morning. It is about the *newest* migration
+ * on purpose, so its seed rows are written the way the release before that
+ * migration wrote them, and both move together: when a migration lands, its
+ * predecessor's upgrade story graduates into a pinned describe above.
  */
 describe("upgrading an instance that already holds work", () => {
   let database: EmptyDatabase;
@@ -745,8 +1095,11 @@ describe("upgrading an instance that already holds work", () => {
       migrations.slice(0, -1).map((migration) => migration.name),
     );
 
-    // A customer's work, written the way the release before this one wrote it:
-    // a run over a connection, and one conversation inside it.
+    // A customer's work, written the way the release before this one wrote
+    // it: a run over a connection, one conversation still queued inside it,
+    // and two already landed — a completed one, and one the release's own
+    // claim path landed as dispatch_failed — the rows the new summary-fact
+    // columns are about, and the rows their guards re-validate on the way in.
     const client = new pg.Client({ connectionString: database.url });
     await client.connect();
     const organization = newId("org");
@@ -756,7 +1109,9 @@ describe("upgrading an instance that already holds work", () => {
     const personaId = newId("prs");
     const personaVersion = newId("prsv");
     const run = newId("run");
-    const simulation = newId("sim");
+    const queued = newId("sim");
+    const landed = newId("sim");
+    const undispatched = newId("sim");
     try {
       await client.query(
         "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
@@ -793,7 +1148,7 @@ describe("upgrading an instance that already holds work", () => {
             triggered_via, pinned_test_versions, requested_personas,
             connection_snapshot, expected_simulation_count)
          values ($1, $2, $3, $4, $5, 'pending', 'manual', $6::jsonb, $7::jsonb,
-            $8::jsonb, 2)`,
+            $8::jsonb, 3)`,
         [
           run,
           organization,
@@ -811,90 +1166,44 @@ describe("upgrading an instance that already holds work", () => {
           }),
         ],
       );
-      await client.query(
-        `insert into simulation
-           (id, run_id, organization_id, project_id, agent_id, connection_id,
-            persona_id, persona_version_id, position, connection_type, modality, status)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, 1, 'retell', 'chat', 'queued')`,
-        [
-          simulation,
-          run,
-          organization,
-          project,
-          agent,
-          connection,
-          personaId,
-          personaVersion,
-        ],
-      );
-      // A conversation that already landed, wearing the old vocabulary. The
-      // upgrade re-validates its widened checks over every row that exists,
-      // so it has to hold for what the old release wrote, not just for what
-      // the new one will write.
-      const landed = newId("sim");
-      await client.query(
-        `insert into simulation
-           (id, run_id, organization_id, project_id, agent_id, connection_id,
-            persona_id, persona_version_id, position, connection_type, modality,
-            status, ending_reason, claimed_by, claimed_at, heartbeat_at, ended_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, 2, 'retell', 'chat',
-            'failed', 'simulator_error', 'simulator-blue-1', now(), now(), now())`,
-        [
-          landed,
-          run,
-          organization,
-          project,
-          agent,
-          connection,
-          personaId,
-          personaVersion,
-        ],
-      );
-
-      // The upgrade itself, with that work sitting in the tables.
-      await writeFile(path.join(asItWas, newest.name), newest.sql);
-      const upgraded = await runMigrations(database.url, asItWas);
-      expect(upgraded.applied).toEqual([newest.name]);
-
-      // What was already true stays true: the conversation that landed under
-      // the old release keeps the reason it landed with.
-      const { rows: kept } = await client.query<{ ending_reason: string }>(
-        "select ending_reason from simulation where id = $1",
-        [landed],
-      );
-      expect(kept[0]?.ending_reason).toBe("simulator_error");
-
-      // And the queued one the old release wrote can take the landing the
-      // upgrade brings: claimed, then failed with the platform's own
-      // dispatch_failed — each step through the same lifecycle guard as ever.
-      await client.query(
-        `update simulation
-         set status = 'claimed', claimed_by = 'simulator-blue-1',
-             claimed_at = now(), heartbeat_at = now()
-         where id = $1`,
-        [simulation],
-      );
-      await client.query(
-        `update simulation
-         set status = 'failed', ending_reason = 'dispatch_failed', ended_at = now()
-         where id = $1`,
-        [simulation],
-      );
-
-      // The widened word keeps to its class: a way to have failed, and still
-      // no way for a conversation to have ended.
-      await expect(
+      const insertSimulation = (
+        id: string,
+        position: number,
+        shape: "queued" | "completed" | "dispatch_failed",
+      ) =>
         client.query(
           `insert into simulation
              (id, run_id, organization_id, project_id, agent_id, connection_id,
-              persona_id, persona_version_id, position, connection_type, modality,
-              status, ending_reason, claimed_by, claimed_at, heartbeat_at,
-              started_at, ended_at)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, 3, 'retell', 'chat',
-              'completed', 'dispatch_failed', 'simulator-blue-1', now(), now(),
-              now(), now())`,
+              persona_id, persona_version_id, position, connection_type,
+              modality, status
+              ${
+                shape === "completed"
+                  ? `, claimed_by, claimed_at, heartbeat_at, started_at,
+                     ended_at, ending_reason`
+                  : ""
+              }
+              ${
+                shape === "dispatch_failed"
+                  ? `, claimed_by, claimed_at, heartbeat_at, ended_at,
+                     ending_reason`
+                  : ""
+              })
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'retell', 'chat'
+              ${
+                shape === "completed"
+                  ? `, 'completed', 'simulator-blue-1', now(), now(), now(),
+                     now(), 'persona_concluded'`
+                  : ""
+              }
+              ${
+                shape === "dispatch_failed"
+                  ? `, 'failed', 'simulator-blue-1', now(), now(), now(),
+                     'dispatch_failed'`
+                  : ""
+              }
+              ${shape === "queued" ? ", 'queued'" : ""})`,
           [
-            newId("sim"),
+            id,
             run,
             organization,
             project,
@@ -902,25 +1211,41 @@ describe("upgrading an instance that already holds work", () => {
             connection,
             personaId,
             personaVersion,
+            position,
           ],
-        ),
-      ).rejects.toThrow(/simulation_ending_reason_agrees/u);
+        );
+      await insertSimulation(queued, 1, "queued");
+      await insertSimulation(landed, 2, "completed");
+      await insertSimulation(undispatched, 3, "dispatch_failed");
 
-      // The record of that landing speaks the widened word too — and stays a
-      // record: written over the work that was already here, and never
-      // rewritten afterwards.
-      await client.query(
-        `insert into run_event
-           (run_id, seq, organization_id, project_id, kind, simulation_id, status, reason)
-         values ($1, 1, $2, $3, 'simulation', $4, 'failed', 'dispatch_failed')`,
-        [run, organization, project, simulation],
+      // The upgrade itself, with that work sitting in the tables.
+      await writeFile(path.join(asItWas, newest.name), newest.sql);
+      const upgraded = await runMigrations(database.url, asItWas);
+      expect(upgraded.applied).toEqual([newest.name]);
+
+      // The conversations that already landed say what is true of them: no
+      // turn count and no provider reference, because no report could carry
+      // either when they landed — never a number invented for them.
+      const { rows } = await client.query<{
+        turn_count: number | null;
+        provider_reference: string | null;
+      }>(
+        `select turn_count, provider_reference from simulation
+          where id in ($1, $2)`,
+        [landed, undispatched],
       );
+      expect(rows).toEqual([
+        { turn_count: null, provider_reference: null },
+        { turn_count: null, provider_reference: null },
+      ]);
+
+      // The columns arrive with their guard: summary facts are terminal
+      // facts, so the conversation still moving cannot be handed either.
       await expect(
-        client.query(
-          "update run_event set reason = 'simulator_error' where run_id = $1 and seq = 1",
-          [run],
-        ),
-      ).rejects.toThrow(/is written once/u);
+        client.query("update simulation set turn_count = 3 where id = $1", [
+          queued,
+        ]),
+      ).rejects.toThrow(/simulation_summary_facts_only_when_ended/u);
     } finally {
       await client.end();
     }

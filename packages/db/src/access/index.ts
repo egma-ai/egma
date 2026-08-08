@@ -377,6 +377,7 @@ export {
   markSimulationCanceled,
   recordSimulationHeartbeat,
   resolveSimulationConnection,
+  resolveSimulationStanding,
   startRun,
   startSimulation,
   sweepOrphanedSimulations,
@@ -396,6 +397,8 @@ export {
   type SimulationFailure,
   type SimulationHeartbeat,
   type SimulationReport,
+  type SimulationStanding,
+  type SimulationSummaryFacts,
   type StartedRun,
   type SweptSimulation,
 } from "./runs.ts";

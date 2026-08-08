@@ -73,11 +73,12 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
  * afterwards. The grader and the simulator each stand behind every
  * organization on the deployment at once and hold no credential, because
  * there is no honest one to give them — so each is handed work rather than
- * asked for one, and the simulator's heartbeat and orphan sweep stand on the
- * same ground: a beat arrives bearing a token that resolves to nobody, and
- * silence is noticed by nobody in particular.
+ * asked for one, and the simulator's heartbeat, orphan sweep and standing
+ * resolver stand on the same ground: a beat arrives bearing a token that
+ * resolves to nobody, silence is noticed by nobody in particular, and a
+ * report about a held row is answered from the row.
  *
- * Five names, and a sixth is a decision somebody makes on purpose. None takes
+ * Six names, and a seventh is a decision somebody makes on purpose. None takes
  * an argument by which a caller could name a customer, and a build rule refuses
  * one that grows one; the only rows any of them reaches are egma's own queues —
  * grading jobs, and the simulations egma itself wrote and claimed. A claim
@@ -86,12 +87,15 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
  * heartbeat can stamp only a row already claimed under the caller's own name
  * and answers one boolean egma wrote; the sweep files each orphan's grading
  * work under the tenancy the row itself carries and answers identifiers and
- * no content.
+ * no content; `resolveSimulationStanding` is the claim's context derived
+ * again, by the id the claim handed out, for the report door — lifecycle
+ * stamps and no content.
  */
 const WORK_DISPATCHING = [
   "claimGradingJobs",
   "claimSimulations",
   "recordSimulationHeartbeat",
+  "resolveSimulationStanding",
   "sweepOrphanedSimulations",
   "watchGradingWork",
 ];
