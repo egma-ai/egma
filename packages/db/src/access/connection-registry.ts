@@ -35,6 +35,37 @@ import { AgentWriteRefusedError } from "./errors.ts";
 type ConfigGate = (key: string, value: unknown) => string;
 
 /**
+ * A gate the caller may leave out.
+ *
+ * Most config keys are demanded, because a missing one means a reach nobody
+ * can complete. Some are not: a key whose absence is itself a setting — "no
+ * name given" meaning "whoever answers" — has to be allowed to be absent, and
+ * demanding it would make a caller write down a value to mean the default they
+ * already had.
+ *
+ * Optional is about absence and nothing else. A key that is there faces the
+ * same gate it would have faced if it were demanded, so an optional key is
+ * never a key where anything goes.
+ */
+type OptionalGate = { readonly optional: true; readonly gate: ConfigGate };
+
+/** What a descriptor holds against one config key. */
+type ConfigDemand = ConfigGate | OptionalGate;
+
+/** Marks a gate optional: absence is admitted, a value still faces the gate. */
+export function optional(gate: ConfigGate): OptionalGate {
+  return { optional: true, gate };
+}
+
+function gateOf(demand: ConfigDemand): ConfigGate {
+  return typeof demand === "function" ? demand : demand.gate;
+}
+
+function isDemanded(demand: ConfigDemand): boolean {
+  return typeof demand === "function";
+}
+
+/**
  * Whether the customer hands over a secret for this type, and what it holds.
  *
  * Required and forbidden are the only two cases on purpose: a credential
@@ -58,7 +89,7 @@ export type CredentialRule =
 export type ConnectionDescriptor = {
   readonly modalities: readonly Modality[];
   readonly topology: Topology;
-  readonly config: Readonly<Record<string, ConfigGate>>;
+  readonly config: Readonly<Record<string, ConfigDemand>>;
   readonly credentials: CredentialRule;
   /**
    * Whether the simulator holds an adapter for this type — whether egma can
@@ -210,47 +241,70 @@ export function validModality(type: ConnectionType, modality: string): Modality 
 }
 
 /**
- * The config as it will be stored: every demanded key present and checked,
- * every unknown key refused by name. Refusing unknowns is what turns a typo'd
- * key into an error at create rather than a demanded key "missing" at run
- * time.
+ * A config as it will be stored, checked against a gate map: every demanded
+ * key present and checked, every optional key checked when it is there, every
+ * unknown key refused by name. Refusing unknowns is what turns a typo'd key
+ * into an error at create rather than a demanded key "missing" at run time.
+ *
+ * `what` names the thing being described — "a livekit connection" — and every
+ * refusal is built from it, so one wording serves every type.
+ *
+ * It takes the gates rather than reading them off a type, so the rule can be
+ * exercised on its own and a new gate can be tried without a connection type
+ * to hang it on. `validConfig` below is the registry-aware door, and is what
+ * everything in the product actually calls.
  */
-export function validConfig(
-  type: ConnectionType,
+export function gatedConfig(
+  what: string,
+  gates: Readonly<Record<string, ConfigDemand>>,
   config: unknown,
 ): Record<string, string> {
-  const gates = descriptorOf(type).config;
-  const demanded = Object.keys(gates);
+  // Optional keys say so, so a caller reading a refusal is never left thinking
+  // egma wants a value it is happy to do without.
+  const held = Object.entries(gates)
+    .map(([key, demand]) => (isDemanded(demand) ? key : `${key} (optional)`))
+    .join(", ");
 
   if (typeof config !== "object" || config === null || Array.isArray(config)) {
     throw new AgentWriteRefusedError(
       "not_admitted",
-      `a ${type} connection's config is an object holding ${demanded.join(", ")}`,
+      `${what}'s config is an object holding ${held}`,
     );
   }
 
   for (const key of Object.keys(config)) {
-    if (!(key in gates)) {
+    // The gates' own keys, never what a prototype also answers to: a config
+    // sent with `constructor` in it is a typo like any other, and treating it
+    // as known would be the one unknown key that got dropped in silence.
+    if (!Object.hasOwn(gates, key)) {
       throw new AgentWriteRefusedError(
         "not_admitted",
-        `a ${type} connection's config has no key "${key}"; it holds ` +
-          demanded.join(", "),
+        `${what}'s config has no key "${key}"; it holds ${held}`,
       );
     }
   }
 
   const stored: Record<string, string> = {};
-  for (const [key, gate] of Object.entries(gates)) {
+  for (const [key, demand] of Object.entries(gates)) {
     const value = (config as Record<string, unknown>)[key];
     if (value === undefined) {
+      if (!isDemanded(demand)) continue;
       throw new AgentWriteRefusedError(
         "not_admitted",
-        `a ${type} connection's config needs ${key}`,
+        `${what}'s config needs ${key}`,
       );
     }
-    stored[key] = gate(key, value);
+    stored[key] = gateOf(demand)(key, value);
   }
   return stored;
+}
+
+/** The config as it will be stored, gated by the type's own registry entry. */
+export function validConfig(
+  type: ConnectionType,
+  config: unknown,
+): Record<string, string> {
+  return gatedConfig(`a ${type} connection`, descriptorOf(type).config, config);
 }
 
 /**
