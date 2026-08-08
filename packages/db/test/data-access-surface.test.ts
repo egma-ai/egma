@@ -195,7 +195,6 @@ const CONTEXT_REQUIRING = [
   "removeConnection",
   "reopenGradingJob",
   "removeMember",
-  "resolveConnectionCredentials",
   // The second secret egma holds, on the first one's terms: the read answers a
   // reference and a hint, and this is the one door to the plaintext behind it.
   "resolveJudgeKey",

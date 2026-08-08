@@ -245,16 +245,17 @@ export async function getJudgeConfiguration(
  * The one door to the judge key's plaintext, and **egma's own grading engine is
  * the only thing that may knock.**
  *
- * The gate is narrower than a role, on purpose. `resolveConnectionCredentials`
- * asks for the run-starter's permission because resolving a connection's
- * credential *is* starting to act with it; the same reasoning lands somewhere
- * else here, because the only thing egma ever does with a judge key is judge,
- * and the only thing that judges is the grading service. So the check is on how
- * the caller came to exist rather than on what their role permits: a context
- * built from a grading claim says `engine` on its face, and every other context
- * in the product — a person's session, an API key, a `viewer` and an `admin`
- * alike — is refused. There is no product surface that hands a customer their
- * own key back, and this is what keeps it that way while roles move around.
+ * The gate is narrower than a role, on purpose: the only thing egma ever does
+ * with a judge key is judge, and the only thing that judges is the grading
+ * service. So the check is on how the caller came to exist rather than on what
+ * their role permits: a context built from a grading claim says `engine` on its
+ * face, and every other context in the product — a person's session, an API
+ * key, a `viewer` and an `admin` alike — is refused. There is no product
+ * surface that hands a customer their own key back, and this is what keeps it
+ * that way while roles move around. The other secret egma replays — a
+ * connection's credentials, on the dispatch path — sits behind
+ * `resolveSimulationConnection`, the same shape of door demanding `simulator`
+ * for the same reason.
  *
  * The reference is checked against the project the context is already narrowed
  * to, so a claim for one project cannot resolve another's key even if something

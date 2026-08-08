@@ -11,7 +11,6 @@ import {
   listConnections,
   NotPermittedError,
   removeConnection,
-  resolveConnectionCredentials,
   updateAgent,
   updateConnection,
   type Agent,
@@ -406,13 +405,6 @@ describe("deleting an agent", () => {
     ).toBeUndefined();
     expect(
       await removeConnection(actingIn(acme.deleting), wired.id, attached.id),
-    ).toBeUndefined();
-    expect(
-      await resolveConnectionCredentials(
-        actingIn(acme.deleting),
-        wired.id,
-        attached.id,
-      ),
     ).toBeUndefined();
     expect(
       await addConnection(actingIn(acme.deleting), wired.id, retellConnection()),

@@ -246,7 +246,6 @@ export {
   listConnections,
   registerAgent,
   removeConnection,
-  resolveConnectionCredentials,
   updateAgent,
   updateConnection,
   type Agent,

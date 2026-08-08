@@ -13,6 +13,7 @@ import {
   removeConnection,
   resolveSimulationConnection,
   startRun,
+  updateConnection,
   type AuthContext,
   type SimulationClaim,
 } from "@egma/db";
@@ -381,5 +382,23 @@ describe("the connection door", () => {
       agentId: restored.id,
       connectionId: restored.connection?.id ?? "",
     };
+  });
+
+  it("unseals what a rotation resealed, trimmed as it was stored", async () => {
+    const { simulationId } = await oneQueuedSimulation(actingAsAcme(), acmeSeed);
+
+    // Rotated between the queueing and the claim — with a padded paste, the
+    // way a rotation actually arrives — because credentials are the one thing
+    // a claim reads live: connections are deliberately unversioned, and a
+    // key rotated mid-run must be the key the next conversation dials with.
+    await updateConnection(actingAsAcme(), acmeSeed.agentId, acmeSeed.connectionId, {
+      credentials: { apiKey: "  retell-secret-rotated-9999ABCD  " },
+    });
+
+    const claim = await claimOne(simulationId);
+    const reached = await resolveSimulationConnection(claim.auth, claim.id);
+    expect(reached?.credentials).toEqual({
+      apiKey: "retell-secret-rotated-9999ABCD",
+    });
   });
 });

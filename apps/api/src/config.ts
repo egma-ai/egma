@@ -1,3 +1,4 @@
+import { SERVICE_TOKEN_PREFIX } from "./auth/service-token.ts";
 import type { SmtpSettings } from "./auth/email.ts";
 
 export type Config = {
@@ -204,18 +205,19 @@ export function loadConfig(
         "the simulator shows this API to claim simulation work, and claim " +
         "answers carry customers' live connection credentials — so the door " +
         "refuses to exist unguarded. Set the same value on the api and " +
-        "simulator containers: egma_st_ followed by `openssl rand -hex 32`.",
+        `simulator containers: ${SERVICE_TOKEN_PREFIX} followed by ` +
+        "`openssl rand -hex 32`.",
     );
   }
   // The prefix is checked at startup rather than discovered as a mystery
   // 401: the claim door only reads bearers that start with it, so a token
   // without it would be configured and yet never match anything.
-  if (!simulatorServiceToken.startsWith("egma_st_")) {
+  if (!simulatorServiceToken.startsWith(SERVICE_TOKEN_PREFIX)) {
     throw new Error(
-      "EGMA_SIMULATOR_SERVICE_TOKEN must start with egma_st_, so a leaked " +
-        "service token is recognisable to secret scanners and can never be " +
-        "mistaken for a customer key. Use egma_st_ followed by " +
-        "`openssl rand -hex 32`.",
+      `EGMA_SIMULATOR_SERVICE_TOKEN must start with ${SERVICE_TOKEN_PREFIX}, ` +
+        "so a leaked service token is recognisable to secret scanners and " +
+        "can never be mistaken for a customer key. Use " +
+        `${SERVICE_TOKEN_PREFIX} followed by \`openssl rand -hex 32\`.`,
     );
   }
 

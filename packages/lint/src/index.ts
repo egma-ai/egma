@@ -126,8 +126,8 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
  */
 const WORK_DISPATCHING = [
   "claimGradingJobs",
-  "watchGradingWork",
   "claimSimulations",
+  "watchGradingWork",
 ];
 
 /**
