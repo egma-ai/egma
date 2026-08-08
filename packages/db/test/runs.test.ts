@@ -24,6 +24,7 @@ import {
   markSimulationCanceled,
   NotPermittedError,
   recordSimulationHeartbeat,
+  resolveSimulationStanding,
   startRun,
   startSimulation,
   sweepOrphanedSimulations,
@@ -837,6 +838,197 @@ describe("the lifecycle, conducted by a claimant", () => {
     expect(kept?.transcript).toEqual([{ speaker: "agent", text: "Goodbye." }]);
     expect(kept?.endingReason).toBe("agent_ended");
     expect(kept?.measuredAudioBandHertz).toBeNull();
+  });
+});
+
+describe("the summary facts a terminal landing carries", () => {
+  const simulator = "simulator-blue-1";
+
+  async function runningOne(): Promise<{
+    started: StartedRun;
+    simulationId: string;
+  }> {
+    const started = await startRun(actingAsAcme(), aRun());
+    const simulationId = (await claimOwn(started.id)).id;
+    await startSimulation(actingAsAcme(), simulationId, simulator);
+    return { started, simulationId };
+  }
+
+  it("lands the turn count, the provider's reference, and the reported moments", async () => {
+    const { simulationId } = await runningOne();
+
+    const startedAt = new Date("2026-08-05T09:00:00.000Z");
+    const endedAt = new Date("2026-08-05T09:02:10.551Z");
+    const landed = await completeSimulation(actingAsAcme(), simulationId, simulator, {
+      endingReason: "persona_concluded",
+      transcript: [],
+      turnCount: 14,
+      providerReference: "chat_5d1f9a3b7c",
+      startedAt,
+      endedAt,
+    });
+
+    expect(landed?.turnCount).toBe(14);
+    expect(landed?.providerReference).toBe("chat_5d1f9a3b7c");
+    // The moments the conduction measured, not the moments the report
+    // happened to arrive: a retried report must not stretch the record.
+    expect(landed?.startedAt).toEqual(startedAt);
+    expect(landed?.endedAt).toEqual(endedAt);
+
+    const kept = await getSimulation(actingAsAcme(), simulationId);
+    expect(kept?.turnCount).toBe(14);
+    expect(kept?.providerReference).toBe("chat_5d1f9a3b7c");
+  });
+
+  it("keeps the stamps it made when a report brings no moments of its own", async () => {
+    const { simulationId } = await runningOne();
+
+    const landed = await completeSimulation(actingAsAcme(), simulationId, simulator, {
+      endingReason: "agent_ended",
+      transcript: [],
+    });
+
+    expect(landed?.turnCount).toBeNull();
+    expect(landed?.providerReference).toBeNull();
+    expect(landed?.startedAt).toBeInstanceOf(Date);
+    expect(landed?.endedAt).toBeInstanceOf(Date);
+  });
+
+  it("lands what a failed simulation still measured before it broke", async () => {
+    const { simulationId } = await runningOne();
+
+    const landed = await failSimulation(actingAsAcme(), simulationId, simulator, {
+      reason: "simulator_error",
+      turnCount: 3,
+      providerReference: "chat_9e8d7c6b5a",
+    });
+
+    expect(landed?.status).toBe("failed");
+    expect(landed?.turnCount).toBe(3);
+    expect(landed?.providerReference).toBe("chat_9e8d7c6b5a");
+  });
+
+  it("lands what a canceled conversation had by the time it stopped", async () => {
+    const { started, simulationId } = await runningOne();
+    await cancelRun(actingAsAcme(), started.id);
+
+    const landed = await markSimulationCanceled(
+      actingAsAcme(),
+      simulationId,
+      simulator,
+      { turnCount: 6, providerReference: "chat_1a2b3c4d5e" },
+    );
+
+    expect(landed?.status).toBe("canceled");
+    // The cancel intent is its own record; the reason column stays empty.
+    expect(landed?.endingReason).toBeNull();
+    expect(landed?.turnCount).toBe(6);
+    expect(landed?.providerReference).toBe("chat_1a2b3c4d5e");
+  });
+
+  it("lands a voice conversation's band and recording beside them", async () => {
+    // The seeded connection speaks chat, and the row would refuse audio facts
+    // on it — so the voice landing gets a voice connection of its own.
+    const voice = await addConnection(actingAsAcme(), agentId, {
+      type: "retell",
+      modality: "voice",
+      config: { retellAgentId: "agent_in_retell_voice" },
+      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+    });
+    if (voice === undefined) throw new Error("the voice connection was not attached");
+    const started = await startRun(
+      actingAsAcme(),
+      aRun({ connectionId: voice.id }),
+    );
+    const simulationId = (await claimOwn(started.id)).id;
+    await startSimulation(actingAsAcme(), simulationId, simulator);
+
+    const landed = await completeSimulation(actingAsAcme(), simulationId, simulator, {
+      endingReason: "agent_ended",
+      transcript: [],
+      measuredAudioBandHertz: 48_000,
+      recordingReference: `${simulationId}/dual-channel.wav`,
+      turnCount: 22,
+      providerReference: "CA7e2b9c1d4f6a8e0b",
+    });
+
+    expect(landed?.measuredAudioBandHertz).toBe(48_000);
+    expect(landed?.recordingReference).toBe(`${simulationId}/dual-channel.wav`);
+    expect(landed?.turnCount).toBe(22);
+  });
+
+  it("refuses a turn count that is not a count", async () => {
+    const { simulationId } = await runningOne();
+
+    for (const turnCount of [-1, 2.5]) {
+      await expect(
+        completeSimulation(actingAsAcme(), simulationId, simulator, {
+          endingReason: "persona_concluded",
+          transcript: [],
+          turnCount,
+        }),
+      ).rejects.toThrow(/turn count/);
+    }
+
+    await failSimulation(actingAsAcme(), simulationId, simulator, {
+      reason: "simulator_error",
+    });
+  });
+});
+
+describe("where a simulation stands, answered for the service's own routes", () => {
+  const simulator = "simulator-blue-1";
+
+  it("answers the lifecycle stamps and a context narrowed to the row's own tenancy", async () => {
+    const started = await startRun(actingAsAcme(), aRun());
+    const claimed = await claimOwn(started.id);
+
+    const standing = await resolveSimulationStanding(claimed.id);
+    expect(standing?.id).toBe(claimed.id);
+    expect(standing?.runId).toBe(started.id);
+    expect(standing?.status).toBe("claimed");
+    expect(standing?.claimedBy).toBe(simulator);
+    expect(standing?.endingReason).toBeNull();
+    expect(standing?.cancelRequestedAt).toBeNull();
+    expect(standing?.modality).toBe("chat");
+    // Built from the row and from nothing the caller said — the same context
+    // the claim itself would have handed over.
+    expect(standing?.auth).toEqual({
+      userId: "simulator",
+      organizationId: acme.organization,
+      projectId: acme.project,
+      role: "member",
+      via: "simulator",
+    });
+
+    // Lifecycle stamps and identifiers, and no content: what a customer
+    // wrote is read afterwards, through the scoped surface, under `auth`.
+    expect(standing).not.toHaveProperty("transcript");
+    expect(standing).not.toHaveProperty("events");
+    expect(standing).not.toHaveProperty("metrics");
+
+    await failSimulation(standing?.auth ?? actingAsAcme(), claimed.id, simulator, {
+      reason: "simulator_error",
+    });
+  });
+
+  it("follows the row as it moves, terminal facts included", async () => {
+    const started = await startRun(actingAsAcme(), aRun());
+    const claimed = await claimOwn(started.id);
+    await startSimulation(actingAsAcme(), claimed.id, simulator);
+    await completeSimulation(actingAsAcme(), claimed.id, simulator, {
+      endingReason: "limit_reached",
+      transcript: [],
+    });
+
+    const standing = await resolveSimulationStanding(claimed.id);
+    expect(standing?.status).toBe("completed");
+    expect(standing?.endingReason).toBe("limit_reached");
+  });
+
+  it("answers undefined for an id this deployment never issued", async () => {
+    expect(await resolveSimulationStanding(newId("sim"))).toBeUndefined();
+    expect(await resolveSimulationStanding("not-an-id-at-all")).toBeUndefined();
   });
 });
 

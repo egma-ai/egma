@@ -60,18 +60,21 @@ import { within } from "./within.ts";
  * machinery is gated by `start_and_cancel_runs` throughout, because claiming
  * and reporting a simulation *is* conducting the run somebody started.
  *
- * Three exceptions, drawn on the grading queue's precedent and as narrowly:
- * `claimSimulations`, `recordSimulationHeartbeat` and
- * `sweepOrphanedSimulations` take no context and cannot be given one, because
- * each stands where the simulator does — behind every organization on the
- * deployment at once, with no honest credential to give it. The claim hands
- * work out; the heartbeat keeps one dispatch alive and steers it; the sweep
- * accounts for dispatches whose simulator died. All three reach only rows
- * egma's own machinery wrote — the queue, and the claims made from it — and
- * carry out identifiers and no content. The claim hands back with every row
- * the context the conducting is then done under, built from the row's own
- * tenancy and from nothing the service said; the other two derive their
- * narrowness the same way, from the row rather than from any caller.
+ * Four exceptions, drawn on the grading queue's precedent and as narrowly:
+ * `claimSimulations`, `recordSimulationHeartbeat`, `sweepOrphanedSimulations`
+ * and `resolveSimulationStanding` take no context and cannot be given one,
+ * because each stands where the simulator does — behind every organization on
+ * the deployment at once, with no honest credential to give it. The claim
+ * hands work out; the heartbeat keeps one dispatch alive and steers it; the
+ * sweep accounts for dispatches whose simulator died; the standing resolver
+ * answers where one dispatched row now stands, for the calls that come back
+ * about it. All four reach only rows egma's own machinery wrote — the queue,
+ * and the claims made from it — and carry out identifiers and no content.
+ * The claim hands back with every row the context the conducting is then
+ * done under, built from the row's own tenancy and from nothing the service
+ * said; the standing resolver derives that same context again from the row,
+ * and the other two derive their narrowness the same way, from the row
+ * rather than from any caller.
  * `resolveSimulationConnection` and `failSimulationDispatch` are the two
  * doors only such a claim-minted context may open — the secret the dispatch
  * needs, and the honest landing when the dispatch cannot happen — and each
@@ -194,6 +197,10 @@ export type Simulation = {
   readonly events: unknown;
   readonly metrics: unknown;
   readonly recordingReference: string | null;
+  /** How many transcript turns the conversation reached, both speakers counted. */
+  readonly turnCount: number | null;
+  /** The platform's own identifier for the exchange — the one join to the agent's telemetry. */
+  readonly providerReference: string | null;
   readonly createdAt: Date;
 };
 
@@ -216,15 +223,39 @@ export type ConductedSimulation = Simulation & {
 export type CompletedEndingReason = (typeof COMPLETED_ENDING_REASONS)[number];
 export type FailedEndingReason = (typeof FAILED_ENDING_REASONS)[number];
 
+/**
+ * The summary facts any terminal landing may carry, whatever its status: what
+ * the conversation reached, how the platform names it, what the audio
+ * measured, and the two moments the conduction itself stamped. Each is
+ * optional because a report may honestly hold none — a chat has no band, a
+ * plug may offer no reference — and everything given lands on the row as the
+ * terminal record.
+ *
+ * The moments are the simulator's own, not the arrival's: a report retried
+ * through a partition must not stretch the record by however long delivery
+ * took, so a landing given them writes them over its own stamps. Given is
+ * the caller's word to keep honest: the report door hands a pair over
+ * exactly when it can be true — an `ended_at` before its `started_at` is
+ * declined there, and the landing's own stamps stand for both.
+ */
+export type SimulationSummaryFacts = {
+  /** How many transcript turns were reached, both speakers counted. */
+  readonly turnCount?: number | undefined;
+  /** The platform's own identifier for the exchange, verbatim. */
+  readonly providerReference?: string | undefined;
+  /** Measured, never declared; a chat simulation reports none. */
+  readonly measuredAudioBandHertz?: number | undefined;
+  readonly recordingReference?: string | undefined;
+  readonly startedAt?: Date | undefined;
+  readonly endedAt?: Date | undefined;
+};
+
 /** What the simulator reports about a conversation that happened. */
-export type SimulationReport = {
+export type SimulationReport = SimulationSummaryFacts & {
   readonly endingReason: CompletedEndingReason;
   readonly transcript: unknown;
   readonly events?: unknown;
   readonly metrics?: unknown;
-  /** Measured, never declared; a chat simulation reports none. */
-  readonly measuredAudioBandHertz?: number | undefined;
-  readonly recordingReference?: string | undefined;
 };
 
 /**
@@ -239,7 +270,7 @@ export type SimulationReport = {
  * handed over, which a simulator with something to report evidently
  * received.
  */
-export type SimulationFailure = {
+export type SimulationFailure = SimulationSummaryFacts & {
   readonly reason: Exclude<FailedEndingReason, "orphaned" | "dispatch_failed">;
   readonly transcript?: unknown;
   readonly events?: unknown;
@@ -295,6 +326,8 @@ const SIMULATION_COLUMNS = {
   events: simulation.events,
   metrics: simulation.metrics,
   recordingReference: simulation.recordingReference,
+  turnCount: simulation.turnCount,
+  providerReference: simulation.providerReference,
   createdAt: simulation.createdAt,
 } as const;
 
@@ -358,6 +391,47 @@ const REPORTABLE_FAILURE_REASONS: readonly FailedEndingReason[] =
   FAILED_ENDING_REASONS.filter(
     (reason) => reason !== "orphaned" && reason !== "dispatch_failed",
   );
+
+/**
+ * The summary facts as one landing will write them: checked, trimmed, and
+ * holding only the keys that were actually given — an absent fact must not
+ * become a written null over a column another path may already have filled.
+ * One helper, because all three landings owe the same facts on the same
+ * terms, and three copies of the checks would drift.
+ */
+function summaryFactsWrite(
+  facts: SimulationSummaryFacts,
+): Record<string, unknown> {
+  const write: Record<string, unknown> = {};
+
+  const { turnCount, providerReference, measuredAudioBandHertz } = facts;
+  if (turnCount !== undefined) {
+    if (!Number.isInteger(turnCount) || turnCount < 0) {
+      throw new Error(
+        "a turn count is a whole number of turns, zero or more",
+      );
+    }
+    write.turnCount = turnCount;
+  }
+  if (providerReference !== undefined) {
+    write.providerReference = providerReference.trim() || null;
+  }
+  if (measuredAudioBandHertz !== undefined) {
+    if (!Number.isInteger(measuredAudioBandHertz) || measuredAudioBandHertz <= 0) {
+      throw new Error(
+        "a measured audio band is a positive whole number of hertz",
+      );
+    }
+    write.measuredAudioBandHertz = measuredAudioBandHertz;
+  }
+  if (facts.recordingReference !== undefined) {
+    write.recordingReference = facts.recordingReference.trim() || null;
+  }
+  if (facts.startedAt !== undefined) write.startedAt = facts.startedAt;
+  if (facts.endedAt !== undefined) write.endedAt = facts.endedAt;
+
+  return write;
+}
 
 /**
  * The shape guards on every read. Stored jsonb comes back `unknown`, and a row
@@ -1682,6 +1756,82 @@ export async function claimSimulations(
 }
 
 /**
+ * Where one simulation stands, and the context its conducting continues
+ * under — what the report and heartbeat doors read before applying anything
+ * a simulator says about a row.
+ *
+ * Lifecycle stamps and identifiers, and no content: enough to tell an
+ * unknown simulation from a moved one, a duplicate from a conflict, and the
+ * claimant whose word the row takes — and nothing a customer wrote. What the
+ * work itself needs is read afterwards, through the scoped surface, under
+ * the context answered here.
+ *
+ * **It takes no `AuthContext` and cannot be given one**, on the claim's own
+ * discipline, one step later in the same lifecycle: the simulator holds no
+ * credential, so its calls about a claimed row arrive with the service
+ * token — which resolves to nobody — and the row itself is what names whose
+ * conducting this is. The context comes back built from the row's own
+ * tenancy and from nothing the caller said, exactly as the claim built it,
+ * and it is the context every write about the row then goes through. The
+ * one argument is the simulation's id — an identifier the claim itself
+ * handed out — and there is no argument by which a caller could name a
+ * customer.
+ */
+export async function resolveSimulationStanding(
+  simulationId: string,
+): Promise<SimulationStanding | undefined> {
+  const [row] = await db()
+    .select({
+      id: simulation.id,
+      runId: simulation.runId,
+      organizationId: simulation.organizationId,
+      projectId: simulation.projectId,
+      modality: simulation.modality,
+      status: simulation.status,
+      endingReason: simulation.endingReason,
+      claimedBy: simulation.claimedBy,
+      cancelRequestedAt: simulation.cancelRequestedAt,
+    })
+    .from(simulation)
+    .where(eq(simulation.id, simulationId))
+    .limit(1);
+
+  if (row === undefined) return undefined;
+
+  return {
+    id: row.id,
+    runId: row.runId,
+    modality: row.modality as Modality,
+    status: row.status as SimulationStatus,
+    endingReason: row.endingReason as SimulationEndingReason | null,
+    claimedBy: row.claimedBy,
+    cancelRequestedAt: row.cancelRequestedAt,
+    auth: conductingContext(row.organizationId, row.projectId),
+  };
+}
+
+/**
+ * What `resolveSimulationStanding` answers with: the row's lifecycle stamps,
+ * and the narrowed context every write about the row goes through.
+ */
+export type SimulationStanding = {
+  readonly id: string;
+  readonly runId: string;
+  readonly modality: Modality;
+  readonly status: SimulationStatus;
+  readonly endingReason: SimulationEndingReason | null;
+  /** The row's conductor — the claimant whose word the row takes. */
+  readonly claimedBy: string | null;
+  readonly cancelRequestedAt: Date | null;
+  /**
+   * Narrowed to this simulation's own organization and project, built here
+   * from the row and from nothing the caller said — the claim's context,
+   * derived again for the calls that come back later.
+   */
+  readonly auth: AuthContext;
+};
+
+/**
  * How the simulator reaches the agent of one claimed simulation: the
  * connection's type, its non-secret config, and the credentials unsealed — or
  * null where the customer supplies no secret for the type.
@@ -1882,7 +2032,11 @@ async function landSimulation(
   claimant: string,
   landing: {
     readonly from: readonly SimulationStatus[];
-    /** Everything this landing writes beside `ended_at` and the heartbeat. */
+    /**
+     * Everything this landing writes beside the heartbeat — including
+     * `ended_at`, when the report carried the conduction's own moment; the
+     * stamp below is only the fallback for a report that brought none.
+     */
     readonly write: Record<string, unknown>;
     /** Any further condition the landing requires of the row. */
     readonly onlyWhere?: SQL | undefined;
@@ -1892,7 +2046,7 @@ async function landSimulation(
   return db().transaction(async (tx) => {
     const [row] = await tx
       .update(simulation)
-      .set({ ...landing.write, endedAt: now, heartbeatAt: now })
+      .set({ endedAt: now, ...landing.write, heartbeatAt: now })
       .where(
         within(
           auth,
@@ -1935,7 +2089,7 @@ async function landSimulation(
 /**
  * A conversation happened and this is its record: `running → completed`, the
  * report written once with the terminal facts — how it ended, the transcript,
- * the measured audio band that can never be backfilled.
+ * the summary facts, the measured audio band that can never be backfilled.
  */
 export async function completeSimulation(
   auth: AuthContext,
@@ -1950,10 +2104,6 @@ export async function completeSimulation(
       `"${report.endingReason}" is not a way a conversation ends`,
     );
   }
-  const band = report.measuredAudioBandHertz;
-  if (band !== undefined && (!Number.isInteger(band) || band <= 0)) {
-    throw new Error("a measured audio band is a positive whole number of hertz");
-  }
 
   return landSimulation(auth, id, claimant, {
     from: ["running"],
@@ -1963,8 +2113,7 @@ export async function completeSimulation(
       transcript: report.transcript ?? null,
       events: report.events ?? null,
       metrics: report.metrics ?? null,
-      measuredAudioBandHertz: band ?? null,
-      recordingReference: report.recordingReference?.trim() || null,
+      ...summaryFactsWrite(report),
     },
   });
 }
@@ -1997,6 +2146,7 @@ export async function failSimulation(
       transcript: failure.transcript ?? null,
       events: failure.events ?? null,
       metrics: failure.metrics ?? null,
+      ...summaryFactsWrite(failure),
     },
   });
 }
@@ -2049,17 +2199,23 @@ export async function failSimulationDispatch(
  * recorded — a simulator abandoning a conversation nobody canceled is a
  * failure, not a cancellation, and is refused by the same guarded update
  * that checks everything else.
+ *
+ * A canceled conversation still landed somewhere, so the landing takes the
+ * summary facts the report carried — what had been reached by the time the
+ * directive was honored. Never an ending reason: the cancel intent is its
+ * own record, and the row's shape holds it to that.
  */
 export async function markSimulationCanceled(
   auth: AuthContext,
   id: string,
   claimant: string,
+  facts: SimulationSummaryFacts = {},
 ): Promise<Simulation | undefined> {
   authorize(auth, "start_and_cancel_runs", here(auth));
 
   return landSimulation(auth, id, claimant, {
     from: ["claimed", "running"],
-    write: { status: "canceled" },
+    write: { status: "canceled", ...summaryFactsWrite(facts) },
     onlyWhere: isNotNull(simulation.cancelRequestedAt),
   });
 }

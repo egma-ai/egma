@@ -404,6 +404,39 @@ describe("a simulation's shape", () => {
     );
   });
 
+  it("holds the summary facts to ended rows, exactly as the report's", async () => {
+    await expect(
+      insertSimulation("running", { turn_count: 6 }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+    await expect(
+      insertSimulation("claimed", { provider_reference: "chat_5d1f9a3b7c" }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+
+    // On a landed row they are exactly what the columns are for — canceled
+    // included, where the reason stays empty but the facts still landed.
+    await expect(
+      insertSimulation("completed", {
+        turn_count: 14,
+        provider_reference: "chat_5d1f9a3b7c",
+      }),
+    ).resolves.toBeDefined();
+    await expect(
+      insertSimulation("canceled", { turn_count: 0 }),
+    ).resolves.toBeDefined();
+  });
+
+  it("refuses a turn count below zero", async () => {
+    await expect(
+      insertSimulation("completed", { turn_count: -1 }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+  });
+
   it("holds audio facts to voice: a chat cannot carry a band or a recording", async () => {
     await expect(
       insertSimulation("completed", { measured_audio_band_hertz: 48_000 }),

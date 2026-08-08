@@ -370,6 +370,21 @@ export const simulation = pgTable(
     metrics: jsonb("metrics"),
     /** The dual-channel recording's reference in the blob store, voice only. */
     recordingReference: text("recording_reference"),
+    /**
+     * How many transcript turns the conversation reached, both speakers
+     * counted — a terminal fact off the report, kept on the row because it is
+     * read alone to answer for one simulation. Null until a landing carries
+     * one, and null forever on a row whose report never did.
+     */
+    turnCount: integer("turn_count"),
+    /**
+     * The platform's own identifier for this exchange on the connection's
+     * side — a Retell chat id, a telephony provider's id for the dialed leg.
+     * The one join between egma's record and the agent's own telemetry, since
+     * no trace context crosses an audio channel. Verbatim from the report,
+     * never parsed; null when the plug had none to offer.
+     */
+    providerReference: text("provider_reference"),
     createdAt: createdAt(),
   },
   (table) => [
@@ -462,6 +477,18 @@ export const simulation = pgTable(
         or (${table.transcript} is null and ${table.events} is null
           and ${table.metrics} is null and ${table.recordingReference} is null
           and ${table.measuredAudioBandHertz} is null)`,
+    ),
+    // The two summary facts are terminal facts too; a check of their own
+    // beside the report's rather than a rewrite of it, because they arrived
+    // by a later migration and an additive column takes an additive guard.
+    check(
+      "simulation_summary_facts_only_when_ended",
+      sql`${table.endedAt} is not null
+        or (${table.turnCount} is null and ${table.providerReference} is null)`,
+    ),
+    check(
+      "simulation_turn_count_is_a_count",
+      sql`${table.turnCount} is null or ${table.turnCount} >= 0`,
     ),
     // A chat has no audio: a measured band or a recording on one would be a
     // number nothing produced, so the row refuses to hold it.

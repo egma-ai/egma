@@ -103,9 +103,10 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
  * key minted inside one customer would either see too little to do the job or
  * be shared between customers to do it. So each is handed work instead of
  * asked for a credential — the claims hand it out, and the simulator's
- * heartbeat and orphan sweep stand on the same ground for the same reason:
- * a beat arrives bearing the service token, which resolves to nobody, and
- * silence is noticed by nobody in particular.
+ * heartbeat, orphan sweep and standing resolver stand on the same ground for
+ * the same reason: a beat arrives bearing the service token, which resolves
+ * to nobody, silence is noticed by nobody in particular, and a report about
+ * a held row arrives from the same nobody the row must answer for.
  *
  * `claimSimulations` was added on 2026-08-08 with the simulator's claim door,
  * deliberately and after the rule stopped the build: the tenancy-scoped claim
@@ -117,6 +118,13 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
  * egma itself wrote, and the sweep moves only rows the claim machinery
  * stamped, filing each orphan's grading work under the tenancy the row
  * itself carries.
+ *
+ * `resolveSimulationStanding` was added the same day with the report door, on
+ * the same terms one step later in the same lifecycle: a simulator calling
+ * back about a row it already holds still has no credential, so the row is
+ * looked up by the id the claim itself handed out, and the answer carries the
+ * lifecycle stamps and the same narrowed context the claim built — which is
+ * what every write about the row then goes through.
  *
  * This category is narrower than it looks, and the rule enforces the property
  * that makes it safe: **nothing here may take an argument by which a caller
@@ -133,12 +141,13 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
  * every claim arrives with the `AuthContext` narrowed to that row's own
  * organization and project — which is what the work itself goes through.
  *
- * A sixth name here is a decision somebody has to make on purpose.
+ * A seventh name here is a decision somebody has to make on purpose.
  */
 const WORK_DISPATCHING = [
   "claimGradingJobs",
   "claimSimulations",
   "recordSimulationHeartbeat",
+  "resolveSimulationStanding",
   "sweepOrphanedSimulations",
   "watchGradingWork",
 ];
