@@ -100,6 +100,30 @@ const FAILED_ENDING_OF: Record<
   error: "simulator_error",
 };
 
+/**
+ * The reported moments, trusted exactly when they can be true.
+ *
+ * A landing given the conduction's own moments writes them over its server
+ * stamps, so a retried report cannot stretch the record — but a document
+ * whose `ended_at` precedes its `started_at` describes an interval that
+ * never existed on any clock, and writing it verbatim would put an
+ * impossible duration on the row forever. Refusing the document would be
+ * worse: the reporter treats a final refusal as final, and punishing
+ * delivery for a skewed clock would turn a truthful conversation into a
+ * sweep's false orphan. So an incoherent pair is answered with `undefined`,
+ * the landing falls back to its own server stamps for both moments, and the
+ * caller logs the pair it declined to believe.
+ */
+function reportedMoments(facts: {
+  readonly started_at: string;
+  readonly ended_at: string;
+}): { readonly startedAt: Date; readonly endedAt: Date } | undefined {
+  const startedAt = new Date(facts.started_at);
+  const endedAt = new Date(facts.ended_at);
+  if (endedAt.getTime() < startedAt.getTime()) return undefined;
+  return { startedAt, endedAt };
+}
+
 /** The terminal facts, as the landings take them. */
 function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
   const facts = event.facts;
@@ -115,8 +139,8 @@ function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
           measuredAudioBandHertz: facts.audio.measured_sample_rate_hz,
           recordingReference: facts.audio.recording,
         }),
-    startedAt: new Date(facts.started_at),
-    endedAt: new Date(facts.ended_at),
+    // Absent when incoherent, so the landing's own stamps stand for both.
+    ...(reportedMoments(facts) ?? {}),
   };
 }
 
@@ -309,8 +333,10 @@ async function applyRunning(
 /**
  * The terminal three — the landing, with the facts mapped in. A resend
  * matching the row's terminal state is absorbed; a document that would
- * rewrite a terminal row is refused; and a `canceled` nobody asked for fails
- * the landing's own guard and is refused honestly rather than recorded.
+ * rewrite a terminal row is refused; a `canceled` nobody asked for fails
+ * the landing's own guard and is refused honestly rather than recorded —
+ * and a `canceled` whose intent landed between the attempt and the answer
+ * is retried once rather than refused for being early.
  */
 async function applyTerminal(
   reply: FastifyReply,
@@ -345,6 +371,20 @@ async function applyTerminal(
     );
   }
 
+  // Said out loud when the reported pair cannot be believed: the landing
+  // below will stand on its own stamps, and the record of why is this line.
+  if (reportedMoments(facts) === undefined) {
+    reply.log.warn(
+      {
+        simulationId: standing.id,
+        reportedStartedAt: facts.started_at,
+        reportedEndedAt: facts.ended_at,
+      },
+      `simulation ${standing.id} reported ended_at before started_at; ` +
+        `landing with the server's own stamps for both moments`,
+    );
+  }
+
   const landed = await applyLanding(standing, event, facts.ending);
   if (landed !== undefined) return landed.status;
 
@@ -354,6 +394,28 @@ async function applyTerminal(
   const moved = await resolveSimulationStanding(standing.id);
   if (moved !== undefined && matchesTerminalRow(event, moved)) {
     return moved.status;
+  }
+  // A cancel that raced this document: at the attempt the intent was not
+  // yet stamped, and by this read it is — the guard's refusal is stale, not
+  // final. One bounded retry lands the transition that is valid at the
+  // moment this request answers; a second failure means the row moved
+  // again, and the freshest reading below says where it went. The route
+  // serves the contract here, not today's runtime — the shipped simulator
+  // cancels only after a directive, which implies the intent was already
+  // stamped, but nothing entitles this door to assume its caller.
+  if (
+    event.status === "canceled" &&
+    moved !== undefined &&
+    (moved.status === "claimed" || moved.status === "running") &&
+    moved.cancelRequestedAt !== null
+  ) {
+    const relanded = await applyLanding(moved, event, facts.ending);
+    if (relanded !== undefined) return relanded.status;
+    const settled = await resolveSimulationStanding(standing.id);
+    if (settled !== undefined && matchesTerminalRow(event, settled)) {
+      return settled.status;
+    }
+    return refusedByTheRecord(reply, settled ?? moved, event.status);
   }
   if (event.status === "canceled" && moved?.cancelRequestedAt === null) {
     return conflict(

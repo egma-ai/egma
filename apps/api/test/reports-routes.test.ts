@@ -376,6 +376,38 @@ describe("the lifecycle lands", () => {
     expect(header.body.failed_count).toBe(0);
   });
 
+  it("declines reported moments that cannot be true, and lands on its own stamps", async () => {
+    const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
+      "reports_skewed_clock",
+    );
+    const before = new Date();
+    const { simulationId } = await aRunningSimulation(key, connectionId, versionId);
+
+    // A skewed clock's confession: contract-valid, impossible on any clock —
+    // the exchange ends before it starts. Refusing it would punish delivery
+    // for the clock and leave a truthful conversation to the sweep, so the
+    // door lands it and simply declines the pair it cannot believe.
+    const answered = await report(simulationId, [
+      terminalEvent("completed", "persona_concluded", {
+        started_at: ENDED_AT,
+        ended_at: STARTED_AT,
+      }),
+    ]);
+    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
+
+    const row = await getSimulation(contextFor(ada, "member"), simulationId);
+    expect(row?.status).toBe("completed");
+    // The server's own stamps stand for both moments: a coherent interval,
+    // inside this test's own wall clock — never the reported 2026-08-05 pair.
+    expect(row?.startedAt?.getTime()).toBeGreaterThanOrEqual(before.getTime());
+    expect(row?.endedAt?.getTime()).toBeGreaterThanOrEqual(
+      row?.startedAt?.getTime() ?? Number.POSITIVE_INFINITY,
+    );
+    // The facts the pair rode in with still land whole.
+    expect(row?.turnCount).toBe(14);
+    expect(row?.providerReference).toBe("chat_5d1f9a3b7c");
+  });
+
   it("lands a voice conversation's measured band and recording reference", async () => {
     const { ada, key, agentId, versionId } = await aCustomerReadyToRun(
       "reports_voice",
@@ -510,6 +542,75 @@ describe("the lifecycle lands", () => {
     const header = await ask(api.app, "GET", `/api/runs/${runId}`, key);
     expect(header.body.status).toBe("canceled");
     expect(header.body.canceled_count).toBe(1);
+  });
+
+  it("retries once when the cancellation lands between the attempt and the answer", async () => {
+    const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
+      "reports_cancel_race",
+    );
+    const { runId, simulationId } = await aRunningSimulation(
+      key,
+      connectionId,
+      versionId,
+    );
+    const asked = await ask(api.app, "POST", `/api/runs/${runId}/cancel`, key);
+    expect(asked.statusCode, JSON.stringify(asked.body)).toBe(200);
+
+    // The race, held open deterministically: a trigger suppresses the first
+    // canceled landing on this row — the update reports no row moved, which
+    // is exactly what the route sees when a cancelRun commits between its
+    // attempt and its re-read — and every later attempt passes. The route
+    // cannot tell this window from the real one; what it must do about it
+    // is the same: read again, see a live row whose cancellation stands,
+    // and retry once rather than refuse a transition that is valid at the
+    // moment it answers.
+    await api.database.sql(
+      "create table report_race_window (id text primary key)",
+    );
+    await api.database.sql(
+      `create function report_race_suppress_once() returns trigger
+       language plpgsql as $$
+       begin
+         if new.status = 'canceled' and old.status <> 'canceled'
+            and not exists (select 1 from report_race_window where id = old.id)
+         then
+           insert into report_race_window values (old.id);
+           return null; -- the attempt sees what a lost race sees: nothing moved
+         end if;
+         return new;
+       end $$`,
+    );
+    await api.database.sql(
+      `create trigger report_race_suppress before update on simulation
+       for each row execute function report_race_suppress_once()`,
+    );
+
+    try {
+      const answered = await report(simulationId, [
+        terminalEvent("canceled", "canceled", { turn_count: 6 }),
+      ]);
+      expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
+      expect(answered.body).toEqual({
+        simulation_id: simulationId,
+        status: "canceled",
+      });
+
+      // The one attempt the window swallowed, and the one retry that landed.
+      const { rows } = await api.database.sql<{ id: string }>(
+        "select id from report_race_window",
+      );
+      expect(rows).toEqual([{ id: simulationId }]);
+
+      const row = await getSimulation(contextFor(ada, "member"), simulationId);
+      expect(row?.status).toBe("canceled");
+      expect(row?.turnCount).toBe(6);
+    } finally {
+      await api.database.sql(
+        "drop trigger report_race_suppress on simulation",
+      );
+      await api.database.sql("drop function report_race_suppress_once()");
+      await api.database.sql("drop table report_race_window");
+    }
   });
 
   it("refuses to call a conversation canceled that nobody asked to cancel", async () => {

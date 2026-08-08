@@ -233,7 +233,10 @@ export type FailedEndingReason = (typeof FAILED_ENDING_REASONS)[number];
  *
  * The moments are the simulator's own, not the arrival's: a report retried
  * through a partition must not stretch the record by however long delivery
- * took, so a landing given them writes them over its own stamps.
+ * took, so a landing given them writes them over its own stamps. Given is
+ * the caller's word to keep honest: the report door hands a pair over
+ * exactly when it can be true — an `ended_at` before its `started_at` is
+ * declined there, and the landing's own stamps stand for both.
  */
 export type SimulationSummaryFacts = {
   /** How many transcript turns were reached, both speakers counted. */
