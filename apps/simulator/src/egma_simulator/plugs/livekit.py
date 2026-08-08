@@ -79,12 +79,6 @@ class LiveKitRoom:
         simulation_id: str,
         driver: Any = None,
     ) -> None:
-        # Which driver holds the room is not the spec's to choose: there
-        # is one, and it is the one below. The keyword is for tests, which
-        # put a room-shaped fake behind the same seam rather than stand up
-        # a LiveKit.
-        driver = driver or LiveKitRoomBackend
-
         if modality != "voice":
             raise PlugError(
                 f"the livekit plug speaks voice only; a {modality!r} "
@@ -94,9 +88,14 @@ class LiveKitRoom:
         # Reading the connection here, before any pipeline starts, is what
         # makes a connection the driver cannot use an honest refusal
         # rather than a failure part-way through an exchange.
+        #
+        # Which driver holds the room is not the spec's to choose: there is
+        # one, and it is the one below. The keyword is for tests, which put
+        # a room-shaped fake behind the same seam rather than stand up a
+        # LiveKit.
         self._band_hz = ROOM_BAND_HZ
         self._backend = _built(
-            driver,
+            driver or LiveKitRoomBackend,
             settings=_read(config, credentials),
             band_hz=self._band_hz,
             simulation_id=simulation_id,
@@ -117,9 +116,9 @@ class LiveKitRoom:
     def backend(self) -> object:
         """The driver holding the room.
 
-        Here for the tests, honestly: the plug seam takes a spec and
-        nothing else, so a test cannot hand in a driver to watch and this
-        is the only way to ask what the exchange was really held in.
+        Here for the tests, honestly: a plug built from a spec alone
+        builds its own driver, and this is the only way to ask which room
+        the exchange was really held in before there is a reference.
         """
         return self._backend
 
