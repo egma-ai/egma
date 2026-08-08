@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 from retell_stub import END_TOOL
 
-from egma_simulator.plugs import AgentReply, PlugError, plug_for
+from egma_simulator.plugs import AgentReply, PlugError, ToolCall, plug_for
 from egma_simulator.plugs.retell import DEFAULT_BASE_URL, END_TOOL_NAMES, RetellChat
 from egma_simulator.redaction import REDACTED
 
@@ -104,9 +104,43 @@ async def test_the_agent_ending_the_exchange_is_read_from_its_end_tool(
         text="Anything else?", ended=False
     )
     # The last reply carries the end-tool invocation: the agent's final
-    # words are still recorded, and the exchange is over.
+    # words are still recorded, the exchange is over, and the call itself
+    # is reported like any other — ending the chat is something the agent
+    # did, and the record of the conversation says so.
     assert await plug.deliver("No, that is everything.") == AgentReply(
-        text="All sorted, goodbye now.", ended=True
+        text="All sorted, goodbye now.",
+        ended=True,
+        tool_calls=(ToolCall(name="end_call", arguments="{}"),),
+    )
+    await plug.close()
+
+
+async def test_the_tools_an_answer_called_are_read_off_it(start_retell_stub):
+    """Retell reports its invocations beside the words, which is what makes
+    a tool call observable from egma's side of the wire at all."""
+    running = await start_retell_stub(
+        api_key=SENTINEL_KEY,
+        replies=["Done — moved to Thursday."],
+        tool_calls=[
+            {
+                "name": "reschedule_appointment",
+                "arguments": '{"appointment_id":"apt-88213"}',
+            },
+            {"name": "send_confirmation_sms"},
+        ],
+    )
+    plug = retell({"retellAgentId": "agent_tooled", "baseUrl": running.base_url})
+    await plug.open()
+
+    answer = await plug.deliver("Move my cleaning to Thursday.")
+    assert answer.tool_calls == (
+        ToolCall(
+            name="reschedule_appointment",
+            arguments='{"appointment_id":"apt-88213"}',
+        ),
+        # Reported without arguments: absence is the honest record of what
+        # the platform said, never an empty object standing in for it.
+        ToolCall(name="send_confirmation_sms", arguments=None),
     )
     await plug.close()
 

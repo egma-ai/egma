@@ -289,10 +289,11 @@ def scripted_spec(
     scenario: str = A_SCENARIO,
     personality: str = A_PERSONALITY,
     greeting: str | None = None,
-    replies: list[str] | None = None,
+    replies: list[str | None] | None = None,
     ends_after_replies: bool = False,
     turn_seconds: float = 0.0,
     provider_reference: str | None = None,
+    tool_calls: list[dict] | None = None,
     max_turns: int = 60,
     max_duration_seconds: int = 600,
     credentials: dict | None = None,
@@ -311,6 +312,8 @@ def scripted_spec(
         config["ends_after_replies"] = True
     if provider_reference is not None:
         config["provider_reference"] = provider_reference
+    if tool_calls is not None:
+        config["tool_calls"] = tool_calls
     return a_spec(
         simulation_id,
         connection={
@@ -601,6 +604,23 @@ def terminal_event_for(records: list[dict], simulation_id: str) -> dict | None:
     for event in events_for(records, simulation_id, "status"):
         if event["status"] in ("completed", "failed", "canceled"):
             return event
+    return None
+
+
+def spans_for(records: list[dict], simulation_id: str) -> list[dict]:
+    """Every span the workbench's OTLP sink recorded for one simulation,
+    in arrival order — the record with its flush number kept."""
+    return [
+        record
+        for record in records
+        if record["kind"] == "span" and record["simulation_id"] == simulation_id
+    ]
+
+
+def span_attribute(span: dict, key: str) -> str | None:
+    for entry in span.get("attributes", []):
+        if entry["key"] == key:
+            return entry["value"]["stringValue"]
     return None
 
 

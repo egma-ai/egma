@@ -8,22 +8,34 @@ import path from "node:path";
 import { createPersona } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { rowsIn } from "../../../packages/db/test/support/clickhouse.ts";
 import { startInstance, type Instance } from "./support/instance.ts";
 import { NEUTRAL_TRAITS } from "./support/traces.ts";
 
 /**
  * The whole wire, walked by the shipped simulator: a run started through the
  * real API, its simulation claimed from the real claim door, conducted by
- * the real Python service over a Retell-shaped counterpart on loopback, and
- * reported back through the real report door — queued → claimed → running →
- * completed, with every lifecycle column read back and checked for truth.
+ * the real Python service over a Retell-shaped counterpart on loopback,
+ * streamed span by span into the real ClickHouse through the real OTLP
+ * ingest, and reported back through the real report door — queued → claimed
+ * → running → completed, with every lifecycle column read back and checked
+ * for truth.
  *
  * Nothing here is a stand-in for egma's own halves: the API listens on a
- * real port, the database is a real Postgres, and the simulator is the same
- * process `docker compose up` starts. The one fake is the platform on the
- * far side of the conversation — a local server speaking Retell's chat wire
- * shape — because the agent under test is the customer's, and a test that
- * needed a real Retell account would prove an account rather than the wire.
+ * real port, the database is a real Postgres, the trace store is a real
+ * ClickHouse, and the simulator is the same process `docker compose up`
+ * starts. The one fake is the platform on the far side of the conversation —
+ * a local server speaking Retell's chat wire shape — because the agent under
+ * test is the customer's, and a test that needed a real Retell account would
+ * prove an account rather than the wire.
+ *
+ * **The ordering guarantee is proved here and nowhere better.** The
+ * simulator puts its span batches and its lifecycle documents through one
+ * write-ahead log and one ordered sender, so a terminal report leaves only
+ * after every span before it landed. What that buys is read back the way a
+ * grader will read it: the walk is watched while it runs, and the moment the
+ * simulation row turns terminal the conversation is already queryable in
+ * ClickHouse, root span included.
  *
  * The failed walk rides the same session: a second connection whose key the
  * counterpart refuses, landing `failed` with the honest reason. The canceled
@@ -226,12 +238,101 @@ async function rowOf(simulationId: string): Promise<Record<string, unknown>> {
   return row;
 }
 
+/**
+ * The trace a simulation's spans belong to, derived here independently of
+ * both the emitter and the ingest: the simulation id's own 128 bits, the 26
+ * Crockford base32 characters after `sim_` written as 32 lowercase hex. A
+ * derivation this test computed for itself is what makes finding the rows
+ * proof of anything — asking either side where it filed them would not be.
+ */
+const CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+function traceIdOf(simulationId: string): string {
+  let value = 0n;
+  for (const character of simulationId.slice("sim_".length)) {
+    const digit = CROCKFORD_ALPHABET.indexOf(character);
+    expect(digit, `${simulationId} is not Crockford base32`).toBeGreaterThan(-1);
+    value = (value << 5n) | BigInt(digit);
+  }
+  return value.toString(16).padStart(32, "0");
+}
+
+type StoredSpan = {
+  readonly name: string;
+  readonly kind: string;
+  readonly text: string;
+  readonly duration_ns: string;
+  readonly span_id: string;
+  readonly parent_span_id: string;
+  readonly source: string;
+  readonly emitter: string;
+  readonly run_id: string;
+  readonly agent_id: string;
+};
+
+/** One conversation as it stands in the trace store, oldest span first. */
+async function storedSpans(traceId: string): Promise<StoredSpan[]> {
+  return rowsIn<StoredSpan>(
+    instance.traceStore,
+    `select name, kind, text, toString(duration_ns) as duration_ns, span_id,
+            parent_span_id, source, emitter, run_id, agent_id
+       from spans
+      where trace_id = '${traceId}'
+      order by started_at, span_id`,
+  );
+}
+
 async function gradingJobsFor(simulationId: string): Promise<number> {
   const { rows } = await instance.database.sql<{ count: string }>(
     "select count(*) as count from grading_job where simulation_id = $1",
     [simulationId],
   );
   return Number(rows[0]?.count);
+}
+
+/** What one poll of a running simulation saw, in both stores at once. */
+type Sighting = {
+  readonly status: string;
+  readonly spans: readonly string[];
+};
+
+/**
+ * Watch one simulation from queued to terminal, reading both stores as it
+ * goes, and answer with everything seen — including one last look taken the
+ * instant the row turned terminal.
+ *
+ * The order inside the loop is the whole point. Spans are read *first* and
+ * the row's status *second*, so a sighting that says terminal is saying the
+ * spans beside it were already there before the transition was visible. Then
+ * the terminal sighting is taken again, spans last, because what has to be
+ * true is the strong direction: when the control plane records a terminal
+ * transition, the evidence a verdict will cite is already stored.
+ */
+async function watchToTerminal(
+  simulationId: string,
+  traceId: string,
+  within: number,
+): Promise<{ seen: Sighting[]; atTerminal: readonly string[] }> {
+  const deadline = Date.now() + within;
+  const seen: Sighting[] = [];
+  for (;;) {
+    const spans = (await storedSpans(traceId)).map((span) => span.name);
+    const status = String((await rowOf(simulationId)).status);
+    seen.push({ status, spans });
+    if (status === "completed" || status === "failed" || status === "canceled") {
+      return {
+        seen,
+        atTerminal: (await storedSpans(traceId)).map((span) => span.name),
+      };
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `simulation ${simulationId} is still ${status} after ${within}ms; ` +
+          `the simulator said:\n${simulatorSaid}`,
+      );
+    }
+    await new Promise((resume) => setTimeout(resume, 25));
+  }
 }
 
 /** Poll one run until it reaches a terminal status, or say what it was doing. */
@@ -260,7 +361,9 @@ beforeAll(async () => {
   scratch = await mkdtemp(path.join(os.tmpdir(), "egma-simulator-walk-"));
   counterpart = new RetellCounterpart();
   await counterpart.start();
-  instance = await startInstance("simulator_walk", { web: false });
+  // The trace store gets its schema here, because this walk reads the
+  // conversation back out of it rather than only off the row.
+  instance = await startInstance("simulator_walk", { web: false, traces: true });
 }, 120_000);
 
 afterAll(async () => {
@@ -391,9 +494,37 @@ describe("the shipped simulator against the real API", () => {
         simulatorSaid += piece.toString("utf8");
       });
 
+      // The conversation watched as it happens, in both stores at once.
+      const traceId = traceIdOf(conducted.simulationId);
+      const watched = await watchToTerminal(
+        conducted.simulationId,
+        traceId,
+        60_000,
+      );
+
       // The whole walk, as a person watching the run would see it settle.
       const conductedRun = await settledRun(key, conducted.runId, 60_000);
       const refusedRun = await settledRun(key, refused.runId, 60_000);
+
+      // Streamed, not posted at the end: turns were queryable in ClickHouse
+      // while the simulation was still running.
+      const whileRunning = watched.seen.filter(
+        (sighting) => sighting.status === "running" && sighting.spans.length > 0,
+      );
+      expect(
+        whileRunning.length,
+        `no span was ever seen while the simulation ran; sightings: ${JSON.stringify(
+          watched.seen,
+        )}`,
+      ).toBeGreaterThan(0);
+      expect(whileRunning[0]?.spans).toContain("agent_turn");
+      // And partial while it ran: the root closes the trace, so a live
+      // reader seeing it would mean the conversation was already over.
+      expect(whileRunning[0]?.spans).not.toContain("simulation");
+
+      // The guarantee: at the moment the row went terminal, the whole
+      // conversation was already stored — root span and all.
+      expect(watched.atTerminal).toContain("simulation");
 
       // The conversation that happened: completed, concluded by the persona,
       // and every lifecycle column telling the truth about it.
@@ -412,6 +543,63 @@ describe("the shipped simulator against the real API", () => {
       expect(startedAt.getTime()).toBeLessThanOrEqual(endedAt.getTime());
       expect(await gradingJobsFor(conducted.simulationId)).toBe(1);
 
+      // The conversation itself, read back out of the trace store the way a
+      // grader will read it — one span per timed thing, nothing invented.
+      const spans = await storedSpans(traceId);
+      const names = spans.map((span) => span.name);
+      expect(names.filter((name) => name === "agent_turn")).toHaveLength(2);
+      expect(names.filter((name) => name === "human_turn")).toHaveLength(2);
+      expect(names.filter((name) => name === "turn_response_latency")).toHaveLength(1);
+      expect(names).toContain("first_response_latency");
+      expect(names.filter((name) => name === "simulation")).toHaveLength(1);
+      // What the row counted and what the store holds are one conversation.
+      expect(names.filter((name) => name.endsWith("_turn"))).toHaveLength(
+        Number(row.turn_count),
+      );
+
+      // What was said, in order, with the transcript's two labels riding the
+      // span names — the speaker is the name, so nothing can disagree with it.
+      expect(
+        spans
+          .filter((span) => span.name.endsWith("_turn"))
+          .map((span) => [span.name, span.text]),
+      ).toEqual([
+        ["agent_turn", "Lakeside Dental, how can I help?"],
+        [
+          "human_turn",
+          "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
+        ],
+        [
+          "agent_turn",
+          "Of course — we have Tuesday and Wednesday afternoon free next week.",
+        ],
+        ["human_turn", "That covers everything I needed. Thank you, goodbye."],
+      ]);
+
+      // Filed under the customer's own row, from egma's own side of the
+      // conversation, and never from anything the payload claimed.
+      const root = spans.find((span) => span.name === "simulation");
+      expect(root?.kind).toBe("root");
+      expect(root?.parent_span_id).toBe("");
+      for (const span of spans) {
+        expect(span.source).toBe("simulation");
+        expect(span.emitter).toBe("egma-runtime");
+        expect(span.run_id).toBe(conducted.runId);
+        expect(span.agent_id).toBe(agentId);
+        if (span !== root) expect(span.parent_span_id).toBe(root?.span_id);
+      }
+
+      // A timing span's own duration is the measurement, in nanoseconds.
+      for (const span of spans) {
+        if (span.name.endsWith("_latency")) {
+          expect(Number(span.duration_ns)).toBeGreaterThan(0);
+        }
+      }
+
+      // Every span landed once. The simulator resends byte-identically and
+      // the store dedups on the ids it minted, so no retry can double a turn.
+      expect(new Set(spans.map((span) => span.span_id)).size).toBe(spans.length);
+
       expect(conductedRun.status).toBe("completed");
       expect(conductedRun.completed_count).toBe(1);
       expect(conductedRun.failed_count).toBe(0);
@@ -424,6 +612,11 @@ describe("the shipped simulator against the real API", () => {
       expect(refusedRow.ending_reason).toBe("simulator_error");
       expect(refusedRow.claimed_by).toBe("walking-simulator-1");
       expect(await gradingJobsFor(refused.simulationId)).toBe(1);
+
+      // A simulation that never got a conversation still says it happened:
+      // one root span, no turns, nothing invented to fill the silence.
+      const refusedSpans = await storedSpans(traceIdOf(refused.simulationId));
+      expect(refusedSpans.map((span) => span.name)).toEqual(["simulation"]);
 
       expect(refusedRun.status).toBe("completed");
       expect(refusedRun.completed_count).toBe(0);

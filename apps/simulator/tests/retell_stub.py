@@ -54,6 +54,12 @@ class RetellStub:
     """When true the last scripted reply carries the end-tool invocation,
     the way an agent ending its own exchange does."""
 
+    tool_calls: Sequence[dict] = ()
+    """Invocations the agent makes while producing its first answer, each
+    ``{"name": …}`` with an optional ``"arguments"`` string. Retell reports
+    these inline with the words, which is what makes a tool call visible
+    from egma's side at all."""
+
     turn_seconds: float = 0.0
     """How long a completion takes, the way a real agent takes time."""
 
@@ -154,6 +160,17 @@ class RetellStub:
         position = chat["delivered"]
         chat["delivered"] += 1
         messages: list[dict] = []
+        if position == 0:
+            messages.extend(
+                {
+                    "message_id": f"msg_{len(self.calls)}_tool_{index}",
+                    "role": "tool_call_invocation",
+                    "tool_call_id": f"tool_call_{index}",
+                    "created_timestamp": _now_ms(),
+                    **call,
+                }
+                for index, call in enumerate(self.tool_calls)
+            )
         if position < len(self.replies):
             answer = self.replies[position]
             bubbles = [answer] if isinstance(answer, str) else list(answer)
