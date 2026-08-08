@@ -145,7 +145,7 @@ anything your LiveKit server says back before quoting it into a reason.
 The repository carries a deliberately boring one to point at:
 [`fixtures/livekit-dumb-agent`](../fixtures/livekit-dumb-agent) is a
 dental-office receptionist with no tools and one-sentence answers, running on a
-single OpenAI key. Its README gets it registered against your project in one
+single OpenAI key. Its README gets it running against your project in one
 command, and it switches between the two dispatch styles with one environment
 variable — useful for proving your credentials and your room path work before
 pointing egma at the agent you actually care about.
