@@ -124,7 +124,10 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
  * back about a row it already holds still has no credential, so the row is
  * looked up by the id the claim itself handed out, and the answer carries the
  * lifecycle stamps and the same narrowed context the claim built — which is
- * what every write about the row then goes through.
+ * what every write about the row then goes through. The ingest door's
+ * service path asks it the same way for arriving telemetry, added the same
+ * day: the answer's pins are what a simulation's spans are filed under, read
+ * off egma's own row rather than off anything the payload claimed.
  *
  * This category is narrower than it looks, and the rule enforces the property
  * that makes it safe: **nothing here may take an argument by which a caller

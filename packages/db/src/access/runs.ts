@@ -68,7 +68,8 @@ import { within } from "./within.ts";
  * hands work out; the heartbeat keeps one dispatch alive and steers it; the
  * sweep accounts for dispatches whose simulator died; the standing resolver
  * answers where one dispatched row now stands, for the calls that come back
- * about it. All four reach only rows egma's own machinery wrote — the queue,
+ * about it — its lifecycle claims and its arriving telemetry alike. All four
+ * reach only rows egma's own machinery wrote — the queue,
  * and the claims made from it — and carry out identifiers and no content.
  * The claim hands back with every row the context the conducting is then
  * done under, built from the row's own tenancy and from nothing the service
@@ -1757,14 +1758,17 @@ export async function claimSimulations(
 
 /**
  * Where one simulation stands, and the context its conducting continues
- * under — what the report and heartbeat doors read before applying anything
- * a simulator says about a row.
+ * under — what the report, heartbeat and telemetry doors read before applying
+ * anything a simulator says about a row.
  *
  * Lifecycle stamps and identifiers, and no content: enough to tell an
  * unknown simulation from a moved one, a duplicate from a conflict, and the
- * claimant whose word the row takes — and nothing a customer wrote. What the
- * work itself needs is read afterwards, through the scoped surface, under
- * the context answered here.
+ * claimant whose word the row takes — and nothing a customer wrote. The pins
+ * ride along for the row's arriving evidence: a span filed under the
+ * simulation carries the run and the versions its conversation executed, and
+ * they come off this same row rather than off anything the wire claimed.
+ * What the work itself needs is read afterwards, through the scoped surface,
+ * under the context answered here.
  *
  * **It takes no `AuthContext` and cannot be given one**, on the claim's own
  * discipline, one step later in the same lifecycle: the simulator holds no
@@ -1776,6 +1780,12 @@ export async function claimSimulations(
  * one argument is the simulation's id — an identifier the claim itself
  * handed out — and there is no argument by which a caller could name a
  * customer.
+ *
+ * The row is answered in whatever state it stands, terminal and swept
+ * included, and each door decides what that standing permits: the lifecycle
+ * doors refuse a claim about a row beyond help, while the telemetry door
+ * keeps a late-returning orphan's spans — evidence arriving after the
+ * verdict on the messenger.
  */
 export async function resolveSimulationStanding(
   simulationId: string,
@@ -1786,6 +1796,9 @@ export async function resolveSimulationStanding(
       runId: simulation.runId,
       organizationId: simulation.organizationId,
       projectId: simulation.projectId,
+      agentId: simulation.agentId,
+      testVersionId: simulation.testVersionId,
+      personaVersionId: simulation.personaVersionId,
       modality: simulation.modality,
       status: simulation.status,
       endingReason: simulation.endingReason,
@@ -1801,6 +1814,9 @@ export async function resolveSimulationStanding(
   return {
     id: row.id,
     runId: row.runId,
+    agentId: row.agentId,
+    testVersionId: row.testVersionId,
+    personaVersionId: row.personaVersionId,
     modality: row.modality as Modality,
     status: row.status as SimulationStatus,
     endingReason: row.endingReason as SimulationEndingReason | null,
@@ -1812,11 +1828,16 @@ export async function resolveSimulationStanding(
 
 /**
  * What `resolveSimulationStanding` answers with: the row's lifecycle stamps,
- * and the narrowed context every write about the row goes through.
+ * the pins its evidence is filed under, and the narrowed context every write
+ * about the row goes through.
  */
 export type SimulationStanding = {
   readonly id: string;
   readonly runId: string;
+  readonly agentId: string;
+  /** Absent only on an upgraded instance's history, exactly as on the claim. */
+  readonly testVersionId: string | null;
+  readonly personaVersionId: string;
   readonly modality: Modality;
   readonly status: SimulationStatus;
   readonly endingReason: SimulationEndingReason | null;
