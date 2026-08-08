@@ -1,0 +1,42 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "egma-simulator" } },
+          { "key": "egma.simulation_id", "value": { "stringValue": "sim_01K3XQ7M4E8YB2FVN0H9TZQWER" } }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "egma-simulator", "version": "1" },
+          "spans": [
+            {
+              "traceId": "0198fb73d08e479627eea08a75fbf1d8",
+              "spanId": "aa10000000000008",
+              "parentSpanId": "aa10000000000001",
+              "name": "agent_turn",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1785920444980000000",
+              "endTimeUnixNano": "1785920444980000000",
+              "attributes": [
+                {
+                  "key": "egma.turn.text",
+                  "value": { "stringValue": "You're all set for Thursday at three. Anything else I can help with?" }
+                }
+              ]
+            },
+            {
+              "traceId": "0198fb73d08e479627eea08a75fbf1d8",
+              "spanId": "aa10000000000001",
+              "name": "simulation",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1785920400000000000",
+              "endTimeUnixNano": "1785920450000000000"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
