@@ -36,14 +36,19 @@ endpoint's job.** Dispatch is an API call signed with the project's key pair,
 and egma does not have one on this connection — that is the whole point of the
 mode. So the handler that mints the token is also the handler that puts a worker
 in the room it just minted a token for. If nothing does, the simulation ends
-with `agent-never-joined`, and the reason says so rather than sending you to
+with `agent_never_joined`, and the reason says so rather than sending you to
 look at a worker registration that was never the problem.
 
-If your workers are registered for **automatic dispatch** — no `agent_name` when
-the worker starts — there is nothing to do: LiveKit gives every new room in the
-project to a worker registered that way, and your endpoint minting a token that
-creates the room is the whole of the request. Explicit dispatch, where your
-workers register under a name, is the case that needs the extra call.
+If your workers are registered for **automatic dispatch** — no agent name when
+the worker starts — there is nothing extra to write: LiveKit hands every new
+room in the project to a worker registered that way, and the room comes into
+existence as soon as somebody joins it. Create the room in the handler if you
+would rather it existed before egma arrives; either way the dispatch follows
+from the room, not from you asking for it.
+
+**Explicit dispatch**, where your workers register under a name, is the case
+that needs the extra call: create the agent dispatch for that name into
+`room_name`, in the same handler, before you answer.
 
 ## The endpoint contract
 
@@ -209,9 +214,13 @@ grants.
 
 ### 6. Set a short empty timeout on `egma-sim-` rooms
 
-Give the room you create an empty timeout of a minute or two. This is what
-closes the room after egma leaves, and the next section is why it has to be your
-side that does it.
+A minute or two. This is what closes the room after egma leaves, and the next
+section is why it has to be your side that does it.
+
+Create the room in your handler with a short empty timeout, which is the direct
+way and lets you set it for `egma-sim-` rooms only. If you let the room come
+into existence when egma joins it instead, the room takes your project's default
+empty timeout, so check what that default is.
 
 ## What closes the room
 
@@ -226,9 +235,10 @@ would write a line in your record about a failure that was never a failure. So
 it does the honest thing and leaves.
 
 **A short empty timeout on the room is what closes it**, moments after egma's
-participant goes. Your endpoint is what sets it, because your endpoint is what
-creates the room. No orphaned rooms, no lingering cost, and no pretending egma
-has a power it deliberately was not given.
+participant goes. Your side is what sets it — on the room your handler creates,
+or as your project's default — because your side is the side with the key pair.
+No orphaned rooms, no lingering cost, and no pretending egma has a power it
+deliberately was not given.
 
 ## When it does not work
 

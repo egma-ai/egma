@@ -3,9 +3,13 @@ simulation against.
 
 The room-shaped twin of the Retell stub one layer down: a whole voice
 simulation conducts against it with no LiveKit server, no project, no
-worker and no network. What it stands in for is exactly the three places
-the room driver touches the network — the requests it makes of the
-project, joining the room, and deleting it — and nothing else.
+worker and no network. What it stands in for is exactly the places the
+room driver reaches a LiveKit — the requests it makes of the project,
+joining the room, and deleting it — and nothing else.
+
+Not the token request. A connection that asks a customer's own endpoint
+for its token really asks, over a socket, of the endpoint in
+:mod:`token_endpoint_stub`; nothing here stands in for that.
 
 Everything else is the real driver's own code, and deliberately so. The
 requests recorded below are the very protobuf messages that would have
@@ -146,7 +150,8 @@ class StubRoom:
 
 
 class RoomStubBackend(LiveKitRoomBackend):
-    """The real room driver, with its three network calls answered here.
+    """The real room driver, with the calls it makes of a LiveKit answered
+    here: making the room, dispatching into it, joining it, deleting it.
 
     The token request is deliberately not among them: a connection that
     asks an endpoint for one really asks, over a socket, of the fake
