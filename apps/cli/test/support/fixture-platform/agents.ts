@@ -45,10 +45,27 @@ const SHORTEST_CREDENTIAL = 8;
 
 type ConfigGate = (key: string, value: unknown) => string;
 
+/**
+ * A gate the caller may leave out, mirroring the registry behind the seam.
+ * Optional is about absence and nothing else: a key that is there faces the
+ * same gate it would have faced if it were demanded.
+ */
+type OptionalGate = { readonly optional: true; readonly gate: ConfigGate };
+
+type ConfigDemand = ConfigGate | OptionalGate;
+
+function optional(gate: ConfigGate): OptionalGate {
+  return { optional: true, gate };
+}
+
+function isDemanded(demand: ConfigDemand): boolean {
+  return typeof demand === "function";
+}
+
 type Descriptor = {
   readonly modalities: readonly string[];
   readonly topology: string;
-  readonly config: Readonly<Record<string, ConfigGate>>;
+  readonly config: Readonly<Record<string, ConfigDemand>>;
   readonly credentials:
     | { readonly required: true; readonly fields: readonly string[]; readonly hintField: string }
     | { readonly required: false; readonly refusal: string };
@@ -82,12 +99,50 @@ function e164PhoneNumber(key: string, value: unknown): string {
   return candidate;
 }
 
+/** The four schemes a LiveKit server URL is written in; the SDKs normalise. */
+const LIVEKIT_URL_SCHEMES = ["ws:", "wss:", "http:", "https:"];
+
+function livekitServerUrl(key: string, value: unknown): string {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  let scheme: string | undefined;
+  try {
+    scheme = new URL(candidate).protocol;
+  } catch {
+    scheme = undefined;
+  }
+  if (scheme === undefined || !LIVEKIT_URL_SCHEMES.includes(scheme)) {
+    throw new Refusal(
+      `the config's ${key} must be a ws, wss, http or https URL, which looks like wss://example.livekit.cloud`,
+    );
+  }
+  return candidate;
+}
+
+/** A JSON object carried as the text it was written as, checked at create. */
+function jsonObjectText(key: string, value: unknown): string {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(candidate);
+  } catch {
+    parsed = undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Refusal(
+      `the config's ${key} must be a JSON object written in a string, which looks like {"tenant":"acme"}`,
+    );
+  }
+  return candidate;
+}
+
 /**
  * What each connection type is made of, mirroring the registry behind the seam.
  *
- * `phone` is here although the CLI never writes one: it is what makes the
- * checks about per-type validation real rather than a single type agreeing
- * with itself.
+ * `phone` and `livekit` are here although the CLI writes neither: they are
+ * what makes the checks about per-type validation real rather than a single
+ * type agreeing with itself, and `livekit` is the one that carries optional
+ * config keys, so the fixture cannot quietly demand what the real thing is
+ * happy to do without.
  */
 const REGISTRY: Readonly<Record<string, Descriptor>> = {
   retell: {
@@ -112,6 +167,26 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
         "a phone connection takes no credential: the customer supplies a public number, " +
         "and egma dials it with its own telephony configuration",
     },
+  },
+  livekit: {
+    // Voice only, because voice is the lane that exists.
+    modalities: ["voice"],
+    // egma opens the room and the customer's agent joins it.
+    topology: "agent-dials-out",
+    config: {
+      url: livekitServerUrl,
+      // Left out means automatic dispatch: whichever worker is listening.
+      agentName: optional(nonEmptyString),
+      // Handed to the agent as the room's metadata, exactly as written.
+      metadata: optional(jsonObjectText),
+    },
+    credentials: {
+      required: true,
+      fields: ["apiKey", "apiSecret"],
+      hintField: "apiKey",
+    },
+    // No reuse rule: the url names a server rather than an agent.
+    simulatorAdapter: false,
   },
 };
 
@@ -205,25 +280,32 @@ function validModality(type: string, modality: unknown): string {
 
 function validConfig(type: string, config: unknown): Record<string, string> {
   const gates = descriptorOf(type).config;
-  const demanded = Object.keys(gates);
+  // Optional keys say so, so a caller reading a refusal is never left thinking
+  // egma wants a value it is happy to do without.
+  const held = Object.entries(gates)
+    .map(([key, demand]) => (isDemanded(demand) ? key : `${key} (optional)`))
+    .join(", ");
 
   if (typeof config !== "object" || config === null || Array.isArray(config)) {
-    throw new Refusal(`a ${type} connection's config is an object holding ${demanded.join(", ")}`);
+    throw new Refusal(`a ${type} connection's config is an object holding ${held}`);
   }
 
   for (const key of Object.keys(config)) {
-    if (!(key in gates)) {
+    if (!Object.hasOwn(gates, key)) {
       throw new Refusal(
-        `a ${type} connection's config has no key "${key}"; it holds ${demanded.join(", ")}`,
+        `a ${type} connection's config has no key "${key}"; it holds ${held}`,
       );
     }
   }
 
   const stored: Record<string, string> = {};
-  for (const [key, gate] of Object.entries(gates)) {
+  for (const [key, demand] of Object.entries(gates)) {
     const value = (config as Record<string, unknown>)[key];
-    if (value === undefined) throw new Refusal(`a ${type} connection's config needs ${key}`);
-    stored[key] = gate(key, value);
+    if (value === undefined) {
+      if (!isDemanded(demand)) continue;
+      throw new Refusal(`a ${type} connection's config needs ${key}`);
+    }
+    stored[key] = (typeof demand === "function" ? demand : demand.gate)(key, value);
   }
   return stored;
 }

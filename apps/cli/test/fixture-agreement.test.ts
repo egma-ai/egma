@@ -582,7 +582,8 @@ describe("a connection payload its type will not take", () => {
     expect(refused.status).toBe(400);
     expect(refused.body).toEqual({
       error: "invalid_request",
-      message: '"vapi" is not a connection type egma knows; expected one of retell, phone',
+      message:
+        '"vapi" is not a connection type egma knows; expected one of retell, phone, livekit',
     });
     expect(platform.registered.agents).toHaveLength(0);
   });
