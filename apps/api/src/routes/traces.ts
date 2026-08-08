@@ -382,7 +382,6 @@ async function simulatorExport(
     };
   };
 
-  let stored = 0;
   const rejected: { count: number; firstReason: string } = {
     count: 0,
     firstReason: "",
@@ -396,12 +395,23 @@ async function simulatorExport(
       { resourceSpans: group.resources },
       attributionFor,
     );
-    stored += normalised.spans.length;
     rejected.count += normalised.rejected.length;
     rejected.firstReason ||= normalised.rejected[0]?.reason ?? "";
     appends.push({ auth: group.auth, spans: normalised.spans });
   }
 
+  // Every group is attempted, whatever happened to the one before it: one
+  // customer's refused rows must never sink another customer's evidence, and
+  // never claim it was sunk. A store that *refuses* a group — rows it has
+  // looked at and will refuse forever — costs exactly that group, counted and
+  // answered as rejected below so the sender stops resending it. A store that
+  // merely *fails* still escapes as the error it is: the whole document comes
+  // back as a retry, and the groups that landed re-append idempotently — the
+  // resend's identical flushes carry identical dedup tokens.
+  const storeRefused: { spans: number; firstMessage: string } = {
+    spans: 0,
+    firstMessage: "",
+  };
   for (const append of appends) {
     // The same function every write in the product goes through, asked with
     // the narrowed context the row resolved to. It cannot refuse a context
@@ -417,19 +427,11 @@ async function simulatorExport(
     } catch (cause) {
       if (!(cause instanceof TraceStoreRefusedError)) throw cause;
 
-      // The store looked at these rows and said no, on the customer path's
-      // exact terms: accepted request, every span rejected, reason given,
-      // because a 5xx would be retried forever. A group that landed before
-      // this one stays landed — the resend's identical flushes carry
-      // identical dedup tokens, so nothing lands twice on the way back in.
       request.log.error({ err: cause }, "the trace store refused a batch");
-      return exportResponse(
-        reply,
-        encoding,
-        stored + rejected.count,
+      storeRefused.spans += append.spans.length;
+      storeRefused.firstMessage ||=
         `the trace store refused these spans: ${cause.message}. They were ` +
-          "not stored and re-sending the same batch will not change that.",
-      );
+        "not stored and re-sending the same batch will not change that.";
     }
   }
 
@@ -437,7 +439,16 @@ async function simulatorExport(
   // grading work is minted by the transaction that lands it terminal, so the
   // telemetry path has nothing to add — a queue row from here would be the
   // second job the landing already guards against.
-  return exportResponse(reply, encoding, rejected.count, rejected.firstReason);
+  //
+  // One truthful answer: what was rejected is the normaliser's rejects plus
+  // the refused groups' spans, and nothing that landed. The field is one
+  // string, and a store refusal is the graver news, so it speaks first.
+  return exportResponse(
+    reply,
+    encoding,
+    rejected.count + storeRefused.spans,
+    storeRefused.firstMessage || rejected.firstReason,
+  );
 }
 
 export async function traceRoutes(

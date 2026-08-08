@@ -5,9 +5,11 @@ import { fileURLToPath } from "node:url";
 import {
   claimSimulations,
   completeSimulation,
+  connectClickHouse,
   createAgent,
   createPersona,
   createTest,
+  disconnectClickHouse,
   startRun,
   startSimulation,
 } from "@egma/db";
@@ -562,6 +564,125 @@ describe("a payload that claims a tenant on the service path", () => {
     expect(rows[0]?.project_id).toBe(acme.projectId);
     // Not obeyed, and not thrown away either: it is somebody's data.
     expect(rows[0]?.payload).toContain(globex.organizationId);
+  });
+});
+
+describe("a batch carrying two customers' evidence when the store refuses one of them", () => {
+  /** One turn for each simulation, on span ids nothing else in this file mints. */
+  function twoTenantBatch(): string {
+    const turn = (
+      simulationId: string,
+      traceId: string,
+      spanId: string,
+    ): Record<string, unknown> => ({
+      resource: {
+        attributes: [
+          { key: "egma.simulation_id", value: { stringValue: simulationId } },
+        ],
+      },
+      scopeSpans: [
+        {
+          scope: { name: "egma-simulator", version: "1" },
+          spans: [
+            {
+              traceId,
+              spanId,
+              name: "agent_turn",
+              startTimeUnixNano: "1785920401214000000",
+              endTimeUnixNano: "1785920401214000000",
+              attributes: [
+                {
+                  key: "egma.turn.text",
+                  value: { stringValue: "Said while the store was fussy." },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    // The refusing tenant deliberately first: a door that stopped at the first
+    // refusal would never reach the second tenant at all, and this batch is
+    // shaped to catch exactly that.
+    return JSON.stringify({
+      resourceSpans: [
+        turn(VOICE_SIMULATION, VOICE_TRACE, "ff60000000000001"),
+        turn(CHAT_SIMULATION, CHAT_TRACE, "ff60000000000002"),
+      ],
+    });
+  }
+
+  /**
+   * One customer's refused rows cost exactly that customer's spans — the
+   * other group still lands, and the answer counts as rejected only what was
+   * genuinely not stored. Nothing that landed is reported rejected: the
+   * sender's write-ahead log believes this count, and a landed span reported
+   * rejected would be evidence the sender stops owing.
+   */
+  it("lands the other customer's group, and counts only the refused one rejected", async () => {
+    await store().command(
+      "alter table spans add constraint refuses_globex check " +
+        `organization_id != '${globex.organizationId}'`,
+    );
+
+    try {
+      const response = await post(twoTenantBatch());
+
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json()).toEqual({
+        partialSuccess: {
+          rejectedSpans: "1",
+          errorMessage: expect.stringContaining("the trace store refused"),
+        },
+      });
+    } finally {
+      await store().command("alter table spans drop constraint refuses_globex");
+    }
+
+    // The tenant the store refused lost its span, and only it.
+    expect(
+      await countOf(
+        "select count() as n from spans where span_id = 'ff60000000000001'",
+      ),
+    ).toBe(0);
+    const landed = await store().rows<{ organization_id: string; text: string }>(
+      "select organization_id, text from spans where span_id = 'ff60000000000002'",
+    );
+    expect(landed).toEqual([
+      {
+        organization_id: acme.organizationId,
+        text: "Said while the store was fussy.",
+      },
+    ]);
+  });
+
+  /**
+   * The other kind of store trouble stays the error it is: rows a minute of
+   * patience would land must reach the sender as a retry, never as a
+   * rejection its write-ahead log would believe forever. The resend is safe
+   * on the groups that landed before the fault — identical flushes carry
+   * identical dedup tokens.
+   */
+  it("still answers a store that merely failed as an error the sender will retry", async () => {
+    await disconnectClickHouse();
+    try {
+      const response = await post(twoTenantBatch());
+      expect(response.statusCode).toBe(500);
+    } finally {
+      connectClickHouse({ clickhouseUrl: store().url, maxOpenConnections: 4 });
+    }
+
+    // And the same document goes through whole once the store is back.
+    const retried = await post(twoTenantBatch());
+    expect(retried.statusCode, retried.body).toBe(200);
+    expect(retried.json()).toEqual({});
+    expect(
+      await countOf(
+        "select count() as n from spans where span_id in " +
+          "('ff60000000000001', 'ff60000000000002')",
+      ),
+    ).toBe(2);
   });
 });
 
