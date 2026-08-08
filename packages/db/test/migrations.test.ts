@@ -820,6 +820,9 @@ describe("the livekit connection type (0015)", () => {
   });
 });
 
+/** Where the upgrade below starts from: the release before run events. */
+const RUN_EVENTS = "0014";
+
 /**
  * An instance that has been running since before a migration is the case a
  * migration is actually for, and it is the one an empty database never tests:
@@ -837,8 +840,6 @@ describe("the livekit connection type (0015)", () => {
  * backfills and then drops a default is the shape this whole file exists for;
  * a later one that changed any of them would fail here, which is the point.
  */
-const RUN_EVENTS = "0014";
-
 describe("upgrading an instance that already holds work", () => {
   let database: EmptyDatabase;
   /** The migration files before run events, as that earlier release shipped them. */

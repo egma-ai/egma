@@ -415,27 +415,33 @@ describe("a livekit connection", () => {
    */
   const REFUSED: readonly {
     readonly named: string;
+    /** Short and stable, because it names the test's own database. */
+    readonly slug: string;
     readonly payload: Record<string, unknown>;
     readonly message: string;
   }[] = [
     {
       named: "a modality a livekit connection does not speak",
+      slug: "wrong_modality",
       payload: { modality: "chat" },
       message:
         "a livekit connection speaks voice, and this one was asked for chat",
     },
     {
       named: "a word that is not a modality at all",
+      slug: "not_a_modality",
       payload: { modality: "telepathy" },
       message: '"telepathy" is not a modality; a livekit connection speaks voice',
     },
     {
       named: "no url",
+      slug: "no_url",
       payload: { config: {} },
       message: "a livekit connection's config needs url",
     },
     {
       named: "a url in a scheme the SDKs do not take",
+      slug: "bad_url",
       payload: { config: { url: "sip:acme.livekit.cloud" } },
       message:
         "the config's url must be a ws, wss, http or https URL, which looks " +
@@ -443,6 +449,7 @@ describe("a livekit connection", () => {
     },
     {
       named: "an agent name that is there but blank",
+      slug: "blank_agent_name",
       payload: {
         config: { url: "wss://acme.livekit.cloud", agentName: "   " },
       },
@@ -450,6 +457,7 @@ describe("a livekit connection", () => {
     },
     {
       named: "metadata that is not a JSON object",
+      slug: "bad_metadata",
       payload: {
         config: { url: "wss://acme.livekit.cloud", metadata: "tenant=acme" },
       },
@@ -459,6 +467,7 @@ describe("a livekit connection", () => {
     },
     {
       named: "a config key a livekit connection has no place for",
+      slug: "unknown_config_key",
       payload: {
         config: { url: "wss://acme.livekit.cloud", roomName: "lobby" },
       },
@@ -468,24 +477,38 @@ describe("a livekit connection", () => {
     },
     {
       named: "no credentials at all",
+      slug: "no_credentials",
       payload: { credentials: undefined },
       message:
         "a livekit connection needs credentials shaped { apiKey, apiSecret }",
     },
     {
       named: "only half the credential",
+      slug: "half_credential",
       payload: { credentials: { apiKey: API_KEY } },
       message:
         "a livekit connection's credentials need apiSecret to be a non-empty string",
     },
     {
       named: "a credential half too short for its hint to stay a hint",
+      slug: "short_credential",
       payload: { credentials: { apiKey: API_KEY, apiSecret: "abcd" } },
       message:
         "a livekit connection's credentials need apiSecret to be at least 8 characters",
     },
     {
+      // Even the right answer: the type decides it, so there is nowhere in a
+      // request to put one.
+      named: "a topology of its own choosing",
+      slug: "supplied_topology",
+      payload: { topology: "agent-dials-out" },
+      message:
+        'a connection has no key "topology"; it holds name, type, modality, ' +
+        "environment, config, credentials",
+    },
+    {
       named: "a credential key that does not belong",
+      slug: "unknown_credential_key",
       payload: {
         credentials: {
           apiKey: API_KEY,
@@ -500,7 +523,7 @@ describe("a livekit connection", () => {
   ];
 
   it.each(REFUSED)("is refused for $named, naming it", async (refusal) => {
-    api = await createApi(`agents_livekit_${refusal.named.replaceAll(" ", "_")}`);
+    api = await createApi(`agents_lk_${refusal.slug}`);
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/api/agents", withKey(ada.secret), {

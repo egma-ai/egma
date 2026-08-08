@@ -110,7 +110,13 @@ function livekitServerUrl(key: string, value: unknown): string {
   } catch {
     scheme = undefined;
   }
-  if (scheme === undefined || !LIVEKIT_URL_SCHEMES.includes(scheme)) {
+  if (
+    scheme === undefined ||
+    !LIVEKIT_URL_SCHEMES.includes(scheme) ||
+    // `wss:acme.livekit.cloud` parses and then reaches nothing, so the
+    // slashes are demanded here rather than missed at dial time.
+    !candidate.toLowerCase().startsWith(`${scheme}//`)
+  ) {
     throw new Refusal(
       `the config's ${key} must be a ws, wss, http or https URL, which looks like wss://example.livekit.cloud`,
     );

@@ -9,7 +9,8 @@
 --
 -- Postgres has no "add a value" for a CHECK, so each is dropped and written
 -- again. Both are widenings: every row that satisfied the old constraint
--- satisfies the new one, so nothing is rewritten and nothing can fail.
+-- satisfies the new one, so no table is rewritten and the scan each new
+-- constraint costs can only pass.
 ALTER TABLE "connection" DROP CONSTRAINT "connection_type_allowed";--> statement-breakpoint
 ALTER TABLE "simulation" DROP CONSTRAINT "simulation_connection_type_allowed";--> statement-breakpoint
 ALTER TABLE "connection" ADD CONSTRAINT "connection_type_allowed" CHECK ("connection"."type" in ('retell', 'phone', 'livekit'));--> statement-breakpoint

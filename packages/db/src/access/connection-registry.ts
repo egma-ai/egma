@@ -172,7 +172,15 @@ function livekitServerUrl(key: string, value: unknown): string {
     scheme = undefined;
   }
 
-  if (scheme === undefined || !LIVEKIT_URL_SCHEMES.includes(scheme)) {
+  if (
+    scheme === undefined ||
+    !LIVEKIT_URL_SCHEMES.includes(scheme) ||
+    // `wss:acme.livekit.cloud` parses — a special scheme takes the rest as a
+    // host — and then reaches nothing, because it is not the form the SDKs
+    // are handed. The stored string is what they get, so the slashes are
+    // demanded here rather than missed at dial time.
+    !candidate.toLowerCase().startsWith(`${scheme}//`)
+  ) {
     throw new AgentWriteRefusedError(
       "not_admitted",
       `the config's ${key} must be a ws, wss, http or https URL, which looks ` +

@@ -165,6 +165,9 @@ describe("a livekit connection's url", () => {
     for (const url of [
       "sip:acme.livekit.cloud",
       "acme.livekit.cloud",
+      // Parses, because a special scheme takes the rest as a host — and then
+      // reaches nothing, so it dies here rather than at dial time.
+      "wss:acme.livekit.cloud",
       "wss://",
       "",
       42,
