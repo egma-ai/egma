@@ -132,8 +132,8 @@ The same record any other voice simulation produces:
 **An API key and secret are project-admin power in LiveKit** — they create
 rooms, dispatch agents and delete rooms, which is exactly what egma does with
 them and also more than some teams will hand over. If that ask is too big for
-yours, a token-endpoint mode lets your own service mint the room token instead,
-and has its own page.
+yours, [a token-endpoint mode](livekit-token-endpoint.md) lets your own service
+mint the room token instead, and has its own page.
 
 Beyond that, the ordinary care: mint egma its own key pair rather than sharing
 the one your agent runs on, so revoking it costs you nothing else. egma never

@@ -340,6 +340,10 @@ where to copy the three values from, how to tell which dispatch style your
 worker uses, the one request that registers it, and what the record carries
 afterwards. [`fixtures/livekit-dumb-agent`](fixtures/livekit-dumb-agent) is a
 deliberately boring agent to try it against before you point egma at a real one.
+For teams that won't hand a testing tool their project's key pair, **[the
+token-endpoint mode](docs/livekit-token-endpoint.md)** keeps the secret on your
+side: your service mints each room's token, and the page carries the hardening
+recipe to run it safely.
 
 ## Working on it
 
