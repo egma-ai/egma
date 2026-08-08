@@ -694,13 +694,16 @@ class CancelsOnceUnderWay(WalkControls):
         return await super().guard(coroutine)
 
 
-async def test_closing_a_simulation_that_never_opened_is_safe():
-    """``close`` is called whatever happened, including before ``open``."""
+async def test_closing_a_simulation_that_never_opened_asks_for_nothing():
+    """``close`` is called whatever happened, including before ``open`` —
+    and a simulation that never made a room must not spend a call
+    deleting one, because that call could only fail."""
     stub = RoomStub()
     plug = room(stub)
     await plug.close()
     await plug.close()
     assert stub.rooms == [], "nothing was ever made"
+    assert stub.deleted == [], "nothing was ever there to delete"
 
 
 # -- The band ----------------------------------------------------------------

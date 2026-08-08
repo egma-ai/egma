@@ -72,6 +72,7 @@ joins no room never loads the library — see the quarantine suite.)
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 from dataclasses import dataclass, field
@@ -272,6 +273,7 @@ class LiveKitRoomBackend:
         self._secrets.register(list(settings.secrets))
         self._room_name = fresh_room_name()
         self._room: JoinedRoom | None = None
+        self._asked_for_a_room = False
 
     @property
     def room_name(self) -> str:
@@ -282,6 +284,10 @@ class LiveKitRoomBackend:
 
     async def create_session(self) -> RoomSession:
         """Make the room, then join it, and answer with its audio."""
+        # Noted before the request rather than after it: a room the server
+        # made and could not say so about is still a room, and teardown
+        # has to go and ask about it.
+        self._asked_for_a_room = True
         await self._create_room()
         self._room = self._joined_room()
         return await self._room.join()
@@ -306,11 +312,16 @@ class LiveKitRoomBackend:
         if room is None or session is None:
             raise MediaBackendError("an agent was waited for before a room")
 
+        # One deadline for both halves, not one each: the budget is how
+        # long the room may stand empty, and two budgets end up waiting
+        # twice as long as anybody was told.
+        deadline = asyncio.get_running_loop().time() + seconds
         if not await first_of(room.arrivals, within=seconds):
             raise MediaBackendError(
                 self._nobody_came(seconds), ending=AGENT_NEVER_JOINED
             )
-        if not await first_of(session.carrying_audio, within=seconds):
+        left = deadline - asyncio.get_running_loop().time()
+        if left <= 0 or not await first_of(session.carrying_audio, within=left):
             raise MediaBackendError(
                 f"an agent joined the room but published no audio within "
                 f"{seconds:.0f}s; check that the worker publishes a track "
@@ -323,15 +334,22 @@ class LiveKitRoomBackend:
         """Leave and delete the room, from any state and on every path.
 
         Deleting is what ends everything the room held — the dispatched
-        worker included — so it is done whether the exchange ended
-        naturally, hit a limit, was canceled, or never opened at all.
+        worker included — so it is done however the exchange ended: a
+        natural close, a limit, a cancel directive, or a fault at any step
+        above. A room left running would go on costing the customer, and
+        the one call that could have stopped it is this one.
+
+        The only path that skips it is the one where no room was ever
+        asked for, because a delete for a room nobody made could only
+        fail.
         """
         room, self._room = self._room, None
         try:
             if room is not None:
                 await room.leave()
         finally:
-            await self._delete_room()
+            if self._asked_for_a_room:
+                await self._delete_room()
 
     # -- The four places this driver touches the network ---------------------
     #
