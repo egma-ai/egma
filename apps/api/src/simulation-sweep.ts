@@ -47,8 +47,12 @@ export type OrphanSweepOptions = {
 };
 
 export type OrphanSweep = {
-  /** The only thing to do with the handle: the server is closing. */
-  stop(): void;
+  /**
+   * The only thing to do with the handle: the server is closing. Settles when
+   * any tick already in flight has finished, so a caller that awaits it can
+   * tear the store down knowing the sweep holds no connection to it.
+   */
+  stop(): Promise<void>;
 };
 
 export function startOrphanSweep(options: OrphanSweepOptions): OrphanSweep {
@@ -91,8 +95,12 @@ export function startOrphanSweep(options: OrphanSweepOptions): OrphanSweep {
     }
   };
 
+  // Kept so `stop` can wait a started tick out. `tick` settles rather than
+  // throwing — every fault is caught and logged inside it — so holding the
+  // latest promise is holding a completion, never an error to re-raise.
+  let inFlight: Promise<void> = Promise.resolve();
   const timer = setInterval(() => {
-    void tick();
+    inFlight = tick();
   }, interval);
   // A shutdown must never wait on a sweep that has not happened yet: the
   // timer holds nothing open, and the rows it would have swept are exactly
@@ -100,8 +108,9 @@ export function startOrphanSweep(options: OrphanSweepOptions): OrphanSweep {
   timer.unref();
 
   return {
-    stop() {
+    async stop() {
       clearInterval(timer);
+      await inFlight;
     },
   };
 }

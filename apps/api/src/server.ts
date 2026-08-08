@@ -245,7 +245,9 @@ export function buildApi(options: ServerOptions): Api {
     });
   });
   app.addHook("onClose", async () => {
-    orphanSweep?.stop();
+    // Awaited, so closing drains any tick in flight: whoever closes the app
+    // and then the stores knows the sweep holds no connection to them.
+    await orphanSweep?.stop();
   });
 
   return { app, identity };

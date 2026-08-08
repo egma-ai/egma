@@ -166,7 +166,7 @@ describe("the standing sweep", () => {
       expect(log.infos).toHaveLength(1);
       expect(log.errors).toHaveLength(0);
     } finally {
-      sweep.stop();
+      await sweep.stop();
     }
   });
 
@@ -184,7 +184,7 @@ describe("the standing sweep", () => {
       expect(log.errors[0]?.message).toContain("sweep");
       expect(log.infos).toHaveLength(0);
     } finally {
-      sweep.stop();
+      await sweep.stop();
     }
   });
 });
