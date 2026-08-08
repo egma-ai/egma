@@ -509,7 +509,7 @@ describe("starting a run", () => {
       message:
         "egma has no simulator adapter for a phone connection yet, so it " +
         "will not start a run it cannot conduct. Run these tests over a " +
-        "connection egma conducts today: retell.",
+        "connection egma conducts today: retell, livekit.",
     });
 
     // And nothing is left queued for a conductor that does not exist.

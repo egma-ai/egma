@@ -192,7 +192,7 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
       hintField: "apiKey",
     },
     // No reuse rule: the url names a server rather than an agent.
-    simulatorAdapter: false,
+    simulatorAdapter: true,
   },
 };
 

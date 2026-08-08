@@ -276,10 +276,7 @@ export const CONNECTION_REGISTRY: Readonly<
       // off their own dashboard to tell two projects apart.
       hintField: "apiKey",
     },
-    // Nothing conducts a livekit room yet, so a run over one is refused at
-    // creation rather than queued for a conductor that does not exist. It
-    // flips to `true` in the same commit as the adapter.
-    simulatorAdapter: false,
+    simulatorAdapter: true,
     // No reuse rule, deliberately: the url names a server rather than an
     // agent, whole teams share one, and the agent name is absent in the
     // ordinary case. There is nothing here that could honestly say two
