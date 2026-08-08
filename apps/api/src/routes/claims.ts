@@ -252,56 +252,70 @@ export async function claimRoutes(
 
     // A client that hangs up mid-hold should stop being worked for: rows
     // claimed for nobody would sit claimed until the sweep called them
-    // orphaned, so the hold checks the connection is still there before
-    // every re-ask.
-    let gone = false;
-    request.raw.once("close", () => {
+    // orphaned, so the hold checks the client is still there before every
+    // re-ask. The signal has to come from the **socket**, not the request:
+    // a request message emits `close` the moment its body has been read —
+    // which happened before this handler ran — so a listener there would
+    // read every hold as abandoned at once and answer each empty-queue
+    // claim immediately. The socket closes only when the client actually
+    // goes.
+    const socket = request.raw.socket;
+    let gone = socket.destroyed;
+    const clientLeft = (): void => {
       gone = true;
-    });
+    };
+    socket.once("close", clientLeft);
 
-    const deadline = Date.now() + ask.holdSeconds * 1_000;
-    let claims = await claimSimulations({
-      claimant: ask.claimant,
-      capacity: ask.capacity,
-    });
-    while (claims.length === 0 && !gone && Date.now() < deadline) {
-      await sleep(Math.min(RECHECK_MILLISECONDS, deadline - Date.now()));
-      if (gone) break;
-      claims = await claimSimulations({
+    try {
+      const deadline = Date.now() + ask.holdSeconds * 1_000;
+      let claims = await claimSimulations({
         claimant: ask.claimant,
         capacity: ask.capacity,
       });
-    }
-
-    const specs: Record<string, unknown>[] = [];
-    for (const claim of claims) {
-      // A row whose stored shapes will not open — a sealed envelope that no
-      // longer decrypts, a column holding something egma never writes —
-      // throws from the reads rather than answering empty. Caught here,
-      // because that too is one row's fault and never the batch's: an
-      // escape would abort the whole response and withhold every valid
-      // claim beside it from a simulator standing ready to conduct them.
-      const spec = await assembledSpec(claim).catch(
-        (fault: unknown): { readonly unbuildable: string } => ({
-          unbuildable: fault instanceof Error ? fault.message : String(fault),
-        }),
-      );
-      if ("unbuildable" in spec) {
-        // Fail loudly on this side and keep dispatching the rest: one
-        // corrupt row must not hold up the batch, and the simulator is
-        // never handed a document it would have to refuse. The row stays
-        // claimed for now — the orphan sweep is what eventually ends it —
-        // until the dispatch-failure landing gives a simulation the
-        // platform could not hand over its own honest terminal state.
-        request.log.error(
-          { simulationId: claim.id, runId: claim.runId },
-          `simulation ${claim.id} was claimed and could not be dispatched: ${spec.unbuildable}`,
-        );
-        continue;
+      while (claims.length === 0 && !gone && Date.now() < deadline) {
+        await sleep(Math.min(RECHECK_MILLISECONDS, deadline - Date.now()));
+        if (gone) break;
+        claims = await claimSimulations({
+          claimant: ask.claimant,
+          capacity: ask.capacity,
+        });
       }
-      specs.push(spec);
-    }
 
-    return reply.send({ specs });
+      const specs: Record<string, unknown>[] = [];
+      for (const claim of claims) {
+        // A row whose stored shapes will not open — a sealed envelope that no
+        // longer decrypts, a column holding something egma never writes —
+        // throws from the reads rather than answering empty. Caught here,
+        // because that too is one row's fault and never the batch's: an
+        // escape would abort the whole response and withhold every valid
+        // claim beside it from a simulator standing ready to conduct them.
+        const spec = await assembledSpec(claim).catch(
+          (fault: unknown): { readonly unbuildable: string } => ({
+            unbuildable: fault instanceof Error ? fault.message : String(fault),
+          }),
+        );
+        if ("unbuildable" in spec) {
+          // Fail loudly on this side and keep dispatching the rest: one
+          // corrupt row must not hold up the batch, and the simulator is
+          // never handed a document it would have to refuse. The row stays
+          // claimed for now — the orphan sweep is what eventually ends it —
+          // until the dispatch-failure landing gives a simulation the
+          // platform could not hand over its own honest terminal state.
+          request.log.error(
+            { simulationId: claim.id, runId: claim.runId },
+            `simulation ${claim.id} was claimed and could not be dispatched: ${spec.unbuildable}`,
+          );
+          continue;
+        }
+        specs.push(spec);
+      }
+
+      return await reply.send({ specs });
+    } finally {
+      // Taken back off rather than left behind: a keep-alive socket outlives
+      // this request, and a listener per claim would pile up for as long as
+      // the simulator keeps its connection — which is its whole life.
+      socket.removeListener("close", clientLeft);
+    }
   });
 }
