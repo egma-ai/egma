@@ -283,7 +283,7 @@ describe("a terminal transition", () => {
       [simulationId],
     );
 
-    const swept = await sweepOrphanedSimulations(auth, { staleAfterSeconds: 1 });
+    const swept = await sweepOrphanedSimulations({ staleAfterSeconds: 1 });
     expect(swept.map((simulation) => simulation.id)).toContain(simulationId);
 
     const [job] = await listGradingJobsForSimulation(auth, simulationId);

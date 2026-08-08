@@ -268,7 +268,7 @@ describe("every lifecycle change", () => {
       "update simulation set heartbeat_at = now() - interval '1 hour' where id = $1",
       [only.id],
     );
-    await sweepOrphanedSimulations(actingAsAcme(), { staleAfterSeconds: 30 });
+    await sweepOrphanedSimulations({ staleAfterSeconds: 30 });
 
     const feed = await feedOf(started.id);
     expect(feed.events.map(said)).toEqual([

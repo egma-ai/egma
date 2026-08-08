@@ -69,22 +69,30 @@ const CONTEXT_ESTABLISHING = [
 const INSTANCE_SCOPED = ["instanceIsClaimed"];
 
 /**
- * What hands egma's own services their work. The grader and the simulator each
- * stand behind every organization on the deployment at once and hold no
- * credential, because there is no honest one to give them — so each is handed
- * work rather than asked for one.
+ * What hands egma's own services their work, and what keeps a dispatch honest
+ * afterwards. The grader and the simulator each stand behind every
+ * organization on the deployment at once and hold no credential, because
+ * there is no honest one to give them — so each is handed work rather than
+ * asked for one, and the simulator's heartbeat and orphan sweep stand on the
+ * same ground: a beat arrives bearing a token that resolves to nobody, and
+ * silence is noticed by nobody in particular.
  *
- * Three names, and a fourth is a decision somebody makes on purpose. None takes
+ * Five names, and a sixth is a decision somebody makes on purpose. None takes
  * an argument by which a caller could name a customer, and a build rule refuses
  * one that grows one; the only rows any of them reaches are egma's own queues —
- * grading jobs, and the simulations egma itself wrote as queued; and every
- * claim arrives carrying the `AuthContext` narrowed to that row's own
- * organization and project, which is what all of the work afterwards goes
- * through.
+ * grading jobs, and the simulations egma itself wrote and claimed. A claim
+ * arrives carrying the `AuthContext` narrowed to that row's own organization
+ * and project, which is what all of the work afterwards goes through; the
+ * heartbeat can stamp only a row already claimed under the caller's own name
+ * and answers one boolean egma wrote; the sweep files each orphan's grading
+ * work under the tenancy the row itself carries and answers identifiers and
+ * no content.
  */
 const WORK_DISPATCHING = [
   "claimGradingJobs",
   "claimSimulations",
+  "recordSimulationHeartbeat",
+  "sweepOrphanedSimulations",
   "watchGradingWork",
 ];
 
@@ -195,7 +203,6 @@ const CONTEXT_REQUIRING = [
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordProductionTraces",
-  "recordSimulationHeartbeat",
   "registerAgent",
   "regrade",
   "releaseGradingJob",
@@ -217,7 +224,6 @@ const CONTEXT_REQUIRING = [
   "setJudgeConfiguration",
   "startRun",
   "startSimulation",
-  "sweepOrphanedSimulations",
   "updateAgent",
   "updateConnection",
   "updateOrganizationSettings",
