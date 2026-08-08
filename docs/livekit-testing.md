@@ -2,9 +2,9 @@
 
 A LiveKit agent is a worker waiting to be given a room. So egma makes one — in
 **your** LiveKit project, not egma's — joins it as an ordinary participant, asks
-for your worker, and holds a conversation with whoever turns up. Your agent does
-not know it is being tested. It gets a room and a caller, which is all it ever
-gets.
+for your worker, and speaks with whoever turns up. Your agent does not know it
+is being tested. It gets a room and a persona speaking to it, which is all it
+ever gets.
 
 This is the testing path. The [other LiveKit page](livekit.md) walks telemetry —
 watching an agent that is already talking to real people. Neither needs the

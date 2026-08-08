@@ -66,8 +66,8 @@ different things:
   the place an agent reads whatever its own deployment needs.
 - **Dispatch metadata** is egma's context and only egma's: the simulation
   this room is conducting and the modality it is in. It carries **nothing
-  of the test's content** — no scenario, no persona, no expectation —
-  because an agent that reads its script stops being under test.
+  of the test's content** — no scenario text, no persona, no expected
+  behavior — because an agent that reads its script stops being under test.
 
 ## Which failed ending a refusal deserves
 
@@ -434,21 +434,20 @@ def _endpoint_headers(credentials: Any) -> dict[str, str]:
 
 
 def _configured_json(configured: object) -> str | None:
-    """The connection's configured metadata, as one string for the room.
+    """The connection's configured metadata, passed through byte for byte.
 
-    A string is the customer's own JSON and goes through byte for byte;
-    an object or a list is written out compactly. Anything else was a
-    mistake worth naming rather than passing on.
+    The control plane only ever stores this as a JSON object in a string,
+    so a string is the customer's own JSON and rides through verbatim.
+    Anything else never came through the door, and is a mistake worth
+    naming rather than passing on.
     """
     if configured is None:
         return None
     if isinstance(configured, str):
         return configured
-    if isinstance(configured, dict | list):
-        return json.dumps(configured, separators=(",", ":"))
     raise MediaBackendError(
-        "livekit config: metadata is what the room carries for the agent, "
-        "so it has to be a JSON object, a list, or a string of JSON"
+        "livekit config: metadata rides to the agent exactly as configured, "
+        "and it is configured as a JSON object in a string"
     )
 
 

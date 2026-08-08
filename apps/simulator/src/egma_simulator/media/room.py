@@ -39,7 +39,7 @@ one line."""
 
 PERSONA_IDENTITY = "egma-persona"
 """Who the simulator is in the room. The *agent* under test is whoever
-else turns up; this name is only ever the caller's."""
+else turns up; this name is only ever the persona's."""
 
 CONNECT_SECONDS = 30.0
 """How long joining the room may take before it counts as a server that
@@ -71,7 +71,7 @@ def room_name_for(simulation_id: str) -> str:
 
 
 def persona_name_for(simulation_id: str) -> str:
-    """Who the simulator is in that room — the caller, never the agent.
+    """Who the simulator is in that room — the persona, never the agent.
 
     Carries the simulation's id for the same reason the room name does: it
     is asked for by name, so it has to be a name that names one simulation
@@ -154,9 +154,9 @@ class RoomSession:
         is the far end listening rather than the far end answering. An
         agent that talks over the persona is lost with it: this seam
         exchanges whole turns, so speech that overlaps two of them has
-        nowhere to go. What the record then shows is a conversation
+        nowhere to go. What the record then shows is an exchange
         without interruptions, which is true of what was measured and not
-        of what a real caller would have heard — worth knowing before
+        of what a live listener would have heard — worth knowing before
         reading a transcript for barge-in behavior.
         """
         from pipecat.frames.frames import OutputAudioRawFrame
@@ -206,8 +206,6 @@ class JoinedRoom:
         self._running: asyncio.Task | None = None
         self.arrivals: asyncio.Event = asyncio.Event()
         """Set once somebody other than the persona is in the room."""
-        self.who_arrived: list[str] = []
-        """Every participant that joined after the persona did, in order."""
 
     @property
     def session(self) -> RoomSession | None:
@@ -250,8 +248,7 @@ class JoinedRoom:
             joined.set()
 
         @transport.event_handler("on_participant_connected")
-        async def _somebody_arrived(_transport: object, participant: str) -> None:
-            self.who_arrived.append(str(participant))
+        async def _somebody_arrived(_transport: object, _participant: str) -> None:
             self.arrivals.set()
 
         @transport.event_handler("on_participant_disconnected")

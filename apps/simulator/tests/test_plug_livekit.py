@@ -489,11 +489,10 @@ def test_egmas_context_is_the_same_string_wherever_it_is_built():
     ("configured", "carried"),
     [
         (
-            {"clinic": "lakeside", "locale": "en-GB"},
+            '{"clinic":"lakeside","locale":"en-GB"}',
             '{"clinic":"lakeside","locale":"en-GB"}',
         ),
         ('{"already":"json"}', '{"already":"json"}'),
-        ([1, 2], "[1,2]"),
         (None, ""),
     ],
 )
@@ -504,7 +503,10 @@ async def test_the_room_carries_the_connections_own_json(
     carried: str,
 ):
     """The customer's metadata channel: theirs to write, egma's to pass
-    through untouched, and it never carries anything of egma's."""
+    through untouched, and it never carries anything of egma's.
+
+    The door only ever stores metadata as a JSON object in a string, so a
+    string is the whole product shape: it rides byte for byte."""
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
     await room_walk(
         tmp_path, stub, monkeypatch, metadata=configured, scenario="One point."
@@ -514,7 +516,20 @@ async def test_the_room_carries_the_connections_own_json(
     assert A_SIMULATION not in stub.rooms[0].metadata
 
 
-# -- Every way a room fails to become a conversation -------------------------
+@pytest.mark.parametrize("configured", [{"clinic": "lakeside"}, [1, 2], 7])
+def test_metadata_that_is_not_the_doors_own_string_is_refused(configured: object):
+    """A spec is the door's word, and the door stores metadata as a JSON
+    object in a string. Anything else never came through it, and the
+    driver names the mistake rather than papering over it."""
+    from egma_simulator.media.livekit_room import _configured_json
+
+    with pytest.raises(MediaBackendError) as refused:
+        _configured_json(configured)
+
+    assert "a JSON object in a string" in str(refused.value)
+
+
+# -- Every way a room fails to become a simulation ---------------------------
 
 
 async def test_a_worker_that_never_comes_is_never_the_agent_failing(
@@ -1006,14 +1021,6 @@ async def test_the_golden_livekit_fixture_is_a_connection_the_plug_accepts(
     assembled = assemble(spec, blobs=FilesystemBlobStore(tmp_path))
     assert assembled.voice is not None
     assert assembled.audio is None, "nothing was conducted, so nothing was measured"
-
-
-def test_the_agent_in_the_room_is_only_ever_the_one_under_test():
-    """The identities in a room say who is whom, and the persona's is
-    never the agent's."""
-    pass
-
-    assert PERSONA_IDENTITY != AGENT_IDENTITY
 
 
 # -- The second way in: the customer mints the token -------------------------

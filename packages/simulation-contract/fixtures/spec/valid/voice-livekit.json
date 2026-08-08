@@ -7,10 +7,7 @@
     "config": {
       "url": "wss://lakeside-dental.livekit.cloud",
       "agentName": "front-desk",
-      "metadata": {
-        "clinic": "lakeside",
-        "locale": "en-GB"
-      }
+      "metadata": "{\"clinic\":\"lakeside\",\"locale\":\"en-GB\"}"
     },
     "credentials": {
       "apiKey": "APIexample0key0",

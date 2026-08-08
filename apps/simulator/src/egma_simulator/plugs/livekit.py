@@ -31,8 +31,8 @@ creates the room, dispatches the worker and deletes the room at the end:
 - ``agentName`` (string, optional) — which agent to dispatch. Absent or
   blank: automatic dispatch, which is what a worker registered without a
   name already gets.
-- ``metadata`` (object, list or string of JSON, optional) — carried on
-  the room, verbatim, for the agent to read.
+- ``metadata`` (a JSON object in a string, optional) — carried on the
+  room, verbatim, for the agent to read.
 
 Its credentials are the customer's LiveKit ``apiKey`` and ``apiSecret``.
 Unlike a phone connection, a room connection carries its own: the room is

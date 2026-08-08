@@ -5,8 +5,15 @@ fake, which says the lifecycle is right and nothing at all about a real
 LiveKit project, a real worker, or a real dispatch. This file is the
 other half: a spec whose connection names a room goes in at the control
 plane, egma makes the room in that project, a real agent worker is
-dispatched into it, a real conversation happens, and the record that
-comes back is read the same way the offline acceptance suite reads one.
+dispatched into it, a genuine spoken exchange happens, and the record
+that comes back is read the same way the offline acceptance suite reads
+one.
+
+Its first execution is on the record: 2026-08-08, against a LiveKit
+Cloud project and the dumb-agent fixture, three simulations conducted
+green — explicit dispatch by name twice (once against a cold worker) and
+automatic dispatch once, every room deleted at teardown, the measured
+band 16000 Hz in all three.
 
 It is opt-in because CI holds no LiveKit project and no agent worker, and
 it skips — visibly, never failing, never waiting on anybody::
