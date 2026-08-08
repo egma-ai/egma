@@ -135,16 +135,16 @@ export async function judgeExpectedBehaviors(
   const behaviors = version.expectedBehaviors;
   if (behaviors.length === 0) return undefined;
 
-  if (!conversation.happened) {
+  // The same sentence the authored graders answer with, read off the
+  // conversation rather than written a second time here: two copies of it are
+  // two things a reader could be told about one conversation.
+  const nothingToJudge = conversation.nothingToJudgeBecause;
+  if (nothingToJudge !== null) {
     return {
       versionId: version.id,
       judgedBy: "engine",
       judged: behaviors.map((behavior, at) =>
-        couldNotJudge(
-          behavior,
-          at,
-          `this simulation ended ${conversation.endingReason ?? "without running"}, so there was no conversation to judge.`,
-        ),
+        couldNotJudge(behavior, at, nothingToJudge),
       ),
     };
   }

@@ -30,7 +30,7 @@ function conversation(transcript: unknown = A_CONVERSATION): Conversation {
   return {
     source: "simulation",
     traceId: "sim_01JQZ0000000000000000000AA",
-    happened: true,
+    nothingToJudgeBecause: null,
     endingReason: "persona_concluded",
     transcript,
     events: [],

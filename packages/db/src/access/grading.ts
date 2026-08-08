@@ -215,7 +215,10 @@ export type GradingClaim = {
   readonly traceId: string | null;
   /**
    * When the trace's earliest and latest spans began — the window its transcript
-   * is read inside. Null for a simulation, which is read from its own row.
+   * is read inside. Null for a simulation, whose window comes off its own row:
+   * a simulation was conducted between two moments egma recorded, and this job
+   * was written by the transaction that recorded the second one rather than by
+   * a span arriving.
    */
   readonly firstSpanAt: Date | null;
   readonly lastSpanAt: Date | null;

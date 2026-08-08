@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@egma/db": "workspace:*",
-    "@egma/ids": "workspace:*"
+    "@egma/ids": "workspace:*",
+    "@egma/simulation-contract": "workspace:*"
   }
 }

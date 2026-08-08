@@ -82,6 +82,9 @@ importers:
       '@egma/ids':
         specifier: workspace:*
         version: link:../../packages/ids
+      '@egma/simulation-contract':
+        specifier: workspace:*
+        version: link:../../packages/simulation-contract
 
   apps/simulator: {}
 
@@ -142,6 +145,9 @@ importers:
 
   packages/simulation-contract:
     dependencies:
+      '@egma/ids':
+        specifier: workspace:*
+        version: link:../ids
       ajv:
         specifier: ^8.17.1
         version: 8.20.0
