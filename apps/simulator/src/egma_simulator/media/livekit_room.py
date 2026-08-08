@@ -417,10 +417,15 @@ class LiveKitRoomBackend:
         """
         from livekit import api
 
-        lkapi = api.LiveKitAPI(
-            self._settings.url, self._settings.api_key, self._settings.api_secret
-        )
+        # The client is built inside the guard so that everything that can
+        # go wrong here comes out of one door, scrubbed: a URL the library
+        # itself will not take is a connection somebody has to fix, and it
+        # must read like one rather than like an unnamed crash.
+        lkapi = None
         try:
+            lkapi = api.LiveKitAPI(
+                self._settings.url, self._settings.api_key, self._settings.api_secret
+            )
             if isinstance(request, api.CreateRoomRequest):
                 await lkapi.room.create_room(request)
             else:
@@ -434,8 +439,9 @@ class LiveKitRoomBackend:
                 what_failed, self._settings.url, self._quotable(repr(unreachable))
             ) from unreachable
         finally:
-            with contextlib.suppress(Exception):
-                await lkapi.aclose()
+            if lkapi is not None:
+                with contextlib.suppress(Exception):
+                    await lkapi.aclose()
 
     def _nobody_came(self, seconds: float) -> str:
         """Why nobody turned up, worded for whoever has to go and look."""

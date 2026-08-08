@@ -359,13 +359,19 @@ async def delete_room(
     """
     from livekit import api
 
-    lkapi = api.LiveKitAPI(url, api_key, api_secret)
+    # Built inside the guard, not before it: a client that cannot even be
+    # constructed — a URL nothing can parse — must not turn teardown into
+    # a raise, because whatever raises here replaces the walk's own answer
+    # with a complaint about tidying up.
+    lkapi = None
     try:
+        lkapi = api.LiveKitAPI(url, api_key, api_secret)
         await lkapi.room.delete_room(api.DeleteRoomRequest(room=room_name))
     except Exception as unfinished:
         logger.info(
             "the room %s was not deleted: %s", room_name, quotable(repr(unfinished))
         )
     finally:
-        with contextlib.suppress(Exception):
-            await lkapi.aclose()
+        if lkapi is not None:
+            with contextlib.suppress(Exception):
+                await lkapi.aclose()

@@ -25,7 +25,7 @@ from conftest import A_PERSONALITY, A_SCENARIO, a_spec, assert_one_speaker_to_a_
 from room_stub import AGENT_IDENTITY, RoomStub
 
 from egma_simulator.blob import FilesystemBlobStore
-from egma_simulator.contract import AGENT_NEVER_JOINED, ERROR
+from egma_simulator.contract import AGENT_NEVER_JOINED, ERROR, contract_dir
 from egma_simulator.media import MediaBackend, MediaBackendError, MediaSession
 from egma_simulator.media.livekit_room import (
     ROOM_BAND_HZ,
@@ -37,7 +37,7 @@ from egma_simulator.media.room import ROOM_PREFIX, RoomSession
 from egma_simulator.model import GOODBYE, ScriptedModel
 from egma_simulator.persona import Persona
 from egma_simulator.pipeline import assemble, channels_of
-from egma_simulator.plugs import PlugError, Utterance, plug_for
+from egma_simulator.plugs import PlugError, Utterance, failed_ending, plug_for
 from egma_simulator.plugs import livekit as livekit_plug
 from egma_simulator.plugs.livekit import LiveKitRoom
 from egma_simulator.redaction import REDACTED
@@ -52,6 +52,17 @@ A_SECRET = "SENTINEL-livekit-api-secret-7f3b0c19d2a4"
 below is scanned for it, on the way through and on the way out."""
 
 A_SIMULATION = "sim-room-001"
+
+FAILED_ENDINGS = frozenset(
+    json.loads(
+        (contract_dir() / "schemas" / "simulation-report.v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )["$defs"]["failed_facts"]["properties"]["ending"]["enum"]
+)
+"""The endings a failed simulation may honestly claim, read off the
+contract itself rather than spelled again here — a plug that invented a
+variant would be refused at the door, and this says so early."""
 
 
 def livekit_spec(
@@ -449,7 +460,11 @@ async def test_a_worker_that_never_comes_is_never_the_agent_failing(
             tmp_path, stub, monkeypatch, agent_name="front-desk", scenario="One point."
         )
 
-    assert never_came.value.ending == AGENT_NEVER_JOINED
+    # What the record would carry, asked the way the service asks it: a
+    # failed simulation whose ending says nothing was tested, so there is
+    # nothing for a grader to judge the agent on.
+    assert failed_ending(never_came.value) == AGENT_NEVER_JOINED
+    assert AGENT_NEVER_JOINED in FAILED_ENDINGS
     told = str(never_came.value)
     assert "front-desk" in told, "the name nobody registered has to be on the record"
     assert "worker" in told
@@ -470,7 +485,7 @@ async def test_an_unnamed_worker_that_never_comes_says_where_to_look(
     with pytest.raises(PlugError) as never_came:
         await room_walk(tmp_path, stub, monkeypatch, scenario="One point.")
 
-    assert never_came.value.ending == AGENT_NEVER_JOINED
+    assert failed_ending(never_came.value) == AGENT_NEVER_JOINED
     assert "automatic dispatch" in str(never_came.value)
 
 
@@ -485,7 +500,7 @@ async def test_a_worker_that_joins_and_publishes_nothing_never_joined_either(
     with pytest.raises(PlugError) as silent:
         await room_walk(tmp_path, stub, monkeypatch, scenario="One point.")
 
-    assert silent.value.ending == AGENT_NEVER_JOINED
+    assert failed_ending(silent.value) == AGENT_NEVER_JOINED
     assert "audio" in str(silent.value)
     assert stub.deleted == [stub.rooms[0].name]
 
@@ -539,7 +554,7 @@ async def test_a_dispatch_the_platform_refuses_is_a_fault_in_its_words(
         )
 
     told = str(refused.value)
-    assert refused.value.ending == ERROR
+    assert failed_ending(refused.value) == ERROR
     assert "no worker registered" in told
     assert stub.deleted == [stub.rooms[0].name]
 
@@ -552,7 +567,7 @@ async def test_a_room_the_platform_refuses_is_a_fault_in_its_words(
     with pytest.raises(PlugError) as refused:
         await room_walk(tmp_path, stub, monkeypatch, scenario="One point.")
 
-    assert refused.value.ending == ERROR
+    assert failed_ending(refused.value) == ERROR
     assert "room name already taken" in str(refused.value)
     # Nothing was joined, and the room is still asked about: a delete that
     # finds nothing is cheaper than a room left running.
