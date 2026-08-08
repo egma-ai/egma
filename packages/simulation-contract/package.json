@@ -13,7 +13,8 @@
   "files": [
     "dist",
     "schemas",
-    "measure-catalog.md"
+    "measure-catalog.md",
+    "span-vocabulary.md"
   ],
   "scripts": {
     "build": "tsc -b"

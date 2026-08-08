@@ -88,8 +88,9 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
  * and answers one boolean egma wrote; the sweep files each orphan's grading
  * work under the tenancy the row itself carries and answers identifiers and
  * no content; `resolveSimulationStanding` is the claim's context derived
- * again, by the id the claim handed out, for the report door — lifecycle
- * stamps and no content.
+ * again, by the id the claim handed out, for every call that comes back
+ * about a row — the report door's lifecycle claims and the ingest door's
+ * arriving spans alike — lifecycle stamps and filing pins, and no content.
  */
 const WORK_DISPATCHING = [
   "claimGradingJobs",

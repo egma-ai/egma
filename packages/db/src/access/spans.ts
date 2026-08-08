@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 
 import { ClickHouseError } from "@clickhouse/client";
@@ -19,10 +20,14 @@ import { TraceStoreRefusedError } from "./errors.ts";
  * update, no delete, no merge of a later part into an earlier one. A span
  * arrives once, complete. Duplicates are not resolved at read time on this
  * table — the obligation not to send twice belongs to whoever wrote the span,
- * and ClickHouse's block-level insert dedup is the backstop under it, which is
- * why the rows this function builds are a pure function of its arguments: an
- * exporter's retry of the same batch has to produce the same bytes or the
- * backstop does not fire.
+ * and the store's insert dedup is the backstop under it. The backstop is keyed
+ * on the ids: every insert carries a deduplication token derived from the
+ * writer-minted span ids it holds, so a resend of the same batch is recognised
+ * as the same batch *by identity* — it dedups even if the bytes around the ids
+ * were re-serialised on the way, which is the guarantee a content hash alone
+ * cannot give. That only works because block construction is a pure function of
+ * this function's arguments: the same batch has to become the same blocks in
+ * the same order, or the same batch would mint a different token.
  */
 
 /**
@@ -265,7 +270,8 @@ function rowFor(auth: AuthContext, span: NewSpan): Record<string, unknown> {
  * One row, serialised exactly once.
  *
  * The line is what is sent, its byte count is what the batch budget is spent
- * from, and its month is which partition it lands in — three questions off one
+ * from, its month is which partition it lands in, and its two ids are what the
+ * block's dedup token is derived from — four questions off one
  * `JSON.stringify` instead of one throwaway serialisation per row for the
  * sizing and a second one inside the client for the wire.
  */
@@ -274,6 +280,9 @@ type SerialisedRow = {
   readonly bytes: number;
   /** `YYYY-MM`, which is `toYYYYMM(started_at)` written the way the literal is. */
   readonly month: string;
+  /** The writer-minted identity, which is what a resend repeats. */
+  readonly traceId: string;
+  readonly spanId: string;
 };
 
 function serialised(auth: AuthContext, span: NewSpan): SerialisedRow {
@@ -283,7 +292,33 @@ function serialised(auth: AuthContext, span: NewSpan): SerialisedRow {
     line,
     bytes: Buffer.byteLength(line),
     month: String(row["started_at"]).slice(0, "YYYY-MM".length),
+    traceId: span.traceId,
+    spanId: span.spanId,
   };
+}
+
+/** One insert as it goes to the store: its rows, and the token naming them. */
+type InsertBlock = {
+  readonly lines: readonly string[];
+  readonly token: string;
+};
+
+/**
+ * The block's `insert_deduplication_token`: a digest over whose spans these are
+ * and which — the tenancy, then every row's writer-minted ids, in block order.
+ *
+ * The ids alone are deliberately not enough. Nothing coordinates id minting
+ * between customers, so two of them can collide honestly, and a token that
+ * ignored tenancy would drop the second customer's telemetry as a duplicate of
+ * the first's. Tenancy plus ids is exactly what makes two spans the same span.
+ * The store tracks tokens per partition; a block is one month by construction,
+ * so the token never has to say which.
+ */
+function tokenFor(auth: AuthContext, rows: readonly SerialisedRow[]): string {
+  const digest = createHash("sha256");
+  digest.update(`spans\n${auth.organizationId}\n${auth.projectId ?? "default"}`);
+  for (const row of rows) digest.update(`\n${row.traceId}/${row.spanId}`);
+  return digest.digest("hex");
 }
 
 /**
@@ -299,9 +334,13 @@ function serialised(auth: AuthContext, span: NewSpan): SerialisedRow {
  *
  * A single row larger than the byte cap still goes, alone: splitting is how a
  * big batch gets written, never a reason to refuse one. Deterministic, because
- * an exporter's retry only dedups if it produces the identical blocks.
+ * a retry only dedups if it produces the identical blocks bearing the
+ * identical tokens.
  */
-function inserts(rows: readonly SerialisedRow[]): string[][] {
+function inserts(
+  auth: AuthContext,
+  rows: readonly SerialisedRow[],
+): InsertBlock[] {
   // Insertion-ordered, so the first month to arrive is the first block written
   // and a retry of the same batch produces the same blocks in the same order.
   const months = new Map<string, SerialisedRow[]>();
@@ -311,9 +350,16 @@ function inserts(rows: readonly SerialisedRow[]): string[][] {
     else month.push(row);
   }
 
-  const blocks: string[][] = [];
+  const blocks: InsertBlock[] = [];
+  const close = (block: readonly SerialisedRow[]): void => {
+    blocks.push({
+      lines: block.map((row) => row.line),
+      token: tokenFor(auth, block),
+    });
+  };
+
   for (const month of months.values()) {
-    let block: string[] = [];
+    let block: SerialisedRow[] = [];
     let bytes = 0;
 
     for (const row of month) {
@@ -322,15 +368,15 @@ function inserts(rows: readonly SerialisedRow[]): string[][] {
         (block.length >= MAXIMUM_ROWS_PER_INSERT ||
           bytes + row.bytes > MAXIMUM_BYTES_PER_INSERT)
       ) {
-        blocks.push(block);
+        close(block);
         block = [];
         bytes = 0;
       }
-      block.push(row.line);
+      block.push(row);
       bytes += row.bytes;
     }
 
-    if (block.length > 0) blocks.push(block);
+    if (block.length > 0) close(block);
   }
 
   return blocks;
@@ -397,10 +443,13 @@ function* lines(block: readonly string[]): Generator<string> {
  * File these spans under the caller's organization and project.
  *
  * Nothing is read first and nothing is overwritten. Sending the same batch
- * twice is not an error and is not a second copy: ClickHouse drops a repeat of
- * a byte-identical insert block, which is the one protection that works on the
- * path egma does not own — an OpenTelemetry exporter's retry is byte-identical
- * by design.
+ * twice is not an error and is not a second copy: every insert carries a
+ * deduplication token derived from its rows' writer-minted ids, and ClickHouse
+ * drops a block whose token it has already accepted. A byte-identical resend —
+ * which is what an OpenTelemetry exporter's retry is by design — repeats the
+ * ids and therefore the token; and so does a resend whose bytes drifted in
+ * re-serialisation, which is the case content-hash identity alone would land
+ * twice.
  */
 export async function appendSpans(
   auth: AuthContext,
@@ -408,18 +457,25 @@ export async function appendSpans(
 ): Promise<AppendedSpans> {
   if (spans.length === 0) return { appended: 0, batches: 0 };
 
-  const batches = inserts(spans.map((span) => serialised(auth, span)));
+  const batches = inserts(
+    auth,
+    spans.map((span) => serialised(auth, span)),
+  );
   for (const block of batches) {
     // The rows go out as the lines they were already serialised into. The
     // client's own `insert` would take the objects and stringify each one
     // again, which on a batch of fat payloads is the whole batch materialised
     // twice for no gain — so the pre-serialised body is handed to the raw
-    // path instead. The bytes ClickHouse sees are the same either way, which
-    // is what the dedup backstop is computed over.
+    // path instead.
     try {
       const { stream } = await traceStore().exec({
         query: `INSERT INTO ${SPANS_TABLE} FORMAT JSONEachRow`,
-        values: Readable.from(lines(block), { objectMode: false }),
+        values: Readable.from(lines(block.lines), { objectMode: false }),
+        clickhouse_settings: {
+          // The block's identity, stated rather than inferred from its bytes.
+          // A repeated token inside the table's dedup window is dropped whole.
+          insert_deduplication_token: block.token,
+        },
       });
       // An insert answers with an empty body, and the empty body still has to
       // be read: a response left undrained keeps its socket out of the pool

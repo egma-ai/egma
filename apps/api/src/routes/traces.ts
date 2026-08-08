@@ -5,20 +5,41 @@ import {
   authorize,
   NotPermittedError,
   recordProductionTraces,
+  resolveSimulationStanding,
   TraceStoreRefusedError,
+  type AuthContext,
+  type NewSpan,
+  type SimulationStanding,
 } from "@egma/db";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
-import { credentialed, requesterOf } from "../http/credentialed.ts";
+import { requesterOf } from "../http/credentialed.ts";
+import {
+  notAuthenticated,
+  tooManyRequests,
+  wrongServiceToken,
+} from "../http/refusals.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
+import { resolveRequester } from "../auth/requester.ts";
+import {
+  acceptsServiceToken,
+  wearsServiceTokenPrefix,
+} from "../auth/service-token.ts";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
+import { toIdentityRequest } from "../http/web-handler.ts";
 import {
   decodeOtlpExport,
   encodingOf,
   NotOtlpError,
   type OtlpEncoding,
+  type OtlpResourceSpans,
 } from "../otlp/decode.ts";
-import { normaliseOtlpExport } from "../otlp/normalise.ts";
+import {
+  normaliseOtlpExport,
+  simulationNamedBy,
+  SIMULATION_ID_ATTRIBUTE,
+  type SpanAttribution,
+} from "../otlp/normalise.ts";
 import {
   EXPORT_TRACE_SERVICE_RESPONSE,
   RPC_STATUS_MESSAGE,
@@ -29,17 +50,29 @@ import {
  *
  * It is the standard path an OpenTelemetry exporter posts to, so a customer's
  * agent reaches egma by setting two environment variables and writing no
- * integration code. **One door**, for the customer's agent now and for egma's
- * own simulation runtime later — one wire format, one code path, and a
- * simulation and a production trace therefore arrive the same way and are the
- * same shape at rest.
+ * integration code. **One door**, for the customer's agent and for egma's own
+ * simulator — one wire format, one code path, and a simulation and a
+ * production trace therefore arrive the same way and are the same shape at
+ * rest.
  *
- * **The organization and the project come from the credential.** A tenancy
- * attribute in the payload is not refused and not obeyed — it is simply not
- * consulted, the way a reserved attribute is treated by every platform that
- * learned this lesson the expensive way. The rows the data-access module writes
- * have no organization on them for a handler to set, so this is a property of
- * the shape rather than of anyone's care.
+ * **The door branches on the credential, and only there.** A customer key
+ * resolves tenancy as it always has. The deployment's own service token — the
+ * same secret the claim door answers to — resolves to no customer at all:
+ * each arriving resource must say which simulation its spans are evidence of
+ * (`egma.simulation_id`), and the door resolves the organization, the project
+ * and the run from that simulation's own row. Spans are accepted for any
+ * simulation this deployment conducted, whatever its status: a late-returning
+ * orphan's spans are evidence and are kept, even as its lifecycle claims are
+ * refused elsewhere.
+ *
+ * **The organization and the project come from the credential, or from egma's
+ * own row — never from the payload.** A tenancy attribute in the payload is
+ * not refused and not obeyed — it is simply not consulted, the way a reserved
+ * attribute is treated by every platform that learned this lesson the
+ * expensive way. The rows the data-access module writes have no organization
+ * on them for a handler to set, so this is a property of the shape rather than
+ * of anyone's care. The simulation id a resource names is not a tenancy claim:
+ * it names a conversation, and whose it is is read off the row egma wrote.
  *
  * **What one request may ask for is bounded, and the bound is reported rather
  * than enforced in silence.** A body stops at the size the OpenTelemetry
@@ -65,12 +98,16 @@ import {
  * Judging belongs to a service that holds no request open, and it stays there:
  * a door that judged would make an exporter's timeout depend on how many
  * graders a customer wrote and on how fast somebody else's judge model felt
- * like answering.
+ * like answering. The service path writes no queue row at all — a simulation's
+ * grading work is minted by the transaction that lands it terminal, so a span
+ * arriving here has nothing to add.
  */
 
 export type TraceRoutesOptions = {
   readonly provider: SessionIdentityProvider;
   readonly rateLimit: RateLimit;
+  /** The deployment's service token, from configuration — the second credential. */
+  readonly serviceToken: string;
 };
 
 /** The path OTLP/HTTP defines. Nothing else is served here. */
@@ -207,6 +244,213 @@ function carriesACredential(request: FastifyRequest): boolean {
   );
 }
 
+declare module "fastify" {
+  interface FastifyRequest {
+    /** Set by the gate below: this request holds the deployment's own token. */
+    simulatorIngest: boolean;
+  }
+}
+
+/**
+ * The spans of one customer's simulations, with the context they are filed
+ * under. One export may carry several simulations — even several customers' —
+ * so the resources are gathered by the tenancy their rows resolved to, and
+ * each gathering is appended under its own narrowed context, because that
+ * context is the only place an organization ever enters a row.
+ */
+type AttributedGroup = {
+  readonly auth: AuthContext;
+  readonly resources: OtlpResourceSpans[];
+};
+
+/**
+ * The simulator's own path through the door.
+ *
+ * By the time this runs, the gate has already matched the service token, and
+ * the token resolves to nobody — so the first real work is attribution: every
+ * resource must name its simulation, every named simulation must be one this
+ * deployment conducted, and both are settled before a single row is built.
+ * Attribution is all-or-nothing on purpose. A resource that cannot be
+ * attributed is an emitter defect, not a partial success: answering 200 for
+ * it would tell the sender's write-ahead log the evidence landed when it has
+ * nowhere to land, and the refusal is terminal (a 400 is never retried) so
+ * the defect surfaces in the simulator's log instead of looping.
+ *
+ * Whatever the simulation's status. The row is looked up, never inspected: a
+ * late flush for a simulation the sweep already called orphaned is evidence
+ * arriving after the verdict on the messenger, and it is kept.
+ *
+ * A refusal here is `google.rpc.Status`, like every refusal on this door —
+ * the sender is an OTLP exporter before it is anything else — with the
+ * sentence written for whoever reads the simulator's log: what happened, and
+ * what to send instead.
+ */
+async function simulatorExport(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  encoding: OtlpEncoding,
+): Promise<FastifyReply> {
+  const body = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
+
+  let decoded;
+  try {
+    decoded = decodeOtlpExport(
+      encoding,
+      decompressed(body, request.headers["content-encoding"]),
+    );
+  } catch (cause) {
+    if (cause instanceof NotOtlpError) {
+      return statusResponse(reply, encoding, 400, RPC_INVALID_ARGUMENT, cause.message);
+    }
+    throw cause;
+  }
+
+  const resources = decoded.resourceSpans ?? [];
+  const named: string[] = [];
+  for (const resourceSpans of resources) {
+    const simulationId = simulationNamedBy(resourceSpans);
+    if (simulationId === "") {
+      return statusResponse(
+        reply,
+        encoding,
+        400,
+        RPC_INVALID_ARGUMENT,
+        "a resource in this export names no simulation. Spans posted with " +
+          `the service token are a simulation's evidence, so every resource ` +
+          `carries the ${SIMULATION_ID_ATTRIBUTE} resource attribute holding ` +
+          "the simulation_id from the claimed spec, exactly as it was handed " +
+          "over. Nothing from this request was stored.",
+      );
+    }
+    named.push(simulationId);
+  }
+
+  // Each named simulation resolved to where it stands — the same asking the
+  // heartbeat and report doors make about a row, because arriving spans are
+  // one more call coming back about it. The standing is looked up and never
+  // inspected: whatever state the row is in, its telemetry files under it.
+  const targets = new Map<string, SimulationStanding>();
+  for (const simulationId of new Set(named)) {
+    const standing = await resolveSimulationStanding(simulationId);
+    if (standing !== undefined) targets.set(simulationId, standing);
+  }
+  const unknown = named.find((simulationId) => !targets.has(simulationId));
+  if (unknown !== undefined) {
+    return statusResponse(
+      reply,
+      encoding,
+      400,
+      RPC_INVALID_ARGUMENT,
+      `there is no simulation ${unknown} on this egma, so its spans have ` +
+        "nowhere to file. A simulation id arrives inside a claimed spec and " +
+        "is echoed verbatim — check the resource attribute against the spec, " +
+        "and check the simulator is pointed at the deployment that handed " +
+        "the work out. Nothing from this request was stored.",
+    );
+  }
+
+  // Gathered by the customer each simulation resolved to, in arrival order —
+  // the stamp is per resource, the append is per customer, and neither is
+  // anything the payload said.
+  const groups = new Map<string, AttributedGroup>();
+  for (const [index, resourceSpans] of resources.entries()) {
+    const target = targets.get(named[index] ?? "");
+    if (target === undefined) continue;
+    const key = `${target.auth.organizationId}/${target.auth.projectId ?? ""}`;
+    const group = groups.get(key);
+    if (group === undefined) {
+      groups.set(key, { auth: target.auth, resources: [resourceSpans] });
+    } else {
+      group.resources.push(resourceSpans);
+    }
+  }
+
+  const attributionFor = (resourceSpans: OtlpResourceSpans): SpanAttribution => {
+    const target = targets.get(simulationNamedBy(resourceSpans));
+    if (target === undefined) {
+      // Every resource was checked against the map before any group was
+      // normalised, so this is this file having lost track of its own input.
+      throw new Error("a resource lost its simulation between checks");
+    }
+    return {
+      source: "simulation",
+      emitter: "egma-runtime",
+      runId: target.runId,
+      agentId: target.agentId,
+      testVersionId: target.testVersionId ?? "",
+      personaVersionId: target.personaVersionId,
+    };
+  };
+
+  const rejected: { count: number; firstReason: string } = {
+    count: 0,
+    firstReason: "",
+  };
+  const appends: { auth: AuthContext; spans: readonly NewSpan[] }[] = [];
+  for (const group of groups.values()) {
+    // Normalised per gathering, so the row caps guard each customer's append
+    // rather than the request: a bound loosened only by naming more
+    // customers' simulations, which only the deployment's own simulator can.
+    const normalised = normaliseOtlpExport(
+      { resourceSpans: group.resources },
+      attributionFor,
+    );
+    rejected.count += normalised.rejected.length;
+    rejected.firstReason ||= normalised.rejected[0]?.reason ?? "";
+    appends.push({ auth: group.auth, spans: normalised.spans });
+  }
+
+  // Every group is attempted, whatever happened to the one before it: one
+  // customer's refused rows must never sink another customer's evidence, and
+  // never claim it was sunk. A store that *refuses* a group — rows it has
+  // looked at and will refuse forever — costs exactly that group, counted and
+  // answered as rejected below so the sender stops resending it. A store that
+  // merely *fails* still escapes as the error it is: the whole document comes
+  // back as a retry, and the groups that landed re-append idempotently — the
+  // resend's identical flushes carry identical dedup tokens.
+  const storeRefused: { spans: number; firstMessage: string } = {
+    spans: 0,
+    firstMessage: "",
+  };
+  for (const append of appends) {
+    // The same function every write in the product goes through, asked with
+    // the narrowed context the row resolved to. It cannot refuse a context
+    // the module itself built — which is the point of asking: a change that
+    // made it refusable would surface here, not in a customer's missing rows.
+    authorize(append.auth, "ingest_traces", {
+      organizationId: append.auth.organizationId,
+      projectId: append.auth.projectId,
+    });
+
+    try {
+      await appendSpans(append.auth, append.spans);
+    } catch (cause) {
+      if (!(cause instanceof TraceStoreRefusedError)) throw cause;
+
+      request.log.error({ err: cause }, "the trace store refused a batch");
+      storeRefused.spans += append.spans.length;
+      storeRefused.firstMessage ||=
+        `the trace store refused these spans: ${cause.message}. They were ` +
+        "not stored and re-sending the same batch will not change that.";
+    }
+  }
+
+  // And nothing goes to the grading queue, deliberately: a simulation's
+  // grading work is minted by the transaction that lands it terminal, so the
+  // telemetry path has nothing to add — a queue row from here would be the
+  // second job the landing already guards against.
+  //
+  // One truthful answer: what was rejected is the normaliser's rejects plus
+  // the refused groups' spans, and nothing that landed. The field is one
+  // string, and a store refusal is the graver news, so it speaks first.
+  return exportResponse(
+    reply,
+    encoding,
+    rejected.count + storeRefused.spans,
+    storeRefused.firstMessage || rejected.firstReason,
+  );
+}
+
 export async function traceRoutes(
   app: FastifyInstance,
   options: TraceRoutesOptions,
@@ -236,14 +480,48 @@ export async function traceRoutes(
     },
   );
 
-  credentialed(app, {
-    provider: options.provider,
-    rateLimit: options.rateLimit,
+  // This door serves two credentials, so it carries `credentialed`'s hook
+  // spelled out rather than calling it: the service token is checked first,
+  // in constant time, and resolves to nobody — there is no requester to hand
+  // the shared hook, and no organization to key its rate limit on. The token
+  // is the gate here, exactly as on the claim door, and everything after it
+  // is checked per resolved row. Anything else falls through to the customer
+  // branch, which is `credentialed`'s own body line for line: the same
+  // resolver, the same budget, the same refusals — so the customer path is
+  // the path it always was.
+  app.decorateRequest("requester", null);
+  app.decorateRequest("simulatorIngest", false);
+  app.addHook("onRequest", async (request, reply) => {
+    if (acceptsServiceToken(request.headers.authorization, options.serviceToken)) {
+      request.simulatorIngest = true;
+      return undefined;
+    }
+    // Wearing the prefix without the secret is a mis-provisioned simulator,
+    // not a customer: it gets the fix in the service's own vocabulary rather
+    // than advice about signing in, and it never reaches the resolver — the
+    // prefix already says no customer key could be under it.
+    if (wearsServiceTokenPrefix(request.headers.authorization)) {
+      return wrongServiceToken(reply);
+    }
+
+    const requester = await resolveRequester(
+      options.provider,
+      toIdentityRequest(request),
+    );
+    if (requester === null) {
+      return notAuthenticated(reply);
+    }
+
+    const verdict = options.rateLimit.reached(requester.auth.organizationId);
+    if (!verdict.allowed) {
+      return tooManyRequests(reply, verdict.retryAfterSeconds);
+    }
+
+    request.requester = requester;
+    return undefined;
   });
 
   app.post(OTLP_TRACES_PATH, async (request, reply) => {
-    const { auth } = requesterOf(request);
-
     const encoding = encodingOf(request.headers["content-type"]);
     if (encoding === null) {
       return statusResponse(
@@ -255,6 +533,12 @@ export async function traceRoutes(
           `and this request said ${request.headers["content-type"] ?? "nothing"}.`,
       );
     }
+
+    if (request.simulatorIngest) {
+      return simulatorExport(request, reply, encoding);
+    }
+
+    const { auth } = requesterOf(request);
 
     // Writing telemetry is a write, so it goes through the same function every
     // other write in the product goes through, before the body is looked at.

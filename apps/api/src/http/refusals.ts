@@ -121,6 +121,24 @@ export function notTheService(reply: FastifyReply): FastifyReply {
   );
 }
 
+/**
+ * A bearer wearing the service prefix that is not this deployment's secret, on
+ * the one door that serves the service token beside customer credentials. Its
+ * own sentence because the general one would say "sign in", and the reader is
+ * a simulator's log: the prefix means this was never a customer key, and the
+ * fix is the token, not a session.
+ */
+export function wrongServiceToken(reply: FastifyReply): FastifyReply {
+  return refuse(
+    reply,
+    "not_authenticated",
+    "this bearer starts egma_st_ and is not this deployment's " +
+      "EGMA_SIMULATOR_SERVICE_TOKEN. The api and simulator containers read " +
+      "the same value — restart whichever holds a stale one. A customer key " +
+      "starts egma_sk_ and files under its own account instead.",
+  );
+}
+
 /** The organization's request budget is spent; the header says when to retry. */
 export function tooManyRequests(
   reply: FastifyReply,

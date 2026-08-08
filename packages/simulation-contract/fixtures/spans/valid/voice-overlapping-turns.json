@@ -1,0 +1,67 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "egma-simulator" } },
+          { "key": "egma.simulation_id", "value": { "stringValue": "sim_01K3XSW9GJ2Q4RD8VXH0MEKAFP" } }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "egma-simulator", "version": "1" },
+          "spans": [
+            {
+              "traceId": "0198fb9e261215c986a37d8828e9a9f6",
+              "spanId": "bb20000000000002",
+              "parentSpanId": "bb20000000000001",
+              "name": "agent_turn",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1785924902100000000",
+              "endTimeUnixNano": "1785924909400000000",
+              "attributes": [
+                {
+                  "key": "egma.turn.text",
+                  "value": { "stringValue": "I can offer Thursday at three or Friday at ten — which works better for you?" }
+                }
+              ]
+            },
+            {
+              "traceId": "0198fb9e261215c986a37d8828e9a9f6",
+              "spanId": "bb20000000000003",
+              "parentSpanId": "bb20000000000001",
+              "name": "human_turn",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1785924907850000000",
+              "endTimeUnixNano": "1785924911020000000",
+              "attributes": [
+                {
+                  "key": "egma.turn.text",
+                  "value": { "stringValue": "Sorry — Friday, Friday at ten is perfect." }
+                }
+              ]
+            },
+            {
+              "traceId": "0198fb9e261215c986a37d8828e9a9f6",
+              "spanId": "bb20000000000004",
+              "parentSpanId": "bb20000000000001",
+              "name": "agent_speech_duration",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1785924903250000000",
+              "endTimeUnixNano": "1785924909400000000"
+            },
+            {
+              "traceId": "0198fb9e261215c986a37d8828e9a9f6",
+              "spanId": "bb20000000000005",
+              "parentSpanId": "bb20000000000001",
+              "name": "persona_speech_duration",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1785924907850000000",
+              "endTimeUnixNano": "1785924911020000000"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

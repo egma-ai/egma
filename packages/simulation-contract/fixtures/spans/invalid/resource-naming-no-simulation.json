@@ -1,0 +1,32 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "egma-simulator" } }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "egma-simulator", "version": "1" },
+          "spans": [
+            {
+              "traceId": "cccc1111cccc1111cccc1111cccc1111",
+              "spanId": "cc30000000000001",
+              "name": "agent_turn",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1785920401214000000",
+              "endTimeUnixNano": "1785920401214000000",
+              "attributes": [
+                {
+                  "key": "egma.turn.text",
+                  "value": { "stringValue": "A turn with no simulation to file under." }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
