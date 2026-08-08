@@ -2,6 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import {
   claimSimulations,
+  failSimulationDispatch,
   getPersonaVersion,
   getSimulationTestVersion,
   resolveSimulationConnection,
@@ -297,14 +298,34 @@ export async function claimRoutes(
         if ("unbuildable" in spec) {
           // Fail loudly on this side and keep dispatching the rest: one
           // corrupt row must not hold up the batch, and the simulator is
-          // never handed a document it would have to refuse. The row stays
-          // claimed for now — the orphan sweep is what eventually ends it —
-          // until the dispatch-failure landing gives a simulation the
-          // platform could not hand over its own honest terminal state.
+          // never handed a document it would have to refuse. The row lands
+          // its honest terminal state here and now — `failed`, with the
+          // platform's own `dispatch_failed` — because a spec that was never
+          // handed over is never the simulator's error, must not wait to be
+          // misnamed orphaned, and must never loop back through the queue to
+          // fail the same way again. The landing is terminal like any other:
+          // the judgement is minted beside it, and a run waiting only on
+          // this row settles with truthful counts.
           request.log.error(
             { simulationId: claim.id, runId: claim.runId },
             `simulation ${claim.id} was claimed and could not be dispatched: ${spec.unbuildable}`,
           );
+          await failSimulationDispatch(
+            claim.auth,
+            claim.id,
+            claim.claimedBy,
+          ).catch((fault: unknown) => {
+            // The one place left where the sweep is the backstop: a row so
+            // broken even its landing throws stays claimed until swept, and
+            // saying so costs one log line rather than aborting a batch a
+            // simulator is standing ready to conduct.
+            request.log.error(
+              { simulationId: claim.id, runId: claim.runId },
+              `simulation ${claim.id} could not even land dispatch_failed: ${
+                fault instanceof Error ? fault.message : String(fault)
+              }`,
+            );
+          });
           continue;
         }
         specs.push(spec);

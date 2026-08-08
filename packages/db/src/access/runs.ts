@@ -67,8 +67,10 @@ import { within } from "./within.ts";
  * simulations egma itself wrote, carries out identifiers and no content, and
  * hands back with every claim the context the conducting is then done under —
  * built from the claimed row's own tenancy and from nothing the service said.
- * `resolveSimulationConnection` is the one door such a context is for, and it
- * refuses every other kind. The whole argument is written out on the two
+ * `resolveSimulationConnection` and `failSimulationDispatch` are the two
+ * doors only such a context may open — the secret the dispatch needs, and
+ * the honest landing when the dispatch cannot happen — and each refuses
+ * every other kind. The whole argument is written out on the three
  * functions.
  *
  * Writers keep to one lock order — simulation rows first, the run header last
@@ -225,12 +227,15 @@ export type SimulationReport = {
  * conversation to grade — or died producing one, in which case the partial
  * transcript is the honest "started, never finished" record.
  *
- * `orphaned` is deliberately not a reason a simulator can give: it is the
- * sweep's word for a simulator that stopped answering, and one still
- * answering cannot claim it.
+ * Two reasons are deliberately not a simulator's to give, because each is
+ * the platform's account of its own failure: `orphaned` is the sweep's word
+ * for a simulator that stopped answering, and one still answering cannot
+ * claim it; `dispatch_failed` is the claim path's word for a spec it never
+ * handed over, which a simulator with something to report evidently
+ * received.
  */
 export type SimulationFailure = {
-  readonly reason: Exclude<FailedEndingReason, "orphaned">;
+  readonly reason: Exclude<FailedEndingReason, "orphaned" | "dispatch_failed">;
   readonly transcript?: unknown;
   readonly events?: unknown;
   readonly metrics?: unknown;
@@ -325,12 +330,15 @@ const LARGEST_CLAIM_CAPACITY = 50;
 const DEFAULT_STALE_AFTER_SECONDS = 60;
 
 /**
- * The failure reasons a simulator may give — everything but `orphaned`, which
- * is the sweep's own word. The types already say so; this is the backstop
- * for the caller the types could not see.
+ * The failure reasons a simulator may give — everything but the platform's
+ * own two words: `orphaned` is the sweep's, `dispatch_failed` the claim
+ * path's. The types already say so; this is the backstop for the caller the
+ * types could not see.
  */
 const REPORTABLE_FAILURE_REASONS: readonly FailedEndingReason[] =
-  FAILED_ENDING_REASONS.filter((reason) => reason !== "orphaned");
+  FAILED_ENDING_REASONS.filter(
+    (reason) => reason !== "orphaned" && reason !== "dispatch_failed",
+  );
 
 /**
  * The shape guards on every read. Stored jsonb comes back `unknown`, and a row
@@ -1957,6 +1965,48 @@ export async function failSimulation(
       events: failure.events ?? null,
       metrics: failure.metrics ?? null,
     },
+  });
+}
+
+/**
+ * The claim path's own landing, for a claimed simulation the platform could
+ * not hand over: `claimed → failed` with the one reason no simulator can
+ * report, `dispatch_failed`. Written at claim time, the moment spec assembly
+ * fails — never left for the sweep to misname `orphaned` (the simulator did
+ * not stop answering; it was never handed anything to answer for), and never
+ * re-queued to fail the same way again — and through the same terminal
+ * machinery as every landing: the judgement minted and the run finalized in
+ * the same transaction, so a run waiting only on a broken row still settles
+ * with truthful counts.
+ *
+ * Only a context minted by a claim may write it, on the terms
+ * `resolveSimulationConnection` drew: the check is on how the caller came to
+ * exist, not on what its role permits. Dispatch failure is a fact about the
+ * moment between claiming and handing over, and the claim path is the only
+ * thing that stands there — a person's session or key, and the grading
+ * engine, would be recording the platform's confession to an act that was
+ * never theirs.
+ *
+ * From `claimed` alone, by the claimant alone: once the conversation is
+ * underway, dispatch already succeeded, and whatever fails afterwards is the
+ * simulator's to report.
+ */
+export async function failSimulationDispatch(
+  auth: AuthContext,
+  id: string,
+  claimant: string,
+): Promise<Simulation | undefined> {
+  authorize(auth, "start_and_cancel_runs", here(auth));
+
+  if (auth.via !== "simulator") {
+    throw new Error(
+      "dispatch_failed is the platform's own confession that it could not hand a claimed simulation over, and only the claim path — conducting as the simulator — stands where that happens",
+    );
+  }
+
+  return landSimulation(auth, id, claimant, {
+    from: ["claimed"],
+    write: { status: "failed", endingReason: "dispatch_failed" },
   });
 }
 

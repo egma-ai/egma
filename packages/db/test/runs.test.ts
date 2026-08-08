@@ -698,7 +698,7 @@ describe("the lifecycle, conducted by a claimant", () => {
     expect(header?.failedCount).toBe(1);
   });
 
-  it("refuses the reasons that belong to the other class, and the sweep's own word", async () => {
+  it("refuses the reasons that belong to the other class, and the platform's own words", async () => {
     const { simulationId } = await claimedOne();
     await startSimulation(actingAsAcme(), simulationId, simulator);
 
@@ -709,11 +709,15 @@ describe("the lifecycle, conducted by a claimant", () => {
       }),
     ).rejects.toThrow(/not a way a conversation ends/);
 
-    await expect(
-      failSimulation(actingAsAcme(), simulationId, simulator, {
-        reason: "orphaned" as never,
-      }),
-    ).rejects.toThrow(/not a way a simulation fails/);
+    // The sweep's word and the claim path's: each is the platform's account
+    // of its own failure, and a simulator still reporting can claim neither.
+    for (const platformsOwn of ["orphaned", "dispatch_failed"] as const) {
+      await expect(
+        failSimulation(actingAsAcme(), simulationId, simulator, {
+          reason: platformsOwn as never,
+        }),
+      ).rejects.toThrow(/not a way a simulation fails/);
+    }
   });
 
   it("answers a stranger's report with undefined and moves nothing", async () => {

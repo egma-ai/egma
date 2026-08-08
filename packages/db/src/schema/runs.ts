@@ -97,6 +97,12 @@ export const COMPLETED_ENDING_REASONS = [
  * a simulator that died mid-conversation are all "the test never ran", and
  * grading any of them as a failure is the false red a test product cannot
  * afford.
+ *
+ * The last two are the platform's own words, never a simulator's report:
+ * `orphaned` is the sweep's verdict on a simulator that stopped answering,
+ * and `dispatch_failed` is the claim path's confession that it could not turn
+ * a claimed row into a spec worth handing over — a broken row is the
+ * platform's fault, never pinned on a simulator that was handed nothing.
  */
 export const FAILED_ENDING_REASONS = [
   "agent_never_joined",
@@ -104,6 +110,7 @@ export const FAILED_ENDING_REASONS = [
   "capacity",
   "simulator_error",
   "orphaned",
+  "dispatch_failed",
 ] as const;
 
 export const SIMULATION_ENDING_REASONS = [
