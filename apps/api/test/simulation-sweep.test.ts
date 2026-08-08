@@ -170,6 +170,51 @@ describe("the standing sweep", () => {
     }
   });
 
+  it("holds stop for a sweep that outlives the cadence, starting nothing beside it", async () => {
+    // A sweep held open from the seam, the way a stalled store would hold
+    // one — the one condition a real store cannot produce on cue.
+    const log = capturingLog();
+    let release: (() => void) | undefined;
+    let started = 0;
+    const sweep = startOrphanSweep({
+      log,
+      intervalMilliseconds: 25,
+      sweep: () => {
+        started += 1;
+        return new Promise((resolve) => {
+          release = () => resolve([]);
+        });
+      },
+    });
+    try {
+      // The first tick starts and holds; the cadence keeps firing meanwhile
+      // and must start no second sweep beside the stalled one.
+      await vi.waitFor(() => expect(started).toBe(1), {
+        timeout: 5_000,
+        interval: 10,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(started).toBe(1);
+
+      // stop() during the held sweep settles only once the sweep does: the
+      // skipped ticks in between must not have handed stop an
+      // already-settled promise to await instead of the running one.
+      let stopped = false;
+      const stopping = sweep.stop().then(() => {
+        stopped = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(stopped).toBe(false);
+
+      release?.();
+      await stopping;
+      expect(stopped).toBe(true);
+    } finally {
+      release?.();
+      await sweep.stop();
+    }
+  });
+
   it("outlives a sweep that fails, saying so instead of dying", async () => {
     // No store at all — the sharpest form of the one Tuesday this loop will
     // actually meet. Every tick fails, and every failure must cost that tick

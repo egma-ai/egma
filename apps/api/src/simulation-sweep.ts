@@ -1,4 +1,7 @@
-import { sweepOrphanedSimulations } from "@egma/db";
+import {
+  sweepOrphanedSimulations,
+  type SweptSimulation,
+} from "@egma/db";
 
 /**
  * The standing orphan sweep: what notices a dead simulator.
@@ -44,6 +47,12 @@ export type OrphanSweepOptions = {
   readonly log: SweepLog;
   /** The cadence, for a test that cannot watch a real clock. */
   readonly intervalMilliseconds?: number;
+  /**
+   * The seam under the loop — what one tick runs. The default is the real
+   * sweep, and the product never passes anything else; a test hands in its
+   * own to hold a tick open or fail one on cue, which no real store does.
+   */
+  readonly sweep?: () => Promise<readonly SweptSimulation[]>;
 };
 
 export type OrphanSweep = {
@@ -61,15 +70,16 @@ export function startOrphanSweep(options: OrphanSweepOptions): OrphanSweep {
     throw new Error("a sweep cadence is a positive whole number of milliseconds");
   }
 
+  const sweep = options.sweep ?? sweepOrphanedSimulations;
+
+  // True from the moment a tick is called — synchronously, before its first
+  // await — until it settles, so the timer callback's read of it can never
+  // interleave with the write.
   let sweeping = false;
   const tick = async (): Promise<void> => {
-    // A sweep that outlives the cadence — a stalled store, mostly — must not
-    // have a second one piled on top of it; the next tick after it returns
-    // will see everything this one would have.
-    if (sweeping) return;
     sweeping = true;
     try {
-      const swept = await sweepOrphanedSimulations();
+      const swept = await sweep();
       // A quiet queue is the ordinary case and is not news; what was swept
       // is, by name, because each of these rows is a conversation somebody
       // is waiting on and this line is where its ending is first visible.
@@ -100,6 +110,14 @@ export function startOrphanSweep(options: OrphanSweepOptions): OrphanSweep {
   // latest promise is holding a completion, never an error to re-raise.
   let inFlight: Promise<void> = Promise.resolve();
   const timer = setInterval(() => {
+    // A sweep that outlives the cadence — a stalled store, mostly — is
+    // skipped over, not piled on: the next tick after it returns will see
+    // everything this one would have. The skip has to happen *here*, before
+    // the assignment, because it is the assignment that must not run — a
+    // skipped tick's already-settled promise would overwrite the running
+    // sweep's, and `stop` would resolve while the store was still being
+    // swept.
+    if (sweeping) return;
     inFlight = tick();
   }, interval);
   // A shutdown must never wait on a sweep that has not happened yet: the
