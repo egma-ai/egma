@@ -37,12 +37,11 @@ from egma_simulator.media import (
 from egma_simulator.media.livekit import LiveKitBackend
 from egma_simulator.media.scripted import REFUSALS, ScriptedBackend
 from egma_simulator.plugs import PlugError, plug_for
+from egma_simulator.plugs.audio_turns import SPEECH_LEVEL, carries_speech
 from egma_simulator.plugs.phone import (
     BACKEND_VARIABLE,
-    SPEECH_LEVEL,
     TELEPHONY_BAND_HZ,
     PhoneCall,
-    carries_speech,
 )
 from egma_simulator.redaction import REDACTED, SecretRegistry
 from egma_simulator.speech import decode_speech, encode_speech, silence
@@ -421,7 +420,7 @@ def test_every_registered_backend_is_behind_the_seam():
 
 
 def test_a_session_is_the_same_surface_whichever_driver_opened_it():
-    from egma_simulator.media.livekit import RoomSession
+    from egma_simulator.media.room import RoomSession
     from egma_simulator.media.scripted import ScriptedSession
 
     for session in (RoomSession, ScriptedSession):
