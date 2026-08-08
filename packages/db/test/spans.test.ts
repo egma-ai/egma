@@ -345,6 +345,65 @@ describe("sending the same batch twice", () => {
       ),
     ).toBe(2);
   });
+
+  /**
+   * The stronger half of the guarantee, and the reason the writer sends an
+   * explicit dedup token rather than leaning on ClickHouse's content hash
+   * alone: identity is the writer-minted ids, not the bytes. A resend that was
+   * re-serialised on the way — different field, same ids — is the same spans
+   * saying the same thing twice, and it lands once.
+   */
+  it("lands a resend once even when its bytes changed, because the ids say it is the same batch", async () => {
+    const traceId = "aaaa2222aaaa2222aaaa2222aaaa2222";
+    const batch = Array.from({ length: 5 }, (_, index) =>
+      span({ traceId, spanId: index.toString(16).padStart(16, "0") }),
+    );
+
+    await appendSpans(at(acme), batch);
+    await appendSpans(
+      at(acme),
+      batch.map((one) => ({ ...one, text: "re-serialised on the way" })),
+    );
+
+    expect(
+      await countOf(
+        `select count() as n from spans where trace_id = '${traceId}'`,
+      ),
+    ).toBe(batch.length);
+    // What landed is the first telling, which is the one that was acknowledged.
+    expect(
+      await countOf(
+        `select count() as n from spans where trace_id = '${traceId}' ` +
+          `and text = 're-serialised on the way'`,
+      ),
+    ).toBe(0);
+    // A dropped block feeds the turn view nothing either: the human is not
+    // heard saying the same thing twice because a resend changed its spelling.
+    expect(
+      await countOf(
+        `select count() as n from turns where trace_id = '${traceId}'`,
+      ),
+    ).toBe(batch.length);
+  });
+
+  /**
+   * The token says whose spans these are as well as which. Two customers can
+   * mint colliding ids — nothing coordinates them — and the second customer's
+   * telemetry must never be dropped as a duplicate of the first's.
+   */
+  it("never mistakes two customers' identical ids for one batch", async () => {
+    const traceId = "bbbb3333bbbb3333bbbb3333bbbb3333";
+    const batch = [span({ traceId, spanId: "abcdefabcdefabcd" })];
+
+    await appendSpans(at(acme), batch);
+    await appendSpans(at(globex), batch);
+
+    expect(
+      await countOf(
+        `select count() as n from spans where trace_id = '${traceId}'`,
+      ),
+    ).toBe(2);
+  });
 });
 
 describe("the recorded start time", () => {
