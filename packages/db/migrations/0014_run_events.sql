@@ -38,29 +38,15 @@ CREATE TABLE "run_event" (
 -- the next writer can forget to fill in.
 ALTER TABLE "run" ADD COLUMN "pinned_test_versions" jsonb NOT NULL DEFAULT '{"testVersionIds": []}'::jsonb;--> statement-breakpoint
 ALTER TABLE "run" ALTER COLUMN "pinned_test_versions" DROP DEFAULT;--> statement-breakpoint
--- Nullable for the same reason, and there is no default that could be right:
--- a simulation conducted before the two halves of the product met executed no
--- stored test, and pointing it at one somebody invented would be egma writing
--- down a test that never ran. Nothing writes a half-pinned row — `startRun`
--- names a version for every conversation it creates — and the check below
--- holds the pair whole whatever path a row arrives by.
-ALTER TABLE "simulation" ADD COLUMN "test_id" text COLLATE "C";--> statement-breakpoint
-ALTER TABLE "simulation" ADD COLUMN "test_version_id" text COLLATE "C";--> statement-breakpoint
--- Moved ahead of the four foreign keys that target them, exactly as the
--- persona pin's were in 0007: the generator emits the unique constraints last,
--- and a key cannot reference one that does not exist yet.
-ALTER TABLE "test" ADD CONSTRAINT "test_id_project_id_unique" UNIQUE("id","project_id");--> statement-breakpoint
-ALTER TABLE "test_version" ADD CONSTRAINT "test_version_id_test_id_unique" UNIQUE("id","test_id");--> statement-breakpoint
-ALTER TABLE "simulation" ADD CONSTRAINT "simulation_id_run_id_unique" UNIQUE("id","run_id");--> statement-breakpoint
 ALTER TABLE "run_event" ADD CONSTRAINT "run_event_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "run_event" ADD CONSTRAINT "run_event_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "run_event" ADD CONSTRAINT "run_event_run_project_fk" FOREIGN KEY ("run_id","project_id") REFERENCES "public"."run"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+-- Moved ahead of the foreign key that targets it, exactly as the persona
+-- pin's pair was in 0007 and the test pin's in 0009: the generator emits the
+-- unique constraints last, and a key cannot reference one that does not exist
+-- yet.
+ALTER TABLE "simulation" ADD CONSTRAINT "simulation_id_run_id_unique" UNIQUE("id","run_id");--> statement-breakpoint
 ALTER TABLE "run_event" ADD CONSTRAINT "run_event_simulation_run_fk" FOREIGN KEY ("simulation_id","run_id") REFERENCES "public"."simulation"("id","run_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "simulation" ADD CONSTRAINT "simulation_test_version_test_fk" FOREIGN KEY ("test_version_id","test_id") REFERENCES "public"."test_version"("id","test_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "simulation" ADD CONSTRAINT "simulation_test_project_fk" FOREIGN KEY ("test_id","project_id") REFERENCES "public"."test"("id","project_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "simulation_test_version_id_idx" ON "simulation" USING btree ("test_version_id");--> statement-breakpoint
-CREATE INDEX "simulation_test_id_idx" ON "simulation" USING btree ("test_id");--> statement-breakpoint
-ALTER TABLE "simulation" ADD CONSTRAINT "simulation_test_pin_is_whole" CHECK (("simulation"."test_id" is null) = ("simulation"."test_version_id" is null));--> statement-breakpoint
 -- Written here by hand for the reason the two lifecycle guards were: the
 -- schema source cannot express a trigger, and this is the only form in which
 -- "an event is appended, never rewritten" is enforced by the database itself.

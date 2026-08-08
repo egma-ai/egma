@@ -61,8 +61,50 @@
     {
       "idx": 8,
       "version": "7",
-      "when": 1786119172993,
-      "tag": "0008_run_events",
+      "when": 1786088195441,
+      "tag": "0008_graders",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786090153025,
+      "tag": "0009_simulation_test_pin",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786118174525,
+      "tag": "0010_grading_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786121620948,
+      "tag": "0011_judge_configuration",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786126032241,
+      "tag": "0012_production_traces",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1786128171838,
+      "tag": "0013_regrade_narrowing",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786149673227,
+      "tag": "0014_run_events",
       "breakpoints": true
     }
   ]

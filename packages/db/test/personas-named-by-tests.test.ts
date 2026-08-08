@@ -239,7 +239,7 @@ async function writeTestNaming(
     ],
   );
   await connection.sql(
-    `insert into test_version_persona (test_version_id, persona_id, position)
+    `insert into test_persona (test_version_id, persona_id, position)
      values ($1, $2, 1)`,
     [versionId, named.personaId],
   );

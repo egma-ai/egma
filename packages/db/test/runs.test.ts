@@ -9,13 +9,16 @@ import {
   createAgent,
   createPersona,
   createTest,
+  deletePersona,
+  deleteTest,
   editPersona,
   editTest,
-  deletePersona,
   failSimulation,
   getPersona,
   getRun,
   getSimulation,
+  getSimulationTestVersion,
+  getTest,
   listRuns,
   listSimulations,
   markSimulationCanceled,
@@ -46,7 +49,9 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
  *
  * Two customers exist throughout, because a test with one organization cannot
  * fail the way that matters. Raw SQL appears only to check what landed in a
- * table, and to backdate a heartbeat, which no seam should offer.
+ * table, to backdate a heartbeat, and to write the one row no verb writes any
+ * more — a conversation with no test pinned, which only an instance upgraded
+ * across the pin's migration still holds.
  */
 
 let database: MigratedDatabase;
@@ -102,7 +107,11 @@ async function seedPersona(auth: AuthContext, name: string): Promise<string> {
   return (await createPersona(auth, { name, traits: neutralTraits })).id;
 }
 
-/** A test, authored the way one is, and the frozen version a run pins. */
+/**
+ * A test, authored the way one is, and the frozen version a run pins. The
+ * scenario is whole enough that resolving it back off a conversation says
+ * something.
+ */
 async function seedTestVersion(
   auth: AuthContext,
   name: string,
@@ -110,9 +119,13 @@ async function seedTestVersion(
 ): Promise<string> {
   const created = await createTest(auth, {
     name,
-    scenario: "Their cleaning is booked for Thursday and has to move.",
-    expectedBehaviors: ["confirms the new time back before finishing"],
-    personaIds,
+    scenario:
+      "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
+    expectedBehaviors: [
+      "verifies who it is speaking to before discussing the booking",
+      "offers at least one afternoon slot next week",
+    ],
+    personaIds: [...personaIds],
   });
   return created.versionId;
 }
@@ -196,8 +209,15 @@ beforeAll(async () => {
   sam = await seedPersona(actingAsAcme(), "Deliberate Sam");
   graceOwn = await seedPersona(actingAsGlobex(), "Careful Grace");
 
-  oneCaller = await seedTestVersion(actingAsAcme(), "Reschedules", [rita]);
-  twoCallers = await seedTestVersion(actingAsAcme(), "Cancels", [rita, sam]);
+  oneCaller = await seedTestVersion(
+    actingAsAcme(),
+    "Reschedules a booked appointment",
+    [rita],
+  );
+  twoCallers = await seedTestVersion(actingAsAcme(), "Cancels a booking", [
+    rita,
+    sam,
+  ]);
   globexOwn = await seedTestVersion(actingAsGlobex(), "Reschedules", [graceOwn]);
 });
 
@@ -239,7 +259,7 @@ describe("starting a run", () => {
       // Both pins, on every conversation: what is being checked, and who is
       // calling about it.
       expect(simulation.testVersionId).toBe(twoCallers);
-      expect(simulation.testName).toBe("Cancels");
+      expect(simulation.testName).toBe("Cancels a booking");
     }
   });
 
@@ -256,6 +276,73 @@ describe("starting a run", () => {
     const simulations = await listSimulations(actingAsAcme(), started.id);
     expect(simulations?.[0]?.personaId).toBe(rita);
     expect(simulations?.[0]?.personaVersionId).toBe(before?.versionId);
+  });
+
+  it("pins every simulation it creates to the version the run named", async () => {
+    const pinnedTest = await testOf(twoCallers);
+    const started = await startRun(
+      actingAsAcme(),
+      aRun({ testVersionIds: [twoCallers] }),
+    );
+
+    // Every one of them, not the first: the run is what names the version, so
+    // a conversation of it that pinned nothing would be one nothing can judge.
+    expect(started.simulations).toHaveLength(2);
+    for (const conducted of started.simulations) {
+      expect(conducted.testId).toBe(pinnedTest);
+      expect(conducted.testVersionId).toBe(twoCallers);
+    }
+
+    // And it landed in the table, not only in the answer.
+    const { rows } = await database.sql<{
+      test_id: string | null;
+      test_version_id: string | null;
+    }>("select test_id, test_version_id from simulation where run_id = $1", [
+      started.id,
+    ]);
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.test_id).toBe(pinnedTest);
+      expect(row.test_version_id).toBe(twoCallers);
+    }
+
+    // The header keeps the selection whole beside them, which is what the
+    // request asked for rather than what each conversation carries.
+    expect(started.pinnedTestVersionIds).toEqual([twoCallers]);
+  });
+
+  it("keeps that pin when the test moves on, so a later edit rewrites nothing", async () => {
+    const moving = await seedTestVersion(actingAsAcme(), "Moves on", [rita]);
+    const movingTest = await testOf(moving);
+    const started = await startRun(
+      actingAsAcme(),
+      aRun({ testVersionIds: [moving] }),
+    );
+
+    await editTest(actingAsAcme(), movingTest, {
+      expectedBehaviors: [
+        "verifies who it is speaking to before discussing the booking",
+        "offers at least one afternoon slot next week",
+        "confirms the new time back before finishing",
+      ],
+    });
+    const after = await getTest(actingAsAcme(), movingTest);
+    expect(after?.versionId).not.toBe(moving);
+
+    const simulations = await listSimulations(actingAsAcme(), started.id);
+    expect(simulations?.[0]?.testId).toBe(movingTest);
+    expect(simulations?.[0]?.testVersionId).toBe(moving);
+  });
+
+  it("executes a version whose test has since been deleted, because the version is what was pinned", async () => {
+    const abandoned = await seedTestVersion(actingAsAcme(), "Abandoned", [rita]);
+    await deleteTest(actingAsAcme(), await testOf(abandoned));
+
+    const started = await startRun(
+      actingAsAcme(),
+      aRun({ testVersionIds: [abandoned] }),
+    );
+    expect(started.simulations[0]?.testVersionId).toBe(abandoned);
   });
 
   it("stamps the connection's shape at start, so editing the connection rewrites nothing", async () => {
@@ -423,6 +510,122 @@ describe("reading runs", () => {
       cursor: page.nextCursor,
     });
     expect(next.items[0]?.id).toBe(first.id);
+  });
+});
+
+/**
+ * What the pin is for: a conversation that has happened can say what it was
+ * supposed to do. The whole resolution is asked of the simulation, so nothing
+ * judging one has to know how the test tables are shaped.
+ */
+describe("resolving what a simulation was executed against", () => {
+  /**
+   * One run of the named version, conducted through to a completed
+   * conversation. `unpin` clears the pin while the conversation is still
+   * running, because a terminal simulation is written once.
+   */
+  async function conducted(
+    versionId: string,
+    unpin = false,
+  ): Promise<string> {
+    const started = await startRun(
+      actingAsAcme(),
+      aRun({ testVersionIds: [versionId] }),
+    );
+    const simulationId = (await claimOwn(started.id)).id;
+    if (unpin) {
+      await database.sql(
+        "update simulation set test_id = null, test_version_id = null where id = $1",
+        [simulationId],
+      );
+    }
+    await startSimulation(actingAsAcme(), simulationId, "simulator-blue-1");
+    await completeSimulation(actingAsAcme(), simulationId, "simulator-blue-1", {
+      endingReason: "persona_concluded",
+      transcript: [{ speaker: "agent", text: "Booked for Tuesday afternoon." }],
+    });
+    return simulationId;
+  }
+
+  it("answers with the pinned version's expected behaviors, in the order authored", async () => {
+    const versionId = await seedTestVersion(actingAsAcme(), "Resolves whole", [
+      rita,
+    ]);
+    const testId = await testOf(versionId);
+    const pinned = await getTest(actingAsAcme(), testId);
+    const simulationId = await conducted(versionId);
+
+    const version = await getSimulationTestVersion(actingAsAcme(), simulationId);
+    expect(version?.id).toBe(versionId);
+    expect(version?.testId).toBe(testId);
+    expect(version?.expectedBehaviors).toEqual(pinned?.expectedBehaviors);
+    expect(version?.scenario).toBe(pinned?.scenario);
+    expect(version?.personas.map((who) => who.id)).toEqual([rita]);
+  });
+
+  it("answers the version as it was, never the test as it is now", async () => {
+    const versionId = await seedTestVersion(actingAsAcme(), "Moves after", [
+      rita,
+    ]);
+    const testId = await testOf(versionId);
+    const before = await getTest(actingAsAcme(), testId);
+    const simulationId = await conducted(versionId);
+
+    await editTest(actingAsAcme(), testId, {
+      expectedBehaviors: ["says nothing about bookings at all"],
+    });
+
+    const version = await getSimulationTestVersion(actingAsAcme(), simulationId);
+    expect(version?.id).toBe(versionId);
+    expect(version?.expectedBehaviors).toEqual(before?.expectedBehaviors);
+  });
+
+  it("goes on answering after the test is deleted, because the run outlives it", async () => {
+    const versionId = await seedTestVersion(
+      actingAsAcme(),
+      "Abandoned but run",
+      [rita],
+    );
+    const testId = await testOf(versionId);
+    const pinned = await getTest(actingAsAcme(), testId);
+    const simulationId = await conducted(versionId);
+
+    await deleteTest(actingAsAcme(), testId);
+    expect(await getTest(actingAsAcme(), testId)).toBeUndefined();
+
+    const version = await getSimulationTestVersion(actingAsAcme(), simulationId);
+    expect(version?.id).toBe(pinned?.versionId);
+    expect(version?.expectedBehaviors).toEqual(pinned?.expectedBehaviors);
+  });
+
+  it("answers nothing for a simulation that pinned no test", async () => {
+    // No verb can write one: `startRun` names a version for every conversation
+    // it creates. The row an instance upgraded across the pin's migration
+    // holds is written here by hand, because it is the only shape of the
+    // question that still exists and the answer still has to be right.
+    const simulationId = await conducted(oneCaller, true);
+
+    expect(
+      await getSimulationTestVersion(actingAsAcme(), simulationId),
+    ).toBeUndefined();
+  });
+
+  it("answers another customer nothing, in the words nothing uses", async () => {
+    const simulationId = await conducted(oneCaller);
+
+    expect(
+      await getSimulationTestVersion(actingAsGlobex(), simulationId),
+    ).toBeUndefined();
+  });
+
+  it("is a read, so a viewer gets it like every other read", async () => {
+    const simulationId = await conducted(oneCaller);
+
+    const version = await getSimulationTestVersion(
+      actingAsAcme("viewer"),
+      simulationId,
+    );
+    expect(version?.testId).toBe(await testOf(oneCaller));
   });
 });
 

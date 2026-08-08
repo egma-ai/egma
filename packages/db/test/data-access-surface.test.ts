@@ -69,6 +69,20 @@ const CONTEXT_ESTABLISHING = [
 const INSTANCE_SCOPED = ["instanceIsClaimed"];
 
 /**
+ * What hands egma's own engine its work. The grader service stands behind every
+ * organization on the deployment at once and holds no credential, because there
+ * is no honest one to give it — so it is handed work rather than asked for one.
+ *
+ * Two names, and a third is a decision somebody makes on purpose. Neither takes
+ * an argument by which a caller could name a customer, and a build rule refuses
+ * one that grows one; the only table either reaches is egma's own grading queue;
+ * and every claim arrives carrying the `AuthContext` narrowed to that job's own
+ * organization and project, which is what all of the grading afterwards goes
+ * through.
+ */
+const WORK_DISPATCHING = ["claimGradingJobs", "watchGradingWork"];
+
+/**
  * Everything that touches a customer's data. All of it needs the context.
  *
  * The trace store's three are `appendSpans`, which writes, and `listTraces` and
@@ -77,40 +91,76 @@ const INSTANCE_SCOPED = ["instanceIsClaimed"];
  * watching, which is the same objection as a permission row nothing enforces.
  * Both reads take a required time window on top of the context, so neither can
  * be called in a way that scans the whole table.
+ *
+ * `appendVerdicts` and `readVerdicts` are the same two halves for the store's
+ * other table. They need no window because a verdict is filed under the
+ * conversation it judges, so naming the conversation is already the bound.
+ * `readRunVerdicts` is that read one grain up — a run's outcome and each of its
+ * conversations', both from the same fold over the same rows — and it is a door
+ * of its own because a run's verdicts are filed under the run and not under any
+ * one conversation.
+ *
+ * `recordProductionTraces` is here rather than among the work-dispatching pair,
+ * and that is the whole shape of production grading: the door that already knows
+ * whose spans these are writes the queue row, with the tenancy it already
+ * resolved, so nothing on the judging side ever has to ask across customers what
+ * has finished.
+ *
+ * `regrade`, `reopenGradingJob` and `correctVerdict` are the two ways a judgment
+ * is ever revisited, and neither is an edit — one reopens the queue so the
+ * engine judges again at today's grader versions, narrowed to one grader when
+ * the ask names one, the other writes a person's disagreement as a row of its
+ * own. There are no routes above them yet, so this surface is the altitude
+ * re-grading and correcting are reachable at.
  */
 const CONTEXT_REQUIRING = [
   "addConnection",
+  "advanceProductionSampling",
   "appendSpans",
+  "appendVerdicts",
   "cancelRun",
   "changeRole",
   "claimSimulations",
   "clonePersona",
   "cloneTest",
   "completeSimulation",
+  "correctVerdict",
   "createAgent",
   "createApiKey",
+  "createGrader",
   "createInvitation",
   "createPersona",
   "createProject",
   "createTest",
   "deactivateUser",
   "deleteAgent",
+  "deleteGrader",
   "deletePersona",
   "deleteTest",
+  "editGrader",
   "editPersona",
   "editTest",
   "failSimulation",
+  "finishGradingJob",
   "getAgent",
   "getConnection",
+  "getGrader",
+  "getGraderVersion",
+  "getGradingJob",
+  "getGradingJobForTrace",
+  "getJudgeConfiguration",
   "getPersona",
   "getPersonaVersion",
   "getRun",
   "getSimulation",
+  "getSimulationTestVersion",
   "getTest",
   "getTestVersion",
   "listAgents",
   "listApiKeys",
   "listConnections",
+  "listGraders",
+  "listGradingJobsForSimulation",
   "listMembers",
   "listPendingInvitations",
   "listPersonas",
@@ -127,17 +177,28 @@ const CONTEXT_REQUIRING = [
   "readOrganization",
   "readOrganizationSettings",
   "readProject",
+  "readRunVerdicts",
   "readTrace",
+  "readVerdicts",
   "recordDeviceAuthorization",
+  "recordGradingHeartbeat",
+  "recordProductionTraces",
   "recordSimulationHeartbeat",
   "registerAgent",
+  "regrade",
+  "releaseGradingJob",
   "removeConnection",
+  "reopenGradingJob",
   "removeMember",
   "resolveConnectionCredentials",
+  // The second secret egma holds, on the first one's terms: the read answers a
+  // reference and a hint, and this is the one door to the plaintext behind it.
+  "resolveJudgeKey",
   // Names off a reviewed file turned into the identity a version names. It
   // reads personas and nothing else, and only ones the context already reaches.
   "resolvePersonaNames",
   "revokeApiKey",
+  "setJudgeConfiguration",
   "startRun",
   "startSimulation",
   "sweepOrphanedSimulations",
@@ -166,6 +227,9 @@ const VALUES = [
   // have to read the sentence to tell them apart.
   "AgentWriteRefusedError",
   "AlreadyBelongsToAnOrganizationError",
+  // The grader factory's one refusal, beside the persona factory's: a delete
+  // that would leave a live test checking one thing fewer than it says it does.
+  "GraderNamedByTestsError",
   "LastAdminError",
   "NotPermittedError",
   "PersonaNamedByTestsError",
@@ -208,6 +272,31 @@ const READ_LIMITS = [
   "MAXIMUM_WINDOW_MILLISECONDS",
 ];
 
+/**
+ * The fold, and the vocabulary it is written in.
+ *
+ * These take no `AuthContext` and are the only exports that reach nothing at
+ * all: rows a caller already holds go in, arithmetic over them comes out. There
+ * is no store to name a customer in, so there is no tenancy to stamp — the rows
+ * were fetched by a call that stamped it already. (The other exports that take
+ * no context do reach a store; each of the three groups above says on what
+ * terms.)
+ *
+ * They are exported because the algebra has to live in exactly one place. A
+ * grader's outcome, a conversation's and a run's are all this computation, no
+ * row is written anywhere that records the answer, and a second implementation
+ * in a query or a page would be a second answer with nothing to settle it
+ * against.
+ */
+const THE_FOLD = [
+  "foldVerdicts",
+  "foldVerdictsByGrader",
+  "speakingVerdicts",
+  "JUDGED_BY_HUMAN",
+  "PRIORITIES",
+  "VERDICTS",
+];
+
 describe("the data-access module's surface", () => {
   it("is exactly this, so widening it cannot happen by accident", () => {
     expect(Object.keys(dataAccess).sort()).toEqual(
@@ -217,10 +306,12 @@ describe("the data-access module's surface", () => {
         ...IDENTITY,
         ...CONTEXT_ESTABLISHING,
         ...INSTANCE_SCOPED,
+        ...WORK_DISPATCHING,
         ...CONTEXT_REQUIRING,
         ...PERMISSION,
         ...VALUES,
         ...READ_LIMITS,
+        ...THE_FOLD,
       ].sort(),
     );
   });

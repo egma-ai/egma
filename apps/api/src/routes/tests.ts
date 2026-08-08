@@ -75,6 +75,24 @@ function describedPersona(named: TestPersona): Record<string, unknown> {
   return { id: named.id, name: named.name };
 }
 
+/**
+ * What the wire says about one expected behavior: the statement, and nothing
+ * else.
+ *
+ * The store carries a priority beside each statement — P0 blocks a release, P1
+ * warns, P2 informs — and the graders judge by it. This door does not carry one
+ * in either direction, and that is a stated position rather than an oversight:
+ * a file is a list of statements, every statement a test file can write is a
+ * P0, and there is no way through here to say otherwise. So the answer says
+ * exactly what a caller could have written, and the day this door can set a
+ * priority is the day it answers with one.
+ */
+function describedBehaviors(
+  behaviors: readonly { readonly behavior: string }[],
+): readonly string[] {
+  return behaviors.map((one) => one.behavior);
+}
+
 /** A test as it currently stands. One shape for the list and for both writes. */
 function described(test: Test): Record<string, unknown> {
   return {
@@ -83,7 +101,7 @@ function described(test: Test): Record<string, unknown> {
     version: test.version,
     version_id: test.versionId,
     scenario: test.scenario,
-    expected_behaviors: [...test.expectedBehaviors],
+    expected_behaviors: describedBehaviors(test.expectedBehaviors),
     personas: test.personas.map(describedPersona),
     created_at: test.createdAt.toISOString(),
     updated_at: test.updatedAt.toISOString(),
@@ -99,7 +117,7 @@ function describedVersion(version: TestVersion): Record<string, unknown> {
     version: version.version,
     current: version.current,
     scenario: version.scenario,
-    expected_behaviors: [...version.expectedBehaviors],
+    expected_behaviors: describedBehaviors(version.expectedBehaviors),
     personas: version.personas.map(describedPersona),
     created_at: version.createdAt.toISOString(),
   };

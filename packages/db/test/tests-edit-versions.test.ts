@@ -15,6 +15,7 @@ import {
   acme,
   actingAsAcme,
   actingAsGlobex,
+  blocking,
   neutralTraits,
   rescheduling,
   rowCounts,
@@ -68,7 +69,7 @@ async function namedOn(
     position: number;
   }>(
     `select persona_id, position
-       from test_version_persona
+       from test_persona
       where test_version_id = $1
       order by position`,
     [versionId],
@@ -105,7 +106,9 @@ describe("editing what a test checks", () => {
     expect(frozen?.version).toBe(1);
     expect(frozen?.testId).toBe(created.id);
     expect(frozen?.scenario).toBe(rescheduling.scenario);
-    expect(frozen?.expectedBehaviors).toEqual(rescheduling.expectedBehaviors);
+    expect(frozen?.expectedBehaviors).toEqual(
+      blocking(rescheduling.expectedBehaviors),
+    );
 
     // The new version's rows are its own, and version 1 still holds the two it
     // was written with — the whole point of minting a version rather than
@@ -133,7 +136,7 @@ describe("editing what a test checks", () => {
     });
 
     expect(edited?.version).toBe(2);
-    expect(edited?.expectedBehaviors).toEqual(sharper);
+    expect(edited?.expectedBehaviors).toEqual(blocking(sharper));
     expect(edited?.scenario).toBe(rescheduling.scenario);
   });
 
@@ -262,7 +265,9 @@ describe("editing what a test checks", () => {
     });
 
     expect(edited?.scenario).toBe("They want a refund and have no receipt.");
-    expect(edited?.expectedBehaviors).toEqual(["states the refund policy"]);
+    expect(edited?.expectedBehaviors).toEqual(
+      blocking(["states the refund policy"]),
+    );
   });
 
   it("is refused to a viewer, per the permission table", async () => {
@@ -343,7 +348,9 @@ describe("an edit naming no persona", () => {
     });
 
     expect(edited?.version).toBe(2);
-    expect(edited?.expectedBehaviors).toEqual(rescheduling.expectedBehaviors);
+    expect(edited?.expectedBehaviors).toEqual(
+      blocking(rescheduling.expectedBehaviors),
+    );
     expect(edited?.personas).toEqual([
       { id: nadia, name: "Nadia", deletedAt: null },
       { id: omar, name: "Omar", deletedAt: null },
@@ -415,7 +422,9 @@ describe("one frozen version", () => {
     expect(frozen?.testId).toBe(created.id);
     expect(frozen?.version).toBe(1);
     expect(frozen?.scenario).toBe(rescheduling.scenario);
-    expect(frozen?.expectedBehaviors).toEqual(rescheduling.expectedBehaviors);
+    expect(frozen?.expectedBehaviors).toEqual(
+      blocking(rescheduling.expectedBehaviors),
+    );
     expect(frozen?.personas).toEqual([
       { id: omar, name: "Omar", deletedAt: null },
       { id: rita, name: STARTER_PERSONA, deletedAt: null },

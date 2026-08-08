@@ -157,6 +157,37 @@ services:
       EGMA_SIMULATOR_MODEL_NAME: ${EGMA_SIMULATOR_MODEL_NAME:-}
       EGMA_SIMULATOR_MODEL_API_KEY: ${EGMA_SIMULATOR_MODEL_API_KEY:-}
       EGMA_SIMULATOR_MODEL_BASE_URL: ${EGMA_SIMULATOR_MODEL_BASE_URL:-}
+      # What the persona hears and speaks with in a voice simulation. Both
+      # default to `scripted`, which needs no account and no network — a
+      # first voice simulation costs nothing — and each is chosen on its
+      # own. Naming `deepgram` or `elevenlabs` makes that provider's key
+      # required, and the simulator says so at startup rather than failing
+      # every voice simulation it later claims.
+      EGMA_SIMULATOR_STT_PROVIDER: ${EGMA_SIMULATOR_STT_PROVIDER:-scripted}
+      EGMA_SIMULATOR_DEEPGRAM_API_KEY: ${EGMA_SIMULATOR_DEEPGRAM_API_KEY:-}
+      EGMA_SIMULATOR_TTS_PROVIDER: ${EGMA_SIMULATOR_TTS_PROVIDER:-scripted}
+      EGMA_SIMULATOR_ELEVENLABS_API_KEY: ${EGMA_SIMULATOR_ELEVENLABS_API_KEY:-}
+      # How a phone call's audio travels, for a simulation whose connection
+      # names a number. Naming a backend is what makes the rest required
+      # and what makes this simulator able to dial at all; unset, it starts
+      # in silence and refuses such a simulation with the variable to set.
+      # The simulator's own posture is unchanged either way: it joins a
+      # LiveKit room outbound and is never dialled into. `scripted` places
+      # no call at all and is what the local story and CI use. A LiveKit
+      # and a SIP trunk are what make a real call possible; the trunk is
+      # yours, from any carrier, either one already stored in LiveKit or
+      # the inline fields below. Standing the LiveKit and SIP containers up
+      # beside this one is a separate, opt-in overlay: those need a public
+      # IP, which this file never assumes.
+      EGMA_SIMULATOR_MEDIA_BACKEND: ${EGMA_SIMULATOR_MEDIA_BACKEND:-}
+      EGMA_SIMULATOR_LIVEKIT_URL: ${EGMA_SIMULATOR_LIVEKIT_URL:-}
+      EGMA_SIMULATOR_LIVEKIT_API_KEY: ${EGMA_SIMULATOR_LIVEKIT_API_KEY:-}
+      EGMA_SIMULATOR_LIVEKIT_API_SECRET: ${EGMA_SIMULATOR_LIVEKIT_API_SECRET:-}
+      EGMA_SIMULATOR_SIP_TRUNK_ID: ${EGMA_SIMULATOR_SIP_TRUNK_ID:-}
+      EGMA_SIMULATOR_SIP_TRUNK_ADDRESS: ${EGMA_SIMULATOR_SIP_TRUNK_ADDRESS:-}
+      EGMA_SIMULATOR_SIP_TRUNK_NUMBER: ${EGMA_SIMULATOR_SIP_TRUNK_NUMBER:-}
+      EGMA_SIMULATOR_SIP_TRUNK_USERNAME: ${EGMA_SIMULATOR_SIP_TRUNK_USERNAME:-}
+      EGMA_SIMULATOR_SIP_TRUNK_PASSWORD: ${EGMA_SIMULATOR_SIP_TRUNK_PASSWORD:-}
       # The volume below, and the two things kept on it. Recordings are
       # what a report can only point at, and the write-ahead log is the
       # only record of a report that never got through — losing either to
@@ -190,6 +221,88 @@ services:
     # is the control plane's to notice, by the heartbeats stopping — which
     # is the one place that can act on it, because it is the only side
     # that knows what was claimed.
+
+  # The grader: the service that judges finished conversations. It claims its
+  # work rather than being sent it, so there is no `ports:` here and there
+  # never will be — every arrow points out, exactly as the simulator's do,
+  # and adding this container to a self-host costs no inbound networking at
+  # all. It sits on the control plane's side of the wire, so it reads the two
+  # stores directly rather than through the API; the API gains nothing at all
+  # from grading existing.
+  #
+  # Scaling it is running more copies of it. They claim from one queue, take
+  # what they have room for, and distribute between themselves with nothing in
+  # front of them: `docker compose up --scale grader=3` is the whole dial.
+  grader:
+    build:
+      context: .
+      dockerfile: apps/grader/Dockerfile
+    environment:
+      # The two stores, on the same terms the API reads them: conversations and
+      # graders come out of Postgres, verdicts go into ClickHouse. Both are
+      # required, because a grader that started with nowhere to read from and
+      # nowhere to write to would look healthy and judge nothing.
+      DATABASE_URL: postgres://${POSTGRES_USER:-egma}:${POSTGRES_PASSWORD:-egma}@postgres:5432/${POSTGRES_DB:-egma}
+      CLICKHOUSE_URL: http://${CLICKHOUSE_USER:-egma}:${CLICKHOUSE_PASSWORD:-egma}@clickhouse:8123/${CLICKHOUSE_DB:-egma}
+      # The same key the API seals with, because a judged grader has to replay
+      # the project's own judge key to the provider, and the process making the
+      # call is this one. What it can open is held narrow on the other side: a
+      # judge key is resolved through one door that refuses every caller whose
+      # context did not come from a grading claim, and a connection's
+      # credentials sit behind a door asking for a permission the engine's
+      # context does not carry. Leave it unset for a deployment whose projects
+      # configure no judge — the deterministic graders judge for free either
+      # way, and a project that did configure one gets `errored` verdicts saying
+      # the key could not be read rather than a silent green tick.
+      #
+      # There is still deliberately no model key here. A judge belongs to the
+      # project that configured it, never to a container.
+      EGMA_ENCRYPTION_KEY: ${EGMA_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      # This copy's own name for itself, in claims and in its log. Unset is
+      # fine and usual — it names itself after its host and process, which is
+      # what tells two copies apart.
+      EGMA_GRADER_CLAIMANT: ${EGMA_GRADER_CLAIMANT:-}
+      # How many conversations one copy judges at once. It claims only what it
+      # has room for, so a burst of finished simulations degrades to a queue
+      # rather than to overload — raise this, or start a second copy.
+      EGMA_GRADER_CAPACITY: ${EGMA_GRADER_CAPACITY:-4}
+      # How the claim behaves. A copy says it is still alive every heartbeat
+      # while it holds a conversation, and a copy silent for longer than the
+      # lease loses it to whichever copy asks next — which is how a container
+      # replaced mid-judgment costs one lease and no verdict. The heartbeat
+      # must stay well under the lease.
+      EGMA_GRADER_HEARTBEAT_SECONDS: ${EGMA_GRADER_HEARTBEAT_SECONDS:-}
+      EGMA_GRADER_LEASE_SECONDS: ${EGMA_GRADER_LEASE_SECONDS:-}
+      # The backstop, and **not** how work arrives. A conversation ending wakes
+      # this service on the transaction that ended it, so nothing a verdict
+      # waits for is on a timer. This is for the notification raised while
+      # every copy happened to be restarting: it costs one indexed query and
+      # catches the case that would otherwise look like grading having stopped.
+      EGMA_GRADER_SWEEP_SECONDS: ${EGMA_GRADER_SWEEP_SECONDS:-}
+      # How long a production conversation has to be quiet before it is judged
+      # without ever having been closed. A well-behaved exporter closes the span
+      # the whole conversation happened inside, egma is woken by it, and this
+      # decides nothing. It is here for the exporter that never closes one — a
+      # crashed agent, a framework that emits no session span — where the event
+      # to wait for is the absence of events. Five minutes by default: shorter
+      # judges a caller left on hold halfway through, longer leaves a broken
+      # exporter's conversations unjudged for an afternoon.
+      EGMA_GRADER_TRACE_IDLE_SECONDS: ${EGMA_GRADER_TRACE_IDLE_SECONDS:-}
+      EGMA_GRADER_LOG_LEVEL: ${EGMA_GRADER_LOG_LEVEL:-INFO}
+    depends_on:
+      api:
+        condition: service_healthy
+    # No `healthcheck` here, for the reason the simulator has none: nothing
+    # listens. The schema is applied by the API on boot, which is what this
+    # waits for — there is no migration container and no manual step, and a
+    # second migrator racing the first would buy nothing.
+    #
+    # What could go wrong instead is answered elsewhere. Bad configuration
+    # stops it before it claims anything, saying which variable. A store it
+    # cannot reach is in its log. And a copy that dies holding a conversation
+    # is the claim's to notice, by the heartbeats stopping — which is the one
+    # place that can act on it, because it is the only side that knows what
+    # was claimed.
 
 volumes:
   postgres-data:

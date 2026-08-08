@@ -213,6 +213,116 @@ def test_the_openai_provider_names_what_it_is_missing(env, supplied, missing):
         SimulatorConfig.from_env()
 
 
+def test_the_speech_legs_are_scripted_until_a_provider_is_named(env):
+    """The pair CI and the free local demo run on, with nothing set."""
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+
+    config = SimulatorConfig.from_env()
+
+    assert config.stt_provider == "scripted"
+    assert config.tts_provider == "scripted"
+    assert config.deepgram_api_key is None
+    assert config.elevenlabs_api_key is None
+
+
+@pytest.mark.parametrize(
+    "variable", ["EGMA_SIMULATOR_STT_PROVIDER", "EGMA_SIMULATOR_TTS_PROVIDER"]
+)
+def test_an_unknown_speech_provider_is_refused_by_name(env, variable):
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv(variable, "lip-reading")
+
+    with pytest.raises(ValueError, match=variable):
+        SimulatorConfig.from_env()
+
+
+@pytest.mark.parametrize(
+    ("provider_variable", "provider", "key_variable"),
+    [
+        (
+            "EGMA_SIMULATOR_STT_PROVIDER",
+            "deepgram",
+            "EGMA_SIMULATOR_DEEPGRAM_API_KEY",
+        ),
+        (
+            "EGMA_SIMULATOR_TTS_PROVIDER",
+            "elevenlabs",
+            "EGMA_SIMULATOR_ELEVENLABS_API_KEY",
+        ),
+    ],
+)
+def test_a_speech_provider_with_no_key_names_the_key_it_wants(
+    env, provider_variable, provider, key_variable
+):
+    """Naming a provider is what makes its key required — and the refusal
+    says which variable to set, at startup, before anything is claimed."""
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv(provider_variable, provider)
+
+    with pytest.raises(ValueError, match=key_variable):
+        SimulatorConfig.from_env()
+
+
+def test_the_speech_provider_keys_are_read_and_kept_out_of_the_repr(env):
+    """They are credentials, so they travel like one: never in a printed
+    config, and registered for redaction wherever one is printed anyway."""
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv("EGMA_SIMULATOR_STT_PROVIDER", "deepgram")
+    env.setenv("EGMA_SIMULATOR_DEEPGRAM_API_KEY", "deepgram_key_under_test")
+    env.setenv("EGMA_SIMULATOR_TTS_PROVIDER", "elevenlabs")
+    env.setenv("EGMA_SIMULATOR_ELEVENLABS_API_KEY", "elevenlabs_key_under_test")
+
+    config = SimulatorConfig.from_env()
+
+    assert config.deepgram_api_key == "deepgram_key_under_test"
+    assert config.elevenlabs_api_key == "elevenlabs_key_under_test"
+    assert "deepgram_key_under_test" not in repr(config)
+    assert "elevenlabs_key_under_test" not in repr(config)
+
+
+def test_every_speech_key_is_registered_for_redaction_at_startup(env):
+    """A key kept out of logs by discipline is a key that leaks one day.
+
+    The live tests plant real provider keys and scan every byte the
+    process wrote, but CI never runs them — so the wiring that makes that
+    scan pass is proved here, with no network and no account: configure
+    both providers, ask for the registry a starting simulator builds, and
+    require that it rewrites both keys.
+    """
+    from egma_simulator.__main__ import secrets_of
+
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv("EGMA_SIMULATOR_STT_PROVIDER", "deepgram")
+    env.setenv("EGMA_SIMULATOR_DEEPGRAM_API_KEY", "SENTINEL-deepgram-3f8a1c")
+    env.setenv("EGMA_SIMULATOR_TTS_PROVIDER", "elevenlabs")
+    env.setenv("EGMA_SIMULATOR_ELEVENLABS_API_KEY", "SENTINEL-elevenlabs-9d2b7e")
+
+    registry = secrets_of(SimulatorConfig.from_env())
+
+    # The shape a provider's own refusal arrives in: the library quotes
+    # the request it made, key and all, and this is what rewrites it.
+    scrubbed = registry.redact(
+        "ElevenLabs API error for xi-api-key SENTINEL-elevenlabs-9d2b7e; "
+        "deepgram token SENTINEL-deepgram-3f8a1c was rejected"
+    )
+    assert "SENTINEL-elevenlabs-9d2b7e" not in scrubbed
+    assert "SENTINEL-deepgram-3f8a1c" not in scrubbed
+    assert scrubbed.count("[redacted]") == 2
+
+
+def test_one_real_leg_does_not_drag_the_other_along(env):
+    """The two legs are chosen apart: a real mouth with scripted ears is a
+    configuration somebody will want, and it needs one key, not two."""
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv("EGMA_SIMULATOR_TTS_PROVIDER", "elevenlabs")
+    env.setenv("EGMA_SIMULATOR_ELEVENLABS_API_KEY", "elevenlabs_key_under_test")
+
+    config = SimulatorConfig.from_env()
+
+    assert (config.stt_provider, config.tts_provider) == ("scripted", "elevenlabs")
+    assert config.deepgram_api_key is None
+
+
 @pytest.mark.parametrize(
     "variable", ["EGMA_SIMULATOR_BLOB_DIR", "EGMA_SIMULATOR_WAL_DIR"]
 )
@@ -274,3 +384,187 @@ def test_the_service_token_is_read_and_kept_out_of_the_repr(env):
 
     assert config.service_token == "egma_service_token_under_test"
     assert "egma_service_token_under_test" not in repr(config)
+
+
+# -- Placing phone calls -----------------------------------------------------
+#
+# A bridge and a trunk are what let a simulator dial at all, and both are
+# the deployment's rather than any one simulation's. So they follow the
+# same rule as everything else here: naming a backend is what makes its
+# variables required, the refusal names the variable, and a deployment
+# that names none starts in silence and simply places no calls.
+
+A_LIVEKIT = {
+    "EGMA_SIMULATOR_MEDIA_BACKEND": "livekit",
+    "EGMA_SIMULATOR_LIVEKIT_URL": "wss://livekit.internal",
+    "EGMA_SIMULATOR_LIVEKIT_API_KEY": "APIkey",
+    "EGMA_SIMULATOR_LIVEKIT_API_SECRET": "SENTINEL-livekit-secret-4c81",
+    "EGMA_SIMULATOR_SIP_TRUNK_ADDRESS": "trunk.example.pstn.twilio.com",
+    "EGMA_SIMULATOR_SIP_TRUNK_NUMBER": "+15550000000",
+    "EGMA_SIMULATOR_SIP_TRUNK_USERNAME": "trunk-user",
+    "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD": "SENTINEL-trunk-password-9f30",
+}
+
+
+def a_deployment_that_dials(env, **changes: str | None):
+    """The environment of a simulator that can place calls, minus or plus
+    whatever one test is about."""
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    for name, value in (A_LIVEKIT | changes).items():
+        if value is None:
+            env.delenv(name, raising=False)
+        else:
+            env.setenv(name, value)
+
+
+def test_a_simulator_that_names_no_bridge_starts_and_places_no_calls(env):
+    """Dialling is opt-in: nobody who never wanted a phone call should
+    have to explain a trunk."""
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    assert SimulatorConfig.from_env().media is None
+
+
+def test_a_bridge_nobody_wrote_is_refused_by_name(env):
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv("EGMA_SIMULATOR_MEDIA_BACKEND", "a-bridge-nobody-wrote")
+    with pytest.raises(ValueError) as refusal:
+        SimulatorConfig.from_env()
+    assert "EGMA_SIMULATOR_MEDIA_BACKEND" in str(refusal.value)
+
+
+def test_the_scripted_bridge_needs_nothing_else(env):
+    """It places no real call, so it wants no server and no trunk."""
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv("EGMA_SIMULATOR_MEDIA_BACKEND", "scripted")
+    media = SimulatorConfig.from_env().media
+    assert media is not None
+    assert media.backend == "scripted"
+    assert media.secrets == ()
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "EGMA_SIMULATOR_LIVEKIT_URL",
+        "EGMA_SIMULATOR_LIVEKIT_API_KEY",
+        "EGMA_SIMULATOR_LIVEKIT_API_SECRET",
+    ],
+)
+def test_a_livekit_deployment_missing_a_variable_is_refused_by_name(env, missing):
+    a_deployment_that_dials(env, **{missing: None})
+    with pytest.raises(ValueError) as refusal:
+        SimulatorConfig.from_env()
+    assert missing in str(refusal.value)
+
+
+def test_a_deployment_with_no_trunk_at_all_is_refused_naming_both_ways(env):
+    """A call needs a trunk, and there are two ways to give one — so the
+    refusal names both rather than picking one for somebody."""
+    a_deployment_that_dials(env, EGMA_SIMULATOR_SIP_TRUNK_ADDRESS=None)
+    with pytest.raises(ValueError) as refusal:
+        SimulatorConfig.from_env()
+    told = str(refusal.value)
+    assert "EGMA_SIMULATOR_SIP_TRUNK_ID" in told
+    assert "EGMA_SIMULATOR_SIP_TRUNK_ADDRESS" in told
+
+
+def test_a_bring_your_own_trunk_arrives_whole(env):
+    """Any carrier, inline, with the credential auth LiveKit documents."""
+    a_deployment_that_dials(env)
+    media = SimulatorConfig.from_env().media
+    assert media.trunk_address == "trunk.example.pstn.twilio.com"
+    assert media.trunk_username == "trunk-user"
+    assert media.trunk_number == "+15550000000"
+
+
+@pytest.mark.parametrize(
+    ("missing", "given"),
+    [
+        ("EGMA_SIMULATOR_SIP_TRUNK_PASSWORD", "EGMA_SIMULATOR_SIP_TRUNK_USERNAME"),
+        ("EGMA_SIMULATOR_SIP_TRUNK_USERNAME", "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"),
+    ],
+)
+def test_half_a_trunk_credential_is_refused_naming_the_missing_half(
+    env, missing, given
+):
+    """Credential auth is a username *and* a password, and half of one
+    authenticates nobody.
+
+    Left alone this is the worst kind of misconfiguration: the simulator
+    starts, claims work, dials, and the carrier answers 403 on every call —
+    a refusal that reads exactly like wrong credentials rather than like
+    absent ones. Said here, it costs a startup line and no calls at all.
+    """
+    a_deployment_that_dials(env, **{missing: None})
+    with pytest.raises(ValueError) as refusal:
+        SimulatorConfig.from_env()
+    told = str(refusal.value)
+    assert missing in told
+    assert given in told
+
+
+def test_a_trunk_the_carrier_authenticates_by_address_needs_no_credential(env):
+    """Some carriers allow a trunk by IP rather than by password. Neither
+    half given is a deployment that meant it, and it starts."""
+    a_deployment_that_dials(
+        env,
+        EGMA_SIMULATOR_SIP_TRUNK_USERNAME=None,
+        EGMA_SIMULATOR_SIP_TRUNK_PASSWORD=None,
+    )
+    media = SimulatorConfig.from_env().media
+    assert media.trunk_username is None
+    assert media.trunk_password is None
+    assert media.trunk_address == "trunk.example.pstn.twilio.com"
+
+
+def test_a_stored_trunk_reference_is_the_other_way(env):
+    a_deployment_that_dials(
+        env,
+        EGMA_SIMULATOR_SIP_TRUNK_ID="ST_1234",
+        EGMA_SIMULATOR_SIP_TRUNK_ADDRESS=None,
+    )
+    assert SimulatorConfig.from_env().media.trunk_id == "ST_1234"
+
+
+def test_a_stored_trunk_is_not_refused_over_a_leftover_inline_half(env):
+    """The credential-pair rule binds the inline trunk only. A deployment
+    that moved to a stored trunk and left one stale inline variable behind
+    is a working deployment, not half of a broken one — the inline fields
+    are never read once EGMA_SIMULATOR_SIP_TRUNK_ID selects the trunk."""
+    a_deployment_that_dials(
+        env,
+        EGMA_SIMULATOR_SIP_TRUNK_ID="ST_1234",
+        EGMA_SIMULATOR_SIP_TRUNK_ADDRESS=None,
+        EGMA_SIMULATOR_SIP_TRUNK_USERNAME="left-behind",
+        EGMA_SIMULATOR_SIP_TRUNK_PASSWORD=None,
+    )
+    assert SimulatorConfig.from_env().media.trunk_id == "ST_1234"
+
+
+def test_the_telephony_secrets_never_print(env):
+    """A config that landed in a log line by accident says nothing."""
+    a_deployment_that_dials(env)
+    config = SimulatorConfig.from_env()
+    printed = repr(config) + repr(config.media)
+    assert A_LIVEKIT["EGMA_SIMULATOR_LIVEKIT_API_SECRET"] not in printed
+    assert A_LIVEKIT["EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"] not in printed
+
+
+def test_every_telephony_secret_is_registered_for_redaction_at_startup(env):
+    """A secret kept out of logs by discipline is a secret that leaks one
+    day. The LiveKit client and the SIP service both log plenty on their
+    own, so what makes a live run's scan pass is proved here instead —
+    with no server, no trunk and no network."""
+    from egma_simulator.__main__ import secrets_of
+
+    a_deployment_that_dials(env)
+    registry = secrets_of(SimulatorConfig.from_env())
+
+    scrubbed = registry.redact(
+        "livekit refused api secret "
+        f"{A_LIVEKIT['EGMA_SIMULATOR_LIVEKIT_API_SECRET']} and the carrier "
+        f"refused password {A_LIVEKIT['EGMA_SIMULATOR_SIP_TRUNK_PASSWORD']}"
+    )
+    assert A_LIVEKIT["EGMA_SIMULATOR_LIVEKIT_API_SECRET"] not in scrubbed
+    assert A_LIVEKIT["EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"] not in scrubbed
+    assert scrubbed.count("[redacted]") == 2

@@ -299,6 +299,47 @@ describe("an exported call that could reach the database without a customer", ()
     expect(violations[0]?.detail).toContain("wearing an exemption");
   });
 
+  /**
+   * The engine's own work, which is the one thing on this surface that
+   * legitimately spans customers: the grader service holds no credential
+   * because there is nobody for it to be, so it is handed work instead. What
+   * keeps that from being a hole is that nothing in it can be *asked* about a
+   * customer, and that is the half of the reasoning a rule can hold.
+   */
+  it("allows the two calls that dispatch egma's own work across the deployment", async () => {
+    await withSurface(
+      'export { claimGradingJobs, watchGradingWork } from "./things.ts";\n',
+      "export type GradingClaimRequest = { readonly claimant: string; readonly capacity: number };\nexport async function claimGradingJobs(request: GradingClaimRequest): Promise<string[]> {\n  return [request.claimant];\n}\nexport async function watchGradingWork(onWork: () => void): Promise<void> {\n  onWork();\n}\n",
+    );
+
+    expect(await check(root)).toEqual([]);
+  });
+
+  it("refuses one of them the moment a caller can name a customer to it", async () => {
+    await withSurface(
+      'export { claimGradingJobs } from "./things.ts";\n',
+      "export async function claimGradingJobs(claimant: string, organizationId: string): Promise<string[]> {\n  return [claimant, organizationId];\n}\n",
+    );
+
+    const violations = await check(root);
+    expect(rules(violations)).toEqual([
+      "every-exported-call-carries-an-auth-context",
+    ]);
+    expect(violations[0]?.detail).toContain("wearing an exemption");
+  });
+
+  it("sees a customer named inside the shape a parameter points at", async () => {
+    await withSurface(
+      'export { claimGradingJobs } from "./things.ts";\n',
+      "export type GradingClaimRequest = { readonly claimant: string; readonly projectId: string };\nexport async function claimGradingJobs(request: GradingClaimRequest): Promise<string[]> {\n  return [request.claimant];\n}\n",
+    );
+
+    const violations = await check(root);
+    expect(rules(violations)).toEqual([
+      "every-exported-call-carries-an-auth-context",
+    ]);
+  });
+
   it("says nothing about what the module keeps to itself", async () => {
     await write("packages/db/src/access/index.ts", "export {} from './things.ts';\n");
     await write(

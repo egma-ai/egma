@@ -393,6 +393,7 @@ def loopback_spec(
     greeting: str | None = None,
     replies: list[str] | None = None,
     ends_after_replies: bool = False,
+    echoes_what_it_hears: bool = False,
     answer_delay_seconds: float = 0.0,
     sample_rate_hz: int | None = None,
     provider_reference: str | None = None,
@@ -414,6 +415,8 @@ def loopback_spec(
         config["replies"] = replies
     if ends_after_replies:
         config["ends_after_replies"] = True
+    if echoes_what_it_hears:
+        config["echoes_what_it_hears"] = True
     if sample_rate_hz is not None:
         config["sample_rate_hz"] = sample_rate_hz
     if provider_reference is not None:
@@ -434,6 +437,124 @@ def loopback_spec(
     if voice is not None:
         spec["persona"]["traits"]["voice"] = voice
     return spec
+
+
+def phone_spec(
+    simulation_id: str,
+    *,
+    scenario: str = A_SCENARIO,
+    personality: str = A_PERSONALITY,
+    voice: dict | None = None,
+    number: str = "+15551234567",
+    backend: str = "scripted",
+    caller_id: str | None = None,
+    greeting: str | None = None,
+    replies: list[str] | None = None,
+    hangs_up_after_replies: bool = False,
+    answer_delay_seconds: float = 0.0,
+    outcome: str | None = None,
+    provider_reference: str | None = None,
+    max_turns: int = 60,
+    max_duration_seconds: int = 600,
+    credentials: dict | None = None,
+) -> dict:
+    """One voice spec that dials a number.
+
+    Deliberately the same shape as :func:`loopback_spec`: a phone
+    simulation differs from every other voice one by its connection block
+    and by nothing else. Which bridge places the call is the simulator's
+    own configuration rather than the spec's, so ``backend`` here only
+    decides whether the scripted backend's script is written into the
+    spec — what the far end says, whether it hangs up, what the carrier
+    answers — which only that backend reads.
+    """
+    config: dict = {"phoneNumber": number}
+    if caller_id is not None:
+        config["callerId"] = caller_id
+    if backend == "scripted":
+        script: dict = {"answer_delay_seconds": answer_delay_seconds}
+        if greeting is not None:
+            script["greeting"] = greeting
+        if replies is not None:
+            script["replies"] = replies
+        if hangs_up_after_replies:
+            script["hangs_up_after_replies"] = True
+        if outcome is not None:
+            script["outcome"] = outcome
+        if provider_reference is not None:
+            script["provider_reference"] = provider_reference
+        config["scripted"] = script
+    spec = a_spec(
+        simulation_id,
+        modality="voice",
+        connection={"type": "phone", "config": config, "credentials": credentials},
+        scenario=scenario,
+        personality=personality,
+        max_turns=max_turns,
+        max_duration_seconds=max_duration_seconds,
+    )
+    if voice is not None:
+        spec["persona"]["traits"]["voice"] = voice
+    return spec
+
+
+SENTINEL_TRUNK_ENV = {
+    "EGMA_SIMULATOR_MEDIA_BACKEND": "livekit",
+    "EGMA_SIMULATOR_LIVEKIT_URL": "ws://127.0.0.1:1",
+    "EGMA_SIMULATOR_LIVEKIT_API_KEY": "SENTINEL-livekit-key-6b13c7f0a45e",
+    "EGMA_SIMULATOR_LIVEKIT_API_SECRET": "SENTINEL-livekit-secret-2a9d4f6c8b71",
+    "EGMA_SIMULATOR_SIP_TRUNK_ADDRESS": "egma-test.pstn.twilio.com",
+    "EGMA_SIMULATOR_SIP_TRUNK_NUMBER": "+15550000000",
+    "EGMA_SIMULATOR_SIP_TRUNK_USERNAME": "egma-trunk-user",
+    "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD": "SENTINEL-trunk-password-d5e8017a3c92",
+}
+"""A whole LiveKit deployment's worth of credentials, every secret one a
+sentinel, pointed at a port nothing answers on.
+
+It is what the acceptance suite plants on a simulator so that the
+credentials a real phone deployment holds are really in the process while
+it succeeds and while it fails — which is the only way scanning its output
+proves anything.
+"""
+
+TRUNK_SENTINELS = tuple(
+    value for value in SENTINEL_TRUNK_ENV.values() if value.startswith("SENTINEL-")
+)
+"""The planted values that must appear in nothing the simulator emits."""
+
+SCRIPTED_TRUNK_ENV = SENTINEL_TRUNK_ENV | {"EGMA_SIMULATOR_MEDIA_BACKEND": "scripted"}
+"""The same planted deployment, placing its calls through the scripted
+bridge instead. The LiveKit and trunk secrets are still in the process,
+which is the point: a simulator holding them must not emit them whichever
+bridge it is dialling through."""
+
+
+def credential(*names: str) -> str:
+    """The first of these environment variables that carries a value.
+
+    The opt-in tests read a ``TEST_``-prefixed name first, so a machine can
+    keep the credentials it tests with apart from the ones it works with,
+    and fall back to the provider's own plain name.
+    """
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def words_of(said: str) -> set[str]:
+    """The words of one turn, as a transcriber would have to have heard them.
+
+    Real transcription is not a codec: it capitalises, punctuates, and
+    sometimes hears "Thursday" as "thursday". So a live comparison is on
+    words rather than on strings, and what is asserted is that most of
+    them survived — which is what "these words were really heard" can
+    honestly mean.
+    """
+    return {
+        word.strip(".,!?;:").lower() for word in said.split() if word.strip(".,!?;:")
+    }
 
 
 def assert_one_speaker_to_a_channel(

@@ -38,6 +38,8 @@ const globexPersonaId = newId("prs");
 const globexPersonaVersionId = newId("prsv");
 const testId = newId("tst");
 const testVersionId = newId("tstv");
+const globexTestId = newId("tst");
+const globexTestVersionId = newId("tstv");
 
 async function seedTenancy(): Promise<void> {
   for (const [organization, slug] of [
@@ -105,16 +107,16 @@ async function seedTest(
   organization: string,
   project: string,
 ): Promise<void> {
-  // The current-version pointer is deferred, so the pair lands in one
-  // transaction exactly as the application writes it.
+  // The current-version pointer is deferred here too, for the same reason.
   await db.sql("begin");
   await db.sql(
     `insert into test (id, organization_id, project_id, name, current_version_id)
-     values ($1, $2, $3, 'Reschedules', $4)`,
+     values ($1, $2, $3, 'Reschedules a booked appointment', $4)`,
     [id, organization, project, version],
   );
   await db.sql(
-    "insert into test_version (id, test_id, version, content) values ($1, $2, 1, '{}'::jsonb)",
+    `insert into test_version (id, test_id, version, content)
+     values ($1, $2, 1, '{"scenario": "Moves a booking", "expectedBehaviors": ["verifies who it is speaking to"]}'::jsonb)`,
     [version, id],
   );
   await db.sql("commit");
@@ -247,6 +249,12 @@ beforeAll(async () => {
     globex.project,
   );
   await seedTest(testId, testVersionId, acme.organization, acme.project);
+  await seedTest(
+    globexTestId,
+    globexTestVersionId,
+    globex.organization,
+    globex.project,
+  );
 });
 
 afterAll(async () => {
@@ -464,6 +472,63 @@ describe("what a simulation cannot name", () => {
       (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
     );
   });
+
+  it("another customer's test pin, even though the test and its version exist", async () => {
+    // The single-column keys would both be satisfied: the test is real and the
+    // version is really its. Only the project pairing is not.
+    const { rows } = await db.sql<{ exists: boolean }>(
+      "select exists (select 1 from test where id = $1) as exists",
+      [globexTestId],
+    );
+    expect(rows[0]?.exists).toBe(true);
+
+    await expect(
+      insertSimulation("queued", {
+        test_id: globexTestId,
+        test_version_id: globexTestVersionId,
+      }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
+    );
+  });
+
+  it("a test version that is not the named test's, even when both exist", async () => {
+    await expect(
+      insertSimulation("queued", {
+        test_id: testId,
+        test_version_id: globexTestVersionId,
+      }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
+    );
+  });
+
+  it("half a test pin: an identity without a version, or a version without one", async () => {
+    await expect(
+      insertSimulation("queued", { test_id: testId, test_version_id: null }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+
+    await expect(
+      insertSimulation("queued", { test_id: null, test_version_id: testVersionId }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+  });
+
+  it("still writes the pin that is real, and the empty pin an upgraded instance holds", async () => {
+    await expect(
+      insertSimulation("queued", {
+        test_id: testId,
+        test_version_id: testVersionId,
+      }),
+    ).resolves.toBeDefined();
+
+    await expect(
+      insertSimulation("queued", { test_id: null, test_version_id: null }),
+    ).resolves.toBeDefined();
+  });
 });
 
 describe("the run header", () => {
@@ -525,10 +590,10 @@ describe("the run header", () => {
 
 /**
  * The events record's own door. A verdict is what the graders make of a
- * conversation, and nothing writes one yet — so these are the checks that will
- * be standing on the day something does, held here by raw SQL for the same
- * reason as everything else in this file: the paths that never pass through
- * the application are exactly the ones a constraint has to defend.
+ * conversation, and they write it to their own tables; the day the feed starts
+ * carrying one, these are the checks it will meet. Held here by raw SQL for the
+ * same reason as everything else in this file: the paths that never pass
+ * through the application are exactly the ones a constraint has to defend.
  */
 describe("a run event", () => {
   /** One simulation, and the run it belongs to. */

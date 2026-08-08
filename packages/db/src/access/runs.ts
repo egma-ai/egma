@@ -23,7 +23,7 @@ import {
   type Topology,
 } from "../schema/agents.ts";
 import { persona } from "../schema/personas.ts";
-import { test, testVersion, testVersionPersona } from "../schema/tests.ts";
+import { test, testVersion, testPersona } from "../schema/tests.ts";
 import {
   COMPLETED_ENDING_REASONS,
   FAILED_ENDING_REASONS,
@@ -37,11 +37,14 @@ import {
   type SimulationStatus,
   type Verdict,
 } from "../schema/runs.ts";
+import { validClaimant } from "./claimants.ts";
 import { descriptorOf, noSimulatorAdapterMessage } from "./connection-registry.ts";
 import type { AuthContext } from "./context.ts";
 import { RunWriteRefusedError, type RunWriteRefusal } from "./errors.ts";
+import { enqueueGradingJob } from "./grading.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
+import { getTestVersion, type TestVersion } from "./tests.ts";
 import { within } from "./within.ts";
 
 /**
@@ -83,7 +86,12 @@ export type NewRun = {
   /**
    * The frozen test versions to execute, in the order they should be
    * conducted. Explicit, never "whatever is current when this runs": what
-   * executed is the whole of what a result means.
+   * executed is the whole of what a result means, and it is what every
+   * simulation this run writes pins for the graders to judge against.
+   *
+   * The personas are not named here. Each version already names the people who
+   * call about it, so naming them again would be a second selection free to
+   * disagree with the test's own.
    */
   readonly testVersionIds: readonly string[];
   /** Something to recognise the run by in a list. */
@@ -143,9 +151,10 @@ export type Simulation = {
   readonly personaVersionId: string;
   /**
    * What is being checked, by identity, and the pin: the frozen version this
-   * conversation executed. Both absent together on a row written before a
-   * simulation could carry either — an upgraded instance's history, saying it
-   * executed no stored test rather than naming one it did not.
+   * conversation executed, which is where a grader's reads start. Both absent
+   * together on a row written before a simulation could carry either — an
+   * upgraded instance's history, saying it executed no stored test rather than
+   * naming one it did not.
    */
   readonly testId: string | null;
   readonly testVersionId: string | null;
@@ -533,17 +542,47 @@ function theRun(auth: AuthContext, id: string): SQL {
 }
 
 /**
- * The claimant's name for itself, as it will be stored: trimmed, non-empty,
- * short enough to be a label. An operational identifier, never an identity in
- * egma's tables — two replicas telling each other apart is all it is for.
+ * Whether landing in this state makes the conversation something to judge.
+ *
+ * A conversation happened, or a simulation failed trying to have one: both are
+ * graded, and the difference between them is what the verdicts say rather than
+ * whether there are any — a simulation that never ran gets `errored` verdicts,
+ * because a broken test is never a broken agent. A `canceled` simulation is
+ * neither: nobody was told to stop conducting it and then judged for stopping.
  */
-function validClaimant(claimant: string): string {
-  const trimmed = claimant.trim();
-  if (trimmed === "") throw new Error("a claimant needs a name");
-  if (trimmed.length > 200) {
-    throw new Error("a claimant's name fits in 200 characters");
-  }
-  return trimmed;
+function isGradable(status: SimulationStatus): boolean {
+  return status === "completed" || status === "failed";
+}
+
+/**
+ * The terminal transition also makes the work.
+ *
+ * Called inside the transaction that landed it, so the row that says a
+ * conversation is over and the row that says it needs judging are one commit —
+ * a conversation cannot land and leave no work behind, and there is no window
+ * for a sweep of forgotten simulations to exist in. The notification the
+ * enqueue raises travels on the same transaction and so reaches a listening
+ * grader the moment the transition is visible to it.
+ */
+async function makeGradable(
+  tx: Transaction,
+  auth: AuthContext,
+  row: {
+    readonly id: string;
+    readonly status: string;
+    readonly projectId: string;
+  },
+): Promise<void> {
+  if (!isGradable(row.status as SimulationStatus)) return;
+  // The organization comes off the context rather than off the row: the row was
+  // reached through `within`, so its organization is this one by construction,
+  // and the answer's columns stay the tenant-free view they are everywhere else.
+  await enqueueGradingJob(tx, {
+    organizationId: auth.organizationId,
+    projectId: row.projectId,
+    source: "simulation",
+    simulationId: row.id,
+  });
 }
 
 /**
@@ -660,13 +699,13 @@ async function resolvePinnedVersions(
   const named = new Map<string, string[]>();
   for (const entry of await on
     .select({
-      testVersionId: testVersionPersona.testVersionId,
-      personaId: testVersionPersona.personaId,
-      position: testVersionPersona.position,
+      testVersionId: testPersona.testVersionId,
+      personaId: testPersona.personaId,
+      position: testPersona.position,
     })
-    .from(testVersionPersona)
-    .where(inArray(testVersionPersona.testVersionId, [...found.keys()]))
-    .orderBy(asc(testVersionPersona.position))) {
+    .from(testPersona)
+    .where(inArray(testPersona.testVersionId, [...found.keys()]))
+    .orderBy(asc(testPersona.position))) {
     const held = named.get(entry.testVersionId);
     if (held === undefined) named.set(entry.testVersionId, [entry.personaId]);
     else held.push(entry.personaId);
@@ -779,6 +818,11 @@ async function resolvePersonaVersions(
  * The connection is read alive, in the acting project, and on the named agent
  * when one is named; the composite foreign keys re-check the same pairings
  * underneath, for every path that does not come through here.
+ *
+ * Every simulation carries the frozen version it was written for, so a grader
+ * reads what was expected off the conversation itself — and a test edited
+ * between the first simulation and the last cannot split a run's meaning in
+ * two.
  */
 export async function startRun(
   auth: AuthContext,
@@ -1138,6 +1182,37 @@ export async function getSimulation(
     .limit(1);
 
   return row === undefined ? undefined : simulationFromRow(row);
+}
+
+/**
+ * What one simulation was executed against: the frozen test version it pinned
+ * at start, with the scenario, the expected behaviors in the order they were
+ * authored, and the personas the version named.
+ *
+ * This is the resolution the pin exists for. Whoever judges a finished
+ * conversation asks here what it was supposed to do, and gets the version as
+ * it was on the day rather than the test as it is now — which is what keeps a
+ * judgement re-readable after the test moves on. The version's own id comes
+ * back with it, so anything else the version carries stays reachable from one
+ * answer.
+ *
+ * Three different absences answer alike, with `undefined`: a simulation the
+ * caller cannot see, one that pinned no test, and a pin whose version the
+ * caller cannot reach. None of them has a version to resolve, and telling them
+ * apart at this seam would be telling one customer about another's rows. A
+ * caller who needs the distinction has it already — the pin is on the
+ * simulation row.
+ */
+export async function getSimulationTestVersion(
+  auth: AuthContext,
+  simulationId: string,
+): Promise<TestVersion | undefined> {
+  authorize(auth, "read", here(auth));
+
+  const pinned = await getSimulation(auth, simulationId);
+  if (pinned === undefined || pinned.testVersionId === null) return undefined;
+
+  return getTestVersion(auth, pinned.testVersionId);
 }
 
 /**
@@ -1568,6 +1643,9 @@ async function landSimulation(
 
     if (row === undefined) return undefined;
 
+    // The judgement is queued in the same transaction as the landing, so a
+    // conversation that ended is never recorded without the work to judge it.
+    await makeGradable(tx, auth, row);
     const settled = await finalizeRunIfDone(tx, row.runId, now);
     await appendRunEvents(tx, row.runId, now, [
       {
@@ -1716,6 +1794,15 @@ export async function sweepOrphanedSimulations(
         ),
       )
       .returning(SIMULATION_COLUMNS);
+
+    // An orphan is a terminal transition like any other, so it becomes work
+    // like any other: a simulator that died mid-conversation produces a `failed`
+    // simulation, and a `failed` simulation is judged `errored` rather than left
+    // unjudged. In id order, so two sweeps racing over one set take the rows in
+    // one order and cannot deadlock over them.
+    for (const row of [...rows].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+      await makeGradable(tx, auth, row);
+    }
 
     // Each affected run at most once, in one order, as everywhere else — and
     // each one's events beside its own finish.

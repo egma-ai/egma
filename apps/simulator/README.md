@@ -10,7 +10,7 @@ imports monorepo code: the versioned JSON contract in
 egma, which is also what lets this one app be Python inside a TypeScript
 monorepo.
 
-Four seams shape the inside, and each exists to be swapped without
+Five seams shape the inside, and each exists to be swapped without
 touching the others:
 
 - **The persona brain** (`persona.py`) — one component for every modality,
@@ -29,16 +29,30 @@ touching the others:
   audio — and they are why the whole loop runs with no account and no
   network. `retell` is the first real one: it speaks Retell's chat API,
   driven entirely by the spec's connection block, and adding it changed
-  nothing outside `plugs/`. To write the next, read the
+  nothing outside `plugs/`. `phone` dials a number — provider-blind by
+  construction, because the telephone network neither knows nor cares
+  what answers, so a Retell agent, a Vapi agent and a person behind a
+  number are all one plug. To write the next, read the
   `plugs/__init__.py` docstring; it is the entire brief.
+- **The media backends** (`media/`) — how a phone call's audio travels.
+  One driver per bridge, behind a four-method seam: open a session, dial,
+  wait until somebody answers, tear it down. `livekit` places real calls
+  over a SIP trunk the deployment brings from any carrier; `scripted` is
+  the local stand-in that answers a call nobody placed, and is what CI
+  runs on. Nothing above the seam — the plug's lifecycle, the pipeline,
+  the recording, the report — learns which one ran, so another bridge is
+  one new module and one registry line. To write one, read the
+  `media/__init__.py` docstring; it is the entire brief.
 - **The speech legs** (`speech.py`) — a voice simulation is a chat one
   with two more legs: the persona's words spoken into audio, the agent's
-  audio read back into words. Both sit in the pipeline exactly where a
-  real provider's service would, so the shape one must fit is settled —
-  but nothing selects a real one yet, and the assembly builds the
-  deterministic pair. That pair is what CI speaks and listens with: no
-  model, no network, no downloaded corpus, and the same words out that
-  went in. A live provider, and the switch that picks it, land together.
+  audio read back into words. Which pair fills them is configuration read
+  at assembly and nowhere else — a deterministic pair, or ElevenLabs
+  speaking and Deepgram listening, each chosen on its own. The
+  deterministic pair is the default everywhere and what CI speaks and
+  listens with: no account, no network, no downloaded corpus, and the
+  same words out that went in. Nothing above the assembly learns which
+  pair it got, which is what keeps a future speech-to-speech persona a
+  different leg-set rather than a rewrite.
 
 One pipeline is assembled per simulation from its own spec and torn down
 after (`pipeline.py`). Modality selects the legs and nothing else: a chat
@@ -117,8 +131,9 @@ conduct whole exchanges over chat and the `loopback` one conducts a spoken
 one, leaving a real `.wav` under `EGMA_SIMULATOR_BLOB_DIR` that you can
 open and listen to a channel at a time; the `retell` fixture really does
 dial Retell and fails at the door, because the key in a fixture is a
-placeholder; the `phone` fixture is refused with a clear log line,
-honestly, until its plug lands.
+placeholder; the `phone` fixture is refused with a clear log
+line naming `EGMA_SIMULATOR_MEDIA_BACKEND`, because a local run
+configures no bridge to place a call through.
 `GET /workbench/records` returns the same as JSON;
 `POST /workbench/simulations/<id>/cancel` flags a cancel directive for the
 next heartbeat; `POST /workbench/specs` queues another spec while
@@ -135,6 +150,98 @@ EGMA_SIMULATOR_MODEL_API_KEY=sk-... \
 EGMA_SIMULATOR_CONTROL_PLANE_URL=http://127.0.0.1:8085 \
 uv run egma-simulator
 ```
+
+To hear a real voice instead of the test tone, name the speech providers.
+The `.wav` the `loopback` fixture leaves behind is then genuinely spoken
+audio on one channel, and the transcript's agent turns are what a real
+transcriber made of the other. Each leg is chosen on its own, so a real
+voice with scripted ears is one variable:
+
+```bash
+EGMA_SIMULATOR_TTS_PROVIDER=elevenlabs \
+EGMA_SIMULATOR_ELEVENLABS_API_KEY=... \
+EGMA_SIMULATOR_STT_PROVIDER=deepgram \
+EGMA_SIMULATOR_DEEPGRAM_API_KEY=... \
+EGMA_SIMULATOR_CONTROL_PLANE_URL=http://127.0.0.1:8085 \
+uv run egma-simulator
+```
+
+Which voice the persona speaks with comes from its own authored traits —
+a `voice` block naming a `voiceId` — and a persona naming none speaks
+with a default English voice. A voice id belongs to the provider it was
+authored for, so a `voice` block naming a *different* provider than the
+one configured is treated as naming none: the default English voice
+speaks and a log line says why, rather than the simulation failing on a
+timbre. A block naming a `voiceId` and no provider is authored for
+whichever deployment runs it, and is used as written. Setting neither
+variable leaves everything exactly as it was: the scripted pair, no
+account, no network.
+
+To dial a real phone number, point the simulator at a LiveKit server and
+give it a SIP trunk. The trunk is yours, from any carrier — either one
+already stored in LiveKit or the inline fields below — and the same three
+LiveKit variables serve a self-hosted server and LiveKit Cloud.
+
+If your carrier is Twilio, one command makes the trunk rather than making
+you build it in a console:
+
+```bash
+TWILIO_ACCOUNT_SID=AC... TWILIO_AUTH_TOKEN=... \
+uv run egma-trunk-setup --number +15551234567
+```
+
+It creates an Elastic SIP Trunk, a credential list and its credential,
+attaches both and the number to the trunk, and prints the five variables
+below on stdout — the story of what it made, with each identifier, goes
+to stderr, so `> phone.env` captures exactly the configuration and
+nothing else. It is safe to run again: a second run finds what the first
+made and rotates only the password, which Twilio hands out once and never
+again. **The account token is used by that command and nothing else** —
+what a deployment keeps afterwards is a SIP credential that can do
+nothing but place calls over one trunk.
+
+Real speech providers belong with all this: a call spoken in the test
+tone reaches a real agent as noise.
+
+```bash
+EGMA_SIMULATOR_MEDIA_BACKEND=livekit \
+EGMA_SIMULATOR_LIVEKIT_URL=wss://... \
+EGMA_SIMULATOR_LIVEKIT_API_KEY=... \
+EGMA_SIMULATOR_LIVEKIT_API_SECRET=... \
+EGMA_SIMULATOR_SIP_TRUNK_ADDRESS=your-trunk.pstn.twilio.com \
+EGMA_SIMULATOR_SIP_TRUNK_NUMBER=+1... \
+EGMA_SIMULATOR_SIP_TRUNK_USERNAME=... \
+EGMA_SIMULATOR_SIP_TRUNK_PASSWORD=... \
+EGMA_SIMULATOR_TTS_PROVIDER=elevenlabs EGMA_SIMULATOR_ELEVENLABS_API_KEY=... \
+EGMA_SIMULATOR_STT_PROVIDER=deepgram EGMA_SIMULATOR_DEEPGRAM_API_KEY=... \
+EGMA_SIMULATOR_CONTROL_PLANE_URL=http://127.0.0.1:8085 \
+uv run egma-simulator
+```
+
+A connection's config carries the number and nothing secret: the trunk
+and the bridge belong to the deployment, which is why they arrive here
+and never in a spec. Anything missing stops the process on its first
+line naming the variable, the way every other required-if-enabled
+variable does — including a trunk given only half a credential, since a
+carrier answers half a username-and-password the same 403 it answers a
+wrong one, once per call, forever. Set none of these and nothing changes
+— the simulator conducts chat and loopback simulations exactly as
+before, and refuses a spec that names a phone number with a sentence
+naming the variable to set.
+
+Where the LiveKit server itself comes from is the root README's story:
+`docker-compose.phone.yml` is an opt-in overlay that stands one up beside
+the simulator, with the honest account of what its SIP gateway needs from
+your network. `egma-workbench --phone-number +1...` is the other half of
+that demo — it points the phone fixture at a real agent instead of the
+placeholder it carries, and queues nothing else.
+
+A phone call is carried at 8 kHz, always, and no connection can ask for
+another band. That is what the public telephone network gives, and a band
+a spec could choose would be a band declared rather than one the audio
+really had — so the number stamped on a result is a band that audio
+genuinely carried, and a narrowband call can never read as a wideband
+one.
 
 ## Configuration
 
@@ -153,6 +260,19 @@ Everything arrives as environment variables.
 | `EGMA_SIMULATOR_MODEL_BASE_URL` | `https://api.openai.com/v1` | The provider, for `openai` — any OpenAI-compatible endpoint. |
 | `EGMA_SIMULATOR_MODEL_NAME` | (required for `openai`) | Which model to ask for. |
 | `EGMA_SIMULATOR_MODEL_API_KEY` | (required for `openai`) | The provider key. Never logged. |
+| `EGMA_SIMULATOR_STT_PROVIDER` | `scripted` | What the persona hears with, in a voice simulation: `scripted` or `deepgram`. |
+| `EGMA_SIMULATOR_DEEPGRAM_API_KEY` | (required for `deepgram`) | The provider key. Never logged. |
+| `EGMA_SIMULATOR_TTS_PROVIDER` | `scripted` | What the persona speaks with: `scripted` or `elevenlabs`. |
+| `EGMA_SIMULATOR_ELEVENLABS_API_KEY` | (required for `elevenlabs`) | The provider key. Never logged. |
+| `EGMA_SIMULATOR_MEDIA_BACKEND` | (none) | Which bridge places a phone call: `livekit`, or `scripted` for the local stand-in that places none. Unset, the simulator places no calls and says so when a simulation names a number. |
+| `EGMA_SIMULATOR_LIVEKIT_URL` | (required for `livekit`) | The LiveKit server — self-hosted or Cloud, only the URL differs. |
+| `EGMA_SIMULATOR_LIVEKIT_API_KEY` | (required for `livekit`) | The LiveKit API key. |
+| `EGMA_SIMULATOR_LIVEKIT_API_SECRET` | (required for `livekit`) | The LiveKit API secret. Never logged. |
+| `EGMA_SIMULATOR_SIP_TRUNK_ID` | (one of the two trunk forms) | A SIP trunk already stored in LiveKit, by id. |
+| `EGMA_SIMULATOR_SIP_TRUNK_ADDRESS` | (the other trunk form) | The carrier's termination hostname, for a trunk given inline. |
+| `EGMA_SIMULATOR_SIP_TRUNK_NUMBER` | (none) | The number calls appear to come from. |
+| `EGMA_SIMULATOR_SIP_TRUNK_USERNAME` | (with the password, or neither) | Credential auth for the inline trunk. |
+| `EGMA_SIMULATOR_SIP_TRUNK_PASSWORD` | (with the username, or neither) | The trunk password. Never logged. |
 | `EGMA_SIMULATOR_WAL_DIR` | `.egma-simulator/wal` | Where report documents land before sending. |
 | `EGMA_SIMULATOR_BLOB_DIR` | `.egma-simulator/blobs` | Where recordings land, for the filesystem-backed blob store. |
 | `EGMA_SIMULATOR_LOG_LEVEL` | `INFO` | The usual levels: `CRITICAL`, `ERROR`, `WARNING`, `INFO`, `DEBUG`. |
@@ -187,7 +307,14 @@ docker compose -f docker-compose.yml -f docker-compose.workbench.yml \
 ```
 
 That is the same story as the two terminals above, in containers, with
-the fixtures already inside the image. The root README tells the rest.
+the fixtures already inside the image.
+
+`docker-compose.phone.yml` is the third overlay: a LiveKit server, its
+SIP gateway and their Redis, for a deployment that places real calls.
+`docker compose up` starts none of it, and the simulator publishes
+nothing whichever overlays are on — the gateway is the one container in
+egma a carrier talks to, and what that costs a self-hoster is the root
+README's story to tell.
 
 ## Tests
 
@@ -225,6 +352,17 @@ protocol needs no account, no key and no network — failure paths included,
 where a refused key and an endpoint nobody answers each end the simulation
 `failed` with an honest reason and no leaked secret.
 
+The `phone` plug converses through the scripted media backend the same
+way: a spec naming a number yields a transcript, an ending, per-turn
+timings, a measured band and a recording, with no LiveKit and no trunk
+anywhere. Its failure paths are the point of the plug, so each is proved
+too — busy, no answer, declined, a carrier that failed, and a trunk that
+cannot be used at all — each ending `failed` with a reason naming what
+the carrier said, and none of them ever reading as the agent failing. A
+whole deployment's worth of LiveKit and trunk credentials is planted as
+sentinels for those runs, so the scan afterwards is a scan of a process
+that really held them.
+
 One real conversation with a real Retell chat agent is opt-in, and skips
 when the environment is silent, so nothing in CI waits on an account:
 
@@ -235,6 +373,67 @@ uv run --frozen pytest tests/test_live_retell.py -v
 ```
 
 `TEST_RETELL_BASE_URL` points that test somewhere other than Retell.
+
+Real speech is opt-in the same way, one test per provider so a failure
+names the leg, plus one for the pair working together. Each skips on its
+own credential, and CI runs none of them:
+
+```bash
+ELEVENLABS_API_KEY=... uv run --frozen pytest tests/test_live_elevenlabs.py -v
+DEEPGRAM_API_KEY=...   uv run --frozen pytest tests/test_live_deepgram.py -v
+DEEPGRAM_API_KEY=... ELEVENLABS_API_KEY=... \
+  uv run --frozen pytest tests/test_live_speech.py -v
+```
+
+The first hears the persona speak for real and reads the recording back:
+one channel a synthesized voice, the other still the test codec. The
+second hands a checked-in recording of one spoken sentence —
+`fixtures/spoken-sentence/` — to a real transcriber and checks the words
+that come back, so proving the ears needs no synthesis. The third
+conducts a whole voice simulation through both, against the loopback's
+echo mode, where what a real voice says is what real ears read. All three
+also plant their keys and scan every byte the run emitted, the way the
+offline sentinel tests do. `TEST_DEEPGRAM_API_KEY` and
+`TEST_ELEVENLABS_API_KEY` are read first, for a machine that keeps its
+test credentials apart from its working ones.
+
+`egma-trunk-setup` converses with `tests/twilio_stub.py`, a local server
+shaped like the two Twilio APIs the step drives — trunks and attachments
+on one, credential lists and numbers on the other — so proving it makes
+the right artifacts in the right order needs no account and no network.
+Its refusals are proved too: a number the account does not hold, a wrong
+token, a carrier that refuses outright, and a termination URI a stranger
+already holds.
+
+`tests/test_deployment.py` compares the deployment story against the code
+that reads it: every variable the simulator looks up is in
+`.env.example`, in a compose file, and in the table above; nothing is
+documented that nothing reads; the simulator publishes no port in any
+compose file in the repository; and a plain `docker compose up` starts
+none of the phone stack.
+
+One real phone call is opt-in too, and it takes a whole live deployment —
+a LiveKit, a trunk, a number, and real speech providers, because a call
+spoken in the test tone would prove nothing about a phone line. It skips
+visibly listing whatever is missing, so CI never waits on any of it:
+
+```bash
+TEST_LIVEKIT_URL=wss://... \
+TEST_LIVEKIT_API_KEY=... TEST_LIVEKIT_API_SECRET=... \
+TEST_SIP_TRUNK_ID=ST_... \
+TEST_PHONE_NUMBER=+1... \
+TEST_DEEPGRAM_API_KEY=... TEST_ELEVENLABS_API_KEY=... \
+  uv run --frozen pytest tests/test_live_phone.py -v
+```
+
+Every name falls back to the `EGMA_SIMULATOR_*` one a real deployment
+already sets, and a trunk arrives either as `TEST_SIP_TRUNK_ID` or inline
+as `TEST_SIP_TRUNK_ADDRESS` with `TEST_SIP_TRUNK_USERNAME` and
+`TEST_SIP_TRUNK_PASSWORD`. What it asserts is structure and not content:
+a live agent says different words every time, so it checks that a
+conversation happened, that it ended honestly, that the band was
+measured, that the recording resolves with both channels carrying sound,
+and that no credential reached a single byte the simulator wrote.
 
 ## Layout
 
@@ -250,8 +449,14 @@ src/egma_simulator/
   model.py        The model-client seam: scripted (CI) and OpenAI-compatible.
   plugs/          The platform-plug seam. Its __init__ docstring is the
                   plug author's whole brief; scripted.py chats,
-                  loopback.py speaks, and retell.py is the first real
-                  platform.
+                  loopback.py speaks, retell.py is the first real
+                  platform, and phone.py dials a number.
+  media/          The media-backend seam: how a phone call's audio
+                  travels. Its __init__ docstring is the driver author's
+                  whole brief; livekit.py places real calls over a SIP
+                  trunk, scripted.py is the one CI converses through.
+  trunk.py        `egma-trunk-setup`: a carrier account and a number
+                  become a SIP trunk, once, through the carrier's own API.
   pipeline.py     One pipeline per simulation, built from its spec: which
                   legs the modality selects, and what the audio measured.
   speech.py       The speech legs, and the deterministic pair CI speaks
