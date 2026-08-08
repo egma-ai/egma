@@ -12,6 +12,7 @@ import { agentRoutes } from "./routes/agents.ts";
 import { apiKeyRoutes } from "./routes/api-keys.ts";
 import { claimRoutes } from "./routes/claims.ts";
 import { deviceRoutes } from "./routes/device.ts";
+import { heartbeatRoutes } from "./routes/heartbeats.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
@@ -195,6 +196,13 @@ export function buildApi(options: ServerOptions): Api {
   // customer — so there is no organization to key a budget on, and a busy
   // run can never eat a customer's request budget from the inside.
   void app.register(claimRoutes, {
+    serviceToken: config.simulatorServiceToken,
+  });
+
+  // The heartbeat door, beside the claim door on the same terms — and all
+  // the more so, because a busy run beats every few seconds per conversation,
+  // which is exactly the traffic a per-organization budget must never see.
+  void app.register(heartbeatRoutes, {
     serviceToken: config.simulatorServiceToken,
   });
 
