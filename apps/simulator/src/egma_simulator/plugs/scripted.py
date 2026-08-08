@@ -21,6 +21,12 @@ Its config keys, like every plug's, are its own:
   cancellation testable.
 - ``provider_reference`` (string, optional) — offered as the platform's
   own identifier for the exchange, the way a real plug offers a chat id.
+- ``tool_calls`` (list of objects, default empty) — tools the scripted
+  agent calls while producing its first answer, each ``{"name": …}`` with
+  an optional ``"arguments"`` string, the way a platform that exposes its
+  agent's tool traffic reports it alongside the words. One position is
+  enough: what a script has to be able to produce is the shape, and where
+  in an exchange it lands is the real platform's business.
 """
 
 from __future__ import annotations
@@ -28,7 +34,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from . import AgentReply, PlugError
+from . import AgentReply, PlugError, ToolCall
 
 FALLBACK_REPLY = "Is there anything else I can help you with?"
 """What the agent says once its script is spent but the exchange holds."""
@@ -39,6 +45,7 @@ _KNOWN_KEYS = {
     "ends_after_replies",
     "turn_seconds",
     "provider_reference",
+    "tool_calls",
 }
 
 
@@ -96,6 +103,7 @@ class ScriptedCounterpart:
         self._ends_after_replies = ends_after_replies
         self._turn_seconds = float(turn_seconds)
         self._provider_reference = reference
+        self._tool_calls = _scripted_tool_calls(config.get("tool_calls", []))
         self._delivered = 0
 
     @property
@@ -112,16 +120,40 @@ class ScriptedCounterpart:
 
         position = self._delivered
         self._delivered += 1
+        called = self._tool_calls if position == 0 else ()
 
         if position < len(self._replies):
             is_last = position == len(self._replies) - 1
             return AgentReply(
                 text=self._replies[position],
                 ended=self._ends_after_replies and is_last,
+                tool_calls=called,
             )
         if self._ends_after_replies:
-            return AgentReply(text=None, ended=True)
-        return AgentReply(text=FALLBACK_REPLY, ended=False)
+            return AgentReply(text=None, ended=True, tool_calls=called)
+        return AgentReply(text=FALLBACK_REPLY, ended=False, tool_calls=called)
 
     async def close(self) -> None:
         return None
+
+
+def _scripted_tool_calls(configured: object) -> tuple[ToolCall, ...]:
+    """The tool calls a script says its agent makes, held to the same shape
+    a real platform's would be read into."""
+    if not isinstance(configured, list):
+        raise PlugError("scripted config: tool_calls must be a list of objects")
+    calls = []
+    for entry in configured:
+        if not isinstance(entry, dict) or set(entry) - {"name", "arguments"}:
+            raise PlugError(
+                "scripted config: each tool call is an object with a name "
+                "and an optional arguments string"
+            )
+        name = entry.get("name")
+        if not isinstance(name, str) or not name:
+            raise PlugError("scripted config: a tool call needs a name")
+        arguments = entry.get("arguments")
+        if arguments is not None and not isinstance(arguments, str):
+            raise PlugError("scripted config: tool call arguments must be a string")
+        calls.append(ToolCall(name=name, arguments=arguments))
+    return tuple(calls)

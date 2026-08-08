@@ -1,9 +1,10 @@
 """``python -m egma_simulator.workbench`` — the fake control plane, standing.
 
 Point it at spec fixtures and start a simulator against it; every claim,
-heartbeat, report and refusal prints as a JSON line the moment it happens,
-which is how you watch a simulation go queued → claimed → running →
-completed without a database anywhere.
+heartbeat, report, arriving span and refusal prints as a JSON line the
+moment it happens, which is how you watch a simulation go queued →
+claimed → running → completed, conversation and all, without a database
+anywhere.
 """
 
 from __future__ import annotations

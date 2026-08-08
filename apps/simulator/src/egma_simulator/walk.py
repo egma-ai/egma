@@ -30,6 +30,12 @@ logger = logging.getLogger(__name__)
 
 OnTurn = Callable[[str, str], Awaitable[None]]
 OnTiming = Callable[[str, float], Awaitable[None]]
+OnToolCall = Callable[[str, str | None], Awaitable[None]]
+OnSpeech = Callable[[str, float], Awaitable[None]]
+"""How long one side's audio ran for one turn, ear to ear. Voice only, and
+reported from where the audio is actually observed — the pipeline — because
+a transcript cannot carry it and a clock around the turn would be timing
+this process rather than the conversation."""
 
 # The two causes a WalkControls can carry. Writer and reader both name
 # these constants, so a stop can never be misread as the other cause.
@@ -120,6 +126,7 @@ async def conduct(
     on_timing: OnTiming | None,
     controls: WalkControls,
     name: str,
+    on_tool_call: OnToolCall | None = None,
 ) -> Conducted:
     """Walk one simulation through one exchange, and say how it went."""
     loop = asyncio.get_running_loop()
@@ -174,6 +181,12 @@ async def conduct(
                 await on_timing(
                     "turn_response_latency", (loop.time() - asked_at) * 1000
                 )
+            # What the agent did while answering, before what it said: a
+            # tool call happened during the turn, and only a platform that
+            # exposes one reports any at all.
+            if on_tool_call is not None:
+                for call in answer.tool_calls:
+                    await on_tool_call(call.name, call.arguments)
             if answer.text is not None:
                 await record("agent", answer.text)
             if answer.ended:

@@ -105,6 +105,43 @@ specs exist only in memory, are handed only to the plug, and are scrubbed
 from every log line — the report schema has no place to put them even by
 accident.
 
+## The conversation, as spans
+
+Every turn, tool call and measurement is also authored as an OpenTelemetry
+span (`spans.py`) and streamed to the control plane's OTLP ingest while
+the simulation runs — the same door a customer's own agent exports to, so
+a simulation is readable the way a production trace is readable, live and
+partial included. The vocabulary — the scope, the span names, the
+attribute keys, how a batch names its simulation, and how a trace id is
+derived from a simulation id — is
+[`packages/simulation-contract/span-vocabulary.md`](../../packages/simulation-contract/span-vocabulary.md),
+pinned as golden fixtures beside it.
+
+Three things about it are worth knowing before reading the code:
+
+- **Delivery is the reporter's, not an exporter's.** Span batches go
+  through the same write-ahead log and the same single ordered sender the
+  lifecycle documents ride. So a resend is byte-identical with its ids,
+  which lets the store dedup on them, and the terminal report leaves only
+  after every span before it landed — when the control plane records a
+  simulation terminal, the conversation is already stored.
+- **A timing span's own duration is the measurement.** A span named for a
+  measure opens one measurement before the moment it was taken, so the
+  number is the interval in nanoseconds and there is no second field to
+  disagree with it.
+- **Turn spans may overlap.** A chat message is one instant; a voice turn
+  is as long as the audio, ear to ear, and two turns are free to cross in
+  time. Nothing crosses today, because the persona waits its turn — the
+  shape is what a full-duplex caller will need, and it exists now so that
+  making the caller real changes conduction and nothing downstream.
+
+Pipecat's own auto-tracing stays off. Its turn spans carry no text and
+ride the stock lossy pipeline; what the record needs is authored where the
+walk observes the conversation.
+
+The simulator reaches the ingest at the control-plane URL it already has.
+There is no second address to configure.
+
 ## Running it locally
 
 Both halves live here: the simulator, and the **workbench** — a dev/test
@@ -125,8 +162,9 @@ uv run egma-simulator
 ```
 
 The workbench prints one JSON line per observation — queued, the claim,
-each heartbeat, each reported event — which is a simulation going
-queued → claimed → running → completed, live. The two `scripted` fixtures
+each heartbeat, each reported event, each span as it arrives at its small
+OTLP sink — which is a simulation going queued → claimed → running →
+completed, live, with the conversation streaming past in between. The two `scripted` fixtures
 conduct whole exchanges over chat and the `loopback` one conducts a spoken
 one, leaving a real `.wav` under `EGMA_SIMULATOR_BLOB_DIR` that you can
 open and listen to a channel at a time; the `retell` fixture really does

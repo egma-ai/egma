@@ -34,6 +34,8 @@ from conftest import (
     phone_spec,
     retell_spec,
     scripted_spec,
+    span_attribute,
+    spans_for,
     status_events_for,
     terminal_event_for,
 )
@@ -1127,3 +1129,174 @@ async def test_a_voice_simulation_lets_no_credential_out_either(
     for channel in channels_of(recording)[:2]:
         spoken = decode_speech(channel, channels_of(recording)[2])
         assert sentinel not in spoken, "the credential was spoken into the audio"
+
+
+# -- The conversation, streamed as spans ----------------------------------
+
+
+def flush_of(record: dict) -> int:
+    return record["flush"]
+
+
+async def test_a_chat_simulation_streams_its_conversation_as_spans(
+    workbench, start_simulator
+):
+    """The whole conversation arrives as OTLP, while it happens — and the
+    terminal report arrives after the last span."""
+    spec = scripted_spec(
+        "sim-spans-chat",
+        scenario="Move my Tuesday cleaning to Thursday. My name is Margaret Hale.",
+        greeting="Lakeside Dental, how can I help?",
+        replies=[
+            "Of course — could I take your name?",
+            "Done: you are moved to Thursday at half past two.",
+        ],
+        tool_calls=[
+            {
+                "name": "reschedule_appointment",
+                "arguments": '{"appointment_id":"apt-88213"}',
+            },
+            {"name": "send_confirmation_sms"},
+        ],
+    )
+    await workbench.offer(spec)
+    start_simulator(workbench)
+
+    records = await workbench.wait_for(has_terminal("sim-spans-chat"))
+    recorded = spans_for(records, "sim-spans-chat")
+    spans = [record["span"] for record in recorded]
+    names = [span["name"] for span in spans]
+
+    # Every turn of the transcript, with the speaker in the span name and
+    # the words in the one attribute the vocabulary declares.
+    turns = events_for(records, "sim-spans-chat", "turn")
+    assert names.count("human_turn") == sum(
+        1 for turn in turns if turn["speaker"] == "human"
+    )
+    assert names.count("agent_turn") == sum(
+        1 for turn in turns if turn["speaker"] == "agent"
+    )
+    said = [
+        span_attribute(span, "egma.turn.text")
+        for span in spans
+        if span["name"] in ("human_turn", "agent_turn")
+    ]
+    assert said == [turn["text"] for turn in turns]
+
+    # The measurements, as spans whose own duration is the number.
+    assert names.count("first_response_latency") == 1
+    assert names.count("turn_response_latency") == 2
+    for span in spans:
+        if span["name"].endswith("_latency"):
+            duration = int(span["endTimeUnixNano"]) - int(span["startTimeUnixNano"])
+            assert duration > 0
+
+    # The tool calls the platform reported, arguments where it gave them.
+    calls = [span for span in spans if span["name"] == "tool_call"]
+    assert [span_attribute(span, "egma.tool.name") for span in calls] == [
+        "reschedule_appointment",
+        "send_confirmation_sms",
+    ]
+    assert span_attribute(calls[0], "egma.tool.arguments") == (
+        '{"appointment_id":"apt-88213"}'
+    )
+    assert span_attribute(calls[1], "egma.tool.arguments") is None
+
+    # One trace, the root last, and every other span named under it.
+    root = next(span for span in spans if span["name"] == "simulation")
+    assert names[-1] == "simulation"
+    assert "parentSpanId" not in root
+    for span in spans:
+        assert span["traceId"] == root["traceId"]
+        if span is not root:
+            assert span["parentSpanId"] == root["spanId"]
+
+    # Every flush disjoint from every other, so a resend lands nothing twice.
+    by_flush: dict[int, set[str]] = {}
+    for record in recorded:
+        by_flush.setdefault(flush_of(record), set()).add(record["span"]["spanId"])
+    assert len(by_flush) > 1, "the whole conversation arrived in one batch"
+    seen: set[str] = set()
+    for ids in by_flush.values():
+        assert seen.isdisjoint(ids)
+        seen |= ids
+
+    # And the ordering the whole design leans on: every span landed before
+    # the terminal report did.
+    last_span = max(record["seq"] for record in recorded)
+    terminal_seq = next(
+        record["seq"]
+        for record in records
+        if record["kind"] == "report"
+        and record["simulation_id"] == "sim-spans-chat"
+        and record["event"]["kind"] == "status"
+        and record["event"]["status"] in ("completed", "failed", "canceled")
+    )
+    assert last_span < terminal_seq
+
+    # Streamed rather than posted at the end: turns were on the record
+    # before the conversation was over.
+    assert min(record["seq"] for record in recorded) < terminal_seq - len(spans)
+
+    # Nothing was refused on the way.
+    assert [record for record in records if record["kind"] == "refusal"] == []
+
+
+async def test_a_voice_simulation_produces_the_same_shapes_plus_its_audio_facts(
+    workbench, start_simulator
+):
+    """The same conversation-span shapes as chat, and the turns carry the
+    length of the audio rather than being instants."""
+    spec = loopback_spec(
+        "sim-spans-voice",
+        scenario="First point. Second point.",
+        greeting="Front desk, hello.",
+        replies=["Certainly.", "Done."],
+        answer_delay_seconds=0.3,
+    )
+    await workbench.offer(spec)
+    start_simulator(workbench)
+
+    records = await workbench.wait_for(has_terminal("sim-spans-voice"))
+    spans = [record["span"] for record in spans_for(records, "sim-spans-voice")]
+    names = [span["name"] for span in spans]
+
+    # The same shapes chat produces, named identically.
+    assert names.count("human_turn") == 3
+    assert names.count("agent_turn") == 3
+    assert names.count("first_response_latency") == 1
+    assert names.count("turn_response_latency") == 2
+    assert names[-1] == "simulation"
+
+    # Plus what only voice can measure, one span per measurement.
+    assert names.count("time_to_first_word") == 3
+    assert names.count("agent_speech_duration") == 3
+    assert names.count("persona_speech_duration") == 2
+
+    def durations(name: str) -> list[int]:
+        return [
+            int(span["endTimeUnixNano"]) - int(span["startTimeUnixNano"])
+            for span in spans
+            if span["name"] == name
+        ]
+
+    # A voice turn has a length, where a chat turn is one instant: what the
+    # simulator heard and what it spoke, ear to ear.
+    assert all(length > 0 for length in durations("agent_turn"))
+    # Every persona turn the counterpart actually heard, except the last —
+    # the persona's goodbye concludes the scenario, so the walk ends before
+    # it is ever spoken, and a turn nobody said is honestly an instant.
+    assert all(length > 0 for length in durations("human_turn")[:-1])
+    assert durations("human_turn")[-1] == 0
+
+    # The quiet before the agent's first word is the delay the counterpart
+    # was told to wait — measured out of the audio, and the span's own
+    # duration is that number.
+    assert all(
+        abs(length - 300_000_000) < 20_000_000 for length in durations(
+            "time_to_first_word"
+        )
+    ), durations("time_to_first_word")
+
+    # A persona turn is exactly as long as the audio the persona spoke.
+    assert durations("persona_speech_duration") == durations("human_turn")[:-1]

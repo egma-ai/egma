@@ -7,8 +7,9 @@ import json
 
 import aiohttp
 import pytest
-from conftest import load_fixture_spec, scripted_spec
+from conftest import load_fixture_spec, scripted_spec, spans_for
 
+from egma_simulator.spans import SIMULATION_ID_ATTRIBUTE
 from egma_simulator.workbench.app import dialling
 
 
@@ -186,3 +187,131 @@ def test_a_number_with_nothing_to_dial_it_is_refused_rather_than_ignored():
         dialling([load_fixture_spec("chat-scripted-hurried.json")], "+12025550143")
 
     assert "+12025550143" in str(refused.value)
+
+
+# -- The OTLP sink, so the developer's rig stays whole ---------------------
+
+
+def a_batch(simulation_id: str, *spans: dict) -> dict:
+    """One OTLP export the way the emitter writes it."""
+    return {
+        "resourceSpans": [
+            {
+                "resource": {
+                    "attributes": [
+                        {
+                            "key": "service.name",
+                            "value": {"stringValue": "egma-simulator"},
+                        },
+                        *(
+                            [
+                                {
+                                    "key": SIMULATION_ID_ATTRIBUTE,
+                                    "value": {"stringValue": simulation_id},
+                                }
+                            ]
+                            if simulation_id
+                            else []
+                        ),
+                    ]
+                },
+                "scopeSpans": [
+                    {
+                        "scope": {"name": "egma-simulator", "version": "1"},
+                        "spans": list(spans),
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def a_span(name: str, **extra: object) -> dict:
+    return {
+        "traceId": "0198fb73d08e479627eea08a75fbf1d8",
+        "spanId": "aa10000000000002",
+        "name": name,
+        "kind": "SPAN_KIND_INTERNAL",
+        "startTimeUnixNano": "1785920401214000000",
+        "endTimeUnixNano": "1785920401214000000",
+        **extra,
+    }
+
+
+async def post_spans(workbench, document: dict) -> tuple[int, str]:
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            f"{workbench.base_url}/v1/traces",
+            data=json.dumps(document),
+            headers={"content-type": "application/json"},
+        ) as response:
+            return response.status, await response.text()
+
+
+async def test_the_sink_records_arriving_spans_against_their_simulation(workbench):
+    await workbench.offer(scripted_spec("sim-wb-spans"))
+
+    status, body = await post_spans(
+        workbench,
+        a_batch(
+            "sim-wb-spans",
+            a_span("human_turn"),
+            a_span("turn_response_latency"),
+        ),
+    )
+
+    assert status == 200
+    assert json.loads(body) == {}
+    recorded = spans_for(await workbench.records(), "sim-wb-spans")
+    assert [record["span"]["name"] for record in recorded] == [
+        "human_turn",
+        "turn_response_latency",
+    ]
+    # The scope rides along, because that is what the real ingest reads the
+    # vocabulary by, and what a person watching the log wants to see.
+    assert recorded[0]["scope"] == {"name": "egma-simulator", "version": "1"}
+
+
+async def test_the_sink_tells_one_flush_from_the_next(workbench):
+    await workbench.offer(scripted_spec("sim-wb-flushes"))
+
+    await post_spans(workbench, a_batch("sim-wb-flushes", a_span("human_turn")))
+    await post_spans(workbench, a_batch("sim-wb-flushes", a_span("agent_turn")))
+
+    recorded = spans_for(await workbench.records(), "sim-wb-flushes")
+    assert [record["flush"] for record in recorded] == [1, 2]
+
+
+async def test_the_sink_refuses_a_batch_naming_no_simulation(workbench):
+    """The one refusal the real ingest makes at the batch grain."""
+    status, body = await post_spans(workbench, a_batch("", a_span("human_turn")))
+
+    assert status == 400
+    assert SIMULATION_ID_ATTRIBUTE in body
+    refusals = [
+        record
+        for record in await workbench.records()
+        if record["kind"] == "refusal"
+    ]
+    assert len(refusals) == 1
+    assert refusals[0]["why"] == "spans naming no simulation"
+
+
+async def test_the_sink_refuses_spans_for_a_simulation_it_never_offered(workbench):
+    status, body = await post_spans(
+        workbench, a_batch("sim-wb-stranger", a_span("human_turn"))
+    )
+
+    assert status == 400
+    assert "sim-wb-stranger" in body
+    assert spans_for(await workbench.records(), "sim-wb-stranger") == []
+
+
+async def test_the_sink_refuses_a_body_that_is_not_an_otlp_export(workbench):
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            f"{workbench.base_url}/v1/traces",
+            data=b"not json at all",
+            headers={"content-type": "application/json"},
+        ) as response:
+            assert response.status == 400
