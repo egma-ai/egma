@@ -32,17 +32,23 @@ touching the others:
   nothing outside `plugs/`. `phone` dials a number — provider-blind by
   construction, because the telephone network neither knows nor cares
   what answers, so a Retell agent, a Vapi agent and a person behind a
-  number are all one plug. To write the next, read the
+  number are all one plug. `livekit` reaches an agent where it lives: a
+  room made in the customer's own LiveKit project, joined outbound, with
+  the agent's worker dispatched into it. To write the next, read the
   `plugs/__init__.py` docstring; it is the entire brief.
-- **The media backends** (`media/`) — how a phone call's audio travels.
-  One driver per bridge, behind a four-method seam: open a session, dial,
-  wait until somebody answers, tear it down. `livekit` places real calls
-  over a SIP trunk the deployment brings from any carrier; `scripted` is
-  the local stand-in that answers a call nobody placed, and is what CI
-  runs on. Nothing above the seam — the plug's lifecycle, the pipeline,
-  the recording, the report — learns which one ran, so another bridge is
-  one new module and one registry line. To write one, read the
-  `media/__init__.py` docstring; it is the entire brief.
+- **The media backends** (`media/`) — how a voice exchange's audio
+  travels. One driver per way in, behind a four-method seam: open a
+  session, dial, wait until somebody answers, tear it down. `livekit.py`
+  places real phone calls over a SIP trunk the deployment brings from any
+  carrier; `livekit_room.py` holds an exchange in the customer's own room
+  and dispatches their agent into it, where "dial" means asking for a
+  worker rather than placing a call; `scripted.py` is the local stand-in
+  that answers a call nobody placed, and is what CI runs on. The two that
+  join a room share `room.py`, which is the joining itself. Nothing above
+  the seam — the plug's lifecycle, the pipeline, the recording, the
+  report — learns which one ran, so another way in is one new module. To
+  write one, read the `media/__init__.py` docstring; it is the entire
+  brief.
 - **The speech legs** (`speech.py`) — a voice simulation is a chat one
   with two more legs: the persona's words spoken into audio, the agent's
   audio read back into words. Which pair fills them is configuration read
@@ -131,7 +137,8 @@ conduct whole exchanges over chat and the `loopback` one conducts a spoken
 one, leaving a real `.wav` under `EGMA_SIMULATOR_BLOB_DIR` that you can
 open and listen to a channel at a time; the `retell` fixture really does
 dial Retell and fails at the door, because the key in a fixture is a
-placeholder; the `phone` fixture is refused with a clear log
+placeholder, and so does the `livekit` one, whose server is an example
+hostname; the `phone` fixture is refused with a clear log
 line naming `EGMA_SIMULATOR_MEDIA_BACKEND`, because a local run
 configures no bridge to place a call through.
 `GET /workbench/records` returns the same as JSON;
@@ -363,6 +370,17 @@ whole deployment's worth of LiveKit and trunk credentials is planted as
 sentinels for those runs, so the scan afterwards is a scan of a process
 that really held them.
 
+The `livekit` plug converses with `tests/room_stub.py`, which stands in
+for the three places its driver reaches a LiveKit — the requests it makes
+of the project, joining the room, and deleting it — and leaves every
+other line of the driver real. So a whole simulation in a room runs with
+no server, no project and no worker, and what the suite proves about a
+refusal or an ending is proved about the code a customer's server will
+run: the two dispatch paths and the metadata each carries, a worker that
+never comes and one that joins and publishes nothing, an agent that
+leaves mid-exchange, and the room deleted however it ended. The
+customer's api secret is a sentinel there too.
+
 One real conversation with a real Retell chat agent is opt-in, and skips
 when the environment is silent, so nothing in CI waits on an account:
 
@@ -450,11 +468,15 @@ src/egma_simulator/
   plugs/          The platform-plug seam. Its __init__ docstring is the
                   plug author's whole brief; scripted.py chats,
                   loopback.py speaks, retell.py is the first real
-                  platform, and phone.py dials a number.
-  media/          The media-backend seam: how a phone call's audio
+                  platform, phone.py dials a number, and livekit.py holds
+                  an exchange in the agent's own room. audio_turns.py is
+                  where a turn begins and ends on any live line.
+  media/          The media-backend seam: how a voice exchange's audio
                   travels. Its __init__ docstring is the driver author's
                   whole brief; livekit.py places real calls over a SIP
-                  trunk, scripted.py is the one CI converses through.
+                  trunk, livekit_room.py dispatches an agent into a room,
+                  room.py is the joining the two of them share, and
+                  scripted.py is the one CI converses through.
   trunk.py        `egma-trunk-setup`: a carrier account and a number
                   become a SIP trunk, once, through the carrier's own API.
   pipeline.py     One pipeline per simulation, built from its spec: which
