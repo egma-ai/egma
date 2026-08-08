@@ -227,7 +227,7 @@ export async function reportRoutes(
       // getting a real home — as spans through the trace store's own ingest,
       // where a simulation reads like a production trace — so this door
       // keeps the shipped reporter working end to end without building a
-      // second storage path those tickets would immediately retire.
+      // second storage path that the spans work immediately retires.
       if (event.kind !== "status") continue;
 
       const applied = await applyStatusEvent(
