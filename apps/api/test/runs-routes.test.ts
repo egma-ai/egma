@@ -10,7 +10,7 @@ import {
   markSimulationCanceled,
   startSimulation,
   type AuthContext,
-  type Simulation,
+  type SimulationClaim,
 } from "@egma/db";
 import { newId } from "@egma/ids";
 import { afterEach, describe, expect, it } from "vitest";
@@ -155,14 +155,13 @@ async function aCustomerReadyToRun(label: string): Promise<{
 const CLAIMANT = "simulator-blue-1";
 
 async function claimOwn(
-  auth: AuthContext,
   runId: string,
-): Promise<readonly Simulation[]> {
-  const claimed = await claimSimulations(auth, {
+): Promise<readonly SimulationClaim[]> {
+  const claimed = await claimSimulations({
     claimant: CLAIMANT,
     capacity: 50,
   });
-  return claimed.filter((simulation) => simulation.runId === runId);
+  return claimed.filter((claim) => claim.runId === runId);
 }
 
 describe("starting a run", () => {
@@ -725,7 +724,7 @@ describe("following a run", () => {
 
     expect((await follow()).events).toEqual([]);
 
-    const [first, second, third] = await claimOwn(auth, runId);
+    const [first, second, third] = await claimOwn(runId);
     if (first === undefined || second === undefined || third === undefined) {
       throw new Error("the claim missed the run under test");
     }
@@ -747,7 +746,6 @@ describe("following a run", () => {
     await startSimulation(auth, first.id, CLAIMANT);
     await completeSimulation(auth, first.id, CLAIMANT, {
       endingReason: "agent_ended",
-      transcript: [],
     });
     await failSimulation(auth, second.id, CLAIMANT, {
       reason: "agent_never_joined",
@@ -755,7 +753,6 @@ describe("following a run", () => {
     await startSimulation(auth, third.id, CLAIMANT);
     await completeSimulation(auth, third.id, CLAIMANT, {
       endingReason: "persona_concluded",
-      transcript: [],
     });
 
     const last = await follow();
@@ -781,7 +778,7 @@ describe("following a run", () => {
     });
     const runId = String(started.body.id);
 
-    const [only] = await claimOwn(auth, runId);
+    const [only] = await claimOwn(runId);
     if (only === undefined) throw new Error("the claim missed the run");
     await failSimulation(auth, only.id, CLAIMANT, { reason: "not_answered" });
 
@@ -966,7 +963,7 @@ describe("stopping a run", () => {
       test_versions: [oneCaller],
     });
     const runId = String(started.body.id);
-    const [only] = await claimOwn(auth, runId);
+    const [only] = await claimOwn(runId);
     if (only === undefined) throw new Error("the claim missed the run");
 
     const canceled = await request("POST", `/api/runs/${runId}/cancel`, key);
@@ -1017,11 +1014,10 @@ describe("stopping a run", () => {
       test_versions: [twoCallers],
     });
     const ranId = String(ran.body.id);
-    for (const one of await claimOwn(auth, ranId)) {
+    for (const one of await claimOwn(ranId)) {
       await startSimulation(auth, one.id, CLAIMANT);
       await completeSimulation(auth, one.id, CLAIMANT, {
         endingReason: "agent_ended",
-        transcript: [],
       });
     }
 

@@ -305,7 +305,7 @@ describe("an illegal simulation move", () => {
     );
 
     await expect(
-      db.sql("update simulation set transcript = '[]'::jsonb where id = $1", [id]),
+      db.sql("update simulation set turn_count = 99 where id = $1", [id]),
     ).rejects.toSatisfy(
       (error) =>
         errorCodeOf(error) === POSTGRES_ERROR.raiseException &&
@@ -380,9 +380,72 @@ describe("a simulation's shape", () => {
     );
   });
 
-  it("refuses a report on a row that has not ended", async () => {
+  it("admits the platform's dispatch_failed as a way to have failed, and only that", async () => {
+    // The honest landing for a claimed simulation the platform could not
+    // hand over: a failed row may say so…
     await expect(
-      insertSimulation("running", { transcript: "[]" }),
+      insertSimulation("failed", { ending_reason: "dispatch_failed" }),
+    ).resolves.toBeDefined();
+
+    // …and nothing that produced a conversation ever can, because a spec
+    // that was never handed over has no conversation to have ended.
+    await expect(
+      insertSimulation("completed", { ending_reason: "dispatch_failed" }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+  });
+
+  it("refuses the audio facts on a row that has not ended", async () => {
+    // The report check reduced to these two when the conversation left the
+    // row, and this is the pair it still holds to a landing. A chat row
+    // could not hold them at all, so the case is voice.
+    await expect(
+      insertSimulation("running", {
+        modality: "voice",
+        measured_audio_band_hertz: 8_000,
+      }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+    await expect(
+      insertSimulation("running", {
+        modality: "voice",
+        recording_reference: "dual-channel.wav",
+      }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+  });
+
+  it("holds the summary facts to ended rows, exactly as the report's", async () => {
+    await expect(
+      insertSimulation("running", { turn_count: 6 }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+    await expect(
+      insertSimulation("claimed", { provider_reference: "chat_5d1f9a3b7c" }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+
+    // On a landed row they are exactly what the columns are for — canceled
+    // included, where the reason stays empty but the facts still landed.
+    await expect(
+      insertSimulation("completed", {
+        turn_count: 14,
+        provider_reference: "chat_5d1f9a3b7c",
+      }),
+    ).resolves.toBeDefined();
+    await expect(
+      insertSimulation("canceled", { turn_count: 0 }),
+    ).resolves.toBeDefined();
+  });
+
+  it("refuses a turn count below zero", async () => {
+    await expect(
+      insertSimulation("completed", { turn_count: -1 }),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
     );
@@ -715,6 +778,15 @@ describe("a run event", () => {
 
     await expect(
       record({ run, simulation }, { seq: 1, kind: "simulation", status: "completed", reason: "orphaned" }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+
+    // The platform's dispatch_failed keeps to the failed class here exactly as
+    // it does on the simulation row the event describes.
+    await record({ run, simulation }, { seq: 1, kind: "simulation", status: "failed", reason: "dispatch_failed" });
+    await expect(
+      record({ run, simulation }, { seq: 2, kind: "simulation", status: "completed", reason: "dispatch_failed" }),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
     );

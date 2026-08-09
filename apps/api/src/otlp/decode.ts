@@ -134,7 +134,7 @@ function hex(base64: string | undefined): string {
  *
  * `longs: String` because a 64-bit nanosecond timestamp is larger than a JS
  * number can hold exactly, and losing its low digits would move a span's
- * recorded start time — the one value ticket 09 requires be replayed
+ * recorded start time — the one value the trace store requires be replayed
  * byte-identically. `bytes: String` because that is what the JSON mapping does
  * with a `bytes` field, so an attribute carrying binary reads the same in both
  * encodings; the three id fields are the mapping's own exception and are hexed

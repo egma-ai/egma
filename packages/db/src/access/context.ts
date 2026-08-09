@@ -43,15 +43,23 @@ export type AuthContext = {
 /**
  * How the caller proved who they are.
  *
- * `engine` is egma's own grading service, and it is the one value that names no
- * person. It proved nothing, because there is nobody for it to be: it holds a
- * grading claim — a work order egma issued to itself, naming the organization
- * and the project of one finished conversation — and `claimGradingJobs` builds
- * the context from that claim and from nothing the service said. The word exists
- * so that a context which came from a claim rather than from a credential says
- * so on its face, wherever it is read.
+ * `engine` is egma's own grading service, and it is one of the two values that
+ * name no person. It proved nothing, because there is nobody for it to be: it
+ * holds a grading claim — a work order egma issued to itself, naming the
+ * organization and the project of one finished conversation — and
+ * `claimGradingJobs` builds the context from that claim and from nothing the
+ * service said. The word exists so that a context which came from a claim
+ * rather than from a credential says so on its face, wherever it is read.
+ *
+ * `simulator` is its sibling for egma's own conductor of simulations, on
+ * exactly the same terms: `claimSimulations` builds one per claimed row, from
+ * the row's own tenancy and from nothing the service said. It exists as its
+ * own word rather than reusing `engine` because the two services are answered
+ * different secrets — a connection's credentials open only to `simulator`, a
+ * judge key only to `engine` — and a door that gated on one word for both
+ * would hand each service the other's.
  */
-export const VIA = ["session", "api_key", "engine"] as const;
+export const VIA = ["session", "api_key", "engine", "simulator"] as const;
 export type Via = (typeof VIA)[number];
 
 /**

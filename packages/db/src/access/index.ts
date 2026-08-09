@@ -35,18 +35,25 @@
  * is asked by the one caller with no credential at all — somebody looking at a
  * signup form — and the same test names it.
  *
- * **Work-dispatching.** `claimGradingJobs` and `watchGradingWork`, and only
- * those two. They are asked by the grader service, which stands behind every
- * organization on the deployment at once and holds no credential, because there
- * is no honest one to give it. The exemption is narrow and each half of it is
- * enforced: neither takes an argument by which a caller could name a customer,
- * and a build rule refuses one that grows one; the only table either reaches is
- * egma's own grading queue; a claim carries out identifiers and tenancy and
- * never anything a customer wrote; and every claim arrives with the
- * `AuthContext` narrowed to that job's own organization and project, which is
- * what all of the grading afterwards goes through. `grading.ts` writes the
- * reasoning out in full. A third name in this category is a deliberate act: a
- * test names both and fails when one appears.
+ * **Work-dispatching.** `claimGradingJobs`, `watchGradingWork`,
+ * `claimSimulations`, `recordSimulationHeartbeat`, `sweepOrphanedSimulations`
+ * and `resolveSimulationStanding`, and only those six. They are asked by
+ * egma's own two services — the grader and the simulator — each of which
+ * stands behind every organization on the deployment at once and holds no
+ * credential, because there is no honest one to give it: the claims hand the
+ * work out, and the simulator's heartbeat, orphan sweep and standing resolver
+ * stand on the same ground for every call that comes back about a dispatched
+ * row — its beats, its silence, its lifecycle claims and its arriving spans.
+ * The exemption is narrow and each half of it is enforced: none takes an
+ * argument by which a caller could name a customer, and a build rule refuses
+ * one that grows one; the only rows any of them reaches are egma's own —
+ * grading jobs, and the simulations egma itself wrote and claimed; an answer
+ * carries identifiers and tenancy and never anything a customer wrote; and
+ * every answer arrives with the `AuthContext` narrowed to that row's own
+ * organization and project, which is what all of the work afterwards goes
+ * through. `grading.ts` writes the reasoning out in full and `runs.ts`
+ * inherits it whole. A seventh name in this category is a deliberate act: a
+ * test names all six and fails when another appears.
  *
  * **Deciding.** The role list, the action list, and the one function every
  * action in the product passes through. They take an `AuthContext` like
@@ -243,7 +250,6 @@ export {
   listConnections,
   registerAgent,
   removeConnection,
-  resolveConnectionCredentials,
   updateAgent,
   updateConnection,
   type Agent,
@@ -365,6 +371,7 @@ export {
   claimSimulations,
   completeSimulation,
   failSimulation,
+  failSimulationDispatch,
   getRun,
   getSimulation,
   getSimulationTestVersion,
@@ -373,6 +380,8 @@ export {
   listSimulations,
   markSimulationCanceled,
   recordSimulationHeartbeat,
+  resolveSimulationConnection,
+  resolveSimulationStanding,
   startRun,
   startSimulation,
   sweepOrphanedSimulations,
@@ -386,9 +395,16 @@ export {
   type RunEventPage,
   type RunPage,
   type Simulation,
+  type SimulationClaim,
+  type SimulationClaimRequest,
+  type SimulationConnection,
   type SimulationFailure,
+  type SimulationHeartbeat,
   type SimulationReport,
+  type SimulationStanding,
+  type SimulationSummaryFacts,
   type StartedRun,
+  type SweptSimulation,
 } from "./runs.ts";
 export type {
   RunEventKind,

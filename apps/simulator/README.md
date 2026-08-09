@@ -2,10 +2,12 @@
 
 The service that conducts simulations. It claims simulation specs from the
 control plane over outbound HTTP, conducts each one as a real conversation
-— the persona on one side, the agent under test on the other — and reports
-what happened — status transitions, transcript turns, measurements,
-terminal facts — as it happens. It never touches the database and never
-imports monorepo code: the versioned JSON contract in
+— the persona on one side, the agent under test on the other — and says
+what happened as it happens, along two lines: the lifecycle — status
+transitions and the terminal facts — as report events, and the
+conversation itself — every turn, tool call and measurement — as
+OpenTelemetry spans. It never touches the database and never imports
+monorepo code: the versioned JSON contract in
 `packages/simulation-contract` is its entire connection to the rest of
 egma, which is also what lets this one app be Python inside a TypeScript
 monorepo.
@@ -62,9 +64,9 @@ spec naming a connection type the simulator holds no plug for is refused
 out loud at claim time and reported not at all: the row stays the control
 plane's to sweep.
 
-## What a voice simulation reports
+## What a voice simulation records
 
-The same transcript, ending and measurements a chat simulation reports,
+The same transcript, ending and measurements a chat simulation records,
 plus what only audio can owe:
 
 - **The measured band.** Connections declare a band; platforms carry what
@@ -81,7 +83,8 @@ plus what only audio can owe:
   never the bytes and never a URL.
 - **Per-turn measurements**, all read from the audio itself rather than
   from a clock: `time_to_first_word` (how long the agent was quiet before
-  speaking), `agent_speech_duration` and `persona_speech_duration`.
+  speaking), `agent_speech_duration` and `persona_speech_duration`. Each
+  is a span, like every other measurement.
 
 ## How it runs
 
@@ -100,10 +103,49 @@ never the agent failing.
 
 Reports are minted as events (ids and timestamps stamped once), written to
 a local write-ahead log, then delivered in order; a resend replays the
-same bytes, so the receiving side can dedup on event ids. Credentials from
-specs exist only in memory, are handed only to the plug, and are scrubbed
-from every log line — the report schema has no place to put them even by
-accident.
+same bytes, so the receiving side can dedup on event ids. A report carries
+the lifecycle and nothing else — the conversation has its own record,
+below — so the one summary fact it keeps about what was said is how many
+turns there were. Credentials from specs exist only in memory, are handed
+only to the plug, and are scrubbed from every log line — the report schema
+has no place to put them even by accident.
+
+## The conversation, as spans
+
+Every turn, tool call and measurement is authored as an OpenTelemetry
+span (`spans.py`) and streamed to the control plane's OTLP ingest while
+the simulation runs — the same door a customer's own agent exports to, so
+a simulation is readable the way a production trace is readable, live and
+partial included. The vocabulary — the scope, the span names, the
+attribute keys, how a batch names its simulation, and how a trace id is
+derived from a simulation id — is
+[`packages/simulation-contract/span-vocabulary.md`](../../packages/simulation-contract/span-vocabulary.md),
+pinned as golden fixtures beside it.
+
+Three things about it are worth knowing before reading the code:
+
+- **Delivery is the reporter's, not an exporter's.** Span batches go
+  through the same write-ahead log and the same single ordered sender the
+  lifecycle documents ride. So a resend is byte-identical with its ids,
+  which lets the store dedup on them, and the terminal report leaves only
+  after every span before it landed — when the control plane records a
+  simulation terminal, the conversation is already stored.
+- **A timing span's own duration is the measurement.** A span named for a
+  measure opens one measurement before the moment it was taken, so the
+  number is the interval in nanoseconds and there is no second field to
+  disagree with it.
+- **Turn spans may overlap.** A chat message is one instant; a voice turn
+  is as long as the audio, ear to ear, and two turns are free to cross in
+  time. Nothing crosses today, because the persona waits its turn — the
+  shape is what a full-duplex caller will need, and it exists now so that
+  making the caller real changes conduction and nothing downstream.
+
+Pipecat's own auto-tracing stays off. Its turn spans carry no text and
+ride the stock lossy pipeline; what the record needs is authored where the
+walk observes the conversation.
+
+The simulator reaches the ingest at the control-plane URL it already has.
+There is no second address to configure.
 
 ## Running it locally
 
@@ -125,8 +167,9 @@ uv run egma-simulator
 ```
 
 The workbench prints one JSON line per observation — queued, the claim,
-each heartbeat, each reported event — which is a simulation going
-queued → claimed → running → completed, live. The two `scripted` fixtures
+each heartbeat, each reported event, each span as it arrives at its small
+OTLP sink — which is a simulation going queued → claimed → running →
+completed, live, with the conversation streaming past in between. The two `scripted` fixtures
 conduct whole exchanges over chat and the `loopback` one conducts a spoken
 one, leaving a real `.wav` under `EGMA_SIMULATOR_BLOB_DIR` that you can
 open and listen to a channel at a time; the `retell` fixture really does
@@ -250,11 +293,11 @@ Everything arrives as environment variables.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `EGMA_SIMULATOR_CONTROL_PLANE_URL` | (required) | Where to claim, heartbeat, and report. |
-| `EGMA_SIMULATOR_SERVICE_TOKEN` | (none) | Sent as `Authorization: Bearer` on every outbound call. The workbench asks for none. |
+| `EGMA_SIMULATOR_SERVICE_TOKEN` | (none) | Sent as `Authorization: Bearer` on every outbound call. The real control plane requires it and checks it against its own `EGMA_SIMULATOR_SERVICE_TOKEN` — under compose one development default reaches both sides, and changing it (once, in `.env`) before anybody else can reach the machine is part of deploying; the claim answers carry live provider credentials. The workbench asks for none. |
 | `EGMA_SIMULATOR_CAPACITY` | `4` | Most simulations conducted at once. |
 | `EGMA_SIMULATOR_CLAIMANT` | `egma-simulator-<host>-<pid>` | The name stamped on claims. |
 | `EGMA_SIMULATOR_HEARTBEAT_SECONDS` | `5` | Beat interval per running simulation. |
-| `EGMA_SIMULATOR_CLAIM_WAIT_SECONDS` | `30` | How long one claim request may hang. |
+| `EGMA_SIMULATOR_CLAIM_WAIT_SECONDS` | `30` | How long one claim request is willing to hang, sent as the claim's `wait_seconds` so the control plane holds no longer than the client will wait. The control plane caps its own hold below this default. |
 | `EGMA_SIMULATOR_REPORT_DEADLINE_SECONDS` | `120` | How long one report is resent before the log on disk becomes its only record. |
 | `EGMA_SIMULATOR_MODEL_PROVIDER` | `scripted` | Where the persona's words come from: `scripted` or `openai`. |
 | `EGMA_SIMULATOR_MODEL_BASE_URL` | `https://api.openai.com/v1` | The provider, for `openai` — any OpenAI-compatible endpoint. |

@@ -55,6 +55,8 @@ export type TestApiOptions = {
   readonly emailDelivers?: boolean;
   /** A budget small enough to reach, for the tests about reaching it. */
   readonly rateLimit?: RateLimit;
+  /** A sweep cadence short enough to observe, for the tests about the sweep. */
+  readonly orphanSweepIntervalMilliseconds?: number;
   /**
    * Whether this API needs a trace store of its own. Off by default: creating
    * and migrating a ClickHouse database costs a second, and only the files
@@ -70,6 +72,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
       CLICKHOUSE_URL: "http://unused/unused",
       EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
       EGMA_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
+      EGMA_SIMULATOR_SERVICE_TOKEN: "egma_st_held-by-this-test-suite-alone",
       EGMA_BASE_URL: "http://localhost:3101",
     }),
     ...overrides,
@@ -114,6 +117,12 @@ export async function createApi(
     config,
     emailSender,
     ...(options.rateLimit === undefined ? {} : { rateLimit: options.rateLimit }),
+    ...(options.orphanSweepIntervalMilliseconds === undefined
+      ? {}
+      : {
+          orphanSweepIntervalMilliseconds:
+            options.orphanSweepIntervalMilliseconds,
+        }),
   });
   await app.ready();
 

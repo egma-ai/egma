@@ -1,11 +1,24 @@
 """The workbench: a fake control plane that speaks the contract from fixtures.
 
-Dev and test only. It serves the three endpoints the simulator dials —
-claim, heartbeat, report — from spec documents loaded off disk, validates
-everything both ways against the contract schemas, and records every
-observation in order. The records are the whole point: the acceptance
-suite asserts against nothing else, and a person watching the log watches
-a simulation go queued → claimed → running → completed.
+Dev and test only. It serves the four endpoints the simulator dials —
+claim, heartbeat, report, and the OTLP ingest the conversation's spans go
+to — from spec documents loaded off disk, validates everything both ways
+against the contract schemas, and records every observation in order. The
+records are the whole point: the acceptance suite asserts against nothing
+else, and a person watching the log watches a simulation go queued →
+claimed → running → completed with its turns arriving as spans in between.
+
+The two doors carry two different records and the contract is what keeps
+them apart: a report says only where the simulation's lifecycle stands, so
+the report schema accepts status transitions and refuses anything claiming
+to carry a conversation, and the conversation arrives at the span sink.
+
+The span sink is deliberately the smallest thing that can be called one: it
+checks a batch parses and names a simulation this workbench knows, records
+each span, and answers what the OTLP specification says to. It stores
+nothing, indexes nothing and joins nothing — the real ingest does all of
+that, and a second implementation of it here would be a second thing to
+keep true.
 
 When the real claim API lands in the control plane, the workbench retires
 from the critical path and stays what it already is: the local rig for
@@ -23,12 +36,17 @@ from aiohttp import web
 
 from ..contract import ContractViolation, validate_report, validate_spec
 from ..reporting import moment
+from ..spans import SIMULATION_ID_ATTRIBUTE
 
 logger = logging.getLogger(__name__)
 
 
 class RefusedReport(Exception):
     """A report document the workbench refused, with the words it refused in."""
+
+
+class RefusedSpans(Exception):
+    """A span batch the workbench refused, with the words it refused in."""
 
 
 class WorkbenchState:
@@ -48,6 +66,10 @@ class WorkbenchState:
         self._cancel_flags: set[str] = set()
         self._arrival = asyncio.Condition()
         self.records: list[dict] = []
+        self._flushes = 0
+        """How many span batches have arrived. Stamped on every span
+        recorded, so a suite can tell one flush from the next without
+        having to reconstruct the grouping from what landed."""
 
     def _record(self, kind: str, **details: object) -> None:
         entry = {"seq": len(self.records), "at": moment(), "kind": kind, **details}
@@ -150,6 +172,55 @@ class WorkbenchState:
                 "report", simulation_id=simulation_id, event=event, raw=body
             )
 
+    def spans(self, raw: bytes) -> None:
+        """Validate and record one OTLP span batch; refusals are records too.
+
+        Two checks, which are the two the real ingest makes at the batch
+        grain: it has to parse, and every resource in it has to name a
+        simulation this deployment conducted. A batch that fails either is
+        refused whole — there is nowhere honest to file part of it — and
+        the refusal is a record like everything else.
+        """
+        body = raw.decode("utf-8", errors="replace")
+        try:
+            document = json.loads(body)
+        except ValueError:
+            self._record("refusal", why="spans unparseable", raw=body)
+            raise RefusedSpans("not JSON") from None
+
+        resources = (
+            document.get("resourceSpans") if isinstance(document, dict) else None
+        )
+        if not isinstance(resources, list) or not resources:
+            self._record("refusal", why="not an OTLP export", raw=body)
+            raise RefusedSpans("no resourceSpans")
+
+        self._flushes += 1
+        for resource in resources:
+            simulation_id = _simulation_named_by(resource)
+            if simulation_id is None:
+                self._record("refusal", why="spans naming no simulation", raw=body)
+                raise RefusedSpans(
+                    f"a resource carries no {SIMULATION_ID_ATTRIBUTE} attribute"
+                )
+            if not self.known(simulation_id):
+                self._record(
+                    "refusal",
+                    simulation_id=simulation_id,
+                    why="spans for an unknown simulation",
+                    raw=body,
+                )
+                raise RefusedSpans(f"no simulation {simulation_id} was ever offered")
+            for scope in resource.get("scopeSpans", []):
+                for span in scope.get("spans", []):
+                    self._record(
+                        "span",
+                        simulation_id=simulation_id,
+                        flush=self._flushes,
+                        scope=scope.get("scope", {}),
+                        span=span,
+                    )
+
     def cancel(self, simulation_id: str) -> None:
         self._cancel_flags.add(simulation_id)
         self._record("cancel_directive", simulation_id=simulation_id)
@@ -190,6 +261,19 @@ def build_app(state: WorkbenchState) -> web.Application:
             raise web.HTTPBadRequest(text=str(refusal)) from refusal
         return web.Response(status=204)
 
+    async def traces(request: web.Request) -> web.Response:
+        try:
+            state.spans(await request.read())
+        except RefusedSpans as refusal:
+            # The specification's own refusal shape, so the sender reads it
+            # the way it would read the real door's.
+            raise web.HTTPBadRequest(
+                text=json.dumps({"code": 3, "message": str(refusal)}),
+                content_type="application/json",
+            ) from refusal
+        # An empty ExportTraceServiceResponse: everything landed.
+        return web.json_response({})
+
     async def records(_request: web.Request) -> web.Response:
         return web.json_response({"records": state.records})
 
@@ -216,10 +300,26 @@ def build_app(state: WorkbenchState) -> web.Application:
     app.router.add_post("/v1/claims", claim)
     app.router.add_post("/v1/simulations/{simulation_id}/heartbeats", heartbeat)
     app.router.add_post("/v1/simulations/{simulation_id}/reports", report)
+    app.router.add_post("/v1/traces", traces)
     app.router.add_get("/workbench/records", records)
     app.router.add_post("/workbench/specs", offer)
     app.router.add_post("/workbench/simulations/{simulation_id}/cancel", cancel)
     return app
+
+
+def _simulation_named_by(resource: object) -> str | None:
+    """Which simulation one OTLP resource says its spans are evidence of."""
+    if not isinstance(resource, dict):
+        return None
+    attributes = resource.get("resource", {}).get("attributes", [])
+    for attribute in attributes:
+        if not isinstance(attribute, dict):
+            continue
+        if attribute.get("key") != SIMULATION_ID_ATTRIBUTE:
+            continue
+        named = attribute.get("value", {}).get("stringValue")
+        return named if isinstance(named, str) and named else None
+    return None
 
 
 def load_spec_documents(path: Path) -> list[dict]:

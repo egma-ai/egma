@@ -10,11 +10,17 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist", "schemas", "measure-catalog.md"],
+  "files": [
+    "dist",
+    "schemas",
+    "measure-catalog.md",
+    "span-vocabulary.md"
+  ],
   "scripts": {
     "build": "tsc -b"
   },
-  "devDependencies": {
+  "dependencies": {
+    "@egma/ids": "workspace:*",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1"
   }

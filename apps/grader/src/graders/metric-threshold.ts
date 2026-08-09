@@ -14,11 +14,13 @@ import { theOneCheck, type ExecutionOf, type Judgment } from "./contract.ts";
  *
  * ## What it reads, and what it does when it is not there
  *
- * The measures a simulation produced live on its header row, as an object whose
- * keys are the measure names the simulator emits. A value is either one number
- * — a measure taken once, like the first response — or a list of numbers, a
- * measure taken per turn. Both are aggregated by the same eight aggregations;
- * one number aggregates to itself under every one of them.
+ * The measures a simulation produced arrive as an object whose keys are the
+ * measure names the simulator emits — assembled from the timing spans it
+ * streamed, one span per measurement, with the span's own duration as the
+ * number. A value is either one number — a measure taken once, like the first
+ * response — or a list of numbers, a measure taken per turn. Both are
+ * aggregated by the same eight aggregations; one number aggregates to itself
+ * under every one of them.
  *
  * Three absences, and they are deliberately not one:
  *

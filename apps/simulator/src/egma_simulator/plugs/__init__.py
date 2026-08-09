@@ -141,6 +141,21 @@ from ..contract import ERROR
 
 
 @dataclass(frozen=True)
+class ToolCall:
+    """One tool the agent called, as observed from egma's side of the wire.
+
+    The name and the arguments exactly as the platform reported them, and
+    nothing else: the simulator observes the call and not the return, so
+    there is no result here. A platform that reports the invocation
+    without its arguments leaves them ``None``, which is the honest record
+    of what was seen.
+    """
+
+    name: str
+    arguments: str | None = None
+
+
+@dataclass(frozen=True)
 class AgentReply:
     """The agent's answer to one delivered persona turn."""
 
@@ -150,6 +165,12 @@ class AgentReply:
     ended: bool = False
     """True when this answer ended the exchange — the agent's goodbye,
     a hang-up, or the platform closing it from its side."""
+
+    tool_calls: tuple[ToolCall, ...] = ()
+    """The tool calls this answer made, where the platform exposes them.
+    Empty is the ordinary case and never a claim that none happened: most
+    ways of reaching an agent say nothing about its tools, and a plug that
+    cannot see them reports none rather than guessing."""
 
 
 @dataclass(frozen=True)
@@ -171,6 +192,10 @@ class AgentSpeech:
     ended: bool = False
     """True when this answer ended the exchange — the same meaning as on
     :class:`AgentReply`, one modality over."""
+
+    tool_calls: tuple[ToolCall, ...] = ()
+    """The same meaning as on :class:`AgentReply`. A voice platform that
+    reports its agent's tool traffic beside the audio names it here."""
 
 
 class PlugError(Exception):

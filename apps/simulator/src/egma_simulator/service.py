@@ -6,6 +6,16 @@ the executor has room for. Each claimed spec becomes one running simulation
 cancel directive arriving on a beat's answer stops the walk at that beat.
 Every arrow points out: the simulator is never dialled into.
 
+A running simulation writes two records of itself and this is where they
+are joined. The lifecycle goes to the control plane as report events; the
+conversation goes to the OTLP ingest as spans, authored here from what the
+walk and the pipeline observe. Neither says what the other says: a turn, a
+tool call and a measurement are spans and only spans, and what the
+lifecycle carries about them is the one summary fact a reader of a single
+simulation asks for — how many turns it reached. Both go through one
+reporter, so they are delivered in the order they happened and the
+terminal document is last.
+
 The executor is deliberately a seam. Today it runs each simulation as one
 asyncio task in this process; a process- or container-per-simulation
 executor implements the same handful of methods and the claim loop never
@@ -33,7 +43,8 @@ from .persona import Persona
 from .pipeline import assemble
 from .plugs import failed_ending, plug_for
 from .redaction import SecretRegistry
-from .reporting import Reporter, moment
+from .reporting import Reporter
+from .spans import SpanEmitter
 from .spec import SimulationSpec
 from .speech import SpeechProviders
 from .walk import Conducted, WalkControls, conduct
@@ -129,7 +140,14 @@ class AsyncioExecutor:
 
 
 class RunningSimulation:
-    """One claimed spec being conducted: the pipe walk and its heartbeat."""
+    """One claimed spec being conducted: the pipe walk and its heartbeat.
+
+    It is also the one place that sees everything the walk observes, which
+    is why the conversation's spans are authored here rather than deeper
+    in: the walk knows turns and tool calls, the pipeline knows the audio,
+    and neither knows the other. Both report to the callbacks below, and
+    what comes out is one emitter for chat and voice alike.
+    """
 
     def __init__(
         self,
@@ -152,6 +170,11 @@ class RunningSimulation:
             config.wal_dir,
             delivery_deadline_seconds=config.report_deadline_seconds,
         )
+        # The conversation's own record, authored here and delivered by the
+        # reporter — the same log, the same ordered sender. Which is what
+        # puts every span ahead of the terminal document rather than
+        # alongside it.
+        self._spans = SpanEmitter(spec.simulation_id, flush=self._reporter.spans)
         self._controls = WalkControls()
         self._first_human_at: float | None = None
         self._first_latency_reported = False
@@ -182,6 +205,7 @@ class RunningSimulation:
     async def _conduct_and_report(self) -> None:
         reporter = self._reporter
         reporter.running()
+        self._spans.opened()
         try:
             # The model first, because the pipeline below holds things that
             # have to be given back and only the walk gives them back.
@@ -196,6 +220,7 @@ class RunningSimulation:
                 blobs=self._blobs,
                 speech=SpeechProviders.from_config(self._config),
                 on_timing=self._on_timing,
+                on_speech=self._on_speech,
             )
             try:
                 conducted = await conduct(
@@ -209,6 +234,8 @@ class RunningSimulation:
                     max_duration_seconds=self._spec.limits.max_duration_seconds,
                     on_turn=self._on_turn,
                     on_timing=self._on_timing,
+                    on_tool_call=self._on_tool_call,
+                    on_answered=self._on_answered,
                     controls=self._controls,
                     name=f"sim:{self.simulation_id}",
                 )
@@ -230,12 +257,18 @@ class RunningSimulation:
             # phone that rang out is not the same record as a simulator
             # that broke, and only the plug knows the difference. See
             # `plugs.failed_ending`.
+            self._spans.sealed()
             reporter.failed(failed_ending(fault), reason)
             return
 
         self._report_terminal(conducted)
 
     def _report_terminal(self, conducted: Conducted) -> None:
+        # Sealed first, always: the conversation's last spans are minted
+        # ahead of the terminal document, and the one ordered sender does
+        # the rest. That is what makes "the record is terminal" also mean
+        # "the evidence is stored".
+        self._spans.sealed()
         self._reporter.provider_reference = conducted.provider_reference
         if conducted.status == "canceled":
             self._reporter.canceled("cancel directive on heartbeat")
@@ -243,7 +276,12 @@ class RunningSimulation:
             self._reporter.completed(conducted.ending, conducted.reason)
 
     async def _on_turn(self, speaker: str, text: str) -> None:
-        self._reporter.turn(speaker, text, started_at=moment())
+        # The turn itself goes one way only: into the spans. What the
+        # lifecycle keeps is the count, which is a fact about the whole
+        # simulation rather than about any turn — so it is tallied here, as
+        # the turns are observed, and rides the terminal transition.
+        self._spans.turn(speaker, text)
+        self._reporter.turn_count += 1
         loop = asyncio.get_running_loop()
         if speaker == "human" and self._first_human_at is None:
             self._first_human_at = loop.time()
@@ -254,10 +292,32 @@ class RunningSimulation:
         ):
             self._first_latency_reported = True
             elapsed_ms = (loop.time() - self._first_human_at) * 1000
-            self._reporter.timing("first_response_latency", elapsed_ms)
+            self._spans.measure("first_response_latency", elapsed_ms)
+
+    async def _on_answered(self) -> None:
+        """One flush per answer, which is where the conversation actually
+        has a seam: the persona's turn, whatever the agent did while
+        answering, and the answer itself go together, and the flush after
+        them is the moment a reader could watch this simulation live.
+        Finer would be a request per span; coarser would be a transcript
+        that only exists once it is over.
+
+        The walk says when an answer is whole rather than this file
+        inferring it from a turn arriving, because an answer that made a
+        tool call and said nothing produces no turn — and it is precisely
+        that answer whose evidence must not sit in a buffer waiting for
+        the agent to speak again.
+        """
+        self._spans.flush()
 
     async def _on_timing(self, measure: str, milliseconds: float) -> None:
-        self._reporter.timing(measure, milliseconds)
+        self._spans.measure(measure, milliseconds)
+
+    async def _on_speech(self, speaker: str, seconds: float) -> None:
+        self._spans.spoke(speaker, seconds)
+
+    async def _on_tool_call(self, name: str, arguments: str | None) -> None:
+        self._spans.tool_call(name, arguments)
 
     async def _heartbeat_forever(self) -> None:
         while True:

@@ -29,10 +29,10 @@ import aiohttp
 import pytest
 from conftest import (
     assert_kept_secret,
-    events_for,
     has_terminal,
     retell_spec,
     terminal_event_for,
+    turns_for,
 )
 
 from egma_simulator.plugs.retell import DEFAULT_BASE_URL
@@ -82,8 +82,7 @@ async def test_the_persona_conducts_a_real_conversation_with_a_retell_agent(
 
     # A real agent said real words, and the transcript alternates the way a
     # conversation does.
-    turns = events_for(records, "sim-retell-live-001", "turn")
-    spoken = [(turn["speaker"], turn["text"]) for turn in turns]
+    spoken = turns_for(records, "sim-retell-live-001")
     agent_turns = [text for speaker, text in spoken if speaker == "agent"]
     human_turns = [text for speaker, text in spoken if speaker == "human"]
     assert agent_turns, f"the agent never said anything: {spoken}"

@@ -69,18 +69,37 @@ const CONTEXT_ESTABLISHING = [
 const INSTANCE_SCOPED = ["instanceIsClaimed"];
 
 /**
- * What hands egma's own engine its work. The grader service stands behind every
- * organization on the deployment at once and holds no credential, because there
- * is no honest one to give it — so it is handed work rather than asked for one.
+ * What hands egma's own services their work, and what keeps a dispatch honest
+ * afterwards. The grader and the simulator each stand behind every
+ * organization on the deployment at once and hold no credential, because
+ * there is no honest one to give them — so each is handed work rather than
+ * asked for one, and the simulator's heartbeat, orphan sweep and standing
+ * resolver stand on the same ground: a beat arrives bearing a token that
+ * resolves to nobody, silence is noticed by nobody in particular, and a
+ * report about a held row is answered from the row.
  *
- * Two names, and a third is a decision somebody makes on purpose. Neither takes
+ * Six names, and a seventh is a decision somebody makes on purpose. None takes
  * an argument by which a caller could name a customer, and a build rule refuses
- * one that grows one; the only table either reaches is egma's own grading queue;
- * and every claim arrives carrying the `AuthContext` narrowed to that job's own
- * organization and project, which is what all of the grading afterwards goes
- * through.
+ * one that grows one; the only rows any of them reaches are egma's own queues —
+ * grading jobs, and the simulations egma itself wrote and claimed. A claim
+ * arrives carrying the `AuthContext` narrowed to that row's own organization
+ * and project, which is what all of the work afterwards goes through; the
+ * heartbeat can stamp only a row already claimed under the caller's own name
+ * and answers one boolean egma wrote; the sweep files each orphan's grading
+ * work under the tenancy the row itself carries and answers identifiers and
+ * no content; `resolveSimulationStanding` is the claim's context derived
+ * again, by the id the claim handed out, for every call that comes back
+ * about a row — the report door's lifecycle claims and the ingest door's
+ * arriving spans alike — lifecycle stamps and filing pins, and no content.
  */
-const WORK_DISPATCHING = ["claimGradingJobs", "watchGradingWork"];
+const WORK_DISPATCHING = [
+  "claimGradingJobs",
+  "claimSimulations",
+  "recordSimulationHeartbeat",
+  "resolveSimulationStanding",
+  "sweepOrphanedSimulations",
+  "watchGradingWork",
+];
 
 /**
  * Everything that touches a customer's data. All of it needs the context.
@@ -120,7 +139,6 @@ const CONTEXT_REQUIRING = [
   "appendVerdicts",
   "cancelRun",
   "changeRole",
-  "claimSimulations",
   "clonePersona",
   "cloneTest",
   "completeSimulation",
@@ -141,6 +159,13 @@ const CONTEXT_REQUIRING = [
   "editPersona",
   "editTest",
   "failSimulation",
+  // The claim path's own landing, for a claimed simulation the platform could
+  // not hand over. It writes a failed-class reason no simulator may report,
+  // so it is a door of its own rather than a word added to `failSimulation` —
+  // and it refuses every context that did not come from a claim, because
+  // dispatch failure is the platform's confession, not a report anybody
+  // files.
+  "failSimulationDispatch",
   "finishGradingJob",
   "getAgent",
   "getConnection",
@@ -183,25 +208,27 @@ const CONTEXT_REQUIRING = [
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordProductionTraces",
-  "recordSimulationHeartbeat",
   "registerAgent",
   "regrade",
   "releaseGradingJob",
   "removeConnection",
   "reopenGradingJob",
   "removeMember",
-  "resolveConnectionCredentials",
   // The second secret egma holds, on the first one's terms: the read answers a
   // reference and a hint, and this is the one door to the plaintext behind it.
   "resolveJudgeKey",
   // Names off a reviewed file turned into the identity a version names. It
   // reads personas and nothing else, and only ones the context already reaches.
   "resolvePersonaNames",
+  // The dispatch path's door to a connection's plaintext. It takes the context
+  // like everything else — and then refuses every one that did not come from a
+  // simulation claim, because conducting is the only thing egma does with a
+  // connection's credentials at this seam.
+  "resolveSimulationConnection",
   "revokeApiKey",
   "setJudgeConfiguration",
   "startRun",
   "startSimulation",
-  "sweepOrphanedSimulations",
   "updateAgent",
   "updateConnection",
   "updateOrganizationSettings",

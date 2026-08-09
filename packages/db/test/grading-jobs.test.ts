@@ -96,7 +96,10 @@ async function aSimulation(): Promise<string> {
 
 async function aRunningSimulation(claimant = "simulator-1"): Promise<string> {
   const id = await aSimulation();
-  await claimSimulations(auth, { claimant, capacity: 1 });
+  // The claim is instance-wide and oldest-first, so it takes everything
+  // outstanding rather than one — anything less could hand back somebody
+  // else's leftovers and leave this test's own row queued.
+  await claimSimulations({ claimant, capacity: 50 });
   await startSimulation(auth, id, claimant);
   return id;
 }
@@ -107,8 +110,6 @@ async function aCompletedSimulation(): Promise<string> {
   const id = await aRunningSimulation(claimant);
   await completeSimulation(auth, id, claimant, {
     endingReason: "persona_concluded",
-    transcript: [{ speaker: "agent", text: "Booked for Tuesday at four." }],
-    metrics: { turn_response_latency: [900, 1_800] },
   });
   return id;
 }
@@ -280,7 +281,7 @@ describe("a terminal transition", () => {
       [simulationId],
     );
 
-    const swept = await sweepOrphanedSimulations(auth, { staleAfterSeconds: 1 });
+    const swept = await sweepOrphanedSimulations({ staleAfterSeconds: 1 });
     expect(swept.map((simulation) => simulation.id)).toContain(simulationId);
 
     const [job] = await listGradingJobsForSimulation(auth, simulationId);
@@ -629,11 +630,10 @@ describe("the claim", () => {
     });
     const [conversation] = started.simulations;
     if (conversation === undefined) throw new Error("no simulation");
-    await claimSimulations(globexAuth, { claimant: "sim", capacity: 1 });
+    await claimSimulations({ claimant: "sim", capacity: 50 });
     await startSimulation(globexAuth, conversation.id, "sim");
     await completeSimulation(globexAuth, conversation.id, "sim", {
       endingReason: "agent_ended",
-      transcript: [],
     });
 
     const acmeSimulation = await aCompletedSimulation();

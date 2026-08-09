@@ -217,10 +217,11 @@ describe("a production trace whose root span closes", () => {
 
     expect(conversation.source).toBe("production");
     expect(conversation.traceId).toBe(traceId);
-    // It happened: spans exist, so somebody talked to something. `errored` is
-    // the answer to "did egma's own runtime manage to conduct this", and a real
-    // caller's conversation was conducted by the world.
-    expect(conversation.happened).toBe(true);
+    // There is something here to judge: spans exist, so somebody talked to
+    // something. `errored` is the answer to "did egma's own runtime manage to
+    // conduct this", and a real caller's conversation was conducted by the
+    // world.
+    expect(conversation.nothingToJudgeBecause).toBeNull();
     // Nothing on the wire says why a real caller hung up, and a guess dressed
     // up as a reason would be worse than the absence.
     expect(conversation.endingReason).toBeNull();

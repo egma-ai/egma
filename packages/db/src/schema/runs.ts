@@ -97,6 +97,12 @@ export const COMPLETED_ENDING_REASONS = [
  * a simulator that died mid-conversation are all "the test never ran", and
  * grading any of them as a failure is the false red a test product cannot
  * afford.
+ *
+ * The last two are the platform's own words, never a simulator's report:
+ * `orphaned` is the sweep's verdict on a simulator that stopped answering,
+ * and `dispatch_failed` is the claim path's confession that it could not turn
+ * a claimed row into a spec worth handing over — a broken row is the
+ * platform's fault, never pinned on a simulator that was handed nothing.
  */
 export const FAILED_ENDING_REASONS = [
   "agent_never_joined",
@@ -104,6 +110,7 @@ export const FAILED_ENDING_REASONS = [
   "capacity",
   "simulator_error",
   "orphaned",
+  "dispatch_failed",
 ] as const;
 
 export const SIMULATION_ENDING_REASONS = [
@@ -357,12 +364,23 @@ export const simulation = pgTable(
      * simulator measures it.
      */
     measuredAudioBandHertz: integer("measured_audio_band_hertz"),
-    /** What the simulator reported, written once at terminal state. */
-    transcript: jsonb("transcript"),
-    events: jsonb("events"),
-    metrics: jsonb("metrics"),
     /** The dual-channel recording's reference in the blob store, voice only. */
     recordingReference: text("recording_reference"),
+    /**
+     * How many transcript turns the conversation reached, both speakers
+     * counted — a terminal fact off the report, kept on the row because it is
+     * read alone to answer for one simulation. Null until a landing carries
+     * one, and null forever on a row whose report never did.
+     */
+    turnCount: integer("turn_count"),
+    /**
+     * The platform's own identifier for this exchange on the connection's
+     * side — a Retell chat id, a telephony provider's id for the dialed leg.
+     * The one join between egma's record and the agent's own telemetry, since
+     * no trace context crosses an audio channel. Verbatim from the report,
+     * never parsed; null when the plug had none to offer.
+     */
+    providerReference: text("provider_reference"),
     createdAt: createdAt(),
   },
   (table) => [
@@ -448,13 +466,27 @@ export const simulation = pgTable(
       sql`${table.status} <> 'canceled'
         or (${table.endedAt} is not null and ${table.cancelRequestedAt} is not null)`,
     ),
-    // The report is terminal facts; nothing running holds one yet.
+    // The audio facts are terminal facts; nothing running holds one yet.
+    // The check keeps its name across the migration that reduced it to
+    // these two, because a constraint's name is what a violation prints and
+    // renaming one would break the sentence a reader is searching for.
     check(
       "simulation_report_only_when_ended",
       sql`${table.endedAt} is not null
-        or (${table.transcript} is null and ${table.events} is null
-          and ${table.metrics} is null and ${table.recordingReference} is null
+        or (${table.recordingReference} is null
           and ${table.measuredAudioBandHertz} is null)`,
+    ),
+    // The two summary facts are terminal facts too; a check of their own
+    // beside the report's rather than a rewrite of it, because they arrived
+    // by a later migration and an additive column takes an additive guard.
+    check(
+      "simulation_summary_facts_only_when_ended",
+      sql`${table.endedAt} is not null
+        or (${table.turnCount} is null and ${table.providerReference} is null)`,
+    ),
+    check(
+      "simulation_turn_count_is_a_count",
+      sql`${table.turnCount} is null or ${table.turnCount} >= 0`,
     ),
     // A chat has no audio: a measured band or a recording on one would be a
     // number nothing produced, so the row refuses to hold it.
