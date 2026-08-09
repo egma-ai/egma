@@ -410,8 +410,8 @@ describe("two organizations sending the very same trace", () => {
    * one shared trace id names a different trace in each account, because the
    * organization leads the filing order and the id does not. It is not a claim
    * that a customer cannot reach the other's rows: nothing reads spans through
-   * the data-access module yet, and enforcing tenancy at read is ticket 04's,
-   * where the read functions inject the predicate the way every Postgres one
+   * the data-access module yet, and enforcing tenancy at read belongs to the
+   * read functions, which inject the predicate the way every Postgres one
    * already does.
    */
   it("keeps each organization's copy separable by the organization, not by the trace id", async () => {
