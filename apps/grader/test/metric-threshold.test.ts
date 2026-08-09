@@ -23,7 +23,7 @@ function conversation(metrics: unknown): Conversation {
   return {
     source: "simulation",
     traceId: "sim_01JQZ0000000000000000000AA",
-    happened: true,
+    nothingToJudgeBecause: null,
     endingReason: "persona_concluded",
     transcript: [],
     events: [],

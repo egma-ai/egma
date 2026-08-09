@@ -10,19 +10,26 @@ import type {
  *
  * **One shape for both sources**, which is the whole reason it exists as a type
  * rather than as "the simulation row". A grader judges a simulation and a
- * production trace with the same logic, and the difference between them is where
- * this was read from — the simulation's header row, or the trace's spans —
- * rather than what a grader is looking at. Anything a grader has to know about
- * *where* it came from would be a second grading path growing quietly inside the
- * first.
+ * production trace with the same logic, and the difference between them is who
+ * conducted the conversation rather than what a grader is looking at. Anything a
+ * grader has to know about *where* it came from would be a second grading path
+ * growing quietly inside the first.
  *
- * Two read paths, both settled. A finished simulation already carries its
- * transcript, its events and its measures on its own row, so grading it needs no
- * second store and no join. A production trace has no row of its own and never
- * will: its whole record is the spans it arrived as, so it is read from the
- * trace store and assembled below. The three fields are `unknown` because they
- * are stored jsonb and nothing has fixed their shape at the write door — each
- * grader reads what it needs and says honestly when what it needs is not there.
+ * **One read path now, and it is the spans.** A conversation's record is the
+ * spans it arrived as, whoever conducted it: a customer's agent posts them at
+ * the OTLP door, and egma's own simulator posts them at the same door while it
+ * is still talking. So a simulation and a production trace are assembled by the
+ * same code out of the same rows, and "passes in simulation, fails in
+ * production" is a join rather than two readers that could one day disagree
+ * about what a turn is.
+ *
+ * A simulation's row is still read for what only it knows — that this
+ * conversation was one egma conducted, which run it belongs to, what the
+ * simulator said about how it ended — and, for as long as the columns exist, as
+ * the fallback for rows written before any of this streamed. The three fields
+ * are `unknown` because the columns are stored jsonb and nothing fixed their
+ * shape at the write door; each grader reads what it needs and says honestly
+ * when what it needs is not there.
  */
 export type Conversation = {
   /** Which kind of conversation this is, in the verdict row's own vocabulary. */
@@ -39,15 +46,24 @@ export type Conversation = {
    */
   readonly traceId: string;
   /**
-   * **Whether there is a conversation here at all.**
+   * **Why there is nothing here to judge**, and null when there is something.
    *
-   * A simulation the simulator reported `failed` never produced one: the agent
-   * never joined, the line was never answered, egma's own runtime broke. Every
-   * grader's verdict on it is `errored`, never `failed`, and this is the flag
-   * that says so — a broken test is never a broken agent, and that line is the
-   * one normalisation a test product cannot get wrong.
+   * Two ways to arrive at it, and one consequence. A simulation the simulator
+   * reported `failed` never produced a conversation: the agent never joined,
+   * the line was never answered, egma's own runtime broke. A simulation that
+   * certainly happened can still be one egma cannot read: its spans never
+   * arrived, or only some of them did, and no column holds it either. Both are
+   * `errored` for every grader, never `failed` — a broken test is never a
+   * broken agent, and that line is the one normalisation a test product cannot
+   * get wrong.
+   *
+   * It carries the sentence rather than a flag because the sentence is what
+   * lands in the verdict's rationale, and the two cases are different things
+   * for a reader to go and do. Written where the fact is known — one field, one
+   * meaning, so nothing downstream has to assemble the reason a second time and
+   * risk assembling a different one.
    */
-  readonly happened: boolean;
+  readonly nothingToJudgeBecause: string | null;
   /**
    * Why it ended, in the simulator's own vocabulary, for the rationale. Null for
    * a production conversation: nothing on the wire says why a real caller hung
@@ -64,7 +80,32 @@ export type Conversation = {
 };
 
 /**
- * A finished simulation, read as a conversation.
+ * A finished simulation, read as a conversation — and the whole of the reading
+ * order, in one place.
+ *
+ * Three answers, asked in this order, and each of them is a different fact
+ * about what egma actually holds:
+ *
+ * 1. **The trace is complete — assemble it from the spans.** The root span is
+ *    what says so: it is authored first and sent last, in the flush that leaves
+ *    once the conversation is over, so a trace holding it is a trace holding
+ *    everything. That is the settled record, and it is read by exactly the code
+ *    a production trace is read by.
+ * 2. **The trace is incomplete or absent — fall back to the row's columns.**
+ *    A simulation with spans and no root is one egma holds part of, and a
+ *    partial transcript is not something to judge an agent against. A
+ *    simulation with no spans at all is older than the emitter. Either way the
+ *    columns are the record that exists, for as long as they exist — this is
+ *    the one interim branch here, and it goes when they do.
+ * 3. **Neither — say so, and judge nothing.** Every grader answers `errored`,
+ *    with the reason, because a check egma could not make is never a check the
+ *    agent failed.
+ *
+ * **The verdict still files under the simulation id.** The spans live under a
+ * trace id derived from it, and that derivation stays where the query is: the
+ * product's word for this conversation is the simulation id, in Postgres, in a
+ * URL and in a log, and nothing downstream of the grader changes because the
+ * evidence moved.
  *
  * `agent_version_id` is deliberately absent from what this produces and lands
  * empty on the verdict row: egma does not version agents yet, and an empty
@@ -72,18 +113,129 @@ export type Conversation = {
  * with the agent's own id would make a comparison of two versions answer with
  * nonsense the day versions arrive.
  */
-export function conversationOf(simulation: Simulation): Conversation {
-  return {
+export function conversationOfSimulation(
+  simulation: Simulation,
+  trace: TraceDetail | undefined,
+): Conversation {
+  // Whether there was a conversation at all is the row's answer and only the
+  // row's: a simulation the simulator reported failed produced none, and no
+  // amount of telemetry arriving afterwards makes one. So it is decided before
+  // anything is read, and every branch below carries it.
+  const neverHappened =
+    simulation.status === "completed" ? null : neverRan(simulation);
+
+  const filedUnderTheSimulation: Conversation = {
     source: "simulation",
     traceId: simulation.id,
-    happened: simulation.status === "completed",
+    nothingToJudgeBecause: neverHappened,
     endingReason: simulation.endingReason,
-    transcript: simulation.transcript,
-    events: simulation.events,
-    metrics: simulation.metrics,
+    transcript: [],
+    events: [],
+    metrics: {},
     runId: simulation.runId,
     agentId: simulation.agentId,
   };
+
+  if (trace !== undefined && rootArrivedIn(trace) && !trace.truncated) {
+    return {
+      ...filedUnderTheSimulation,
+      transcript: transcriptOf(trace),
+      // The same walk a production trace's tool calls come off, which is what
+      // makes the two lists the same list. A simulation's results are always
+      // empty and that is the emitter's fact rather than a rule applied here:
+      // the simulator observes the call from egma's side of the connection and
+      // not the return, so its vocabulary declares no result attribute and the
+      // door has nothing to write into the column.
+      events: toolCallsIn(trace),
+      metrics: measuresTimedIn(trace),
+    };
+  }
+
+  if (theColumnsHoldSomething(simulation)) {
+    // INTERIM: the row's three jsonb columns, which are the record for every
+    // conversation that landed before the simulator streamed one. This branch
+    // is the only reader of them left, and it goes in the migration that drops
+    // them.
+    return {
+      ...filedUnderTheSimulation,
+      transcript: simulation.transcript,
+      events: simulation.events,
+      metrics: simulation.metrics,
+    };
+  }
+
+  return {
+    ...filedUnderTheSimulation,
+    nothingToJudgeBecause: neverHappened ?? unreadable(simulation, trace),
+  };
+}
+
+/** A simulation that produced no conversation, in the simulator's own words. */
+function neverRan(simulation: Simulation): string {
+  return `this simulation ended ${simulation.endingReason ?? "without running"}, so there was no conversation to judge.`;
+}
+
+/**
+ * A conversation that happened and that egma cannot read — and which of the two
+ * ways it can happen, because they are different things to go and fix.
+ *
+ * Never `failed`, and this is where that is decided rather than in each grader:
+ * an agent that answered every question perfectly would be marked down for a
+ * flush that never landed, which is the exact false signal this product exists
+ * to kill.
+ */
+function unreadable(
+  simulation: Simulation,
+  trace: TraceDetail | undefined,
+): string {
+  const ended = `it ended ${simulation.endingReason ?? "without a recorded reason"}`;
+  if (trace === undefined) {
+    return `egma holds no record of this conversation — ${ended}, and no telemetry for it ever arrived — so there was nothing to judge.`;
+  }
+  return trace.truncated
+    ? `egma holds more of this conversation than one reading returns — ${ended}, and its trace overran the reader's span limit — so judging the readable part would judge a different conversation.`
+    : `egma holds only part of this conversation — ${ended}, and the span that closes its trace never arrived — so there was nothing complete to judge.`;
+}
+
+/**
+ * Whether the trace is the whole conversation, which the root span is the one
+ * signal of.
+ *
+ * The simulator authors it first and sends it last, alone in the flush that
+ * leaves once the conversation is over — so its arrival means every other span
+ * is already stored, and its absence means the record is still open or the
+ * simulator never got to the end of it. A count of turns could not answer this:
+ * a conversation cut off after four turns and one recorded completely in four
+ * turns hold the same rows.
+ */
+function rootArrivedIn(trace: TraceDetail): boolean {
+  for (const span of everySpanIn(trace)) {
+    if (span.kind === ROOT) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether the row's columns hold a conversation at all.
+ *
+ * Null is what a landing writes today, and an empty list or object is what a
+ * conversation with nothing in it comes back as. Anything else is a record
+ * somebody can be judged against, however thin — a row with measures and no
+ * transcript is still the measures it holds.
+ */
+function theColumnsHoldSomething(simulation: Simulation): boolean {
+  return (
+    holdsSomething(simulation.transcript) ||
+    holdsSomething(simulation.events) ||
+    holdsSomething(simulation.metrics)
+  );
+}
+
+function holdsSomething(column: unknown): boolean {
+  if (column === null || column === undefined) return false;
+  if (Array.isArray(column)) return column.length > 0;
+  if (typeof column === "object") return Object.keys(column).length > 0;
+  return true;
 }
 
 /**
@@ -111,7 +263,7 @@ export function conversationOfTrace(trace: TraceDetail): Conversation {
   return {
     source: "production",
     traceId: trace.traceId,
-    happened: true,
+    nothingToJudgeBecause: null,
     endingReason: null,
     transcript: transcriptOf(trace),
     events: toolCallsIn(trace),
@@ -183,25 +335,18 @@ function speakerOf(kind: string): string {
 function toolCallsIn(trace: TraceDetail): readonly ToolCall[] {
   const called: (ToolCall & { readonly at: string })[] = [];
 
-  const walk = (spans: readonly TraceSpan[]): void => {
-    for (const span of spans) {
-      if (span.toolName !== "") {
-        called.push({
-          kind: "tool_call",
-          at: span.startedAt,
-          name: span.toolName,
-          arguments: span.toolArguments,
-          result: span.toolResult,
-        });
-      }
-      walk(span.spans);
-    }
-  };
+  for (const span of everySpanIn(trace)) {
+    if (span.toolName === "") continue;
+    called.push({
+      kind: "tool_call",
+      at: span.startedAt,
+      name: span.toolName,
+      arguments: span.toolArguments,
+      result: span.toolResult,
+    });
+  }
 
-  walk(trace.turns);
-  walk(trace.spans);
-
-  return called.sort((left, right) => (left.at < right.at ? -1 : left.at > right.at ? 1 : 0));
+  return called.sort(byWhenItStarted);
 }
 
 type ToolCall = {
@@ -214,7 +359,7 @@ type ToolCall = {
 };
 
 /**
- * What this conversation measured, which today is nothing — and the reason is
+ * What a production trace measured, which today is nothing — and the reason is
  * worth writing down rather than discovering twice.
  *
  * The measures a threshold grader names are the simulator's: egma stands on one
@@ -242,6 +387,108 @@ type ToolCall = {
  */
 function measuresIn(): Readonly<Record<string, never>> {
   return {};
+}
+
+/**
+ * What a simulation measured, from the timing spans — and there **is** a number
+ * here, which is the whole difference from a production trace.
+ *
+ * These are the simulator's own measurements: egma stood on one side of the
+ * conversation with a clock, and every measure it took is a span named for that
+ * measure. Nothing is derived from the shape of the transcript here — the same
+ * arithmetic that comes out negative on overlapping turns would come out
+ * negative on a simulation's, and the simulator already knows the answer.
+ *
+ * **The span's own duration is the measurement.** A timing span is opened one
+ * measurement before the moment it was taken and closed at it, so its start and
+ * end bracket the interval that was measured. There is deliberately no
+ * attribute carrying the number: a second copy of it would be free to disagree
+ * with the interval, and the vocabulary refuses to write one down twice.
+ *
+ * Nanoseconds on the wire, milliseconds in the catalog, so the conversion
+ * happens once and here. It is floating-point on purpose — a measure is
+ * `862.5ms` and a whole-number division would quietly floor every one of them —
+ * and the counts involved are tens of seconds, nowhere near where a double
+ * stops holding a nanosecond exactly.
+ *
+ * **A measure the conversation never took is simply absent**, which is what
+ * makes the voice measures free on chat: `time_to_first_word`,
+ * `agent_speech_duration` and `persona_speech_duration` come out of audio, a
+ * chat simulation has none, and a threshold grader asked for one answers
+ * `skipped` — out of the score's denominator, never an error and never a
+ * failure.
+ */
+function measuresTimedIn(trace: TraceDetail): Readonly<Record<string, number[]>> {
+  const NANOSECONDS_PER_MILLISECOND = 1_000_000;
+
+  const timed: (Measurement & { readonly at: string })[] = [];
+  for (const span of everySpanIn(trace)) {
+    if (span.kind !== TIMING) continue;
+    timed.push({
+      // The span is named for the measure it takes, which is what makes the
+      // catalog and the vocabulary the same list read twice.
+      measure: span.name,
+      at: span.startedAt,
+      milliseconds:
+        Number(span.durationNanoseconds) / NANOSECONDS_PER_MILLISECOND,
+    });
+  }
+
+  // In the order they were taken, so that a per-turn series is the conversation
+  // read forwards and two gradings of one conversation aggregate the same list.
+  const measured: Record<string, number[]> = {};
+  for (const measurement of timed.sort(byWhenItStarted)) {
+    (measured[measurement.measure] ??= []).push(measurement.milliseconds);
+  }
+  return measured;
+}
+
+type Measurement = {
+  readonly measure: string;
+  readonly milliseconds: number;
+};
+
+/**
+ * The kinds this file selects on, as the door normalised them — never the
+ * provider's own span names, which is what keeps one reading working for
+ * LiveKit, for the simulator and for whatever the registry learns next.
+ */
+const ROOT = "root";
+const TIMING = "timing";
+
+/**
+ * Every span the trace holds, exactly once: the turns, whatever hangs inside
+ * them, and everything filed beside them.
+ *
+ * A trace read hands back two lists — the turns lifted out for the transcript,
+ * and the top-level spans with their children beneath — and every span is under
+ * one of the two, once. Which of them a thing lands in depends on what its
+ * parent was: the simulator hangs its tool calls and its measurements off the
+ * root, so they arrive inside it, and a trace whose root never came holds those
+ * same spans at the top. Walking both lists is what makes the reading the same
+ * either way.
+ */
+function* everySpanIn(trace: TraceDetail): Generator<TraceSpan> {
+  const walk = function* (spans: readonly TraceSpan[]): Generator<TraceSpan> {
+    for (const span of spans) {
+      yield span;
+      yield* walk(span.spans);
+    }
+  };
+  yield* walk(trace.turns);
+  yield* walk(trace.spans);
+}
+
+/**
+ * By when it began, as the store wrote the instant — fixed-width RFC 3339 to
+ * the microsecond, so the strings sort exactly as the moments do and no `Date`
+ * is built to round the last three digits off.
+ */
+function byWhenItStarted(
+  left: { readonly at: string },
+  right: { readonly at: string },
+): number {
+  return left.at < right.at ? -1 : left.at > right.at ? 1 : 0;
 }
 
 /**
