@@ -38,6 +38,14 @@ environment; see `.env.example` for the names and their defaults.
 one.** Compose supplies a development default so that `docker compose up` works
 out of the box. Change it before anybody else can reach your instance.
 
+**`EGMA_SIMULATOR_SERVICE_TOKEN` is what the simulator shows the API to claim
+work, and the API refuses to start without one.** The answers to a claim carry
+your live provider credentials, and port 3100 is published on the host, so the
+check is always on. Compose supplies one development default to both
+containers so they match out of the box. Change it — one line in `.env` covers
+both — before anybody else can reach your instance:
+`echo "egma_st_$(openssl rand -hex 32)"` makes one.
+
 Email is optional, and this is load-bearing rather than a convenience. See
 [Adding a second person](#adding-a-second-person).
 
@@ -103,8 +111,10 @@ push, run and follow — then print what was proved and what waits.
 ## The two services that publish nothing
 
 The simulator conducts simulations: it takes a persona and a scenario and
-holds a real conversation with the agent under test, then reports the
-transcript, the measurements and how it ended.
+holds a real conversation with the agent under test. It streams the
+conversation — every turn, tool call and measurement — as OpenTelemetry spans
+to the same ingest a customer's own agent exports to, and reports the
+lifecycle and how it ended to the control plane.
 
 **It claims its work rather than being sent it.** It asks the control plane for
 what it has room for, keeps a heartbeat going while it conducts, and posts what

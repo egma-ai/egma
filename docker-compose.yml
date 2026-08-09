@@ -63,6 +63,13 @@ services:
       # reach needs its own — `openssl rand -hex 32` makes one. Back it up
       # alongside the database; losing it loses every stored credential.
       EGMA_ENCRYPTION_KEY: ${EGMA_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      # What the simulator must show to claim work. Claim answers carry
+      # customers' live connection credentials and port 3100 is published on
+      # this machine, so the check is always on: the default is a development
+      # one, interpolated identically into the simulator below so the two
+      # halves always match, and every instance that anybody else can reach
+      # needs its own — egma_st_ then `openssl rand -hex 32`.
+      EGMA_SIMULATOR_SERVICE_TOKEN: ${EGMA_SIMULATOR_SERVICE_TOKEN:-egma_st_development-only-change-this-before-anybody-else-can-reach-it}
       # Where a browser reaches this instance. The pages and the API answer on
       # one origin, and that origin is the self-hoster's own.
       EGMA_BASE_URL: ${EGMA_BASE_URL:-http://localhost:3101}
@@ -140,10 +147,11 @@ services:
       # again, which is what a queue with nothing in it looks like.
       EGMA_SIMULATOR_CONTROL_PLANE_URL: ${EGMA_SIMULATOR_CONTROL_PLANE_URL:-http://api:3100}
       # What it shows the control plane to be allowed to claim, as a bearer
-      # — the same header an egma key uses everywhere else. Unset is fine
-      # while both halves are yours and meet on this network; a simulator
-      # claiming across the internet needs one.
-      EGMA_SIMULATOR_SERVICE_TOKEN: ${EGMA_SIMULATOR_SERVICE_TOKEN:-}
+      # — the same header an egma key uses everywhere else. The API checks it
+      # on every claim, so this interpolates the same development default as
+      # the api service above and the two halves always match. Change it —
+      # once, in .env, for both — before anybody else can reach the machine.
+      EGMA_SIMULATOR_SERVICE_TOKEN: ${EGMA_SIMULATOR_SERVICE_TOKEN:-egma_st_development-only-change-this-before-anybody-else-can-reach-it}
       # How many simulations one simulator conducts at once. It claims only
       # what it has room for, so a big run degrades to a queue rather than
       # to overload — raise this, or start a second simulator, and they

@@ -9,7 +9,6 @@ import {
   listConnections,
   NotPermittedError,
   removeConnection,
-  resolveConnectionCredentials,
   updateConnection,
   type AuthContext,
   type NewConnection,
@@ -357,18 +356,6 @@ describe("a livekit connection", () => {
     expect(rows[0]?.credentials_hint).toBe("WXYZ");
   });
 
-  it("hands both halves back through the resolver, and only through it", async () => {
-    const agentId = await agentNamed("LiveKit Resolved");
-    const added = await addConnection(actingAsAcme(), agentId, livekitConnection());
-
-    expect(
-      await resolveConnectionCredentials(actingAsAcme(), agentId, added?.id ?? ""),
-    ).toEqual({
-      apiKey: "livekit-key-A1B2C3D4WXYZ",
-      apiSecret: "livekit-secret-E5F6G7H8QRST",
-    });
-  });
-
   it("leaves nothing behind when the payload is refused", async () => {
     const agentId = await agentNamed("LiveKit Refused");
 
@@ -446,15 +433,6 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
     expect(JSON.stringify(rows[0]?.config)).not.toContain("SENTINEL");
   });
 
-  it("hands the headers to the simulator through the resolver, and only through it", async () => {
-    const agentId = await agentNamed("LiveKit Endpoint Resolved");
-    const added = await addConnection(actingAsAcme(), agentId, atEndpoint());
-
-    expect(
-      await resolveConnectionCredentials(actingAsAcme(), agentId, added?.id ?? ""),
-    ).toEqual({ headers: HEADERS });
-  });
-
   it("lands with no credentials at all, and reads back with no hint", async () => {
     const agentId = await agentNamed("LiveKit Open Endpoint");
     const added = await addConnection(
@@ -463,10 +441,9 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
       atEndpoint({ credentials: undefined }),
     );
 
+    // The unsealing half of this story is the claim door's, and lives with it:
+    // see "a livekit connection's two credential shapes, through the claim".
     expect(added?.credentialsHint).toBeNull();
-    expect(
-      await resolveConnectionCredentials(actingAsAcme(), agentId, added?.id ?? ""),
-    ).toBeNull();
   });
 
   /**
@@ -511,10 +488,9 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
       credentials: { headers: HEADERS },
     });
 
+    // The hint is what a reader may see of the new shape; that the headers
+    // themselves come back whole is the claim door's story, told beside it.
     expect(moved?.credentialsHint).toBe("Authorization");
-    expect(
-      await resolveConnectionCredentials(actingAsAcme(), agentId, added?.id ?? ""),
-    ).toEqual({ headers: HEADERS });
   });
 
   /**
@@ -568,47 +544,10 @@ describe("the sealed credential", () => {
     expect(rows[0]?.credentials_hint).toBe("WXYZ");
   });
 
-  it("round-trips through the resolver, the one door to the plaintext", async () => {
-    const agentId = await agentNamed("Resolved");
-    const added = await addConnection(actingAsAcme(), agentId, retellConnection());
-
-    const resolved = await resolveConnectionCredentials(
-      actingAsAcme(),
-      agentId,
-      added?.id ?? "",
-    );
-    expect(resolved).toEqual({ apiKey: "retell-secret-A1B2C3D4WXYZ" });
-  });
-
-  it("resolves to null for a type that holds no secret", async () => {
-    const agentId = await agentNamed("Resolved Phone");
-    const added = await addConnection(actingAsAcme(), agentId, {
-      name: "hotline",
-      type: "phone",
-      modality: "voice",
-      config: { phoneNumber: "+15559876543" },
-    });
-
-    const resolved = await resolveConnectionCredentials(
-      actingAsAcme(),
-      agentId,
-      added?.id ?? "",
-    );
-    expect(resolved).toBeNull();
-  });
-
-  it("refuses the resolver to a viewer, who cannot start a run", async () => {
-    const agentId = await agentNamed("Resolver Gate");
-    const added = await addConnection(actingAsAcme(), agentId, retellConnection());
-
-    await expect(
-      resolveConnectionCredentials(
-        actingAsAcme("viewer"),
-        agentId,
-        added?.id ?? "",
-      ),
-    ).rejects.toThrow(NotPermittedError);
-  });
+  // What the plaintext opens back into — a fresh seal, a rotation, a padded
+  // paste — is proven where the one door to it now lives: the dispatch path's
+  // resolver, in `simulation-claims.test.ts`, which walks seal → store →
+  // claim → unseal through the same rows these tests write.
 
   it("stores the key trimmed, so a padded paste still authenticates", async () => {
     const agentId = await agentNamed("Padded Key");
@@ -618,13 +557,9 @@ describe("the sealed credential", () => {
       retellConnection({ credentials: { apiKey: "  retell-secret-padded-1234  " } }),
     );
 
+    // The hint is the stored value's own tail, so a hint without the pasted
+    // whitespace is the trim having happened before the seal.
     expect(added?.credentialsHint).toBe("1234");
-    const resolved = await resolveConnectionCredentials(
-      actingAsAcme(),
-      agentId,
-      added?.id ?? "",
-    );
-    expect(resolved).toEqual({ apiKey: "retell-secret-padded-1234" });
   });
 
   it("rotates by replacing the object whole, resealing envelope and hint", async () => {
@@ -646,13 +581,6 @@ describe("the sealed credential", () => {
       [added?.id],
     );
     expect(after.rows[0]?.credentials).not.toBe(before.rows[0]?.credentials);
-
-    const resolved = await resolveConnectionCredentials(
-      actingAsAcme(),
-      agentId,
-      added?.id ?? "",
-    );
-    expect(resolved).toEqual({ apiKey: "retell-secret-rotated-9999ABCD" });
   });
 });
 
@@ -803,9 +731,6 @@ describe("reaching a connection through the wrong door", () => {
     expect(
       await removeConnection(actingAsAcme(), neighbour, added?.id ?? ""),
     ).toBeUndefined();
-    expect(
-      await resolveConnectionCredentials(actingAsAcme(), neighbour, added?.id ?? ""),
-    ).toBeUndefined();
   });
 
   it("is unreachable under another organization's auth context, every verb", async () => {
@@ -826,9 +751,6 @@ describe("reaching a connection through the wrong door", () => {
     ).toBeUndefined();
     expect(
       await removeConnection(actingAsGlobex(), agentId, added?.id ?? ""),
-    ).toBeUndefined();
-    expect(
-      await resolveConnectionCredentials(actingAsGlobex(), agentId, added?.id ?? ""),
     ).toBeUndefined();
   });
 

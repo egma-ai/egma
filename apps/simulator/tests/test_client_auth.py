@@ -41,10 +41,15 @@ async def listening_control_plane() -> AsyncIterator[tuple[str, list[str | None]
         offered.append(request.headers.get("Authorization"))
         return web.Response(status=204)
 
+    async def traces(request: web.Request) -> web.Response:
+        offered.append(request.headers.get("Authorization"))
+        return web.json_response({})
+
     app = web.Application()
     app.router.add_post("/v1/claims", claim)
     app.router.add_post("/v1/simulations/{simulation_id}/heartbeats", heartbeat)
     app.router.add_post("/v1/simulations/{simulation_id}/reports", report)
+    app.router.add_post("/v1/traces", traces)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -56,10 +61,11 @@ async def listening_control_plane() -> AsyncIterator[tuple[str, list[str | None]
         await runner.cleanup()
 
 
-async def _make_all_three_calls(client: ControlPlaneClient) -> None:
+async def _make_every_call(client: ControlPlaneClient) -> None:
     await client.claim("sim-under-test", 1)
     await client.heartbeat("sim-1", "sim-under-test")
     await client.report("sim-1", b"{}")
+    await client.spans("sim-1", b'{"resourceSpans":[]}')
 
 
 async def test_a_service_token_rides_every_outbound_call(listening_control_plane):
@@ -68,9 +74,9 @@ async def test_a_service_token_rides_every_outbound_call(listening_control_plane
     async with ControlPlaneClient(
         base_url, claim_wait_seconds=1, service_token="egma_service_token_under_test"
     ) as client:
-        await _make_all_three_calls(client)
+        await _make_every_call(client)
 
-    assert offered == ["Bearer egma_service_token_under_test"] * 3
+    assert offered == ["Bearer egma_service_token_under_test"] * 4
 
 
 async def test_no_token_means_no_header(listening_control_plane):
@@ -78,9 +84,9 @@ async def test_no_token_means_no_header(listening_control_plane):
     base_url, offered = listening_control_plane
 
     async with ControlPlaneClient(base_url, claim_wait_seconds=1) as client:
-        await _make_all_three_calls(client)
+        await _make_every_call(client)
 
-    assert offered == [None] * 3
+    assert offered == [None] * 4
 
 
 # -- And nowhere else --------------------------------------------------------

@@ -1,4 +1,4 @@
-import type { NewSpan } from "@egma/db";
+import type { NewSpan, SpanEmitter, SpanSource } from "@egma/db";
 
 import type {
   OtlpAttribute,
@@ -30,27 +30,54 @@ import type {
  * **Tenancy is not the payload's business.** A resource attribute naming an
  * organization or a project is read by nothing here, deliberately. The customer
  * comes from the credential, which is what makes a copied key unable to write
- * into somebody else's account by asking nicely.
+ * into somebody else's account by asking nicely. The one resource attribute the
+ * simulator path does read — `egma.simulation_id` — names a conversation, not
+ * a customer: the door resolves whose it is from egma's own row, so the
+ * payload's claim still decides nothing.
  */
 
-/** What this door can know about a span's provenance, and it is not much. */
-const INGESTED_AT_THIS_DOOR = {
+/**
+ * What the door knows about an export beyond what the payload says: which kind
+ * of traffic it is, which side measured it, and — for a simulation — the run
+ * and pins the door resolved from egma's own row. Everything a row carries
+ * that the wire cannot be trusted to carry.
+ */
+export type SpanAttribution = {
+  readonly source: SpanSource;
+  readonly emitter: SpanEmitter;
+  readonly runId: string;
+  readonly agentId: string;
+  readonly testVersionId: string;
+  readonly personaVersionId: string;
+};
+
+/** What this door can know about a customer key's spans, and it is not much. */
+const INGESTED_AT_THIS_DOOR: SpanAttribution = {
   /**
-   * Everything arriving here is `production`. This door cannot know a run
-   * exists: a run is created by a simulation runtime that does not yet exist,
+   * Everything arriving on a customer key is `production`. This path cannot
+   * know a run exists: a run's conversations are conducted by egma's own
+   * simulator, which posts through the same door holding the service token,
    * and `source` is an explicit column precisely so it is never inferred from
-   * `run_id` being empty. When the runtime lands it arrives through this same
-   * door and says which it is.
+   * `run_id` being empty.
    */
   source: "production",
   /**
-   * And it came from the customer's agent, which is the only thing emitting
-   * today. egma's own runtime will emit `egma-runtime` through this door and
-   * the two views of one trace will find each other by `provider_call_id`,
-   * since there is no way to carry trace context across an audio channel.
+   * And it came from the customer's agent, which is the only thing a customer
+   * key speaks for. egma's own runtime emits `egma-runtime` through this door
+   * on the service path, and the two views of one trace will find each other
+   * by `provider_call_id`, since there is no way to carry trace context across
+   * an audio channel.
    */
   emitter: "agent",
-} as const;
+  /**
+   * A run, an agent and the versions it pinned are the control plane's, and a
+   * trace arriving on a customer key was not started by egma.
+   */
+  runId: "",
+  agentId: "",
+  testVersionId: "",
+  personaVersionId: "",
+};
 
 /** The sentinel the schema declares for telemetry that named no environment. */
 const DEFAULT_ENVIRONMENT = "default";
@@ -133,6 +160,67 @@ const LIVEKIT_TOOL = {
   arguments: "lk.function_tool.arguments",
   result: "lk.function_tool.output",
 } as const;
+
+/**
+ * How egma's own simulator names the timed things inside a conversation — the
+ * scope-gated entry beside LiveKit's, and the ingest half of the emitter
+ * contract: the scope, the span names and the attribute keys are pinned by the
+ * golden fixtures in `packages/simulation-contract`, whose document says what
+ * each shape means. The simulator emits exactly those shapes; this table is
+ * what they land as.
+ *
+ * A timing span is named for the measure it takes and its duration *is* the
+ * measurement, so the five names here are the measure catalog's own
+ * timing-event entries. A measure joining the catalog adds a line here, or its
+ * spans read `other` until it does — stored either way, payload intact.
+ */
+const SIMULATOR_SCOPE = "egma-simulator";
+
+const SIMULATOR_KINDS: Readonly<Record<string, string>> = {
+  // The one span the whole conversation happened inside, emitted last: when it
+  // arrives, the conversation is over.
+  simulation: "root",
+  human_turn: "turn:human",
+  agent_turn: "turn:agent",
+  tool_call: "tool",
+  first_response_latency: "timing",
+  turn_response_latency: "timing",
+  time_to_first_word: "timing",
+  agent_speech_duration: "timing",
+  persona_speech_duration: "timing",
+};
+
+/** The two turn names, which are where the one text attribute is read. */
+const SIMULATOR_TURN_NAMES: ReadonlySet<string> = new Set([
+  "human_turn",
+  "agent_turn",
+]);
+
+const SIMULATOR_TURN_TEXT = "egma.turn.text";
+
+/**
+ * No `result` key, deliberately: the simulator observes the call from egma's
+ * side of the connection and not the return, and a key for a fact nobody
+ * observes would be the invented structure this file refuses. When a platform
+ * starts reporting results, the vocabulary grows the line.
+ */
+const SIMULATOR_TOOL = {
+  name: "egma.tool.name",
+  arguments: "egma.tool.arguments",
+} as const;
+
+/**
+ * How a resource on the service path names the simulation its spans are
+ * evidence of. Read by the door, which resolves everything tenant-shaped from
+ * the named row; on the customer path it is not consulted at all — it rides
+ * the payload like any other attribute.
+ */
+export const SIMULATION_ID_ATTRIBUTE = "egma.simulation_id";
+
+/** Which simulation this resource speaks for, or `""` for naming none. */
+export function simulationNamedBy(resourceSpans: OtlpResourceSpans): string {
+  return attribute(resourceSpans.resource?.attributes, SIMULATION_ID_ATTRIBUTE);
+}
 
 /**
  * The connection an agent was reached over, when the telemetry says so. Only
@@ -278,23 +366,51 @@ function wireId(id: string | undefined, bytes: 8 | 16): string {
   return WIRE_ID_PATTERNS[bytes]?.test(lowered) === true ? lowered : "";
 }
 
+/** The registry itself: which vocabulary each known scope's names land as. */
+const KINDS_BY_SCOPE: Readonly<
+  Record<string, Readonly<Record<string, string>>>
+> = {
+  [LIVEKIT_SCOPE]: LIVEKIT_KINDS,
+  [SIMULATOR_SCOPE]: SIMULATOR_KINDS,
+};
+
 function kindOf(scope: OtlpScope | undefined, span: OtlpSpan): string {
-  if (scope?.name === LIVEKIT_SCOPE) {
-    const known = LIVEKIT_KINDS[span.name ?? ""];
-    if (known !== undefined) return known;
-  }
+  const known = KINDS_BY_SCOPE[scope?.name ?? ""]?.[span.name ?? ""];
+  if (known !== undefined) return known;
   // A scope this table does not know is `other`, including one emitting the
-  // GenAI semantic conventions: reading those arrives with the first non-LiveKit
+  // GenAI semantic conventions: reading those arrives with the first unknown
   // provider, recognised by scope like everything else here rather than by an
   // attribute any framework might set on any span.
   return "other";
 }
 
 function textFor(scope: OtlpScope | undefined, span: OtlpSpan): string {
-  if (scope?.name !== LIVEKIT_SCOPE) return "";
-  const key = LIVEKIT_TURN_TEXT[span.name ?? ""];
-  return key === undefined ? "" : attribute(span.attributes, key);
+  if (scope?.name === LIVEKIT_SCOPE) {
+    const key = LIVEKIT_TURN_TEXT[span.name ?? ""];
+    return key === undefined ? "" : attribute(span.attributes, key);
+  }
+  if (scope?.name === SIMULATOR_SCOPE) {
+    return SIMULATOR_TURN_NAMES.has(span.name ?? "")
+      ? attribute(span.attributes, SIMULATOR_TURN_TEXT)
+      : "";
+  }
+  return "";
 }
+
+/**
+ * Where a scope's tool spans keep their facts, or nothing for a scope whose
+ * vocabulary this table does not know. `result` is optional because not every
+ * emitter observes one, and an absent fact stays absent.
+ */
+const TOOL_KEYS_BY_SCOPE: Readonly<
+  Record<
+    string,
+    { readonly name: string; readonly arguments: string; readonly result?: string }
+  >
+> = {
+  [LIVEKIT_SCOPE]: LIVEKIT_TOOL,
+  [SIMULATOR_SCOPE]: SIMULATOR_TOOL,
+};
 
 /**
  * The environment this resource's spans were recorded in, discovered here on
@@ -359,7 +475,21 @@ const TOO_MANY_BYTES =
   "before the body does. The spans that fitted were stored and the rest were " +
   "refused rather than retried; flush smaller batches.";
 
-export function normaliseOtlpExport(request: OtlpExport): NormalisedExport {
+/**
+ * Turn one export into rows.
+ *
+ * `attributionFor` is the door's knowledge of each resource, resolved before
+ * this runs: absent on the customer path, where every resource is production
+ * traffic from the customer's agent; present on the service path, where the
+ * door has already resolved each resource's simulation row and answers the
+ * stamp its spans carry. It is asked once per resource, because attribution is
+ * a fact about where the spans came from and every span of a resource came
+ * from the same place.
+ */
+export function normaliseOtlpExport(
+  request: OtlpExport,
+  attributionFor?: (resourceSpans: OtlpResourceSpans) => SpanAttribution,
+): NormalisedExport {
   const spans: NewSpan[] = [];
   const rejected: RejectedSpan[] = [];
 
@@ -371,6 +501,8 @@ export function normaliseOtlpExport(request: OtlpExport): NormalisedExport {
 
   for (const resourceSpans of request.resourceSpans ?? []) {
     const environment = environmentOf(resourceSpans);
+    const attribution =
+      attributionFor?.(resourceSpans) ?? INGESTED_AT_THIS_DOOR;
 
     for (const scopeSpans of resourceSpans.scopeSpans ?? []) {
       const scope = scopeSpans.scope;
@@ -432,7 +564,7 @@ export function normaliseOtlpExport(request: OtlpExport): NormalisedExport {
 
         const attributes = span.attributes;
         const kind = kindOf(scope, span);
-        const isLiveKit = scope?.name === LIVEKIT_SCOPE;
+        const tool = TOOL_KEYS_BY_SCOPE[scope?.name ?? ""];
 
         payloadPrefix ??= payloadPrefixFor(resourceSpans, scopeSpans);
         const payload = `${payloadPrefix}${JSON.stringify(span)}}`;
@@ -449,8 +581,8 @@ export function normaliseOtlpExport(request: OtlpExport): NormalisedExport {
           // still in the payload, and the nesting ticket treats a span whose
           // parent is not in the trace as top-level under the real root.
           parentSpanId: wireId(span.parentSpanId, 8),
-          source: INGESTED_AT_THIS_DOOR.source,
-          emitter: INGESTED_AT_THIS_DOOR.emitter,
+          source: attribution.source,
+          emitter: attribution.emitter,
           environment: environment.environment,
           // Microseconds, because the column is DateTime64(6). The nanoseconds
           // are not lost — the full-precision duration is the column beside it,
@@ -461,14 +593,16 @@ export function normaliseOtlpExport(request: OtlpExport): NormalisedExport {
           kind,
           status: statusOf(span),
           text: textFor(scope, span),
-          // Nothing here holds audio, and the fixture's provider does not offer
-          // a reference to any. A guess would be worse than an empty column.
+          // Nothing here holds audio, and neither emitter offers a reference
+          // to any yet. A guess would be worse than an empty column.
           audioUrl: "",
-          toolName: isLiveKit ? attribute(attributes, LIVEKIT_TOOL.name) : "",
-          toolArguments: isLiveKit
-            ? attribute(attributes, LIVEKIT_TOOL.arguments)
-            : "",
-          toolResult: isLiveKit ? attribute(attributes, LIVEKIT_TOOL.result) : "",
+          toolName: tool === undefined ? "" : attribute(attributes, tool.name),
+          toolArguments:
+            tool === undefined ? "" : attribute(attributes, tool.arguments),
+          toolResult:
+            tool?.result === undefined
+              ? ""
+              : attribute(attributes, tool.result),
           providerCallId: firstAttribute(
             [attributes, resourceSpans.resource?.attributes],
             PROVIDER_CALL_ID_ATTRIBUTES,
@@ -477,14 +611,15 @@ export function normaliseOtlpExport(request: OtlpExport): NormalisedExport {
           // Measured, never declared — and nothing on this path measured it.
           audioSampleRateHz: 0,
           audioEncoding: "",
-          // A run, an agent and the versions it pinned are the control plane's,
-          // and this door has none of them: a trace arriving here was not
-          // started by egma.
-          runId: "",
-          agentId: "",
+          // The run and pins ride the attribution: the door resolved them from
+          // egma's own simulation row on the service path, and a customer
+          // key's traffic has none — a trace arriving there was not started by
+          // egma. Agents are not versioned, so nothing has a version to pin.
+          runId: attribution.runId,
+          agentId: attribution.agentId,
           agentVersionId: "",
-          testVersionId: "",
-          personaVersionId: "",
+          testVersionId: attribution.testVersionId,
+          personaVersionId: attribution.personaVersionId,
           payload,
         });
       }

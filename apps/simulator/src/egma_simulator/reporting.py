@@ -1,13 +1,29 @@
-"""Reporting: events minted as they happen, delivered in order, at least once.
+"""Reporting: everything minted as it happens, delivered in order, at least once.
 
-One ``Reporter`` serves one simulation. Every event is stamped and
-serialized at the moment it happens; the serialized bytes are appended to a
-local write-ahead log and then posted to the control plane by a single
-sender task, so delivery is ordered and a resend replays byte-identical
-documents — ids and timestamps included, which is what lets the control
-plane dedup on event ids. The report schema is applied to every document
-before it is logged or sent: an invalid report is a bug in this process,
-and it fails here, loudly, rather than at the receiver.
+One ``Reporter`` serves one simulation and carries two kinds of document
+to the control plane: the lifecycle report events, and the conversation
+itself as OTLP span batches. Both are stamped and serialized at the moment
+they happen; the serialized bytes are appended to a local write-ahead log
+and then posted by a single sender task, so delivery is ordered and a
+resend replays byte-identical documents — ids and timestamps included,
+which is what lets the control plane dedup on event ids and the trace
+store dedup on span ids. The report schema is applied to every report
+document before it is logged or sent: an invalid report is a bug in this
+process, and it fails here, loudly, rather than at the receiver.
+
+**One queue for both kinds, and that is the design rather than a saving.**
+Because span batches and lifecycle documents share the one ordered sender,
+the terminal report leaves only after every span batch minted before it
+landed. So when the control plane records a simulation terminal, the
+evidence a verdict will cite is already in the trace store — there is no
+window in which a conversation is finished and its transcript is still in
+flight.
+
+The log on disk holds both, interleaved in the order the events happened,
+each line exactly the bytes that went on the wire. The two kinds are told
+apart by their own shape — a report names its ``contract_version``, a span
+batch its ``resourceSpans`` — because a log line that was not what was
+sent would not be a record of what was sent.
 
 A document that will not go through is resent, same bytes, with widening
 backoff until a deadline. Past that the reporter is *abandoned*: it stops
@@ -26,9 +42,10 @@ import json
 import logging
 import re
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 
-from .client import ControlPlaneClient, ReportRejected, TransientReportFailure
+from .client import ControlPlaneClient, DocumentRejected, TransientDeliveryFailure
 from .contract import validate_report
 
 logger = logging.getLogger(__name__)
@@ -44,6 +61,20 @@ MAX_BACKOFF_SECONDS = 5.0
 
 _UNSAFE_IN_A_FILENAME = re.compile(r"[^A-Za-z0-9._-]")
 _READABLE_PREFIX_LIMIT = 64
+
+
+class Destination(Enum):
+    """Which door one queued document is bound for.
+
+    The queue carries the pair rather than the bytes alone, because one
+    ordered sender serving two doors has to know which it is knocking on —
+    and knowing it here, at the moment the document was minted, is what
+    keeps the ordering between them a property of when things happened
+    rather than of how they were routed.
+    """
+
+    REPORT = "report"
+    SPANS = "spans"
 
 
 def moment() -> str:
@@ -85,8 +116,13 @@ class Reporter:
         self._delivery_deadline_seconds = delivery_deadline_seconds
         self._sequence = 0
         self.turn_count = 0
+        """How many transcript turns the conversation reached, both speakers
+        counted, kept by whoever is watching it happen. A summary fact rather
+        than the conversation itself — the turns are spans, and a count of
+        them is one number about the whole simulation, which is why it rides
+        the terminal transition instead of being asked of the trace store."""
         self.started_at: str | None = None
-        self._queue: asyncio.Queue[bytes] = asyncio.Queue()
+        self._queue: asyncio.Queue[tuple[Destination, bytes]] = asyncio.Queue()
         self._sender: asyncio.Task | None = None
         self.abandoned = False
         """Set once delivery has given up; from then on the WAL is the record."""
@@ -109,13 +145,28 @@ class Reporter:
             "events": [event],
         }
         validate_report(document)
+        self._log_and_queue(Destination.REPORT, document)
+
+    def spans(self, document: dict) -> None:
+        """Take one span batch into the same log and the same ordered queue.
+
+        This is the whole of what makes the ordering guarantee true: a
+        batch handed over here is ahead of every document minted after it,
+        the terminal report included. The batch is not schema-validated —
+        it is an OTLP export document, which the vocabulary's golden
+        fixtures pin and the ingest door checks — but it travels on exactly
+        the report's terms.
+        """
+        self._log_and_queue(Destination.SPANS, document)
+
+    def _log_and_queue(self, destination: Destination, document: dict) -> None:
         serialized = json.dumps(document, separators=(",", ":")).encode()
         self._append_to_wal(serialized)
         if self._sender is None:
             self._sender = asyncio.create_task(
                 self._send_in_order(), name=f"reporter:{self.simulation_id}"
             )
-        self._queue.put_nowait(serialized)
+        self._queue.put_nowait((destination, serialized))
 
     def _append_to_wal(self, serialized: bytes) -> None:
         # The filename is one flat component by construction, so this only
@@ -126,10 +177,10 @@ class Reporter:
 
     async def _send_in_order(self) -> None:
         while True:
-            serialized = await self._queue.get()
+            destination, serialized = await self._queue.get()
             try:
                 if not self.abandoned:
-                    await self._deliver(serialized)
+                    await self._deliver(destination, serialized)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -150,33 +201,40 @@ class Reporter:
             finally:
                 self._queue.task_done()
 
-    async def _deliver(self, serialized: bytes) -> None:
+    async def _deliver(self, destination: Destination, serialized: bytes) -> None:
         """Send one document, resending the same bytes until it lands or time is up."""
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._delivery_deadline_seconds
         backoff = FIRST_BACKOFF_SECONDS
         attempt = 0
+        send = (
+            self._client.report
+            if destination is Destination.REPORT
+            else self._client.spans
+        )
         while True:
             attempt += 1
             try:
-                await self._client.report(self.simulation_id, serialized)
+                await send(self.simulation_id, serialized)
                 if attempt > 1:
                     logger.info(
-                        "a report for %s landed on attempt %d",
+                        "a %s document for %s landed on attempt %d",
+                        destination.value,
                         self.simulation_id,
                         attempt,
                     )
                 return
-            except ReportRejected as refusal:
+            except DocumentRejected as refusal:
                 # The control plane refused the document outright. Resending
                 # the same bytes cannot succeed; the WAL holds the record.
                 logger.error(
-                    "control plane refused a report for %s: %s",
+                    "control plane refused a %s document for %s: %s",
+                    destination.value,
                     self.simulation_id,
                     refusal,
                 )
                 return
-            except TransientReportFailure as failure:
+            except TransientDeliveryFailure as failure:
                 remaining = deadline - loop.time()
                 if remaining <= 0:
                     # Ordered delivery is over for this simulation: sending
@@ -184,10 +242,10 @@ class Reporter:
                     # control plane cannot be reached to receive it anyway.
                     self.abandoned = True
                     logger.error(
-                        "gave up delivering reports for %s after %d attempt(s) "
-                        "over %.0fs (%s); the events are in %s, and a simulator "
-                        "the control plane cannot hear is what its heartbeat "
-                        "sweep is for",
+                        "gave up delivering for %s after %d attempt(s) "
+                        "over %.0fs (%s); everything it saw is in %s, and a "
+                        "simulator the control plane cannot hear is what its "
+                        "heartbeat sweep is for",
                         self.simulation_id,
                         attempt,
                         self._delivery_deadline_seconds,
@@ -199,7 +257,7 @@ class Reporter:
                 backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
 
     async def drain(self) -> None:
-        """Wait until every event minted so far has been delivered or given up."""
+        """Wait until everything minted so far has been delivered or given up."""
         await self._queue.join()
 
     async def close(self) -> None:
@@ -223,30 +281,6 @@ class Reporter:
                 "at": self.started_at,
                 "status": "running",
                 "reason": reason,
-            }
-        )
-
-    def turn(self, speaker: str, text: str, started_at: str) -> None:
-        self.turn_count += 1
-        self._enqueue(
-            {
-                "kind": "turn",
-                "event_id": self._mint_event_id(),
-                "speaker": speaker,
-                "text": text,
-                "started_at": started_at,
-                "ended_at": None,
-            }
-        )
-
-    def timing(self, measure: str, milliseconds: float) -> None:
-        self._enqueue(
-            {
-                "kind": "timing",
-                "event_id": self._mint_event_id(),
-                "at": moment(),
-                "measure": measure,
-                "milliseconds": milliseconds,
             }
         )
 

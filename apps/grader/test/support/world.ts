@@ -23,12 +23,14 @@ import {
   startSimulation,
   type AuthContext,
   type ExpectedBehaviorInput,
-  type FailedEndingReason,
   type GradingJob,
   type NewGrader,
   type NewSpan,
   type RecordedVerdict,
+  type Simulation,
+  type SimulationFailure,
 } from "@egma/db";
+import { traceIdOfSimulation } from "@egma/simulation-contract";
 
 import {
   createMigratedDatabase,
@@ -252,6 +254,8 @@ export function aRubric(overrides: Partial<NewGrader> = {}): NewGrader {
 export type ConductedSimulation = {
   readonly runId: string;
   readonly simulationId: string;
+  /** Where its spans are filed, for a test that wants to read them back. */
+  readonly traceId: string;
 };
 
 /**
@@ -261,10 +265,22 @@ export type ConductedSimulation = {
 export async function conductSimulation(
   world: World,
   landing: {
-    readonly metrics?: unknown;
-    readonly transcript?: unknown;
-    /** Absent means it happened; a reason means it never ran. */
-    readonly failedBecause?: FailedEndingReason | undefined;
+    /**
+     * The conversation as spans, streamed while it runs — before the terminal
+     * transition, which is the order the simulator's one ordered sender puts
+     * them in.
+     *
+     * Absent is a conversation that happened, in the default shape below.
+     * `null` is the other thing a case can mean: a conversation that happened
+     * and whose evidence never reached egma at all, which a reader has to be
+     * able to tell from one that never happened.
+     */
+    readonly spans?: StreamedConversation | null | undefined;
+    /**
+     * Absent means it happened; a reason means it never ran. Typed as what a
+     * simulator may report, because that is who this helper is playing.
+     */
+    readonly failedBecause?: SimulationFailure["reason"] | undefined;
     readonly testId?: string | undefined;
   } = {},
 ): Promise<ConductedSimulation> {
@@ -302,7 +318,7 @@ export async function conductSimulation(
   // itself reliable. A real simulator has the same shape and does not care,
   // because it conducts whatever it claimed rather than one row it named.
   await eventually(`simulation ${only.id} to be claimed`, async () => {
-    await claimSimulations(world.auth, { claimant, capacity: 50 });
+    await claimSimulations({ claimant, capacity: 50 });
     const now = await getSimulation(world.auth, only.id);
     return now?.status === "claimed" ? now : undefined;
   });
@@ -312,23 +328,254 @@ export async function conductSimulation(
     throw new Error(`simulation ${only.id} would not start`);
   }
 
+  // Every span on the wire before the document that ends the conversation, which
+  // is the whole point of the simulator's one ordered sender: when the control
+  // plane lands a terminal transition, the evidence is already stored.
+  //
+  // A case that said nothing about the conversation gets one that happened,
+  // because that is what a conducted simulation is now: there is no column
+  // left for a conversation to sit in instead of the spans. `null` asks for
+  // the opposite — nothing on the wire at all — and a conduct that failed
+  // streams nothing unless it asked to, because nothing was conducted.
+  const streaming =
+    landing.spans === null
+      ? undefined
+      : (landing.spans ??
+        (landing.failedBecause === undefined
+          ? A_CONVERSATION_HAPPENED
+          : undefined));
+  if (streaming !== undefined) {
+    await streamConversation(world, conducting, streaming);
+  }
+
+  // The landing carries the lifecycle and the summary facts, and nothing
+  // about what was said: the conversation is whatever was streamed above,
+  // and there is no column left for a second copy of it to land in.
   const landed =
     landing.failedBecause !== undefined
       ? await failSimulation(world.auth, only.id, claimant, {
-          reason: landing.failedBecause as Exclude<FailedEndingReason, "orphaned">,
+          reason: landing.failedBecause,
         })
       : await completeSimulation(world.auth, only.id, claimant, {
           endingReason: "persona_concluded",
-          transcript: landing.transcript ?? [
-            { speaker: "agent", text: "Booked for Tuesday at four." },
-          ],
-          metrics: landing.metrics ?? { turn_response_latency: [900, 1_100] },
         });
   if (landed === undefined) {
     throw new Error(`simulation ${only.id} never reached a terminal transition`);
   }
 
-  return { runId: started.id, simulationId: only.id };
+  return {
+    runId: started.id,
+    simulationId: only.id,
+    traceId: traceIdOfSimulation(only.id) ?? "",
+  };
+}
+
+/* ------------------------------------------------------------------- *
+ * A simulation's conversation, as the spans it actually arrives as.
+ * ------------------------------------------------------------------- */
+
+/**
+ * The conversation a conduct streams when a case has no opinion about it: two
+ * turns with something findable in them, and one measure to threshold. It is
+ * the default rather than the empty conversation because most cases here are
+ * about grading and not about evidence, and a simulation that streamed nothing
+ * is a simulation with nothing to judge.
+ */
+const A_CONVERSATION_HAPPENED: StreamedConversation = {
+  measured: { turn_response_latency: [900, 1_100] },
+};
+
+/**
+ * What one conducted conversation streams, said in the terms the vocabulary
+ * uses rather than in rows.
+ */
+export type StreamedConversation = {
+  /**
+   * Absent leaves the root span unsent — a trace egma holds part of, which is
+   * what a simulator killed mid-conversation leaves behind.
+   */
+  readonly rootCloses?: boolean | undefined;
+  readonly said?: readonly StreamedTurn[] | undefined;
+  readonly calledTool?:
+    | { readonly name: string; readonly arguments: string }
+    | undefined;
+  /**
+   * What the simulator measured, in the milliseconds the catalog names — each
+   * sample authored as its own timing span whose duration *is* the number.
+   */
+  readonly measured?: Readonly<Record<string, readonly number[]>> | undefined;
+};
+
+/**
+ * One turn as it was spoken, which is two facts a transcript cannot carry.
+ *
+ * Both default to what a chat turn is — one instant, two seconds after the one
+ * before it — and both are here because a voice turn is neither. A turn is open
+ * for as long as it was spoken for, and two of them may **cross**: the persona
+ * starting before the agent has finished is what barge-in looks like, and the
+ * shape has to permit it rather than be widened for it later.
+ */
+export type StreamedTurn = {
+  readonly speaker: "human" | "agent";
+  readonly text: string;
+  /** When it began, counted from the start of the conversation. */
+  readonly atMilliseconds?: number | undefined;
+  /** How long the audio ran, ear to ear. Zero on chat. */
+  readonly spokeForMilliseconds?: number | undefined;
+};
+
+/**
+ * One simulation's spans, filed exactly as the ingest door files them.
+ *
+ * That one call *is* the door for these purposes — the OTLP wire, the service
+ * token and the resource attribute naming the simulation are the API's own
+ * tests, and repeating them here would test Fastify rather than grading. What
+ * matters on this side is that the rows land under the trace the simulation id
+ * derives, stamped `simulation` and `egma-runtime`, carrying the run and the
+ * agent the door resolves from egma's own row.
+ *
+ * **No queue row, deliberately.** A simulation's grading work is minted by the
+ * transaction that lands it terminal, so a span arriving has nothing to add —
+ * which is exactly the asymmetry with a production trace, whose spans are the
+ * only thing that could ever have created its job.
+ */
+async function streamConversation(
+  world: World,
+  simulation: Simulation,
+  streaming: StreamedConversation,
+): Promise<void> {
+  const traceId = traceIdOfSimulation(simulation.id);
+  if (traceId === undefined) {
+    throw new Error(`${simulation.id} names no trace`);
+  }
+
+  const began = Date.now();
+  const rootSpanId = nextSpanId();
+  const spans: NewSpan[] = [];
+
+  const spanning = (over: Partial<NewSpan>): NewSpan =>
+    simulationSpan(traceId, simulation, {
+      spanId: nextSpanId(),
+      parentSpanId: rootSpanId,
+      startedAtMicroseconds: BigInt(began) * 1_000n,
+      ...over,
+    });
+
+  const said = streaming.said ?? [
+    { speaker: "human" as const, text: "Can you move my cleaning to Tuesday?" },
+    { speaker: "agent" as const, text: "Booked for Tuesday at four." },
+  ];
+
+  said.forEach((turn, at) => {
+    spans.push(
+      spanning({
+        // The speaker rides the span name, and the door reads the kind off it.
+        name: turn.speaker === "human" ? "human_turn" : "agent_turn",
+        kind: `turn:${turn.speaker}`,
+        text: turn.text,
+        startedAtMicroseconds:
+          BigInt(began) * 1_000n +
+          BigInt(turn.atMilliseconds ?? at * 2_000) * 1_000n,
+        // One instant unless something measured how long it was spoken for,
+        // which on chat nothing ever does.
+        durationNanoseconds:
+          BigInt(turn.spokeForMilliseconds ?? 0) * 1_000_000n,
+      }),
+    );
+  });
+
+  if (streaming.calledTool !== undefined) {
+    spans.push(
+      spanning({
+        name: "tool_call",
+        kind: "tool",
+        toolName: streaming.calledTool.name,
+        toolArguments: streaming.calledTool.arguments,
+        // Always empty: the simulator observes the call and not the return, so
+        // its vocabulary declares no result attribute at all.
+        toolResult: "",
+        startedAtMicroseconds: BigInt(began) * 1_000n + 1_000_000n,
+        durationNanoseconds: 0n,
+      }),
+    );
+  }
+
+  let takenAt = 0n;
+  for (const [measure, samples] of Object.entries(streaming.measured ?? {})) {
+    for (const milliseconds of samples) {
+      takenAt += 500_000n;
+      spans.push(
+        spanning({
+          // A timing span is named for the measure it takes, and the door files
+          // every one of the catalog's timing measures as `timing`.
+          name: measure,
+          kind: "timing",
+          startedAtMicroseconds: BigInt(began) * 1_000n + takenAt,
+          durationNanoseconds: BigInt(Math.round(milliseconds * 1_000_000)),
+        }),
+      );
+    }
+  }
+
+  // While it is still happening: everything the walk observed, and nothing that
+  // closes it.
+  await appendSpans(world.auth, spans);
+
+  if (streaming.rootCloses ?? true) {
+    // And the flush that ends it, with the root alone — authored first, sent
+    // last, which is what makes its arrival mean the conversation is over.
+    await appendSpans(world.auth, [
+      simulationSpan(traceId, simulation, {
+        spanId: rootSpanId,
+        parentSpanId: "",
+        name: "simulation",
+        kind: "root",
+        startedAtMicroseconds: BigInt(began) * 1_000n,
+        durationNanoseconds: 20_000_000_000n,
+      }),
+    ]);
+  }
+}
+
+/** A simulation's span as the door writes one, with everything else empty. */
+function simulationSpan(
+  traceId: string,
+  simulation: Simulation,
+  over: Partial<NewSpan>,
+): NewSpan {
+  return {
+    traceId,
+    spanId: "",
+    parentSpanId: "",
+    // Explicit on the row rather than inferred from the run being set:
+    // comparing a simulation against a production trace is the premise of the
+    // product, so the two dimensions compose instead of sharing a slot.
+    source: "simulation",
+    emitter: "egma-runtime",
+    environment: "default",
+    startedAtMicroseconds: 0n,
+    durationNanoseconds: 0n,
+    name: "",
+    kind: "other",
+    status: "unset",
+    text: "",
+    audioUrl: "",
+    toolName: "",
+    toolArguments: "",
+    toolResult: "",
+    providerCallId: "",
+    connectionType: simulation.connectionType,
+    audioSampleRateHz: 0,
+    audioEncoding: "",
+    // Resolved by the door from egma's own row, never from the payload.
+    runId: simulation.runId,
+    agentId: simulation.agentId,
+    agentVersionId: "",
+    testVersionId: simulation.testVersionId ?? "",
+    personaVersionId: simulation.personaVersionId,
+    payload: "{}",
+    ...over,
+  };
 }
 
 /* ------------------------------------------------------------------- *
@@ -365,6 +612,15 @@ function wireId(ordinal: number, bytes: 8 | 16): string {
   return ordinal.toString(16).padStart(bytes * 2, "0");
 }
 
+/**
+ * One span id, never issued twice in a run of the suite — which is what the
+ * store's own dedup is keyed on, so a repeat would land as nothing at all.
+ */
+function nextSpanId(): string {
+  nextSpanOrdinal += 1;
+  return wireId(nextSpanOrdinal, 8);
+}
+
 export async function conductProductionTrace(
   world: World,
   conducting: {
@@ -377,10 +633,7 @@ export async function conductProductionTrace(
   nextTraceOrdinal += 1;
   const traceId = wireId(nextTraceOrdinal, 16);
   const startedAt = new Date();
-  const spanId = (): string => {
-    nextSpanOrdinal += 1;
-    return wireId(nextSpanOrdinal, 8);
-  };
+  const spanId = nextSpanId;
 
   const rootSpanId = spanId();
   const said = conducting.said ?? [
@@ -457,10 +710,9 @@ export async function exportALateFlush(
   world: World,
   traceId: string,
 ): Promise<void> {
-  nextSpanOrdinal += 1;
   await exportFlush(world, [
     productionSpan(traceId, {
-      spanId: wireId(nextSpanOrdinal, 8),
+      spanId: nextSpanId(),
       parentSpanId: "",
       name: "agent_session",
       kind: "root",
@@ -528,15 +780,23 @@ export async function seedTest(
   return test.id;
 }
 
-/** A transcript with enough turns in it for a judgment to cite one. */
-export function aConversation(): readonly unknown[] {
-  return [
-    { speaker: "agent", text: "Thanks for calling Lakeside Dental." },
-    { speaker: "persona", text: "I need to move my cleaning to Thursday." },
-    { speaker: "agent", text: "Thursday at four works. Shall I move it?" },
-    { speaker: "persona", text: "Yes please." },
-    { speaker: "agent", text: "Booked for Thursday at four. Anything else?" },
-  ];
+/**
+ * A conversation with enough turns in it for a judgment to cite one, streamed
+ * as the spans a conversation now is. The measure rides with it because a
+ * judge is shown the measures beside the transcript, and a case about what a
+ * judge was shown wants both.
+ */
+export function aConversation(): StreamedConversation {
+  return {
+    said: [
+      { speaker: "agent", text: "Thanks for calling Lakeside Dental." },
+      { speaker: "human", text: "I need to move my cleaning to Thursday." },
+      { speaker: "agent", text: "Thursday at four works. Shall I move it?" },
+      { speaker: "human", text: "Yes please." },
+      { speaker: "agent", text: "Booked for Thursday at four. Anything else?" },
+    ],
+    measured: { turn_response_latency: [900, 1_100] },
+  };
 }
 
 /**

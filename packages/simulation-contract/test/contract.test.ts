@@ -7,6 +7,8 @@ import ajvFormats from "ajv-formats";
 import type { FormatsPlugin } from "ajv-formats";
 import { describe, expect, it } from "vitest";
 
+import { reportComplaints, specComplaints } from "@egma/simulation-contract";
+
 // ajv-formats ships CommonJS whose module.exports is the plugin function
 // itself; under NodeNext TypeScript types the default import as a namespace,
 // so the callable gets its name here.
@@ -130,6 +132,22 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     keyword: "additionalProperties",
     property: "facts",
   },
+  // The three kinds this direction used to carry. A conversation's record is
+  // its spans now, so a report claiming to carry one is refused at the same
+  // place any other unknown kind is — which is what makes the retirement a
+  // fact of the contract rather than a habit of the shipped simulator.
+  "report/timing-event-retired.json": {
+    at: "/events/0/kind",
+    keyword: "const",
+  },
+  "report/tool-call-event-retired.json": {
+    at: "/events/0/kind",
+    keyword: "const",
+  },
+  "report/turn-event-retired.json": {
+    at: "/events/0/kind",
+    keyword: "const",
+  },
   "report/unknown-event-kind.json": {
     at: "/events/0/kind",
     keyword: "const",
@@ -252,14 +270,17 @@ describe("what the golden fixtures cover", () => {
     expect(modalities).toEqual(new Set(["chat", "voice"]));
   });
 
-  it("shows every report event kind, and every terminal status", async () => {
+  it("shows the one report event kind, and every terminal status", async () => {
     const reports = await fixturesUnder("report", "valid");
     const events = reports.flatMap(
       (fixture) => fixture.document.events as Record<string, unknown>[],
     );
 
+    // One kind, and this is the assertion that says so: the report direction
+    // carries the lifecycle and nothing else, because a conversation's record
+    // is the spans it arrived as.
     const kinds = new Set(events.map((event) => event.kind));
-    expect(kinds).toEqual(new Set(["status", "turn", "tool_call", "timing"]));
+    expect(kinds).toEqual(new Set(["status"]));
 
     const statuses = new Set(
       events
@@ -387,5 +408,108 @@ describe("the report schema structurally forbids credential material", () => {
         "must NOT have additional properties",
       );
     }
+  });
+});
+
+describe("the exported spec check, which the control plane sends through", () => {
+  it("has no complaints about any valid golden fixture", async () => {
+    for (const fixture of await fixturesUnder("spec", "valid")) {
+      expect(specComplaints(fixture.document), fixture.name).toEqual([]);
+    }
+  });
+
+  it("complains about every deliberately invalid fixture", async () => {
+    for (const fixture of await fixturesUnder("spec", "invalid")) {
+      expect(
+        specComplaints(fixture.document).length,
+        `${fixture.name} raised no complaint`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("names the place a document is wrong, the way the simulator's check does", async () => {
+    const [valid] = await fixturesUnder("spec", "valid");
+    if (valid === undefined) throw new Error("no valid spec fixture");
+
+    const { limits: _limits, ...missingLimits } = valid.document;
+    expect(specComplaints(missingLimits)).toEqual([
+      ": must have required property 'limits'",
+    ]);
+
+    expect(
+      specComplaints({ ...valid.document, modality: "carrier-pigeon" }),
+    ).toEqual(["/modality: must be equal to one of the allowed values"]);
+  });
+
+  it("complains about a document that is not an object at all", () => {
+    expect(specComplaints(null).length).toBeGreaterThan(0);
+    expect(specComplaints("a string").length).toBeGreaterThan(0);
+  });
+});
+
+describe("the exported report check, which the report route reads through", () => {
+  it("has no complaints about any valid golden fixture", async () => {
+    for (const fixture of await fixturesUnder("report", "valid")) {
+      expect(reportComplaints(fixture.document), fixture.name).toEqual([]);
+    }
+  });
+
+  it("complains about every deliberately invalid fixture", async () => {
+    for (const fixture of await fixturesUnder("report", "invalid")) {
+      expect(
+        reportComplaints(fixture.document).length,
+        `${fixture.name} raised no complaint`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("names the place a document is wrong, in the shape the spec check uses", async () => {
+    const carried = await readJson(
+      "fixtures",
+      "report",
+      "valid",
+      "completed-chat.json",
+    );
+
+    const { events: _events, ...missingEvents } = carried;
+    expect(reportComplaints(missingEvents)).toEqual([
+      ": must have required property 'events'",
+    ]);
+  });
+
+  it("refuses the endings that are the platform's own words, never a reporter's", async () => {
+    // `orphaned` is the sweep's verdict on a simulator that went silent, and
+    // a simulator still talking cannot claim it; `dispatch_failed` is the
+    // claim path's own landing for work it could not hand over. The wire's
+    // vocabulary carries neither, so a report claiming either is refused at
+    // validation — before any route has to reason about it.
+    const carried = await readJson(
+      "fixtures",
+      "report",
+      "valid",
+      "failed-agent-never-joined.json",
+    );
+
+    for (const ending of ["orphaned", "dispatch_failed", "capacity"]) {
+      const claiming = {
+        ...carried,
+        events: (carried.events as Record<string, unknown>[]).map((event) => ({
+          ...event,
+          facts: {
+            ...(event.facts as Record<string, unknown>),
+            ending,
+          },
+        })),
+      };
+      expect(
+        reportComplaints(claiming).length,
+        `a report claiming "${ending}" raised no complaint`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("complains about a document that is not an object at all", () => {
+    expect(reportComplaints(null).length).toBeGreaterThan(0);
+    expect(reportComplaints("a string").length).toBeGreaterThan(0);
   });
 });

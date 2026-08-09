@@ -26,13 +26,13 @@ import type { Service } from "../src/service.ts";
  * **The contract is the seam.** A conversation and a grader configuration go in;
  * the assertions are on the verdict rows and on nothing about how they got
  * written — not which function was called, not in what order, not how many times
- * the service woke up. That is what lets tickets 05, 06 and 07 change the
- * middle of this without rewriting the suite that proves it works.
+ * the service woke up. That is what lets later work change the middle of this
+ * without rewriting the suite that proves it works.
  *
  * **No model key is present anywhere in this file, or needed anywhere under
  * it.** The one grader type the skeleton executes is deterministic: it reads a
  * number off the conversation and applies a threshold, in-process, instantly.
- * A judge arrives in ticket 05 behind a seam, and until it does the whole path
+ * A judge arrives later behind a seam, and until it does the whole path
  * runs for free.
  *
  * **The backstop is set an hour away on purpose.** Nothing here waits for a
@@ -60,7 +60,7 @@ describe("a conversation reaching its terminal transition", () => {
 
     const started = Date.now();
     const { simulationId, runId } = await conductSimulation(world, {
-      metrics: { turn_response_latency: [900, 1_100] },
+      spans: { measured: { turn_response_latency: [900, 1_100] } },
     });
 
     const verdicts = await verdictsOn(world, simulationId);
@@ -78,7 +78,7 @@ describe("a conversation reaching its terminal transition", () => {
       aThreshold({ name: "P1 latency", priority: "P1" }),
     );
     const { simulationId, runId } = await conductSimulation(world, {
-      metrics: { turn_response_latency: [900, 9_100] },
+      spans: { measured: { turn_response_latency: [900, 9_100] } },
     });
 
     const verdicts = await verdictsOn(world, simulationId, 2);
@@ -201,7 +201,7 @@ describe("a completed conversation missing the measure a grader wants", () => {
     );
 
     const { simulationId } = await conductSimulation(world, {
-      metrics: { turn_response_latency: [900] },
+      spans: { measured: { turn_response_latency: [900] } },
     });
     await verdictsOn(world, simulationId, 2);
 

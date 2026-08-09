@@ -3,15 +3,21 @@ import {
   getGrader,
   getSimulation,
   readTrace,
+  MAXIMUM_WINDOW_MILLISECONDS,
+  type AuthContext,
   type Grader,
   type GradingClaim,
   type GradingSource,
   type NewVerdict,
   type Priority,
+  type Simulation,
+  type TimeWindow,
+  type TraceDetail,
 } from "@egma/db";
+import { traceIdOfSimulation } from "@egma/simulation-contract";
 
 import {
-  conversationOf,
+  conversationOfSimulation,
   conversationOfTrace,
   type Conversation,
 } from "./conversation.ts";
@@ -36,13 +42,15 @@ import { applicableGraders, applicableProductionGraders } from "./resolve.ts";
  * conversation or for its run — there is no such row anywhere, by design, and
  * the fold works one out at read time from exactly the rows this wrote.
  *
- * **The source decides the first two steps and nothing after them.** A
- * simulation is read from its header row and judged by the project's graders
- * plus its test's; a production trace is read from its spans and judged by the
- * project's production-scoped graders, sampled. From the moment a `Conversation`
- * and a grader list exist there is one path — one executor seam, one verdict row
- * builder, one write — because a second judging path would be a second set of
- * answers that could one day disagree about the same agent.
+ * **The source decides the first two steps and nothing after them.** Both are
+ * read from their spans; what differs is what egma knows besides. A simulation
+ * names its own row, which says whose conversation it was and how the simulator
+ * said it ended, and it is judged by the project's graders plus its test's; a
+ * production trace has no row and is judged by the project's production-scoped
+ * graders, sampled. From the moment a `Conversation` and a grader list exist
+ * there is one path — one executor seam, one verdict row builder, one write —
+ * because a second judging path would be a second set of answers that could one
+ * day disagree about the same agent.
  *
  * **The verdicts are written in one call.** A conversation's judgments land
  * together or not at all as far as any reader is concerned, and a job that fails
@@ -242,7 +250,22 @@ export async function gradeClaim(
   };
 }
 
-/** A finished simulation, read from the row that already holds everything. */
+/**
+ * A finished simulation: its own row for what egma knows about conducting it,
+ * and its spans for the conversation.
+ *
+ * The row is read first because it is what says this simulation exists, whose
+ * it is and when it ran — and the window comes off those two moments, because
+ * the trace store is filed by the minute a span started in and a read naming
+ * only an id would have nothing to prune with.
+ *
+ * A trace that comes back absent is not an error here, and that is the
+ * difference from the production path: a production job was written *by* the
+ * spans arriving, so their absence means telemetry has gone, while a
+ * simulation's job is written by the transaction that landed it and can
+ * legitimately reach a conversation whose spans never came. What to do about it
+ * is the reading order's decision, made in one place; this only goes and asks.
+ */
 async function theSimulation(claim: GradingClaim): Promise<Resolved> {
   if (claim.simulationId === null) {
     throw new NotGradable(
@@ -258,12 +281,73 @@ async function theSimulation(claim: GradingClaim): Promise<Resolved> {
   }
 
   return {
-    conversation: conversationOf(simulation),
+    conversation: conversationOfSimulation(
+      simulation,
+      await theSimulationsTrace(claim.auth, simulation),
+    ),
     graders: await judgingGraders(claim, () =>
       applicableGraders(claim.auth, simulation),
     ),
     simulationId: simulation.id,
   };
+}
+
+/**
+ * The spans this simulation streamed, or nothing at all if none did.
+ *
+ * **The trace id is derived, never stored.** A simulation's spans are filed
+ * under the 128 bits its own id carries, because an OpenTelemetry trace id is
+ * fixed-width binary and cannot hold one of egma's identifiers. The derivation
+ * is a term of the span contract and lives there, in one place, so that the
+ * simulator authoring a span and this query going to find it can never fall out
+ * of step. The verdict rows still file under the simulation id: the product's
+ * word for this conversation is unchanged, and only the query knows the other
+ * form.
+ */
+async function theSimulationsTrace(
+  auth: AuthContext,
+  simulation: Simulation,
+): Promise<TraceDetail | undefined> {
+  const traceId = traceIdOfSimulation(simulation.id);
+  // Unreachable: every simulation id egma reads is one egma minted. Answered
+  // rather than asserted, because a grading service is not the place to throw
+  // over an id that came out of its own database.
+  if (traceId === undefined) return undefined;
+
+  return readTrace(auth, traceId, { window: whenItRan(simulation) });
+}
+
+/**
+ * How wide a window a simulation's spans are looked for in.
+ *
+ * Five minutes at each end, which is not rounding slack. The row's two moments
+ * are the *simulator's* own, reported over the wire and written onto the row
+ * where they could be true — so the two clocks are different machines' — and
+ * where a report carried neither, the landing stamped its own arrival instead,
+ * which is later than the conversation by however long delivery took. A span
+ * that fell outside the window would be a hole in a transcript nobody could
+ * see, and the sort key prunes by the minute, so a generous cushion costs
+ * almost nothing to read.
+ */
+const A_GENEROUS_CUSHION_MICROSECONDS = 5n * 60n * 1_000_000n;
+
+function whenItRan(simulation: Simulation): TimeWindow {
+  // A row that never started is bracketed by its own creation, which is
+  // certainly before anything the simulator stamped; one that never landed by
+  // now, which is certainly after.
+  const began = BigInt((simulation.startedAt ?? simulation.createdAt).getTime());
+  const ended = BigInt((simulation.endedAt ?? new Date()).getTime());
+
+  const from =
+    (began < ended ? began : ended) * 1_000n - A_GENEROUS_CUSHION_MICROSECONDS;
+  const to =
+    (began < ended ? ended : began) * 1_000n + A_GENEROUS_CUSHION_MICROSECONDS;
+
+  // The store refuses a window wider than its cap rather than narrowing one, so
+  // a row that sat queued for longer than that is narrowed here — from the end,
+  // which is where the conversation was.
+  const widest = BigInt(MAXIMUM_WINDOW_MILLISECONDS) * 1_000n;
+  return { from: to - from > widest ? to - widest : from, to };
 }
 
 /**
@@ -316,13 +400,15 @@ async function theProductionTrace(claim: GradingClaim): Promise<Resolved> {
 /**
  * What one grader says about this conversation.
  *
- * **A simulation that never ran is `errored` for every grader, and no grader is
- * executed at all.** The agent never joined, the line was never answered, egma's
- * own runtime broke — there is no conversation to judge, and the one thing a
- * test product must never do is score that as the agent behaving badly. The word
- * is `errored` rather than `failed`, the fold keeps the two apart all the way up
- * to the run's headline, and the check is here rather than inside each executor
- * so that no future grader type can get it wrong.
+ * **A conversation with nothing to judge is `errored` for every grader, and no
+ * grader is executed at all.** Either it never happened — the agent never
+ * joined, the line was never answered, egma's own runtime broke — or it happened
+ * and egma cannot read it, because its spans never arrived and no column holds
+ * it. Both are things that went wrong on egma's side of the glass, and the one
+ * thing a test product must never do is score them as the agent behaving badly.
+ * The word is `errored` rather than `failed`, the fold keeps the two apart all
+ * the way up to the run's headline, and the check is here rather than inside
+ * each executor so that no future grader type can get it wrong.
  *
  * It answers with one row per grader, named by the grader's own one check —
  * which is the honest shape while every *authored* type executed makes one. The
@@ -337,13 +423,9 @@ export async function judgmentsOf(
   conversation: Conversation,
   judging: Judging,
 ): Promise<readonly Judgment[]> {
-  if (!conversation.happened) {
-    return [
-      couldNotJudge(
-        grader,
-        `this simulation ended ${conversation.endingReason ?? "without running"}, so there was no conversation to judge.`,
-      ),
-    ];
+  const nothingToJudge = conversation.nothingToJudgeBecause;
+  if (nothingToJudge !== null) {
+    return [couldNotJudge(grader, nothingToJudge)];
   }
 
   try {

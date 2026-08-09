@@ -17,11 +17,12 @@ import type { Conversation } from "../conversation.ts";
  * reach another behavior's judge — not because the fan-out is careful, but
  * because there is nowhere in this type for it to be.
  *
- * Text-only in v1. The three jsonb columns a finished simulation carries have
- * no fixed shape at the write door, so everything here reads defensively and
- * says honestly when what it wanted is not there — an absent transcript is an
- * empty list, not a crash, and a judge shown an empty transcript answers that
- * it cannot determine anything, which is exactly right.
+ * Text-only in v1. Nothing fixes the shape of what arrives here — telemetry is
+ * written by whoever emitted it, and no write door stands between an exporter
+ * and the store — so everything here reads defensively and says honestly when
+ * what it wanted is not there. An absent transcript is an empty list, not a
+ * crash, and a judge shown an empty transcript answers that it cannot determine
+ * anything, which is exactly right.
  */
 export type JudgeInput = {
   /** In the order they were spoken, numbered from one. */
@@ -76,12 +77,14 @@ export type Measure = {
 /**
  * How a judgment points at a turn.
  *
- * The verdict row's column is `cited_span_ids`, and a simulation read from its
- * own header row has no spans yet — the transcript is on the row and the OTLP
- * door is where the two converge later. So a citation names the turn it is
- * about, prefixed, and the prefix is the whole point: on the day a simulation's
- * turns arrive as spans, a reader looking at this column can tell a turn
- * reference from a span id without knowing when the row was written.
+ * The verdict row's column is `cited_span_ids`, and what a judgment cites is a
+ * turn's **position** rather than the id of the span it came on. That is
+ * deliberate on both sources: a judge is shown a numbered transcript and
+ * answers with the numbers it read, so a position is the one reference that is
+ * the same thing in the text the judge saw and in the row the judgment lands
+ * in — and it is still readable for a conversation whose spans have aged out of
+ * the store. The prefix is what lets a reader tell the two kinds apart without
+ * knowing when the row was written.
  */
 export const TURN_REFERENCE_PREFIX = "turn:";
 
@@ -90,9 +93,10 @@ export function turnReference(at: number): string {
 }
 
 /**
- * The conversation, as the declared set. Everything defensive, because the
- * three columns are jsonb and a simulator that wrote something else must make a
- * judge say "I could not tell" rather than make the service fall over.
+ * The conversation, as the declared set. Everything defensive, because nothing
+ * stands between an exporter and the store: telemetry that arrived in a shape
+ * nobody expected must make a judge say "I could not tell" rather than make the
+ * service fall over.
  */
 export function judgeInputOf(conversation: Conversation): JudgeInput {
   const transcript = turnsOf(conversation.transcript);
@@ -100,7 +104,10 @@ export function judgeInputOf(conversation: Conversation): JudgeInput {
   return {
     transcript,
     outcome: {
-      happened: conversation.happened,
+      // Always true by the time a judge is asked anything: a conversation with
+      // nothing to judge is `errored` for every grader without a model being
+      // called, so the one place this could be false never reaches here.
+      happened: conversation.nothingToJudgeBecause === null,
       endingReason: conversation.endingReason,
       turns: transcript.length,
     },
@@ -118,15 +125,14 @@ function objectsOf(value: unknown): readonly Record<string, unknown>[] {
 }
 
 /**
- * One field of a jsonb column as something somebody wrote, or `undefined` when
- * there is nothing there to read.
+ * One field of the assembled conversation as something somebody wrote, or
+ * `undefined` when there is nothing there to read.
  *
  * **Blank is absent**, deliberately: a transcript entry holding an empty string
- * is a turn with nothing said in it, and a tool call event naming `""` names no
- * tool.
+ * is a turn with nothing said in it, and a tool call naming `""` names no tool.
  *
- * Exported because the `tool_calls` grader reads the same column and has to see
- * the same tool calls a judge is shown. Two readings of one shapeless column
+ * Exported because the `tool_calls` grader reads the same list and has to see
+ * the same tool calls a judge is shown. Two readings of one shapeless list
  * would be two answers to one question, and the way to stop that is one reading
  * rather than two careful ones.
  */

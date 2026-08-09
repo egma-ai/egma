@@ -18,7 +18,7 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
   return {
     source: "simulation",
     traceId: "sim_01JQZ0000000000000000000AA",
-    happened: true,
+    nothingToJudgeBecause: null,
     endingReason: "persona_concluded",
     transcript: [],
     events: [],
@@ -72,7 +72,8 @@ describe("a simulation that never ran", () => {
     const [only] = await judgmentsOf(
       grader(),
       conversation({
-        happened: false,
+        nothingToJudgeBecause:
+          "this simulation ended agent_never_joined, so there was no conversation to judge.",
         endingReason: "agent_never_joined",
         // Measures the grader would happily have passed, so the answer cannot
         // be coming from the executor having looked at them.

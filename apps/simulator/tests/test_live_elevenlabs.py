@@ -22,10 +22,10 @@ import pytest
 from conftest import (
     assert_kept_secret,
     credential,
-    events_for,
     has_terminal,
     loopback_spec,
     terminal_event_for,
+    turns_for,
 )
 
 from egma_simulator.pipeline import AGENT_CHANNEL, PERSONA_CHANNEL, channels_of
@@ -73,10 +73,7 @@ async def test_the_persona_speaks_with_a_real_voice(workbench, start_simulator):
 
     # The transcript is what it always was: only the mouth changed, and
     # the persona brain never learned that its words were spoken aloud.
-    spoken = [
-        (turn["speaker"], turn["text"])
-        for turn in events_for(records, SIMULATION_ID, "turn")
-    ]
+    spoken = turns_for(records, SIMULATION_ID)
     assert (SAID in [text for speaker, text in spoken if speaker == "human"]), spoken
     assert ANSWERED in [text for speaker, text in spoken if speaker == "agent"]
 

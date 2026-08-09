@@ -1,12 +1,17 @@
-"""The simulator's side of the wire: three outbound calls, nothing inbound.
+"""The simulator's side of the wire: four outbound calls, nothing inbound.
 
 The simulator pulls its own work rather than being sent it. It claims
 simulations with a capacity declaration, on a request the control plane may
 hold open until there is something to give; it heartbeats each running
-simulation and receives any directive on the answer; and it posts report
-documents as events happen. Every arrow points out, so the simulator needs
-no inbound network surface at all — which is what makes it one more
-container that only dials out.
+simulation and receives any directive on the answer; it posts report
+documents as events happen; and it posts the conversation itself as OTLP
+span batches, at the same ingest door a customer's agent exports to. Every
+arrow points out, so the simulator needs no inbound network surface at all
+— which is what makes it one more container that only dials out.
+
+All four reach the same deployment, so there is one address to configure
+and the telemetry path is derived from it rather than named separately: a
+simulator that can claim work can always file the evidence of it.
 
 In development and test the other end is the workbench. Nothing here knows
 the difference, and nothing here changes when the real control plane
@@ -15,6 +20,7 @@ answers instead: both ends speak the contract, not each other.
 
 from __future__ import annotations
 
+import json
 import logging
 
 import aiohttp
@@ -45,12 +51,23 @@ class HeartbeatFailure(Exception):
     """A heartbeat did not reach the control plane, or came back unreadable."""
 
 
-class ReportRejected(Exception):
-    """The control plane refused a report document; resending cannot help."""
+class DocumentRejected(Exception):
+    """The control plane refused a document; resending cannot help.
+
+    Either kind the ordered sender carries: a report the control plane
+    will not apply, or a span batch the ingest door will not file. Both
+    are terminal for that document and neither is terminal for the
+    simulation."""
 
 
-class TransientReportFailure(Exception):
-    """A report did not get through this time; the same bytes may next time."""
+class TransientDeliveryFailure(Exception):
+    """A document did not get through this time; the same bytes may next time."""
+
+
+# The OTLP/HTTP path, which is the specification's and not egma's: an
+# exporter posts here, and so does the simulator, because a simulation
+# arriving the way a customer's agent arrives is the point.
+OTLP_TRACES_PATH = "/v1/traces"
 
 
 class ControlPlaneClient:
@@ -64,6 +81,11 @@ class ControlPlaneClient:
         service_token: str | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
+        # Sent on every claim as ``wait_seconds`` and enforced locally as the
+        # timeout below: the control plane holds an empty-queue claim open no
+        # longer than the client says it will wait, so the two ends agree and
+        # a quiet queue can never read as a client-side timeout.
+        self._claim_wait_seconds = claim_wait_seconds
         self._claim_timeout = aiohttp.ClientTimeout(
             total=claim_wait_seconds + CLAIM_TIMEOUT_MARGIN_SECONDS
         )
@@ -98,7 +120,11 @@ class ControlPlaneClient:
         try:
             async with self._live_session().post(
                 f"{self._base_url}/v1/claims",
-                json={"claimant": claimant, "capacity": capacity},
+                json={
+                    "claimant": claimant,
+                    "capacity": capacity,
+                    "wait_seconds": self._claim_wait_seconds,
+                },
                 timeout=self._claim_timeout,
             ) as response:
                 if response.status != 200:
@@ -140,23 +166,87 @@ class ControlPlaneClient:
 
     async def report(self, simulation_id: str, serialized: bytes) -> None:
         """Post one already-serialized report document, byte-identically."""
+        await self._post_document(
+            f"{self._base_url}/v1/simulations/{simulation_id}/reports", serialized
+        )
+
+    async def spans(self, simulation_id: str, serialized: bytes) -> None:
+        """Post one already-serialized OTLP span batch, byte-identically.
+
+        The specification's own path, JSON encoding, the service token as
+        bearer — an ordinary OTLP export, refused and retried on exactly
+        the terms a report is. A 400 is the door saying the batch names no
+        simulation it can file under, which resending cannot fix.
+
+        A 200 may still carry a partial success, which is how the
+        specification says an ingest reports data it will not store.
+        Nothing is retried on it — the specification is explicit that
+        rejected data must not be — but the count is said out loud, because
+        evidence quietly dropped is exactly what a verdict must never rest
+        on.
+        """
+        body = await self._post_document(
+            f"{self._base_url}{OTLP_TRACES_PATH}", serialized
+        )
+        rejected, why = _partial_success(body)
+        if rejected:
+            logger.error(
+                "the ingest refused %d of %s's spans and will refuse them "
+                "again, so they are not resent: %s",
+                rejected,
+                simulation_id,
+                why or "it gave no reason",
+            )
+
+    async def _post_document(self, url: str, serialized: bytes) -> str:
+        """One document, posted as the bytes it already is.
+
+        Both directions the ordered sender carries come through here, so
+        what counts as refused and what counts as try-again is decided
+        once. A 4xx says the document is wrong and the same bytes will be
+        wrong next time — except for the two that say "not now": a timeout
+        and a rate limit both mean try again.
+        """
         try:
             async with self._live_session().post(
-                f"{self._base_url}/v1/simulations/{simulation_id}/reports",
+                url,
                 data=serialized,
                 headers={"content-type": "application/json"},
                 timeout=self._brisk_timeout,
             ) as response:
                 if response.status in (200, 202, 204):
-                    return
+                    return await response.text()
                 text = await response.text()
-                # A 4xx says the document is wrong, and the same bytes will
-                # be wrong next time — except for the two that say "not now":
-                # a timeout and a rate limit both mean try again.
                 if response.status in (408, 429):
-                    raise TransientReportFailure(f"{response.status}: {text}")
+                    raise TransientDeliveryFailure(f"{response.status}: {text}")
                 if 400 <= response.status < 500:
-                    raise ReportRejected(f"{response.status}: {text}")
-                raise TransientReportFailure(f"{response.status}: {text}")
+                    raise DocumentRejected(f"{response.status}: {text}")
+                raise TransientDeliveryFailure(f"{response.status}: {text}")
         except UNREACHABLE as error:
-            raise TransientReportFailure(f"{error!r}") from error
+            raise TransientDeliveryFailure(f"{error!r}") from error
+
+
+def _partial_success(body: str) -> tuple[int, str]:
+    """What an OTLP answer says it refused, if it says anything at all.
+
+    An empty body is the whole batch landed, which is the ordinary case
+    and the one worth staying quiet about. Anything unreadable is treated
+    the same way: the status already said the request was accepted, and
+    inventing a refusal out of a body nobody can parse would be worse than
+    trusting the code.
+    """
+    if not body.strip():
+        return 0, ""
+    try:
+        document = json.loads(body)
+    except ValueError:
+        return 0, ""
+    partial = document.get("partialSuccess") if isinstance(document, dict) else None
+    if not isinstance(partial, dict):
+        return 0, ""
+    try:
+        rejected = int(partial.get("rejectedSpans", 0))
+    except (TypeError, ValueError):
+        rejected = 0
+    message = partial.get("errorMessage")
+    return rejected, message if isinstance(message, str) else ""

@@ -33,19 +33,21 @@ the whole conversation. `per_turn` is a series, one sample per turn, which is
 what makes a percentile mean something.
 
 `Arrives as` says where the number comes from on the wire, which is not the same
-question as what it is called here. A **timing event** is its own report event,
-one per measurement, carrying exactly the name in this table. A **terminal
-fact** arrives on the status transition that ends the simulation, inside its
-facts, and the control plane records it under the catalog name — so a threshold
-grader reads one vocabulary whether the number was timed or counted.
+question as what it is called here. A **timing span** is its own span through
+the trace store's ingest, one per measurement, named for exactly the name in
+this table, and the span's own duration *is* the number — nothing carries it a
+second time. A **terminal fact** arrives on the status transition that ends the
+simulation, inside its facts, and the control plane records it under the catalog
+name — so a threshold grader reads one vocabulary whether the number was timed
+or counted.
 
 | Measure | Unit | Taken | Emitted by | Arrives as | What it is |
 | --- | --- | --- | --- | --- | --- |
-| `first_response_latency` | milliseconds | once | every simulation | timing event | How long the agent took to say anything at all, from the moment the simulation began. |
-| `turn_response_latency` | milliseconds | per turn | every simulation | timing event | How long the agent took to answer, measured once for every turn the persona took. |
-| `time_to_first_word` | milliseconds | per turn | voice simulations | timing event | The quiet before the agent's first word of an answer, measured out of the audio rather than off a clock. |
-| `agent_speech_duration` | milliseconds | per turn | voice simulations | timing event | How long the agent spoke for, silence inside the answer excluded. |
-| `persona_speech_duration` | milliseconds | per turn | voice simulations | timing event | How long egma's own synthetic caller spoke for — what the agent was made to listen to, not anything the agent did. |
+| `first_response_latency` | milliseconds | once | every simulation | timing span | How long the agent took to say anything at all, from the moment the simulation began. |
+| `turn_response_latency` | milliseconds | per turn | every simulation | timing span | How long the agent took to answer, measured once for every turn the persona took. |
+| `time_to_first_word` | milliseconds | per turn | voice simulations | timing span | The quiet before the agent's first word of an answer, measured out of the audio rather than off a clock. |
+| `agent_speech_duration` | milliseconds | per turn | voice simulations | timing span | How long the agent spoke for, silence inside the answer excluded. |
+| `persona_speech_duration` | milliseconds | per turn | voice simulations | timing span | How long egma's own synthetic caller spoke for — what the agent was made to listen to, not anything the agent did. |
 | `turn_count` | turns | once | every simulation | terminal fact | How many transcript turns the conversation reached, both speakers counted. |
 | `measured_audio_band_hertz` | hertz | once | voice simulations | terminal fact | The sample rate the simulator actually heard, negotiated or measured and never copied from configuration. |
 
@@ -102,10 +104,12 @@ a rule somebody has to remember.
 - **Measures a customer defines.** The catalog ships as egma's own contract. A
   team that wants a number egma does not measure is asking for a feature, and
   the honest answer today is that the list is this one.
-- **Anything read from a span.** Production conversations arrive through the
-  OTLP door and carry their own attributes. When threshold grading reaches them,
-  what they measure joins this document under the same discipline — named,
-  versioned, and refused at the write door until it is.
+- **Anything a production conversation measures.** A real caller's telemetry
+  arrives through the same OTLP door and carries the agent's own attributes,
+  which is a different measurement from egma standing on one side with a clock.
+  When threshold grading reaches them, what they measure joins this document
+  under the same discipline — named, versioned, and refused at the write door
+  until it is.
 
 ## Changing this catalog
 

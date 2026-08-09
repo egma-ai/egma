@@ -380,7 +380,7 @@ describe("a parameter that arrived empty", () => {
 });
 
 /**
- * Two customers, and the enforcement ticket 03 deferred to here.
+ * Two customers, and the enforcement the ingest door deferred to the reads.
  *
  * The strongest form of the question is a trace id that is *right* — Globex asks
  * for Acme's trace by its actual id, inside the window it actually happened in,

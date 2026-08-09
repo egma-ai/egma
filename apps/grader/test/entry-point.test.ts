@@ -88,7 +88,7 @@ describe("the process the image runs", () => {
     }
 
     const { simulationId, runId } = await conductSimulation(world, {
-      metrics: { turn_response_latency: [900, 1_100] },
+      spans: { measured: { turn_response_latency: [900, 1_100] } },
     });
 
     const verdicts = await eventually(

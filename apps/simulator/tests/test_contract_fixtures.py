@@ -61,6 +61,13 @@ EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
     "report/credentials-echoed.json": ("", "additionalProperties", "connection"),
     "report/failed-without-reason.json": ("/events/0/reason", "type", None),
     "report/running-with-facts.json": ("/events/0", "additionalProperties", "facts"),
+    # The three kinds this direction used to carry. A conversation's record
+    # is its spans now, so a report claiming to carry one is refused at the
+    # same place any other unknown kind is — which is what makes the
+    # retirement a fact of the contract rather than a habit of this process.
+    "report/timing-event-retired.json": ("/events/0/kind", "const", None),
+    "report/tool-call-event-retired.json": ("/events/0/kind", "const", None),
+    "report/turn-event-retired.json": ("/events/0/kind", "const", None),
     "report/unknown-event-kind.json": ("/events/0/kind", "const", None),
 }
 
@@ -182,7 +189,7 @@ def test_the_report_schema_rejects_the_specs_credentials_wherever_they_ride():
 
 
 def test_the_golden_fixtures_cover_what_the_simulator_must_speak():
-    """Both modalities inbound; every event kind and terminal status outbound."""
+    """Both modalities inbound; the lifecycle and nothing else outbound."""
     modalities = {
         document["modality"] for _, document in fixtures_under("spec", "valid")
     }
@@ -193,12 +200,10 @@ def test_the_golden_fixtures_cover_what_the_simulator_must_speak():
         for _, document in fixtures_under("report", "valid")
         for event in document["events"]
     ]
-    assert {event["kind"] for event in events} == {
-        "status",
-        "turn",
-        "tool_call",
-        "timing",
-    }
+    # One kind, and this is the assertion that says so: the report direction
+    # carries the lifecycle and nothing else, because a conversation's record
+    # is the spans it arrived as.
+    assert {event["kind"] for event in events} == {"status"}
     assert {
         event["status"] for event in events if event["kind"] == "status"
     } == {"running", "completed", "failed", "canceled"}

@@ -10,10 +10,13 @@ import {
 import { admitIdentity, onIdentityCreated } from "./auth/provisioning.ts";
 import { agentRoutes } from "./routes/agents.ts";
 import { apiKeyRoutes } from "./routes/api-keys.ts";
+import { claimRoutes } from "./routes/claims.ts";
 import { deviceRoutes } from "./routes/device.ts";
+import { heartbeatRoutes } from "./routes/heartbeats.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
+import { reportRoutes } from "./routes/reports.ts";
 import { runRoutes } from "./routes/runs.ts";
 import { signOutRoutes } from "./routes/sign-out.ts";
 import { signupRoutes } from "./routes/signup.ts";
@@ -22,6 +25,7 @@ import { traceReadRoutes } from "./routes/trace-reads.ts";
 import { traceRoutes } from "./routes/traces.ts";
 import { fixedWindowRateLimit, type RateLimit } from "./http/rate-limit.ts";
 import { webHandler } from "./http/web-handler.ts";
+import { startOrphanSweep, type OrphanSweep } from "./simulation-sweep.ts";
 import type { Config } from "./config.ts";
 
 /** Where the auth provider's own endpoints live, under the shared origin. */
@@ -53,6 +57,11 @@ export type ServerOptions = {
    * for lines, whatever `LOG_LEVEL` a test run was started with.
    */
   readonly logTo?: { write(line: string): void } | undefined;
+  /**
+   * How often the standing orphan sweep runs. Defaults to the ~30s cadence; a
+   * test hands in a shorter one rather than watching a real clock.
+   */
+  readonly orphanSweepIntervalMilliseconds?: number;
 };
 
 export type Api = {
@@ -203,11 +212,41 @@ export function buildApi(options: ServerOptions): Api {
     baseUrl: config.baseUrl,
   });
 
+  // The simulator's claim door. Outside the credentialed scope and the
+  // per-organization rate limit on purpose: the caller is egma's own
+  // simulator, whose service token is the whole gate and resolves to no
+  // customer — so there is no organization to key a budget on, and a busy
+  // run can never eat a customer's request budget from the inside.
+  void app.register(claimRoutes, {
+    serviceToken: config.simulatorServiceToken,
+  });
+
+  // The heartbeat door, beside the claim door on the same terms — and all
+  // the more so, because a busy run beats every few seconds per conversation,
+  // which is exactly the traffic a per-organization budget must never see.
+  void app.register(heartbeatRoutes, {
+    serviceToken: config.simulatorServiceToken,
+  });
+
+  // And the report door, on the claim door's exact terms: the same gate,
+  // the same exemption, and each row's own claimant naming whose
+  // conversation a document may land.
+  void app.register(reportRoutes, {
+    serviceToken: config.simulatorServiceToken,
+  });
+
   // The OTLP door, registered without `fastify-plugin` for the same reason the
   // provider's adapter is: it replaces every body parser inside its own scope
   // so that telemetry arrives as the bytes that were sent, and encapsulation is
-  // what stops that reaching the JSON routes above.
-  void app.register(traceRoutes, { provider: identity.provider, rateLimit });
+  // what stops that reaching the JSON routes above. It takes the service token
+  // beside the customer credentials because it is the one door with two: a
+  // customer key files an agent's traces, and the simulator's own spans arrive
+  // through this same door naming the simulation they are evidence of.
+  void app.register(traceRoutes, {
+    provider: identity.provider,
+    rateLimit,
+    serviceToken: config.simulatorServiceToken,
+  });
 
   // The v1 read surface, in its own scope beside the door rather than inside
   // it. It shares the `/v1/traces` path and none of the door's arrangements: a
@@ -222,6 +261,24 @@ export function buildApi(options: ServerOptions): Api {
   // invitation has no membership, so there is no context to resolve them into
   // and no organization to key a budget on. The token is the credential there.
   void app.register(invitationRoutes, { provider: identity.provider });
+
+  // The standing orphan sweep, started with the server and stopped with it.
+  // Its timer is unref'd, so a shutdown never waits on a sweep that has not
+  // happened; every replica runs one, which the seam makes harmless.
+  let orphanSweep: OrphanSweep | undefined;
+  app.addHook("onReady", async () => {
+    orphanSweep = startOrphanSweep({
+      log: app.log,
+      ...(options.orphanSweepIntervalMilliseconds === undefined
+        ? {}
+        : { intervalMilliseconds: options.orphanSweepIntervalMilliseconds }),
+    });
+  });
+  app.addHook("onClose", async () => {
+    // Awaited, so closing drains any tick in flight: whoever closes the app
+    // and then the stores knows the sweep holds no connection to them.
+    await orphanSweep?.stop();
+  });
 
   return { app, identity };
 }

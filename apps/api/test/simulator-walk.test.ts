@@ -1,0 +1,791 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import http from "node:http";
+import os from "node:os";
+import path from "node:path";
+
+import {
+  createGrader,
+  createPersona,
+  readVerdicts,
+  setJudgeConfiguration,
+  type AuthContext,
+  type NewGrader,
+  type RecordedVerdict,
+} from "@egma/db";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { rowsIn } from "../../../packages/db/test/support/clickhouse.ts";
+import { makeLog } from "../../grader/src/log.ts";
+import { startService, type Service } from "../../grader/src/service.ts";
+import { scriptedJudge } from "../../grader/test/support/scripted-judge.ts";
+import { startInstance, type Instance } from "./support/instance.ts";
+import { NEUTRAL_TRAITS } from "./support/traces.ts";
+
+/**
+ * The whole wire, walked by the shipped simulator: a run started through the
+ * real API, its simulation claimed from the real claim door, conducted by
+ * the real Python service over a Retell-shaped counterpart on loopback,
+ * streamed span by span into the real ClickHouse through the real OTLP
+ * ingest, and reported back through the real report door — queued → claimed
+ * → running → completed, with every lifecycle column read back and checked
+ * for truth.
+ *
+ * Nothing here is a stand-in for egma's own halves: the API listens on a
+ * real port, the database is a real Postgres, the trace store is a real
+ * ClickHouse, and the simulator is the same process `docker compose up`
+ * starts. The one fake is the platform on the far side of the conversation —
+ * a local server speaking Retell's chat wire shape — because the agent under
+ * test is the customer's, and a test that needed a real Retell account would
+ * prove an account rather than the wire.
+ *
+ * **The ordering guarantee is proved here and nowhere better.** The
+ * simulator puts its span batches and its lifecycle documents through one
+ * write-ahead log and one ordered sender, so a terminal report leaves only
+ * after every span before it landed. What that buys is read back the way a
+ * grader will read it: the walk is watched while it runs, and the moment the
+ * simulation row turns terminal the conversation is already queryable in
+ * ClickHouse, root span included.
+ *
+ * **And it runs to a verdict.** The real grader service claims the work the
+ * terminal landing minted, reads the conversation back out of ClickHouse the
+ * way it reads a production trace, and writes verdicts that cite turns by
+ * their position in that transcript. Which closes the walk on the only claim
+ * that matters end to end: a team's check was answered from a conversation
+ * that exists as spans and as nothing else — the row has no column left to
+ * hold one, and this asserts that of the schema itself.
+ *
+ * The judge is scripted, and it is the one seam here that is not a real
+ * deployment's. A criterion written in a team's own words is answered by a
+ * model, and a walk that called one would need an account and a network and
+ * would still not answer the same way twice. Everything around it is real,
+ * including the deterministic grader beside it, whose pass depends on no
+ * model at all.
+ *
+ * The failed walk rides the same session: a second connection whose key the
+ * counterpart refuses, landing `failed` with the honest reason. The canceled
+ * walk is deliberately absent — the cancel directive travels on heartbeat
+ * answers, and the heartbeat route ships separately — so cancellation is
+ * proven at the report door's own seam instead (`reports-routes.test.ts`).
+ */
+
+const API_DIRECTORY = path.join(import.meta.dirname, "..");
+const SIMULATOR_DIRECTORY = path.join(
+  API_DIRECTORY,
+  "../simulator",
+);
+
+/** The token the instance support configures on the API's side. */
+const SERVICE_TOKEN = "egma_st_held-by-this-test-suite-alone";
+
+/** The key the Retell-shaped counterpart accepts, and the one it refuses. */
+const COUNTERPART_KEY = "retell-secret-A1B2C3D4WXYZ";
+const REFUSED_KEY = "retell-secret-NOBODY0000000";
+
+/**
+ * A Retell-shaped chat platform on loopback: the three endpoints the shipped
+ * plug speaks — create-chat, create-chat-completion, end-chat — with
+ * Retell's own field names, bearer-key auth, and a scripted agent behind
+ * them. Strict where the platform is: a wrong key answers 401, which is the
+ * failed walk's whole way in.
+ */
+class RetellCounterpart {
+  private server: http.Server | undefined;
+  private readonly replies = [
+    "Of course — we have Tuesday and Wednesday afternoon free next week.",
+    "Done: you are moved to Wednesday at half past two.",
+  ];
+
+  /** Reply cursor per chat, so two exchanges cannot eat each other's script. */
+  private readonly delivered = new Map<string, number>();
+  port = 0;
+
+  async start(): Promise<void> {
+    this.server = http.createServer((request, response) => {
+      let body = "";
+      request.on("data", (piece: Buffer) => {
+        body += piece.toString("utf8");
+      });
+      request.on("end", () => {
+        this.answer(request, response, body);
+      });
+    });
+    await new Promise<void>((resolve) => {
+      this.server?.listen(0, "127.0.0.1", resolve);
+    });
+    const address = this.server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("the counterpart has no port");
+    }
+    this.port = address.port;
+  }
+
+  private answer(
+    request: http.IncomingMessage,
+    response: http.ServerResponse,
+    body: string,
+  ): void {
+    const send = (status: number, document: Record<string, unknown>): void => {
+      response.writeHead(status, { "content-type": "application/json" });
+      response.end(JSON.stringify(document));
+    };
+
+    if (request.headers.authorization !== `Bearer ${COUNTERPART_KEY}`) {
+      send(401, { error: "invalid api key" });
+      return;
+    }
+
+    const url = request.url ?? "";
+    if (request.method === "POST" && url === "/create-chat") {
+      const chatId = `chat_${randomUUID().replaceAll("-", "").slice(0, 10)}`;
+      this.delivered.set(chatId, 0);
+      send(201, {
+        chat_id: chatId,
+        message_with_tool_calls: [
+          { role: "agent", content: "Lakeside Dental, how can I help?" },
+        ],
+      });
+      return;
+    }
+    if (request.method === "POST" && url === "/create-chat-completion") {
+      const { chat_id: chatId } = JSON.parse(body) as { chat_id?: string };
+      const turn = chatId === undefined ? undefined : this.delivered.get(chatId);
+      if (chatId === undefined || turn === undefined) {
+        send(422, { error: "no such chat" });
+        return;
+      }
+      const reply = this.replies[turn];
+      if (reply === undefined) {
+        send(422, { error: "the script ran dry" });
+        return;
+      }
+      this.delivered.set(chatId, turn + 1);
+      send(200, { messages: [{ role: "agent", content: reply }] });
+      return;
+    }
+    if (request.method === "PATCH" && url.startsWith("/end-chat/")) {
+      send(200, {});
+      return;
+    }
+    send(404, { error: `nothing at ${url}` });
+  }
+
+  async stop(): Promise<void> {
+    await new Promise<void>((resolve) => {
+      this.server?.close(() => {
+        resolve();
+      });
+    });
+  }
+}
+
+/** What the team wrote down, in their own words, for the judge to answer. */
+const THE_BEHAVIOR = "confirms the new time back before finishing";
+
+/**
+ * A phrase the agent has to have said — the deterministic grader, and the one
+ * that cites the turn it found. Its words are the counterpart's scripted
+ * answer, so a pass here can only have come from the transcript egma
+ * assembled out of the spans the simulator streamed.
+ */
+const THE_PHRASE = "Wednesday afternoon";
+
+let instance: Instance;
+let counterpart: RetellCounterpart;
+let simulator: ChildProcess | undefined;
+let grader: Service | undefined;
+let simulatorSaid = "";
+let scratch: string;
+
+/** One request against the instance as a person's terminal makes one. */
+async function call(
+  method: string,
+  route: string,
+  options: { key?: string; body?: unknown; cookie?: string } = {},
+): Promise<{ status: number; body: Record<string, unknown>; setCookie: string }> {
+  const response = await fetch(`${instance.origin}${route}`, {
+    method,
+    headers: {
+      "content-type": "application/json",
+      ...(options.key === undefined
+        ? {}
+        : { authorization: `Bearer ${options.key}` }),
+      ...(options.cookie === undefined ? {} : { cookie: options.cookie }),
+    },
+    ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+  });
+  const text = await response.text();
+  return {
+    status: response.status,
+    body: (text === "" ? {} : JSON.parse(text)) as Record<string, unknown>,
+    setCookie: response.headers.get("set-cookie") ?? "",
+  };
+}
+
+/**
+ * Sign up over the wire and come back holding a project-scoped key — plus
+ * the tenancy the persona seam needs, because no persona route ships yet
+ * and the caller authors one at the db seam this process shares.
+ */
+async function signedUpKey(): Promise<{
+  key: string;
+  userId: string;
+  organizationId: string;
+  projectId: string;
+}> {
+  const signedUp = await call("POST", "/api/signup", {
+    body: {
+      email: "ada@acme.example",
+      password: "a-password-long-enough-1",
+      organizationName: "Acme",
+    },
+  });
+  expect(signedUp.status, JSON.stringify(signedUp.body)).toBe(201);
+  const cookie = signedUp.setCookie.split(";", 1)[0] ?? "";
+  const landed = signedUp.body as unknown as {
+    userId: string;
+    organization: { id: string };
+    project: { id: string };
+  };
+
+  const minted = await call("POST", "/api/keys", {
+    cookie,
+    body: { name: "walking", project_id: landed.project.id },
+  });
+  expect(minted.status, JSON.stringify(minted.body)).toBe(201);
+  return {
+    key: String(minted.body.secret),
+    userId: landed.userId,
+    organizationId: landed.organization.id,
+    projectId: landed.project.id,
+  };
+}
+
+/** What the row itself says, read raw — the truth the walk must land. */
+async function rowOf(simulationId: string): Promise<Record<string, unknown>> {
+  const { rows } = await instance.database.sql(
+    `select status, ending_reason, claimed_by, started_at, ended_at,
+            turn_count, provider_reference, measured_audio_band_hertz,
+            cancel_requested_at
+       from simulation where id = $1`,
+    [simulationId],
+  );
+  const row = rows[0];
+  if (row === undefined) throw new Error(`no row for ${simulationId}`);
+  return row;
+}
+
+/**
+ * The trace a simulation's spans belong to, derived here independently of
+ * both the emitter and the ingest: the simulation id's own 128 bits, the 26
+ * Crockford base32 characters after `sim_` written as 32 lowercase hex. A
+ * derivation this test computed for itself is what makes finding the rows
+ * proof of anything — asking either side where it filed them would not be.
+ */
+const CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+function traceIdOf(simulationId: string): string {
+  let value = 0n;
+  for (const character of simulationId.slice("sim_".length)) {
+    const digit = CROCKFORD_ALPHABET.indexOf(character);
+    expect(digit, `${simulationId} is not Crockford base32`).toBeGreaterThan(-1);
+    value = (value << 5n) | BigInt(digit);
+  }
+  return value.toString(16).padStart(32, "0");
+}
+
+type StoredSpan = {
+  readonly name: string;
+  readonly kind: string;
+  readonly text: string;
+  readonly duration_ns: string;
+  readonly span_id: string;
+  readonly parent_span_id: string;
+  readonly source: string;
+  readonly emitter: string;
+  readonly run_id: string;
+  readonly agent_id: string;
+};
+
+/** One conversation as it stands in the trace store, oldest span first. */
+async function storedSpans(traceId: string): Promise<StoredSpan[]> {
+  return rowsIn<StoredSpan>(
+    instance.traceStore,
+    `select name, kind, text, toString(duration_ns) as duration_ns, span_id,
+            parent_span_id, source, emitter, run_id, agent_id
+       from spans
+      where trace_id = '${traceId}'
+      order by started_at, span_id`,
+  );
+}
+
+/** The verdicts on one conversation, once the grader has written them. */
+async function verdictsOn(
+  auth: AuthContext,
+  simulationId: string,
+  atLeast: number,
+  within: number,
+): Promise<readonly RecordedVerdict[]> {
+  const deadline = Date.now() + within;
+  for (;;) {
+    const { verdicts } = await readVerdicts(auth, simulationId);
+    if (verdicts.length >= atLeast) return verdicts;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `${simulationId} has ${verdicts.length} verdict(s) after ${within}ms, ` +
+          `wanted ${atLeast}`,
+      );
+    }
+    await new Promise((resume) => setTimeout(resume, 100));
+  }
+}
+
+async function gradingJobsFor(simulationId: string): Promise<number> {
+  const { rows } = await instance.database.sql<{ count: string }>(
+    "select count(*) as count from grading_job where simulation_id = $1",
+    [simulationId],
+  );
+  return Number(rows[0]?.count);
+}
+
+/** What one poll of a running simulation saw, in both stores at once. */
+type Sighting = {
+  readonly status: string;
+  readonly spans: readonly string[];
+};
+
+/**
+ * Watch one simulation from queued to terminal, reading both stores as it
+ * goes, and answer with everything seen — including one last look taken the
+ * instant the row turned terminal.
+ *
+ * The order inside the loop is the whole point. Spans are read *first* and
+ * the row's status *second*, so a sighting that says terminal is saying the
+ * spans beside it were already there before the transition was visible. Then
+ * the terminal sighting is taken again, spans last, because what has to be
+ * true is the strong direction: when the control plane records a terminal
+ * transition, the evidence a verdict will cite is already stored.
+ */
+async function watchToTerminal(
+  simulationId: string,
+  traceId: string,
+  within: number,
+): Promise<{ seen: Sighting[]; atTerminal: readonly string[] }> {
+  const deadline = Date.now() + within;
+  const seen: Sighting[] = [];
+  for (;;) {
+    const spans = (await storedSpans(traceId)).map((span) => span.name);
+    const status = String((await rowOf(simulationId)).status);
+    seen.push({ status, spans });
+    if (status === "completed" || status === "failed" || status === "canceled") {
+      return {
+        seen,
+        atTerminal: (await storedSpans(traceId)).map((span) => span.name),
+      };
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `simulation ${simulationId} is still ${status} after ${within}ms; ` +
+          `the simulator said:\n${simulatorSaid}`,
+      );
+    }
+    await new Promise((resume) => setTimeout(resume, 25));
+  }
+}
+
+/** Poll one run until it reaches a terminal status, or say what it was doing. */
+async function settledRun(
+  key: string,
+  runId: string,
+  within: number,
+): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + within;
+  for (;;) {
+    const read = await call("GET", `/api/runs/${runId}`, { key });
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    const status = String(read.body.status);
+    if (status === "completed" || status === "canceled") return read.body;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `run ${runId} is still ${status} after ${within}ms; the simulator said:\n` +
+          simulatorSaid,
+      );
+    }
+    await new Promise((resume) => setTimeout(resume, 250));
+  }
+}
+
+beforeAll(async () => {
+  scratch = await mkdtemp(path.join(os.tmpdir(), "egma-simulator-walk-"));
+  counterpart = new RetellCounterpart();
+  await counterpart.start();
+  // The trace store gets its schema here, because this walk reads the
+  // conversation back out of it rather than only off the row.
+  instance = await startInstance("simulator_walk", { web: false, traces: true });
+}, 120_000);
+
+afterAll(async () => {
+  simulator?.kill("SIGTERM");
+  grader?.stop();
+  await grader?.finished;
+  await instance?.close();
+  await counterpart?.stop();
+  await rm(scratch, { recursive: true, force: true });
+});
+
+describe("the shipped simulator against the real API", () => {
+  it(
+    "walks queued → claimed → running → completed, and a refused key to an honest failed",
+    { timeout: 90_000 },
+    async () => {
+      const { key, userId, organizationId, projectId } = await signedUpKey();
+
+      // The agent and the way to reach it — a retell chat connection whose
+      // key the counterpart accepts, and a second whose key it refuses.
+      const registered = await call("POST", "/api/agents", {
+        key,
+        body: {
+          name: "Front desk",
+          connection: {
+            type: "retell",
+            modality: "chat",
+            config: { retellAgentId: "agent_under_walk" },
+            credentials: { apiKey: COUNTERPART_KEY },
+          },
+        },
+      });
+      expect(registered.status, JSON.stringify(registered.body)).toBe(201);
+      const agentId = (registered.body.agent as { id: string }).id;
+      const goodConnection = (registered.body.connection as { id: string }).id;
+
+      const attached = await call("POST", `/api/agents/${agentId}/connections`, {
+        key,
+        body: {
+          type: "retell",
+          modality: "chat",
+          config: { retellAgentId: "agent_under_walk" },
+          credentials: { apiKey: REFUSED_KEY },
+        },
+      });
+      expect(attached.status, JSON.stringify(attached.body)).toBe(201);
+      const refusedConnection = (attached.body.connection as { id: string }).id;
+
+      // Point both connections at the counterpart. `baseUrl` is the shipped
+      // plug's own documented config key — what lets an exchange land on a
+      // Retell-shaped server on loopback — but the connection factory does
+      // not take it from customers yet, so the harness writes it the way a
+      // deployment pointing at a proxy one day would. Raw SQL on purpose,
+      // and the only hand this test lays on any table.
+      await instance.database.sql(
+        `update connection
+            set config = config || jsonb_build_object('baseUrl', $1::text)
+          where id in ($2, $3)`,
+        [
+          `http://127.0.0.1:${counterpart.port}`,
+          goodConnection,
+          refusedConnection,
+        ],
+      );
+
+      // The persona, the project's grader and its judge are authored at the
+      // seam — no route ships for any of them — and this process shares the
+      // instance's database connection.
+      const auth: AuthContext = {
+        userId,
+        organizationId,
+        projectId,
+        role: "member",
+        via: "session",
+      };
+      await createPersona(auth, {
+        name: "Impatient Rita",
+        traits: NEUTRAL_TRAITS,
+      });
+      const phraseGrader = await createGrader(auth, {
+        name: "Reads an afternoon back",
+        type: "phrase_match",
+        config: {
+          required: [{ text: THE_PHRASE, match: "contains" }],
+          banned: [],
+          speaker: "agent",
+        },
+      } as NewGrader);
+      await setJudgeConfiguration(
+        { ...auth, role: "admin" },
+        {
+          provider: "openai",
+          model: "gpt-4.1-mini",
+          key: "sk-walk-judge-never-called-over-a-network",
+        },
+      );
+
+      const pushed = await call("POST", "/api/tests", {
+        key,
+        body: {
+          name: "Reschedules a booked appointment",
+          scenario:
+            "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
+          expected_behaviors: [THE_BEHAVIOR],
+          personas: ["Impatient Rita"],
+        },
+      });
+      expect(pushed.status, JSON.stringify(pushed.body)).toBe(201);
+      const versionId = String(pushed.body.version_id);
+
+      // Both runs queued before the simulator exists, so the walk starts
+      // from the resting state a trigger leaves behind.
+      const startRunOver = async (connection: string) => {
+        const started = await call("POST", "/api/runs", {
+          key,
+          body: { connection, test_versions: [versionId] },
+        });
+        expect(started.status, JSON.stringify(started.body)).toBe(201);
+        const simulations = started.body.simulations as { id: string }[];
+        const first = simulations[0];
+        if (first === undefined) throw new Error("the run has no simulation");
+        return { runId: String(started.body.id), simulationId: first.id };
+      };
+      const conducted = await startRunOver(goodConnection);
+      const refused = await startRunOver(refusedConnection);
+
+      // The shipped service, exactly as compose starts it: pointed at this
+      // instance, holding the deployment's service token, everything else
+      // its defaults — the scripted persona model included.
+      simulator = spawn("uv", ["run", "--frozen", "egma-simulator"], {
+        cwd: SIMULATOR_DIRECTORY,
+        env: {
+          ...process.env,
+          EGMA_SIMULATOR_CONTROL_PLANE_URL: instance.origin,
+          EGMA_SIMULATOR_SERVICE_TOKEN: SERVICE_TOKEN,
+          EGMA_SIMULATOR_CLAIMANT: "walking-simulator-1",
+          EGMA_SIMULATOR_CLAIM_WAIT_SECONDS: "2",
+          EGMA_SIMULATOR_HEARTBEAT_SECONDS: "1",
+          EGMA_SIMULATOR_WAL_DIR: path.join(scratch, "wal"),
+          EGMA_SIMULATOR_BLOB_DIR: path.join(scratch, "blobs"),
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      simulator.stdout?.on("data", (piece: Buffer) => {
+        simulatorSaid += piece.toString("utf8");
+      });
+      simulator.stderr?.on("data", (piece: Buffer) => {
+        simulatorSaid += piece.toString("utf8");
+      });
+
+      // The real grader, in this process and against these same two stores,
+      // claiming the work each terminal landing mints. Started beside the
+      // simulator rather than after it, so the walk to a verdict is one
+      // continuous thing and not a second act arranged afterwards.
+      const judge = scriptedJudge({
+        answers: {
+          [THE_BEHAVIOR]: {
+            decision: "met",
+            rationale: "the agent named an afternoon back before finishing.",
+            citedTurns: [3],
+          },
+        },
+      });
+      grader = startService({
+        config: {
+          databaseUrl: "",
+          clickhouseUrl: "",
+          // Both stores are already connected by the instance this process
+          // shares, and the master key with them.
+          encryptionKey: undefined,
+          claimant: "walking-grader-1",
+          capacity: 4,
+          heartbeatSeconds: 1,
+          leaseSeconds: 3_600,
+          sweepSeconds: 3_600,
+          traceIdleSeconds: 3_600,
+          logLevel: "ERROR",
+        },
+        log: makeLog("ERROR", "walking-grader-1"),
+        makers: judge.makers,
+      });
+
+      // The conversation watched as it happens, in both stores at once.
+      const traceId = traceIdOf(conducted.simulationId);
+      const watched = await watchToTerminal(
+        conducted.simulationId,
+        traceId,
+        60_000,
+      );
+
+      // The whole walk, as a person watching the run would see it settle.
+      const conductedRun = await settledRun(key, conducted.runId, 60_000);
+      const refusedRun = await settledRun(key, refused.runId, 60_000);
+
+      // Streamed, not posted at the end: turns were queryable in ClickHouse
+      // while the simulation was still running.
+      const whileRunning = watched.seen.filter(
+        (sighting) => sighting.status === "running" && sighting.spans.length > 0,
+      );
+      expect(
+        whileRunning.length,
+        `no span was ever seen while the simulation ran; sightings: ${JSON.stringify(
+          watched.seen,
+        )}`,
+      ).toBeGreaterThan(0);
+      expect(whileRunning[0]?.spans).toContain("agent_turn");
+      // And partial while it ran: the root closes the trace, so a live
+      // reader seeing it would mean the conversation was already over.
+      expect(whileRunning[0]?.spans).not.toContain("simulation");
+
+      // The guarantee: at the moment the row went terminal, the whole
+      // conversation was already stored — root span and all.
+      expect(watched.atTerminal).toContain("simulation");
+
+      // The conversation that happened: completed, concluded by the persona,
+      // and every lifecycle column telling the truth about it.
+      const row = await rowOf(conducted.simulationId);
+      expect(row.status).toBe("completed");
+      expect(row.ending_reason).toBe("persona_concluded");
+      expect(row.claimed_by).toBe("walking-simulator-1");
+      // Greeting, the scenario's one sentence, the scripted answer, and the
+      // persona's goodbye: four turns, counted by the simulator itself.
+      expect(row.turn_count).toBe(4);
+      // Retell's own id for the exchange, echoed off the counterpart.
+      expect(String(row.provider_reference)).toMatch(/^chat_/);
+      expect(row.measured_audio_band_hertz).toBeNull();
+      const startedAt = new Date(String(row.started_at));
+      const endedAt = new Date(String(row.ended_at));
+      expect(startedAt.getTime()).toBeLessThanOrEqual(endedAt.getTime());
+      expect(await gradingJobsFor(conducted.simulationId)).toBe(1);
+
+      // The conversation itself, read back out of the trace store the way a
+      // grader will read it — one span per timed thing, nothing invented.
+      const spans = await storedSpans(traceId);
+      const names = spans.map((span) => span.name);
+      expect(names.filter((name) => name === "agent_turn")).toHaveLength(2);
+      expect(names.filter((name) => name === "human_turn")).toHaveLength(2);
+      expect(names.filter((name) => name === "turn_response_latency")).toHaveLength(1);
+      expect(names).toContain("first_response_latency");
+      expect(names.filter((name) => name === "simulation")).toHaveLength(1);
+      // What the row counted and what the store holds are one conversation.
+      expect(names.filter((name) => name.endsWith("_turn"))).toHaveLength(
+        Number(row.turn_count),
+      );
+
+      // What was said, in order, with the transcript's two labels riding the
+      // span names — the speaker is the name, so nothing can disagree with it.
+      expect(
+        spans
+          .filter((span) => span.name.endsWith("_turn"))
+          .map((span) => [span.name, span.text]),
+      ).toEqual([
+        ["agent_turn", "Lakeside Dental, how can I help?"],
+        [
+          "human_turn",
+          "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
+        ],
+        [
+          "agent_turn",
+          "Of course — we have Tuesday and Wednesday afternoon free next week.",
+        ],
+        ["human_turn", "That covers everything I needed. Thank you, goodbye."],
+      ]);
+
+      // Filed under the customer's own row, from egma's own side of the
+      // conversation, and never from anything the payload claimed.
+      const root = spans.find((span) => span.name === "simulation");
+      expect(root?.kind).toBe("root");
+      expect(root?.parent_span_id).toBe("");
+      for (const span of spans) {
+        expect(span.source).toBe("simulation");
+        expect(span.emitter).toBe("egma-runtime");
+        expect(span.run_id).toBe(conducted.runId);
+        expect(span.agent_id).toBe(agentId);
+        if (span !== root) expect(span.parent_span_id).toBe(root?.span_id);
+      }
+
+      // A timing span's own duration is the measurement, in nanoseconds.
+      for (const span of spans) {
+        if (span.name.endsWith("_latency")) {
+          expect(Number(span.duration_ns)).toBeGreaterThan(0);
+        }
+      }
+
+      // Every span landed once. The simulator resends byte-identically and
+      // the store dedups on the ids it minted, so no retry can double a turn.
+      expect(new Set(spans.map((span) => span.span_id)).size).toBe(spans.length);
+
+      expect(conductedRun.status).toBe("completed");
+      expect(conductedRun.completed_count).toBe(1);
+      expect(conductedRun.failed_count).toBe(0);
+
+      // The conversation that could not happen: the platform refused the
+      // key, and the record says failed with the simulator's honest word —
+      // never a judgement of an agent nothing ever reached.
+      const refusedRow = await rowOf(refused.simulationId);
+      expect(refusedRow.status).toBe("failed");
+      expect(refusedRow.ending_reason).toBe("simulator_error");
+      expect(refusedRow.claimed_by).toBe("walking-simulator-1");
+      expect(await gradingJobsFor(refused.simulationId)).toBe(1);
+
+      // A simulation that never got a conversation still says it happened:
+      // one root span, no turns, nothing invented to fill the silence.
+      const refusedSpans = await storedSpans(traceIdOf(refused.simulationId));
+      expect(refusedSpans.map((span) => span.name)).toEqual(["simulation"]);
+
+      expect(refusedRun.status).toBe("completed");
+      expect(refusedRun.completed_count).toBe(0);
+      expect(refusedRun.failed_count).toBe(1);
+
+      // And the verdict, which is what the whole walk was for. Two graders
+      // judged this conversation — the project's phrase match and the test's
+      // own expected behavior — and both were answered out of a transcript
+      // that exists only as the spans above.
+      const verdicts = await verdictsOn(auth, conducted.simulationId, 2, 30_000);
+      const phrase = verdicts.find(
+        (verdict) => verdict.graderId === phraseGrader.id,
+      );
+      const behavior = verdicts.find(
+        (verdict) => verdict.graderId === "expected_behaviors",
+      );
+
+      expect(phrase).toMatchObject({
+        verdict: "passed",
+        traceId: conducted.simulationId,
+        runId: conducted.runId,
+        agentId,
+      });
+      // Cited at its position in the span-assembled transcript: the third
+      // thing said, which is the agent turn carrying the phrase — the same
+      // turn the store holds and the same one this test read back above.
+      expect(phrase?.citedSpanIds).toEqual(["turn:3"]);
+      expect(
+        spans.filter((span) => span.name.endsWith("_turn"))[2]?.text,
+      ).toContain(THE_PHRASE);
+
+      // The dimension is the behavior's position in the test, which is how a
+      // page lines a run's checks up whatever each one says.
+      expect(behavior).toMatchObject({ verdict: "passed", dimension: "behavior_1" });
+      // The judge was shown the conversation egma assembled, not a report:
+      // four turns, the ending the row records, and no tool call, because the
+      // counterpart made none.
+      const [asked] = judge.asked;
+      expect(asked?.criterion).toBe(THE_BEHAVIOR);
+      expect(asked?.evidence.transcript).toHaveLength(4);
+      expect(asked?.evidence.outcome).toMatchObject({
+        happened: true,
+        endingReason: "persona_concluded",
+        turns: 4,
+      });
+
+      // And the row it was all filed against holds no conversation, because
+      // the table has nowhere left to put one. Asked of the schema rather
+      // than of a row: a column nobody writes is not the same fact as a
+      // column that does not exist.
+      const { rows: gone } = await instance.database.sql<{
+        column_name: string;
+      }>(
+        `select column_name from information_schema.columns
+          where table_name = 'simulation'
+            and column_name in ('transcript', 'events', 'metrics')`,
+      );
+      expect(gone).toEqual([]);
+    },
+  );
+});

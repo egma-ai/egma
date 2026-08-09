@@ -1,5 +1,5 @@
 {
-  "id": "b1b9574f-7250-4de9-a128-52aa8d14835c",
+  "id": "465858f7-1aea-4731-8de6-be8ccd40c9ad",
   "prevId": "2c6eba9f-0b50-4064-ae5d-1cfe11fe36f2",
   "version": "7",
   "dialect": "postgresql",
@@ -1995,7 +1995,7 @@
         },
         "connection_type_allowed": {
           "name": "connection_type_allowed",
-          "value": "\"connection\".\"type\" in ('retell', 'phone', 'livekit')"
+          "value": "\"connection\".\"type\" in ('retell', 'phone')"
         },
         "connection_modality_allowed": {
           "name": "connection_modality_allowed",
@@ -3396,7 +3396,7 @@
         },
         "run_event_reason_agrees": {
           "name": "run_event_reason_agrees",
-          "value": "\"run_event\".\"reason\" is null\n        or (\"run_event\".\"status\" = 'completed' and \"run_event\".\"reason\" in ('persona_concluded', 'agent_ended', 'limit_reached'))\n        or (\"run_event\".\"status\" = 'failed' and \"run_event\".\"reason\" in ('agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned'))"
+          "value": "\"run_event\".\"reason\" is null\n        or (\"run_event\".\"status\" = 'completed' and \"run_event\".\"reason\" in ('persona_concluded', 'agent_ended', 'limit_reached'))\n        or (\"run_event\".\"status\" = 'failed' and \"run_event\".\"reason\" in ('agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned', 'dispatch_failed'))"
         }
       },
       "isRLSEnabled": false
@@ -3864,7 +3864,7 @@
         },
         "simulation_connection_type_allowed": {
           "name": "simulation_connection_type_allowed",
-          "value": "\"simulation\".\"connection_type\" in ('retell', 'phone', 'livekit')"
+          "value": "\"simulation\".\"connection_type\" in ('retell', 'phone')"
         },
         "simulation_modality_allowed": {
           "name": "simulation_modality_allowed",
@@ -3876,11 +3876,11 @@
         },
         "simulation_ending_reason_allowed": {
           "name": "simulation_ending_reason_allowed",
-          "value": "\"simulation\".\"ending_reason\" is null or \"simulation\".\"ending_reason\" in ('persona_concluded', 'agent_ended', 'limit_reached', 'agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned')"
+          "value": "\"simulation\".\"ending_reason\" is null or \"simulation\".\"ending_reason\" in ('persona_concluded', 'agent_ended', 'limit_reached', 'agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned', 'dispatch_failed')"
         },
         "simulation_ending_reason_agrees": {
           "name": "simulation_ending_reason_agrees",
-          "value": "case \"simulation\".\"status\"\n        when 'completed' then \"simulation\".\"ending_reason\" in ('persona_concluded', 'agent_ended', 'limit_reached')\n        when 'failed' then \"simulation\".\"ending_reason\" in ('agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned')\n        else \"simulation\".\"ending_reason\" is null\n      end"
+          "value": "case \"simulation\".\"status\"\n        when 'completed' then \"simulation\".\"ending_reason\" in ('persona_concluded', 'agent_ended', 'limit_reached')\n        when 'failed' then \"simulation\".\"ending_reason\" in ('agent_never_joined', 'not_answered', 'capacity', 'simulator_error', 'orphaned', 'dispatch_failed')\n        else \"simulation\".\"ending_reason\" is null\n      end"
         },
         "simulation_test_pin_columns_agree": {
           "name": "simulation_test_pin_columns_agree",

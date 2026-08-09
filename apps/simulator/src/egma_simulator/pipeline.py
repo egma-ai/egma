@@ -78,7 +78,7 @@ from .speech import (
     spoken_seconds,
     voice_from_traits,
 )
-from .walk import OnTiming
+from .walk import OnSpeech, OnTiming
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +174,7 @@ def assemble(
     blobs: BlobStore,
     speech: SpeechProviders = SCRIPTED_PAIR,
     on_timing: OnTiming | None = None,
+    on_speech: OnSpeech | None = None,
 ) -> Assembled:
     """Build one simulation's pipeline from its spec.
 
@@ -209,6 +210,7 @@ def assemble(
         blobs=blobs,
         recording_key=f"{spec.simulation_id}/{RECORDING_NAME}",
         on_timing=on_timing,
+        on_speech=on_speech,
     )
     return Assembled(plug=speech_legs, voice=speech_legs)
 
@@ -286,12 +288,14 @@ class VoicePipeline:
         recording_key: str,
         speech: SpeechProviders = SCRIPTED_PAIR,
         on_timing: OnTiming | None = None,
+        on_speech: OnSpeech | None = None,
     ) -> None:
         self._transport = transport
         self._band_hz = transport.sample_rate_hz
         self._blobs = blobs
         self._recording_key = recording_key
         self._on_timing = on_timing
+        self._on_speech = on_speech
 
         self._legs = build_legs(
             speech, voice=voice, sample_rate_hz=self._band_hz
@@ -402,8 +406,14 @@ class VoicePipeline:
         spoken = await self._speak(text)
         answer = await self._transport.deliver(spoken)
         if answer.audio is None:
-            return AgentReply(text=None, ended=answer.ended)
-        return AgentReply(text=await self._hear(answer.audio), ended=answer.ended)
+            return AgentReply(
+                text=None, ended=answer.ended, tool_calls=answer.tool_calls
+            )
+        return AgentReply(
+            text=await self._hear(answer.audio),
+            ended=answer.ended,
+            tool_calls=answer.tool_calls,
+        )
 
     async def close(self) -> None:
         try:
@@ -433,9 +443,12 @@ class VoicePipeline:
         )
         await self._reach(self._sink.spoken)
         pcm = self._sink.spoken_audio()
-        await self._measure(
-            "persona_speech_duration", duration_seconds(pcm, self._band_hz)
-        )
+        spoken_for = duration_seconds(pcm, self._band_hz)
+        await self._measure("persona_speech_duration", spoken_for)
+        # The persona's words were recorded when they were decided, a
+        # moment before this; how long they took to say is known only now,
+        # and it is what gives that turn its length on the record.
+        await self._spoke("human", spoken_for)
         return Utterance(pcm=pcm, sample_rate_hz=self._band_hz)
 
     async def _hear(self, speech: Utterance) -> str:
@@ -447,6 +460,13 @@ class VoicePipeline:
         await self._measure(
             "agent_speech_duration",
             spoken_seconds(speech.pcm, speech.sample_rate_hz),
+        )
+        # The whole utterance, ear to ear — silence inside it included,
+        # because that is the length of the turn even though it is not the
+        # length of the speech. The turn it belongs to is recorded after
+        # the words come back out of the transcriber.
+        await self._spoke(
+            "agent", duration_seconds(speech.pcm, speech.sample_rate_hz)
         )
         self._before_turn()
         self._sink.before_hearing()
@@ -484,6 +504,10 @@ class VoicePipeline:
     async def _measure(self, measure: str, seconds: float) -> None:
         if self._on_timing is not None:
             await self._on_timing(measure, seconds * 1000)
+
+    async def _spoke(self, speaker: str, seconds: float) -> None:
+        if self._on_speech is not None:
+            await self._on_speech(speaker, seconds)
 
     async def _reach(
         self, event: asyncio.Event, *, within: float | None = None

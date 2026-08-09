@@ -95,30 +95,65 @@ const CONTEXT_ESTABLISHING = [
 const INSTANCE_SCOPED = ["instanceIsClaimed"];
 
 /**
- * The exports that dispatch egma's own work across the whole deployment.
+ * The exports that dispatch egma's own work across the whole deployment, and
+ * the ones that keep a dispatch honest afterwards.
  *
- * The grader service stands behind every organization at once and holds no
- * credential, because there is no honest one to give it: an API key minted
- * inside one customer would either see too little to do the job or be shared
- * between customers to do it. So it is handed work instead of asked for a
- * credential — and the two calls that hand it out are these.
+ * The grader and the simulator each stand behind every organization at once
+ * and hold no credential, because there is no honest one to give them: an API
+ * key minted inside one customer would either see too little to do the job or
+ * be shared between customers to do it. So each is handed work instead of
+ * asked for a credential — the claims hand it out, and the simulator's
+ * heartbeat, orphan sweep and standing resolver stand on the same ground for
+ * the same reason: a beat arrives bearing the service token, which resolves
+ * to nobody, silence is noticed by nobody in particular, and a report about
+ * a held row arrives from the same nobody the row must answer for.
+ *
+ * `claimSimulations` was added on 2026-08-08 with the simulator's claim door,
+ * deliberately and after the rule stopped the build: the tenancy-scoped claim
+ * it replaced had no production caller, and the real one reaches every
+ * customer's queue on the grading claim's exact terms.
+ * `recordSimulationHeartbeat` and `sweepOrphanedSimulations` followed the
+ * same day on the same replaced-function terms: a heartbeat can only stamp a
+ * row already claimed under the caller's own name and answers one boolean
+ * egma itself wrote, and the sweep moves only rows the claim machinery
+ * stamped, filing each orphan's grading work under the tenancy the row
+ * itself carries.
+ *
+ * `resolveSimulationStanding` was added the same day with the report door, on
+ * the same terms one step later in the same lifecycle: a simulator calling
+ * back about a row it already holds still has no credential, so the row is
+ * looked up by the id the claim itself handed out, and the answer carries the
+ * lifecycle stamps and the same narrowed context the claim built — which is
+ * what every write about the row then goes through. The ingest door's
+ * service path asks it the same way for arriving telemetry, added the same
+ * day: the answer's pins are what a simulation's spans are filed under, read
+ * off egma's own row rather than off anything the payload claimed.
  *
  * This category is narrower than it looks, and the rule enforces the property
  * that makes it safe: **nothing here may take an argument by which a caller
- * could name a customer.** A claimant's name and a capacity say who is asking
- * and how much they can hold; neither says whose work to bring back. A function
- * here that grew an `organizationId` or a `projectId` would be an ordinary
- * cross-tenant read wearing an exemption, and the rule refuses it.
+ * could name a customer.** A claimant's name, a capacity, a simulation id, a
+ * staleness window — each says which piece of egma's own bookkeeping is
+ * meant; none says whose data to bring back. A function here that grew an
+ * `organizationId` or a `projectId` would be an ordinary cross-tenant read
+ * wearing an exemption, and the rule refuses it.
  *
- * The rest of what makes it safe is not mechanical and is written out where the
- * functions live: the only table either reaches is egma's own grading queue, a
- * claim carries identifiers and tenancy rather than anything a customer wrote,
- * and every claim arrives with the `AuthContext` narrowed to that job's own
- * organization and project — which is what the grading itself goes through.
+ * The rest of what makes it safe is not mechanical and is written out where
+ * the functions live: the only rows any of them reaches are egma's own queues
+ * — grading jobs, and the simulations egma itself wrote and claimed — a claim
+ * carries identifiers and tenancy rather than anything a customer wrote, and
+ * every claim arrives with the `AuthContext` narrowed to that row's own
+ * organization and project — which is what the work itself goes through.
  *
- * A third name here is a decision somebody has to make on purpose.
+ * A seventh name here is a decision somebody has to make on purpose.
  */
-const WORK_DISPATCHING = ["claimGradingJobs", "watchGradingWork"];
+const WORK_DISPATCHING = [
+  "claimGradingJobs",
+  "claimSimulations",
+  "recordSimulationHeartbeat",
+  "resolveSimulationStanding",
+  "sweepOrphanedSimulations",
+  "watchGradingWork",
+];
 
 /**
  * What a work-dispatching export may not be handed, in any position: an
@@ -429,9 +464,10 @@ function asWritten(tree: ts.SourceFile, parameter: ts.ParameterDeclaration): str
 /**
  * Every function the module exports either takes an `AuthContext` first, or is
  * one of the named exceptions: the seven that produce a context, the one that
- * asks about the deployment, and the two that dispatch egma's own work. Nothing
- * exported takes a predicate, so there is no call shape that lets a caller
- * supply their own tenancy filter — or none.
+ * asks about the deployment, and the five that dispatch egma's own work and
+ * keep those dispatches honest. Nothing exported takes a predicate, so there
+ * is no call shape that lets a caller supply their own tenancy filter — or
+ * none.
  */
 async function checkExportedCallShapes(root: string): Promise<Violation[]> {
   const surface = path.join(root, ACCESS_SURFACE);

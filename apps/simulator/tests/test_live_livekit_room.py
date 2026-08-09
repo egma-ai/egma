@@ -72,12 +72,17 @@ measured and came back wideband, that the room's own name is the
 provider reference, that the recording resolves with one speaker to a
 channel, and that no credential appears in a single byte the simulator
 wrote.
+
+It reads that record through both of the simulator's doors, because the
+record now travels by two: the lifecycle and its terminal facts come back
+as report events, while the transcript and every measurement ride the
+trace as spans. The turn count is the one fact that exists on both sides,
+so a live run is the only place the two doors can be caught disagreeing.
 """
 
 from __future__ import annotations
 
 import re
-from datetime import datetime
 from pathlib import Path
 
 import nltk
@@ -86,9 +91,12 @@ from conftest import (
     a_spec,
     assert_kept_secret,
     credential,
-    events_for,
     has_terminal,
+    measures_for,
+    milliseconds_of,
+    spans_for,
     terminal_event_for,
+    turns_for,
 )
 
 from egma_simulator.media.livekit_room import ROOM_BAND_HZ
@@ -296,8 +304,12 @@ async def test_the_simulator_holds_a_real_conversation_in_a_real_room(
     # a conversation does. What was said is not pinned: a live agent
     # answers differently every time, and pinning it would be pinning the
     # agent rather than egma.
-    turns = events_for(records, SIMULATION, "turn")
-    spoken = [(turn["speaker"], turn["text"]) for turn in turns]
+    #
+    # The transcript is read where the transcript now lives — the turn
+    # spans, off the trace door — because the report door carries the
+    # lifecycle alone. The speaker rides the span's own name, so there is
+    # no second field free to disagree with it.
+    spoken = turns_for(records, SIMULATION)
     agent_turns = [text for speaker, text in spoken if speaker == "agent"]
     human_turns = [text for speaker, text in spoken if speaker == "human"]
     assert agent_turns, f"the agent never said anything: {spoken}"
@@ -320,7 +332,10 @@ async def test_the_simulator_holds_a_real_conversation_in_a_real_room(
     # Whatever happened, it is one of the deliberate endings — a room
     # nobody joined would have failed instead, naming the worker.
     assert facts["ending"] in ("persona_concluded", "agent_ended", "limit_reached")
-    assert facts["turn_count"] == len(turns)
+    # The count rides the terminal transition and the turns ride the trace,
+    # so these two now arrive through different doors. That they still
+    # agree is a thing only a real run can say.
+    assert facts["turn_count"] == len(spoken)
 
     # The room egma made is the provider reference: one room, one
     # simulation, and the one join between this record and the project's
@@ -351,20 +366,41 @@ async def test_the_simulator_holds_a_real_conversation_in_a_real_room(
             "the recording carried a credential"
         )
 
-    # Per-turn timings, measured off the real exchange, and never backwards.
-    timings = events_for(records, SIMULATION, "timing")
-    measures = [event["measure"] for event in timings]
+    # Per-turn timings, measured off the real exchange, and never
+    # backwards. A timing span is named for the measure it takes and its
+    # own duration *is* the number, so there is no separate field to read
+    # and none to disagree with.
+    measures = measures_for(records, SIMULATION)
     assert "time_to_first_word" in measures
     assert "agent_speech_duration" in measures
-    assert all(event["milliseconds"] >= 0 for event in timings)
+    timed = [
+        record["span"]
+        for record in spans_for(records, SIMULATION)
+        if record["span"]["name"] in measures
+    ]
+    assert all(milliseconds_of(span) >= 0 for span in timed)
 
-    # Monotonic, in both the senses a live record has to be: no
-    # measurement stamped before the one reported ahead of it, and no turn
-    # beginning before the turn beginning ahead of it. In a real room
-    # these are read from real audio arriving in real time, so an ordering
-    # that went backwards would mean the clock or the reader was wrong —
-    # which is exactly the thing a latency number is trusted not to be.
-    stamped = [datetime.fromisoformat(event["at"]) for event in timings]
+    # Monotonic, on the one clock a live record can be held to: the moment
+    # each thing was *finished*. Read from real audio arriving in real
+    # time, an ordering that went backwards would mean the clock or the
+    # reader was wrong — which is the thing a latency number is trusted
+    # not to be.
+    #
+    # Ends rather than starts, and that is the claim changing rather than
+    # its spelling: a voice turn's span opens backwards from the moment the
+    # turn was observed, so two turns may legally overlap. That overlap is
+    # barge-in, and it is a fact about the conversation rather than a fault
+    # in the record.
+    stamped = [int(span["endTimeUnixNano"]) for span in timed]
     assert stamped == sorted(stamped), "a measurement is stamped out of order"
-    began = [datetime.fromisoformat(turn["started_at"]) for turn in turns]
-    assert began == sorted(began), "a turn began before the one before it"
+    heard = [
+        int(record["span"]["endTimeUnixNano"])
+        for record in spans_for(records, SIMULATION)
+        if record["span"]["name"].endswith("_turn")
+    ]
+    assert heard == sorted(heard), "a turn was heard out of order"
+
+    # Nothing the simulator sent was refused on its way in. On this door
+    # that also catches a malformed export — a batch naming no simulation,
+    # or one nobody claimed.
+    assert [record for record in records if record["kind"] == "refusal"] == []

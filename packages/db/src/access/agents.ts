@@ -9,7 +9,7 @@ import {
   type Modality,
   type Topology,
 } from "../schema/agents.ts";
-import { openCredentials, sealCredentials } from "../sealing.ts";
+import { sealCredentials } from "../sealing.ts";
 import {
   descriptorOf,
   shapeOf,
@@ -44,11 +44,16 @@ import { within } from "./within.ts";
  * it may use, because a connection lands in the project its agent already
  * names.
  *
- * Credentials pass through here exactly twice: sealed on the way in (create
- * and whole-object rotation), and unsealed in `resolveConnectionCredentials`,
- * the one door to the plaintext. Every read shape omits the field entirely,
- * so leaking a secret through a serializer is a compile error rather than a
- * review catch.
+ * Credentials pass through here once, sealed on the way in (create and
+ * whole-object rotation) and never opened on the way out: every read shape
+ * omits the field entirely, so leaking a secret through a serializer is a
+ * compile error rather than a review catch. The one door to the plaintext is
+ * the dispatch path's `resolveSimulationConnection`, beside the claim that
+ * mints the only kind of context it opens for. (This file's own role-gated
+ * resolver was retired on 2026-08-08 without ever gaining a production
+ * caller: the caller it imagined — something resolving credentials as a run
+ * starts — is exactly what the claim's door replaced, refusing by how a
+ * context came to exist rather than by what a role permits.)
  */
 
 export type NewConnection = {
@@ -277,8 +282,13 @@ async function visibleAgent(
  * fail here, loudly and naming itself, rather than leak into a caller as a
  * shape it isn't. Shape only, deliberately: the registry's demands may
  * tighten later, and an old row must stay readable exactly as it was written.
+ *
+ * Exported for the one sibling that also reads a connection's stored shapes —
+ * the simulator's connection door in `runs.ts` — so the two files cannot
+ * drift into two ideas of what a well-formed row is. It is not on the
+ * package's surface.
  */
-function stringRecordFromRow(
+export function stringRecordFromRow(
   value: unknown,
   malformed: () => Error,
 ): Record<string, string> {
@@ -1110,39 +1120,3 @@ export async function removeConnection(
   return { ...row, deletedAt };
 }
 
-/**
- * The one door to the plaintext, and the simulation runtime is who knocks:
- * handed `(agent_id, connection_id)` when a run starts, it answers the
- * decrypted credentials object — or `null` for a type where the customer
- * supplies no secret, or `undefined` for a connection out of the caller's
- * reach. Nothing else in the codebase can decrypt, and the gate is the
- * run-starter's permission rather than the reader's, because resolving a
- * credential *is* starting to act with it.
- */
-export async function resolveConnectionCredentials(
-  auth: AuthContext,
-  agentId: string,
-  connectionId: string,
-): Promise<Readonly<Record<string, string>> | null | undefined> {
-  authorize(auth, "start_and_cancel_runs", here(auth));
-
-  if ((await visibleAgent(auth, agentId)) === undefined) return undefined;
-
-  const [row] = await db()
-    .select({ id: connection.id, credentials: connection.credentials })
-    .from(connection)
-    .where(theConnection(auth, agentId, connectionId))
-    .limit(1);
-
-  if (row === undefined) return undefined;
-  if (row.credentials === null) return null;
-
-  return stringRecordFromRow(
-    openCredentials(row.credentials),
-    () =>
-      new Error(
-        `connection ${row.id} holds credentials in a shape egma never ` +
-          `writes; the row needs repairing before anybody can use it`,
-      ),
-  );
-}

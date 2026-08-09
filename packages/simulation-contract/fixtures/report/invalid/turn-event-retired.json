@@ -9,14 +9,6 @@
       "text": "Thanks for reaching Lakeside Dental, how can I help today?",
       "started_at": "2026-08-05T09:00:01.214000Z",
       "ended_at": null
-    },
-    {
-      "kind": "turn",
-      "event_id": "evt-000003",
-      "speaker": "human",
-      "text": "Oh, hello — I'm so sorry, I need to move my cleaning. It's on Tuesday, I think? Could we do Thursday instead?",
-      "started_at": "2026-08-05T09:00:07.902000Z",
-      "ended_at": null
     }
   ]
 }

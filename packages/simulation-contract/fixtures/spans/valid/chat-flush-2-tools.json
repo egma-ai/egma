@@ -1,0 +1,56 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "egma-simulator" } },
+          { "key": "egma.simulation_id", "value": { "stringValue": "sim_01K3XQ7M4E8YB2FVN0H9TZQWER" } }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "egma-simulator", "version": "1" },
+          "spans": [
+            {
+              "traceId": "0198fb73d08e479627eea08a75fbf1d8",
+              "spanId": "aa10000000000005",
+              "parentSpanId": "aa10000000000001",
+              "name": "turn_response_latency",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1785920410617500000",
+              "endTimeUnixNano": "1785920411480000000"
+            },
+            {
+              "traceId": "0198fb73d08e479627eea08a75fbf1d8",
+              "spanId": "aa10000000000006",
+              "parentSpanId": "aa10000000000001",
+              "name": "tool_call",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1785920441377000000",
+              "endTimeUnixNano": "1785920441377000000",
+              "attributes": [
+                { "key": "egma.tool.name", "value": { "stringValue": "reschedule_appointment" } },
+                {
+                  "key": "egma.tool.arguments",
+                  "value": { "stringValue": "{\"appointment_id\":\"apt-88213\",\"from\":\"2026-08-11T15:00:00Z\",\"to\":\"2026-08-13T15:00:00Z\"}" }
+                }
+              ]
+            },
+            {
+              "traceId": "0198fb73d08e479627eea08a75fbf1d8",
+              "spanId": "aa10000000000007",
+              "parentSpanId": "aa10000000000001",
+              "name": "tool_call",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1785920444020000000",
+              "endTimeUnixNano": "1785920444020000000",
+              "attributes": [
+                { "key": "egma.tool.name", "value": { "stringValue": "send_confirmation_sms" } }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -18,7 +18,7 @@ import {
   sweepOrphanedSimulations,
   type AuthContext,
   type RunEvent,
-  type Simulation,
+  type SimulationClaim,
 } from "@egma/db";
 
 import {
@@ -90,13 +90,13 @@ async function aRun(testVersionIds: readonly string[] = [oneCaller]) {
   return startRun(actingAsAcme(), { agentId, connectionId, testVersionIds });
 }
 
-/** Claim for one run under test; the queue is the whole customer's. */
-async function claimOwn(runId: string): Promise<readonly Simulation[]> {
-  const claimed = await claimSimulations(actingAsAcme(), {
+/** Claim for one run under test; the queue is the whole deployment's. */
+async function claimOwn(runId: string): Promise<readonly SimulationClaim[]> {
+  const claimed = await claimSimulations({
     claimant: CLAIMANT,
     capacity: 50,
   });
-  return claimed.filter((simulation) => simulation.runId === runId);
+  return claimed.filter((claim) => claim.runId === runId);
 }
 
 async function feedOf(runId: string, after = 0) {
@@ -219,7 +219,6 @@ describe("every lifecycle change", () => {
     await startSimulation(actingAsAcme(), first.id, CLAIMANT);
     await completeSimulation(actingAsAcme(), first.id, CLAIMANT, {
       endingReason: "agent_ended",
-      transcript: [],
     });
     await failSimulation(actingAsAcme(), second.id, CLAIMANT, {
       reason: "agent_never_joined",
@@ -247,7 +246,6 @@ describe("every lifecycle change", () => {
     await startSimulation(actingAsAcme(), only.id, CLAIMANT);
     await completeSimulation(actingAsAcme(), only.id, CLAIMANT, {
       endingReason: "persona_concluded",
-      transcript: [],
     });
 
     const landed = (await feedOf(started.id)).events.find(
@@ -268,7 +266,7 @@ describe("every lifecycle change", () => {
       "update simulation set heartbeat_at = now() - interval '1 hour' where id = $1",
       [only.id],
     );
-    await sweepOrphanedSimulations(actingAsAcme(), { staleAfterSeconds: 30 });
+    await sweepOrphanedSimulations({ staleAfterSeconds: 30 });
 
     const feed = await feedOf(started.id);
     expect(feed.events.map(said)).toEqual([
@@ -347,7 +345,6 @@ describe("the change and its event", () => {
     expect(
       await completeSimulation(actingAsAcme(), only.id, CLAIMANT, {
         endingReason: "agent_ended",
-        transcript: [],
       }),
     ).toBeUndefined();
     expect(
@@ -401,7 +398,6 @@ describe("a follower that crashes and comes back", () => {
     await startSimulation(actingAsAcme(), first.id, CLAIMANT);
     await completeSimulation(actingAsAcme(), first.id, CLAIMANT, {
       endingReason: "agent_ended",
-      transcript: [],
     });
 
     // A page served twice: the same request, twice. The server is stateless

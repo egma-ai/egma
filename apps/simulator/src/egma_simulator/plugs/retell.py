@@ -45,7 +45,7 @@ import aiohttp
 
 from ..client import UNREACHABLE
 from ..redaction import REDACTED
-from . import AgentReply, PlugError
+from . import AgentReply, PlugError, ToolCall
 
 DEFAULT_BASE_URL = "https://api.retellai.com"
 """Retell's own API, where a connection with no base URL is reached."""
@@ -166,7 +166,11 @@ class RetellChat:
         messages = completion.get("messages")
         if not isinstance(messages, list):
             raise PlugError("retell answered a completion with no messages list")
-        return AgentReply(text=_agent_words(messages), ended=_ended(messages))
+        return AgentReply(
+            text=_agent_words(messages),
+            ended=_ended(messages),
+            tool_calls=_tool_calls(messages),
+        )
 
     async def close(self) -> None:
         session, self._session = self._session, None
@@ -262,8 +266,44 @@ def _agent_words(messages: object) -> str | None:
 def _ended(messages: list) -> bool:
     """Whether the agent ended the exchange with this answer."""
     return any(
-        isinstance(message, dict)
-        and message.get("role") == "tool_call_invocation"
+        _invocation(message) is not None
         and message.get("name") in END_TOOL_NAMES
         for message in messages
     )
+
+
+def _tool_calls(messages: list) -> tuple[ToolCall, ...]:
+    """The tools the agent called while producing this answer.
+
+    Retell reports its invocations inline with the agent's words, which
+    makes it one of the few platforms where a tool call is observable from
+    egma's side at all. What is kept is exactly what it said — the name,
+    and the arguments as the bytes they arrived as — and never the return,
+    which Retell reports separately and this plug does not read: the
+    conversation is what egma observes, and inventing the other half of a
+    call would poison every comparison across platforms.
+
+    The ending tool is not filtered out. It is a tool the agent called, and
+    the record of the conversation says so; that it *also* ends the
+    exchange is a separate reading of the same fact.
+    """
+    return tuple(
+        ToolCall(name=name, arguments=_arguments(message))
+        for message in messages
+        if _invocation(message) is not None
+        and isinstance(name := message.get("name"), str)
+        and name
+    )
+
+
+def _invocation(message: object) -> dict | None:
+    """One message, if it is Retell reporting a tool being called."""
+    if isinstance(message, dict) and message.get("role") == "tool_call_invocation":
+        return message
+    return None
+
+
+def _arguments(message: dict) -> str | None:
+    """The arguments as observed: Retell sends them JSON-encoded already."""
+    arguments = message.get("arguments")
+    return arguments if isinstance(arguments, str) and arguments else None
