@@ -6,23 +6,39 @@ loopback counterpart are CI's two fake platforms — one chatting, one
 speaking — so their behavior is pinned here: the greeting, the scripted
 replies in order, the deliberate ending, the fallback when the script runs
 dry, and the refusal of config they do not understand. The pair are
-deliberately alike, because the difference between chat and voice is meant
-to be the modality and nothing else.
+deliberately alike in what they script, and deliberately unalike in shape:
+chat is asked for a turn, and a voice line is driven one slice of audio at
+a time because both directions of it are open at once.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from egma_simulator.plugs import AgentReply, PlugError, Utterance, plug_for
-from egma_simulator.plugs.loopback import FALLBACK_REPLY as SPOKEN_FALLBACK
+from egma_simulator.plugs import (
+    AgentReply,
+    DuplexLine,
+    PlugError,
+    plug_for,
+)
 from egma_simulator.plugs.loopback import (
+    CALLER_FINISHED_SECONDS,
     SUPPORTED_BANDS_HZ,
     LoopbackCounterpart,
     negotiated_band,
 )
+from egma_simulator.plugs.loopback import FALLBACK_REPLY as SPOKEN_FALLBACK
 from egma_simulator.plugs.scripted import FALLBACK_REPLY, ScriptedCounterpart
-from egma_simulator.speech import decode_speech, encode_speech
+from egma_simulator.speech import (
+    SAMPLES_PER_BYTE,
+    decode_speech,
+    encode_speech,
+    leading_silence_seconds,
+    silence,
+)
+
+SLICE_SAMPLES = SAMPLES_PER_BYTE
+"""One slice of the line, the same one the conductor drives it with."""
 
 
 def scripted(config: dict, *, modality: str = "chat") -> ScriptedCounterpart:
@@ -33,11 +49,30 @@ def loopback(config: dict, *, modality: str = "voice") -> LoopbackCounterpart:
     return LoopbackCounterpart(modality=modality, config=config, credentials=None)
 
 
-def said(speech) -> str | None:
-    """What one spoken answer carried, read from its samples."""
-    if speech is None or speech.audio is None:
-        return None
-    return decode_speech(speech.audio.pcm, speech.audio.sample_rate_hz)
+async def carry(
+    line: LoopbackCounterpart, outgoing: bytes = b"", *, slices: int = 1
+) -> bytes:
+    """Drive the line the way the conductor drives it, and keep what came
+    back: the same number of samples each way, every slice, quiet
+    included."""
+    width = SLICE_SAMPLES * 2
+    said = bytearray(outgoing)
+    said += bytes(max(0, slices * width - len(said)))
+    heard = bytearray()
+    for offset in range(0, len(said), width):
+        heard += await line.exchange(bytes(said[offset : offset + width]))
+    return bytes(heard)
+
+
+async def hear(line: LoopbackCounterpart, said: str = "", *, seconds: float = 3.0):
+    """What the far end says back over one caller turn and the quiet after
+    it — read as words, which is all any test here cares about."""
+    band = line.sample_rate_hz
+    spoken = encode_speech(said, band) if said else b""
+    quiet = round(seconds * band / SLICE_SAMPLES)
+    heard = await carry(line, spoken)
+    heard += await carry(line, slices=quiet)
+    return decode_speech(heard, band)
 
 
 def test_the_registry_knows_the_two_plugs_and_nothing_imaginary():
@@ -127,45 +162,94 @@ def test_the_counterpart_speaks_chat_only_for_now():
 # -- The loopback counterpart ------------------------------------------------
 
 
+def test_the_loopback_counterpart_is_a_full_duplex_line():
+    """The seam it wears is what decides which conductor it gets, so the
+    four verbs are the thing to pin."""
+    assert isinstance(loopback({}), DuplexLine)
+
+
 async def test_the_loopback_counterpart_answers_in_audio():
-    plug = loopback(
+    line = loopback(
         {
             "greeting": "Front desk, good morning.",
             "replies": ["Certainly.", "One moment."],
         }
     )
-    assert said(await plug.open()) == "Front desk, good morning."
-
-    persona = Utterance(pcm=encode_speech("I need help.", 16000), sample_rate_hz=16000)
-    assert said(await plug.deliver(persona)) == "Certainly."
-    assert said(await plug.deliver(persona)) == "One moment."
+    await line.open()
+    assert await hear(line) == "Front desk, good morning."
+    assert await hear(line, "I need help.") == "Certainly."
+    assert await hear(line, "And another thing.") == "One moment."
     # The script is dry and the counterpart was not told to end: it holds
     # the exchange open with a fixed line, deterministically.
-    assert said(await plug.deliver(persona)) == SPOKEN_FALLBACK
-    await plug.close()
+    assert await hear(line, "Anything else?") == SPOKEN_FALLBACK
+    await line.close()
 
 
 async def test_the_loopback_counterpart_can_end_the_exchange():
-    plug = loopback({"replies": ["All sorted."], "ends_after_replies": True})
-    assert await plug.open() is None
-    answer = await plug.deliver(
-        Utterance(pcm=b"", sample_rate_hz=plug.sample_rate_hz)
-    )
-    assert (said(answer), answer.ended) == ("All sorted.", True)
+    line = loopback({"replies": ["All sorted."], "ends_after_replies": True})
+    await line.open()
+    assert not line.far_end_left
+    assert await hear(line, "Is that everything?") == "All sorted."
+    assert line.far_end_left
 
     silent = loopback({"replies": [], "ends_after_replies": True})
-    ending = await silent.deliver(Utterance(pcm=b"", sample_rate_hz=16000))
-    assert (ending.audio, ending.ended) == (None, True)
+    await silent.open()
+    assert await hear(silent, "Hello?") == ""
+    assert silent.far_end_left
 
 
-async def test_the_quiet_before_an_answer_is_in_the_answers_own_audio():
+async def test_the_counterpart_hears_the_caller_stop_by_listening():
+    """Nothing tells it where a turn ended, because nothing tells a real
+    platform either: it answers once the line has been quiet long enough
+    for the caller to have finished."""
+    line = loopback({"replies": ["Yes."]})
+    await line.open()
+    await carry(line, encode_speech("A question.", 16000))
+
+    nearly = round(CALLER_FINISHED_SECONDS * 16000 / SLICE_SAMPLES) - 1
+    assert decode_speech(await carry(line, slices=nearly), 16000) == ""
+    assert decode_speech(await carry(line, slices=200), 16000) == "Yes."
+
+
+async def test_the_quiet_before_an_answer_is_spent_on_the_line():
     """A real call carries the agent's thinking as silence, and that is
-    where time-to-first-word is measured from."""
-    plug = loopback({"replies": ["Yes."], "answer_delay_seconds": 0.5})
-    answer = await plug.deliver(Utterance(pcm=b"", sample_rate_hz=16000))
-    quiet_samples = int(0.5 * plug.sample_rate_hz)
-    assert answer.audio.pcm[: quiet_samples * 2] == bytes(quiet_samples * 2)
-    assert said(answer) == "Yes."
+    where time-to-first-word is measured from — so the counterpart spends
+    the delay it was given as quiet on the line before its first word,
+    counted in samples and landing on the next slice of it."""
+    line = loopback({"replies": ["Yes."], "answer_delay_seconds": 0.5})
+    await line.open()
+    await carry(line, encode_speech("A question.", 16000))
+    heard = await carry(line, slices=round(3.0 * 16000 / SLICE_SAMPLES))
+
+    asked_for = round(0.5 * 16000)
+    quiet = round(leading_silence_seconds(heard, 16000) * 16000)
+    assert asked_for <= quiet < asked_for + SLICE_SAMPLES
+    assert decode_speech(heard, 16000) == "Yes."
+
+
+async def test_a_greeting_is_the_first_thing_on_the_line():
+    """Nobody has said anything yet, so the counterpart opens the
+    conversation the moment the line does."""
+    line = loopback({"greeting": "Front desk."})
+    await line.open()
+    heard = await carry(line, slices=round(3.0 * 16000 / SLICE_SAMPLES))
+    assert heard.startswith(encode_speech("Front desk.", 16000))
+
+
+async def test_a_counterpart_that_echoes_hands_back_the_caller_own_words():
+    line = loopback({"echoes_what_it_hears": True})
+    await line.open()
+    assert await hear(line, "Say that again.") == "Say that again."
+
+
+async def test_the_line_is_quiet_when_nobody_is_speaking():
+    """Quiet is audio: a slice of it crosses the line like any other, or
+    the two speakers would be on two different clocks."""
+    line = loopback({"replies": ["Noted."]})
+    await line.open()
+    assert await carry(line, slices=4) == silence(
+        4 * SLICE_SAMPLES / 16000, 16000
+    )
 
 
 @pytest.mark.parametrize(
@@ -183,10 +267,9 @@ def test_the_counterpart_carries_the_band_it_can_not_the_one_asked_for(
 
 
 async def test_the_loopback_counterpart_speaks_at_the_band_it_carries():
-    plug = loopback({"replies": ["Noted."], "sample_rate_hz": 8000})
-    answer = await plug.deliver(Utterance(pcm=b"", sample_rate_hz=8000))
-    assert answer.audio.sample_rate_hz == 8000
-    assert decode_speech(answer.audio.pcm, 8000) == "Noted."
+    line = loopback({"replies": ["Noted."], "sample_rate_hz": 8000})
+    await line.open()
+    assert await hear(line, "A question.") == "Noted."
 
 
 def test_the_loopback_counterpart_offers_its_provider_reference():

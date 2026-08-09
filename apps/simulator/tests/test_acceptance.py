@@ -37,13 +37,14 @@ from conftest import (
     scripted_spec,
     span_attribute,
     spans_for,
+    speech_in_the_recording,
     status_events_for,
     terminal_event_for,
     turns_for,
 )
 
 from egma_simulator.model import GOODBYE
-from egma_simulator.pipeline import channels_of
+from egma_simulator.recording import channels_of
 from egma_simulator.speech import decode_speech
 
 LONG_SCENARIO = " ".join(f"Sentence number {n}." for n in range(1, 41))
@@ -1337,6 +1338,86 @@ async def test_a_voice_simulation_produces_the_same_shapes_plus_its_audio_facts(
 
     # A persona turn is exactly as long as the audio the persona spoke.
     assert durations("persona_speech_duration") == durations("human_turn")[:-1]
+
+
+async def test_a_voice_turn_span_is_anchored_to_the_audio_timeline(
+    workbench, start_simulator
+):
+    """The claim the voice conductor exists to make, checked at the wire.
+
+    A turn's span is not the moment the simulator noticed the turn: both
+    of its ends are positions on the conversation's own sample timeline.
+    So every stretch of speech a listener can find in the recording is one
+    span, at the same distance from every other, to the sample — and
+    whether two turns overlap is a fact about the audio rather than about
+    when Python happened to run.
+    """
+    spec = loopback_spec(
+        "sim-anchored",
+        scenario="First point. Second point.",
+        greeting="Front desk, hello.",
+        replies=["Certainly.", "Done."],
+        answer_delay_seconds=0.3,
+    )
+    await workbench.offer(spec)
+    simulator = start_simulator(workbench)
+
+    records = await workbench.wait_for(has_terminal("sim-anchored"))
+    facts = terminal_event_for(records, "sim-anchored")["facts"]
+    band = facts["audio"]["measured_sample_rate_hz"]
+    heard = speech_in_the_recording(simulator.blob(facts["audio"]["recording"]))
+
+    # Every turn but the persona's concluding goodbye, which was never
+    # spoken into the line and is honestly an instant.
+    spoken = [
+        span
+        for span in (record["span"] for record in spans_for(records, "sim-anchored"))
+        if span["name"].endswith("_turn")
+        and span["endTimeUnixNano"] != span["startTimeUnixNano"]
+    ]
+    assert [speaker for speaker, _began, _ended in heard] == [
+        "human" if span["name"] == "human_turn" else "agent" for span in spoken
+    ]
+
+    def since_the_first(positions: list[int]) -> list[int]:
+        return [position - positions[0] for position in positions]
+
+    def in_samples(instants: list[int]) -> list[int]:
+        return [
+            round((instant - instants[0]) * band / 1_000_000_000)
+            for instant in instants
+        ]
+
+    assert since_the_first([began for _speaker, began, _ended in heard]) == (
+        in_samples([int(span["startTimeUnixNano"]) for span in spoken])
+    )
+    assert since_the_first([ended for _speaker, _began, ended in heard]) == (
+        in_samples([int(span["endTimeUnixNano"]) for span in spoken])
+    )
+
+
+async def test_a_voice_simulation_ends_on_its_turn_limit_like_a_chat_one(
+    workbench, start_simulator
+):
+    """Supervision relocated without changing meaning: the turn limit is
+    the same ending with the same reason, counting finished utterances of
+    either speaker."""
+    spec = loopback_spec(
+        "sim-voice-limit",
+        scenario="First point. Second point. Third point.",
+        greeting="Front desk, hello.",
+        max_turns=3,
+    )
+    await workbench.offer(spec)
+    start_simulator(workbench)
+
+    records = await workbench.wait_for(has_terminal("sim-voice-limit"))
+    terminal = terminal_event_for(records, "sim-voice-limit")
+    assert terminal["status"] == "completed"
+    assert terminal["facts"]["ending"] == "limit_reached"
+    assert terminal["reason"] == "the turn limit (3 turns) tripped"
+    assert terminal["facts"]["turn_count"] == 3
+    assert len(turns_for(records, "sim-voice-limit")) == 3
 
 
 async def test_an_answer_that_only_called_a_tool_is_flushed_like_any_other(

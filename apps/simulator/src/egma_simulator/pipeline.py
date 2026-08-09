@@ -7,17 +7,26 @@ plug and the persona brain, and a voice simulation is the same plug and
 the same brain with speech legs between them. The brain is one component
 for every modality, forever — it never learns which of these it is in.
 
-The voice legs run on Pipecat: the persona's words are spoken into audio
-by one processor, the agent's audio is read back into words by another,
-and both directions pass through Pipecat's own audio buffer, which is
-what keeps the two speakers in step and gives the recording a channel
-each. Turn-taking is deliberately *not* Pipecat's
-here: the walk owns it, because limits, cancellation and the transcript
-are the walk's business and are the same for chat. So the pipeline is
-driven a turn at a time, and every wait below is for a specific frame
-reaching the end of it — never for a length of time.
+**Who conducts is what a spec selects here, and there are two answers.**
+A chat simulation is walked a turn at a time by :mod:`egma_simulator.walk`.
+A voice simulation on a full-duplex line is conducted by
+:mod:`egma_simulator.conductor` — a real Pipecat pipeline, with the voice
+activity detector and the turn model deciding where turns fall instead of
+a loop. A voice connection still wearing the turn-shaped plug protocol —
+the phone leg, until it moves too — keeps the walk, with
+:class:`VoicePipeline` below as the adapter that makes speech legs look
+like text in and text out.
 
-Everything a voice simulation owes its record is measured here, from what
+That adapter's own pipeline runs on Pipecat too: the persona's words are
+spoken into audio by one processor, the agent's audio is read back into
+words by another, and both directions pass through Pipecat's own audio
+buffer, which is what keeps the two speakers in step and gives the
+recording a channel each. Turn-taking is deliberately *not* Pipecat's
+there: the walk owns it, so the pipeline is driven a turn at a time, and
+every wait below is for a specific frame reaching the end of it — never
+for a length of time.
+
+Everything such a simulation owes its record is measured here, from what
 actually flowed: the band the audio was carried at, the recording's
 reference, how long each side spoke, and how long the agent was quiet
 before it answered.
@@ -27,11 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import io
 import logging
-import sys
-import wave
-from array import array
 from dataclasses import dataclass
 
 from pipecat.frames.frames import (
@@ -55,17 +60,19 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.workers.runner import WorkerRunner
 
 from .blob import BlobStore
+from .conductor import DEFAULT_CONDUCT, ConductParameters, VoiceConductor
 from .plugs import (
     AgentReply,
+    DuplexLine,
     PlatformPlug,
     PlugError,
     Utterance,
     VoicePlug,
     plug_for,
 )
+from .recording import RECORDING_NAME, AudioFacts, dual_channel_wav
 from .spec import SimulationSpec
 from .speech import (
-    SAMPLE_WIDTH_BYTES,
     SCRIPTED_PAIR,
     PersonaVoice,
     SpeechFault,
@@ -81,9 +88,6 @@ from .speech import (
 from .walk import OnSpeech, OnTiming
 
 logger = logging.getLogger(__name__)
-
-RECORDING_NAME = "dual-channel.wav"
-"""What one simulation's recording is called inside its own blob key."""
 
 TEARDOWN_SECONDS = 10.0
 """How long a torn-down pipeline may take to finish before it is cancelled."""
@@ -103,11 +107,6 @@ and why it is the only wait in this file measured in time rather than in
 frames. The scripted pair answers every turn it is given, so no
 deterministic exchange ever reaches it.
 """
-
-PERSONA_CHANNEL = 0
-AGENT_CHANNEL = 1
-"""Who is on which channel of a recording. The transcript's two labels in
-the transcript's own order, so the file needs no legend to be read."""
 
 
 @dataclass
@@ -136,36 +135,34 @@ class PipelineGone(RuntimeError):
 
 
 @dataclass(frozen=True)
-class AudioFacts:
-    """What a voice simulation measured about its own audio."""
-
-    measured_sample_rate_hz: int
-    recording: str
-
-    def as_report(self) -> dict:
-        """The contract's audio block, exactly."""
-        return {
-            "measured_sample_rate_hz": self.measured_sample_rate_hz,
-            "recording": self.recording,
-        }
-
-
-@dataclass(frozen=True)
 class Assembled:
-    """One simulation's pipeline: what the walk drives, and what it measured."""
+    """One simulation's pipeline: who conducts it, and what it measured.
 
-    plug: PlatformPlug
+    Exactly one of the two conductors is filled in. ``plug`` is what the
+    walk drives — a chat platform, or a turn-shaped voice connection with
+    its speech legs already wrapped around it. ``conductor`` is the voice
+    conductor, which needs no plug of its own because it holds the line.
+    """
+
+    plug: PlatformPlug | None = None
     """Text in, text out — the walk never learns which modality it is in."""
 
-    voice: VoicePipeline | None
-    """The speech legs, for a voice simulation; ``None`` for a chat one."""
+    voice: VoicePipeline | None = None
+    """The turn-shaped speech legs, where the walk conducts a voice
+    simulation; ``None`` for a chat one and for a full-duplex line."""
+
+    conductor: VoiceConductor | None = None
+    """The Pipecat pipeline conducting a full-duplex voice simulation."""
 
     @property
     def audio(self) -> dict | None:
         """The contract's audio block once the exchange is over, else ``None``."""
-        if self.voice is None or self.voice.audio is None:
-            return None
-        return self.voice.audio.as_report()
+        measured = None
+        if self.conductor is not None:
+            measured = self.conductor.audio
+        elif self.voice is not None:
+            measured = self.voice.audio
+        return None if measured is None else measured.as_report()
 
 
 def assemble(
@@ -173,15 +170,15 @@ def assemble(
     *,
     blobs: BlobStore,
     speech: SpeechProviders = SCRIPTED_PAIR,
+    parameters: ConductParameters | None = None,
     on_timing: OnTiming | None = None,
     on_speech: OnSpeech | None = None,
 ) -> Assembled:
     """Build one simulation's pipeline from its spec.
 
     Constructing is validation and nothing else — no platform is dialled
-    and no pipeline is started until the walk opens the exchange — so a
-    spec that cannot be conducted fails here, honestly, before anything
-    happens.
+    and no pipeline is started until the exchange opens — so a spec that
+    cannot be conducted fails here, honestly, before anything happens.
 
     ``speech`` is where a deployment's choice of real providers enters,
     and the only place: the spec says what the simulation is, the
@@ -200,14 +197,28 @@ def assemble(
         credentials=spec.credentials,
     )
     if spec.modality != "voice":
-        return Assembled(plug=plug, voice=None)
+        return Assembled(plug=plug)
+
+    recording_key = f"{spec.simulation_id}/{RECORDING_NAME}"
+    voice = voice_from_traits(spec.persona_traits)
+    if isinstance(plug, DuplexLine):
+        return Assembled(
+            conductor=VoiceConductor(
+                line=plug,
+                voice=voice,
+                speech=speech,
+                blobs=blobs,
+                recording_key=recording_key,
+                parameters=parameters or DEFAULT_CONDUCT,
+            )
+        )
 
     speech_legs = VoicePipeline(
         transport=plug,
-        voice=voice_from_traits(spec.persona_traits),
+        voice=voice,
         speech=speech,
         blobs=blobs,
-        recording_key=f"{spec.simulation_id}/{RECORDING_NAME}",
+        recording_key=recording_key,
         on_timing=on_timing,
         on_speech=on_speech,
     )
@@ -610,71 +621,3 @@ class VoicePipeline:
             measured_sample_rate_hz=measured_band_hz, recording=reference
         )
 
-
-def dual_channel_wav(
-    persona_audio: bytes, agent_audio: bytes, sample_rate_hz: int
-) -> bytes:
-    """Both sides of one exchange, one speaker to a channel.
-
-    The persona on channel 0 and the agent on channel 1, in the order the
-    transcript labels them, so each side can be heard alone when a
-    transcript looks wrong. The two tracks come from the pipeline's audio
-    buffer, which holds each speaker's audio and keeps the pair the same
-    length; the shorter one is padded with quiet so a file never runs out
-    halfway through the exchange. On a transport carrying audio in real
-    time the buffer's quiet is the other side's clock; a counterpart that
-    answers faster than real time — the loopback does — leaves a file that
-    is each side in order rather than a faithful clock.
-    """
-    frames = max(len(persona_audio), len(agent_audio)) // SAMPLE_WIDTH_BYTES
-    interleaved = array("h", bytes(frames * 2 * SAMPLE_WIDTH_BYTES))
-    interleaved[PERSONA_CHANNEL::2] = _samples(persona_audio, frames)
-    interleaved[AGENT_CHANNEL::2] = _samples(agent_audio, frames)
-
-    written = io.BytesIO()
-    with wave.open(written, "wb") as out:
-        out.setnchannels(2)
-        out.setsampwidth(SAMPLE_WIDTH_BYTES)
-        out.setframerate(sample_rate_hz)
-        out.writeframes(_as_pcm(interleaved))
-    return written.getvalue()
-
-
-def channels_of(wav_bytes: bytes) -> tuple[bytes, bytes, int]:
-    """One recording, taken apart: persona, agent, and the band it holds."""
-    with wave.open(io.BytesIO(wav_bytes), "rb") as recording:
-        if recording.getnchannels() != 2:
-            raise ValueError("the recording is not dual-channel")
-        sample_rate_hz = recording.getframerate()
-        interleaved = _samples(
-            recording.readframes(recording.getnframes()), recording.getnframes() * 2
-        )
-    return (
-        _as_pcm(interleaved[PERSONA_CHANNEL::2]),
-        _as_pcm(interleaved[AGENT_CHANNEL::2]),
-        sample_rate_hz,
-    )
-
-
-def _samples(pcm: bytes, frames: int) -> array:
-    """PCM read as signed 16-bit samples, padded with quiet to ``frames``.
-
-    ``array`` holds samples in this machine's byte order while PCM is
-    always little-endian, so the two agree only on a little-endian
-    machine and a swap is what makes them agree anywhere else.
-    """
-    samples = array("h")
-    samples.frombytes(pcm[: frames * SAMPLE_WIDTH_BYTES])
-    if sys.byteorder != "little":
-        samples.byteswap()
-    samples.extend([0] * (frames - len(samples)))
-    return samples
-
-
-def _as_pcm(samples: array) -> bytes:
-    """Signed 16-bit samples written back out as little-endian PCM."""
-    if sys.byteorder == "little":
-        return samples.tobytes()
-    little_endian = array("h", samples)
-    little_endian.byteswap()
-    return little_endian.tobytes()

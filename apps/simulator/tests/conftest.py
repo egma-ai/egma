@@ -569,7 +569,7 @@ def assert_one_speaker_to_a_channel(
     samples of each channel, transcribed — so this says what a person
     would hear, not what the simulator believed it wrote.
     """
-    from egma_simulator.pipeline import channels_of
+    from egma_simulator.recording import channels_of
     from egma_simulator.speech import decode_speech
 
     persona_audio, agent_audio, band = channels_of(recording)
@@ -581,6 +581,41 @@ def assert_one_speaker_to_a_channel(
         other = "agent" if speaker == "human" else "human"
         assert text in said[speaker], (speaker, text)
         assert text not in said[other], (speaker, text)
+
+
+def speech_in_the_recording(recording: bytes) -> list[tuple[str, int, int]]:
+    """Every stretch of speech a listener could find, in sample positions.
+
+    Read the way a listener would read it, one slice of the line at a
+    time: loud is somebody talking and quiet is nobody, on each channel
+    separately, and the results put back in the order they were spoken.
+    What comes out is the conversation as the audio holds it, which is
+    what a turn span claims to be about.
+    """
+    from egma_simulator.conductor import LINE_SLICE_SAMPLES
+    from egma_simulator.recording import channels_of
+    from egma_simulator.speech import SAMPLE_WIDTH_BYTES, carries_speech
+
+    width = LINE_SLICE_SAMPLES * SAMPLE_WIDTH_BYTES
+    persona_audio, agent_audio, _band = channels_of(recording)
+    heard: list[tuple[str, int, int]] = []
+    for speaker, channel in (("human", persona_audio), ("agent", agent_audio)):
+        opened: int | None = None
+        slices = range(0, len(channel) - width + 1, width)
+        for position, offset in enumerate(slices):
+            speaking = carries_speech(channel[offset : offset + width])
+            if speaking and opened is None:
+                opened = position
+            elif not speaking and opened is not None:
+                heard.append(
+                    (
+                        speaker,
+                        opened * LINE_SLICE_SAMPLES,
+                        position * LINE_SLICE_SAMPLES,
+                    )
+                )
+                opened = None
+    return sorted(heard, key=lambda run: run[1])
 
 
 # -- Record readers: the acceptance suite's entire vocabulary -----------------

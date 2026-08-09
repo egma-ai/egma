@@ -47,9 +47,15 @@ ALLOWED_DEPENDENCIES = {
 SPEECH_PROVIDER_MODULES = (
     "pipecat.services.deepgram.stt",
     "pipecat.services.elevenlabs.tts",
+    "pipecat.audio.vad.silero",
 )
-"""The stock services a configured deployment gets, and the modules a
-deployment that configured nothing must never load."""
+"""The stock legs a configured deployment gets, and the modules a
+deployment that configured nothing must never load.
+
+The voice activity detector is here on the same terms as the two speech
+providers: Silero ships inside the pinned wheel, so choosing it downloads
+nothing — but loading a model is still a cost only a deployment that
+asked for it should pay, and CI reads the scripted codec instead."""
 
 MEDIA_BACKEND_MODULES = (
     "livekit",
@@ -207,8 +213,11 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
         os.environ["EGMA_SIMULATOR_MEDIA_BACKEND"] = "scripted"
 
         from egma_simulator.blob import FilesystemBlobStore
+        from egma_simulator.model import ScriptedModel
+        from egma_simulator.persona import Persona
         from egma_simulator.pipeline import assemble
         from egma_simulator.spec import SimulationSpec
+        from egma_simulator.walk import WalkControls
 
         def spec_for(connection):
             return SimulationSpec.from_document({
@@ -235,16 +244,40 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
             "credentials": None,
         })
 
+        def persona_for(spec):
+            return Persona(
+                traits=spec.persona_traits,
+                scenario_instructions=spec.scenario_instructions,
+                model=ScriptedModel(spec.scenario_instructions),
+            )
+
         async def conduct(spec):
             with tempfile.TemporaryDirectory() as blobs:
                 assembled = assemble(spec, blobs=FilesystemBlobStore(Path(blobs)))
-                plug = assembled.plug
-                await plug.open()
-                try:
-                    answer = await plug.deliver("One point.")
-                finally:
-                    await plug.close()
-                assert answer.text == "Noted.", answer
+                heard = []
+                if assembled.conductor is not None:
+                    async def on_utterance(speaker, text, began, ended):
+                        heard.append((speaker, text))
+                    async def on_measured(measure, began, ended):
+                        pass
+                    await assembled.conductor.conduct(
+                        persona=persona_for(spec),
+                        max_turns=spec.limits.max_turns,
+                        max_duration_seconds=spec.limits.max_duration_seconds,
+                        controls=WalkControls(),
+                        name="sim:unconfigured",
+                        on_utterance=on_utterance,
+                        on_measured=on_measured,
+                    )
+                else:
+                    plug = assembled.plug
+                    await plug.open()
+                    try:
+                        answer = await plug.deliver("One point.")
+                    finally:
+                        await plug.close()
+                    heard.append(("agent", answer.text))
+                assert ("agent", "Noted.") in heard, heard
                 assert assembled.audio is not None
 
         async def conduct_both():
@@ -258,6 +291,7 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
             or name.startswith("pipecat.services.deepgram")
             or name.startswith("pipecat.services.elevenlabs")
             or name.startswith("pipecat.transports.livekit")
+            or name == "pipecat.audio.vad.silero"
         )))
         """
     )

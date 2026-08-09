@@ -36,9 +36,16 @@ timing span is named for the measure it takes and its own duration *is*
 the number, so it is opened one measurement before the moment it was
 taken. A turn is opened for as long as it was spoken — one instant on
 chat, where a message has no duration, and ear to ear on voice. Two turns
-may cross in time: that is how barge-in will be represented when the
-persona becomes a full-duplex caller, and the shape already permits it
-rather than being widened later.
+may cross in time: that is how barge-in is represented now that the
+persona is a full-duplex caller, and the shape always permitted it rather
+than being widened later.
+
+**Where a turn's two ends come from depends on who conducted it.** Chat's
+walk observes a turn at one moment and this stamps it there. A voice
+conductor knows both ends before it says anything, because it read them
+off the audio itself, and hands both over — see :meth:`SpanEmitter.spoken_turn`.
+Only the second is exact enough for turns that cross, and only the first
+is available where nothing was ever spoken.
 """
 
 from __future__ import annotations
@@ -256,6 +263,55 @@ class SpanEmitter:
         )
         if spoken_seconds is None:
             self._open_turn[speaker] = span
+
+    def spoken_turn(
+        self,
+        speaker: str,
+        text: str,
+        *,
+        began_unix_nano: int,
+        ended_unix_nano: int,
+    ) -> None:
+        """One transcript turn whose both ends are already known.
+
+        The turn above is authored from the wall clock, which is exact
+        enough only while turns cannot cross: it stamps the end at the
+        moment the turn was observed and derives the start by subtracting
+        however long the audio ran. Under full duplex that would make
+        "did these two turns overlap" a question about when Python
+        happened to run.
+
+        So a conductor that knows both ends says both, and says them from
+        the audio itself. What arrives here is already the answer — two
+        instants on the conversation's own clock, converted once from
+        sample positions — and this authors the span and nothing else.
+        """
+        name = TURN_SPAN_OF.get(speaker)
+        if name is None:
+            raise ValueError(f"a turn was taken by {speaker!r}, who is not a speaker")
+        self._author(
+            name,
+            started_unix_nano=began_unix_nano,
+            ended_unix_nano=ended_unix_nano,
+            attributes={TURN_TEXT_ATTRIBUTE: text},
+        )
+
+    def measured(
+        self, measure: str, *, began_unix_nano: int, ended_unix_nano: int
+    ) -> None:
+        """One measurement whose interval is already known, both ends.
+
+        :meth:`measure` takes a number and brackets it against the wall
+        clock. This takes the interval instead, for the same reason
+        :meth:`spoken_turn` exists: a voice measure is read off the
+        conversation's audio, and the two instants that bracket it are
+        the measurement rather than a rendering of it.
+        """
+        self._author(
+            measure,
+            started_unix_nano=began_unix_nano,
+            ended_unix_nano=ended_unix_nano,
+        )
 
     def spoke(self, speaker: str, seconds: float) -> None:
         """How long one side's audio ran for one turn, ear to ear.
