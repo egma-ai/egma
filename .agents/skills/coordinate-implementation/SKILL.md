@@ -21,17 +21,38 @@ The branches fan out and back in. One **integration branch** per effort, cut fro
 
 The issue tracker should have been provided to you — run `/setup-matt-pocock-skills` if it is missing.
 
+## The whole context, in every worktree
+
+A worktree carries tracked files only. Anything this repo ignores is absent from a fresh one, and nothing announces the absence.
+
+The tracker does not live here, and `AGENTS.md` reaches it with a conditional: read it if it is in your checkout, carry on if it is not. **In a fresh worktree it is never there.** So a dispatched agent takes the second branch and builds without the ticket it was given, without the settled vocabulary, and without knowing either existed. Nothing errors. The work comes back fluent and unmoored — and the reviewer, in an identical worktree, grades it against the same blank.
+
+So a worktree is not ready when the code is in it. Cut the code worktree, then cut the tracker into it, at the path `AGENTS.md` names:
+
+```
+git -C <tracker-repo> fetch origin
+git -C <tracker-repo> worktree add --detach <agent-worktree>/<path> origin/main
+```
+
+`--detach` is what lets this happen more than once. A branch can be checked out in one worktree only, so the second agent that asks for `main` is refused outright; detached, every agent gets its own copy at the same commit. Fetch first, so an agent dispatched later sees tracker updates you have already landed.
+
+The path is already ignored here, so no agent can commit it into this repo by accident.
+
+**Agents read the tracker. Only you write it** — on `main`, in your own checkout. A commit made on a detached HEAD inside an agent's copy is unreachable the moment that worktree is removed.
+
 ## Per-ticket checklist
 
 Copy this for each ticket and tick it off as you go:
 
 ```
 NN — <ticket>
+- [ ] worktree cut, with the tracker in it
 - [ ] branch <effort>-tNN cut from <effort>
 - [ ] implemented, full suite green
 - [ ] review loop closed — clean, or capped and reported
 - [ ] PR opened against <effort>
 - [ ] every PR review bot thread fixed or answered
+- [ ] re-run against the current <effort> head, still green
 - [ ] merged into <effort>, ticket recorded
 ```
 
@@ -58,8 +79,9 @@ Fetch, cut `<effort>` from `origin/main` if it does not exist, and push it so ti
 One message, one `Agent` call per frontier ticket, so they run in parallel. Each gets:
 
 - **A name**: `impl-NN`. Unnamed agents cannot be messaged later, and a name reused across tickets makes a send refuse rather than reach the wrong agent.
-- **Opus 5 at the highest reasoning effort available**, and `isolation: "worktree"` so parallel agents never share a checkout.
-- **A self-contained prompt**: the ticket in full; branch `<effort>-tNN` based on the integration branch; follow `/implement` — TDD at pre-agreed seams, typecheck and single test files often, full suite at the end; push the ticket branch and stop there.
+- **Opus 5 at the highest reasoning effort available.**
+- **Its own worktree, with the tracker in it.** Parallel agents must never share a checkout. On Claude Code the code worktree comes from the `isolation: "worktree"` flag; on Codex there is no such flag, so cut it yourself with `git worktree add` and pass the path. The tracker is yours to cut either way — no harness flag knows about a second repo.
+- **A self-contained prompt**: the ticket in full; where its worktree is and where the tracker sits inside it; branch `<effort>-tNN` based on the integration branch; follow `/implement` — TDD at pre-agreed seams, typecheck and single test files often, full suite at the end; push the ticket branch and stop there.
 - **A reporting brief**: branch, commits, what it built, what it deliberately did not build, anything it found that the ticket got wrong.
 
 Agents run in the background and report as they finish. Take each one as it lands rather than waiting for the set — the moment a ticket's last blocker merges, dispatch it.
@@ -69,6 +91,8 @@ Agents run in the background and report as they finish. Take each one as it land
 Spawn `review-NN` **after** `impl-NN` exists, never before. Where the roster of siblings an agent may message is a snapshot taken when it starts, a reviewer spawned first cannot see the implementer at all.
 
 The reviewer runs `/code-review` on the ticket branch: the integration branch as the fixed point, the ticket as the spec. It is not the implementer, because an author reviewing its own work shares its blind spot. It reports findings and changes no code.
+
+It needs the tracker too, cut the same way — a reviewer that cannot read the ticket cannot check the code against it, and grades the work against its own guess instead. That is worse than no review, because it reports back clean.
 
 Then loop, up to three rounds: findings go to `impl-NN`, which fixes what is right and answers what is wrong rather than obeying it; `review-NN` re-checks. Keep the same two agents throughout. The reviewer remembers what it already raised and what was answered, so nothing rejected comes back, and independence was established the moment it was not the author.
 
@@ -84,7 +108,11 @@ The loop ends in one of three states, and you report which:
 
 The bot's comments arrive minutes after the PR opens, sometimes in waves as later pushes get re-reviewed. Fix in the same branch, never a follow-up PR. Reply on the thread when a comment is wrong and it is not acting on it, so the record shows the comment was weighed. Ready when every thread is fixed or answered.
 
-**You merge, not the agent.** Only you know what else is in flight. Check the git state, merge one PR at a time, and record the outcome on the ticket — status resolved, the PR, what landed, what each gate found — committed wherever the tracker lives, which may not be this repo.
+**You merge, not the agent.** Only you know what else is in flight. Check the git state and merge one PR at a time.
+
+**Each merge makes every other open ticket branch stale.** They were built and reviewed against an integration head that no longer exists. Git stops a textual conflict; it does not stop a sibling that renamed what this branch still calls, or changed a behaviour this branch still assumes — the merge is clean and the suite is broken. So after each merge, send every open ticket branch back to its `impl-NN` to take the new integration head and re-run the full suite. It still holds the context, so this is cheap. A branch that has not been run against the head it is merging into is unverified, whatever the review said earlier.
+
+Record the outcome on the ticket once it is merged and green — status resolved, the PR, what landed, what each gate found. That commit goes wherever the tracker lives, from your own checkout, not this repo and not an agent's.
 
 ### 6. Advance
 
@@ -92,7 +120,7 @@ A ticket is done when it is merged. Recompute the frontier and dispatch whatever
 
 ### 7. Close the effort out
 
-When every ticket has folded in, merge the latest `main` **into** the integration branch and resolve the conflicts there, not in the final PR. Run the full suite — this is where the tickets meet each other for real.
+When every ticket has folded in, merge the latest `main` **into** the integration branch and resolve the conflicts there, not in the final PR. Run the full suite. The tickets have already met each other one merge at a time; this is where they meet everything else that landed on `main` while you worked.
 
 Open one PR, integration branch → `main`, and **leave it open**.
 
@@ -107,6 +135,7 @@ A wide refactor cannot be split into parallel rewrites of the same call sites. E
 Nothing supervises this but you.
 
 - **Silence is not success.** Check the branch — does it exist, does it carry commits, does the suite pass? Never mark a ticket done on an absent report, and never guess at a pending agent's result.
+- **An agent that never quotes its ticket probably cannot see it.** A missing tracker raises nothing; it just reads as an agent working from a thin brief. Check the path before you accept the work.
 - **Message before you respawn.** A stalled agent still holds everything it knew, and a message wakes it. A fresh agent starts from nothing.
 - **A whole quiet wave means the machine, not the model** — a dead container daemon, a missing service, a command that failed for permissions without saying so. Fix it and resume; the work on the branches normally survives.
 - **Give suites and builds generous timeouts**, and poll on the work's cadence.
