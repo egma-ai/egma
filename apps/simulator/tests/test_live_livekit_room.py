@@ -21,12 +21,20 @@ it skips — visibly, never failing, never waiting on anybody::
     TEST_LIVEKIT_URL=wss://... \\
     TEST_LIVEKIT_API_KEY=... TEST_LIVEKIT_API_SECRET=... \\
     TEST_DEEPGRAM_API_KEY=... TEST_ELEVENLABS_API_KEY=... \\
+    TEST_MODEL_API_KEY=... \\
     uv run pytest tests/test_live_livekit_room.py -v
 
 Each name falls back to the plain one LiveKit's own tooling reads —
-``LIVEKIT_URL``, ``LIVEKIT_API_KEY``, ``LIVEKIT_API_SECRET`` — so the one
-environment that starts the counterpart worker also runs this, and
-nobody keeps two copies of the same project's coordinates.
+``LIVEKIT_URL``, ``LIVEKIT_API_KEY``, ``LIVEKIT_API_SECRET``, and
+``OPENAI_API_KEY`` for the persona's brain — so the one environment that
+starts the counterpart worker also runs this, and nobody keeps two copies
+of the same project's coordinates.
+
+The brain is required, not optional. Conducted with the scripted default
+a live run proves the room and the wire and nothing about speech, because
+a scripted turn is one sentence and one sentence never asks the speaking
+leg where a sentence ends. That gap is what let a missing tokenizer
+corpus survive a passing live test.
 
 The standing counterpart is ``fixtures/livekit-dumb-agent``: a
 deliberately boring receptionist on one OpenAI key. Start it first and
@@ -68,8 +76,11 @@ wrote.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
+from pathlib import Path
 
+import nltk
 import pytest
 from conftest import (
     a_spec,
@@ -91,6 +102,13 @@ LIVEKIT_API_SECRET = credential("TEST_LIVEKIT_API_SECRET", "LIVEKIT_API_SECRET")
 AGENT_NAME = credential("TEST_LIVEKIT_AGENT_NAME", "EGMA_DUMB_AGENT_NAME")
 DEEPGRAM_API_KEY = credential("TEST_DEEPGRAM_API_KEY", "DEEPGRAM_API_KEY")
 ELEVENLABS_API_KEY = credential("TEST_ELEVENLABS_API_KEY", "ELEVENLABS_API_KEY")
+# The persona's own brain, and it is required rather than optional on
+# purpose. Left unset, the simulator takes its scripted default, whose
+# turns are one sentence each — and a live test conducted that way proves
+# the room and the wire while saying nothing about speech, which is how a
+# corpus the speaking leg genuinely needed stayed missing for three days.
+MODEL_API_KEY = credential("TEST_MODEL_API_KEY", "OPENAI_API_KEY")
+MODEL_NAME = credential("TEST_MODEL_NAME") or "gpt-4o-mini"
 
 REQUIRED = {
     "TEST_LIVEKIT_URL": LIVEKIT_URL,
@@ -98,22 +116,55 @@ REQUIRED = {
     "TEST_LIVEKIT_API_SECRET": LIVEKIT_API_SECRET,
     "TEST_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
     "TEST_ELEVENLABS_API_KEY": ELEVENLABS_API_KEY,
+    "TEST_MODEL_API_KEY": MODEL_API_KEY,
 }
 MISSING = sorted(name for name, value in REQUIRED.items() if not value)
 
-pytestmark = pytest.mark.skipif(
-    bool(MISSING),
-    reason=(
-        "no live LiveKit project: set "
-        + ", ".join(MISSING)
-        + " to conduct a real simulation against a real agent worker in a "
-        "real room"
+
+def _corpus_root() -> str:
+    """Where this machine keeps the sentence-tokenizer corpus.
+
+    The image ships its own and names it; a developer's machine has one
+    wherever NLTK put it. Either way the child is handed exactly the copy
+    found here, because the harness hides the home directory it would
+    otherwise be found through.
+    """
+    try:
+        return str(Path(str(nltk.data.find("tokenizers/punkt_tab"))).parents[1])
+    except LookupError:
+        return ""
+
+
+CORPUS_ROOT = _corpus_root()
+
+pytestmark = [
+    pytest.mark.skipif(
+        bool(MISSING),
+        reason=(
+            "no live LiveKit project: set "
+            + ", ".join(MISSING)
+            + " to conduct a real simulation against a real agent worker in a "
+            "real room"
+        ),
     ),
-)
+    pytest.mark.skipif(
+        not CORPUS_ROOT,
+        reason=(
+            "no sentence-tokenizer corpus on this machine: the image ships "
+            "one, and speaking a turn of two sentences needs it — "
+            "python -c \"import nltk; nltk.download('punkt_tab')\""
+        ),
+    ),
+]
 
 SECRETS = tuple(
     secret
-    for secret in (LIVEKIT_API_SECRET, DEEPGRAM_API_KEY, ELEVENLABS_API_KEY)
+    for secret in (
+        LIVEKIT_API_SECRET,
+        DEEPGRAM_API_KEY,
+        ELEVENLABS_API_KEY,
+        MODEL_API_KEY,
+    )
     if secret
 )
 
@@ -158,28 +209,58 @@ def room_spec() -> dict:
             "You are calling about your check-up. Ask whether it can be "
             "moved to Thursday, then thank them and finish."
         ),
-        personality="Polite and brief; asks one thing at a time.",
+        # Talkative on purpose. A turn of one sentence never asks the
+        # speaking leg where a sentence ends, so a curt persona would
+        # conduct a whole live simulation without touching the path this
+        # test exists to walk.
+        personality=(
+            "Polite and warm; explains yourself in two or three full "
+            "sentences at a time rather than clipped answers."
+        ),
         max_turns=MAX_TURNS,
         max_duration_seconds=MAX_DURATION_SECONDS,
     )
 
 
-def speech() -> dict[str, str]:
-    """The persona's own voice, which a room simulation needs and the
-    deployment supplies.
+def deployment() -> dict[str, str]:
+    """The persona itself — brain, mouth and ears — which the deployment
+    supplies whatever it is simulating.
 
     Nothing about reaching the room is here: a room connection carries
     its own key pair, so unlike a phone call there is no LiveKit in this
-    simulator's environment at all. What is left is the persona's two
-    speech legs, which belong to the deployment whatever it is
-    simulating.
+    simulator's environment at all.
+
+    The brain is named rather than left to its default, and that is the
+    whole difference between this test and one that only proves a wire.
+    A scripted persona speaks the scenario back a sentence at a time; a
+    real one answers the agent, at whatever length it chooses, which is
+    what a customer's agent will actually hear.
+
+    The corpus is named too, because the harness hides the home directory
+    NLTK would otherwise find one through — deliberately, so the machine's
+    own cache cannot quietly stand in for what the image ships.
     """
     return {
+        "EGMA_SIMULATOR_MODEL_PROVIDER": "openai",
+        "EGMA_SIMULATOR_MODEL_NAME": MODEL_NAME,
+        "EGMA_SIMULATOR_MODEL_API_KEY": MODEL_API_KEY,
         "EGMA_SIMULATOR_STT_PROVIDER": "deepgram",
         "EGMA_SIMULATOR_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
         "EGMA_SIMULATOR_TTS_PROVIDER": "elevenlabs",
         "EGMA_SIMULATOR_ELEVENLABS_API_KEY": ELEVENLABS_API_KEY,
+        "NLTK_DATA": CORPUS_ROOT,
     }
+
+
+def says_more_than_one_sentence(text: str) -> bool:
+    """Whether a turn holds a sentence boundary with words after it.
+
+    That is the exact shape the speaking leg used to refuse, and the
+    reason it went unnoticed: the tokenizer is only asked where a
+    sentence ends when something follows the punctuation, so a turn of
+    one sentence never reaches it.
+    """
+    return bool(re.search(r"[.!?…]\s+\S", text.strip()))
 
 
 # The suite's own wall is 120s, which is right for a hermetic test and
@@ -191,7 +272,7 @@ async def test_the_simulator_holds_a_real_conversation_in_a_real_room(
     workbench, start_simulator
 ):
     await workbench.offer(room_spec())
-    simulator = start_simulator(workbench, extra_env=speech())
+    simulator = start_simulator(workbench, extra_env=deployment())
 
     records = await workbench.wait_for(
         has_terminal(SIMULATION), within_seconds=WITHIN_SECONDS
@@ -224,6 +305,15 @@ async def test_the_simulator_holds_a_real_conversation_in_a_real_room(
     assert any(text.strip() for text in agent_turns), (
         "every agent turn came back empty; the room was joined but nothing "
         "in it was read"
+    )
+
+    # The persona said two sentences in one breath and they were spoken.
+    # Without this the run can pass while never asking the speaking leg
+    # where a sentence ends — which is how a missing tokenizer corpus hid
+    # behind a scripted persona for three days.
+    assert any(says_more_than_one_sentence(text) for text in human_turns), (
+        "no persona turn held more than one sentence, so this run never "
+        f"exercised the speaking leg's sentence regrouping: {human_turns}"
     )
 
     facts = terminal["facts"]

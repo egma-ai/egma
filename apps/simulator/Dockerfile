@@ -40,15 +40,55 @@ COPY apps/simulator/src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
+# The sentence-tokenizer corpus, fetched once here rather than at run time.
+#
+# The speaking leg regroups a turn into sentences to line spoken words up
+# with the transcript, and that regrouping needs this data. It is the same
+# file for every deployment, it never changes between them, and nobody
+# configures it — so there is nothing to gain by fetching it later, and a
+# customer's firewall would be a poor place to discover it was missing.
+#
+# English alone, because the sentence matcher asks for no other language;
+# that is 244 KB where the whole package is 11 MB. Should a language ever
+# be asked for, the library's own missing-data error says so loudly rather
+# than guessing, which is what makes this pruning safe to do.
+#
+# Run through the interpreter directly and not through the simulator: the
+# package disarms NLTK's downloader on import, deliberately, and this is
+# the one moment that download is wanted.
+# Said twice, because the two say different things. The variable puts the
+# directory on NLTK's *search* path, without which the downloader refuses
+# to write there at all — it will not write anywhere it would not later
+# read from. The argument below is the *destination*, which otherwise
+# lands in whichever home directory the build happens to run as.
+ENV NLTK_DATA=/app/nltk_data
+
+# Loudly, and checked twice: the downloader answers False rather than
+# raising, so a quiet build would carry an image whose speaking leg fails
+# on its first two-sentence turn — the very failure this line prevents.
+# The second check reads the corpus back the way the simulator will.
+RUN /app/.venv/bin/python -c \
+        "import nltk, sys; sys.exit(0 if nltk.download('punkt_tab', download_dir='/app/nltk_data') else 'the punkt_tab corpus could not be fetched')" \
+    && find /app/nltk_data/tokenizers/punkt_tab -maxdepth 1 -mindepth 1 \
+        -not -name english -exec rm -rf {} + \
+    && rm -f /app/nltk_data/tokenizers/punkt_tab.zip \
+    && /app/.venv/bin/python -c "import nltk; nltk.data.find('tokenizers/punkt_tab')"
+
 FROM python:3.13-slim-bookworm AS runtime
 
 WORKDIR /app
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    EGMA_SIMULATION_CONTRACT_DIR=/app/packages/simulation-contract
+    EGMA_SIMULATION_CONTRACT_DIR=/app/packages/simulation-contract \
+    NLTK_DATA=/app/nltk_data
 
 COPY --from=build /app/.venv /app/.venv
+
+# Named rather than left to the library's search path: the corpus is a
+# thing this image ships, so where it is should be readable here instead
+# of inferred from somebody's home directory at run time.
+COPY --from=build /app/nltk_data /app/nltk_data
 
 # The contract, read at runtime rather than vendored: one shared artifact,
 # two readers. The walk that finds it inside a checkout would find it here
