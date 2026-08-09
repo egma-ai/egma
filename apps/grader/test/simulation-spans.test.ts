@@ -79,13 +79,6 @@ const A_CONVERSATION = [
   { speaker: "agent" as const, text: "Booked for Tuesday at four." },
 ];
 
-/** The same conversation as the columns hold one, for the path being retired. */
-const A_CONVERSATION_IN_COLUMNS = A_CONVERSATION.map((turn) => ({
-  kind: "turn",
-  speaker: turn.speaker,
-  text: turn.text,
-}));
-
 describe("a simulation whose spans arrived complete", () => {
   beforeAll(async () => {
     await service.start();
@@ -111,13 +104,11 @@ describe("a simulation whose spans arrived complete", () => {
     });
     await jobFor(world, conducted, "graded");
 
-    // Nothing on the row, so nothing a verdict says can have come from it. This
-    // is the whole point of the case: the conversation exists only as spans.
-    const row = await getSimulation(world.auth, conducted.simulationId);
-    expect(row?.transcript).toBeNull();
-    expect(row?.events).toBeNull();
-    expect(row?.metrics).toBeNull();
-
+    // The conversation exists as spans and nowhere else — the row has no
+    // field left that could hold one — so nothing a verdict says below can
+    // have come from anywhere but the trace store. That the columns are
+    // gone from the table itself is asserted where the schema is, in the
+    // API's own black-box walk.
     const { verdicts } = await readVerdicts(world.auth, conducted.simulationId);
     const by = (graderId: string) =>
       verdicts.find((verdict) => verdict.graderId === graderId);
@@ -220,6 +211,38 @@ describe("a simulation whose spans arrived complete", () => {
     });
   });
 
+  it("cites every turn it found, in the order the conversation said them", async () => {
+    const graderId = await seedGrader(
+      world,
+      aPhrase({
+        name: "Two phrases, two turns",
+        // Two phrases in two different turns, so what is proved is the order
+        // of the citations rather than there being one.
+        config: {
+          required: [
+            { text: "Tuesday at four", match: "contains" },
+            { text: "the diary", match: "contains" },
+          ],
+          banned: [],
+          speaker: "agent",
+        },
+      } as Partial<NewGrader>),
+    );
+
+    const conducted = await conductSimulation(world, {
+      spans: { said: A_CONVERSATION },
+    });
+    await jobFor(world, conducted, "graded");
+
+    const { verdicts } = await readVerdicts(world.auth, conducted.simulationId);
+    const mine = verdicts.find((verdict) => verdict.graderId === graderId);
+
+    // The second thing the agent said and the fourth, counted through the
+    // span-assembled transcript and cited in that order.
+    expect(mine?.verdict).toBe("passed");
+    expect(mine?.citedSpanIds).toEqual(["turn:2", "turn:4"]);
+  });
+
   it("keeps two turns that cross in time, in the order they began", async () => {
     // What barge-in looks like: the persona starts answering before the agent
     // has stopped talking. The transcript has to hold both — a reader that
@@ -274,61 +297,6 @@ describe("a simulation whose spans arrived complete", () => {
     expect(
       (humanTurn?.started_at ?? "") < (agentTurn?.ended_at ?? ""),
     ).toBe(true);
-  });
-});
-
-describe("one conversation graded through each path", () => {
-  beforeAll(async () => {
-    await service.start();
-  });
-
-  it("cites the same turns, in the same order, whichever it was read from", async () => {
-    const graderId = await seedGrader(
-      world,
-      aPhrase({
-        name: "Compared across both paths",
-        // Two phrases in two different turns, so the comparison is about the
-        // order of the citations rather than about there being one.
-        config: {
-          required: [
-            { text: "Tuesday at four", match: "contains" },
-            { text: "the diary", match: "contains" },
-          ],
-          banned: [],
-          speaker: "agent",
-        },
-      } as Partial<NewGrader>),
-    );
-
-    const fromSpans = await conductSimulation(world, {
-      spans: { said: A_CONVERSATION },
-    });
-    const fromColumns = await conductSimulation(world, {
-      transcript: A_CONVERSATION_IN_COLUMNS,
-    });
-    await jobFor(world, fromSpans, "graded");
-    await jobFor(world, fromColumns, "graded");
-
-    const judgedIn = async (simulationId: string) => {
-      const { verdicts } = await readVerdicts(world.auth, simulationId);
-      const mine = verdicts.find((verdict) => verdict.graderId === graderId);
-      return {
-        verdict: mine?.verdict,
-        rationale: mine?.rationale,
-        citedSpanIds: mine?.citedSpanIds,
-      };
-    };
-
-    const spans = await judgedIn(fromSpans.simulationId);
-    const columns = await judgedIn(fromColumns.simulationId);
-
-    // The same answer, about the same turns, in the same order. Written as one
-    // comparison rather than two assertions against a constant, because what is
-    // being proved is that the two paths agree — not that either says something
-    // somebody typed out here.
-    expect(spans).toEqual(columns);
-    expect(spans.verdict).toBe("passed");
-    expect(spans.citedSpanIds).toEqual(["turn:2", "turn:4"]);
   });
 });
 
@@ -399,33 +367,7 @@ describe("a simulation whose trace never closed", () => {
     await service.start();
   });
 
-  it("falls back to the row's columns, so nothing mid-migration breaks", async () => {
-    const graderId = await seedGrader(
-      world,
-      aPhrase({ name: "Read off the columns behind a half-sent trace" }),
-    );
-
-    const conducted = await conductSimulation(world, {
-      spans: {
-        // Turns went out; the flush carrying the root never did.
-        rootCloses: false,
-        said: [{ speaker: "agent", text: "Something else entirely." }],
-      },
-      transcript: A_CONVERSATION_IN_COLUMNS,
-    });
-    await jobFor(world, conducted, "graded");
-
-    const { verdicts } = await readVerdicts(world.auth, conducted.simulationId);
-    const mine = verdicts.find((verdict) => verdict.graderId === graderId);
-
-    // Judged, and judged from the columns: the phrase is in the column
-    // transcript and nowhere in the spans that did arrive, so a pass here can
-    // only have come from the fallback.
-    expect(mine?.verdict).toBe("passed");
-    expect(mine?.citedSpanIds).toEqual(["turn:4"]);
-  });
-
-  it("is errored for every grader when no column holds it either", async () => {
+  it("is errored for every grader — a partial record judges nobody", async () => {
     const graderId = await seedGrader(
       world,
       aPhrase({ name: "Asked about a conversation egma holds half of" }),
@@ -486,26 +428,7 @@ describe("a simulation with no spans at all", () => {
     await service.start();
   });
 
-  it("still grades from its columns — the row written before any of this streamed", async () => {
-    const graderId = await seedGrader(
-      world,
-      aPhrase({ name: "Judging a row that predates the emitter" }),
-    );
-
-    const conducted = await conductSimulation(world, {
-      transcript: A_CONVERSATION_IN_COLUMNS,
-      metrics: { turn_response_latency: [900, 1_100] },
-    });
-    await jobFor(world, conducted, "graded");
-
-    const { verdicts } = await readVerdicts(world.auth, conducted.simulationId);
-    const mine = verdicts.find((verdict) => verdict.graderId === graderId);
-
-    expect(mine?.verdict).toBe("passed");
-    expect(mine?.citedSpanIds).toEqual(["turn:4"]);
-  });
-
-  it("is errored for every grader, and for every expected behavior, when its row holds nothing", async () => {
+  it("is errored for every grader, and for every expected behavior", async () => {
     const graderId = await seedGrader(
       world,
       aPhrase({ name: "Asked about a conversation egma has no record of" }),
@@ -515,11 +438,11 @@ describe("a simulation with no spans at all", () => {
       "never quotes a price",
     ]);
 
-    // Nothing streamed and nothing landed on the row: a completed conversation
-    // whose evidence never reached egma at all.
+    // Nothing streamed: a completed conversation whose evidence never
+    // reached egma at all, which is the only way a conversation can be
+    // missing now that the spans are the whole of the record.
     const conducted = await conductSimulation(world, {
-      transcript: null,
-      metrics: null,
+      spans: null,
       testId,
     });
     await jobFor(world, conducted, "graded");

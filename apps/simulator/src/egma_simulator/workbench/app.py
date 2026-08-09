@@ -6,7 +6,12 @@ to — from spec documents loaded off disk, validates everything both ways
 against the contract schemas, and records every observation in order. The
 records are the whole point: the acceptance suite asserts against nothing
 else, and a person watching the log watches a simulation go queued →
-claimed → running → completed with its turns arriving in between.
+claimed → running → completed with its turns arriving as spans in between.
+
+The two doors carry two different records and the contract is what keeps
+them apart: a report says only where the simulation's lifecycle stands, so
+the report schema accepts status transitions and refuses anything claiming
+to carry a conversation, and the conversation arrives at the span sink.
 
 The span sink is deliberately the smallest thing that can be called one: it
 checks a batch parses and names a simulation this workbench knows, records

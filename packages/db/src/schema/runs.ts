@@ -364,10 +364,6 @@ export const simulation = pgTable(
      * simulator measures it.
      */
     measuredAudioBandHertz: integer("measured_audio_band_hertz"),
-    /** What the simulator reported, written once at terminal state. */
-    transcript: jsonb("transcript"),
-    events: jsonb("events"),
-    metrics: jsonb("metrics"),
     /** The dual-channel recording's reference in the blob store, voice only. */
     recordingReference: text("recording_reference"),
     /**
@@ -470,12 +466,14 @@ export const simulation = pgTable(
       sql`${table.status} <> 'canceled'
         or (${table.endedAt} is not null and ${table.cancelRequestedAt} is not null)`,
     ),
-    // The report is terminal facts; nothing running holds one yet.
+    // The audio facts are terminal facts; nothing running holds one yet.
+    // The check keeps its name across the migration that reduced it to
+    // these two, because a constraint's name is what a violation prints and
+    // renaming one would break the sentence a reader is searching for.
     check(
       "simulation_report_only_when_ended",
       sql`${table.endedAt} is not null
-        or (${table.transcript} is null and ${table.events} is null
-          and ${table.metrics} is null and ${table.recordingReference} is null
+        or (${table.recordingReference} is null
           and ${table.measuredAudioBandHertz} is null)`,
     ),
     // The two summary facts are terminal facts too; a check of their own

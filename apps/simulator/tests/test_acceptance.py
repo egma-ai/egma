@@ -26,11 +26,12 @@ from conftest import (
     all_terminal,
     assert_kept_secret,
     assert_one_speaker_to_a_channel,
-    events_for,
     has_terminal,
     heartbeats_for,
     load_fixture_spec,
     loopback_spec,
+    measures_for,
+    milliseconds_of,
     phone_spec,
     retell_spec,
     scripted_spec,
@@ -38,6 +39,7 @@ from conftest import (
     spans_for,
     status_events_for,
     terminal_event_for,
+    turns_for,
 )
 
 from egma_simulator.model import GOODBYE
@@ -81,11 +83,12 @@ async def test_a_scripted_persona_converses_with_the_scripted_counterpart(
     assert statuses[0] == "running"
     assert statuses[-1] == "completed"
 
-    # The transcript, turn for turn: the greeting, the persona's scenario
-    # sentence by sentence against the counterpart's scripted answers, and
-    # the persona's concluding goodbye.
-    turns = events_for(records, "sim-chat-001", "turn")
-    assert [(turn["speaker"], turn["text"]) for turn in turns] == [
+    # The transcript, turn for turn, read where the transcript is — the
+    # spans: the greeting, the persona's scenario sentence by sentence
+    # against the counterpart's scripted answers, and the persona's
+    # concluding goodbye.
+    turns = turns_for(records, "sim-chat-001")
+    assert turns == [
         ("agent", "Lakeside Dental, how can I help?"),
         ("human", "I need to move my Tuesday cleaning to Thursday."),
         ("agent", "Of course — could I take your name?"),
@@ -94,10 +97,17 @@ async def test_a_scripted_persona_converses_with_the_scripted_counterpart(
         ("human", GOODBYE),
     ]
 
-    # Timestamped, and in order: every turn carries its moment, and the
-    # moments never run backwards.
-    started_ats = [datetime.fromisoformat(turn["started_at"]) for turn in turns]
-    assert started_ats == sorted(started_ats)
+    # Timestamped, and in order: a turn span closes at the moment the turn
+    # was observed, and those moments never run backwards. Read at the
+    # close rather than the open, because a voice turn opens backwards
+    # from it by however long the audio ran — which is what lets two turns
+    # cross, and is exactly the shape barge-in will need.
+    observed = [
+        int(record["span"]["endTimeUnixNano"])
+        for record in spans_for(records, "sim-chat-001")
+        if record["span"]["name"].endswith("_turn")
+    ]
+    assert observed == sorted(observed)
 
     terminal = terminal_event_for(records, "sim-chat-001")
     facts = terminal["facts"]
@@ -111,9 +121,8 @@ async def test_a_scripted_persona_converses_with_the_scripted_counterpart(
     )
 
     # Measured, not judged: the first answer's latency, and one
-    # measurement per answered turn.
-    timings = events_for(records, "sim-chat-001", "timing")
-    measures = [event["measure"] for event in timings]
+    # measurement per answered turn — each its own timing span.
+    measures = measures_for(records, "sim-chat-001")
     assert measures.count("first_response_latency") == 1
     assert measures.count("turn_response_latency") == 2
 
@@ -121,20 +130,24 @@ async def test_a_scripted_persona_converses_with_the_scripted_counterpart(
     assert [record for record in records if record["kind"] == "refusal"] == []
 
     # And the record's own order tells the story: claimed before running,
-    # running before any turn, every turn before completed.
-    def first_seq(kind: str, status: str | None = None) -> int:
+    # running before any turn, every turn before completed — one story told
+    # across the two doors, which is what the one ordered sender buys.
+    def first_status(status: str) -> int:
         for record in records:
             if record["kind"] == "report" and record["simulation_id"] == "sim-chat-001":
                 event = record["event"]
-                if event["kind"] == kind and (
-                    status is None or event.get("status") == status
-                ):
+                if event["kind"] == "status" and event["status"] == status:
                     return record["seq"]
-        raise AssertionError(f"no {kind}/{status} on record")
+        raise AssertionError(f"no status/{status} on record")
 
-    assert claims[0]["seq"] < first_seq("status", "running")
-    assert first_seq("status", "running") < first_seq("turn")
-    assert first_seq("turn") < first_seq("status", "completed")
+    turn_seqs = [
+        record["seq"]
+        for record in spans_for(records, "sim-chat-001")
+        if record["span"]["name"].endswith("_turn")
+    ]
+    assert claims[0]["seq"] < first_status("running")
+    assert first_status("running") < turn_seqs[0]
+    assert turn_seqs[-1] < first_status("completed")
 
 
 async def test_two_golden_fixture_specs_conduct_two_visibly_different_exchanges(
@@ -152,11 +165,7 @@ async def test_two_golden_fixture_specs_conduct_two_visibly_different_exchanges(
     records = await workbench.wait_for(all_terminal(ids))
 
     transcripts = {
-        simulation_id: [
-            (turn["speaker"], turn["text"])
-            for turn in events_for(records, simulation_id, "turn")
-        ]
-        for simulation_id in ids
+        simulation_id: turns_for(records, simulation_id) for simulation_id in ids
     }
     for simulation_id, transcript in transcripts.items():
         assert len(transcript) >= 3, simulation_id
@@ -262,7 +271,7 @@ async def test_every_ending_reason_is_reachable_and_reported_distinctly(
     assert len(set(reasons)) == 4
 
     # The clipped walk really was clipped where the limit says.
-    assert len(events_for(records, "sim-end-turns", "turn")) == 4
+    assert len(turns_for(records, "sim-end-turns")) == 4
 
 
 async def test_a_cancel_directive_stops_a_simulation_mid_exchange(
@@ -280,7 +289,7 @@ async def test_a_cancel_directive_stops_a_simulation_mid_exchange(
     start_simulator(workbench)
 
     await workbench.wait_for(
-        lambda records: len(events_for(records, "sim-cancel-001", "turn")) >= 2
+        lambda records: len(turns_for(records, "sim-cancel-001")) >= 2
     )
     await workbench.cancel("sim-cancel-001")
 
@@ -289,15 +298,16 @@ async def test_a_cancel_directive_stops_a_simulation_mid_exchange(
     assert terminal["status"] == "canceled"
     assert terminal["facts"]["ending"] == "canceled"
 
-    turns = events_for(records, "sim-cancel-001", "turn")
+    turns = turns_for(records, "sim-cancel-001")
     assert len(turns) < 80, "the exchange was not stopped"
     assert terminal["facts"]["turn_count"] == len(turns)
     assert "completed" not in status_events_for(records, "sim-cancel-001")
 
-    # Nothing more is reported after the terminal event: the simulation is over.
+    # Nothing more arrives after the terminal event, at either door: the
+    # simulation is over.
     await asyncio.sleep(HEARTBEAT_SECONDS * 4)
     later = await workbench.records()
-    assert len(events_for(later, "sim-cancel-001", "turn")) == len(turns)
+    assert len(turns_for(later, "sim-cancel-001")) == len(turns)
 
 
 async def test_capacity_caps_simulations_in_flight(workbench, start_simulator):
@@ -487,7 +497,7 @@ async def test_a_plug_refusal_is_an_honest_failure_on_the_record(
     assert "repliez" in terminal["reason"]
 
     # Nothing was conducted: no exchange happened off the record.
-    assert events_for(records, "sim-misconfigured-001", "turn") == []
+    assert turns_for(records, "sim-misconfigured-001") == []
     assert [record for record in records if record["kind"] == "refusal"] == []
 
 
@@ -526,8 +536,8 @@ async def test_a_retell_chat_spec_conducts_a_multi_turn_exchange(
 
     records = await workbench.wait_for(has_terminal("sim-retell-001"))
 
-    turns = events_for(records, "sim-retell-001", "turn")
-    assert [(turn["speaker"], turn["text"]) for turn in turns] == [
+    turns = turns_for(records, "sim-retell-001")
+    assert turns == [
         ("agent", "Lakeside Dental, how can I help?"),
         ("human", "I need to move my Tuesday cleaning to Thursday."),
         ("agent", "Of course — could I take your name?"),
@@ -585,7 +595,7 @@ async def test_a_retell_key_the_platform_refuses_fails_honestly_and_silently(
     assert terminal["facts"]["turn_count"] == 0
     assert "401" in terminal["reason"], terminal["reason"]
     # Nothing was conducted: no exchange happened off the record.
-    assert events_for(records, "sim-retell-badkey", "turn") == []
+    assert turns_for(records, "sim-retell-badkey") == []
 
     simulator.stop()
     assert_kept_secret(sentinel, records=records, simulator=simulator)
@@ -664,10 +674,9 @@ async def test_a_voice_spec_reports_a_whole_exchange_and_its_audio(
     # below went through both sides' validation untouched.
     assert [record for record in records if record["kind"] == "refusal"] == []
     assert status_events_for(records, simulation_id) == ["running", "completed"]
-    turns = events_for(records, simulation_id, "turn")
-    spoken = [(turn["speaker"], turn["text"]) for turn in turns]
-    assert spoken[0] == ("agent", spec["connection"]["config"]["greeting"])
-    assert [speaker for speaker, _ in spoken] == [
+    turns = turns_for(records, simulation_id)
+    assert turns[0] == ("agent", spec["connection"]["config"]["greeting"])
+    assert [speaker for speaker, _ in turns] == [
         "agent",
         "human",
         "agent",
@@ -699,7 +708,7 @@ async def test_a_voice_spec_reports_a_whole_exchange_and_its_audio(
     # 0 says is what the persona said, and what channel 1 says is what the
     # agent said — every turn of the transcript, on its own side, and on
     # neither of the other's.
-    assert_one_speaker_to_a_channel(recording, spoken)
+    assert_one_speaker_to_a_channel(recording, turns)
 
 
 async def test_a_voice_simulation_reports_a_measurement_for_every_turn(
@@ -719,8 +728,12 @@ async def test_a_voice_simulation_reports_a_measurement_for_every_turn(
 
     records = await workbench.wait_for(has_terminal("sim-voice-measures"))
 
-    timings = events_for(records, "sim-voice-measures", "timing")
-    measures = [event["measure"] for event in timings]
+    timed = [
+        record["span"]
+        for record in spans_for(records, "sim-voice-measures")
+        if record["span"]["name"] in measures_for(records, "sim-voice-measures")
+    ]
+    measures = measures_for(records, "sim-voice-measures")
     assert measures.count("time_to_first_word") == 3
     assert measures.count("agent_speech_duration") == 3
     assert measures.count("persona_speech_duration") == 2
@@ -729,17 +742,19 @@ async def test_a_voice_simulation_reports_a_measurement_for_every_turn(
     assert measures.count("first_response_latency") == 1
     assert measures.count("turn_response_latency") == 2
 
-    # Every agent turn was quiet for as long as the counterpart waits.
+    # Every agent turn was quiet for as long as the counterpart waits —
+    # read off the span's own duration, which is where the number is.
     quiet = [
-        event["milliseconds"]
-        for event in timings
-        if event["measure"] == "time_to_first_word"
+        milliseconds_of(span)
+        for span in timed
+        if span["name"] == "time_to_first_word"
     ]
-    assert quiet == [300.0, 300.0, 300.0]
+    assert all(abs(number - 300.0) < 20.0 for number in quiet), quiet
+    assert len(quiet) == 3
 
     # Monotonically ordered: no measurement is stamped before the one the
-    # simulator reported ahead of it.
-    stamped = [datetime.fromisoformat(event["at"]) for event in timings]
+    # simulator took ahead of it.
+    stamped = [int(span["endTimeUnixNano"]) for span in timed]
     assert stamped == sorted(stamped)
 
 
@@ -826,13 +841,9 @@ async def test_one_scenario_over_chat_and_over_voice_is_one_transcript(
         all_terminal(["sim-same-chat", "sim-same-voice"])
     )
 
-    def transcript(simulation_id: str) -> list[tuple[str, str]]:
-        return [
-            (turn["speaker"], turn["text"])
-            for turn in events_for(records, simulation_id, "turn")
-        ]
-
-    assert transcript("sim-same-chat") == transcript("sim-same-voice")
+    assert turns_for(records, "sim-same-chat") == turns_for(
+        records, "sim-same-voice"
+    )
 
     # And the record still tells them apart where it should: only one of
     # them has audio to account for.
@@ -884,9 +895,8 @@ async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
     assert [record for record in records if record["kind"] == "refusal"] == []
     assert status_events_for(records, "sim-phone-001") == ["running", "completed"]
 
-    turns = events_for(records, "sim-phone-001", "turn")
-    spoken = [(turn["speaker"], turn["text"]) for turn in turns]
-    assert spoken == [
+    turns = turns_for(records, "sim-phone-001")
+    assert turns == [
         ("agent", "Lakeside Dental, how can I help?"),
         ("human", "I need to move my Tuesday cleaning to Thursday."),
         ("agent", "Of course — could I take your name?"),
@@ -894,8 +904,15 @@ async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
         ("agent", "Done: Thursday at half past two."),
         ("human", GOODBYE),
     ]
-    started_ats = [datetime.fromisoformat(turn["started_at"]) for turn in turns]
-    assert started_ats == sorted(started_ats)
+    # Read at the close: a voice turn opens backwards from the moment it
+    # was observed by however long the audio ran, so two of them may cross
+    # in time while the order they were heard in never does.
+    observed = [
+        int(record["span"]["endTimeUnixNano"])
+        for record in spans_for(records, "sim-phone-001")
+        if record["span"]["name"].endswith("_turn")
+    ]
+    assert observed == sorted(observed)
 
     terminal = terminal_event_for(records, "sim-phone-001")
     facts = terminal["facts"]
@@ -908,20 +925,25 @@ async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
     # Measured, and measured per turn: the far end was quiet for exactly
     # as long as it waits before speaking, on every one of its turns, and
     # nothing was stamped before the measurement reported ahead of it.
-    timings = events_for(records, "sim-phone-001", "timing")
-    measures = [event["measure"] for event in timings]
+    measures = measures_for(records, "sim-phone-001")
     assert measures.count("time_to_first_word") == 3
     assert measures.count("agent_speech_duration") == 3
     assert measures.count("persona_speech_duration") == 2
     assert measures.count("first_response_latency") == 1
     assert measures.count("turn_response_latency") == 2
-    quiet = [
-        event["milliseconds"]
-        for event in timings
-        if event["measure"] == "time_to_first_word"
+    timed = [
+        record["span"]
+        for record in spans_for(records, "sim-phone-001")
+        if record["span"]["name"] in measures
     ]
-    assert quiet == [300.0, 300.0, 300.0]
-    stamped = [datetime.fromisoformat(event["at"]) for event in timings]
+    quiet = [
+        milliseconds_of(span)
+        for span in timed
+        if span["name"] == "time_to_first_word"
+    ]
+    assert all(abs(number - 300.0) < 20.0 for number in quiet), quiet
+    assert len(quiet) == 3
+    stamped = [int(span["endTimeUnixNano"]) for span in timed]
     assert stamped == sorted(stamped)
 
     # A phone call is narrowband, and the band on the record is the one
@@ -935,7 +957,7 @@ async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
     recording = simulator.blob(audio["recording"])
     assert channels_of(recording)[2] == 8000
     assert_one_speaker_to_a_channel(
-        recording, [turn for turn in spoken if turn[1] != GOODBYE]
+        recording, [turn for turn in turns if turn[1] != GOODBYE]
     )
 
     simulator.stop()
@@ -978,7 +1000,7 @@ async def test_every_call_that_never_became_a_conversation_fails_honestly(
         assert terminal["facts"]["ending"] == ending, simulation_id
         assert terminal["facts"]["turn_count"] == 0, simulation_id
         # Nothing was conducted, so no exchange happened off the record.
-        assert events_for(records, simulation_id, "turn") == [], simulation_id
+        assert turns_for(records, simulation_id) == [], simulation_id
         reason = terminal["reason"]
         assert "agent" not in reason.lower(), (simulation_id, reason)
         reasons.append(reason)
@@ -1018,7 +1040,7 @@ async def test_a_livekit_that_cannot_be_reached_fails_without_a_credential(
     assert terminal["status"] == "failed"
     assert terminal["facts"]["ending"] == "error"
     assert "127.0.0.1:1" in terminal["reason"], terminal["reason"]
-    assert events_for(records, "sim-phone-livekit", "turn") == []
+    assert turns_for(records, "sim-phone-livekit") == []
 
     simulator.stop()
     for sentinel in TRUNK_SENTINELS:
@@ -1054,9 +1076,8 @@ async def test_the_far_end_hanging_up_is_the_agent_ending_the_exchange(
 
     # The partial transcript: the greeting, one persona turn, the agent's
     # last words — and nothing after them, because there was no line left.
-    turns = events_for(records, "sim-phone-hangup", "turn")
-    spoken = [(turn["speaker"], turn["text"]) for turn in turns]
-    assert spoken == [
+    turns = turns_for(records, "sim-phone-hangup")
+    assert turns == [
         ("agent", "Front desk."),
         ("human", "Sentence number 1."),
         ("agent", "I am afraid I have to go. Goodbye."),
@@ -1068,7 +1089,7 @@ async def test_the_far_end_hanging_up_is_the_agent_ending_the_exchange(
     audio = terminal["facts"]["audio"]
     assert audio is not None
     recording = simulator.blob(audio["recording"])
-    assert_one_speaker_to_a_channel(recording, spoken)
+    assert_one_speaker_to_a_channel(recording, turns)
 
 
 async def test_credentials_never_appear_in_logs_or_reports(
@@ -1168,20 +1189,21 @@ async def test_a_chat_simulation_streams_its_conversation_as_spans(
     names = [span["name"] for span in spans]
 
     # Every turn of the transcript, with the speaker in the span name and
-    # the words in the one attribute the vocabulary declares.
-    turns = events_for(records, "sim-spans-chat", "turn")
-    assert names.count("human_turn") == sum(
-        1 for turn in turns if turn["speaker"] == "human"
-    )
-    assert names.count("agent_turn") == sum(
-        1 for turn in turns if turn["speaker"] == "agent"
-    )
-    said = [
-        span_attribute(span, "egma.turn.text")
-        for span in spans
-        if span["name"] in ("human_turn", "agent_turn")
+    # the words in the one attribute the vocabulary declares — which is the
+    # whole of the record, because the report door carries no turn.
+    assert turns_for(records, "sim-spans-chat") == [
+        ("agent", "Lakeside Dental, how can I help?"),
+        ("human", "Move my Tuesday cleaning to Thursday."),
+        ("agent", "Of course — could I take your name?"),
+        ("human", "My name is Margaret Hale."),
+        ("agent", "Done: you are moved to Thursday at half past two."),
+        ("human", GOODBYE),
     ]
-    assert said == [turn["text"] for turn in turns]
+    # And what the lifecycle keeps about them is the count, which agrees
+    # with the spans without repeating them.
+    assert terminal_event_for(records, "sim-spans-chat")["facts"][
+        "turn_count"
+    ] == names.count("human_turn") + names.count("agent_turn")
 
     # The measurements, as spans whose own duration is the number.
     assert names.count("first_response_latency") == 1
@@ -1234,9 +1256,24 @@ async def test_a_chat_simulation_streams_its_conversation_as_spans(
     )
     assert last_span < terminal_seq
 
-    # Streamed rather than posted at the end: turns were on the record
-    # before the conversation was over.
-    assert min(record["seq"] for record in recorded) < terminal_seq - len(spans)
+    # Streamed rather than posted at the end: every turn but the last rode
+    # a flush that left while the conversation was still going, which is
+    # what a reader watching this live would see. The last is the persona
+    # concluding — the words that end the walk, so they leave with the
+    # flush that closes the record and could not have left before it.
+    root_flush = next(
+        flush_of(record)
+        for record in recorded
+        if record["span"]["name"] == "simulation"
+    )
+    spoken_turns = names.count("human_turn") + names.count("agent_turn")
+    said_while_running = [
+        record
+        for record in recorded
+        if record["span"]["name"].endswith("_turn")
+        and flush_of(record) < root_flush
+    ]
+    assert len(said_while_running) == spoken_turns - 1
 
     # Nothing was refused on the way.
     assert [record for record in records if record["kind"] == "refusal"] == []
@@ -1333,8 +1370,8 @@ async def test_an_answer_that_only_called_a_tool_is_flushed_like_any_other(
 
     # The wordless answer said nothing, so the transcript never mentions
     # it — the agent's two turns are the greeting and the later words.
-    turns = events_for(records, "sim-spans-tool-only", "turn")
-    assert [turn["text"] for turn in turns if turn["speaker"] == "agent"] == [
+    said = turns_for(records, "sim-spans-tool-only")
+    assert [text for speaker, text in said if speaker == "agent"] == [
         "Lakeside Dental, how can I help?",
         "Moved — Thursday at three.",
     ]

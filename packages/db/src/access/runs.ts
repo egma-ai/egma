@@ -194,9 +194,6 @@ export type Simulation = {
   readonly startedAt: Date | null;
   readonly endedAt: Date | null;
   readonly measuredAudioBandHertz: number | null;
-  readonly transcript: unknown;
-  readonly events: unknown;
-  readonly metrics: unknown;
   readonly recordingReference: string | null;
   /** How many transcript turns the conversation reached, both speakers counted. */
   readonly turnCount: number | null;
@@ -251,18 +248,24 @@ export type SimulationSummaryFacts = {
   readonly endedAt?: Date | undefined;
 };
 
-/** What the simulator reports about a conversation that happened. */
+/**
+ * What the simulator reports about a conversation that happened: how it
+ * ended, and the summary facts.
+ *
+ * What was *said* is not here and is not on the row. A conversation is its
+ * spans, streamed to the trace store's own ingest while it happens, so a
+ * landing records that the conversation is over rather than recording the
+ * conversation — and the evidence is already stored by the time it does,
+ * because the simulator puts both through one ordered sender.
+ */
 export type SimulationReport = SimulationSummaryFacts & {
   readonly endingReason: CompletedEndingReason;
-  readonly transcript: unknown;
-  readonly events?: unknown;
-  readonly metrics?: unknown;
 };
 
 /**
  * What the simulator reports about a simulation that never produced a
- * conversation to grade — or died producing one, in which case the partial
- * transcript is the honest "started, never finished" record.
+ * conversation to grade — or died producing one, in which case whatever it
+ * streamed before it died is the honest "started, never finished" record.
  *
  * Two reasons are deliberately not a simulator's to give, because each is
  * the platform's account of its own failure: `orphaned` is the sweep's word
@@ -273,9 +276,6 @@ export type SimulationReport = SimulationSummaryFacts & {
  */
 export type SimulationFailure = SimulationSummaryFacts & {
   readonly reason: Exclude<FailedEndingReason, "orphaned" | "dispatch_failed">;
-  readonly transcript?: unknown;
-  readonly events?: unknown;
-  readonly metrics?: unknown;
 };
 
 /** An answer's columns, and no more — the tenant-free view. */
@@ -323,9 +323,6 @@ const SIMULATION_COLUMNS = {
   startedAt: simulation.startedAt,
   endedAt: simulation.endedAt,
   measuredAudioBandHertz: simulation.measuredAudioBandHertz,
-  transcript: simulation.transcript,
-  events: simulation.events,
-  metrics: simulation.metrics,
   recordingReference: simulation.recordingReference,
   turnCount: simulation.turnCount,
   providerReference: simulation.providerReference,
@@ -2109,8 +2106,9 @@ async function landSimulation(
 
 /**
  * A conversation happened and this is its record: `running → completed`, the
- * report written once with the terminal facts — how it ended, the transcript,
- * the summary facts, the measured audio band that can never be backfilled.
+ * terminal facts written once — how it ended, the summary facts, the measured
+ * audio band that can never be backfilled. What was said is not among them:
+ * the conversation is its spans, and they are already stored.
  */
 export async function completeSimulation(
   auth: AuthContext,
@@ -2131,9 +2129,6 @@ export async function completeSimulation(
     write: {
       status: "completed",
       endingReason: report.endingReason,
-      transcript: report.transcript ?? null,
-      events: report.events ?? null,
-      metrics: report.metrics ?? null,
       ...summaryFactsWrite(report),
     },
   });
@@ -2141,7 +2136,8 @@ export async function completeSimulation(
 
 /**
  * The simulation ends without a conversation to grade — or with a partial
- * one, kept as the honest "started, never finished" record. From `claimed`
+ * one, whatever reached the trace store before it stopped, which is the
+ * honest "started, never finished" record. From `claimed`
  * (the agent never joined, the line was never answered) or from `running`
  * (something died mid-conversation). Never a judgement: the reasons here are the
  * "test never ran" class, and keeping them apart from a bad conversation is
@@ -2164,9 +2160,6 @@ export async function failSimulation(
     write: {
       status: "failed",
       endingReason: failure.reason,
-      transcript: failure.transcript ?? null,
-      events: failure.events ?? null,
-      metrics: failure.metrics ?? null,
       ...summaryFactsWrite(failure),
     },
   });

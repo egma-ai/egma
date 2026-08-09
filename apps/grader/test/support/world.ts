@@ -265,16 +265,17 @@ export type ConductedSimulation = {
 export async function conductSimulation(
   world: World,
   landing: {
-    readonly metrics?: unknown;
-    readonly transcript?: unknown;
     /**
      * The conversation as spans, streamed while it runs — before the terminal
      * transition, which is the order the simulator's one ordered sender puts
-     * them in. A conduct that streams them lands its row's columns **empty**
-     * unless a case explicitly asks for both, because empty is what the report
-     * door writes today.
+     * them in.
+     *
+     * Absent is a conversation that happened, in the default shape below.
+     * `null` is the other thing a case can mean: a conversation that happened
+     * and whose evidence never reached egma at all, which a reader has to be
+     * able to tell from one that never happened.
      */
-    readonly spans?: StreamedConversation | undefined;
+    readonly spans?: StreamedConversation | null | undefined;
     /**
      * Absent means it happened; a reason means it never ran. Typed as what a
      * simulator may report, because that is who this helper is playing.
@@ -330,16 +331,26 @@ export async function conductSimulation(
   // Every span on the wire before the document that ends the conversation, which
   // is the whole point of the simulator's one ordered sender: when the control
   // plane lands a terminal transition, the evidence is already stored.
-  if (landing.spans !== undefined) {
-    await streamConversation(world, conducting, landing.spans);
+  //
+  // A case that said nothing about the conversation gets one that happened,
+  // because that is what a conducted simulation is now: there is no column
+  // left for a conversation to sit in instead of the spans. `null` asks for
+  // the opposite — nothing on the wire at all — and a conduct that failed
+  // streams nothing unless it asked to, because nothing was conducted.
+  const streaming =
+    landing.spans === null
+      ? undefined
+      : (landing.spans ??
+        (landing.failedBecause === undefined
+          ? A_CONVERSATION_HAPPENED
+          : undefined));
+  if (streaming !== undefined) {
+    await streamConversation(world, conducting, streaming);
   }
 
-  // A column a case named is what that column gets, `null` included — asked by
-  // presence rather than by value, because "the row holds nothing" is a case
-  // this file has to be able to conduct. Unnamed, a column holds the default
-  // conversation for a conduct that streamed nothing, and nothing for one that
-  // streamed spans: empty is what the report door writes today.
-  const byDefault = landing.spans === undefined;
+  // The landing carries the lifecycle and the summary facts, and nothing
+  // about what was said: the conversation is whatever was streamed above,
+  // and there is no column left for a second copy of it to land in.
   const landed =
     landing.failedBecause !== undefined
       ? await failSimulation(world.auth, only.id, claimant, {
@@ -347,18 +358,6 @@ export async function conductSimulation(
         })
       : await completeSimulation(world.auth, only.id, claimant, {
           endingReason: "persona_concluded",
-          transcript:
-            "transcript" in landing
-              ? landing.transcript
-              : byDefault
-                ? [{ speaker: "agent", text: "Booked for Tuesday at four." }]
-                : null,
-          metrics:
-            "metrics" in landing
-              ? landing.metrics
-              : byDefault
-                ? { turn_response_latency: [900, 1_100] }
-                : null,
         });
   if (landed === undefined) {
     throw new Error(`simulation ${only.id} never reached a terminal transition`);
@@ -374,6 +373,17 @@ export async function conductSimulation(
 /* ------------------------------------------------------------------- *
  * A simulation's conversation, as the spans it actually arrives as.
  * ------------------------------------------------------------------- */
+
+/**
+ * The conversation a conduct streams when a case has no opinion about it: two
+ * turns with something findable in them, and one measure to threshold. It is
+ * the default rather than the empty conversation because most cases here are
+ * about grading and not about evidence, and a simulation that streamed nothing
+ * is a simulation with nothing to judge.
+ */
+const A_CONVERSATION_HAPPENED: StreamedConversation = {
+  measured: { turn_response_latency: [900, 1_100] },
+};
 
 /**
  * What one conducted conversation streams, said in the terms the vocabulary
@@ -770,15 +780,23 @@ export async function seedTest(
   return test.id;
 }
 
-/** A transcript with enough turns in it for a judgment to cite one. */
-export function aConversation(): readonly unknown[] {
-  return [
-    { speaker: "agent", text: "Thanks for calling Lakeside Dental." },
-    { speaker: "persona", text: "I need to move my cleaning to Thursday." },
-    { speaker: "agent", text: "Thursday at four works. Shall I move it?" },
-    { speaker: "persona", text: "Yes please." },
-    { speaker: "agent", text: "Booked for Thursday at four. Anything else?" },
-  ];
+/**
+ * A conversation with enough turns in it for a judgment to cite one, streamed
+ * as the spans a conversation now is. The measure rides with it because a
+ * judge is shown the measures beside the transcript, and a case about what a
+ * judge was shown wants both.
+ */
+export function aConversation(): StreamedConversation {
+  return {
+    said: [
+      { speaker: "agent", text: "Thanks for calling Lakeside Dental." },
+      { speaker: "human", text: "I need to move my cleaning to Thursday." },
+      { speaker: "agent", text: "Thursday at four works. Shall I move it?" },
+      { speaker: "human", text: "Yes please." },
+      { speaker: "agent", text: "Booked for Thursday at four. Anything else?" },
+    ],
+    measured: { turn_response_latency: [900, 1_100] },
+  };
 }
 
 /**

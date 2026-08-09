@@ -18,11 +18,11 @@ import type { Conversation } from "../conversation.ts";
  * because there is nowhere in this type for it to be.
  *
  * Text-only in v1. Nothing fixes the shape of what arrives here — telemetry is
- * written by whoever emitted it, and the columns a conversation falls back to
- * had no write door behind them — so everything here reads defensively and says
- * honestly when what it wanted is not there. An absent transcript is an empty
- * list, not a crash, and a judge shown an empty transcript answers that it
- * cannot determine anything, which is exactly right.
+ * written by whoever emitted it, and no write door stands between an exporter
+ * and the store — so everything here reads defensively and says honestly when
+ * what it wanted is not there. An absent transcript is an empty list, not a
+ * crash, and a judge shown an empty transcript answers that it cannot determine
+ * anything, which is exactly right.
  */
 export type JudgeInput = {
   /** In the order they were spoken, numbered from one. */
@@ -93,9 +93,10 @@ export function turnReference(at: number): string {
 }
 
 /**
- * The conversation, as the declared set. Everything defensive, because the
- * three columns are jsonb and a simulator that wrote something else must make a
- * judge say "I could not tell" rather than make the service fall over.
+ * The conversation, as the declared set. Everything defensive, because nothing
+ * stands between an exporter and the store: telemetry that arrived in a shape
+ * nobody expected must make a judge say "I could not tell" rather than make the
+ * service fall over.
  */
 export function judgeInputOf(conversation: Conversation): JudgeInput {
   const transcript = turnsOf(conversation.transcript);
@@ -124,15 +125,14 @@ function objectsOf(value: unknown): readonly Record<string, unknown>[] {
 }
 
 /**
- * One field of a jsonb column as something somebody wrote, or `undefined` when
- * there is nothing there to read.
+ * One field of the assembled conversation as something somebody wrote, or
+ * `undefined` when there is nothing there to read.
  *
  * **Blank is absent**, deliberately: a transcript entry holding an empty string
- * is a turn with nothing said in it, and a tool call event naming `""` names no
- * tool.
+ * is a turn with nothing said in it, and a tool call naming `""` names no tool.
  *
- * Exported because the `tool_calls` grader reads the same column and has to see
- * the same tool calls a judge is shown. Two readings of one shapeless column
+ * Exported because the `tool_calls` grader reads the same list and has to see
+ * the same tool calls a judge is shown. Two readings of one shapeless list
  * would be two answers to one question, and the way to stop that is one reading
  * rather than two careful ones.
  */

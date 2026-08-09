@@ -271,7 +271,6 @@ describe("the contract's golden flushes, posted with the service token", () => {
     await startSimulation(ours.auth, CHAT_SIMULATION, claimant);
     await completeSimulation(ours.auth, CHAT_SIMULATION, claimant, {
       endingReason: "persona_concluded",
-      transcript: null,
     });
 
     for (const name of ["chat-flush-2-tools.json", "chat-flush-3-root.json"]) {

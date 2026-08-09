@@ -296,7 +296,6 @@ describe("following a run from the terminal's own code", () => {
     await startSimulation(auth, first.id, CLAIMANT);
     await completeSimulation(auth, first.id, CLAIMANT, {
       endingReason: "agent_ended",
-      transcript: [],
     });
     await failSimulation(auth, second.id, CLAIMANT, {
       reason: "not_answered",

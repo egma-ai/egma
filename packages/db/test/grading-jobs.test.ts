@@ -110,8 +110,6 @@ async function aCompletedSimulation(): Promise<string> {
   const id = await aRunningSimulation(claimant);
   await completeSimulation(auth, id, claimant, {
     endingReason: "persona_concluded",
-    transcript: [{ speaker: "agent", text: "Booked for Tuesday at four." }],
-    metrics: { turn_response_latency: [900, 1_800] },
   });
   return id;
 }
@@ -636,7 +634,6 @@ describe("the claim", () => {
     await startSimulation(globexAuth, conversation.id, "sim");
     await completeSimulation(globexAuth, conversation.id, "sim", {
       endingReason: "agent_ended",
-      transcript: [],
     });
 
     const acmeSimulation = await aCompletedSimulation();

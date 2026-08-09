@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:egma:simulation-contract:report:v1",
   "title": "Simulation report",
-  "description": "The report direction of the simulation contract: what the simulator tells the control plane about one simulation, as it happens. One document carries one or more events, persisted whole to the simulator's write-ahead log before sending, so delivery is at-least-once and the control plane dedups on event ids. Every object in this schema is closed and no property is credential-shaped: a report carrying the spec's credential material cannot validate. That is deliberate, and the contract's test suites hold this schema to it.",
+  "description": "The report direction of the simulation contract: what the simulator tells the control plane about one simulation's lifecycle, as it happens. One document carries one or more events, persisted whole to the simulator's write-ahead log before sending, so delivery is at-least-once and the control plane dedups on event ids. The lifecycle is the whole of this direction: a conversation — its turns, its tool calls, its measurements — is streamed as OpenTelemetry spans to the trace store's own ingest instead, so a simulation is read the way a production trace is read. Every object in this schema is closed and no property is credential-shaped: a report carrying the spec's credential material cannot validate. That is deliberate, and the contract's test suites hold this schema to it.",
   "type": "object",
   "additionalProperties": false,
   "required": ["contract_version", "simulation_id", "events"],
@@ -36,15 +36,12 @@
       "minLength": 1
     },
     "event": {
-      "description": "One observed fact about the simulation, written once, complete — there is no patch-after-the-fact in this direction. The status transitions come in four shapes, one per status the simulator may report, so that what each transition must carry is spelled out rather than implied: `claimed` never appears among them, because claiming is the control plane's own act, stamped when it answers the claim.",
+      "description": "One transition of the simulation's lifecycle, written once, complete — there is no patch-after-the-fact in this direction. The transitions come in four shapes, one per status the simulator may report, so that what each must carry is spelled out rather than implied: `claimed` never appears among them, because claiming is the control plane's own act, stamped when it answers the claim. Every event carries a `kind` and the only kind is `status`, which is what refuses the turn, tool-call and timing kinds this direction used to carry — a conversation's record is the spans it arrived as, and a report claiming to carry one is a document the control plane does not accept.",
       "oneOf": [
         { "$ref": "#/$defs/running_event" },
         { "$ref": "#/$defs/completed_event" },
         { "$ref": "#/$defs/failed_event" },
-        { "$ref": "#/$defs/canceled_event" },
-        { "$ref": "#/$defs/turn_event" },
-        { "$ref": "#/$defs/tool_call_event" },
-        { "$ref": "#/$defs/timing_event" }
+        { "$ref": "#/$defs/canceled_event" }
       ]
     },
     "running_event": {
@@ -142,7 +139,7 @@
           "$ref": "#/$defs/moment"
         },
         "turn_count": {
-          "description": "How many transcript turns the simulation reached, both speakers counted — the same turns reported as turn events.",
+          "description": "How many transcript turns the simulation reached, both speakers counted — the same turns the conversation streamed as spans. A count is a summary fact about the whole simulation, so it rides the transition rather than being asked of the trace store.",
           "type": "integer",
           "minimum": 0
         },
@@ -180,7 +177,7 @@
           "$ref": "#/$defs/moment"
         },
         "turn_count": {
-          "description": "How many transcript turns the simulation reached, both speakers counted — the same turns reported as turn events.",
+          "description": "How many transcript turns the simulation reached, both speakers counted — the same turns the conversation streamed as spans. A count is a summary fact about the whole simulation, so it rides the transition rather than being asked of the trace store.",
           "type": "integer",
           "minimum": 0
         },
@@ -218,7 +215,7 @@
           "$ref": "#/$defs/moment"
         },
         "turn_count": {
-          "description": "How many transcript turns the simulation reached, both speakers counted — the same turns reported as turn events.",
+          "description": "How many transcript turns the simulation reached, both speakers counted — the same turns the conversation streamed as spans. A count is a summary fact about the whole simulation, so it rides the transition rather than being asked of the trace store.",
           "type": "integer",
           "minimum": 0
         },
@@ -248,81 +245,6 @@
           "description": "An opaque reference to the dual-channel recording the simulator wrote to the blob store — one side per channel, so each speaker can be heard alone when a transcript looks wrong. Resolved by the control plane; never a URL, never carries how to fetch it.",
           "type": "string",
           "minLength": 1
-        }
-      }
-    },
-    "turn_event": {
-      "description": "One transcript turn, written once, complete, when the turn is over.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "kind",
-        "event_id",
-        "speaker",
-        "text",
-        "started_at",
-        "ended_at"
-      ],
-      "properties": {
-        "kind": { "const": "turn" },
-        "event_id": { "$ref": "#/$defs/event_id" },
-        "speaker": {
-          "description": "Whose turn it was: `human` is the persona's side of the transcript, `agent` is the agent under test. The transcript's two labels, exactly.",
-          "type": "string",
-          "enum": ["human", "agent"]
-        },
-        "text": {
-          "description": "What was said, as text — spoken and transcribed on voice, sent verbatim on chat. May be empty for a turn that carried no words.",
-          "type": "string"
-        },
-        "started_at": {
-          "description": "When the turn began.",
-          "$ref": "#/$defs/moment"
-        },
-        "ended_at": {
-          "description": "When the turn finished, or null for a turn that was one instant — a chat message has no duration.",
-          "oneOf": [{ "$ref": "#/$defs/moment" }, { "type": "null" }]
-        }
-      }
-    },
-    "tool_call_event": {
-      "description": "The agent under test called a tool, as observed from egma's side of the connection — reported where the platform exposes it, which is how the outcome gets populated. Never the persona's doing: the persona has no tools.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["kind", "event_id", "at", "name", "arguments"],
-      "properties": {
-        "kind": { "const": "tool_call" },
-        "event_id": { "$ref": "#/$defs/event_id" },
-        "at": { "$ref": "#/$defs/moment" },
-        "name": {
-          "description": "The tool's name, exactly as the platform reported it.",
-          "type": "string",
-          "minLength": 1
-        },
-        "arguments": {
-          "description": "The arguments, JSON-encoded, exactly as observed — or null where the platform reports the invocation but not its arguments. A string deliberately: it keeps every object in this schema closed, and the observed bytes are the fact worth keeping.",
-          "type": ["string", "null"]
-        }
-      }
-    },
-    "timing_event": {
-      "description": "One measurement. A metric measures and a grader judges; nothing in this direction is a verdict.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["kind", "event_id", "at", "measure", "milliseconds"],
-      "properties": {
-        "kind": { "const": "timing" },
-        "event_id": { "$ref": "#/$defs/event_id" },
-        "at": { "$ref": "#/$defs/moment" },
-        "measure": {
-          "description": "What was measured, named in snake_case — `first_response_latency`, `turn_response_latency`. An open vocabulary: measures are emitted for every simulation whether or not anyone asked, and new ones join without a contract change.",
-          "type": "string",
-          "minLength": 1
-        },
-        "milliseconds": {
-          "description": "The measurement, in milliseconds.",
-          "type": "number",
-          "minimum": 0
         }
       }
     }

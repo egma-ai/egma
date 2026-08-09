@@ -1,0 +1,13 @@
+{
+  "contract_version": 1,
+  "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWER",
+  "events": [
+    {
+      "kind": "tool_call",
+      "event_id": "evt-000004",
+      "at": "2026-08-05T09:00:41.377000Z",
+      "name": "reschedule_appointment",
+      "arguments": "{\"appointment_id\":\"apt-88213\"}"
+    }
+  ]
+}

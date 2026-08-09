@@ -25,11 +25,11 @@ import type {
  *
  * A simulation's row is still read for what only it knows — that this
  * conversation was one egma conducted, which run it belongs to, what the
- * simulator said about how it ended — and, for as long as the columns exist, as
- * the fallback for rows written before any of this streamed. The three fields
- * are `unknown` because the columns are stored jsonb and nothing fixed their
- * shape at the write door; each grader reads what it needs and says honestly
- * when what it needs is not there.
+ * simulator said about how it ended. The three conversation fields are
+ * `unknown` because a production trace and a simulation are assembled into
+ * them by the same code and nothing downstream may branch on which; each
+ * grader reads what it needs and says honestly when what it needs is not
+ * there.
  */
 export type Conversation = {
   /** Which kind of conversation this is, in the verdict row's own vocabulary. */
@@ -41,8 +41,10 @@ export type Conversation = {
    * simulation's own id: it is what every other row about this conversation is
    * reachable from, and it is the same string in Postgres, in a URL and in a
    * log. For a production trace it is the trace's own id off the wire, which is
-   * the same fact from the other direction — and when simulator reports converge
-   * on the OTLP door the two stop differing at all.
+   * the same fact from the other direction — each source filed under the word
+   * its own world already uses for the conversation. A simulation's spans sit
+   * under a trace id derived from that id, and the derivation stays with the
+   * query rather than moving up here.
    */
   readonly traceId: string;
   /**
@@ -83,21 +85,21 @@ export type Conversation = {
  * A finished simulation, read as a conversation — and the whole of the reading
  * order, in one place.
  *
- * Three answers, asked in this order, and each of them is a different fact
- * about what egma actually holds:
+ * Two answers, asked in this order, and each of them is a different fact about
+ * what egma actually holds:
  *
  * 1. **The trace is complete — assemble it from the spans.** The root span is
  *    what says so: it is authored first and sent last, in the flush that leaves
  *    once the conversation is over, so a trace holding it is a trace holding
- *    everything. That is the settled record, and it is read by exactly the code
- *    a production trace is read by.
- * 2. **The trace is incomplete or absent — fall back to the row's columns.**
- *    A simulation with spans and no root is one egma holds part of, and a
- *    partial transcript is not something to judge an agent against. A
- *    simulation with no spans at all is older than the emitter. Either way the
- *    columns are the record that exists, for as long as they exist — this is
- *    the one interim branch here, and it goes when they do.
- * 3. **Neither — say so, and judge nothing.** Every grader answers `errored`,
+ *    everything. That is the record, and it is read by exactly the code a
+ *    production trace is read by. There is no second one: the row's three jsonb
+ *    columns were the interim carrier and the migration that dropped them left
+ *    this branch as the only reader of a conversation.
+ * 2. **Anything else — say so, and judge nothing.** A simulation with spans
+ *    and no root is one egma holds part of; one whose trace overran the
+ *    reader's limit is one egma holds more of than a reading returns; one with
+ *    no spans at all is one no telemetry ever arrived for. None of the three is
+ *    something to judge an agent against, so every grader answers `errored`
  *    with the reason, because a check egma could not make is never a check the
  *    agent failed.
  *
@@ -151,19 +153,6 @@ export function conversationOfSimulation(
     };
   }
 
-  if (theColumnsHoldSomething(simulation)) {
-    // INTERIM: the row's three jsonb columns, which are the record for every
-    // conversation that landed before the simulator streamed one. This branch
-    // is the only reader of them left, and it goes in the migration that drops
-    // them.
-    return {
-      ...filedUnderTheSimulation,
-      transcript: simulation.transcript,
-      events: simulation.events,
-      metrics: simulation.metrics,
-    };
-  }
-
   return {
     ...filedUnderTheSimulation,
     nothingToJudgeBecause: neverHappened ?? unreadable(simulation, trace),
@@ -176,8 +165,8 @@ function neverRan(simulation: Simulation): string {
 }
 
 /**
- * A conversation that happened and that egma cannot read — and which of the two
- * ways it can happen, because they are different things to go and fix.
+ * A conversation that happened and that egma cannot read — and which of the
+ * three ways it can happen, because they are different things to go and fix.
  *
  * Never `failed`, and this is where that is decided rather than in each grader:
  * an agent that answered every question perfectly would be marked down for a
@@ -213,29 +202,6 @@ function rootArrivedIn(trace: TraceDetail): boolean {
     if (span.kind === ROOT) return true;
   }
   return false;
-}
-
-/**
- * Whether the row's columns hold a conversation at all.
- *
- * Null is what a landing writes today, and an empty list or object is what a
- * conversation with nothing in it comes back as. Anything else is a record
- * somebody can be judged against, however thin — a row with measures and no
- * transcript is still the measures it holds.
- */
-function theColumnsHoldSomething(simulation: Simulation): boolean {
-  return (
-    holdsSomething(simulation.transcript) ||
-    holdsSomething(simulation.events) ||
-    holdsSomething(simulation.metrics)
-  );
-}
-
-function holdsSomething(column: unknown): boolean {
-  if (column === null || column === undefined) return false;
-  if (Array.isArray(column)) return column.length > 0;
-  if (typeof column === "object") return Object.keys(column).length > 0;
-  return true;
 }
 
 /**

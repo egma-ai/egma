@@ -305,7 +305,7 @@ describe("an illegal simulation move", () => {
     );
 
     await expect(
-      db.sql("update simulation set transcript = '[]'::jsonb where id = $1", [id]),
+      db.sql("update simulation set turn_count = 99 where id = $1", [id]),
     ).rejects.toSatisfy(
       (error) =>
         errorCodeOf(error) === POSTGRES_ERROR.raiseException &&
@@ -396,9 +396,23 @@ describe("a simulation's shape", () => {
     );
   });
 
-  it("refuses a report on a row that has not ended", async () => {
+  it("refuses the audio facts on a row that has not ended", async () => {
+    // The report check reduced to these two when the conversation left the
+    // row, and this is the pair it still holds to a landing. A chat row
+    // could not hold them at all, so the case is voice.
     await expect(
-      insertSimulation("running", { transcript: "[]" }),
+      insertSimulation("running", {
+        modality: "voice",
+        measured_audio_band_hertz: 8_000,
+      }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+    await expect(
+      insertSimulation("running", {
+        modality: "voice",
+        recording_reference: "dual-channel.wav",
+      }),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
     );

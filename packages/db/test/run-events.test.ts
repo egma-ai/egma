@@ -219,7 +219,6 @@ describe("every lifecycle change", () => {
     await startSimulation(actingAsAcme(), first.id, CLAIMANT);
     await completeSimulation(actingAsAcme(), first.id, CLAIMANT, {
       endingReason: "agent_ended",
-      transcript: [],
     });
     await failSimulation(actingAsAcme(), second.id, CLAIMANT, {
       reason: "agent_never_joined",
@@ -247,7 +246,6 @@ describe("every lifecycle change", () => {
     await startSimulation(actingAsAcme(), only.id, CLAIMANT);
     await completeSimulation(actingAsAcme(), only.id, CLAIMANT, {
       endingReason: "persona_concluded",
-      transcript: [],
     });
 
     const landed = (await feedOf(started.id)).events.find(
@@ -347,7 +345,6 @@ describe("the change and its event", () => {
     expect(
       await completeSimulation(actingAsAcme(), only.id, CLAIMANT, {
         endingReason: "agent_ended",
-        transcript: [],
       }),
     ).toBeUndefined();
     expect(
@@ -401,7 +398,6 @@ describe("a follower that crashes and comes back", () => {
     await startSimulation(actingAsAcme(), first.id, CLAIMANT);
     await completeSimulation(actingAsAcme(), first.id, CLAIMANT, {
       endingReason: "agent_ended",
-      transcript: [],
     });
 
     // A page served twice: the same request, twice. The server is stateless

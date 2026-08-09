@@ -712,14 +712,23 @@ describe("idempotency without a ledger", () => {
   });
 });
 
-describe("what is accepted and deliberately dropped", () => {
-  it("takes turn, timing and tool_call events without storing a byte of them", async () => {
+describe("what this door is not for", () => {
+  /**
+   * The conversation has one home and this is not it. A turn, a tool call and
+   * a measurement arrive as spans at the OTLP ingest — the same door a
+   * customer's agent exports to — so a report carrying one would be a second
+   * copy of the conversation, free to disagree with the first. The refusal is
+   * the contract's rather than this route's, which is what makes it true of
+   * both sides at once: the simulator's own check raises the same complaint
+   * before such a document could ever be sent.
+   */
+  it("refuses a report carrying a conversation, whichever kind it claims", async () => {
     const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
-      "reports_dropped",
+      "reports_conversation",
     );
     const { simulationId } = await aRunningSimulation(key, connectionId, versionId);
 
-    const answered = await report(simulationId, [
+    const carrying: Record<string, unknown>[] = [
       {
         kind: "turn",
         event_id: eventId(),
@@ -742,20 +751,22 @@ describe("what is accepted and deliberately dropped", () => {
         name: "reschedule_appointment",
         arguments: null,
       },
-    ]);
-    expect(answered.statusCode).toBe(200);
-    expect(answered.body).toEqual({
-      simulation_id: simulationId,
-      status: "running",
-    });
+    ];
 
-    // Dropped means dropped: nothing landed on the row, and the columns that
-    // once carried conversation data are untouched.
+    for (const event of carrying) {
+      const refused = await report(simulationId, [event]);
+      expect(
+        refused.statusCode,
+        `a "${String(event.kind)}" event was believed`,
+      ).toBe(400);
+      expect(refused.body.error).toBe("invalid_request");
+      expect(String(refused.body.message)).toContain("/events/0");
+    }
+
+    // And the record is exactly where it was: a refused document moves
+    // nothing, so the conversation is still running and still only in spans.
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
     expect(row?.status).toBe("running");
-    expect(row?.transcript).toBeNull();
-    expect(row?.events).toBeNull();
-    expect(row?.metrics).toBeNull();
   });
 });
 

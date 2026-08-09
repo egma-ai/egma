@@ -76,7 +76,7 @@ describe("a project that configured no judge", () => {
     const testId = await seedTest(world, [], [BEHAVIOR, "never quotes a price"]);
     const { simulationId } = await conductSimulation(world, {
       testId,
-      transcript: aConversation(),
+      spans: aConversation(),
     });
 
     const rows = await eventually("the behaviors to be errored", async () => {
@@ -187,7 +187,7 @@ describe("the project's default judge", () => {
     const testId = await seedTest(world, [], [BEHAVIOR]);
     const { simulationId } = await conductSimulation(world, {
       testId,
-      transcript: aConversation(),
+      spans: aConversation(),
     });
 
     const verdicts = await eventually("a behavior verdict", async () => {

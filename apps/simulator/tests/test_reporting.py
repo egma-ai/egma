@@ -53,22 +53,22 @@ async def test_events_arrive_in_order_with_the_wal_written_first(tmp_path):
     reporter = Reporter(client, "sim-rep-1", tmp_path)
 
     reporter.running()
-    reporter.turn("human", "Hello.", started_at="2026-08-05T09:00:00.000000Z")
-    reporter.turn("agent", "Hello.", started_at="2026-08-05T09:00:00.100000Z")
-    reporter.timing("first_response_latency", 100)
+    # What the lifecycle keeps about the conversation: the count, tallied by
+    # whoever watched it happen. The turns themselves are spans.
+    reporter.turn_count = 2
     reporter.completed("persona_concluded")
     await reporter.close()
 
     kinds = [
         json.loads(document)["events"][0]["kind"] for document in client.delivered
     ]
-    assert kinds == ["status", "turn", "turn", "timing", "status"]
+    assert kinds == ["status", "status"]
 
     event_ids = [
         json.loads(document)["events"][0]["event_id"]
         for document in client.delivered
     ]
-    assert event_ids == [f"evt-{n:06d}" for n in range(1, 6)]
+    assert event_ids == [f"evt-{n:06d}" for n in range(1, 3)]
 
     wal_lines = (tmp_path / wal_filename("sim-rep-1")).read_bytes().splitlines()
     assert wal_lines == client.delivered
@@ -103,11 +103,19 @@ async def test_a_terminal_report_before_running_is_a_loud_bug(tmp_path):
 async def test_a_report_that_violates_the_contract_never_leaves(tmp_path):
     client = FakeClient()
     reporter = Reporter(client, "sim-rep-4", tmp_path)
+    reporter.running()
     with pytest.raises(ContractViolation):
-        reporter.turn("narrator", "not a speaker", started_at="not a moment")
+        reporter.completed("hung_up_on")
     await reporter.close()
-    assert client.attempts == []
-    assert not (tmp_path / wal_filename("sim-rep-4")).exists()
+
+    # The running report went; the ending nothing in the contract names did
+    # not, and nothing about it reached the log either.
+    kinds = [
+        json.loads(document)["events"][0]["status"] for document in client.delivered
+    ]
+    assert kinds == ["running"]
+    wal_lines = (tmp_path / wal_filename("sim-rep-4")).read_bytes().splitlines()
+    assert wal_lines == client.delivered
 
 
 async def test_the_wal_stays_inside_its_directory_whatever_the_id_says(tmp_path):
@@ -164,8 +172,11 @@ async def test_an_unreachable_control_plane_is_given_up_on_without_hanging(
     client.unreachable = True
     reporter = Reporter(client, "sim-rep-6", tmp_path, delivery_deadline_seconds=0.5)
 
+    spans = SpanEmitter("sim-rep-6", flush=reporter.spans)
     reporter.running()
-    reporter.turn("human", "Hello.", started_at="2026-08-05T09:00:00.000000Z")
+    spans.opened()
+    spans.turn("human", "Hello.")
+    spans.flush()
     reporter.completed("persona_concluded")
 
     # close() returns rather than waiting out an outage of unknown length.
@@ -175,14 +186,14 @@ async def test_an_unreachable_control_plane_is_given_up_on_without_hanging(
     assert client.delivered == []
     assert len(client.attempts) > 1, "it gave up without retrying"
 
-    # Once abandoned, later events are not attempted out of order — but
-    # every one of them is still on disk, in the order it happened.
+    # Once abandoned, later documents are not attempted out of order — but
+    # every one of them is still on disk, in the order it happened, both
+    # kinds together.
     wal_lines = (tmp_path / wal_filename("sim-rep-6")).read_bytes().splitlines()
-    assert [json.loads(line)["events"][0]["kind"] for line in wal_lines] == [
-        "status",
-        "turn",
-        "status",
-    ]
+    assert [
+        "spans" if "resourceSpans" in json.loads(line) else "report"
+        for line in wal_lines
+    ] == ["report", "spans", "report"]
     assert json.loads(wal_lines[-1])["events"][0]["status"] == "completed"
 
 
@@ -201,12 +212,8 @@ async def test_spans_and_lifecycle_share_one_log_in_the_order_they_happened(
     spans.opened()
     spans.turn("agent", "Lakeside Dental.")
     spans.flush()
-    reporter.turn("agent", "Lakeside Dental.", started_at="2026-08-05T09:00:00.000000Z")
     spans.turn("human", "Could we move my cleaning?")
     spans.flush()
-    reporter.turn(
-        "human", "Could we move my cleaning?", started_at="2026-08-05T09:00:01.000000Z"
-    )
     spans.sealed()
     reporter.completed("persona_concluded")
     await reporter.close()
@@ -214,9 +221,7 @@ async def test_spans_and_lifecycle_share_one_log_in_the_order_they_happened(
     assert client.doors == [
         "report",  # running
         "spans",  # the greeting
-        "report",  # the greeting as a transcript turn
         "spans",  # the persona's turn
-        "report",  # the same turn on the lifecycle side
         "spans",  # the closing flush, root last
         "report",  # completed, and only now
     ]

@@ -5,10 +5,21 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 
-import { createPersona } from "@egma/db";
+import {
+  createGrader,
+  createPersona,
+  readVerdicts,
+  setJudgeConfiguration,
+  type AuthContext,
+  type NewGrader,
+  type RecordedVerdict,
+} from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { rowsIn } from "../../../packages/db/test/support/clickhouse.ts";
+import { makeLog } from "../../grader/src/log.ts";
+import { startService, type Service } from "../../grader/src/service.ts";
+import { scriptedJudge } from "../../grader/test/support/scripted-judge.ts";
 import { startInstance, type Instance } from "./support/instance.ts";
 import { NEUTRAL_TRAITS } from "./support/traces.ts";
 
@@ -36,6 +47,21 @@ import { NEUTRAL_TRAITS } from "./support/traces.ts";
  * grader will read it: the walk is watched while it runs, and the moment the
  * simulation row turns terminal the conversation is already queryable in
  * ClickHouse, root span included.
+ *
+ * **And it runs to a verdict.** The real grader service claims the work the
+ * terminal landing minted, reads the conversation back out of ClickHouse the
+ * way it reads a production trace, and writes verdicts that cite turns by
+ * their position in that transcript. Which closes the walk on the only claim
+ * that matters end to end: a team's check was answered from a conversation
+ * that exists as spans and as nothing else — the row has no column left to
+ * hold one, and this asserts that of the schema itself.
+ *
+ * The judge is scripted, and it is the one seam here that is not a real
+ * deployment's. A criterion written in a team's own words is answered by a
+ * model, and a walk that called one would need an account and a network and
+ * would still not answer the same way twice. Everything around it is real,
+ * including the deterministic grader beside it, whose pass depends on no
+ * model at all.
  *
  * The failed walk rides the same session: a second connection whose key the
  * counterpart refuses, landing `failed` with the honest reason. The canceled
@@ -154,9 +180,21 @@ class RetellCounterpart {
   }
 }
 
+/** What the team wrote down, in their own words, for the judge to answer. */
+const THE_BEHAVIOR = "confirms the new time back before finishing";
+
+/**
+ * A phrase the agent has to have said — the deterministic grader, and the one
+ * that cites the turn it found. Its words are the counterpart's scripted
+ * answer, so a pass here can only have come from the transcript egma
+ * assembled out of the spans the simulator streamed.
+ */
+const THE_PHRASE = "Wednesday afternoon";
+
 let instance: Instance;
 let counterpart: RetellCounterpart;
 let simulator: ChildProcess | undefined;
+let grader: Service | undefined;
 let simulatorSaid = "";
 let scratch: string;
 
@@ -282,6 +320,27 @@ async function storedSpans(traceId: string): Promise<StoredSpan[]> {
   );
 }
 
+/** The verdicts on one conversation, once the grader has written them. */
+async function verdictsOn(
+  auth: AuthContext,
+  simulationId: string,
+  atLeast: number,
+  within: number,
+): Promise<readonly RecordedVerdict[]> {
+  const deadline = Date.now() + within;
+  for (;;) {
+    const { verdicts } = await readVerdicts(auth, simulationId);
+    if (verdicts.length >= atLeast) return verdicts;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `${simulationId} has ${verdicts.length} verdict(s) after ${within}ms, ` +
+          `wanted ${atLeast}`,
+      );
+    }
+    await new Promise((resume) => setTimeout(resume, 100));
+  }
+}
+
 async function gradingJobsFor(simulationId: string): Promise<number> {
   const { rows } = await instance.database.sql<{ count: string }>(
     "select count(*) as count from grading_job where simulation_id = $1",
@@ -368,6 +427,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   simulator?.kill("SIGTERM");
+  grader?.stop();
+  await grader?.finished;
   await instance?.close();
   await counterpart?.stop();
   await rm(scratch, { recursive: true, force: true });
@@ -427,18 +488,36 @@ describe("the shipped simulator against the real API", () => {
         ],
       );
 
-      // The persona is authored at the seam — no route ships for one — and
-      // the test then names her, which is what the claimed spec's traits
-      // come from. This process shares the instance's database connection.
-      await createPersona(
-        {
-          userId,
-          organizationId,
-          projectId,
-          role: "member",
-          via: "session",
+      // The persona, the project's grader and its judge are authored at the
+      // seam — no route ships for any of them — and this process shares the
+      // instance's database connection.
+      const auth: AuthContext = {
+        userId,
+        organizationId,
+        projectId,
+        role: "member",
+        via: "session",
+      };
+      await createPersona(auth, {
+        name: "Impatient Rita",
+        traits: NEUTRAL_TRAITS,
+      });
+      const phraseGrader = await createGrader(auth, {
+        name: "Reads an afternoon back",
+        type: "phrase_match",
+        config: {
+          required: [{ text: THE_PHRASE, match: "contains" }],
+          banned: [],
+          speaker: "agent",
         },
-        { name: "Impatient Rita", traits: NEUTRAL_TRAITS },
+      } as NewGrader);
+      await setJudgeConfiguration(
+        { ...auth, role: "admin" },
+        {
+          provider: "openai",
+          model: "gpt-4.1-mini",
+          key: "sk-walk-judge-never-called-over-a-network",
+        },
       );
 
       const pushed = await call("POST", "/api/tests", {
@@ -447,7 +526,7 @@ describe("the shipped simulator against the real API", () => {
           name: "Reschedules a booked appointment",
           scenario:
             "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-          expected_behaviors: ["confirms the new time back before finishing"],
+          expected_behaviors: [THE_BEHAVIOR],
           personas: ["Impatient Rita"],
         },
       });
@@ -492,6 +571,38 @@ describe("the shipped simulator against the real API", () => {
       });
       simulator.stderr?.on("data", (piece: Buffer) => {
         simulatorSaid += piece.toString("utf8");
+      });
+
+      // The real grader, in this process and against these same two stores,
+      // claiming the work each terminal landing mints. Started beside the
+      // simulator rather than after it, so the walk to a verdict is one
+      // continuous thing and not a second act arranged afterwards.
+      const judge = scriptedJudge({
+        answers: {
+          [THE_BEHAVIOR]: {
+            decision: "met",
+            rationale: "the agent named an afternoon back before finishing.",
+            citedTurns: [3],
+          },
+        },
+      });
+      grader = startService({
+        config: {
+          databaseUrl: "",
+          clickhouseUrl: "",
+          // Both stores are already connected by the instance this process
+          // shares, and the master key with them.
+          encryptionKey: undefined,
+          claimant: "walking-grader-1",
+          capacity: 4,
+          heartbeatSeconds: 1,
+          leaseSeconds: 3_600,
+          sweepSeconds: 3_600,
+          traceIdleSeconds: 3_600,
+          logLevel: "ERROR",
+        },
+        log: makeLog("ERROR", "walking-grader-1"),
+        makers: judge.makers,
       });
 
       // The conversation watched as it happens, in both stores at once.
@@ -621,6 +732,60 @@ describe("the shipped simulator against the real API", () => {
       expect(refusedRun.status).toBe("completed");
       expect(refusedRun.completed_count).toBe(0);
       expect(refusedRun.failed_count).toBe(1);
+
+      // And the verdict, which is what the whole walk was for. Two graders
+      // judged this conversation — the project's phrase match and the test's
+      // own expected behavior — and both were answered out of a transcript
+      // that exists only as the spans above.
+      const verdicts = await verdictsOn(auth, conducted.simulationId, 2, 30_000);
+      const phrase = verdicts.find(
+        (verdict) => verdict.graderId === phraseGrader.id,
+      );
+      const behavior = verdicts.find(
+        (verdict) => verdict.graderId === "expected_behaviors",
+      );
+
+      expect(phrase).toMatchObject({
+        verdict: "passed",
+        traceId: conducted.simulationId,
+        runId: conducted.runId,
+        agentId,
+      });
+      // Cited at its position in the span-assembled transcript: the third
+      // thing said, which is the agent turn carrying the phrase — the same
+      // turn the store holds and the same one this test read back above.
+      expect(phrase?.citedSpanIds).toEqual(["turn:3"]);
+      expect(
+        spans.filter((span) => span.name.endsWith("_turn"))[2]?.text,
+      ).toContain(THE_PHRASE);
+
+      // The dimension is the behavior's position in the test, which is how a
+      // page lines a run's checks up whatever each one says.
+      expect(behavior).toMatchObject({ verdict: "passed", dimension: "behavior_1" });
+      // The judge was shown the conversation egma assembled, not a report:
+      // four turns, the ending the row records, and no tool call, because the
+      // counterpart made none.
+      const [asked] = judge.asked;
+      expect(asked?.criterion).toBe(THE_BEHAVIOR);
+      expect(asked?.evidence.transcript).toHaveLength(4);
+      expect(asked?.evidence.outcome).toMatchObject({
+        happened: true,
+        endingReason: "persona_concluded",
+        turns: 4,
+      });
+
+      // And the row it was all filed against holds no conversation, because
+      // the table has nowhere left to put one. Asked of the schema rather
+      // than of a row: a column nobody writes is not the same fact as a
+      // column that does not exist.
+      const { rows: gone } = await instance.database.sql<{
+        column_name: string;
+      }>(
+        `select column_name from information_schema.columns
+          where table_name = 'simulation'
+            and column_name in ('transcript', 'events', 'metrics')`,
+      );
+      expect(gone).toEqual([]);
     },
   );
 });

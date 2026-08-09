@@ -107,6 +107,50 @@ async def test_an_invalid_report_is_refused_and_the_refusal_is_a_record(workbenc
     assert [record for record in records if record["kind"] == "report"] == []
 
 
+async def test_a_report_carrying_a_conversation_is_refused_at_the_report_door(
+    workbench,
+):
+    """The two doors carry two records, and the contract keeps them apart.
+
+    A turn is a span. A report that carried one would be a second copy of
+    the conversation, free to disagree with the first — so the report
+    schema does not merely ignore the kind, it refuses the document, and
+    the workbench refuses it exactly where the real report door does.
+    """
+    await workbench.offer(scripted_spec("sim-wb-turn"))
+    async with aiohttp.ClientSession() as session:
+        await session.post(
+            f"{workbench.base_url}/v1/claims",
+            json={"claimant": "test", "capacity": 1},
+        )
+        carrying = {
+            "contract_version": 1,
+            "simulation_id": "sim-wb-turn",
+            "events": [
+                {
+                    "kind": "turn",
+                    "event_id": "evt-000002",
+                    "speaker": "agent",
+                    "text": "Lakeside Dental, how can I help?",
+                    "started_at": "2026-08-05T09:00:01.214000Z",
+                    "ended_at": None,
+                }
+            ],
+        }
+        async with session.post(
+            f"{workbench.base_url}/v1/simulations/sim-wb-turn/reports",
+            data=json.dumps(carrying).encode(),
+            headers={"content-type": "application/json"},
+        ) as response:
+            assert response.status == 400
+
+    records = await workbench.records()
+    refusals = [record for record in records if record["kind"] == "refusal"]
+    assert len(refusals) == 1
+    assert refusals[0]["why"] == "contract violation"
+    assert [record for record in records if record["kind"] == "report"] == []
+
+
 async def test_a_report_for_an_unknown_simulation_is_not_found(workbench):
     async with aiohttp.ClientSession() as session:
         async with session.post(

@@ -746,7 +746,6 @@ describe("following a run", () => {
     await startSimulation(auth, first.id, CLAIMANT);
     await completeSimulation(auth, first.id, CLAIMANT, {
       endingReason: "agent_ended",
-      transcript: [],
     });
     await failSimulation(auth, second.id, CLAIMANT, {
       reason: "agent_never_joined",
@@ -754,7 +753,6 @@ describe("following a run", () => {
     await startSimulation(auth, third.id, CLAIMANT);
     await completeSimulation(auth, third.id, CLAIMANT, {
       endingReason: "persona_concluded",
-      transcript: [],
     });
 
     const last = await follow();
@@ -1020,7 +1018,6 @@ describe("stopping a run", () => {
       await startSimulation(auth, one.id, CLAIMANT);
       await completeSimulation(auth, one.id, CLAIMANT, {
         endingReason: "agent_ended",
-        transcript: [],
       });
     }
 
