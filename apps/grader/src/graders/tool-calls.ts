@@ -94,7 +94,7 @@ export function executeToolCalls(
       // Empty, and honestly so. A tool call is not a turn: it has a span of its
       // own, sitting beside the transcript rather than inside it, so there is no
       // turn to point a reader at. A citation naming the tool span itself is a
-      // different reference from the turn positions this column otherwise
+      // different reference from the turn positions this field otherwise
       // carries, and adding it means teaching every reader of the column to
       // resolve two kinds — which is a decision for whoever renders it.
       citedSpanIds: [],
@@ -115,13 +115,11 @@ type ObservedCall = {
 /**
  * The tools the agent called, read off the event stream defensively.
  *
- * Nothing fixes the shape of this list — it is assembled from spans for a
- * conversation egma holds spans for, and read off a jsonb column with no write
- * door behind it for one it does not — so anything that is not a tool call
- * event with a name on it is not a tool call. Read the
- * same way `judgeInputOf` reads it, deliberately: a judge and this grader
- * looking at two different lists of tool calls would be two answers to one
- * question. The reading of a field is literally the judge input's `textOf`
+ * Nothing fixes the shape of this list — it is assembled from spans, and no
+ * write door stands between an exporter and the store — so anything that is not
+ * a tool call with a name on it is not a tool call. Read the same way
+ * `judgeInputOf` reads it, deliberately: a judge and this grader looking at two
+ * different lists of tool calls would be two answers to one question. The reading of a field is literally the judge input's `textOf`
  * rather than a copy of it, so "the same way" is a fact about the code and not
  * an intention stated in a comment.
  */

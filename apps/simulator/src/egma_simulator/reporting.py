@@ -116,6 +116,11 @@ class Reporter:
         self._delivery_deadline_seconds = delivery_deadline_seconds
         self._sequence = 0
         self.turn_count = 0
+        """How many transcript turns the conversation reached, both speakers
+        counted, kept by whoever is watching it happen. A summary fact rather
+        than the conversation itself — the turns are spans, and a count of
+        them is one number about the whole simulation, which is why it rides
+        the terminal transition instead of being asked of the trace store."""
         self.started_at: str | None = None
         self._queue: asyncio.Queue[tuple[Destination, bytes]] = asyncio.Queue()
         self._sender: asyncio.Task | None = None
@@ -276,30 +281,6 @@ class Reporter:
                 "at": self.started_at,
                 "status": "running",
                 "reason": reason,
-            }
-        )
-
-    def turn(self, speaker: str, text: str, started_at: str) -> None:
-        self.turn_count += 1
-        self._enqueue(
-            {
-                "kind": "turn",
-                "event_id": self._mint_event_id(),
-                "speaker": speaker,
-                "text": text,
-                "started_at": started_at,
-                "ended_at": None,
-            }
-        )
-
-    def timing(self, measure: str, milliseconds: float) -> None:
-        self._enqueue(
-            {
-                "kind": "timing",
-                "event_id": self._mint_event_id(),
-                "at": moment(),
-                "measure": measure,
-                "milliseconds": milliseconds,
             }
         )
 

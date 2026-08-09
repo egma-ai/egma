@@ -39,16 +39,17 @@ wrote.
 
 from __future__ import annotations
 
-from datetime import datetime
-
 import pytest
 from conftest import (
     assert_kept_secret,
     credential,
-    events_for,
     has_terminal,
+    measures_for,
+    milliseconds_of,
     phone_spec,
+    spans_for,
     terminal_event_for,
+    turns_for,
 )
 
 from egma_simulator.pipeline import channels_of
@@ -188,8 +189,7 @@ async def test_the_simulator_dials_a_real_number_and_holds_a_conversation(
     # A real agent said real words, and the transcript alternates the way a
     # conversation does. What was said is not pinned: a live agent answers
     # differently every time, and pinning it would be pinning the agent.
-    turns = events_for(records, "sim-phone-live-001", "turn")
-    spoken = [(turn["speaker"], turn["text"]) for turn in turns]
+    spoken = turns_for(records, "sim-phone-live-001")
     agent_turns = [text for speaker, text in spoken if speaker == "agent"]
     human_turns = [text for speaker, text in spoken if speaker == "human"]
     assert agent_turns, f"the agent never said anything: {spoken}"
@@ -202,7 +202,7 @@ async def test_the_simulator_dials_a_real_number_and_holds_a_conversation(
     # Whatever happened, it is one of the deliberate endings — a call that
     # never became a conversation would have failed instead.
     assert facts["ending"] in ("persona_concluded", "agent_ended", "limit_reached")
-    assert facts["turn_count"] == len(turns)
+    assert facts["turn_count"] == len(spoken)
 
     # LiveKit's own identity for the SIP participant: the one join between
     # this record and the platform's telemetry.
@@ -226,19 +226,27 @@ async def test_the_simulator_dials_a_real_number_and_holds_a_conversation(
         )
 
     # Per-turn timings, measured off the real call, and never backwards.
-    timings = events_for(records, "sim-phone-live-001", "timing")
-    measures = [event["measure"] for event in timings]
+    measures = measures_for(records, "sim-phone-live-001")
     assert "time_to_first_word" in measures
     assert "agent_speech_duration" in measures
-    assert all(event["milliseconds"] >= 0 for event in timings)
+    timed = [
+        record["span"]
+        for record in spans_for(records, "sim-phone-live-001")
+        if record["span"]["name"] in measures
+    ]
+    assert all(milliseconds_of(span) >= 0 for span in timed)
 
     # Monotonic, in both the senses a live record has to be: no measurement
-    # stamped before the one reported ahead of it, and no turn beginning
-    # before the turn beginning ahead of it. On a real line these are read
-    # from real audio arriving in real time, so an ordering that went
-    # backwards would mean the clock or the reader was wrong — which is
-    # exactly the thing a latency number is trusted not to be.
-    stamped = [datetime.fromisoformat(event["at"]) for event in timings]
-    assert stamped == sorted(stamped), "a measurement is stamped out of order"
-    began = [datetime.fromisoformat(turn["started_at"]) for turn in turns]
-    assert began == sorted(began), "a turn began before the one before it"
+    # taken before the one taken ahead of it, and no turn beginning before
+    # the turn beginning ahead of it. On a real line these are read from
+    # real audio arriving in real time, so an ordering that went backwards
+    # would mean the clock or the reader was wrong — which is exactly the
+    # thing a latency number is trusted not to be.
+    stamped = [int(span["endTimeUnixNano"]) for span in timed]
+    assert stamped == sorted(stamped), "a measurement is taken out of order"
+    observed = [
+        int(record["span"]["endTimeUnixNano"])
+        for record in spans_for(records, "sim-phone-live-001")
+        if record["span"]["name"].endswith("_turn")
+    ]
+    assert observed == sorted(observed), "a turn was heard out of order"

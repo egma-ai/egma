@@ -73,13 +73,14 @@ export type MeasureSource = "every simulation" | "voice simulations";
  * Where the number comes from on the wire — which is not the same question as
  * what it is called here.
  *
- * `timing_event` measures arrive as their own report events, one per
- * measurement, under exactly the name in this catalog. `terminal_fact` measures
- * arrive on the status transition that ends the simulation, inside its facts,
- * and the control plane records them under the catalog name — so a threshold
- * grader reads one vocabulary whether the number was timed or counted.
+ * `timing_span` measures arrive as their own spans through the trace store's
+ * ingest, one per measurement, named for exactly the name in this catalog and
+ * with the span's own duration as the number. `terminal_fact` measures arrive
+ * on the status transition that ends the simulation, inside its facts, and the
+ * control plane records them under the catalog name — so a threshold grader
+ * reads one vocabulary whether the number was timed or counted.
  */
-export type MeasureOrigin = "timing_event" | "terminal_fact";
+export type MeasureOrigin = "timing_span" | "terminal_fact";
 
 /** One measure, as both the write door and a person reading the catalog see it. */
 export type CatalogedMeasure = {
@@ -116,7 +117,7 @@ export const MEASURE_CATALOG: readonly CatalogedMeasure[] = [
     unit: "milliseconds",
     taken: "once",
     from: "every simulation",
-    origin: "timing_event",
+    origin: "timing_span",
     means:
       "how long the agent took to say anything at all, from the moment the simulation began",
     aggregations: EVERY_AGGREGATION,
@@ -126,7 +127,7 @@ export const MEASURE_CATALOG: readonly CatalogedMeasure[] = [
     unit: "milliseconds",
     taken: "per_turn",
     from: "every simulation",
-    origin: "timing_event",
+    origin: "timing_span",
     means:
       "how long the agent took to answer, measured once for every turn the persona took",
     aggregations: EVERY_AGGREGATION,
@@ -136,7 +137,7 @@ export const MEASURE_CATALOG: readonly CatalogedMeasure[] = [
     unit: "milliseconds",
     taken: "per_turn",
     from: "voice simulations",
-    origin: "timing_event",
+    origin: "timing_span",
     means:
       "the quiet before the agent's first word of an answer, measured out of the audio rather than off a clock",
     aggregations: EVERY_AGGREGATION,
@@ -146,7 +147,7 @@ export const MEASURE_CATALOG: readonly CatalogedMeasure[] = [
     unit: "milliseconds",
     taken: "per_turn",
     from: "voice simulations",
-    origin: "timing_event",
+    origin: "timing_span",
     means: "how long the agent spoke for, silence inside the answer excluded",
     aggregations: EVERY_AGGREGATION,
   },
@@ -155,7 +156,7 @@ export const MEASURE_CATALOG: readonly CatalogedMeasure[] = [
     unit: "milliseconds",
     taken: "per_turn",
     from: "voice simulations",
-    origin: "timing_event",
+    origin: "timing_span",
     means:
       "how long egma's own synthetic caller spoke for — what the agent was made to listen to, not anything the agent did",
     aggregations: EVERY_AGGREGATION,

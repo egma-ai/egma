@@ -122,8 +122,6 @@ async function aFinishedSimulation(): Promise<Conducted> {
   await startSimulation(auth, only.id, claimant);
   await completeSimulation(auth, only.id, claimant, {
     endingReason: "persona_concluded",
-    transcript: [{ speaker: "agent", text: "Booked for Tuesday at four." }],
-    metrics: { turn_response_latency: [900, 1_800] },
   });
 
   return { runId: started.id, simulationId: only.id };

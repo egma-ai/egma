@@ -83,7 +83,7 @@ describe("a rubric judged on the project's own judge", () => {
     });
 
     const { simulationId } = await conductSimulation(world, {
-      transcript: aConversation(),
+      spans: aConversation(),
     });
     const rows = await rowsFrom(simulationId, graderId);
 
@@ -122,7 +122,7 @@ describe("a rubric judged on the project's own judge", () => {
     });
 
     const { simulationId } = await conductSimulation(world, {
-      transcript: aConversation(),
+      spans: aConversation(),
     });
     const [only] = await rowsFrom(simulationId, graderId);
 
@@ -164,7 +164,7 @@ describe("a rubric judged on the project's own judge", () => {
     });
 
     const { simulationId } = await conductSimulation(world, {
-      transcript: aConversation(),
+      spans: aConversation(),
     });
     const [broken] = await rowsFrom(simulationId, graderId);
 
@@ -206,7 +206,7 @@ describe("a rubric on a grader that names its own judge", () => {
     });
 
     const { simulationId } = await conductSimulation(world, {
-      transcript: aConversation(),
+      spans: aConversation(),
     });
     const [only] = await rowsFrom(simulationId, overridden);
 

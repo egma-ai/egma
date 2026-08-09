@@ -540,7 +540,6 @@ describe("resolving what a simulation was executed against", () => {
     await startSimulation(actingAsAcme(), simulationId, "simulator-blue-1");
     await completeSimulation(actingAsAcme(), simulationId, "simulator-blue-1", {
       endingReason: "persona_concluded",
-      transcript: [{ speaker: "agent", text: "Booked for Tuesday afternoon." }],
     });
     return simulationId;
   }
@@ -669,8 +668,7 @@ describe("the lifecycle, conducted by a claimant", () => {
     // A chat simulation reports no audio facts — the row would refuse them.
     const completed = await completeSimulation(actingAsAcme(), simulationId, simulator, {
       endingReason: "persona_concluded",
-      transcript: [{ speaker: "human", text: "Thanks, that is everything." }],
-      metrics: { turnCount: 6 },
+      turnCount: 6,
     });
     expect(completed?.status).toBe("completed");
     expect(completed?.endingReason).toBe("persona_concluded");
@@ -705,7 +703,6 @@ describe("the lifecycle, conducted by a claimant", () => {
     await expect(
       completeSimulation(actingAsAcme(), simulationId, simulator, {
         endingReason: "agent_never_joined" as never,
-        transcript: [],
       }),
     ).rejects.toThrow(/not a way a conversation ends/);
 
@@ -816,7 +813,6 @@ describe("the lifecycle, conducted by a claimant", () => {
     await startSimulation(actingAsAcme(), simulationId, simulator);
     await completeSimulation(actingAsAcme(), simulationId, simulator, {
       endingReason: "persona_concluded",
-      transcript: [],
     });
     expect(
       await recordSimulationHeartbeat({
@@ -826,17 +822,20 @@ describe("the lifecycle, conducted by a claimant", () => {
     ).toBeUndefined();
   });
 
-  it("keeps a completed simulation's report readable exactly as reported", async () => {
+  it("keeps a completed simulation's terminal facts readable exactly as reported", async () => {
     const { simulationId } = await claimedOne();
     await startSimulation(actingAsAcme(), simulationId, simulator);
     await completeSimulation(actingAsAcme(), simulationId, simulator, {
       endingReason: "agent_ended",
-      transcript: [{ speaker: "agent", text: "Goodbye." }],
+      turnCount: 4,
     });
 
+    // What the row keeps is the lifecycle and the summary facts. What was
+    // said is not among them and has no column to be in: the conversation
+    // is its spans, in the trace store.
     const kept = await getSimulation(actingAsAcme(), simulationId);
-    expect(kept?.transcript).toEqual([{ speaker: "agent", text: "Goodbye." }]);
     expect(kept?.endingReason).toBe("agent_ended");
+    expect(kept?.turnCount).toBe(4);
     expect(kept?.measuredAudioBandHertz).toBeNull();
   });
 });
@@ -861,7 +860,6 @@ describe("the summary facts a terminal landing carries", () => {
     const endedAt = new Date("2026-08-05T09:02:10.551Z");
     const landed = await completeSimulation(actingAsAcme(), simulationId, simulator, {
       endingReason: "persona_concluded",
-      transcript: [],
       turnCount: 14,
       providerReference: "chat_5d1f9a3b7c",
       startedAt,
@@ -885,7 +883,6 @@ describe("the summary facts a terminal landing carries", () => {
 
     const landed = await completeSimulation(actingAsAcme(), simulationId, simulator, {
       endingReason: "agent_ended",
-      transcript: [],
     });
 
     expect(landed?.turnCount).toBeNull();
@@ -945,7 +942,6 @@ describe("the summary facts a terminal landing carries", () => {
 
     const landed = await completeSimulation(actingAsAcme(), simulationId, simulator, {
       endingReason: "agent_ended",
-      transcript: [],
       measuredAudioBandHertz: 48_000,
       recordingReference: `${simulationId}/dual-channel.wav`,
       turnCount: 22,
@@ -964,7 +960,6 @@ describe("the summary facts a terminal landing carries", () => {
       await expect(
         completeSimulation(actingAsAcme(), simulationId, simulator, {
           endingReason: "persona_concluded",
-          transcript: [],
           turnCount,
         }),
       ).rejects.toThrow(/turn count/);
@@ -1018,7 +1013,6 @@ describe("where a simulation stands, answered for the service's own routes", () 
     await startSimulation(actingAsAcme(), claimed.id, simulator);
     await completeSimulation(actingAsAcme(), claimed.id, simulator, {
       endingReason: "limit_reached",
-      transcript: [],
     });
 
     const standing = await resolveSimulationStanding(claimed.id);
@@ -1117,7 +1111,6 @@ describe("canceling a run", () => {
     await startSimulation(actingAsAcme(), claimed.id, simulator);
     await completeSimulation(actingAsAcme(), claimed.id, simulator, {
       endingReason: "persona_concluded",
-      transcript: [],
     });
 
     await expect(cancelRun(actingAsAcme(), finished.id)).rejects.toThrow(

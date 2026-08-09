@@ -624,6 +624,49 @@ def span_attribute(span: dict, key: str) -> str | None:
     return None
 
 
+TURN_SPANS = {"human_turn": "human", "agent_turn": "agent"}
+
+
+def turns_for(records: list[dict], simulation_id: str) -> list[tuple[str, str]]:
+    """The transcript, read where the transcript is: the turn spans.
+
+    The speaker rides the span name and the words ride the one attribute
+    the vocabulary declares, so a turn is those two and nothing else. This
+    is how every suite here reads a conversation — the report door carries
+    the lifecycle alone.
+    """
+    return [
+        (
+            TURN_SPANS[record["span"]["name"]],
+            span_attribute(record["span"], "egma.turn.text") or "",
+        )
+        for record in spans_for(records, simulation_id)
+        if record["span"]["name"] in TURN_SPANS
+    ]
+
+
+def measures_for(records: list[dict], simulation_id: str) -> list[str]:
+    """Every measurement taken, named, in the order it was taken.
+
+    A timing span is named for the measure it takes, so the names *are*
+    the measurements — and the conversation's own spans are named for what
+    they are, which is what tells the two apart.
+    """
+    conversation = {*TURN_SPANS, "simulation", "tool_call"}
+    return [
+        record["span"]["name"]
+        for record in spans_for(records, simulation_id)
+        if record["span"]["name"] not in conversation
+    ]
+
+
+def milliseconds_of(span: dict) -> float:
+    """One timing span's measurement: its own duration, and nothing beside it."""
+    return (
+        int(span["endTimeUnixNano"]) - int(span["startTimeUnixNano"])
+    ) / 1_000_000
+
+
 def heartbeats_for(records: list[dict], simulation_id: str) -> list[dict]:
     return [
         record

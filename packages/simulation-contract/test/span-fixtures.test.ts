@@ -47,7 +47,7 @@ const CONVERSATION_SPAN_NAMES = [
  * measure joining the catalog joins this vocabulary in the same edit.
  */
 const MEASURE_SPAN_NAMES = MEASURE_CATALOG.filter(
-  (entry) => entry.origin === "timing_event",
+  (entry) => entry.origin === "timing_span",
 ).map((entry) => entry.measure);
 
 const SPAN_ATTRIBUTE_KEYS = [

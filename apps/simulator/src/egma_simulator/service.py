@@ -9,8 +9,12 @@ Every arrow points out: the simulator is never dialled into.
 A running simulation writes two records of itself and this is where they
 are joined. The lifecycle goes to the control plane as report events; the
 conversation goes to the OTLP ingest as spans, authored here from what the
-walk and the pipeline observe. Both go through one reporter, so they are
-delivered in the order they happened and the terminal document is last.
+walk and the pipeline observe. Neither says what the other says: a turn, a
+tool call and a measurement are spans and only spans, and what the
+lifecycle carries about them is the one summary fact a reader of a single
+simulation asks for — how many turns it reached. Both go through one
+reporter, so they are delivered in the order they happened and the
+terminal document is last.
 
 The executor is deliberately a seam. Today it runs each simulation as one
 asyncio task in this process; a process- or container-per-simulation
@@ -39,7 +43,7 @@ from .persona import Persona
 from .pipeline import assemble
 from .plugs import failed_ending, plug_for
 from .redaction import SecretRegistry
-from .reporting import Reporter, moment
+from .reporting import Reporter
 from .spans import SpanEmitter
 from .spec import SimulationSpec
 from .speech import SpeechProviders
@@ -272,8 +276,12 @@ class RunningSimulation:
             self._reporter.completed(conducted.ending, conducted.reason)
 
     async def _on_turn(self, speaker: str, text: str) -> None:
-        self._reporter.turn(speaker, text, started_at=moment())
+        # The turn itself goes one way only: into the spans. What the
+        # lifecycle keeps is the count, which is a fact about the whole
+        # simulation rather than about any turn — so it is tallied here, as
+        # the turns are observed, and rides the terminal transition.
         self._spans.turn(speaker, text)
+        self._reporter.turn_count += 1
         loop = asyncio.get_running_loop()
         if speaker == "human" and self._first_human_at is None:
             self._first_human_at = loop.time()
@@ -284,7 +292,6 @@ class RunningSimulation:
         ):
             self._first_latency_reported = True
             elapsed_ms = (loop.time() - self._first_human_at) * 1000
-            self._reporter.timing("first_response_latency", elapsed_ms)
             self._spans.measure("first_response_latency", elapsed_ms)
 
     async def _on_answered(self) -> None:
@@ -304,7 +311,6 @@ class RunningSimulation:
         self._spans.flush()
 
     async def _on_timing(self, measure: str, milliseconds: float) -> None:
-        self._reporter.timing(measure, milliseconds)
         self._spans.measure(measure, milliseconds)
 
     async def _on_speech(self, speaker: str, seconds: float) -> None:

@@ -132,6 +132,22 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     keyword: "additionalProperties",
     property: "facts",
   },
+  // The three kinds this direction used to carry. A conversation's record is
+  // its spans now, so a report claiming to carry one is refused at the same
+  // place any other unknown kind is — which is what makes the retirement a
+  // fact of the contract rather than a habit of the shipped simulator.
+  "report/timing-event-retired.json": {
+    at: "/events/0/kind",
+    keyword: "const",
+  },
+  "report/tool-call-event-retired.json": {
+    at: "/events/0/kind",
+    keyword: "const",
+  },
+  "report/turn-event-retired.json": {
+    at: "/events/0/kind",
+    keyword: "const",
+  },
   "report/unknown-event-kind.json": {
     at: "/events/0/kind",
     keyword: "const",
@@ -254,14 +270,17 @@ describe("what the golden fixtures cover", () => {
     expect(modalities).toEqual(new Set(["chat", "voice"]));
   });
 
-  it("shows every report event kind, and every terminal status", async () => {
+  it("shows the one report event kind, and every terminal status", async () => {
     const reports = await fixturesUnder("report", "valid");
     const events = reports.flatMap(
       (fixture) => fixture.document.events as Record<string, unknown>[],
     );
 
+    // One kind, and this is the assertion that says so: the report direction
+    // carries the lifecycle and nothing else, because a conversation's record
+    // is the spans it arrived as.
     const kinds = new Set(events.map((event) => event.kind));
-    expect(kinds).toEqual(new Set(["status", "turn", "tool_call", "timing"]));
+    expect(kinds).toEqual(new Set(["status"]));
 
     const statuses = new Set(
       events

@@ -24,7 +24,11 @@ import {
 
 /**
  * The report door: `POST /v1/simulations/:simulationId/reports`, where the
- * simulator says what happened — the lifecycle landing.
+ * simulator says what happened — the lifecycle landing, and only that. What
+ * was said in the conversation arrives at the OTLP ingest as spans and never
+ * here, which the contract holds rather than this route: a document carrying
+ * a turn does not validate, so there is no second record of one conversation
+ * for two readers to disagree about.
  *
  * It sits with the claim door on the claim door's exact terms: the service
  * token is the whole gate and resolves to nothing, and the group is outside
@@ -245,15 +249,11 @@ export async function reportRoutes(
     const events = document.events as readonly Record<string, unknown>[];
     let lastKnownStatus: string = standing.status;
 
+    // Every event here is a lifecycle transition, because the contract check
+    // above has already refused anything else: a conversation's turns, tool
+    // calls and measurements arrive as spans at the OTLP door, and a report
+    // claiming to carry one does not validate.
     for (const event of events) {
-      // INTERIM: turn, timing and tool_call events are accepted and dropped
-      // here, whole. The simulator ships them today and conversation data is
-      // getting a real home — as spans through the trace store's own ingest,
-      // where a simulation reads like a production trace — so this door
-      // keeps the shipped reporter working end to end without building a
-      // second storage path that the spans work immediately retires.
-      if (event.kind !== "status") continue;
-
       const applied = await applyStatusEvent(
         reply,
         simulationId,
@@ -441,7 +441,6 @@ async function applyLanding(
   if (event.status === "completed") {
     return completeSimulation(standing.auth, standing.id, conductor, {
       endingReason: ending as CompletedEndingReason,
-      transcript: null,
       ...facts,
     });
   }

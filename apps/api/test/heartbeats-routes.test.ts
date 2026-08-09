@@ -312,7 +312,7 @@ describe("the steering matrix", () => {
       contextFor(ada, "member"),
       held.simulationId,
       SIMULATOR,
-      { endingReason: "persona_concluded", transcript: [] },
+      { endingReason: "persona_concluded" },
     );
     const late = await beat(token, held.simulationId, { claimant: SIMULATOR });
     expect(late.statusCode).toBe(200);

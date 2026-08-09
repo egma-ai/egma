@@ -60,7 +60,7 @@ describe("a conversation reaching its terminal transition", () => {
 
     const started = Date.now();
     const { simulationId, runId } = await conductSimulation(world, {
-      metrics: { turn_response_latency: [900, 1_100] },
+      spans: { measured: { turn_response_latency: [900, 1_100] } },
     });
 
     const verdicts = await verdictsOn(world, simulationId);
@@ -78,7 +78,7 @@ describe("a conversation reaching its terminal transition", () => {
       aThreshold({ name: "P1 latency", priority: "P1" }),
     );
     const { simulationId, runId } = await conductSimulation(world, {
-      metrics: { turn_response_latency: [900, 9_100] },
+      spans: { measured: { turn_response_latency: [900, 9_100] } },
     });
 
     const verdicts = await verdictsOn(world, simulationId, 2);
@@ -201,7 +201,7 @@ describe("a completed conversation missing the measure a grader wants", () => {
     );
 
     const { simulationId } = await conductSimulation(world, {
-      metrics: { turn_response_latency: [900] },
+      spans: { measured: { turn_response_latency: [900] } },
     });
     await verdictsOn(world, simulationId, 2);
 

@@ -1054,6 +1054,265 @@ describe("the dispatch-failure vocabulary (0015)", () => {
   });
 });
 
+/* ------------------------------------------------------------------- *
+ * Seeding a customer's work the way an older release wrote it.
+ * ------------------------------------------------------------------- */
+
+/**
+ * Everything one seeded run is made of: the tenancy above it, the agent it
+ * reaches over one connection, the persona at one version, and the run itself.
+ *
+ * Written by hand rather than through the data-access module, on purpose. The
+ * point of an upgrade check is what the *older* release wrote, and the module
+ * writes what today's schema takes — so seeding through it would put today's
+ * rows in and then congratulate the migration for coping with them.
+ */
+type ACustomersWork = {
+  readonly organization: string;
+  readonly project: string;
+  readonly agent: string;
+  readonly connection: string;
+  readonly personaId: string;
+  readonly personaVersion: string;
+  readonly run: string;
+  /** How many conversations the run says it expects, which its rows must match. */
+  readonly expected: number;
+};
+
+async function seedACustomersWork(
+  client: pg.Client,
+  work: ACustomersWork,
+): Promise<void> {
+  await client.query(
+    "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
+    [work.organization],
+  );
+  await client.query(
+    "insert into project (id, organization_id, name, slug) values ($1, $2, 'Default', 'default')",
+    [work.project, work.organization],
+  );
+  await client.query(
+    "insert into agent (id, organization_id, project_id, name) values ($1, $2, $3, 'Front desk')",
+    [work.agent, work.organization, work.project],
+  );
+  await client.query(
+    `insert into connection
+       (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
+     values ($1, $2, $3, $4, 'retell-1', 'retell', 'chat', 'hosted-broker', '{}'::jsonb)`,
+    [work.connection, work.organization, work.project, work.agent],
+  );
+  // The persona and the version name each other, so they go in together.
+  await client.query("begin");
+  await client.query(
+    `insert into persona (id, organization_id, project_id, name, current_version_id)
+     values ($1, $2, $3, 'Impatient Rita', $4)`,
+    [work.personaId, work.organization, work.project, work.personaVersion],
+  );
+  await client.query(
+    "insert into persona_version (id, persona_id, version, traits) values ($1, $2, 1, '{}'::jsonb)",
+    [work.personaVersion, work.personaId],
+  );
+  await client.query("commit");
+  await client.query(
+    `insert into run
+       (id, organization_id, project_id, agent_id, connection_id, status,
+        triggered_via, pinned_test_versions, requested_personas,
+        connection_snapshot, expected_simulation_count)
+     values ($1, $2, $3, $4, $5, 'pending', 'manual', $6::jsonb, $7::jsonb,
+        $8::jsonb, $9)`,
+    [
+      work.run,
+      work.organization,
+      work.project,
+      work.agent,
+      work.connection,
+      JSON.stringify({ testVersionIds: [] }),
+      JSON.stringify({ personaIds: [work.personaId] }),
+      JSON.stringify({
+        type: "retell",
+        modality: "chat",
+        topology: "hosted-broker",
+        environment: null,
+        config: {},
+      }),
+      work.expected,
+    ],
+  );
+}
+
+/**
+ * Where one seeded conversation stood when the older release stopped writing
+ * it: still waiting, finished, or landed by that release's own claim path as
+ * work it could never hand over.
+ */
+type SimulationShape = "queued" | "completed" | "dispatch_failed";
+
+async function insertSimulation(
+  client: pg.Client,
+  work: ACustomersWork,
+  simulation: {
+    readonly id: string;
+    readonly position: number;
+    readonly shape: SimulationShape;
+    /** Chat unless a case needs the audio facts, which only voice may hold. */
+    readonly modality?: "chat" | "voice" | undefined;
+    /**
+     * What the conversation was, for a release that kept it in the row's
+     * three jsonb columns. Written in the insert rather than an update
+     * afterwards, because a terminal simulation is written once and the row
+     * itself enforces that.
+     */
+    readonly conversation?:
+      | {
+          readonly transcript: unknown;
+          readonly events: unknown;
+          readonly metrics: unknown;
+        }
+      | undefined;
+  },
+): Promise<void> {
+  const landing = {
+    queued: { columns: "", values: ", 'queued'" },
+    completed: {
+      columns: `, claimed_by, claimed_at, heartbeat_at, started_at, ended_at,
+                ending_reason`,
+      values: `, 'completed', 'simulator-blue-1', now(), now(), now(), now(),
+               'persona_concluded'`,
+    },
+    dispatch_failed: {
+      columns: ", claimed_by, claimed_at, heartbeat_at, ended_at, ending_reason",
+      values: `, 'failed', 'simulator-blue-1', now(), now(), now(),
+               'dispatch_failed'`,
+    },
+  }[simulation.shape];
+
+  // The conversation's three slots come last in the parameter list, so a
+  // statement that does not name them simply stops before them.
+  const held = simulation.conversation;
+  await client.query(
+    `insert into simulation
+       (id, run_id, organization_id, project_id, agent_id, connection_id,
+        persona_id, persona_version_id, position, connection_type, modality,
+        status${landing.columns}${
+          held === undefined ? "" : ", transcript, events, metrics"
+        })
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'retell', $10${landing.values}${
+       held === undefined ? "" : ", $11::jsonb, $12::jsonb, $13::jsonb"
+     })`,
+    [
+      simulation.id,
+      work.run,
+      work.organization,
+      work.project,
+      work.agent,
+      work.connection,
+      work.personaId,
+      work.personaVersion,
+      simulation.position,
+      simulation.modality ?? "chat",
+      ...(held === undefined
+        ? []
+        : [
+            JSON.stringify(held.transcript),
+            JSON.stringify(held.events),
+            JSON.stringify(held.metrics),
+          ]),
+    ],
+  );
+}
+
+describe("the simulation's summary facts (0016)", () => {
+  let database: EmptyDatabase;
+  /** The schema as it stood before the two facts, in a directory of its own. */
+  let beforeTheFacts: string;
+  let client: pg.Client;
+
+  const work: ACustomersWork = {
+    organization: newId("org"),
+    project: newId("prj"),
+    agent: newId("agt"),
+    connection: newId("con"),
+    personaId: newId("prs"),
+    personaVersion: newId("prsv"),
+    run: newId("run"),
+    expected: 3,
+  };
+  const queued = newId("sim");
+  const landed = newId("sim");
+  const undispatched = newId("sim");
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("summary_facts_upgrade");
+    beforeTheFacts = await mkdtemp(path.join(os.tmpdir(), "egma-before-0016-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0016") {
+        await writeFile(path.join(beforeTheFacts, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, beforeTheFacts);
+
+    // A customer's work as that release wrote it: one conversation still
+    // queued, one finished, and one that release's own claim path landed as
+    // dispatch_failed. The last two are the rows the new columns are about,
+    // and the rows their guards re-validate on the way in.
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await seedACustomersWork(client, work);
+    await insertSimulation(client, work, {
+      id: queued,
+      position: 1,
+      shape: "queued",
+    });
+    await insertSimulation(client, work, {
+      id: landed,
+      position: 2,
+      shape: "completed",
+    });
+    await insertSimulation(client, work, {
+      id: undispatched,
+      position: 3,
+      shape: "dispatch_failed",
+    });
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(beforeTheFacts, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("is what is still pending on a database that already holds landed work", async () => {
+    const result = await runMigrations(database.url);
+    expect(result.applied[0]).toBe("0016_simulation_summary_facts.sql");
+    expect(result.applied.every((name) => name >= "0016")).toBe(true);
+  });
+
+  it("says what is true of the conversations that already landed: no facts", async () => {
+    // No turn count and no provider reference, because no report could carry
+    // either when they landed — never a number invented for them.
+    const { rows } = await client.query<{
+      turn_count: number | null;
+      provider_reference: string | null;
+    }>(
+      `select turn_count, provider_reference from simulation
+        where id in ($1, $2)`,
+      [landed, undispatched],
+    );
+    expect(rows).toEqual([
+      { turn_count: null, provider_reference: null },
+      { turn_count: null, provider_reference: null },
+    ]);
+  });
+
+  it("brings the columns with their guard: a summary fact is a terminal fact", async () => {
+    await expect(
+      client.query("update simulation set turn_count = 3 where id = $1", [
+        queued,
+      ]),
+    ).rejects.toThrow(/simulation_summary_facts_only_when_ended/u);
+  });
+});
+
 /**
  * An instance that has been running since before a migration is the case a
  * migration is actually for, and it is the one an empty database never tests:
@@ -1095,157 +1354,108 @@ describe("upgrading an instance that already holds work", () => {
       migrations.slice(0, -1).map((migration) => migration.name),
     );
 
-    // A customer's work, written the way the release before this one wrote
-    // it: a run over a connection, one conversation still queued inside it,
-    // and two already landed — a completed one, and one the release's own
-    // claim path landed as dispatch_failed — the rows the new summary-fact
-    // columns are about, and the rows their guards re-validate on the way in.
     const client = new pg.Client({ connectionString: database.url });
     await client.connect();
-    const organization = newId("org");
-    const project = newId("prj");
-    const agent = newId("agt");
-    const connection = newId("con");
-    const personaId = newId("prs");
-    const personaVersion = newId("prsv");
-    const run = newId("run");
+    const work: ACustomersWork = {
+      organization: newId("org"),
+      project: newId("prj"),
+      agent: newId("agt"),
+      connection: newId("con"),
+      personaId: newId("prs"),
+      personaVersion: newId("prsv"),
+      run: newId("run"),
+      expected: 3,
+    };
     const queued = newId("sim");
     const landed = newId("sim");
-    const undispatched = newId("sim");
+    const dialing = newId("sim");
     try {
-      await client.query(
-        "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
-        [organization],
-      );
-      await client.query(
-        "insert into project (id, organization_id, name, slug) values ($1, $2, 'Default', 'default')",
-        [project, organization],
-      );
-      await client.query(
-        "insert into agent (id, organization_id, project_id, name) values ($1, $2, $3, 'Front desk')",
-        [agent, organization, project],
-      );
-      await client.query(
-        `insert into connection
-           (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
-         values ($1, $2, $3, $4, 'retell-1', 'retell', 'chat', 'hosted-broker', '{}'::jsonb)`,
-        [connection, organization, project, agent],
-      );
-      await client.query("begin");
-      await client.query(
-        `insert into persona (id, organization_id, project_id, name, current_version_id)
-         values ($1, $2, $3, 'Impatient Rita', $4)`,
-        [personaId, organization, project, personaVersion],
-      );
-      await client.query(
-        "insert into persona_version (id, persona_id, version, traits) values ($1, $2, 1, '{}'::jsonb)",
-        [personaVersion, personaId],
-      );
-      await client.query("commit");
-      await client.query(
-        `insert into run
-           (id, organization_id, project_id, agent_id, connection_id, status,
-            triggered_via, pinned_test_versions, requested_personas,
-            connection_snapshot, expected_simulation_count)
-         values ($1, $2, $3, $4, $5, 'pending', 'manual', $6::jsonb, $7::jsonb,
-            $8::jsonb, 3)`,
-        [
-          run,
-          organization,
-          project,
-          agent,
-          connection,
-          JSON.stringify({ testVersionIds: [] }),
-          JSON.stringify({ personaIds: [personaId] }),
-          JSON.stringify({
-            type: "retell",
-            modality: "chat",
-            topology: "hosted-broker",
-            environment: null,
-            config: {},
-          }),
-        ],
-      );
-      const insertSimulation = (
-        id: string,
-        position: number,
-        shape: "queued" | "completed" | "dispatch_failed",
-      ) =>
-        client.query(
-          `insert into simulation
-             (id, run_id, organization_id, project_id, agent_id, connection_id,
-              persona_id, persona_version_id, position, connection_type,
-              modality, status
-              ${
-                shape === "completed"
-                  ? `, claimed_by, claimed_at, heartbeat_at, started_at,
-                     ended_at, ending_reason`
-                  : ""
-              }
-              ${
-                shape === "dispatch_failed"
-                  ? `, claimed_by, claimed_at, heartbeat_at, ended_at,
-                     ending_reason`
-                  : ""
-              })
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'retell', 'chat'
-              ${
-                shape === "completed"
-                  ? `, 'completed', 'simulator-blue-1', now(), now(), now(),
-                     now(), 'persona_concluded'`
-                  : ""
-              }
-              ${
-                shape === "dispatch_failed"
-                  ? `, 'failed', 'simulator-blue-1', now(), now(), now(),
-                     'dispatch_failed'`
-                  : ""
-              }
-              ${shape === "queued" ? ", 'queued'" : ""})`,
-          [
-            id,
-            run,
-            organization,
-            project,
-            agent,
-            connection,
-            personaId,
-            personaVersion,
-            position,
+      // A customer's work, written the way the release before this one wrote
+      // it: one conversation still queued, and one finished with its
+      // transcript, its tool calls and its measures in the three jsonb
+      // columns — because that release had nowhere else to put them. Those
+      // columns are what this migration drops, so a row that actually holds
+      // a conversation is the row the upgrade has to survive.
+      await seedACustomersWork(client, work);
+      await insertSimulation(client, work, {
+        id: queued,
+        position: 1,
+        shape: "queued",
+      });
+      await insertSimulation(client, work, {
+        id: landed,
+        position: 2,
+        shape: "completed",
+        conversation: {
+          transcript: [
+            { speaker: "human", text: "Can you move my cleaning to Tuesday?" },
+            { speaker: "agent", text: "Booked for Tuesday at four." },
           ],
-        );
-      await insertSimulation(queued, 1, "queued");
-      await insertSimulation(landed, 2, "completed");
-      await insertSimulation(undispatched, 3, "dispatch_failed");
+          events: [{ kind: "tool_call", name: "reschedule_appointment" }],
+          metrics: { turn_response_latency: [900, 1_100] },
+        },
+      });
+      // And one voice conversation still waiting, because the check this
+      // migration shrinks guards the audio facts and only voice may hold one.
+      await insertSimulation(client, work, {
+        id: dialing,
+        position: 3,
+        shape: "queued",
+        modality: "voice",
+      });
 
       // The upgrade itself, with that work sitting in the tables.
       await writeFile(path.join(asItWas, newest.name), newest.sql);
       const upgraded = await runMigrations(database.url, asItWas);
       expect(upgraded.applied).toEqual([newest.name]);
 
-      // The conversations that already landed say what is true of them: no
-      // turn count and no provider reference, because no report could carry
-      // either when they landed — never a number invented for them.
-      const { rows } = await client.query<{
-        turn_count: number | null;
-        provider_reference: string | null;
-      }>(
-        `select turn_count, provider_reference from simulation
-          where id in ($1, $2)`,
-        [landed, undispatched],
+      // The three columns are gone from the table — asked of the schema
+      // rather than of a row, because a column nobody selects any more is
+      // not the same fact as a column that does not exist.
+      const { rows: left } = await client.query<{ column_name: string }>(
+        `select column_name from information_schema.columns
+          where table_name = 'simulation'
+            and column_name in ('transcript', 'events', 'metrics')`,
       );
-      expect(rows).toEqual([
-        { turn_count: null, provider_reference: null },
-        { turn_count: null, provider_reference: null },
+      expect(left).toEqual([]);
+
+      // And the conversations survive losing them, because what the row was
+      // ever the record of is the lifecycle: both still read, unchanged.
+      const { rows: kept } = await client.query<{
+        id: string;
+        status: string;
+        ending_reason: string | null;
+      }>(
+        `select id, status, ending_reason from simulation
+          where run_id = $1 order by position`,
+        [work.run],
+      );
+      expect(kept).toEqual([
+        { id: queued, status: "queued", ending_reason: null },
+        { id: landed, status: "completed", ending_reason: "persona_concluded" },
+        { id: dialing, status: "queued", ending_reason: null },
       ]);
 
-      // The columns arrive with their guard: summary facts are terminal
-      // facts, so the conversation still moving cannot be handed either.
+      // The check that named the three columns shrinks to the audio facts
+      // rather than being renamed, so a violation still prints the sentence
+      // an operator is searching for — and it still guards them.
       await expect(
-        client.query("update simulation set turn_count = 3 where id = $1", [
-          queued,
-        ]),
-      ).rejects.toThrow(/simulation_summary_facts_only_when_ended/u);
+        client.query(
+          "update simulation set recording_reference = 'r.wav' where id = $1",
+          [dialing],
+        ),
+      ).rejects.toThrow(/simulation_report_only_when_ended/u);
+
+      // And the shrunken check no longer names what is gone. A check holding
+      // a dropped column could not exist, so this is what says the shrink
+      // happened rather than the drop having been quietly refused.
+      const { rows: guards } = await client.query<{ definition: string }>(
+        `select pg_get_constraintdef(oid) as definition from pg_constraint
+          where conname = 'simulation_report_only_when_ended'`,
+      );
+      expect(guards).toHaveLength(1);
+      expect(guards[0]?.definition).toContain("recording_reference");
+      expect(guards[0]?.definition).not.toContain("transcript");
     } finally {
       await client.end();
     }

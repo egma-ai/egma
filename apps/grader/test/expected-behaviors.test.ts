@@ -80,7 +80,7 @@ async function judgedWith(
   const testId = await seedTest(world, [], THREE);
   const { simulationId } = await conductSimulation(world, {
     testId,
-    transcript: aConversation(),
+    spans: aConversation(),
     ...landing,
   });
 
@@ -292,7 +292,7 @@ describe("a simulation born from no test", () => {
     await seedGrader(world, aThreshold({ name: "Latency, on an untested call" }));
 
     const { simulationId } = await conductSimulation(world, {
-      transcript: aConversation(),
+      spans: aConversation(),
     });
     const verdicts = await verdictsOn(world, simulationId, 1);
 

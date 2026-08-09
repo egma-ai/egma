@@ -43,8 +43,9 @@ const document = await readFile(
  * Every measure name the simulator emits as a literal, read out of its own
  * source.
  *
- * The simulator emits timing measures by calling one of three functions with a
- * name; a measure passed through as a variable is one of those calls made
+ * The simulator emits timing measures by calling one of a handful of functions
+ * with a name — the span emitter's own `measure`, or one of the callbacks that
+ * reach it; a measure passed through as a variable is one of those calls made
  * again from a caller that named it, so the literals are the whole vocabulary.
  * Reading them rather than listing them is what makes this a drift test: a
  * measure added in Python and not added to the catalog fails the TypeScript
@@ -64,7 +65,7 @@ async function measuresTheSimulatorEmits(): Promise<readonly string[]> {
       if (!entry.name.endsWith(".py")) continue;
       const python = await readFile(here, "utf8");
       for (const [, measure] of python.matchAll(
-        /\b(?:timing|_measure|on_timing)\(\s*"([a-z_]+)"/g,
+        /\b(?:measure|_measure|on_timing|timing)\(\s*"([a-z_]+)"/g,
       )) {
         if (measure !== undefined) emitted.add(measure);
       }
@@ -106,7 +107,7 @@ describe("what the catalog names", () => {
   });
 
   /**
-   * Not everything in the catalog is a timing event. `turn_count` is counted
+   * Not everything in the catalog is a timing span. `turn_count` is counted
    * and the audio band is measured, and both arrive on the terminal transition
    * inside its facts — so the ones the scan cannot see are exactly the ones the
    * catalog marks as terminal facts, and nothing else.
@@ -115,10 +116,10 @@ describe("what the catalog names", () => {
     const emitted = new Set(await measuresTheSimulatorEmits());
 
     for (const cataloged of MEASURE_CATALOG) {
-      if (cataloged.origin === "timing_event") {
+      if (cataloged.origin === "timing_span") {
         expect(
           emitted.has(cataloged.measure),
-          `${cataloged.measure} is cataloged as a timing event and nothing emits it`,
+          `${cataloged.measure} is cataloged as a timing span and nothing emits it`,
         ).toBe(true);
       } else {
         expect(cataloged.origin).toBe("terminal_fact");

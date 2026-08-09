@@ -47,7 +47,7 @@ let graderId: string;
 /** One judged conversation the agent answered quickly. */
 async function aFastConversation(): Promise<ConductedSimulation> {
   const conducted = await conductSimulation(world, {
-    metrics: { turn_response_latency: [900, 1_100] },
+    spans: { measured: { turn_response_latency: [900, 1_100] } },
   });
   await verdictsOn(world, conducted.simulationId, 1);
   return conducted;
@@ -304,7 +304,7 @@ describe("a re-grade that names one grader", () => {
     const testId = await seedTest(world, []);
     conducted = await conductSimulation(world, {
       testId,
-      metrics: { turn_response_latency: [900, 1_100] },
+      spans: { measured: { turn_response_latency: [900, 1_100] } },
     });
 
     before = await verdictsOn(world, conducted.simulationId, 3);

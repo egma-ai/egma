@@ -2,10 +2,12 @@
 
 The service that conducts simulations. It claims simulation specs from the
 control plane over outbound HTTP, conducts each one as a real conversation
-— the persona on one side, the agent under test on the other — and reports
-what happened — status transitions, transcript turns, measurements,
-terminal facts — as it happens. It never touches the database and never
-imports monorepo code: the versioned JSON contract in
+— the persona on one side, the agent under test on the other — and says
+what happened as it happens, along two lines: the lifecycle — status
+transitions and the terminal facts — as report events, and the
+conversation itself — every turn, tool call and measurement — as
+OpenTelemetry spans. It never touches the database and never imports
+monorepo code: the versioned JSON contract in
 `packages/simulation-contract` is its entire connection to the rest of
 egma, which is also what lets this one app be Python inside a TypeScript
 monorepo.
@@ -62,9 +64,9 @@ spec naming a connection type the simulator holds no plug for is refused
 out loud at claim time and reported not at all: the row stays the control
 plane's to sweep.
 
-## What a voice simulation reports
+## What a voice simulation records
 
-The same transcript, ending and measurements a chat simulation reports,
+The same transcript, ending and measurements a chat simulation records,
 plus what only audio can owe:
 
 - **The measured band.** Connections declare a band; platforms carry what
@@ -81,7 +83,8 @@ plus what only audio can owe:
   never the bytes and never a URL.
 - **Per-turn measurements**, all read from the audio itself rather than
   from a clock: `time_to_first_word` (how long the agent was quiet before
-  speaking), `agent_speech_duration` and `persona_speech_duration`.
+  speaking), `agent_speech_duration` and `persona_speech_duration`. Each
+  is a span, like every other measurement.
 
 ## How it runs
 
@@ -100,14 +103,16 @@ never the agent failing.
 
 Reports are minted as events (ids and timestamps stamped once), written to
 a local write-ahead log, then delivered in order; a resend replays the
-same bytes, so the receiving side can dedup on event ids. Credentials from
-specs exist only in memory, are handed only to the plug, and are scrubbed
-from every log line — the report schema has no place to put them even by
-accident.
+same bytes, so the receiving side can dedup on event ids. A report carries
+the lifecycle and nothing else — the conversation has its own record,
+below — so the one summary fact it keeps about what was said is how many
+turns there were. Credentials from specs exist only in memory, are handed
+only to the plug, and are scrubbed from every log line — the report schema
+has no place to put them even by accident.
 
 ## The conversation, as spans
 
-Every turn, tool call and measurement is also authored as an OpenTelemetry
+Every turn, tool call and measurement is authored as an OpenTelemetry
 span (`spans.py`) and streamed to the control plane's OTLP ingest while
 the simulation runs — the same door a customer's own agent exports to, so
 a simulation is readable the way a production trace is readable, live and

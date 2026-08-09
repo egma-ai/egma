@@ -533,7 +533,6 @@ describe("the dispatch-failure landing", () => {
     await startSimulation(conducted.auth, conducted.id, conducted.claimedBy);
     await completeSimulation(conducted.auth, conducted.id, conducted.claimedBy, {
       endingReason: "persona_concluded",
-      transcript: [{ speaker: "human", text: "Thanks, that is everything." }],
     });
     await failSimulationDispatch(
       unbuildable.auth,

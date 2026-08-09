@@ -34,10 +34,10 @@ import pytest
 from conftest import (
     assert_kept_secret,
     credential,
-    events_for,
     has_terminal,
     loopback_spec,
     terminal_event_for,
+    turns_for,
     words_of,
 )
 
@@ -109,10 +109,7 @@ async def test_a_real_voice_speaks_and_real_ears_read_it_back(
     # exist only because a transcriber listened to synthesized speech and
     # wrote what it heard. Each one is the persona turn it echoed, as far
     # as a real transcriber and a real voice agree on anything.
-    spoken = [
-        (turn["speaker"], turn["text"])
-        for turn in events_for(records, SIMULATION_ID, "turn")
-    ]
+    spoken = turns_for(records, SIMULATION_ID)
     heard_back = [text for speaker, text in spoken if speaker == "agent"]
     assert len(heard_back) >= 2, spoken
     for said, transcribed in zip((FIRST, SECOND), heard_back, strict=False):
