@@ -377,6 +377,56 @@ describe("starting a run", () => {
     expect(JSON.stringify(snapshot)).not.toContain("retell-secret");
   });
 
+  /**
+   * The same claim for the credential of the other shape a livekit
+   * connection comes in. A connection whose secret is a set of auth headers
+   * rather than a key pair must be snapshotted exactly as carefully: the
+   * snapshot is what a run carries for the rest of its life, and headers in
+   * it would be headers in every read of that run forever.
+   */
+  it("keeps an endpoint's auth headers out of the snapshot too", async () => {
+    const atEndpoint = await createAgent(actingAsAcme(), {
+      name: "Front desk in production",
+      connection: {
+        type: "livekit",
+        modality: "voice",
+        config: {
+          url: "wss://acme.livekit.cloud",
+          tokenEndpoint: "https://acme.example/egma/livekit-token",
+        },
+        credentials: {
+          headers: '{"Authorization":"Bearer SENTINEL-endpoint-token-b3f1"}',
+        },
+      },
+    });
+
+    const started = await startRun(
+      actingAsAcme(),
+      aRun({
+        agentId: atEndpoint.id,
+        connectionId: atEndpoint.connection?.id ?? "",
+      }),
+    );
+
+    const { rows } = await database.sql<{ connection_snapshot: unknown }>(
+      "select connection_snapshot from run where id = $1",
+      [started.id],
+    );
+    const snapshot = rows[0]?.connection_snapshot as Record<string, unknown>;
+    expect(Object.keys(snapshot).sort()).toEqual([
+      "config",
+      "environment",
+      "modality",
+      "topology",
+      "type",
+    ]);
+    // The endpoint is configuration and is in there, which is the point of
+    // checking: the snapshot really did carry this connection's config.
+    expect(JSON.stringify(snapshot)).toContain("egma/livekit-token");
+    expect(JSON.stringify(snapshot)).not.toContain("SENTINEL");
+    expect(JSON.stringify(started.connectionSnapshot)).not.toContain("SENTINEL");
+  });
+
   it("records a retry as a new run pointing back, never the old run reopened", async () => {
     const first = await startRun(actingAsAcme(), aRun());
     const retry = await startRun(

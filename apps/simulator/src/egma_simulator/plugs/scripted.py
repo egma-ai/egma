@@ -55,11 +55,17 @@ class ScriptedCounterpart:
     """The scripted counterpart, one exchange per instance."""
 
     def __init__(
-        self, *, modality: str, config: dict[str, Any], credentials: object
+        self,
+        *,
+        modality: str,
+        config: dict[str, Any],
+        credentials: object,
+        simulation_id: str | None = None,
     ) -> None:
         # The scripted counterpart takes no credentials; anything handed
         # over is ignored unread, the way a sentinel-planting test expects.
-        del credentials
+        # It has nobody to tell which simulation this is, either.
+        del credentials, simulation_id
 
         if modality != "chat":
             raise PlugError(

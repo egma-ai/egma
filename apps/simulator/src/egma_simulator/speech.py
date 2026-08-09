@@ -572,11 +572,16 @@ def _mouth(
         aiohttp_session=session,
         sample_rate=sample_rate_hz,
         settings=settings,
-        # One persona turn is one whole thing to say. The default is to
-        # regroup text into sentences, which is done with a tokenizer
-        # corpus fetched from the internet — the download this package
-        # disarms — and a turn is already the unit here, so there is
-        # nothing to regroup and nothing to fetch.
+        # One persona turn is one whole thing to say, so it goes to the
+        # provider in one piece rather than a sentence at a time, which
+        # is what the default mode would do and what would add its
+        # latency to every sentence.
+        #
+        # This does not avoid the sentence tokenizer, and it once was
+        # thought to: the service pairs this mode with a sequencer that
+        # regroups the streamed tokens back into sentences, to attribute
+        # spoken words to the transcript. That regrouping reads the
+        # tokenizer corpus, which is why the image ships one.
         text_aggregation_mode=TextAggregationMode.TOKEN,
     )
     return leg, spoken_with, (session.close,)

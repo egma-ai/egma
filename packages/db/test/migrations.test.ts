@@ -1321,14 +1321,19 @@ describe("the simulation's summary facts (0016)", () => {
  *
  * So this applies the schema as it stood one migration ago, puts a customer's
  * work into it, and then upgrades — which is what a self-hoster's `docker
- * compose pull` does on a Tuesday morning. It is about the *newest* migration
- * on purpose, so its seed rows are written the way the release before that
- * migration wrote them, and both move together: when a migration lands, its
- * predecessor's upgrade story graduates into a pinned describe above.
+ * compose pull` does on a Tuesday morning.
+ *
+ * It named the *newest* migration to do that, and this is where that graduated:
+ * the seed rows below write `transcript`, `events` and `metrics`, which is a
+ * story only 0017 can tell, because 0017 is the migration that drops them. Read
+ * through `at(-1)` it broke the moment anything landed after — the columns it
+ * seeds no longer exist by then — so it names its own migration now, and the
+ * newest migration's upgrade story lives in that migration's own describe, the
+ * way the livekit type's does below.
  */
-describe("upgrading an instance that already holds work", () => {
+describe("the conversation leaving the row, over work already there (0017)", () => {
   let database: EmptyDatabase;
-  /** The migration files, minus the newest, as an earlier release shipped them. */
+  /** The migration files, up to 0017's predecessor, as that release shipped. */
   let asItWas: string;
 
   beforeAll(async () => {
@@ -1341,17 +1346,22 @@ describe("upgrading an instance that already holds work", () => {
     await rm(asItWas, { recursive: true, force: true });
   });
 
-  it("applies the newest migration over rows the release before it wrote", async () => {
+  it("applies 0017 over rows the release before it wrote", async () => {
     const migrations = await readMigrations();
-    const newest = migrations.at(-1);
-    if (newest === undefined) throw new Error("there are no migrations");
+    const subject = migrations.findIndex((migration) =>
+      migration.name.startsWith("0017_"),
+    );
+    if (subject === -1) throw new Error("0017 is missing");
+    const newest = migrations[subject];
+    if (newest === undefined) throw new Error("0017 is missing");
+    const before0017 = migrations.slice(0, subject);
 
-    for (const migration of migrations.slice(0, -1)) {
+    for (const migration of before0017) {
       await writeFile(path.join(asItWas, migration.name), migration.sql);
     }
     const before = await runMigrations(database.url, asItWas);
     expect(before.applied).toEqual(
-      migrations.slice(0, -1).map((migration) => migration.name),
+      before0017.map((migration) => migration.name),
     );
 
     const client = new pg.Client({ connectionString: database.url });
@@ -1459,5 +1469,118 @@ describe("upgrading an instance that already holds work", () => {
     } finally {
       await client.end();
     }
+  });
+});
+
+describe("the livekit connection type (0018)", () => {
+  let database: EmptyDatabase;
+  let beforeLiveKit: string;
+  let client: pg.Client;
+
+  const organizationId = newId("org");
+  const projectId = newId("prj");
+  const agentId = newId("agt");
+  const retellId = newId("con");
+
+  /** A connection row, written straight past the access layer's own gates. */
+  async function connectionOfType(id: string, type: string): Promise<void> {
+    await client.query(
+      `insert into connection
+         (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
+       values ($1, $2, $3, $4, $5, $6, 'voice', 'agent-dials-out', '{}'::jsonb)`,
+      [id, organizationId, projectId, agentId, `${type}-1`, type],
+    );
+  }
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("livekit_type");
+
+    // The world as it was: a customer already reaching an agent the ways egma
+    // knew, so the widening lands on a table that is not empty.
+    beforeLiveKit = await mkdtemp(path.join(os.tmpdir(), "egma-before-0018-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0018") {
+        await writeFile(path.join(beforeLiveKit, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, beforeLiveKit);
+
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query(
+      "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
+      [organizationId],
+    );
+    await client.query(
+      "insert into project (id, organization_id, name, slug) values ($1, $2, 'Default', 'default')",
+      [projectId, organizationId],
+    );
+    await client.query(
+      "insert into agent (id, organization_id, project_id, name) values ($1, $2, $3, 'Front desk')",
+      [agentId, organizationId, projectId],
+    );
+    await client.query(
+      `insert into connection
+         (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
+       values ($1, $2, $3, $4, 'retell-1', 'retell', 'chat', 'hosted-broker', '{}'::jsonb)`,
+      [retellId, organizationId, projectId, agentId],
+    );
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(beforeLiveKit, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("is what the database refuses until the migration arrives", async () => {
+    await expect(connectionOfType(newId("con"), "livekit")).rejects.toThrow(
+      /connection_type_allowed/u,
+    );
+  });
+
+  it("is what is still pending on a database that already holds connections", async () => {
+    const result = await runMigrations(database.url);
+    expect(result.applied).toEqual(["0018_livekit_connection_type.sql"]);
+  });
+
+  it("adds livekit to the two checks the one list of types feeds, and nothing else", async () => {
+    const { rows } = await client.query<{ name: string; definition: string }>(
+      `select conname as name, pg_get_constraintdef(oid) as definition
+         from pg_constraint
+        where conname in ('connection_type_allowed', 'simulation_connection_type_allowed')
+        order by conname`,
+    );
+
+    expect(rows.map((row) => row.name)).toEqual([
+      "connection_type_allowed",
+      "simulation_connection_type_allowed",
+    ]);
+    for (const row of rows) {
+      // The whole list rather than a search for "livekit": what a widening
+      // must never do is quietly drop a type somebody is already reaching an
+      // agent through.
+      expect(row.definition).toContain(
+        "ARRAY['retell'::text, 'phone'::text, 'livekit'::text]",
+      );
+    }
+  });
+
+  it("leaves the connections that were already there exactly as they were", async () => {
+    const { rows } = await client.query<{ id: string; type: string }>(
+      "select id, type from connection",
+    );
+    expect(rows).toEqual([{ id: retellId, type: "retell" }]);
+  });
+
+  it("takes a livekit connection once it has run", async () => {
+    const livekitId = newId("con");
+    await connectionOfType(livekitId, "livekit");
+
+    const { rows } = await client.query<{ type: string }>(
+      "select type from connection where id = $1",
+      [livekitId],
+    );
+    expect(rows).toEqual([{ type: "livekit" }]);
   });
 });

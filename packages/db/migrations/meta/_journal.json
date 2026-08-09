@@ -127,6 +127,13 @@
       "when": 1786244071521,
       "tag": "0017_conversation_leaves_the_row",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1786310576443,
+      "tag": "0018_livekit_connection_type",
+      "breakpoints": true
     }
   ]
 }

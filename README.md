@@ -336,6 +336,29 @@ on its first line naming the variable — including a trunk given only half a
 credential, which a carrier would otherwise refuse once per call in a way that
 reads exactly like a wrong one.
 
+## Testing a LiveKit agent in its own room
+
+A phone number is one way to reach an agent. A LiveKit agent has a shorter one:
+it is a worker waiting to be given a room, so egma makes a room in **your**
+LiveKit project, joins it, asks for your worker, and holds the conversation
+there. No trunk, no carrier, no number — and no bridge to host, because the room
+*is* the meeting place.
+
+What that takes is the three variables already in your agent's own environment:
+its LiveKit URL, API key and API secret, plus the agent's name if your worker
+registers one. They go on the connection rather than into this deployment's
+environment, because the project is yours and not egma's.
+
+**[Testing a LiveKit agent](docs/livekit-testing.md)** is the whole recipe —
+where to copy the three values from, how to tell which dispatch style your
+worker uses, the one request that registers it, and what the record carries
+afterwards. [`fixtures/livekit-dumb-agent`](fixtures/livekit-dumb-agent) is a
+deliberately boring agent to try it against before you point egma at a real one.
+For teams that won't hand a testing tool their project's key pair, **[the
+token-endpoint mode](docs/livekit-token-endpoint.md)** keeps the secret on your
+side: your service mints each room's token, and the page carries the hardening
+recipe to run it safely.
+
 ## Working on it
 
 Node 24 and pnpm 10. The simulator is Python, managed by

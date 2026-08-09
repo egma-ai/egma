@@ -242,7 +242,7 @@ describe("starting a run from the terminal's own code", () => {
       reason:
         "egma has no simulator adapter for a phone connection yet, so it " +
         "will not start a run it cannot conduct. Run these tests over a " +
-        "connection egma conducts today: retell.",
+        "connection egma conducts today: retell, livekit.",
     });
   });
 });

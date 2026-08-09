@@ -39,6 +39,9 @@ wrote.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import nltk
 import pytest
 from conftest import (
     assert_kept_secret,
@@ -77,6 +80,12 @@ TRUNK_PASSWORD = credential(
 PHONE_NUMBER = credential("TEST_PHONE_NUMBER")
 DEEPGRAM_API_KEY = credential("TEST_DEEPGRAM_API_KEY", "DEEPGRAM_API_KEY")
 ELEVENLABS_API_KEY = credential("TEST_ELEVENLABS_API_KEY", "ELEVENLABS_API_KEY")
+# The persona's own brain, required rather than optional — the same reason it
+# is required of the room suite. Left unset the simulator takes its scripted
+# default, whose turns are one sentence each, and a live call conducted that
+# way proves the carrier and the wire while saying nothing about speech.
+MODEL_API_KEY = credential("TEST_MODEL_API_KEY", "OPENAI_API_KEY")
+MODEL_NAME = credential("TEST_MODEL_NAME") or "gpt-4o-mini"
 
 REQUIRED = {
     "TEST_LIVEKIT_URL": LIVEKIT_URL,
@@ -86,17 +95,44 @@ REQUIRED = {
     "TEST_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
     "TEST_ELEVENLABS_API_KEY": ELEVENLABS_API_KEY,
     "TEST_SIP_TRUNK_ID (or TEST_SIP_TRUNK_ADDRESS)": TRUNK_ID or TRUNK_ADDRESS,
+    "TEST_MODEL_API_KEY": MODEL_API_KEY,
 }
 MISSING = sorted(name for name, value in REQUIRED.items() if not value)
 
-pytestmark = pytest.mark.skipif(
-    bool(MISSING),
-    reason=(
-        "no live phone deployment: set "
-        + ", ".join(MISSING)
-        + " to dial a real number through a real LiveKit and a real trunk"
+
+def _corpus_root() -> str:
+    """Where this machine keeps the sentence-tokenizer corpus.
+
+    Named for the child because the harness hides the home directory it
+    would otherwise be found through — and a real persona brain says more
+    than one sentence in a breath, which is when the speaking leg needs it.
+    """
+    try:
+        return str(Path(str(nltk.data.find("tokenizers/punkt_tab"))).parents[1])
+    except LookupError:
+        return ""
+
+
+CORPUS_ROOT = _corpus_root()
+
+pytestmark = [
+    pytest.mark.skipif(
+        bool(MISSING),
+        reason=(
+            "no live phone deployment: set "
+            + ", ".join(MISSING)
+            + " to dial a real number through a real LiveKit and a real trunk"
+        ),
     ),
-)
+    pytest.mark.skipif(
+        not CORPUS_ROOT,
+        reason=(
+            "no sentence-tokenizer corpus on this machine: the image ships "
+            "one, and speaking a turn of two sentences needs it — "
+            "python -c \"import nltk; nltk.download('punkt_tab')\""
+        ),
+    ),
+]
 
 SECRETS = tuple(
     secret
@@ -137,6 +173,10 @@ def deployment() -> dict[str, str]:
         "EGMA_SIMULATOR_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
         "EGMA_SIMULATOR_TTS_PROVIDER": "elevenlabs",
         "EGMA_SIMULATOR_ELEVENLABS_API_KEY": ELEVENLABS_API_KEY,
+        "EGMA_SIMULATOR_MODEL_PROVIDER": "openai",
+        "EGMA_SIMULATOR_MODEL_NAME": MODEL_NAME,
+        "EGMA_SIMULATOR_MODEL_API_KEY": MODEL_API_KEY,
+        "NLTK_DATA": CORPUS_ROOT,
     }
     for name, value in (
         ("EGMA_SIMULATOR_SIP_TRUNK_ID", TRUNK_ID),

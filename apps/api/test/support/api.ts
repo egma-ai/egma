@@ -63,6 +63,12 @@ export type TestApiOptions = {
    * about ingest have anything to put in one.
    */
   readonly traceStore?: boolean;
+  /**
+   * Somewhere to keep the log lines, for a test whose claim is about what is
+   * not in them. Off by default: the suite runs silent, and a file that does
+   * not read the log has no reason to collect one.
+   */
+  readonly logTo?: { write(line: string): void };
 };
 
 export function testConfig(overrides: Partial<Config> = {}): Config {
@@ -117,6 +123,7 @@ export async function createApi(
     config,
     emailSender,
     ...(options.rateLimit === undefined ? {} : { rateLimit: options.rateLimit }),
+    ...(options.logTo === undefined ? {} : { logTo: options.logTo }),
     ...(options.orphanSweepIntervalMilliseconds === undefined
       ? {}
       : {
