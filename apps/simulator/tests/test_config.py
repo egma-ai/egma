@@ -221,12 +221,18 @@ def test_the_speech_legs_are_scripted_until_a_provider_is_named(env):
 
     assert config.stt_provider == "scripted"
     assert config.tts_provider == "scripted"
+    assert config.vad_provider == "scripted"
     assert config.deepgram_api_key is None
     assert config.elevenlabs_api_key is None
 
 
 @pytest.mark.parametrize(
-    "variable", ["EGMA_SIMULATOR_STT_PROVIDER", "EGMA_SIMULATOR_TTS_PROVIDER"]
+    "variable",
+    [
+        "EGMA_SIMULATOR_STT_PROVIDER",
+        "EGMA_SIMULATOR_TTS_PROVIDER",
+        "EGMA_SIMULATOR_VAD_PROVIDER",
+    ],
 )
 def test_an_unknown_speech_provider_is_refused_by_name(env, variable):
     env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)

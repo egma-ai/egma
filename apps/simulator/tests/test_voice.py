@@ -51,6 +51,7 @@ from egma_simulator.spec import SimulationSpec
 from egma_simulator.speech import (
     DEFAULT_ENGLISH_VOICE_ID,
     DEFAULT_VOICE_ID,
+    SAMPLE_WIDTH_BYTES,
     SAMPLES_PER_BYTE,
     SCRIPTED_PAIR,
     ScriptedSTT,
@@ -549,6 +550,184 @@ async def test_the_persona_opens_when_the_far_end_does_not(tmp_path: Path):
     assert abs(listened_longer - band) < LINE_SLICE_SAMPLES
 
 
+# -- The agent talks over the persona ----------------------------------------
+
+TALKED_OVER = "A long second point that takes a while to say."
+"""The persona utterance the scripted barge-in cuts in half."""
+
+BARGE_IN_SECONDS = 0.3
+"""How far into that utterance the counterpart starts speaking.
+
+A whole number of slices at 16 kHz — 4800 samples, twenty of them — so
+the moment the script names is a moment the line really has, and every
+number below is exact rather than approximate.
+"""
+
+
+async def talked_over(tmp_path: Path, **overrides) -> Observed:
+    """One exchange the agent talks over the persona's second utterance in."""
+    return await voice_simulation(
+        tmp_path,
+        scenario=f"First point. {TALKED_OVER}",
+        greeting="Front desk, hello.",
+        replies=["Certainly.", "Right, one moment."],
+        talks_over_caller_turn=2,
+        talks_over_seconds_in=BARGE_IN_SECONDS,
+        **overrides,
+    )
+
+
+def voiced_slices(band: int = 16000) -> int:
+    """How much of the interrupted utterance went out, in slices.
+
+    The barge-in moment, plus the one window the detector needs to be
+    sure it is hearing speech. Nothing else: what the persona keeps
+    saying after somebody starts talking over it is exactly what it takes
+    to hear them, and that window is the detector's own declared number.
+    """
+    moment = round(BARGE_IN_SECONDS * band)
+    return -(-moment // LINE_SLICE_SAMPLES) + ScriptedVAD.SPEAKING_WINDOWS
+
+
+async def test_the_persona_stops_mid_utterance_when_the_agent_talks_over_it(
+    tmp_path: Path,
+):
+    """The record tells both truths on one clock.
+
+    The persona's turn ends where its voice really stopped and carries
+    what was really voiced; the agent's turn starts where its voice
+    really started; and the two cross, by exactly the window the detector
+    needed to be sure somebody had started talking.
+    """
+    observed = await talked_over(tmp_path)
+    band = 16000
+    cut_short = TALKED_OVER[: voiced_slices(band)]
+
+    assert observed.turns == [
+        ("agent", "Front desk, hello."),
+        ("human", "First point."),
+        ("agent", "Certainly."),
+        ("human", cut_short),
+        ("agent", "Right, one moment."),
+        ("human", GOODBYE),
+    ]
+    assert cut_short != TALKED_OVER and TALKED_OVER.startswith(cut_short)
+
+    def in_samples(nanoseconds: int) -> int:
+        return round(nanoseconds * band / 1_000_000_000)
+
+    _, _, persona_began, persona_ended = observed.spans[3]
+    _, _, agent_began, agent_ended = observed.spans[4]
+
+    # The persona's turn is as long as the part of it that went out.
+    assert in_samples(persona_ended - persona_began) == (
+        voiced_slices(band) * LINE_SLICE_SAMPLES
+    )
+    # The agent's turn opens inside it, one slice before it closes, and
+    # runs on past it: they cross, exactly as the script said.
+    assert agent_began < persona_ended < agent_ended
+    assert in_samples(persona_ended - agent_began) == LINE_SLICE_SAMPLES
+
+
+async def test_the_measures_the_overlap_voids_are_absent_and_the_rest_stand(
+    tmp_path: Path,
+):
+    """An answer nobody waited for has no waiting to measure.
+
+    Three of the seven measures are about the quiet between the speakers,
+    and there was none before the turn that talked over the persona. They
+    are absent for that turn — not zero, not invented — and every other
+    sample keeps exactly the meaning it shipped with.
+    """
+    observed = await talked_over(tmp_path)
+    named = observed.named
+
+    # Three agent turns and two spoken persona turns, so without the
+    # overlap there would be three of each quiet measure and one of the
+    # first answer's. The turn that talked over the persona carries none
+    # of them.
+    assert named.count("agent_speech_duration") == 3
+    assert named.count("persona_speech_duration") == 2
+    assert named.count("time_to_first_word") == 2
+    assert named.count("turn_response_latency") == 1
+    assert named.count("first_response_latency") == 1
+
+    # And the samples that are there are the shipped ones: the quiet the
+    # counterpart really spent, measured out of the audio.
+    assert all(
+        milliseconds > 0
+        for milliseconds in observed.milliseconds_of("persona_speech_duration")
+    )
+    assert all(milliseconds >= 0 for _, milliseconds in observed.measures)
+
+
+async def test_the_overlap_is_audible_across_the_two_channels(tmp_path: Path):
+    """One speaker to a channel still, and the crossing plain in the audio.
+
+    Read the way a listener would read it — the samples of each channel,
+    on the one timeline both were recorded on — the agent's voice starts
+    while the persona's is still going, and what the persona's channel
+    carries is exactly the words its turn span claims.
+    """
+    observed = await talked_over(tmp_path)
+    audio = observed.assembled.audio
+    assert audio is not None
+    recording = (tmp_path / audio["recording"]).read_bytes()
+    persona_audio, _agent_audio, band = channels_of(recording)
+
+    carried = [
+        (speaker, text) for speaker, text in observed.turns if text != GOODBYE
+    ]
+    assert_one_speaker_to_a_channel(recording, carried)
+
+    heard = speech_in_the_recording(recording)
+    assert [speaker for speaker, _began, _ended in heard] == [
+        "agent",
+        "human",
+        "agent",
+        "human",
+        "agent",
+    ]
+    _persona, persona_began, persona_ended = heard[3]
+    _agent, agent_began, agent_ended = heard[4]
+    assert agent_began < persona_ended < agent_ended
+    assert persona_ended - agent_began == LINE_SLICE_SAMPLES
+
+    # The invertible codec is what makes "what was actually voiced" a
+    # provable claim rather than a bookkeeping one: the persona's channel,
+    # between the two ends of its span, says exactly what the span says.
+    spoken = persona_audio[
+        persona_began * SAMPLE_WIDTH_BYTES : persona_ended * SAMPLE_WIDTH_BYTES
+    ]
+    assert decode_speech(spoken, band) == observed.turns[3][1]
+
+
+async def test_a_persona_that_does_not_yield_says_the_whole_of_its_turn(
+    tmp_path: Path,
+):
+    """Yielding is a named parameter, and the same script proves it.
+
+    With it off the counterpart still talks over the persona — the audio
+    is the audio — and the persona speaks on to the end of what it meant
+    to say. That is the same conduct the record showed before the persona
+    could be interrupted at all, which is what makes the parameter a seam
+    rather than a rewrite.
+    """
+    observed = await talked_over(
+        tmp_path, parameters=ConductParameters(yields_to_the_agent=False)
+    )
+    assert ("human", TALKED_OVER) in observed.turns
+
+    band = 16000
+    _speaker, text, began, ended = next(
+        span for span in observed.spans if span[1] == TALKED_OVER
+    )
+    spoken = duration_seconds(encode_speech(text, band), band)
+    assert (ended - began) / NANOSECONDS_PER_MILLISECOND == pytest.approx(
+        spoken * 1000, abs=0.001
+    )
+
+
 # -- Limits, cancellation, and the endings -----------------------------------
 
 
@@ -645,7 +824,8 @@ async def test_a_cancel_lands_mid_utterance_and_keeps_what_was_voiced(
 ):
     """A cancel directive stops the line at the next slice, wherever the
     conversation had got to — and the turn it stopped in the middle of is
-    on the record for exactly the stretch of line it occupied."""
+    on the record for exactly the stretch of line it occupied, carrying
+    exactly the words that stretch carried."""
     observed = await stopped_mid_utterance(tmp_path, "request_cancel")
 
     assert observed.conducted.status == "canceled"
@@ -654,13 +834,18 @@ async def test_a_cancel_lands_mid_utterance_and_keeps_what_was_voiced(
 
     assert len(observed.turns) == 1
     speaker, text, began, ended = observed.spans[0]
-    assert (speaker, text) == ("human", LONG_FIRST_POINT)
-    whole = len(encode_speech(text, 16000)) // 2
+    assert speaker == "human"
+    whole = len(encode_speech(LONG_FIRST_POINT, 16000)) // 2
     voiced = round((ended - began) * 16000 / 1_000_000_000)
     # Stopped where the line stopped: part of the utterance, and a whole
     # number of slices of it.
     assert 0 < voiced < whole
     assert voiced % LINE_SLICE_SAMPLES == 0
+    # And the words are the words that stretch of line really carried —
+    # what the persona meant to say next was never said, so the record
+    # does not say it was.
+    assert text == LONG_FIRST_POINT[: voiced // LINE_SLICE_SAMPLES]
+    assert LONG_FIRST_POINT.startswith(text) and text != LONG_FIRST_POINT
 
 
 async def test_the_duration_limit_ends_the_simulation_honestly(tmp_path: Path):

@@ -236,6 +236,63 @@ async def test_a_greeting_is_the_first_thing_on_the_line():
     assert heard.startswith(encode_speech("Front desk.", 16000))
 
 
+async def test_the_counterpart_talks_over_the_caller_at_the_scripted_sample():
+    """A barge-in is a moment, and the moment is rendered into the audio.
+
+    The counterpart starts its next line the sample the script named,
+    while the caller is still talking — so a test asserts a position on
+    the line rather than a tolerance, and gets the same one every run.
+    """
+    line = loopback(
+        {
+            "replies": ["Hold on."],
+            "talks_over_caller_turn": 1,
+            "talks_over_seconds_in": 0.3,
+        }
+    )
+    await line.open()
+    heard = await carry(line, encode_speech("A long question that runs on.", 16000))
+
+    quiet = round(leading_silence_seconds(heard, 16000) * 16000)
+    assert quiet == round(0.3 * 16000)
+    assert decode_speech(heard, 16000) == "Hold on."
+
+
+async def test_a_counterpart_that_talked_over_a_turn_does_not_answer_its_remains():
+    """Having cut the caller off deliberately, it waits to be spoken to.
+
+    What is left of an utterance somebody talked over is not a new turn,
+    and a counterpart that answered it would say two things in a row to a
+    caller who had said one.
+    """
+    line = loopback(
+        {
+            "replies": ["Hold on.", "Go ahead."],
+            "talks_over_caller_turn": 1,
+            "talks_over_seconds_in": 0.1,
+        }
+    )
+    await line.open()
+    said = encode_speech("A long question that runs on.", 16000)
+    assert "Hold on." in decode_speech(await carry(line, said), 16000)
+    assert await hear(line) == ""
+    assert await hear(line, "Sorry, go on?") == "Go ahead."
+
+
+async def test_a_counterpart_told_to_talk_over_a_turn_that_never_comes_never_does():
+    """A script naming a turn the caller never takes is not an error: the
+    exchange is just one nobody was talked over in."""
+    line = loopback(
+        {
+            "replies": ["Yes."],
+            "talks_over_caller_turn": 4,
+            "talks_over_seconds_in": 0.1,
+        }
+    )
+    await line.open()
+    assert await hear(line, "A question.") == "Yes."
+
+
 async def test_a_counterpart_that_echoes_hands_back_the_caller_own_words():
     line = loopback({"echoes_what_it_hears": True})
     await line.open()
@@ -297,6 +354,14 @@ def test_loopback_config_it_does_not_know_is_refused():
         {"sample_rate_hz": "wideband"},
         {"sample_rate_hz": 0},
         {"provider_reference": 12},
+        {"talks_over_caller_turn": "the second one"},
+        {"talks_over_caller_turn": 0},
+        {"talks_over_caller_turn": 1, "talks_over_seconds_in": "a moment"},
+        {"talks_over_caller_turn": 1, "talks_over_seconds_in": -1},
+        # Half a barge-in names no moment, so it is a key read by nobody.
+        {"talks_over_seconds_in": 0.5},
+        # And a counterpart with no script has nothing to talk over with.
+        {"echoes_what_it_hears": True, "talks_over_caller_turn": 1},
     ],
 )
 def test_loopback_config_of_the_wrong_shape_is_refused(config: dict):

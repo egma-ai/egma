@@ -43,9 +43,10 @@ from conftest import (
     turns_for,
 )
 
+from egma_simulator.conductor import LINE_SLICE_SAMPLES as SLICE_SAMPLES
 from egma_simulator.model import GOODBYE
 from egma_simulator.recording import channels_of
-from egma_simulator.speech import decode_speech
+from egma_simulator.speech import SAMPLE_WIDTH_BYTES, decode_speech
 
 LONG_SCENARIO = " ".join(f"Sentence number {n}." for n in range(1, 41))
 
@@ -757,6 +758,119 @@ async def test_a_voice_simulation_reports_a_measurement_for_every_turn(
     # simulator took ahead of it.
     stamped = [int(span["endTimeUnixNano"]) for span in timed]
     assert stamped == sorted(stamped)
+
+
+TALKED_OVER = "A long second point that takes a while to say."
+"""The persona utterance the scripted barge-in below cuts in half."""
+
+TALKED_OVER_SLICES = 21
+"""How much of it went out: twenty slices of line before the counterpart
+started speaking — 0.3 s at 16 kHz — and the one more it takes to hear
+that somebody has. One slice of the line is one character of the codec,
+so this is also how many characters the far end really heard."""
+
+
+async def test_a_voice_simulation_records_the_agent_talking_over_the_persona(
+    workbench, start_simulator
+):
+    """Barge-in, proved from what crossed the wire and nothing else.
+
+    The script names a moment — talk over the persona 0.3 s into its
+    second utterance — and the moment is rendered into the audio, so the
+    same spans arrive at the same sample positions every run. What the
+    record has to say is both truths on one clock: the persona's turn
+    ends where its voice really stopped and carries what was really
+    voiced, the agent's turn starts where its voice really started, and
+    the two cross.
+    """
+    spec = loopback_spec(
+        "sim-voice-barge-in",
+        scenario=f"First point. {TALKED_OVER}",
+        greeting="Front desk, hello.",
+        replies=["Certainly.", "Right, one moment."],
+        talks_over_caller_turn=2,
+        talks_over_seconds_in=0.3,
+    )
+    await workbench.offer(spec)
+    simulator = start_simulator(workbench)
+
+    records = await workbench.wait_for(has_terminal("sim-voice-barge-in"))
+    cut_short = TALKED_OVER[:TALKED_OVER_SLICES]
+
+    # The transcript keeps what was said, and the interrupted turn keeps
+    # what was actually said rather than what the persona had in mind.
+    assert turns_for(records, "sim-voice-barge-in") == [
+        ("agent", "Front desk, hello."),
+        ("human", "First point."),
+        ("agent", "Certainly."),
+        ("human", cut_short),
+        ("agent", "Right, one moment."),
+        ("human", GOODBYE),
+    ]
+    assert TALKED_OVER.startswith(cut_short) and cut_short != TALKED_OVER
+
+    turns = [
+        record["span"]
+        for record in spans_for(records, "sim-voice-barge-in")
+        if record["span"]["name"].endswith("_turn")
+    ]
+    persona, agent = turns[3], turns[4]
+    band = terminal_event_for(records, "sim-voice-barge-in")["facts"]["audio"][
+        "measured_sample_rate_hz"
+    ]
+    slice_nanoseconds = round(1_000_000_000 * SLICE_SAMPLES / band)
+
+    # They cross: the agent's turn opens before the persona's closes, and
+    # runs on past it.
+    assert (
+        int(agent["startTimeUnixNano"])
+        < int(persona["endTimeUnixNano"])
+        < int(agent["endTimeUnixNano"])
+    )
+    # By exactly one slice — the window the detector needs to be sure it
+    # is hearing speech, and nothing else.
+    assert int(persona["endTimeUnixNano"]) - int(agent["startTimeUnixNano"]) == (
+        slice_nanoseconds
+    )
+    assert int(persona["endTimeUnixNano"]) - int(persona["startTimeUnixNano"]) == (
+        TALKED_OVER_SLICES * slice_nanoseconds
+    )
+
+    # The three measures about the quiet between the speakers are absent
+    # for a turn nobody waited through — never zero, never invented — and
+    # every other sample is exactly the one it always was.
+    measures = measures_for(records, "sim-voice-barge-in")
+    assert measures.count("agent_speech_duration") == 3
+    assert measures.count("persona_speech_duration") == 2
+    assert measures.count("time_to_first_word") == 2
+    assert measures.count("turn_response_latency") == 1
+    assert measures.count("first_response_latency") == 1
+
+    # And a listener hears the overlap: one speaker to a channel still,
+    # crossing on the two channels' one timeline, with the persona's
+    # channel saying exactly what its span says it said.
+    recording = simulator.blob(
+        terminal_event_for(records, "sim-voice-barge-in")["facts"]["audio"][
+            "recording"
+        ]
+    )
+    assert_one_speaker_to_a_channel(
+        recording,
+        [
+            (speaker, text)
+            for speaker, text in turns_for(records, "sim-voice-barge-in")
+            if text != GOODBYE
+        ],
+    )
+    heard = speech_in_the_recording(recording)
+    _persona_heard, persona_began, persona_ended = heard[3]
+    _agent_heard, agent_began, _agent_ended = heard[4]
+    assert persona_ended - agent_began == SLICE_SAMPLES
+    persona_audio, _agent_audio, recorded_band = channels_of(recording)
+    spoken = persona_audio[
+        persona_began * SAMPLE_WIDTH_BYTES : persona_ended * SAMPLE_WIDTH_BYTES
+    ]
+    assert decode_speech(spoken, recorded_band) == cut_short
 
 
 async def test_two_voice_simulations_at_once_keep_their_audio_apart(

@@ -35,6 +35,13 @@ Its config keys, like every plug's, are its own:
   a live exchange spends it and where time-to-first-word is measured from,
   rather than slept through: CI then measures the same quantity a live
   exchange would without waiting for it.
+- ``talks_over_caller_turn`` (integer ≥ 1, optional) — which of the
+  caller's utterances the agent talks over instead of waiting for. Absent:
+  it never talks over anybody, which is what every other script does.
+- ``talks_over_seconds_in`` (number ≥ 0, default 0) — how far into that
+  utterance the agent starts speaking. Only read beside
+  ``talks_over_caller_turn``; a script naming one without the other is
+  refused, because half a barge-in is a moment nobody named.
 - ``sample_rate_hz`` (integer, default 16000) — the band the connection
   asks for. The counterpart carries the nearest band it supports at or
   below it, exactly as a real platform negotiates down to what it can
@@ -50,6 +57,27 @@ sends is either speech or quiet — :func:`egma_simulator.speech.carries_speech`
 answers that from the samples — and once the caller has spoken and then
 been quiet long enough, the counterpart says its next line. Nothing tells
 it where a turn ended, because nothing tells a real platform either.
+
+## How it talks over the caller
+
+Talking over somebody is the same act with the waiting taken out: the
+counterpart counts the samples of the caller's current utterance and
+starts its next line the moment that count reaches the scripted one,
+whether or not the caller has finished. The moment is therefore *rendered
+into the audio* rather than slept through — the same barge-in, at the
+same sample, every run — and it lands on the first slice boundary at or
+after the second it was told, exactly as ``answer_delay_seconds`` does.
+
+Having talked over a turn deliberately, the counterpart does not then
+answer what is left of it: a caller cut off mid-word has not taken a new
+turn, and the counterpart waits for the caller to start speaking again.
+
+Which utterance is the caller's second is counted as the stretches of
+speech the line carried. The scripted codec leaves no quiet inside a
+turn, so those stretches are exactly the turns the persona took — which
+is why a barge-in script belongs beside the scripted pair and is refused
+beside ``echoes_what_it_hears``, where the audio is somebody's real voice
+and pauses for breath.
 """
 
 from __future__ import annotations
@@ -89,6 +117,8 @@ _KNOWN_KEYS = {
     "ends_after_replies",
     "answer_delay_seconds",
     "echoes_what_it_hears",
+    "talks_over_caller_turn",
+    "talks_over_seconds_in",
     "sample_rate_hz",
     "provider_reference",
 }
@@ -157,6 +187,43 @@ class LoopbackCounterpart:
                 "loopback config: answer_delay_seconds must be zero or more"
             )
 
+        talks_over_turn = config.get("talks_over_caller_turn")
+        if talks_over_turn is not None and (
+            isinstance(talks_over_turn, bool) or not isinstance(talks_over_turn, int)
+        ):
+            raise PlugError(
+                "loopback config: talks_over_caller_turn must be an integer"
+            )
+        if talks_over_turn is not None and talks_over_turn < 1:
+            raise PlugError(
+                "loopback config: talks_over_caller_turn counts the caller's "
+                "utterances from one, so it must be one or more"
+            )
+
+        talks_over_in = config.get("talks_over_seconds_in", 0)
+        if isinstance(talks_over_in, bool) or not isinstance(
+            talks_over_in, int | float
+        ):
+            raise PlugError(
+                "loopback config: talks_over_seconds_in must be a number"
+            )
+        if talks_over_in < 0:
+            raise PlugError(
+                "loopback config: talks_over_seconds_in must be zero or more"
+            )
+        if talks_over_turn is None and "talks_over_seconds_in" in config:
+            raise PlugError(
+                "loopback config: talks_over_seconds_in says how far into an "
+                "utterance the agent starts speaking, so it needs "
+                "talks_over_caller_turn to say which utterance"
+            )
+        if talks_over_turn is not None and echoes:
+            raise PlugError(
+                "loopback config: a counterpart that echoes has no script to "
+                "talk over the caller with, so echoes_what_it_hears cannot be "
+                "combined with talks_over_caller_turn"
+            )
+
         asked_for = config.get("sample_rate_hz", DEFAULT_BAND_HZ)
         if isinstance(asked_for, bool) or not isinstance(asked_for, int):
             raise PlugError("loopback config: sample_rate_hz must be an integer")
@@ -172,6 +239,8 @@ class LoopbackCounterpart:
         self._ends_after_replies = ends_after_replies
         self._echoes = echoes
         self._answer_delay_seconds = float(delay)
+        self._talks_over_turn = talks_over_turn
+        self._talks_over_seconds_in = float(talks_over_in)
         self._band_hz = negotiated_band(asked_for)
         self._provider_reference = reference
 
@@ -182,6 +251,15 @@ class LoopbackCounterpart:
         self._echoed_back = bytearray()
         self._ends_when_said = False
         self._left = False
+
+        self._caller_speaking = False
+        self._caller_turns = 0
+        """How many utterances the caller has begun, counted from one."""
+
+        self._caller_turn_samples = 0
+        """How much of the caller's current utterance has been heard."""
+
+        self._talked_over = False
 
     @property
     def provider_reference(self) -> str | None:
@@ -211,9 +289,13 @@ class LoopbackCounterpart:
         because that is all a far end can have heard by the time it puts
         this slice on the line. Hearing this one afterwards is what makes
         the quiet the counterpart spends exactly the quiet it was told to
-        spend, to the sample.
+        spend, to the sample — and the moment it talks over the caller
+        exactly the sample it was told to talk over.
         """
-        if self._due_to_speak():
+        if self._due_to_talk_over():
+            self._talked_over = True
+            self._say_the_next_thing()
+        elif self._due_to_speak():
             self._say_the_next_thing()
         spoken = self._next_slice(len(outgoing))
         self._hear(outgoing)
@@ -225,20 +307,46 @@ class LoopbackCounterpart:
     # -- Listening ----------------------------------------------------------
 
     def _hear(self, outgoing: bytes) -> None:
-        """What the far end makes of the slice the caller just sent."""
+        """What the far end makes of the slice the caller just sent.
+
+        A caller is heard to *start* an utterance, once, rather than to be
+        speaking in every slice of it. The difference only shows when the
+        counterpart has already answered this utterance — by talking over
+        it — and what is left of it must not read as a second turn to
+        answer.
+        """
+        samples = len(outgoing) // SAMPLE_WIDTH_BYTES
         if carries_speech(outgoing):
-            self._heard_the_caller = True
+            if not self._caller_speaking:
+                self._caller_speaking = True
+                self._caller_turns += 1
+                self._caller_turn_samples = 0
+                self._heard_the_caller = True
+            self._caller_turn_samples += samples
             self._quiet_samples = 0
             if self._echoes:
                 self._echoed_back += outgoing
             return
-        self._quiet_samples += len(outgoing) // SAMPLE_WIDTH_BYTES
+        self._caller_speaking = False
+        self._quiet_samples += samples
 
     def _due_to_speak(self) -> bool:
         """Whether the caller has finished and the answer delay is spent."""
         if self._left or self._saying or not self._heard_the_caller:
             return False
         return self._quiet_samples >= self._quiet_before_answering()
+
+    def _due_to_talk_over(self) -> bool:
+        """Whether the scripted barge-in moment has arrived on the line."""
+        if self._left or self._saying:
+            return False
+        if self._talks_over_turn is None or self._talked_over:
+            return False
+        if not self._caller_speaking or self._caller_turns != self._talks_over_turn:
+            return False
+        return self._caller_turn_samples >= round(
+            self._talks_over_seconds_in * self._band_hz
+        )
 
     def _quiet_before_answering(self) -> int:
         """How many samples of quiet the counterpart waits out, in all.

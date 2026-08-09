@@ -64,7 +64,11 @@ a turn at a time. A voice simulation on a full-duplex line is the same
 brain with the speech legs around it, conducted by a real Pipecat
 pipeline (`conductor.py`): both directions of the line are open at once,
 the detector and the turn model decide where turns fall, and nothing
-announces a turn because nothing announces one on a real call. A spec
+announces a turn because nothing announces one on a real call. An agent
+that starts talking while the persona is still speaking cuts it off, the
+way a person is cut off: the persona stops mid-word, and its turn is
+recorded for the stretch of line it really occupied, carrying the words
+the agent really heard. A spec
 naming a connection type the simulator holds no plug for is refused out
 loud at claim time and reported not at all: the row stays the control
 plane's to sweep.
@@ -90,6 +94,14 @@ plus what only audio can owe:
   from a clock: `time_to_first_word` (how long the agent was quiet before
   speaking), `agent_speech_duration` and `persona_speech_duration`. Each
   is a span, like every other measurement.
+- **Overlap, recorded and never interpreted.** Two turns that crossed in
+  time are two spans that cross, and nothing labels the crossing. What a
+  crossing does void is the measures about the quiet between the two
+  speakers: an answer that began before the persona had finished was not
+  waited for, so `time_to_first_word` and the two response latencies are
+  **absent** for that turn rather than reported as zero. A threshold
+  grader reads one fewer sample, which is the same honest silence it gets
+  for a measure a conversation did not produce.
 
 ## How it runs
 

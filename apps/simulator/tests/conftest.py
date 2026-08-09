@@ -398,6 +398,8 @@ def loopback_spec(
     ends_after_replies: bool = False,
     echoes_what_it_hears: bool = False,
     answer_delay_seconds: float = 0.0,
+    talks_over_caller_turn: int | None = None,
+    talks_over_seconds_in: float | None = None,
     sample_rate_hz: int | None = None,
     provider_reference: str | None = None,
     max_turns: int = 60,
@@ -420,6 +422,10 @@ def loopback_spec(
         config["ends_after_replies"] = True
     if echoes_what_it_hears:
         config["echoes_what_it_hears"] = True
+    if talks_over_caller_turn is not None:
+        config["talks_over_caller_turn"] = talks_over_caller_turn
+    if talks_over_seconds_in is not None:
+        config["talks_over_seconds_in"] = talks_over_seconds_in
     if sample_rate_hz is not None:
         config["sample_rate_hz"] = sample_rate_hz
     if provider_reference is not None:

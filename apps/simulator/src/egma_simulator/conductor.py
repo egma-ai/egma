@@ -12,6 +12,13 @@ Chat keeps the walk. The two conductors share the persona brain, the
 endings vocabulary, the limits and the record — and nothing else, because
 a conversation where both sides may speak at once has no loop in it.
 
+Both sides may speak at once, so either may talk over the other. The
+agent talking over the persona is Pipecat's own machinery, switched on
+here and reaching this module as one frame: the persona stops mid-word,
+its turn goes on the record for the stretch of line it really occupied,
+and it carries what the far end really heard rather than what the persona
+had meant to say.
+
 ## The line, and the one clock everything is read from
 
 The line is driven one **slice** at a time: the persona's audio out, the
@@ -41,7 +48,18 @@ One slice is fed into the pipeline and then a mark is put behind it, and
 the next slice is not taken until that mark has come out the far end. So
 "the pipeline has finished with this slice" is a fact rather than a hope,
 and everything the slice caused — a detector's verdict, a turn ending, the
-persona answering — happened at a sample position this module knows.
+persona answering, the far end cutting in — happened at a sample position
+this module knows.
+
+That last one is worth spelling out, because it is the one thing in the
+pipeline that deliberately jumps the queue. An interruption travels as a
+*system* frame: every processor hands one on the moment it arrives,
+without waiting for the ordinary frames already queued behind it. A mark
+is an ordinary frame. So at each leg in turn the interruption is passed on
+before the mark it shares a slice with is so much as taken off the queue,
+and it is still ahead at the next leg for the same reason — which makes
+"the persona stopped speaking on the slice the agent's first samples
+arrived on" true by construction rather than by luck.
 """
 
 from __future__ import annotations
@@ -58,12 +76,15 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     StartFrame,
     TextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
+    TTSTextFrame,
+    UninterruptibleFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
@@ -141,10 +162,16 @@ class ConductParameters:
     Only ever reached when the ears found no words in a stretch of
     speech, which is a real thing a phone line does."""
 
-    yields_to_the_agent: bool = False
+    yields_to_the_agent: bool = True
     """Whether the agent speaking cuts the persona's own utterance short.
-    Off for now: moving who conducts is one change, and being interrupted
-    is a behavior of its own, with a record of its own."""
+
+    On, because that is what a person does: somebody talked over stops
+    talking. How long the persona keeps going after the agent's first
+    sample is not a number here and never will be — it is however long the
+    detector needs to be sure it is hearing speech, which is the
+    detector's own declared window and is spent in samples like everything
+    else.
+    """
 
 
 DEFAULT_CONDUCT = ConductParameters()
@@ -190,7 +217,7 @@ while the conversation is still going."""
 
 
 @dataclass
-class _SlicePassed(ControlFrame):
+class _SlicePassed(UninterruptibleFrame, ControlFrame):
     """The mark behind one slice of the line.
 
     When it comes out of the pipeline, everything that slice caused has
@@ -198,11 +225,19 @@ class _SlicePassed(ControlFrame):
     every leg is guaranteed to pass along untouched, and being a control
     frame rather than a system one is what keeps it strictly behind the
     data frames it is a mark for.
+
+    **Uninterruptible, and the marks below with it.** An interruption
+    throws away every ordinary frame waiting in the pipeline — that is
+    what stopping speech mid-word *is* — and these are not speech. They
+    are how the conductor knows where the conversation has got to, so a
+    conductor waiting on one that was thrown away would wait out the
+    simulation's duration limit. The mixin says exactly that: still
+    ordered like any other frame, but never dropped.
     """
 
 
 @dataclass
-class _AgentFinished(ControlFrame):
+class _AgentFinished(UninterruptibleFrame, ControlFrame):
     """The agent has said its piece; the persona may answer.
 
     Pushed by the turn keeper the moment the turn model calls a turn
@@ -215,7 +250,7 @@ class _AgentFinished(ControlFrame):
 
 
 @dataclass
-class _PersonaSaid(ControlFrame):
+class _PersonaSaid(UninterruptibleFrame, ControlFrame):
     """The mark closing a persona turn the pipeline has spoken.
 
     Everything queued before it has come out of the speaking leg, so the
@@ -380,6 +415,13 @@ class _PersonaMouth(FrameProcessor):
     placed on the same clock as the far end's. So a whole utterance is
     gathered, handed to the line, and the line's own slices are what say
     where it began and ended.
+
+    It also keeps the map between the words and the samples. A speaking
+    leg announces each piece of a turn just before the audio for it — a
+    character from the scripted voice, a word from a provider that gives
+    word timings, a whole turn from one that gives none — and closing
+    each piece at the audio gathered so far is what lets a turn cut off
+    part-way say what was really voiced instead of what was meant.
     """
 
     def __init__(self) -> None:
@@ -388,25 +430,55 @@ class _PersonaMouth(FrameProcessor):
         self.slice_passed = asyncio.Event()
         self.to_say: list[_Utterance] = []
         self._audio = bytearray()
+        self._pieces: list[tuple[int, str]] = []
+        self._saying: str | None = None
+        self._interrupted = False
+
+    def take_interruption(self) -> bool:
+        """Whether the far end has cut in since this was last asked."""
+        interrupted, self._interrupted = self._interrupted, False
+        return interrupted
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         if isinstance(frame, StartFrame):
             self.started.set()
+        elif isinstance(frame, InterruptionFrame):
+            # Pipecat's own way of saying the far end started talking over
+            # us. It reaches here out of band, ahead of the mark closing
+            # the slice that carried the far end's first samples, so the
+            # conductor learns of it at a sample position rather than at
+            # whatever moment this code ran.
+            self._interrupted = True
+        elif isinstance(frame, TTSTextFrame):
+            self._close_piece()
+            self._saying = frame.text
         elif isinstance(frame, TTSAudioRawFrame):
             self._audio.extend(frame.audio)
         elif isinstance(frame, _PersonaSaid):
+            self._close_piece()
             self.to_say.append(
                 _Utterance(
                     text=frame.text,
                     pcm=bytes(self._audio),
+                    voiced=tuple(self._pieces),
                     concluded=frame.concluded,
                 )
             )
             self._audio.clear()
+            self._pieces.clear()
         elif isinstance(frame, _SlicePassed):
             self.slice_passed.set()
         await self.push_frame(frame, direction)
+
+    def _close_piece(self) -> None:
+        """The piece being spoken ends at the audio gathered so far."""
+        if self._saying is None:
+            return
+        self._pieces.append(
+            (len(self._audio) // SAMPLE_WIDTH_BYTES, self._saying)
+        )
+        self._saying = None
 
 
 @dataclass
@@ -415,6 +487,12 @@ class _Utterance:
 
     text: str
     pcm: bytes
+    voiced: tuple[tuple[int, str], ...] = ()
+    """Each piece of the turn and the sample it is finished being said at
+    — the speaking leg's own account of which samples carried which
+    words. Empty from a leg that says nothing about it, which is honest:
+    such a leg can only ever answer all or nothing."""
+
     concluded: bool = False
     began_at: int | None = None
     said: int = 0
@@ -426,6 +504,19 @@ class _Utterance:
     @property
     def finished(self) -> bool:
         return self.said >= self.samples
+
+    def as_voiced(self) -> str:
+        """What the far end actually heard of this turn.
+
+        The whole of it where the whole of it went out, which is every
+        turn nobody talked over. Where the line stopped carrying it
+        part-way, only the pieces whose audio had already gone: what the
+        persona meant to say next was never said, so the record does not
+        say it was.
+        """
+        if self.finished:
+            return self.text
+        return "".join(piece for ends_at, piece in self.voiced if ends_at <= self.said)
 
 
 class PipelineGone(RuntimeError):
@@ -805,13 +896,38 @@ class VoiceConductor:
         cancelled exchange keeps its last turn there too — this is the
         same fact, measured off the audio instead of assumed whole.
         """
+        await self._stopped_speaking()
+
+    async def _yielded_to_the_agent(self) -> None:
+        """The agent talked over the persona, and the persona stopped.
+
+        Two things happen and they are different in kind. What the
+        persona was saying is cut where the line stopped carrying it, and
+        that stretch is a turn like any other — shorter than it meant to
+        be, carrying what was really heard. What the persona had decided
+        to say but had not begun is dropped: it was never said, so there
+        is nothing to record, and when the agent finishes the persona
+        answers what it has just heard rather than what it was about to
+        say before it heard it.
+        """
+        assert self._mouth is not None
+        self._mouth.to_say.clear()
+        self._owes_a_turn = False
+        self._may_speak_from = None
+        await self._stopped_speaking()
+
+    async def _stopped_speaking(self) -> None:
+        """Close the utterance in flight at the sample the line reached."""
         spoken = self._speaking
         self._speaking = None
         if spoken is None or spoken.began_at is None or spoken.said == 0:
             return
         ended = spoken.began_at + spoken.said
         await self._measure("persona_speech_duration", spoken.began_at, ended)
-        await self._took_a_turn("human", spoken.text, spoken.began_at, ended)
+        await self._took_a_turn(
+            "human", spoken.as_voiced(), spoken.began_at, ended
+        )
+        self._record.persona_last_stopped_at = ended
 
     async def _say_nothing_more(self, utterance: _Utterance) -> None:
         """The persona concluded: the words go on the record unspoken.
@@ -827,17 +943,11 @@ class VoiceConductor:
 
     async def _after_the_slice(self) -> None:
         """Read what this slice changed, and decide what happens next."""
-        assert self._ear is not None
+        assert self._ear is not None and self._mouth is not None
+        if self._mouth.take_interruption():
+            await self._yielded_to_the_agent()
         if self._speaking is not None and self._speaking.finished:
-            spoken = self._speaking
-            self._speaking = None
-            assert spoken.began_at is not None
-            ended_at = spoken.began_at + spoken.samples
-            await self._measure("persona_speech_duration", spoken.began_at, ended_at)
-            await self._took_a_turn("human", spoken.text, spoken.began_at, ended_at)
-            self._record.persona_last_stopped_at = ended_at
-            if self._ending is not None:
-                return
+            await self._stopped_speaking()
 
         if self._ending is not None:
             return
@@ -929,14 +1039,29 @@ class VoiceConductor:
             self._heard_so_far = len(self._ear.utterances)
             stopped_at = ended
             quiet_from = self._record.persona_last_stopped_at or 0
-            # In the order the intervals close, so no measurement is ever
-            # stamped before the one taken ahead of it.
-            await self._measure("time_to_first_word", quiet_from, began)
-            if self._record.persona_last_stopped_at is not None:
-                if not self._record.first_answer_measured:
-                    self._record.first_answer_measured = True
-                    await self._measure("first_response_latency", quiet_from, began)
-                await self._measure("turn_response_latency", quiet_from, began)
+            answered_a_turn = self._record.persona_last_stopped_at is not None
+            # Three of the measures are about the quiet between the two
+            # speakers, and this turn began before the persona's ended:
+            # there was no quiet. A number would have to be invented to
+            # report one, so none is reported — the same answer grading
+            # gives a check whose sample the conversation did not
+            # produce. What the turn itself was is measured as ever.
+            talked_over = answered_a_turn and began < quiet_from
+            if not talked_over:
+                # In the order the intervals close, so no measurement is
+                # ever stamped before the one taken ahead of it.
+                await self._measure("time_to_first_word", quiet_from, began)
+            if answered_a_turn:
+                first_answer = not self._record.first_answer_measured
+                # Marked answered either way: the agent's first answer
+                # happened, and a later one is not it.
+                self._record.first_answer_measured = True
+                if not talked_over:
+                    if first_answer:
+                        await self._measure(
+                            "first_response_latency", quiet_from, began
+                        )
+                    await self._measure("turn_response_latency", quiet_from, began)
             await self._took_a_turn("agent", said, began, ended)
             await self._measure("agent_speech_duration", began, ended)
             self._record.persona_last_stopped_at = None

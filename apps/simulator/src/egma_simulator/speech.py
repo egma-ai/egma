@@ -60,6 +60,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import STTSettings
@@ -88,6 +89,14 @@ quiet talker and high enough to ignore a line's own hiss.
 TONE_BASE_HZ = 200
 TONE_STEP_HZ = 10
 TONE_AMPLITUDE = 8000
+
+SPOKEN_BY_CHARACTER = "character"
+"""How finely the scripted voice says which samples carried which words.
+
+Pipecat's own services name their granularity the same way — a word, a
+sentence, a whole turn — and this leg's is one character, because one
+character of the codec is a whole number of tones.
+"""
 
 DEFAULT_VOICE_ID = "egma-scripted-voice"
 """What a persona authored with no voice block speaks with."""
@@ -306,16 +315,35 @@ class ScriptedTTS(FrameProcessor):
         await self.push_frame(frame, direction)
 
     async def _speak(self, text: str) -> None:
+        """Say one turn: each piece of it announced, then its audio.
+
+        A real service interleaves the same two frames, at whatever
+        granularity it knows its own voice to — a word where the provider
+        gives word timings, the whole turn where it gives none. What
+        listens for them is the mouth, which reads the pairs as the map
+        between the words and the samples, and needs that map for exactly
+        one question: a turn cut off part-way was voiced up to *here*, so
+        what did the far end actually hear?
+
+        This leg's granularity is one character, because that is what its
+        codec's granularity is: one character is a whole number of tones,
+        so what the map says was voiced is precisely what a listener can
+        decode out of the audio that went on the line.
+        """
         if not text:
             return
         await self.push_frame(TTSStartedFrame())
-        await self.push_frame(
-            TTSAudioRawFrame(
-                audio=encode_speech(text, self.sample_rate_hz),
-                sample_rate=self.sample_rate_hz,
-                num_channels=1,
+        for character in text:
+            await self.push_frame(
+                TTSTextFrame(text=character, aggregated_by=SPOKEN_BY_CHARACTER)
             )
-        )
+            await self.push_frame(
+                TTSAudioRawFrame(
+                    audio=encode_speech(character, self.sample_rate_hz),
+                    sample_rate=self.sample_rate_hz,
+                    num_channels=1,
+                )
+            )
         await self.push_frame(TTSStoppedFrame())
 
 
