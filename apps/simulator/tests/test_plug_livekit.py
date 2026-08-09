@@ -1274,6 +1274,55 @@ async def test_an_endpoint_that_answers_badly_is_a_fault_in_its_own_words(
     assert A_HEADER_SECRET not in told
 
 
+async def test_a_token_the_endpoint_minted_is_never_quoted_back():
+    """The leak that lives between a good token and a bad answer.
+
+    An endpoint may hand over a working token and still say something
+    egma cannot use — here a ``serverUrl`` that is not a string. The
+    refusal quotes the whole answer back, because that is what makes a
+    handler's own mistake fixable, and the whole answer contains the
+    token. A token registered only after that quoting would reach a
+    reason, a log line and the traceback under it, and it opens a room in
+    the customer's project.
+    """
+    minted = "a.working.token.nobody.should.read"
+    stub = RoomStub()
+    with serving(body={"token": minted, "serverUrl": 17}) as endpoint:
+        plug = endpoint_room(stub, endpoint.url)
+        with pytest.raises(PlugError) as refused:
+            await plug.open()
+        await plug.close()
+
+    told = str(refused.value)
+    assert failed_ending(refused.value) == ERROR
+    assert "serverUrl" in told, "the handler still has to see what to fix"
+    assert minted not in told, "the endpoint's token was quoted back"
+    assert A_HEADER_SECRET not in told
+
+
+async def test_an_endpoint_that_redirects_is_answered_rather_than_followed():
+    """A redirect is an answer, not an instruction.
+
+    Following one would carry the customer's own auth headers to a host
+    they never configured, chosen by whoever answered — so egma reads the
+    status and stops, and says so in the same words it uses for any other
+    status it cannot work with.
+    """
+    stub = RoomStub()
+    with serving(
+        status=302, body={"token": "never.minted.here"}
+    ) as endpoint:
+        plug = endpoint_room(stub, endpoint.url)
+        with pytest.raises(PlugError) as refused:
+            await plug.open()
+        await plug.close()
+
+    told = str(refused.value)
+    assert failed_ending(refused.value) == ERROR
+    assert "302" in told, "the status it stopped on is the diagnosis"
+    assert A_HEADER_SECRET not in told
+
+
 async def test_an_endpoint_that_answers_nowhere_is_a_fault_naming_it():
     """A closed port on loopback: the failure a wrong address really hits,
     hermetically and through the real driver."""

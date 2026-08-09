@@ -669,6 +669,12 @@ class LiveKitRoomBackend:
                 endpoint,
                 json=asked,
                 headers=self._settings.endpoint_headers,
+                # A token endpoint answers; it does not send egma somewhere
+                # else. Following a redirect would carry the customer's own
+                # auth headers to a host they never configured, chosen by
+                # whoever answered — so a redirect is read as the answer it
+                # is, and quoted like any other unexpected status.
+                allow_redirects=False,
             ) as answer:
                 status = answer.status
                 said = await answer.text()
@@ -726,6 +732,16 @@ class LiveKitRoomBackend:
                 f"{self._quotable_endpoint(said)}",
                 ending=ERROR,
             )
+
+        # From here the token is a credential like any other on this
+        # connection: it opens a room in the customer's project, and it is
+        # registered before anything else can quote it. Everything below
+        # quotes the *whole* answer back — that is what makes a handler's
+        # own mistake fixable — and the answer it quotes contains this
+        # token. Registered late is registered too late: a refusal about a
+        # bad serverUrl would carry a working credential into a reason, a
+        # log line and the traceback under it.
+        self._secrets.register([token])
 
         server_url = held.get("serverUrl", "")
         if not isinstance(server_url, str):
