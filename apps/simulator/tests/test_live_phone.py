@@ -52,7 +52,7 @@ from conftest import (
     turns_for,
 )
 
-from egma_simulator.pipeline import channels_of
+from egma_simulator.recording import channels_of
 
 LIVEKIT_URL = credential("TEST_LIVEKIT_URL", "EGMA_SIMULATOR_LIVEKIT_URL")
 LIVEKIT_API_KEY = credential(

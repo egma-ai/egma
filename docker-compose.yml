@@ -175,6 +175,9 @@ services:
       EGMA_SIMULATOR_DEEPGRAM_API_KEY: ${EGMA_SIMULATOR_DEEPGRAM_API_KEY:-}
       EGMA_SIMULATOR_TTS_PROVIDER: ${EGMA_SIMULATOR_TTS_PROVIDER:-scripted}
       EGMA_SIMULATOR_ELEVENLABS_API_KEY: ${EGMA_SIMULATOR_ELEVENLABS_API_KEY:-}
+      # What hears the agent start and stop speaking. Bundled in the image
+      # either way, so this downloads nothing at run time.
+      EGMA_SIMULATOR_VAD_PROVIDER: ${EGMA_SIMULATOR_VAD_PROVIDER:-scripted}
       # How a phone call's audio travels, for a simulation whose connection
       # names a number. Naming a backend is what makes the rest required
       # and what makes this simulator able to dial at all; unset, it starts

@@ -44,11 +44,18 @@ the plug, and the audio that comes back is transcribed before anyone else
 sees it. So a voice plug never handles text, the persona never handles
 audio, and neither of them learns about the other.
 
-The seams are :class:`PlatformPlug` (chat, and what the walk drives
-whatever the modality) and :class:`VoicePlug` (voice). A plug implements
-the one for the modality it speaks and refuses the other at construction.
+The seams are :class:`PlatformPlug` (chat, and what the walk drives),
+:class:`DuplexLine` (voice) and :class:`VoicePlug` (voice, turn-shaped and
+on its way out). A plug implements the one for the modality it speaks and
+refuses the other at construction.
 
-## The lifecycle the walk drives
+A voice plug's whole difference from a chat one is that both directions of
+the line are open at once. So a duplex line is not asked for a turn: it is
+driven one slice of audio at a time, the persona's speech out and the far
+end's speech in, and where the turns fall is the conductor's reading of
+that audio rather than anything the plug declares.
+
+## The lifecycle a conductor drives
 
 For one simulation, in order, always:
 
@@ -70,14 +77,19 @@ For one simulation, in order, always:
    cancel directive, and after a fault. Make it safe to call in every one
    of those states.
 
-A voice plug's lifecycle is the same three steps in audio: ``open``
-answers with the agent's spoken greeting, ``deliver`` takes the persona's
-speech as an ``Utterance`` and answers with an ``AgentSpeech``, ``close``
-tears the exchange down. It also declares ``sample_rate_hz`` — **the band
-it actually carries**, after whatever negotiation the platform does, not
-the band the config asked for. The legs are assembled at that band and the
-simulation's audio facts are measured from what flowed, so a plug that
-returns a hopeful number is lying on the record.
+A duplex line's lifecycle is three steps too: ``open`` reaches the
+platform, ``exchange`` is called once per slice for as long as the
+exchange lasts, and ``close`` tears it down. A turn-shaped voice plug's is
+the same three steps one utterance at a time: ``open`` answers with the
+agent's spoken greeting, ``deliver`` takes the persona's speech as an
+``Utterance`` and answers with an ``AgentSpeech``, ``close`` tears the
+exchange down.
+
+Either way the plug declares ``sample_rate_hz`` — **the band it actually
+carries**, after whatever negotiation the platform does, not the band the
+config asked for. The legs are assembled at that band and the simulation's
+audio facts are measured from what flowed, so a plug that returns a
+hopeful number is lying on the record.
 
 ``provider_reference`` is the platform's own identifier for the exchange —
 a chat id, a telephony leg id — reported with the terminal facts as the
@@ -87,10 +99,10 @@ soon as it is known; ``None`` when the platform has none.
 ## Failure
 
 Raise when the platform cannot be reached or stops making sense —
-``PlugError`` for the failures you can name, anything for the rest. The
-walk turns an exception into a simulation that reports ``failed`` with the
-exception's message as the reason, so word messages for the person who
-reads the record — and keep credentials out of them.
+``PlugError`` for the failures you can name, anything for the rest.
+Conducting turns an exception into a simulation that reports ``failed``
+with the exception's message as the reason, so word messages for the
+person who reads the record — and keep credentials out of them.
 
 A ``PlugError`` also carries **which of the contract's failed endings**
 the refusal deserves. They are named in :mod:`egma_simulator.contract`,
@@ -108,9 +120,10 @@ answer nearly always:
 None of the three is ever graded as the agent failing: each of them
 means the exchange did not happen, so there is nothing to grade.
 
-A cancel directive or a tripped limit cancels the in-flight ``open`` or
-``deliver`` (an ``asyncio.CancelledError`` inside the plug): let it
-propagate, and rely on ``close()`` for teardown.
+A cancel directive or a tripped limit stops the exchange at whatever call
+is in flight — ``open``, ``deliver`` or ``exchange`` — as an
+``asyncio.CancelledError`` inside the plug: let it propagate, and rely on
+``close()`` for teardown.
 
 ## Pacing
 
@@ -120,8 +133,10 @@ untestable (nothing can be canceled mid-flight), which is why the scripted
 counterpart takes a ``turn_seconds`` knob.
 
 A voice plug has a second, better way to be slow: the quiet before an
-agent starts speaking belongs in the audio it returns, because that is
-where it is on a real call and where the measurement of it is read from.
+agent starts speaking belongs in the audio, because that is where it is on
+a real call and where the measurement of it is read from. On a duplex line
+that quiet is simply the slices the far end says nothing in, which costs a
+deterministic test no time at all and a live call exactly what it costs.
 
 ## Registration
 
@@ -135,7 +150,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from ..contract import ERROR
 
@@ -244,6 +259,12 @@ class VoicePlug(Protocol):
 
     ``sample_rate_hz`` is the band actually carried, which the speech legs
     are assembled at and the simulation's measured audio band is read from.
+
+    **Turn-shaped, and on its way out.** It hands over one whole utterance
+    and takes one whole answer back, which is a shape no live line has: on
+    a real call both directions are open at once and nobody announces the
+    end of a turn. :class:`DuplexLine` below is what replaces it, and the
+    phone plug is the last plug still wearing this one.
     """
 
     @property
@@ -255,6 +276,51 @@ class VoicePlug(Protocol):
     async def open(self) -> AgentSpeech | None: ...
 
     async def deliver(self, speech: Utterance) -> AgentSpeech: ...
+
+    async def close(self) -> None: ...
+
+
+@runtime_checkable
+class DuplexLine(Protocol):
+    """The seam a full-duplex voice connection is reached through.
+
+    **Checkable at runtime, and used that way.** Assembly asks a plug
+    whether it is one of these to decide which conductor a voice
+    simulation gets, so the four verbs below are the whole difference
+    between a line and the turn-shaped protocol beside it.
+
+    Both directions are open at once, and the line is driven one slice at
+    a time: :meth:`exchange` takes the slice the persona is saying right
+    now and answers with the slice the far end said in the same moment.
+    Neither side is a turn, and neither side announces one — turn-taking
+    is the conductor's reading of the audio, which is what makes it
+    possible for the two speakers to overlap at all.
+
+    **Every slice is the same number of samples in both directions, and
+    quiet is audio.** A speaker saying nothing sends silence rather than
+    nothing, because the count of samples that have crossed the line *is*
+    the conversation's clock: every utterance in the record is a pair of
+    positions on it, so a line that skipped its quiet would leave the two
+    speakers on two different clocks.
+
+    ``sample_rate_hz`` is the band actually carried — the speech legs are
+    assembled at it and the record's measured band is read from it.
+    ``far_end_left`` is true once the far end is off the line, which is
+    what "the agent ended the exchange" means on a voice connection.
+    """
+
+    @property
+    def provider_reference(self) -> str | None: ...
+
+    @property
+    def sample_rate_hz(self) -> int: ...
+
+    @property
+    def far_end_left(self) -> bool: ...
+
+    async def open(self) -> None: ...
+
+    async def exchange(self, outgoing: bytes) -> bytes: ...
 
     async def close(self) -> None: ...
 

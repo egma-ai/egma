@@ -46,22 +46,27 @@ touching the others:
   one new module and one registry line. To write one, read the
   `media/__init__.py` docstring; it is the entire brief.
 - **The speech legs** (`speech.py`) — a voice simulation is a chat one
-  with two more legs: the persona's words spoken into audio, the agent's
-  audio read back into words. Which pair fills them is configuration read
-  at assembly and nowhere else — a deterministic pair, or ElevenLabs
-  speaking and Deepgram listening, each chosen on its own. The
-  deterministic pair is the default everywhere and what CI speaks and
-  listens with: no account, no network, no downloaded corpus, and the
+  with three more legs: the persona's words spoken into audio, the
+  agent's audio read back into words, and a detector that hears *whether*
+  the agent is speaking at all. Which one fills each is configuration
+  read at assembly and nowhere else — a deterministic set, or ElevenLabs
+  speaking, Deepgram listening and Silero hearing, each chosen on its
+  own. The deterministic set is the default everywhere and what CI speaks
+  and listens with: no account, no network, no downloaded corpus, and the
   same words out that went in. Nothing above the assembly learns which
-  pair it got, which is what keeps a future speech-to-speech persona a
+  set it got, which is what keeps a future speech-to-speech persona a
   different leg-set rather than a rewrite.
 
 One pipeline is assembled per simulation from its own spec and torn down
-after (`pipeline.py`). Modality selects the legs and nothing else: a chat
-simulation is the plug and the brain, and a voice one is the same plug and
-the same brain with the speech legs between them, recording as they go. A
-spec naming a connection type the simulator holds no plug for is refused
-out loud at claim time and reported not at all: the row stays the control
+after (`pipeline.py`). Modality selects the legs, and the connection
+selects who conducts. A chat simulation is the plug and the brain, walked
+a turn at a time. A voice simulation on a full-duplex line is the same
+brain with the speech legs around it, conducted by a real Pipecat
+pipeline (`conductor.py`): both directions of the line are open at once,
+the detector and the turn model decide where turns fall, and nothing
+announces a turn because nothing announces one on a real call. A spec
+naming a connection type the simulator holds no plug for is refused out
+loud at claim time and reported not at all: the row stays the control
 plane's to sweep.
 
 ## What a voice simulation records
@@ -136,13 +141,13 @@ Three things about it are worth knowing before reading the code:
   disagree with it.
 - **Turn spans may overlap.** A chat message is one instant; a voice turn
   is as long as the audio, ear to ear, and two turns are free to cross in
-  time. Nothing crosses today, because the persona waits its turn — the
-  shape is what a full-duplex caller will need, and it exists now so that
-  making the caller real changes conduction and nothing downstream.
+  time. On voice both of a turn's ends are positions on the audio itself —
+  counted in samples, never stamped off a clock — so whether two turns
+  crossed is a fact about what was said rather than about when code ran.
 
-Pipecat's own auto-tracing stays off. Its turn spans carry no text and
-ride the stock lossy pipeline; what the record needs is authored where the
-walk observes the conversation.
+Pipecat's own auto-tracing stays off. Its turn spans carry no text, cannot
+represent two people speaking at once, and ride the stock lossy pipeline;
+what the record needs is authored where the conversation is observed.
 
 The simulator reaches the ingest at the control-plane URL it already has.
 There is no second address to configure.
@@ -205,9 +210,15 @@ EGMA_SIMULATOR_TTS_PROVIDER=elevenlabs \
 EGMA_SIMULATOR_ELEVENLABS_API_KEY=... \
 EGMA_SIMULATOR_STT_PROVIDER=deepgram \
 EGMA_SIMULATOR_DEEPGRAM_API_KEY=... \
+EGMA_SIMULATOR_VAD_PROVIDER=silero \
 EGMA_SIMULATOR_CONTROL_PLANE_URL=http://127.0.0.1:8085 \
 uv run egma-simulator
 ```
+
+The third one is the detector: real speech is neither as loud nor as
+silent as the test tone, so a deployment that hears real voices wants the
+real detector too. It needs no key and downloads nothing — the model
+ships inside the pinned pipecat wheel.
 
 Which voice the persona speaks with comes from its own authored traits —
 a `voice` block naming a `voiceId` — and a persona naming none speaks
@@ -307,6 +318,7 @@ Everything arrives as environment variables.
 | `EGMA_SIMULATOR_DEEPGRAM_API_KEY` | (required for `deepgram`) | The provider key. Never logged. |
 | `EGMA_SIMULATOR_TTS_PROVIDER` | `scripted` | What the persona speaks with: `scripted` or `elevenlabs`. |
 | `EGMA_SIMULATOR_ELEVENLABS_API_KEY` | (required for `elevenlabs`) | The provider key. Never logged. |
+| `EGMA_SIMULATOR_VAD_PROVIDER` | `scripted` | What hears the agent start and stop speaking: `scripted`, which reads the test tone exactly, or `silero`. Needs no key either way — Silero ships inside the pinned pipecat wheel and downloads nothing. |
 | `EGMA_SIMULATOR_MEDIA_BACKEND` | (none) | Which bridge places a phone call: `livekit`, or `scripted` for the local stand-in that places none. Unset, the simulator places no calls and says so when a simulation names a number. |
 | `EGMA_SIMULATOR_LIVEKIT_URL` | (required for `livekit`) | The LiveKit server — self-hosted or Cloud, only the URL differs. |
 | `EGMA_SIMULATOR_LIVEKIT_API_KEY` | (required for `livekit`) | The LiveKit API key. |
@@ -501,12 +513,19 @@ src/egma_simulator/
   trunk.py        `egma-trunk-setup`: a carrier account and a number
                   become a SIP trunk, once, through the carrier's own API.
   pipeline.py     One pipeline per simulation, built from its spec: which
-                  legs the modality selects, and what the audio measured.
+                  legs the modality selects, which of the two conductors
+                  it gets, and what the audio measured.
+  conductor.py    A voice simulation on a full-duplex line, conducted by a
+                  real Pipecat pipeline: the detector, the turn model, the
+                  brain, the legs, and the audio timeline the record is
+                  anchored to.
   speech.py       The speech legs, and the deterministic pair CI speaks
                   and listens with — no corpus, no provider, no network.
+  recording.py    One simulation's dual-channel recording, and the two
+                  audio facts a report carries about it.
   blob.py         Where a recording is written and what a report points at.
-  walk.py         One simulation's exchange: the turn loop, limits, cancel
-                  delivery, and how each walk names its ending.
+  walk.py         One chat simulation's exchange: the turn loop, limits,
+                  cancel delivery, and how each walk names its ending.
   reporting.py    Event minting, the write-ahead log, ordered delivery.
   redaction.py    Credential values registered once, scrubbed everywhere.
   workbench/      The fake control plane: same contract, fixture-fed,
