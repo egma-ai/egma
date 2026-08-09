@@ -46,6 +46,18 @@ export type ServerOptions = {
    */
   readonly rateLimit?: RateLimit;
   /**
+   * Where log lines are written. Defaults to the process's own output, which
+   * is what a container reads.
+   *
+   * A test hands in a destination of its own, because one of the promises this
+   * door makes is about what is *not* written: a customer's provider secret
+   * arrives here and must appear in no line egma keeps. That promise is only
+   * worth making while something can read the log back and check it, so the
+   * log is a seam rather than a side effect. A destination handed in is asked
+   * for lines, whatever `LOG_LEVEL` a test run was started with.
+   */
+  readonly logTo?: { write(line: string): void } | undefined;
+  /**
    * How often the standing orphan sweep runs. Defaults to the ~30s cadence; a
    * test hands in a shorter one rather than watching a real clock.
    */
@@ -66,7 +78,10 @@ export function buildApi(options: ServerOptions): Api {
   const { config } = options;
 
   const app = Fastify({
-    logger: { level: process.env.LOG_LEVEL ?? "info" },
+    logger:
+      options.logTo === undefined
+        ? { level: process.env.LOG_LEVEL ?? "info" }
+        : { level: "info", stream: options.logTo },
     // Forwarded headers are believed only when somebody said there is a proxy
     // in front. Everything that reads the request's origin — the provider's
     // cookie attributes among them — reads what this resolves.

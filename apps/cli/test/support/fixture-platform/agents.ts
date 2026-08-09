@@ -45,13 +45,61 @@ const SHORTEST_CREDENTIAL = 8;
 
 type ConfigGate = (key: string, value: unknown) => string;
 
+/**
+ * A gate the caller may leave out, mirroring the registry behind the seam.
+ * Optional is about absence and nothing else: a key that is there faces the
+ * same gate it would have faced if it were demanded.
+ */
+type OptionalGate = { readonly optional: true; readonly gate: ConfigGate };
+
+type ConfigDemand = ConfigGate | OptionalGate;
+
+function optional(gate: ConfigGate): OptionalGate {
+  return { optional: true, gate };
+}
+
+function isDemanded(demand: ConfigDemand): boolean {
+  return typeof demand === "function";
+}
+
+type CredentialGate = (what: string, field: string, value: unknown) => string;
+
+type CredentialHint = (sealed: Record<string, string>) => string;
+
+type CredentialRule =
+  | {
+      /** `true` demands them; `"if-sent"` takes them when they come. */
+      readonly required: true | "if-sent";
+      readonly fields: readonly string[];
+      /** How each field is checked. Left out: an ordinary credential string. */
+      readonly gate?: CredentialGate;
+      readonly hint: CredentialHint;
+    }
+  | { readonly required: false; readonly refusal: string };
+
+/**
+ * One whole shape a type comes in — config keys and the credential that goes
+ * with them, together — mirroring the registry behind the seam. Together
+ * because a shape is a fact about the pair: gating the two against separate
+ * rules would admit connections that are half of each and can do neither.
+ */
+type Variant = {
+  /** How a refusal names this shape. Left out: named after the type. */
+  readonly named?: string;
+  /** The config key whose presence chooses this shape. */
+  readonly chosenBy?: string;
+  readonly config: Readonly<Record<string, ConfigDemand>>;
+  readonly credentials: CredentialRule;
+  /** What a caller sending the *other* shape's credentials is told. */
+  readonly mixedUp?: string;
+};
+
 type Descriptor = {
   readonly modalities: readonly string[];
   readonly topology: string;
-  readonly config: Readonly<Record<string, ConfigGate>>;
-  readonly credentials:
-    | { readonly required: true; readonly fields: readonly string[]; readonly hintField: string }
-    | { readonly required: false; readonly refusal: string };
+  /** The shapes this type comes in, the first being the one a config lands in
+   * by naming none of the others' keys. */
+  readonly variants: readonly [Variant, ...Variant[]];
   /**
    * Which config key decides that two registrations are about one vendor
    * agent. A type that cannot answer that — a framework the customer runs
@@ -82,19 +130,164 @@ function e164PhoneNumber(key: string, value: unknown): string {
   return candidate;
 }
 
+/** The four schemes a LiveKit server URL is written in; the SDKs normalise. */
+const LIVEKIT_URL_SCHEMES = ["ws:", "wss:", "http:", "https:"];
+
+function livekitServerUrl(key: string, value: unknown): string {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  let scheme: string | undefined;
+  try {
+    scheme = new URL(candidate).protocol;
+  } catch {
+    scheme = undefined;
+  }
+  if (
+    scheme === undefined ||
+    !LIVEKIT_URL_SCHEMES.includes(scheme) ||
+    // `wss:acme.livekit.cloud` parses and then reaches nothing, so the
+    // slashes are demanded here rather than missed at dial time.
+    !candidate.toLowerCase().startsWith(`${scheme}//`)
+  ) {
+    throw new Refusal(
+      `the config's ${key} must be a ws, wss, http or https URL, which looks like wss://example.livekit.cloud`,
+    );
+  }
+  return candidate;
+}
+
+/** The ordinary credential field: one non-empty string, stored trimmed. */
+function credentialString(what: string, field: string, value: unknown): string {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (trimmed === "") {
+    throw new Refusal(
+      `${what}'s credentials need ${field} to be a non-empty string`,
+    );
+  }
+  if (trimmed.length < SHORTEST_CREDENTIAL) {
+    throw new Refusal(
+      `${what}'s credentials need ${field} to be at least ${SHORTEST_CREDENTIAL} characters`,
+    );
+  }
+  return trimmed;
+}
+
+/** The last four of one field — only ever a credential's public half. */
+function lastFourOf(field: string): CredentialHint {
+  return (sealed) => sealed[field]?.slice(-4) ?? "";
+}
+
+/**
+ * The names in a field holding a JSON object, and never their values: for a
+ * credential with no public half, where a tail would be real characters of a
+ * live secret.
+ */
+function namesIn(field: string): CredentialHint {
+  return (sealed) => {
+    try {
+      const held: unknown = JSON.parse(sealed[field] ?? "");
+      if (typeof held !== "object" || held === null || Array.isArray(held)) {
+        return "";
+      }
+      return Object.keys(held).join(", ");
+    } catch {
+      return "";
+    }
+  };
+}
+
+/** The two schemes something egma POSTs to is written in. */
+const TOKEN_ENDPOINT_SCHEMES = ["http:", "https:"];
+
+/** Where egma asks the customer for a token, per simulation. */
+function tokenEndpointUrl(key: string, value: unknown): string {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  let scheme: string | undefined;
+  try {
+    scheme = new URL(candidate).protocol;
+  } catch {
+    scheme = undefined;
+  }
+  if (
+    scheme === undefined ||
+    !TOKEN_ENDPOINT_SCHEMES.includes(scheme) ||
+    !candidate.toLowerCase().startsWith(`${scheme}//`)
+  ) {
+    throw new Refusal(
+      `the config's ${key} must be an http or https URL, which looks like https://example.com/egma/livekit-token`,
+    );
+  }
+  return candidate;
+}
+
+/** The headers egma sends when it asks for a token, checked at create. */
+function authHeadersJson(what: string, field: string, value: unknown): string {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(candidate);
+  } catch {
+    parsed = undefined;
+  }
+  const named =
+    typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? Object.entries(parsed as Record<string, unknown>)
+      : undefined;
+  if (
+    named === undefined ||
+    named.length === 0 ||
+    named.some(
+      ([name, held]) =>
+        name.trim() === "" || typeof held !== "string" || held.trim() === "",
+    )
+  ) {
+    throw new Refusal(
+      `${what}'s credentials need ${field} to be a JSON object of header name to header value, ` +
+        `written in a string, which looks like {"Authorization":"Bearer …"}`,
+    );
+  }
+  return candidate;
+}
+
+/** A JSON object carried as the text it was written as, checked at create. */
+function jsonObjectText(key: string, value: unknown): string {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(candidate);
+  } catch {
+    parsed = undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Refusal(
+      `the config's ${key} must be a JSON object written in a string, which looks like {"tenant":"acme"}`,
+    );
+  }
+  return candidate;
+}
+
 /**
  * What each connection type is made of, mirroring the registry behind the seam.
  *
- * `phone` is here although the CLI never writes one: it is what makes the
- * checks about per-type validation real rather than a single type agreeing
- * with itself.
+ * `phone` and `livekit` are here although the CLI writes neither: they are
+ * what makes the checks about per-type validation real rather than a single
+ * type agreeing with itself, and `livekit` is the one that carries optional
+ * config keys, so the fixture cannot quietly demand what the real thing is
+ * happy to do without.
  */
 const REGISTRY: Readonly<Record<string, Descriptor>> = {
   retell: {
     modalities: ["chat", "voice"],
     topology: "hosted-broker",
-    config: { retellAgentId: nonEmptyString },
-    credentials: { required: true, fields: ["apiKey"], hintField: "apiKey" },
+    variants: [
+      {
+        config: { retellAgentId: nonEmptyString },
+        credentials: {
+          required: true,
+          fields: ["apiKey"],
+          hint: lastFourOf("apiKey"),
+        },
+      },
+    ],
     // The provider's own agent id: the first vendor to carry a reuse rule.
     reuseKey: "retellAgentId",
     simulatorAdapter: true,
@@ -102,20 +295,104 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
   phone: {
     modalities: ["voice"],
     topology: "egma-dials-in",
-    config: { phoneNumber: e164PhoneNumber },
-    // No reuse rule, deliberately: a number is where egma dials, not who
-    // answers, and two agents can legitimately share one.
+    variants: [
+      {
+        config: { phoneNumber: e164PhoneNumber },
+        // No reuse rule, deliberately: a number is where egma dials, not who
+        // answers, and two agents can legitimately share one.
+        credentials: {
+          required: false,
+          refusal:
+            "a phone connection takes no credential: the customer supplies a public number, " +
+            "and egma dials it with its own telephony configuration",
+        },
+      },
+    ],
     simulatorAdapter: false,
-    credentials: {
-      required: false,
-      refusal:
-        "a phone connection takes no credential: the customer supplies a public number, " +
-        "and egma dials it with its own telephony configuration",
-    },
+  },
+  livekit: {
+    // Voice only, because voice is the lane that exists.
+    modalities: ["voice"],
+    // egma opens the room and the customer's agent joins it.
+    topology: "agent-dials-out",
+    /**
+     * Two shapes, and they are two answers to one question: who mints the
+     * token that opens the room. Nothing carries over between them — a
+     * connection that names an endpoint holds no key pair, so it cannot
+     * dispatch a worker or carry room metadata, and both keys are refused on
+     * it by name rather than silently ignored.
+     */
+    variants: [
+      {
+        config: {
+          url: livekitServerUrl,
+          // Left out means automatic dispatch: whichever worker is listening.
+          agentName: optional(nonEmptyString),
+          // Handed to the agent as the room's metadata, exactly as written.
+          metadata: optional(jsonObjectText),
+        },
+        credentials: {
+          required: true,
+          fields: ["apiKey", "apiSecret"],
+          hint: lastFourOf("apiKey"),
+        },
+        mixedUp:
+          "a livekit connection mints its own tokens, so it needs the " +
+          "project's apiKey and apiSecret. Send the pair, or name a " +
+          "tokenEndpoint in the config and egma will ask that endpoint for a " +
+          "token instead — which is the shape where the project's secret " +
+          "never leaves the customer.",
+      },
+      {
+        named: "a token-endpoint livekit connection",
+        chosenBy: "tokenEndpoint",
+        config: { url: livekitServerUrl, tokenEndpoint: tokenEndpointUrl },
+        credentials: {
+          // An endpoint on a private network can be open to egma alone.
+          required: "if-sent",
+          fields: ["headers"],
+          gate: authHeadersJson,
+          // The header names and never their values.
+          hint: namesIn("headers"),
+        },
+        mixedUp:
+          "a livekit connection whose config names a tokenEndpoint asks that " +
+          "endpoint for every token, so it holds no key pair of its own: its " +
+          "credentials are the endpoint's auth headers, shaped { headers }. " +
+          "Send those, or drop the tokenEndpoint and egma will mint its own " +
+          "tokens from an apiKey and apiSecret.",
+      },
+    ],
+    // No reuse rule: the url names a server rather than an agent.
+    simulatorAdapter: true,
   },
 };
 
 const CONNECTION_TYPES = Object.keys(REGISTRY);
+
+/**
+ * The shape a config is in, out of the shapes it could be in: one config key
+ * tells them apart, and a config naming none of them lands on the first.
+ */
+function shapeChosen(
+  shapes: readonly [Variant, ...Variant[]],
+  config: unknown,
+): Variant {
+  const held =
+    typeof config === "object" && config !== null && !Array.isArray(config)
+      ? (config as Record<string, unknown>)
+      : {};
+  return (
+    shapes.find(
+      (shape) => shape.chosenBy !== undefined && held[shape.chosenBy] !== undefined,
+    ) ?? shapes[0]
+  );
+}
+
+/** How a refusal names one shape: the type itself, unless the shape says. */
+function nameOf(type: string, shape: Variant): string {
+  return shape.named ?? `a ${type} connection`;
+}
 
 /**
  * The types something can actually conduct a run over today.
@@ -204,77 +481,107 @@ function validModality(type: string, modality: unknown): string {
 }
 
 function validConfig(type: string, config: unknown): Record<string, string> {
-  const gates = descriptorOf(type).config;
-  const demanded = Object.keys(gates);
+  const shape = shapeChosen(descriptorOf(type).variants, config);
+  const what = nameOf(type, shape);
+  const gates = shape.config;
+  // Optional keys say so, so a caller reading a refusal is never left thinking
+  // egma wants a value it is happy to do without.
+  const held = Object.entries(gates)
+    .map(([key, demand]) => (isDemanded(demand) ? key : `${key} (optional)`))
+    .join(", ");
 
   if (typeof config !== "object" || config === null || Array.isArray(config)) {
-    throw new Refusal(`a ${type} connection's config is an object holding ${demanded.join(", ")}`);
+    throw new Refusal(`${what}'s config is an object holding ${held}`);
   }
 
   for (const key of Object.keys(config)) {
-    if (!(key in gates)) {
-      throw new Refusal(
-        `a ${type} connection's config has no key "${key}"; it holds ${demanded.join(", ")}`,
-      );
+    if (!Object.hasOwn(gates, key)) {
+      throw new Refusal(`${what}'s config has no key "${key}"; it holds ${held}`);
     }
   }
 
   const stored: Record<string, string> = {};
-  for (const [key, gate] of Object.entries(gates)) {
+  for (const [key, demand] of Object.entries(gates)) {
     const value = (config as Record<string, unknown>)[key];
-    if (value === undefined) throw new Refusal(`a ${type} connection's config needs ${key}`);
-    stored[key] = gate(key, value);
+    if (value === undefined) {
+      if (!isDemanded(demand)) continue;
+      throw new Refusal(`${what}'s config needs ${key}`);
+    }
+    stored[key] = (typeof demand === "function" ? demand : demand.gate)(key, value);
   }
   return stored;
 }
 
+/**
+ * Whether a credential block could belong to one shape at all — its keys, and
+ * whether it is there when the shape needs it there. The values are nobody's
+ * business here.
+ */
+function couldBe(shape: Variant, credentials: unknown): boolean {
+  const rule = shape.credentials;
+  if (credentials === undefined) return rule.required !== true;
+  if (rule.required === false) return false;
+  if (
+    typeof credentials !== "object" ||
+    credentials === null ||
+    Array.isArray(credentials)
+  ) {
+    return false;
+  }
+  return Object.keys(credentials).every((key) => rule.fields.includes(key));
+}
+
 function validCredentials(
   type: string,
+  config: unknown,
   credentials: unknown,
 ): { readonly sealed: Record<string, string>; readonly hint: string } | null {
-  const rule = descriptorOf(type).credentials;
+  const variants = descriptorOf(type).variants;
+  const shape = shapeChosen(variants, config);
+  const what = nameOf(type, shape);
+  const rule = shape.credentials;
 
-  if (!rule.required) {
+  // A caller who sent the *other* shape's credentials hears about the mix
+  // rather than about a key they never meant to send.
+  if (
+    shape.mixedUp !== undefined &&
+    !couldBe(shape, credentials) &&
+    variants.some((other) => other !== shape && couldBe(other, credentials))
+  ) {
+    throw new Refusal(shape.mixedUp);
+  }
+
+  if (rule.required === false) {
     if (credentials !== undefined) throw new Refusal(rule.refusal);
     return null;
   }
 
-  const shape = `{ ${rule.fields.join(", ")} }`;
+  const held = `{ ${rule.fields.join(", ")} }`;
+  if (credentials === undefined && rule.required === "if-sent") return null;
   if (
     credentials === undefined ||
     typeof credentials !== "object" ||
     credentials === null ||
     Array.isArray(credentials)
   ) {
-    throw new Refusal(`a ${type} connection needs credentials shaped ${shape}`);
+    throw new Refusal(`${what} needs credentials shaped ${held}`);
   }
 
   for (const key of Object.keys(credentials)) {
     if (!rule.fields.includes(key)) {
       throw new Refusal(
-        `a ${type} connection's credentials have no key "${key}"; they are shaped ${shape}`,
+        `${what}'s credentials have no key "${key}"; they are shaped ${held}`,
       );
     }
   }
 
+  const gate = rule.gate ?? credentialString;
   const sealed: Record<string, string> = {};
   for (const field of rule.fields) {
-    const value = (credentials as Record<string, unknown>)[field];
-    const trimmed = typeof value === "string" ? value.trim() : "";
-    if (trimmed === "") {
-      throw new Refusal(
-        `a ${type} connection's credentials need ${field} to be a non-empty string`,
-      );
-    }
-    if (trimmed.length < SHORTEST_CREDENTIAL) {
-      throw new Refusal(
-        `a ${type} connection's credentials need ${field} to be at least ${SHORTEST_CREDENTIAL} characters`,
-      );
-    }
-    sealed[field] = trimmed;
+    sealed[field] = gate(what, field, (credentials as Record<string, unknown>)[field]);
   }
 
-  return { sealed, hint: sealed[rule.hintField]?.slice(-4) ?? "" };
+  return { sealed, hint: rule.hint(sealed) };
 }
 
 /**
@@ -552,7 +859,9 @@ export function agentRoutes(options: {
     const type = input["type"] as string;
     const modality = validModality(type, input["modality"]);
     const config = validConfig(type, input["config"]);
-    const credentials = validCredentials(type, input["credentials"]);
+    // The config comes in beside the credentials because a type can come in
+    // more than one shape, and the config is what says which shape this is.
+    const credentials = validCredentials(type, input["config"], input["credentials"]);
     return {
       // A name sent blank is refused rather than dropped; absent is different
       // and means the smallest free numbered name.

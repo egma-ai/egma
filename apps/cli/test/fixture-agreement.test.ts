@@ -582,7 +582,8 @@ describe("a connection payload its type will not take", () => {
     expect(refused.status).toBe(400);
     expect(refused.body).toEqual({
       error: "invalid_request",
-      message: '"vapi" is not a connection type egma knows; expected one of retell, phone',
+      message:
+        '"vapi" is not a connection type egma knows; expected one of retell, phone, livekit',
     });
     expect(platform.registered.agents).toHaveLength(0);
   });
@@ -666,6 +667,121 @@ describe("a connection payload its type will not take", () => {
         "a phone connection takes no credential: the customer supplies a public number, " +
         "and egma dials it with its own telephony configuration",
     });
+  });
+
+  /**
+   * A livekit connection is the one type that comes in two shapes, and the
+   * fixture has to tell them apart the same way the real registry does. These
+   * are the sentences a caller who mixed the two really gets, and a fixture
+   * that answered anything friendlier would hide the mix from whoever is
+   * working on the client offline.
+   */
+  it("refuses a key pair sent alongside a token endpoint", async () => {
+    const refused = await ask("POST", "/api/agents", {
+      name: "Production agent",
+      connection: {
+        type: "livekit",
+        modality: "voice",
+        config: {
+          url: "wss://acme.livekit.cloud",
+          tokenEndpoint: "https://acme.example/egma/livekit-token",
+        },
+        credentials: {
+          apiKey: "APIsomethingWXYZ",
+          apiSecret: "livekit-secret-E5F6G7H8",
+        },
+      },
+    });
+
+    expect(refused.status).toBe(400);
+    expect(refused.body).toEqual({
+      error: "invalid_request",
+      message:
+        "a livekit connection whose config names a tokenEndpoint asks that " +
+        "endpoint for every token, so it holds no key pair of its own: its " +
+        "credentials are the endpoint's auth headers, shaped { headers }. " +
+        "Send those, or drop the tokenEndpoint and egma will mint its own " +
+        "tokens from an apiKey and apiSecret.",
+    });
+  });
+
+  it("names both ways in when a livekit connection carries neither", async () => {
+    const refused = await ask("POST", "/api/agents", {
+      name: "Quickstart agent",
+      connection: {
+        type: "livekit",
+        modality: "voice",
+        config: { url: "wss://acme.livekit.cloud" },
+      },
+    });
+
+    expect(refused.status).toBe(400);
+    expect(refused.body).toEqual({
+      error: "invalid_request",
+      message:
+        "a livekit connection mints its own tokens, so it needs the " +
+        "project's apiKey and apiSecret. Send the pair, or name a " +
+        "tokenEndpoint in the config and egma will ask that endpoint for a " +
+        "token instead — which is the shape where the project's secret " +
+        "never leaves the customer.",
+    });
+  });
+
+  it("refuses an agent to dispatch on a connection that cannot dispatch", async () => {
+    const refused = await ask("POST", "/api/agents", {
+      name: "Production agent",
+      connection: {
+        type: "livekit",
+        modality: "voice",
+        config: {
+          url: "wss://acme.livekit.cloud",
+          tokenEndpoint: "https://acme.example/egma/livekit-token",
+          agentName: "front-desk",
+        },
+        credentials: { headers: '{"Authorization":"Bearer not-real"}' },
+      },
+    });
+
+    expect(refused.status).toBe(400);
+    expect(refused.body).toEqual({
+      error: "invalid_request",
+      message:
+        'a token-endpoint livekit connection\'s config has no key "agentName"; ' +
+        "it holds url, tokenEndpoint",
+    });
+  });
+});
+
+describe("a livekit connection that asks an endpoint for its tokens", () => {
+  it("lands, and reads back hinted by the header's name and never its value", async () => {
+    const registered = await ask("POST", "/api/agents", {
+      name: "Production agent",
+      connection: {
+        type: "livekit",
+        modality: "voice",
+        config: {
+          url: "wss://acme.livekit.cloud",
+          tokenEndpoint: "https://acme.example/egma/livekit-token",
+        },
+        credentials: {
+          headers: '{"Authorization":"Bearer a-long-random-secret"}',
+        },
+      },
+    });
+
+    expect(registered.status, JSON.stringify(registered.body)).toBe(201);
+    expect(connectionOf(registered)).toMatchObject({
+      type: "livekit",
+      modality: "voice",
+      topology: "agent-dials-out",
+      config: {
+        url: "wss://acme.livekit.cloud",
+        tokenEndpoint: "https://acme.example/egma/livekit-token",
+      },
+      credentials_hint: "Authorization",
+    });
+    expect(connectionOf(registered)).not.toHaveProperty("credentials");
+    expect(JSON.stringify(registered.body)).not.toContain("a-long-random-secret");
   });
 });
 
@@ -1220,7 +1336,7 @@ describe("starting a run", () => {
       message:
         "egma has no simulator adapter for a phone connection yet, so it " +
         "will not start a run it cannot conduct. Run these tests over a " +
-        "connection egma conducts today: retell.",
+        "connection egma conducts today: retell, livekit.",
     });
 
     // And nothing is left queued for a conductor that does not exist.

@@ -13,8 +13,8 @@ requires reading anything beyond this file, that is a bug in this file.
 
 ## What a plug receives
 
-A plug is constructed once per simulation, from the claimed spec's
-connection block, with three keyword arguments:
+A plug is constructed once per simulation, from the claimed spec, with
+four keyword arguments:
 
 - ``modality`` — ``"chat"`` or ``"voice"``. A plug that cannot speak the
   requested modality must refuse at construction (raise ``PlugError``).
@@ -29,6 +29,11 @@ connection block, with three keyword arguments:
   report schema structurally rejects credential-shaped fields, and the
   acceptance suite plants sentinel credentials and scans every byte the
   process emits.
+- ``simulation_id`` — which simulation this plug is conducting, opaque as
+  everywhere else: never parsed, never minted, never rewritten. Only a
+  plug that has to *tell the platform* which simulation it is in has any
+  use for it, and most have none — a plug that does not need it takes it
+  and drops it.
 
 Constructors validate and hold; they never do I/O. A constructor that
 raises means the simulation fails with an honest reason before the
@@ -260,9 +265,9 @@ class VoicePlug(Protocol):
 
 
 PlugFactory = Callable[..., PlatformPlug | VoicePlug]
-"""What the registry hands back: called with ``modality=``, ``config=``
-and ``credentials=`` keywords, it returns one plug for one simulation —
-in practice, the plug class itself."""
+"""What the registry hands back: called with ``modality=``, ``config=``,
+``credentials=`` and ``simulation_id=`` keywords, it returns one plug for
+one simulation — in practice, the plug class itself."""
 
 
 def plug_for(connection_type: str) -> PlugFactory | None:
@@ -271,12 +276,14 @@ def plug_for(connection_type: str) -> PlugFactory | None:
     The registry is deliberately a literal here: adding a platform is one
     import and one line, and the diff that adds it touches nothing else.
     """
+    from .livekit import LiveKitRoom
     from .loopback import LoopbackCounterpart
     from .phone import PhoneCall
     from .retell import RetellChat
     from .scripted import ScriptedCounterpart
 
     return {
+        "livekit": LiveKitRoom,
         "loopback": LoopbackCounterpart,
         "phone": PhoneCall,
         "retell": RetellChat,

@@ -12,6 +12,7 @@ import {
 import { sealCredentials } from "../sealing.ts";
 import {
   descriptorOf,
+  shapeOf,
   validConfig,
   validCredentials,
   validModality,
@@ -375,7 +376,9 @@ function admitConnection(input: NewConnection): AdmittedConnection {
   const descriptor = descriptorOf(input.type);
   const modality = validModality(input.type, input.modality);
   const config = validConfig(input.type, input.config);
-  const sealed = validCredentials(input.type, input.credentials);
+  // The config comes in beside the credentials because a type can come in more
+  // than one shape, and the config is what says which shape this is.
+  const sealed = validCredentials(input.type, input.config, input.credentials);
 
   return {
     name:
@@ -1007,7 +1010,11 @@ export async function updateConnection(
   if ((await visibleAgent(auth, agentId)) === undefined) return undefined;
 
   const [current] = await db()
-    .select({ id: connection.id, type: connection.type })
+    .select({
+      id: connection.id,
+      type: connection.type,
+      config: connection.config,
+    })
     .from(connection)
     .where(theConnection(auth, agentId, connectionId))
     .limit(1);
@@ -1020,10 +1027,37 @@ export async function updateConnection(
     changes.config === undefined
       ? undefined
       : validConfig(type, changes.config);
+
+  /**
+   * A credential belongs to the shape its config is in, so an edit that moves
+   * a connection from one shape to the other has to bring the credential the
+   * new shape needs. Left to itself it would write a row that is half of each:
+   * a config asking egma to fetch a token, over a sealed key pair nothing will
+   * ever open again — readable, unrefusable, and dead at the next run.
+   *
+   * The sealed half cannot be read here to check it, and does not need to be:
+   * what shape a connection is in is written in its config, in the clear.
+   */
+  const before = shapeOf(type, current.config);
+  const after = config === undefined ? before : shapeOf(type, config);
+  if (before !== after && changes.credentials === undefined) {
+    throw new AgentWriteRefusedError(
+      "not_admitted",
+      `a connection's credentials belong to the shape its config is in, and ` +
+        `this change moves it from ${before.named ?? `a ${type} connection`} ` +
+        `to ${after.named ?? `a ${type} connection`}. Send the credentials ` +
+        `the new shape needs in the same change.`,
+    );
+  }
+
   const sealed =
     changes.credentials === undefined
       ? undefined
-      : validCredentials(type, changes.credentials);
+      : validCredentials(
+          type,
+          config ?? current.config,
+          changes.credentials,
+        );
 
   const [updated] = await db()
     .update(connection)

@@ -2,6 +2,7 @@ import { newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  addConnection,
   claimSimulations,
   completeSimulation,
   createAgent,
@@ -603,5 +604,84 @@ describe("the dispatch-failure landing", () => {
     expect(
       (await getSimulation(actingAsAcme(), simulationId))?.status,
     ).toBe("running");
+  });
+});
+
+/**
+ * A livekit connection's credentials come in two shapes, and the claim door is
+ * the only place either is ever plaintext again.
+ *
+ * They live here rather than beside the connection factory's own tests because
+ * the resolver those tests once used is gone on purpose — one door, one true
+ * story. What the factory proves is that the secret goes in and never comes
+ * back out of a read; what this proves is that the simulator, and only the
+ * simulator holding a claim, gets it whole.
+ */
+describe("a livekit connection's two credential shapes, through the claim", () => {
+  /** The livekit connection, and one queued simulation dialling through it. */
+  async function queuedOverLiveKit(
+    connection: Record<string, unknown>,
+  ): Promise<string> {
+    const added = await addConnection(actingAsAcme(), acmeSeed.agentId, {
+      type: "livekit",
+      modality: "voice",
+      ...connection,
+    } as never);
+    const { simulationId } = await oneQueuedSimulation(actingAsAcme(), {
+      ...acmeSeed,
+      connectionId: added?.id ?? "",
+    });
+    return simulationId;
+  }
+
+  it("hands back the key and the secret together, both whole", async () => {
+    const simulationId = await queuedOverLiveKit({
+      config: { url: "wss://acme.livekit.cloud" },
+      credentials: {
+        apiKey: "livekit-key-A1B2C3D4WXYZ",
+        apiSecret: "livekit-secret-E5F6G7H8QRST",
+      },
+    });
+
+    const claim = await claimOne(simulationId);
+    const reached = await resolveSimulationConnection(claim.auth, claim.id);
+
+    expect(reached?.credentials).toEqual({
+      apiKey: "livekit-key-A1B2C3D4WXYZ",
+      apiSecret: "livekit-secret-E5F6G7H8QRST",
+    });
+  });
+
+  it("hands back the endpoint's auth headers, which are a credential like any other", async () => {
+    const simulationId = await queuedOverLiveKit({
+      config: {
+        url: "wss://acme.livekit.cloud",
+        tokenEndpoint: "https://acme.example/livekit/token",
+      },
+      credentials: {
+        headers: '{"Authorization":"Bearer acme-endpoint-token-9999"}',
+      },
+    });
+
+    const claim = await claimOne(simulationId);
+    const reached = await resolveSimulationConnection(claim.auth, claim.id);
+
+    expect(reached?.credentials).toEqual({
+      headers: '{"Authorization":"Bearer acme-endpoint-token-9999"}',
+    });
+  });
+
+  it("hands back nothing at all when the endpoint needs no header", async () => {
+    const simulationId = await queuedOverLiveKit({
+      config: {
+        url: "wss://acme.livekit.cloud",
+        tokenEndpoint: "https://acme.example/livekit/open",
+      },
+    });
+
+    const claim = await claimOne(simulationId);
+    const reached = await resolveSimulationConnection(claim.auth, claim.id);
+
+    expect(reached?.credentials).toBeNull();
   });
 });

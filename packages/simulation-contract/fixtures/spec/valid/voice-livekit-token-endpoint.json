@@ -1,0 +1,33 @@
+{
+  "contract_version": 1,
+  "simulation_id": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZN",
+  "modality": "voice",
+  "connection": {
+    "type": "livekit",
+    "config": {
+      "url": "wss://lakeside-dental.livekit.cloud",
+      "tokenEndpoint": "https://lakeside-dental.example/egma/livekit-token"
+    },
+    "credentials": {
+      "headers": "{\"Authorization\":\"Bearer example0endpoint0token0not0a0real0one\"}"
+    }
+  },
+  "persona": {
+    "traits": {
+      "personality": "Retired teacher, 68, calling from a quiet kitchen. Polite, thorough, repeats details back to be sure she has them right.",
+      "language": "en-GB",
+      "voice": {
+        "provider": "elevenlabs",
+        "voiceId": "measured-alto-3",
+        "speed": 0.95
+      }
+    }
+  },
+  "scenario": {
+    "instructions": "Your six-month check-up is on Tuesday and you now have to be somewhere else that morning. You want it moved to any Thursday in the next month, and you want the new date read back to you before the call ends."
+  },
+  "limits": {
+    "max_duration_seconds": 300,
+    "max_turns": 40
+  }
+}

@@ -198,6 +198,7 @@ def assemble(
         modality=spec.modality,
         config=spec.connection_config,
         credentials=spec.credentials,
+        simulation_id=spec.simulation_id,
     )
     if spec.modality != "voice":
         return Assembled(plug=plug, voice=None)

@@ -72,6 +72,24 @@ function retellConnection(overrides: Partial<NewConnection> = {}): NewConnection
   };
 }
 
+/**
+ * A live livekit payload. The credential halves carry distinct tails so a
+ * hint, an envelope and a resolved pair can each be told apart at a glance.
+ */
+function livekitConnection(overrides: Partial<NewConnection> = {}): NewConnection {
+  return {
+    name: `livekit-${newId("con").slice(-8)}`,
+    type: "livekit",
+    modality: "voice",
+    config: { url: "wss://acme.livekit.cloud" },
+    credentials: {
+      apiKey: "livekit-key-A1B2C3D4WXYZ",
+      apiSecret: "livekit-secret-E5F6G7H8QRST",
+    },
+    ...overrides,
+  };
+}
+
 async function agentNamed(name: string): Promise<string> {
   const created = await createAgent(actingAsAcme(), { name });
   return created.id;
@@ -254,6 +272,244 @@ describe("what the registry refuses at the door, by name", () => {
         retellConnection({ credentials: { apiKey: "abcd" } }),
       ),
     ).rejects.toThrow(/at least 8 characters/);
+  });
+});
+
+/**
+ * The livekit type end to end through the store. What a payload is allowed to
+ * say is the registry's story and is checked where the registry lives, with no
+ * database in the way; what is here is only what a row can prove — that the
+ * type lands, that its topology is derived, and that both credential halves go
+ * in sealed and come back only through the one door.
+ */
+describe("a livekit connection", () => {
+  it("lands with url alone, dialling out, and reads back with the hint", async () => {
+    const agentId = await agentNamed("LiveKit Bare");
+
+    const added = await addConnection(
+      actingAsAcme(),
+      agentId,
+      livekitConnection({ name: "quickstart" }),
+    );
+
+    const fetched = await getConnection(actingAsAcme(), agentId, added?.id ?? "");
+    expect(fetched).toMatchObject({
+      name: "quickstart",
+      type: "livekit",
+      modality: "voice",
+      // Derived from the type: the agent joins the room egma opened.
+      topology: "agent-dials-out",
+      config: { url: "wss://acme.livekit.cloud" },
+      // The last four of the key, never of the secret.
+      credentialsHint: "WXYZ",
+    });
+    expect(fetched).not.toHaveProperty("credentials");
+  });
+
+  it("lands with an agent name and metadata too, both read back whole", async () => {
+    const agentId = await agentNamed("LiveKit Dispatched");
+
+    const added = await addConnection(
+      actingAsAcme(),
+      agentId,
+      livekitConnection({
+        config: {
+          url: "wss://acme.livekit.cloud",
+          agentName: "front-desk",
+          metadata: '{"tenant":"acme"}',
+        },
+      }),
+    );
+
+    expect(added?.config).toEqual({
+      url: "wss://acme.livekit.cloud",
+      agentName: "front-desk",
+      metadata: '{"tenant":"acme"}',
+    });
+  });
+
+  it("defaults its name from the type, like every other", async () => {
+    const agentId = await agentNamed("LiveKit Unnamed");
+
+    const first = await addConnection(
+      actingAsAcme(),
+      agentId,
+      livekitConnection({ name: undefined }),
+    );
+    expect(first?.name).toBe("livekit-1");
+  });
+
+  it("seals both halves, and neither is in the row", async () => {
+    const agentId = await agentNamed("LiveKit Sealed");
+    const added = await addConnection(actingAsAcme(), agentId, livekitConnection());
+
+    const { rows } = await database.sql<{
+      credentials: string;
+      credentials_hint: string;
+    }>("select credentials, credentials_hint from connection where id = $1", [
+      added?.id,
+    ]);
+
+    expect(rows[0]?.credentials).toMatch(/^v1\./);
+    expect(rows[0]?.credentials).not.toContain("livekit-key");
+    expect(rows[0]?.credentials).not.toContain("livekit-secret");
+    expect(rows[0]?.credentials_hint).toBe("WXYZ");
+  });
+
+  it("leaves nothing behind when the payload is refused", async () => {
+    const agentId = await agentNamed("LiveKit Refused");
+
+    await expect(
+      addConnection(
+        actingAsAcme(),
+        agentId,
+        livekitConnection({ config: { url: "wss://acme.livekit.cloud", agentName: "" } }),
+      ),
+    ).rejects.toThrow(/agentName/);
+
+    expect(await listConnections(actingAsAcme(), agentId)).toEqual([]);
+  });
+});
+
+/**
+ * The second shape: the customer keeps the key pair that signs tokens for
+ * their whole LiveKit project, and egma asks an endpoint of theirs for one
+ * scoped token per simulation.
+ *
+ * What is pinned here is the same three things mode A pins — what lands, what
+ * a read shows, and what the resolver hands the simulator — because the
+ * headers that authenticate egma to that endpoint are a credential exactly as
+ * the key pair is, and nothing about them being headers makes them less so.
+ */
+describe("a livekit connection that asks an endpoint for its tokens", () => {
+  const HEADERS = '{"Authorization":"Bearer SENTINEL-endpoint-token-91af"}';
+
+  function atEndpoint(overrides: Partial<NewConnection> = {}): NewConnection {
+    return {
+      name: `livekit-endpoint-${newId("con").slice(-8)}`,
+      type: "livekit",
+      modality: "voice",
+      config: {
+        url: "wss://acme.livekit.cloud",
+        tokenEndpoint: "https://acme.example/egma/livekit-token",
+      },
+      credentials: { headers: HEADERS },
+      ...overrides,
+    };
+  }
+
+  it("lands with the endpoint in its config, hinted by the header's name", async () => {
+    const agentId = await agentNamed("LiveKit Endpoint");
+    const added = await addConnection(actingAsAcme(), agentId, atEndpoint());
+
+    const fetched = await getConnection(actingAsAcme(), agentId, added?.id ?? "");
+    expect(fetched).toMatchObject({
+      type: "livekit",
+      topology: "agent-dials-out",
+      config: {
+        url: "wss://acme.livekit.cloud",
+        tokenEndpoint: "https://acme.example/egma/livekit-token",
+      },
+      // The name of the header and no part of its value: a bearer token has
+      // no public half whose tail would be safe to print.
+      credentialsHint: "Authorization",
+    });
+    expect(fetched).not.toHaveProperty("credentials");
+  });
+
+  it("seals the headers, and they are nowhere in the row", async () => {
+    const agentId = await agentNamed("LiveKit Endpoint Sealed");
+    const added = await addConnection(actingAsAcme(), agentId, atEndpoint());
+
+    const { rows } = await database.sql<{
+      credentials: string;
+      config: Record<string, string>;
+    }>("select credentials, config from connection where id = $1", [added?.id]);
+
+    expect(rows[0]?.credentials).toMatch(/^v1\./);
+    expect(rows[0]?.credentials).not.toContain("SENTINEL-endpoint-token");
+    // Config is readable by design, which is exactly why a credential may
+    // never be put in it.
+    expect(JSON.stringify(rows[0]?.config)).not.toContain("SENTINEL");
+  });
+
+  it("lands with no credentials at all, and reads back with no hint", async () => {
+    const agentId = await agentNamed("LiveKit Open Endpoint");
+    const added = await addConnection(
+      actingAsAcme(),
+      agentId,
+      atEndpoint({ credentials: undefined }),
+    );
+
+    // The unsealing half of this story is the claim door's, and lives with it:
+    // see "a livekit connection's two credential shapes, through the claim".
+    expect(added?.credentialsHint).toBeNull();
+  });
+
+  /**
+   * A credential belongs to the shape its config is in. An edit that moved a
+   * connection between the two shapes and left the credential behind would
+   * write a row that is half of each — a config asking egma to fetch a token,
+   * over a sealed key pair nothing will ever open again.
+   */
+  it("refuses an edit that moves a connection between the shapes on its own", async () => {
+    const agentId = await agentNamed("LiveKit Shape Change");
+    const added = await addConnection(actingAsAcme(), agentId, livekitConnection());
+
+    await expect(
+      updateConnection(actingAsAcme(), agentId, added?.id ?? "", {
+        config: {
+          url: "wss://acme.livekit.cloud",
+          tokenEndpoint: "https://acme.example/egma/livekit-token",
+        },
+      }),
+    ).rejects.toThrow(
+      "a connection's credentials belong to the shape its config is in, and " +
+        "this change moves it from a livekit connection to a token-endpoint " +
+        "livekit connection. Send the credentials the new shape needs in the " +
+        "same change.",
+    );
+
+    // Nothing moved: the row is the shape it was, with the credential it had.
+    expect(
+      (await getConnection(actingAsAcme(), agentId, added?.id ?? ""))?.config,
+    ).toEqual({ url: "wss://acme.livekit.cloud" });
+  });
+
+  it("takes the same edit when the new shape's credentials come with it", async () => {
+    const agentId = await agentNamed("LiveKit Shape Moved");
+    const added = await addConnection(actingAsAcme(), agentId, livekitConnection());
+
+    const moved = await updateConnection(actingAsAcme(), agentId, added?.id ?? "", {
+      config: {
+        url: "wss://acme.livekit.cloud",
+        tokenEndpoint: "https://acme.example/egma/livekit-token",
+      },
+      credentials: { headers: HEADERS },
+    });
+
+    // The hint is what a reader may see of the new shape; that the headers
+    // themselves come back whole is the claim door's story, told beside it.
+    expect(moved?.credentialsHint).toBe("Authorization");
+  });
+
+  /**
+   * Credentials changed on their own are gated against the shape the *stored*
+   * config is in, so a key pair cannot be rotated onto a connection that has
+   * no way to use one.
+   */
+  it("refuses a key pair rotated onto a connection that asks an endpoint", async () => {
+    const agentId = await agentNamed("LiveKit Endpoint Rotated");
+    const added = await addConnection(actingAsAcme(), agentId, atEndpoint());
+
+    await expect(
+      updateConnection(actingAsAcme(), agentId, added?.id ?? "", {
+        credentials: {
+          apiKey: "livekit-key-A1B2C3D4WXYZ",
+          apiSecret: "livekit-secret-E5F6G7H8QRST",
+        },
+      }),
+    ).rejects.toThrow(/holds no key pair of its own/);
   });
 });
 
