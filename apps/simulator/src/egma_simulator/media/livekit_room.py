@@ -433,6 +433,26 @@ def _endpoint_headers(credentials: Any) -> dict[str, str]:
     return {name.strip(): value.strip() for name, value in held.items()}
 
 
+def _tokens_in(said: str) -> list[str]:
+    """Every token-shaped value an endpoint's answer carries.
+
+    Tolerant on purpose: this is handed whatever came back, including an
+    exception's repr and somebody's HTML error page, and anything it
+    cannot read as a JSON object simply holds no token to protect.
+    """
+    try:
+        held = json.loads(said)
+    except ValueError:
+        return []
+    if not isinstance(held, dict):
+        return []
+    return [
+        held[alias]
+        for alias in TOKEN_ALIASES
+        if isinstance(held.get(alias), str) and held[alias].strip()
+    ]
+
+
 def _configured_json(configured: object) -> str | None:
     """The connection's configured metadata, passed through byte for byte.
 
@@ -858,5 +878,15 @@ class LiveKitRoomBackend:
         Its own budget because what comes back from somebody's own handler
         is often an HTML error page rather than a sentence, and the useful
         part of one is at the top.
+
+        It also registers any token the answer carries before redacting,
+        and that ordering is the point rather than tidiness. An endpoint
+        that *failed* may still have minted a working credential — a 500
+        with a token in its body, or a redirect carrying one — and those
+        answers are quoted from branches that run long before anything
+        reads a token out of them. Registering here rather than at each
+        branch means every path that can quote an endpoint, now or later,
+        is covered by the one door it already goes through.
         """
+        self._secrets.register(_tokens_in(told))
         return self._secrets.redact(told).strip()[:QUOTED_ENDPOINT_CHARS]

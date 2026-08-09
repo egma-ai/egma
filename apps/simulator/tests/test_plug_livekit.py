@@ -1300,6 +1300,37 @@ async def test_a_token_the_endpoint_minted_is_never_quoted_back():
     assert A_HEADER_SECRET not in told
 
 
+@pytest.mark.parametrize(
+    ("named", "status"),
+    [("a server error", 500), ("a refusal", 403), ("a redirect", 302)],
+)
+async def test_a_token_in_a_failing_answer_is_never_quoted_back(
+    named: str, status: int
+):
+    """An endpoint can fail and still have minted a working credential.
+
+    A 500 whose body carries a token, a 403 that echoes one back, a
+    redirect that answers with one — all three are quoted from a branch
+    that runs long before anything reads a token out of the body. The
+    token is protected where the quoting happens rather than where the
+    reading does, so a path that fails early is covered by the same door
+    as one that fails late.
+    """
+    minted = "a.token.the.failure.still.carried"
+    stub = RoomStub()
+    with serving(status=status, body={"token": minted}) as endpoint:
+        plug = endpoint_room(stub, endpoint.url)
+        with pytest.raises(PlugError) as refused:
+            await plug.open()
+        await plug.close()
+
+    told = str(refused.value)
+    assert failed_ending(refused.value) == ERROR
+    assert str(status) in told, f"{named}: the status is the diagnosis"
+    assert minted not in told, f"{named}: a minted token was quoted back"
+    assert A_HEADER_SECRET not in told
+
+
 async def test_an_endpoint_that_redirects_is_answered_rather_than_followed():
     """A redirect is an answer, not an instruction.
 
