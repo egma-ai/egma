@@ -446,6 +446,39 @@ describe("a simulation whose trace never closed", () => {
     expect(mine?.rationale).toContain("only part of this conversation");
     expect(verdicts.every((verdict) => verdict.verdict === "errored")).toBe(true);
   });
+
+  it("refuses to judge a reading the span limit cut short, root or no root", async () => {
+    const conducted = await conductSimulation(world, {
+      spans: { said: A_CONVERSATION },
+    });
+    await jobFor(world, conducted, "graded");
+
+    const simulation = await getSimulation(world.auth, conducted.simulationId);
+    if (simulation === undefined) throw new Error("the row went missing");
+    const trace = await readTrace(
+      world.auth,
+      traceIdOfSimulation(simulation.id) as string,
+      {
+        window: {
+          from: BigInt(Date.now() - 600_000) * 1_000n,
+          to: BigInt(Date.now() + 600_000) * 1_000n,
+        },
+      },
+    );
+    if (trace === undefined) throw new Error("the trace store lost the spans");
+
+    // Exactly what the trace read answers when a conversation overruns the
+    // reader's span limit: the same rows, the flag up. The root is present,
+    // so completeness is not the question — wholeness of the reading is, and
+    // judging the readable part would judge a different conversation.
+    const conversation = conversationOfSimulation(simulation, {
+      ...trace,
+      truncated: true,
+    });
+
+    expect(conversation.nothingToJudgeBecause).toContain("span limit");
+    expect(conversation.transcript).toEqual([]);
+  });
 });
 
 describe("a simulation with no spans at all", () => {

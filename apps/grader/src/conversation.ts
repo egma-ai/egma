@@ -136,7 +136,7 @@ export function conversationOfSimulation(
     agentId: simulation.agentId,
   };
 
-  if (trace !== undefined && rootArrivedIn(trace)) {
+  if (trace !== undefined && rootArrivedIn(trace) && !trace.truncated) {
     return {
       ...filedUnderTheSimulation,
       transcript: transcriptOf(trace),
@@ -189,8 +189,11 @@ function unreadable(
   trace: TraceDetail | undefined,
 ): string {
   const ended = `it ended ${simulation.endingReason ?? "without a recorded reason"}`;
-  return trace === undefined
-    ? `egma holds no record of this conversation — ${ended}, and no telemetry for it ever arrived — so there was nothing to judge.`
+  if (trace === undefined) {
+    return `egma holds no record of this conversation — ${ended}, and no telemetry for it ever arrived — so there was nothing to judge.`;
+  }
+  return trace.truncated
+    ? `egma holds more of this conversation than one reading returns — ${ended}, and its trace overran the reader's span limit — so judging the readable part would judge a different conversation.`
     : `egma holds only part of this conversation — ${ended}, and the span that closes its trace never arrived — so there was nothing complete to judge.`;
 }
 
