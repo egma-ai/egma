@@ -182,22 +182,24 @@ Register CI and pull-request review with the coordinator heartbeat. Let the hear
 
 ## 7. Land one ticket
 
-Land one clean ticket at a time.
+Land one clean ticket at a time. Hold one coordinator-owned landing lock from the first refresh through the integration push. No other ticket may land while the lock is held.
 
 Before merging:
 
-1. Record the current integration commit.
+1. Fetch and record the current remote integration commit.
 2. Send the branch back to its implementer.
 3. Update it against that exact integration commit.
 4. Resolve conflicts in the ticket branch.
 5. Run the full suite.
 6. Rerun independent review against that exact integration commit, even when the refresh was conflict-free.
 7. Require the refreshed branch to pass the review gate again.
-8. Confirm the integration commit has not moved.
+8. Fetch the remote integration branch again and require its commit to equal the recorded commit.
+9. Fast-forward the local integration branch to the reviewed ticket branch.
+10. Push the integration branch normally. Treat a rejected push as evidence that the remote branch moved; never force it.
 
-If the integration branch moved, repeat the refresh, full suite, and independent review.
+If the integration branch moved or the push was rejected, repeat the refresh, full suite, and independent review while keeping landing serial.
 
-Merge only while the verified integration commit is still current. Confirm the integration branch remains green after the merge.
+The successful guarded push is the merge. Confirm the integration branch remains green, then release the landing lock.
 
 Then update the ticket in the Planning root:
 
