@@ -564,7 +564,10 @@ function simulationSpan(
     toolArguments: "",
     toolResult: "",
     providerCallId: "",
-    connectionType: simulation.connectionType,
+    // Empty, as the door writes it here: the type is read off the emitting
+    // instrumentation's scope name, and only LiveKit's is one egma knows —
+    // this world reaches its agent over a Retell chat connection.
+    connectionType: "",
     audioSampleRateHz: 0,
     audioEncoding: "",
     // Resolved by the door from egma's own row, never from the payload.

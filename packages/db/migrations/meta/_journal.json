@@ -134,6 +134,13 @@
       "when": 1786310576443,
       "tag": "0018_livekit_connection_type",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1786319406614,
+      "tag": "0019_simulation_connection_type_leaves_the_row",
+      "breakpoints": true
     }
   ]
 }

@@ -230,7 +230,6 @@ describe("the instance-wide claim", () => {
     expect(claim.personaId).toBe(acmeSeed.personaId);
     expect(claim.personaVersionId).toMatch(/^prsv_/);
     expect(claim.testVersionId).toBe(acmeSeed.testVersionId);
-    expect(claim.connectionType).toBe("retell");
     expect(claim.modality).toBe("chat");
     expect(claim.claimedBy).toBe("simulator-blue-1");
     expect(claim.claimedAt).toBeInstanceOf(Date);

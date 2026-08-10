@@ -12,7 +12,7 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
-import { agent, connection, CONNECTION_TYPES, MODALITIES } from "./agents.ts";
+import { agent, connection, MODALITIES } from "./agents.ts";
 import { persona, personaVersion } from "./personas.ts";
 import { test, testVersion } from "./tests.ts";
 import { organization, project } from "./tenancy.ts";
@@ -327,11 +327,16 @@ export const simulation = pgTable(
     /** Where in the run's requested order this conversation sits, from one. */
     position: integer("position").notNull(),
     /**
-     * The connection's type and modality as they were at execution, stamped
-     * here because the connection row is mutable and unversioned: editing it
-     * next month must not rewrite what this simulation's numbers meant.
+     * The connection's modality as it was at execution — the one thing about
+     * the connection this row keeps its own copy of, and it keeps it because
+     * its own check names it. `simulation_audio_facts_are_voice_facts` below
+     * refuses a measured band or a recording on a conversation that was not
+     * voice, and a Postgres CHECK cannot join: the column it compares has to
+     * sit on the row it guards. Reaching the connection for it instead would
+     * make that guarantee a trigger — a second mechanism on the report-write
+     * path, and one an operator can switch off — so the fact rides here
+     * rather than being looked up.
      */
-    connectionType: text("connection_type").notNull(),
     modality: text("modality").notNull(),
     status: text("status").notNull(),
     /**
@@ -386,9 +391,6 @@ export const simulation = pgTable(
   (table) => [
     prefixCheck("simulation_id_prefix", table.id, "sim"),
     oneOf("simulation_status_allowed", table.status, [...SIMULATION_STATUSES]),
-    oneOf("simulation_connection_type_allowed", table.connectionType, [
-      ...CONNECTION_TYPES,
-    ]),
     oneOf("simulation_modality_allowed", table.modality, [...MODALITIES]),
     check(
       "simulation_position_counts_from_one",

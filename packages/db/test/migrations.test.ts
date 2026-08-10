@@ -1018,10 +1018,10 @@ describe("the dispatch-failure vocabulary (0015)", () => {
       client.query(
         `insert into simulation
            (id, run_id, organization_id, project_id, agent_id, connection_id,
-            persona_id, persona_version_id, position, connection_type, modality,
+            persona_id, persona_version_id, position, modality,
             status, ending_reason, claimed_by, claimed_at, heartbeat_at,
             started_at, ended_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, 3, 'retell', 'chat',
+         values ($1, $2, $3, $4, $5, $6, $7, $8, 3, 'chat',
             'completed', 'dispatch_failed', 'simulator-blue-1', now(), now(),
             now(), now())`,
         [
@@ -1540,7 +1540,19 @@ describe("the livekit connection type (0018)", () => {
   });
 
   it("is what is still pending on a database that already holds connections", async () => {
-    const result = await runMigrations(database.url);
+    // Through 0018 and no further, the way the block below it stops at 0017.
+    // What this block asserts next — the two checks the one list of types
+    // feeds — is true of the schema 0018 left behind and stopped being true of
+    // the newest schema the moment a later migration dropped one of them. A
+    // migration's own describe is about the upgrade that migration is, so it
+    // names the file it is about rather than reading whatever is newest.
+    const widening = (await readMigrations()).find((migration) =>
+      migration.name.startsWith("0018_"),
+    );
+    if (widening === undefined) throw new Error("0018 is missing");
+    await writeFile(path.join(beforeLiveKit, widening.name), widening.sql);
+
+    const result = await runMigrations(database.url, beforeLiveKit);
     expect(result.applied).toEqual(["0018_livekit_connection_type.sql"]);
   });
 
@@ -1582,5 +1594,150 @@ describe("the livekit connection type (0018)", () => {
       [livekitId],
     );
     expect(rows).toEqual([{ type: "livekit" }]);
+  });
+});
+
+describe("the connection type leaving the simulation row (0019)", () => {
+  let database: EmptyDatabase;
+  /** The schema as it stood while the copy was still there, on its own. */
+  let beforeTheDrop: string;
+  let client: pg.Client;
+
+  const work: ACustomersWork = {
+    organization: newId("org"),
+    project: newId("prj"),
+    agent: newId("agt"),
+    connection: newId("con"),
+    personaId: newId("prs"),
+    personaVersion: newId("prsv"),
+    run: newId("run"),
+    expected: 2,
+  };
+  const queued = newId("sim");
+  const landed = newId("sim");
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("connection_type_drop");
+    beforeTheDrop = await mkdtemp(path.join(os.tmpdir(), "egma-before-0019-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0019") {
+        await writeFile(path.join(beforeTheDrop, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, beforeTheDrop);
+
+    // A customer's work as the release before this one wrote it: every
+    // simulation carrying its own copy of the connection type, which is the
+    // column the upgrade takes away underneath them.
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await seedACustomersWork(client, work);
+    await insertSimulation(client, work, {
+      id: queued,
+      position: 1,
+      shape: "queued",
+    });
+    await insertSimulation(client, work, {
+      id: landed,
+      position: 2,
+      shape: "completed",
+    });
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(beforeTheDrop, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("is what is still pending on a database that already holds conversations", async () => {
+    const result = await runMigrations(database.url);
+    expect(result.applied[0]).toBe(
+      "0019_simulation_connection_type_leaves_the_row.sql",
+    );
+    expect(result.applied.every((name) => name >= "0019")).toBe(true);
+  });
+
+  it("takes the check and the column, in that order and both", async () => {
+    // Asked of the schema rather than of a row: a column nothing selects any
+    // more is not the same fact as a column that does not exist, and a check
+    // left behind on a dropped column could not exist at all — so the two
+    // questions together are what say the drop happened as one piece.
+    const { rows: left } = await client.query<{ column_name: string }>(
+      `select column_name from information_schema.columns
+        where table_name = 'simulation' and column_name = 'connection_type'`,
+    );
+    expect(left).toEqual([]);
+
+    const { rows: guards } = await client.query<{ name: string }>(
+      `select conname as name from pg_constraint
+        where conname = 'simulation_connection_type_allowed'`,
+    );
+    expect(guards).toEqual([]);
+  });
+
+  it("leaves the conversations that were already there exactly as they were", async () => {
+    const { rows } = await client.query<{
+      id: string;
+      status: string;
+      ending_reason: string | null;
+    }>(
+      `select id, status, ending_reason from simulation
+        where run_id = $1 order by position`,
+      [work.run],
+    );
+    expect(rows).toEqual([
+      { id: queued, status: "queued", ending_reason: null },
+      { id: landed, status: "completed", ending_reason: "persona_concluded" },
+    ]);
+  });
+
+  it("keeps the check that guards what a connection may be, which is the other one", async () => {
+    // The type is still enumerated where it is the source of truth. Dropping
+    // this one instead would leave the copy constrained and the original open,
+    // which is the mistake this asks about by name.
+    const { rows } = await client.query<{ definition: string }>(
+      `select pg_get_constraintdef(oid) as definition from pg_constraint
+        where conname = 'connection_type_allowed'`,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.definition).toContain(
+      "ARRAY['retell'::text, 'phone'::text, 'livekit'::text]",
+    );
+  });
+
+  it("keeps modality, which rides the row for a reason the type never had", async () => {
+    // The row's own check names it, and a CHECK cannot join — which is why
+    // this column stayed where the type went. A recording on a conversation
+    // that was not voice is still refused by the row itself, and the write
+    // that proves it names no connection type at all.
+    await expect(
+      client.query(
+        `insert into simulation
+           (id, run_id, organization_id, project_id, agent_id, connection_id,
+            persona_id, persona_version_id, position, modality, status,
+            ending_reason, claimed_by, claimed_at, heartbeat_at, started_at,
+            ended_at, recording_reference)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, 3, 'chat', 'completed',
+            'persona_concluded', 'simulator-blue-1', now(), now(), now(),
+            now(), 'r.wav')`,
+        [
+          newId("sim"),
+          work.run,
+          work.organization,
+          work.project,
+          work.agent,
+          work.connection,
+          work.personaId,
+          work.personaVersion,
+        ],
+      ),
+    ).rejects.toThrow(/simulation_audio_facts_are_voice_facts/u);
+
+    const { rows } = await client.query<{ name: string }>(
+      `select conname as name from pg_constraint
+        where conname = 'simulation_modality_allowed'`,
+    );
+    expect(rows).toHaveLength(1);
   });
 });
