@@ -29,44 +29,38 @@ The effort is complete when:
 - one final pull request is open against the base branch with required checks green;
 - the final pull request remains unmerged for the user.
 
-## Coordinator heartbeat
+## Completion notifications and watchdogs
 
-Create one repeating monitor for the whole effort before starting the first worker, test run, CI run, or pull-request review.
+Use harness completion notifications as the primary signal for workers and reviewers. Wait for those notifications instead of polling healthy agents.
 
-Use the harness-native monitor or wake-up mechanism. When it is unavailable, wait for no more than 60 seconds and schedule the next check before yielding.
+Before dispatching an agent or starting a long-running command, register the active item with its owner, branch, last commit, state, time of last evidence, and a watchdog deadline 15 minutes after that evidence. Wait until the next harness notification, command event, or nearest watchdog deadline.
 
-Use this cadence:
+When a completion notification arrives:
 
-- every minute while workers, reviewers, tests, or builds are active;
-- every three minutes while waiting only for CI or the pull-request review bot.
+1. Read the report immediately.
+2. Verify the terminal state from commits, test output, pull-request state, or another durable result.
+3. Cancel that item's watchdog.
+4. Advance the work.
 
-Track each active item with its owner, branch, last commit, state, and time of last evidence.
+When a watchdog expires:
 
-On every heartbeat:
+1. Inspect the item once: its harness state, branch, worktree, and command output.
+2. If there is new evidence or clear progress, record it and set a new deadline 15 minutes later.
+3. If there is no progress, contact the same worker and request a status report and checkpoint.
+4. If the worker responds and can continue, record the evidence and set a new deadline 15 minutes later.
+5. If another 15 minutes pass without evidence, treat the item as stalled. Preserve its branch and commits, diagnose the environment, then resume or replace the worker.
 
-1. Inspect every worker and reviewer.
-2. Read new command or test output.
-3. Inspect branch commits and worktree state.
-4. Poll pull-request checks and review threads.
-5. Advance completed work immediately.
-6. Record the latest evidence.
-7. Schedule the next heartbeat before yielding.
+Reset a watchdog only for meaningful evidence: a completion or progress report, new command output, a new commit, or a verified external state change. Silence is never completion.
 
-Treat quiet work in stages:
+CI and pull-request review bots are external systems and might not send harness notifications. Poll each pending external system with a bounded wait of at most three minutes. Stop polling as soon as it reaches a terminal state.
 
-- First quiet heartbeat: continue monitoring.
-- Second quiet heartbeat: contact the same worker and inspect its branch, worktree, and command output.
-- Third quiet heartbeat: treat it as stalled, diagnose the environment, and resume or replace the worker only after preserving its branch and commits.
-
-Silence is never completion. Verify a terminal state from commits, test output, pull-request state, or a clear agent report.
-
-Keep the heartbeat active while any work is pending. Stop it only when:
+Keep the coordinator task active while work is pending. End it only when:
 
 - the final pull request is open and its required checks are green;
 - a user decision is required;
 - an external blocker prevents progress and has been reported with evidence.
 
-Cancel the monitor when the coordination run ends. Leave no orphaned monitors. Do not end the coordinator task while non-terminal work remains. Yield to the heartbeat and resume from its next check.
+Cancel all watchdogs and external monitors when coordination ends. Leave no orphaned monitors.
 
 ## 1. Resolve the roots
 
@@ -161,7 +155,7 @@ Tell it to:
 
 A worker that cannot read the Planning root must stop.
 
-Register every dispatched worker and long-running command with the coordinator heartbeat.
+Register every dispatched worker and long-running command with the coordinator watchdog registry.
 
 ## 6. Run the independent review loop
 
@@ -184,7 +178,7 @@ The result must be one of:
 
 Only `clean` passes the gate. Stop and ask the user about `capped` or `escalated` work.
 
-Register every reviewer with the coordinator heartbeat.
+Register every reviewer with the coordinator watchdog registry.
 
 ## 7. Run the pull-request review gate
 
@@ -196,7 +190,7 @@ The gate passes when every review thread is fixed or answered.
 
 If the repository has no configured review bot, report that fact and continue only when repository configuration allows it.
 
-Register CI and pull-request review with the coordinator heartbeat. Let the heartbeat own their polling.
+Register CI and pull-request review with the bounded external wait loop.
 
 ## 8. Land one ticket
 
@@ -247,7 +241,7 @@ After all selected tickets are resolved:
 6. Resolve findings, then repeat the full suite and independent review until the result is clean.
 7. Push the integration branch.
 8. Open one pull request into the base branch.
-9. Register the final pull request with the coordinator heartbeat and wait for required CI and review to turn green.
+9. Register the final pull request with the bounded external wait loop and wait for required CI and review to turn green.
 10. Leave the green pull request open.
 
 The final pull request is the handoff point. Later movement on the base branch does not restart coordination; the user decides when to update or merge it.
@@ -258,10 +252,10 @@ Never merge the final pull request.
 
 ## Recovery
 
-Before restarting work, inspect existing branches, worktrees, pull requests, ticket states, and heartbeat state. Resume valid work instead of recreating it.
+Before restarting work, inspect existing branches, worktrees, pull requests, ticket states, and watchdog state. Resume valid work instead of recreating it.
 
 Silence is not success. Verify branches, commits, test results, and pull-request state directly.
 
 If a worker stops responding, contact the same worker before replacing it. A replacement must read the ticket and branch state from the beginning.
 
-Restore or recreate the coordinator heartbeat before resuming any non-terminal work.
+Restore or recreate watchdog deadlines and external waits before resuming any non-terminal work.
