@@ -11,6 +11,16 @@
  * — and one of the three shapes keeps its words in the customer's own service,
  * where there is nothing for egma to read. That is a real answer, not a failure.
  *
+ * **The account's telephone numbers are read here too, and only ever read.**
+ * Retell has no per-agent number listing, so the account's numbers are listed
+ * and the ones this agent answers are picked out of them — and the one a
+ * developer settles on is confirmed at its own address before egma writes a
+ * connection it will really dial. Which agent answers a number comes from
+ * `inbound_agents` and from nowhere else: Retell's older single-agent field was
+ * observed reporting nothing for a number that is in fact assigned, and a
+ * wizard that trusted it would tell a developer their agent has no numbers
+ * while their customers are dialling one.
+ *
  * **Every document is kept exactly as it arrived**, as text, beside whatever is
  * read out of it. It is the platform's rule for anything a provider sends, and
  * it is the reason a field egma has no place for today is still there tomorrow.
@@ -83,10 +93,47 @@ export type RetellConfig = {
   readonly tools: readonly unknown[];
 };
 
+/**
+ * One telephone number on the account, and which agents answer it.
+ *
+ * `answeredBy` is read from `inbound_agents` and from nothing else. Retell's
+ * older single-agent field is not read at all: it is absent from this account's
+ * answers and was observed reporting nothing for a number that is in fact
+ * assigned, so a wizard that trusted it would tell a developer their agent has
+ * no numbers while their customers are dialling one.
+ *
+ * A number may be answered by several agents under weighted routing, so this is
+ * a list. Which of them wins a given call is Retell's business and is
+ * deliberately not modelled — what egma needs to know is whether the agent the
+ * developer picked is among them.
+ */
+export type RetellNumber = {
+  /** E.164, exactly as Retell holds it. */
+  readonly number: string;
+  /** What the customer calls it, or `""` when they have never named it. */
+  readonly label: string;
+  /** Every agent Retell routes an inbound call on this number to. */
+  readonly answeredBy: readonly string[];
+};
+
 export type ListedAgents =
   | { readonly kind: "agents"; readonly agents: readonly RetellAgent[] }
   /** Retell would not take the key. */
   | { readonly kind: "invalid-key" }
+  | { readonly kind: "refused"; readonly reason: string }
+  | { readonly kind: "unreachable"; readonly reason: string };
+
+export type ListedNumbers =
+  | { readonly kind: "numbers"; readonly numbers: readonly RetellNumber[] }
+  | { readonly kind: "invalid-key" }
+  | { readonly kind: "refused"; readonly reason: string }
+  | { readonly kind: "unreachable"; readonly reason: string };
+
+export type ConfirmedNumber =
+  | { readonly kind: "number"; readonly number: RetellNumber }
+  | { readonly kind: "invalid-key" }
+  /** The number was listed a moment ago and is not there now. */
+  | { readonly kind: "gone" }
   | { readonly kind: "refused"; readonly reason: string }
   | { readonly kind: "unreachable"; readonly reason: string };
 
@@ -243,6 +290,124 @@ export async function listAgents(key: RetellKey, reach: RetellReach = {}): Promi
   }
 
   return { kind: "agents", agents };
+}
+
+/** A listed number, or `null` for a row that is not one. */
+function numberFrom(row: unknown): RetellNumber | null {
+  if (typeof row !== "object" || row === null) return null;
+  const held = row as Record<string, unknown>;
+  const number = plain(held["phone_number"]);
+  if (number === "") return null;
+
+  const routed = Array.isArray(held["inbound_agents"])
+    ? (held["inbound_agents"] as unknown[])
+    : [];
+  const answeredBy: string[] = [];
+  for (const entry of routed) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const id = plain((entry as Record<string, unknown>)["agent_id"]);
+    if (id !== "" && !answeredBy.includes(id)) answeredBy.push(id);
+  }
+
+  return { number, label: plain(held["nickname"]), answeredBy };
+}
+
+/**
+ * Every telephone number on the account the key belongs to.
+ *
+ * A read, and the only way to enumerate: Retell has no per-agent number
+ * listing, so the account's numbers are read and the ones this agent answers
+ * are picked out of them. The picking is `numbersAnswering` below, which is
+ * where the rule lives rather than here.
+ */
+export async function listNumbers(
+  key: RetellKey,
+  reach: RetellReach = {},
+): Promise<ListedNumbers> {
+  let answer: Answer;
+  try {
+    answer = await ask(key, reach, { method: "GET", path: "/list-phone-numbers" });
+  } catch (cause) {
+    if (cause instanceof RetellUnreachableError) {
+      return { kind: "unreachable", reason: cause.message };
+    }
+    throw cause;
+  }
+
+  if (answer.status === 401 || answer.status === 403) return { kind: "invalid-key" };
+  if (answer.status < 200 || answer.status >= 300) {
+    return { kind: "refused", reason: refusalIn(answer) };
+  }
+
+  let held: unknown;
+  try {
+    held = JSON.parse(answer.body);
+  } catch {
+    held = [];
+  }
+  const rows = Array.isArray(held) ? held : [];
+
+  const numbers: RetellNumber[] = [];
+  for (const row of rows) {
+    const number = numberFrom(row);
+    if (number !== null) numbers.push(number);
+  }
+  return { kind: "numbers", numbers };
+}
+
+/**
+ * One number's own document, which is where an assignment is settled.
+ *
+ * The listing is how the candidates are found; this is how the one the
+ * developer picked is confirmed, immediately before egma writes a connection
+ * that will be dialled for real. Both answers come from `inbound_agents`, so
+ * the two cannot disagree about *what* is read — what this buys is that the
+ * number egma is about to register still answers the agent under test at the
+ * moment it registers it, read at that number's own address rather than out of
+ * a list that was fetched a screen ago.
+ */
+export async function confirmNumber(
+  key: RetellKey,
+  number: string,
+  reach: RetellReach = {},
+): Promise<ConfirmedNumber> {
+  let answer: Answer;
+  try {
+    answer = await ask(key, reach, {
+      method: "GET",
+      path: `/get-phone-number/${encodeURIComponent(number)}`,
+    });
+  } catch (cause) {
+    if (cause instanceof RetellUnreachableError) {
+      return { kind: "unreachable", reason: cause.message };
+    }
+    throw cause;
+  }
+
+  if (answer.status === 401 || answer.status === 403) return { kind: "invalid-key" };
+  if (answer.status === 404) return { kind: "gone" };
+  if (answer.status < 200 || answer.status >= 300) {
+    return { kind: "refused", reason: refusalIn(answer) };
+  }
+
+  const held = numberFrom(parsed(answer));
+  if (held === null) return { kind: "gone" };
+  return { kind: "number", number: held };
+}
+
+/**
+ * The numbers one agent answers, out of the account's own.
+ *
+ * Written here rather than at the call site so that "assigned to this agent"
+ * means one thing everywhere, and so a surface that shows a developer a list of
+ * numbers to be dialled can never show one their agent does not answer.
+ */
+export function numbersAnswering(
+  numbers: readonly RetellNumber[],
+  agentId: string,
+): readonly RetellNumber[] {
+  const wanted = agentId.trim();
+  return numbers.filter((number) => number.answeredBy.includes(wanted));
 }
 
 /** Which second request an agent's response engine calls for, if any. */

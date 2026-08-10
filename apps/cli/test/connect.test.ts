@@ -22,9 +22,11 @@ import {
   KEY_ASK_LINE,
   CUSTODY_LINE,
   NO_AGENTS_LINE,
+  NO_NUMBERS_LINE,
 } from "../src/retell/connect.ts";
 import { DRIFT_LINE } from "../src/retell/prompt-drift.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
+import type { AskId } from "../src/ui/wizard-ui.ts";
 import { connectStep } from "../src/wizard/connect-step.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
@@ -56,6 +58,12 @@ const ONE_AGENT: FakeRetellScript = {
     },
   ],
 };
+
+/** Two numbers on the account, one of them answered by the order line. */
+const NUMBERS = [
+  { phone_number: "+15551110000", nickname: "order line", inbound_agents: [{ agent_id: "agent_0001" }] },
+  { phone_number: "+15552220000", nickname: "somebody else", inbound_agents: [{ agent_id: "agent_9999" }] },
+] as const;
 
 const THREE_AGENTS: FakeRetellScript = {
   keys: [KEY],
@@ -92,6 +100,14 @@ type RunOptions = {
   readonly keys: readonly (string | null)[];
   /** Which agent they pick, when they are asked. */
   readonly agent?: string | null;
+  /**
+   * Which way they say egma should reach it. `text` unless a check is about
+   * the phone: every check written before there was a choice is about the
+   * connection egma made then, and text is that connection.
+   */
+  readonly reach?: string | null;
+  /** Which number they pick, when Retell routes the agent more than one. */
+  readonly number?: string | null;
   /** Where the coding agent said the repository keeps its prompt. */
   readonly repoPrompts?: string | null;
 };
@@ -105,17 +121,23 @@ type RunOptions = {
 class ScriptedUI extends HeadlessUI {
   private readonly keys: (string | null)[];
   private readonly agent: string | null;
+  private readonly reach: string | null;
+  private readonly number: string | null;
 
   constructor(options: RunOptions) {
     super();
     this.keys = [...options.keys];
     this.agent = options.agent ?? null;
+    this.reach = options.reach === undefined ? "text" : options.reach;
+    this.number = options.number ?? null;
   }
 
-  override waitForAnswer(ask: "prompts-pointer" | "retell-key" | "retell-agent") {
+  override waitForAnswer(ask: AskId) {
     this.record.asked.push(ask);
     if (ask === "retell-key") return Promise.resolve(this.keys.shift() ?? null);
     if (ask === "retell-agent") return Promise.resolve(this.agent);
+    if (ask === "reach") return Promise.resolve(this.reach);
+    if (ask === "phone-number") return Promise.resolve(this.number);
     return Promise.resolve(null);
   }
 }
@@ -282,15 +304,24 @@ describe("one agent, and several", () => {
     expect(platform.registered.agents).toHaveLength(0);
   });
 
-  it("carries the agent's own modality, so a chat agent is not called a voice one", async () => {
+  it("makes a text connection a chat one, whichever kind of agent it reaches", async () => {
     retell = await startFakeRetell(THREE_AGENTS);
 
+    // agent_0003 is a chat agent and agent_0002 is a voice one. Text is what
+    // egma is doing over the connection, not what the agent is: reaching a
+    // voice agent by text is exactly the point of the choice, and the modality
+    // says which layer is under test rather than which kind of agent answered.
     const { connected } = await run({ keys: [KEY], agent: "agent_0003" });
-
-    const [connection] = platform.registered.connections;
-    expect(connection?.modality).toBe("chat");
+    expect(platform.registered.connections[0]?.modality).toBe("chat");
     // A custom model is the customer's own service, so Retell holds no prompt.
     expect(connected?.config.prompt).toBeNull();
+
+    const voice = await run({ keys: [KEY], agent: "agent_0002" });
+    expect(voice.connected?.config.modality).toBe("voice");
+    expect(platform.registered.connections[1]?.modality).toBe("chat");
+    expect(platform.registered.connections[1]?.config).toEqual({
+      retellAgentId: "agent_0002",
+    });
   });
 
   it("reads a chat agent at the address Retell keeps chat agents at", async () => {
@@ -405,7 +436,7 @@ describe("what lands on the platform", () => {
     expect(connection?.id).toMatch(/^con_[0-9A-HJKMNP-TV-Z]{26}$/u);
     expect(connection?.name).toBe("retell-1");
     expect(connection?.type).toBe("retell");
-    expect(connection?.modality).toBe("voice");
+    expect(connection?.modality).toBe("chat");
     expect(connection?.topology).toBe("hosted-broker");
     expect(connection?.agentId).toBe(agent?.id);
   });
@@ -461,9 +492,18 @@ describe("what lands on the platform", () => {
 
     // Said in plain words, on the screen, and never as a failure.
     expect(second.ui.record.statuses.join("\n")).toContain(
-      "This Retell agent was already registered as order-line, so egma kept it and " +
-        "stored the key you just gave. Nothing new was registered.",
+      "This voice agent was already registered as order-line, and retell-1 was " +
+        "already the way egma reaches it. Nothing new was registered.",
     );
+    // And each half is reported on its own, because a retry cares about both.
+    expect(second.connected?.registration).toEqual({
+      agent: "reused",
+      connection: "reused",
+    });
+    expect(first.connected?.registration).toEqual({
+      agent: "created",
+      connection: "created",
+    });
   });
 });
 
@@ -786,6 +826,7 @@ describe("a registration answer this build cannot read", () => {
           type: "retell",
           modality: "voice",
           credentialsHint: "WXYZ",
+          config: {},
         },
       },
     });

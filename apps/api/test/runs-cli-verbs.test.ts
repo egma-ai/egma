@@ -6,6 +6,7 @@ import {
   startSimulation,
   type AuthContext,
 } from "@egma/db";
+import { newId } from "@egma/ids";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -203,9 +204,9 @@ describe("starting a run from the terminal's own code", () => {
     expect(read).toEqual(answer.run);
   });
 
-  it("hands the platform's own refusal back as an answer, word for word", async () => {
+  it("starts a run over a phone connection, because the phone adapter has shipped", async () => {
     const { signedIn, fetchImpl, versions } = await readyToRun(
-      "runs_cli_no_adapter",
+      "runs_cli_over_phone",
     );
 
     const registered = await api.app.inject({
@@ -213,7 +214,7 @@ describe("starting a run from the terminal's own code", () => {
       url: "/api/agents",
       headers: { authorization: `Bearer ${signedIn.key}` },
       payload: {
-        name: "Old line",
+        name: "Front desk line",
         connection: {
           type: "phone",
           modality: "voice",
@@ -234,15 +235,35 @@ describe("starting a run from the terminal's own code", () => {
       fetchImpl,
     );
 
+    // This was the `no_adapter` refusal until the phone adapter shipped. The
+    // terminal's own code now gets a run back over a number, the same way it
+    // does over any other type egma conducts.
+    expect(answer.kind).toBe("started");
+    if (answer.kind !== "started") return;
+    expect(answer.run.connectionType).toBe("phone");
+    expect(answer.run.modality).toBe("voice");
+  });
+
+  it("hands the platform's own refusal back as an answer, word for word", async () => {
+    const { signedIn, fetchImpl, connectionId } = await readyToRun(
+      "runs_cli_refusal",
+    );
+
+    const missing = newId("tstv");
+    const answer = await startRun(
+      signedIn,
+      { agentId: "", connectionId, testVersionIds: [missing] },
+      fetchImpl,
+    );
+
     // A refusal, not an exception: the terminal prints the sentence as it
     // stands, because paraphrasing a decision it did not make would be egma
     // inventing an explanation.
     expect(answer).toEqual({
       kind: "refused",
       reason:
-        "egma has no simulator adapter for a phone connection yet, so it " +
-        "will not start a run it cannot conduct. Run these tests over a " +
-        "connection egma conducts today: retell, livekit.",
+        `there is no test version ${missing} on this egma. Push the test ` +
+        `first, or read the test and pin the version_id it names now.`,
     });
   });
 });

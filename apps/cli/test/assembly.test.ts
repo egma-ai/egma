@@ -198,7 +198,7 @@ describe("the whole walk, offline", () => {
     // and the one thing nobody can answer in advance is answered here. The
     // skill offer is left unanswered, which is skip — the answer that has to
     // leave the machine exactly as it was.
-    const ui = new HeadlessUI({ answers: { "retell-key": KEY } });
+    const ui = new HeadlessUI({ answers: { "retell-key": KEY, reach: "text" } });
 
     // One verdict, and one only: the wizard leaves at the first, and a sweep
     // that judged the whole suite would put a number in the exit line that
@@ -274,10 +274,13 @@ describe("the whole walk, offline", () => {
     expect(platform.registered.agents.map((agent) => agent.name)).toEqual(["order-line"]);
     const connection = platform.registered.connections[0];
     expect(platform.registered.connections).toHaveLength(1);
+    // One connection, and it is the one the walk chose: text, which is a chat
+    // connection over the selected voice agent. Creating both is the bug the
+    // choice exists to kill.
     expect(connection).toMatchObject({
       agentId: platform.registered.agents[0]?.id,
       type: "retell",
-      modality: "voice",
+      modality: "chat",
       name: "retell-1",
       config: { retellAgentId: RETELL_AGENT_ID },
     });

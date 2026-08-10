@@ -132,7 +132,7 @@ describe("a whole run, swept afterwards", () => {
     const printed: string[] = [];
     const ui = new HeadlessUI({
       write: (line) => printed.push(line),
-      answers: { "retell-key": KEY },
+      answers: { "retell-key": KEY, reach: "text" },
     });
 
     // The walk ends in a run, and a run ends when verdicts arrive. The sweep
@@ -229,6 +229,7 @@ describe("a whole run, swept afterwards", () => {
         EGMA_URL: platform.url,
         EGMA_RETELL_URL: retell.url,
         EGMA_RETELL_API_KEY: KEY,
+        EGMA_REACH: "text",
       }),
     });
     child.stdin.end("");

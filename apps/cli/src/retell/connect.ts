@@ -10,20 +10,41 @@
  * and everything the developer should see goes out through `say` — so the same
  * flow runs on a screen, in a pipe, and in a check with nobody watching.
  *
- * Four things happen in order and each one can end the flow honestly: the key
- * is taken, it is checked by listing the account's agents, one agent is settled
- * on, and its configuration is pulled and registered. A key that is wrong and
- * an account that is empty are told apart by name and each is worth one more
- * try — a typo should cost seconds, and a second wrong answer means the answer
- * is somewhere else.
+ * Six things happen in order and each one can end the flow honestly: the key is
+ * taken, it is checked by listing the account's agents, one agent is settled
+ * on, its configuration is pulled, the developer says whether egma should reach
+ * it by text or by phone — and, for the phone, which of the numbers Retell
+ * routes to that agent egma should dial. Then one connection is written: **the
+ * one that was chosen, and only that one.** A key that is wrong and an account
+ * that is empty are told apart by name and each is worth one more try — a typo
+ * should cost seconds, and a second wrong answer means the answer is somewhere
+ * else.
+ *
+ * **Nothing here writes to Retell.** Every request it makes is a read: the
+ * account's agents, one agent's own document, its response engine, the
+ * account's numbers, and one number's own document. egma reaches a customer's
+ * agent; it does not configure it.
  */
 
-import { registerAgent, type Registered, type RegisterOptions } from "../platform/agents.ts";
 import {
+  addConnection,
+  agentNamed,
+  readAgent,
+  registerAgent,
+  type NewConnection,
+  type Registered,
+  type RegisteredConnection,
+  type RegisterOptions,
+} from "../platform/agents.ts";
+import {
+  confirmNumber,
   listAgents,
+  listNumbers,
+  numbersAnswering,
   pullAgent,
   type RetellAgent,
   type RetellConfig,
+  type RetellNumber,
   type RetellReach,
 } from "./client.ts";
 import type { RetellKey } from "./key.ts";
@@ -54,6 +75,38 @@ export const NO_AGENTS_LINE =
 export const DEFAULT_AGENT_NAME = "voice-agent";
 
 /**
+ * How egma reaches the agent, chosen by the developer and never by egma.
+ *
+ * One voice agent can be reached both ways, and the two answer different
+ * questions: text exercises the prompt, the reasoning and the tools; phone
+ * exercises all of that plus the speech stack and the line it is carried on.
+ * The same test over both is the product's sharpest diagnostic — so both are
+ * offered, and **only the one that was chosen is created.** A wizard that made
+ * both would put a connection in somebody's project that they never asked for
+ * and would be billed for the day something ran over it.
+ */
+export type Reach = "text" | "phone";
+
+/** What the developer is choosing between, said the same way on every surface. */
+export const REACH_ASK_LINE = "How should egma reach this agent?";
+
+/** One line per way, said in what it tests rather than in what it is made of. */
+export const REACH_LINES: Readonly<Record<Reach, string>> = {
+  text: "Text — egma exchanges messages with the agent. No phone call, nothing dialled.",
+  phone: "Phone — egma dials one of the agent's numbers and talks to it, as a customer would.",
+};
+
+/** What the developer is asked when the phone was chosen. */
+export const NUMBER_ASK_LINE =
+  "Which number should egma dial? These are the numbers Retell routes to this agent.";
+
+/** The exact failure for an agent Retell routes no number to. */
+export const NO_NUMBERS_LINE =
+  "Retell routes no phone number to that agent, so there is nothing for egma to " +
+  "dial. Assign a number to it in the Retell dashboard, under Phone Numbers — " +
+  "or reach it over text instead.";
+
+/**
  * What egma says when connecting found something already there.
  *
  * Registering the same Retell agent twice is safe on purpose — a coding agent
@@ -73,12 +126,13 @@ export function registrationLine(registered: Registered): string | null {
       return null;
     case "reused":
       return (
-        `This Retell agent was already registered as ${registered.agent.name}, so egma ` +
-        `kept it and stored the key you just gave. Nothing new was registered.`
+        `This voice agent was already registered as ${registered.agent.name}, and ` +
+        `${registered.connection.name} was already the way egma reaches it. Nothing ` +
+        `new was registered.`
       );
     case "connection_added":
       return (
-        `This Retell agent was already registered as ${registered.agent.name}, so egma ` +
+        `This voice agent was already registered as ${registered.agent.name}, so egma ` +
         `added ${registered.connection.name} as another way of reaching it. No second ` +
         `agent was registered.`
       );
@@ -103,6 +157,22 @@ export function keyAskLines(ask: KeyAsk): readonly string[] {
 /** How many times a name already held is tried again with a number on the end. */
 const NAME_ATTEMPTS = 20;
 
+/**
+ * Which of the two things a write turned out to be, said for each half.
+ *
+ * The platform answers one word for the pair — created, reused, the same agent
+ * reached a new way — and that is one word too few for whoever is retrying.
+ * "The agent was already there and the connection is new" and "both are new"
+ * are different facts about somebody's project, and a coding agent deciding
+ * whether its retry worked needs both of them.
+ */
+export type WriteResult = "created" | "reused";
+
+export type Registration = {
+  readonly agent: WriteResult;
+  readonly connection: WriteResult;
+};
+
 export type ConnectOutcome =
   | {
       readonly kind: "connected";
@@ -111,6 +181,12 @@ export type ConnectOutcome =
       readonly drift: Drift;
       /** How many agents the account holds, which is why a picker appeared. */
       readonly onTheAccount: number;
+      /** Which way the developer chose, and the only one egma wrote. */
+      readonly reach: Reach;
+      /** The number egma will dial, or `null` for a text connection. */
+      readonly number: string | null;
+      /** Whether each half was written or found already there. */
+      readonly registration: Registration;
     }
   /** Nobody gave a key, so there is nothing to connect with. */
   | { readonly kind: "no-key" }
@@ -120,6 +196,12 @@ export type ConnectOutcome =
   | { readonly kind: "no-agents" }
   /** Several agents, and nobody said which. */
   | { readonly kind: "unchosen"; readonly agents: readonly RetellAgent[] }
+  /** Nobody said whether egma should reach the agent by text or by phone. */
+  | { readonly kind: "unchosen-reach" }
+  /** Retell routes no number to the chosen agent, so there is nothing to dial. */
+  | { readonly kind: "no-numbers" }
+  /** Several numbers reach the agent, and nobody said which to dial. */
+  | { readonly kind: "unchosen-number"; readonly numbers: readonly RetellNumber[] }
   | { readonly kind: "interrupted" }
   | { readonly kind: "failed"; readonly reason: string };
 
@@ -135,6 +217,22 @@ export type ConnectOptions = {
   readonly askForKey: () => Promise<RetellKey | null>;
   /** Which of several, by id, or `null` when nobody chose. */
   readonly chooseAgent: (agents: readonly RetellAgent[]) => Promise<string | null>;
+  /**
+   * Text or phone, or `null` when nobody chose.
+   *
+   * Asked once the agent is settled and never before it: which numbers exist
+   * is a fact about *that* agent, so there is nothing honest to offer until
+   * egma knows which one is under test.
+   */
+  readonly chooseReach: () => Promise<Reach | null>;
+  /**
+   * Which number to dial, in E.164, or `null` when nobody chose.
+   *
+   * Only ever called with more than one, exactly as the agent choice is: one
+   * number Retell routes to the agent is not a choice, and asking about it
+   * would be a question with one answer.
+   */
+  readonly chooseNumber: (numbers: readonly RetellNumber[]) => Promise<string | null>;
   /** One line about what is happening, for whoever is watching. */
   readonly say: (line: string) => void;
   /**
@@ -234,68 +332,341 @@ async function keyAndAgents(
 /** The key, carried between the two halves of the flow, never stored. */
 type KeyedOptions = ConnectOptions & { readonly key: RetellKey };
 
+/** What egma is being asked to write, once the reach has been chosen. */
+type Selected = {
+  readonly reach: Reach;
+  /** The connection body for the chosen reach, and no other. */
+  readonly connection: NewConnection;
+  /** The number egma will dial, or `null` for a text connection. */
+  readonly number: string | null;
+};
+
 /**
- * Writes the agent and its connection, taking the next free name when a living
- * agent already holds the one asked for.
+ * The one connection the chosen reach means.
  *
- * The platform names connections that way for the same reason, so a second run
- * in the same project lands beside the first instead of refusing.
+ * **Text is a chat connection over the selected voice agent**, not a second
+ * Retell agent: the identity is the voice agent's own, and what changes is how
+ * egma talks to it. **Phone carries the destination number and nothing else** —
+ * no Retell identifier and no credential — because the public telephone network
+ * neither knows nor cares what answers, and a phone connection that named a
+ * provider would be claiming knowledge egma does not use.
+ */
+function selectionFor(
+  reach: Reach,
+  config: RetellConfig,
+  key: RetellKey,
+  number: string | null,
+): Selected {
+  if (reach === "phone") {
+    return {
+      reach,
+      // No name: the platform's own default is the convention, and one
+      // convention in one place cannot drift from itself.
+      connection: {
+        type: "phone",
+        modality: "voice",
+        config: { phoneNumber: number ?? "" },
+      },
+      number,
+    };
+  }
+  return {
+    reach,
+    connection: {
+      type: "retell",
+      modality: "chat",
+      config: { retellAgentId: config.agentId },
+      credentials: key,
+    },
+    number: null,
+  };
+}
+
+/** Whether a connection already on the platform is the one being asked for. */
+function isTheSameReach(held: RegisteredConnection, wanted: NewConnection): boolean {
+  if (held.type !== wanted.type || held.modality !== wanted.modality) return false;
+  return Object.entries(wanted.config).every(([key, value]) => held.config[key] === value);
+}
+
+/** The Retell agent a connection already on the platform reaches, if it names one. */
+function retellAgentOf(held: RegisteredConnection): string | null {
+  if (held.type !== "retell") return null;
+  const named = held.config["retellAgentId"];
+  return named === undefined || named === "" ? null : named;
+}
+
+/** What a write turned out to be, for each half, out of the platform's one word. */
+function registrationOf(registered: Registered): Registration {
+  switch (registered.result) {
+    case "created":
+      return { agent: "created", connection: "created" };
+    case "reused":
+      return { agent: "reused", connection: "reused" };
+    case "connection_added":
+      return { agent: "reused", connection: "created" };
+  }
+}
+
+type Written = {
+  readonly kind: "registered";
+  readonly registered: Registered;
+  readonly registration: Registration;
+};
+
+/**
+ * Writes the selected connection, and the agent under it when there is not one
+ * already.
  *
- * **Connecting the same Retell agent twice is not a name clash.** egma settles
- * that inside its own write — the registration already there answers, with the
- * key rotated whole — and says which of the three things it did. So the name
- * loop below is for the other case only: a *different* Retell agent whose egma
- * name is already taken. Nothing here retries a reuse, because there is nothing
- * to retry.
+ * **A second walk over one voice agent must land on the first walk's agent**,
+ * whichever way it chose to reach it. Two egma agents for one Retell agent
+ * splits a team's results history in half, and that is the failure this whole
+ * function exists to prevent — a retry after a network failure nobody could
+ * read is the ordinary case, not a rare one.
+ *
+ * The platform settles the easy half itself: a retell connection carries the
+ * vendor's own agent id, so registering the same one twice answers what is
+ * already there with the key rotated whole. What it cannot settle is a **phone**
+ * connection, which carries a number and no vendor identity at all — the
+ * platform has nothing to match on, so it would write a second agent every
+ * time, and a developer who connected over text and came back for the phone
+ * would end up with two.
+ *
+ * So the refusal is read rather than worked around. `name-taken` means a living
+ * agent in this project already holds the name egma derives from the Retell
+ * agent's own, and exactly one of two things is true of it:
+ *
+ * - **It is this voice agent**, reached some other way. The chosen connection
+ *   joins it — or, when the same reach is already attached, that connection
+ *   answers and nothing is written at all.
+ * - **It is a different voice agent** wearing the same name, which a real
+ *   account does produce. Then the name is taken and the next one is tried,
+ *   exactly as before.
+ *
+ * **Two signals tell them apart, and a phone-only agent needs the second one.**
+ * A retell connection carries the vendor's own agent id, so it answers outright.
+ * A phone connection carries a number — and Retell knows which numbers it routes
+ * to the agent under test, so a number it routes here says "this is it" and a
+ * number it does not says "this is somebody else" just as clearly. Only an agent
+ * with no connections at all leaves nothing to read, and that is treated as this
+ * one: there is no history to split and nothing to be wrong about.
  */
 async function register(
   options: KeyedOptions,
   config: RetellConfig,
-): Promise<{ readonly kind: "registered"; readonly registered: Registered } | ConnectOutcome> {
+  selected: Selected,
+  /**
+   * The numbers Retell routes to the agent under test, read at most once and
+   * only when a name clash actually needs them. `null` when Retell would not
+   * say — which is not a reason to refuse a registration, so it reads as
+   * "nothing to go on" and the connection joins the agent that holds the name.
+   */
+  numbersOfTheAgent: () => Promise<readonly string[] | null>,
+): Promise<Written | ConnectOutcome> {
   const wanted = defaultAgentName(config.name);
+  const platform: RegisterOptions = {
+    url: options.platform.url,
+    key: options.platform.key,
+    fetchImpl: options.fetchImpl,
+    signal: options.signal,
+  };
+  const notSignedIn: ConnectOutcome = {
+    kind: "failed",
+    reason: "egma would not take this machine's key. Run egma login, then try again.",
+  };
 
   for (let attempt = 1; attempt <= NAME_ATTEMPTS; attempt += 1) {
     if (options.signal.aborted) return { kind: "interrupted" };
+    const name = attempt === 1 ? wanted : `${wanted}-${attempt}`;
 
     const result = await registerAgent(
-      {
-        name: attempt === 1 ? wanted : `${wanted}-${attempt}`,
-        connection: {
-          // No name: the platform's own default is the convention, and one
-          // convention in one place cannot drift from itself.
-          type: "retell",
-          modality: config.modality,
-          config: { retellAgentId: config.agentId },
-          credentials: options.key,
-        },
-      },
-      {
-        url: options.platform.url,
-        key: options.platform.key,
-        fetchImpl: options.fetchImpl,
-        signal: options.signal,
-      },
+      { name, connection: selected.connection },
+      platform,
     );
 
     switch (result.kind) {
       case "registered":
-        return { kind: "registered", registered: result.registered };
-      case "name-taken":
-        continue;
-      case "not-authenticated":
         return {
-          kind: "failed",
-          reason: "egma would not take this machine's key. Run egma login, then try again.",
+          kind: "registered",
+          registered: result.registered,
+          registration: registrationOf(result.registered),
         };
+      case "not-authenticated":
+        return notSignedIn;
       case "refused":
       case "unreachable":
         return { kind: "failed", reason: result.reason };
+      case "name-taken":
+        break;
+    }
+
+    // Somebody holds the name. Which somebody decides everything below.
+    const found = await agentNamed(name, platform);
+    if (options.signal.aborted) return { kind: "interrupted" };
+    if (found.kind === "not-authenticated") return notSignedIn;
+    if (found.kind === "refused" || found.kind === "unreachable") {
+      return { kind: "failed", reason: found.reason };
+    }
+    // Gone between the refusal and the read. Asking again is the whole answer.
+    if (found.kind === "not-found") continue;
+
+    const held = await readAgent(found.agent.id, platform);
+    if (options.signal.aborted) return { kind: "interrupted" };
+    if (held.kind === "not-authenticated") return notSignedIn;
+    if (held.kind === "refused" || held.kind === "unreachable") {
+      return { kind: "failed", reason: held.reason };
+    }
+    if (held.kind === "not-found") continue;
+
+    // A connection naming another Retell agent settles it: this is somebody
+    // else's agent under the same name, and the next name is tried.
+    const reaches = held.connections
+      .map(retellAgentOf)
+      .filter((named): named is string => named !== null);
+    if (reaches.length > 0 && !reaches.includes(config.agentId)) continue;
+
+    // Nothing here names a vendor, so the numbers do. An agent reached only by
+    // phone is this one exactly when Retell routes one of its numbers to the
+    // agent under test — and when it routes none of them, this is a different
+    // voice agent wearing the same name.
+    const dialled = held.connections
+      .filter((one) => one.type === "phone")
+      .map((one) => one.config["phoneNumber"] ?? "");
+    if (reaches.length === 0 && dialled.length > 0) {
+      const routed = await numbersOfTheAgent();
+      if (options.signal.aborted) return { kind: "interrupted" };
+      if (routed !== null && !dialled.some((number) => routed.includes(number))) continue;
+    }
+
+    // The same reach, already attached. Nothing is written and both halves
+    // answer as they stand — which is what makes running this twice free.
+    const already = held.connections.find((one) =>
+      isTheSameReach(one, selected.connection),
+    );
+    if (already !== undefined) {
+      return {
+        kind: "registered",
+        registered: { result: "reused", agent: held.agent, connection: already },
+        registration: { agent: "reused", connection: "reused" },
+      };
+    }
+
+    const added = await addConnection(found.agent.id, selected.connection, platform);
+    switch (added.kind) {
+      case "added":
+        return {
+          kind: "registered",
+          registered: {
+            result: "connection_added",
+            agent: held.agent,
+            connection: added.connection,
+          },
+          registration: { agent: "reused", connection: "created" },
+        };
+      case "not-authenticated":
+        return notSignedIn;
+      // The agent went away, or the connection name did, between the read and
+      // the write. Both are answered by going round again.
+      case "not-found":
+      case "name-taken":
+        continue;
+      case "refused":
+      case "unreachable":
+        return { kind: "failed", reason: added.reason };
     }
   }
 
   return {
     kind: "failed",
     reason: `every name from "${wanted}" onwards is already taken in this project. Rename one of them, or say which agent this is.`,
+  };
+}
+
+/**
+ * The number egma will dial, out of the ones Retell routes to this agent.
+ *
+ * Two reads, and both of them are reads. The account's numbers are listed
+ * because Retell has no per-agent listing, and the one the developer settles on
+ * is then read at its own address — immediately before egma writes a connection
+ * that will be dialled for real, and against the same field the listing was
+ * filtered on. A number that stopped answering this agent in between is an
+ * ending rather than a call to somebody else's telephone.
+ *
+ * A number the agent does not answer is never offered, so this cannot end with
+ * egma dialling a number for an agent that is not under test.
+ */
+async function pickNumber(
+  options: ConnectOptions,
+  key: RetellKey,
+  config: RetellConfig,
+): Promise<
+  | {
+      readonly kind: "number";
+      readonly number: string;
+      /** Every number Retell routes here, so nothing lists them twice. */
+      readonly routed: readonly string[];
+    }
+  | ConnectOutcome
+> {
+  const listed = await listNumbers(key, options.retell ?? {});
+  if (options.signal.aborted) return { kind: "interrupted" };
+
+  switch (listed.kind) {
+    case "numbers":
+      break;
+    case "invalid-key":
+      return { kind: "invalid-key" };
+    case "refused":
+    case "unreachable":
+      return { kind: "failed", reason: listed.reason };
+  }
+
+  const mine = numbersAnswering(listed.numbers, config.agentId);
+  if (mine.length === 0) {
+    options.say(NO_NUMBERS_LINE);
+    return { kind: "no-numbers" };
+  }
+
+  // One number is not a choice, exactly as one agent is not. The developer
+  // reads which one egma took, inside the flow, with nothing to answer.
+  let wanted = mine.length === 1 ? (mine[0] as RetellNumber).number : null;
+  if (wanted === null) {
+    wanted = (await options.chooseNumber(mine))?.trim() ?? null;
+    if (options.signal.aborted) return { kind: "interrupted" };
+    if (wanted === null || wanted === "") return { kind: "unchosen-number", numbers: mine };
+    if (!mine.some((one) => one.number === wanted)) {
+      return { kind: "unchosen-number", numbers: mine };
+    }
+  }
+
+  const confirmed = await confirmNumber(key, wanted, options.retell ?? {});
+  if (options.signal.aborted) return { kind: "interrupted" };
+
+  switch (confirmed.kind) {
+    case "number":
+      break;
+    case "invalid-key":
+      return { kind: "invalid-key" };
+    case "gone":
+      return {
+        kind: "failed",
+        reason: `${wanted} is no longer on the Retell account. Run egma again to see which numbers are.`,
+      };
+    case "refused":
+    case "unreachable":
+      return { kind: "failed", reason: confirmed.reason };
+  }
+
+  if (!confirmed.number.answeredBy.includes(config.agentId)) {
+    return {
+      kind: "failed",
+      reason: `Retell no longer routes ${wanted} to ${config.name}, so egma will not register it as the way to reach that agent. Run egma again to see which numbers it answers.`,
+    };
+  }
+
+  return {
+    kind: "number",
+    number: confirmed.number.number,
+    routed: mine.map((one) => one.number),
   };
 }
 
@@ -341,8 +712,36 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
   }
 
   const config = pulled.config;
+
+  // The agent is settled, so what egma may offer is settled with it. Asking
+  // before this point would be offering a phone the agent may have no number
+  // for.
+  const reach = await options.chooseReach();
+  if (options.signal.aborted) return { kind: "interrupted" };
+  if (reach === null) return { kind: "unchosen-reach" };
+
+  // Read once at most, and only where it is needed: by the phone branch, which
+  // needs it to offer anything at all, and by a name clash that has nothing
+  // else to go on. A text connect on an account nobody has clashed with never
+  // asks Retell about telephone numbers.
+  let routed: readonly string[] | null | undefined;
+  const numbersOfTheAgent = async (): Promise<readonly string[] | null> => {
+    if (routed !== undefined) return routed;
+    const listed = await listNumbers(key, options.retell ?? {});
+    routed =
+      listed.kind === "numbers"
+        ? numbersAnswering(listed.numbers, config.agentId).map((one) => one.number)
+        : null;
+    return routed;
+  };
+
+  const dialling = reach === "phone" ? await pickNumber(options, key, config) : null;
+  if (dialling !== null && dialling.kind !== "number") return dialling;
+  if (dialling !== null) routed = dialling.routed;
+  const selected = selectionFor(reach, config, key, dialling?.number ?? null);
+
   await options.beforeRegistering?.();
-  const written = await register(keyed, config);
+  const written = await register(keyed, config, selected, numbersOfTheAgent);
   if (written.kind !== "registered") return written;
 
   // Shown, never blocking: the drift is worked out after everything that
@@ -361,5 +760,8 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
     config,
     drift,
     onTheAccount: agents.length,
+    reach: selected.reach,
+    number: selected.number,
+    registration: written.registration,
   };
 }

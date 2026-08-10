@@ -153,6 +153,9 @@ async function runWalk(options: {
     write: (line) => lines.push(line),
     answers: {
       "retell-key": KEY,
+      // Text. These checks are about writing and pushing tests, and a walk
+      // that stops at "text or phone?" never reaches either.
+      reach: "text",
       ...(options.existingTests === undefined
         ? {}
         : { "existing-tests": options.existingTests }),
@@ -607,6 +610,7 @@ async function withNobodyWatching(
             EGMA_URL: platform.url,
             EGMA_RETELL_URL: retell.url,
             EGMA_RETELL_API_KEY: KEY,
+            EGMA_REACH: "text",
             // Nowhere near the home of whoever is running this.
             HOME: path.join(workspace.dir, "pretend-home"),
           }),

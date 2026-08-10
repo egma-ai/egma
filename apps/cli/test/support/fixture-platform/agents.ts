@@ -308,7 +308,9 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
         },
       },
     ],
-    simulatorAdapter: false,
+    // The simulator dials: the phone plug is in the shipped build. Whether one
+    // deployment's carrier is set up is a separate fact, answered elsewhere.
+    simulatorAdapter: true,
   },
   livekit: {
     // Voice only, because voice is the lane that exists.

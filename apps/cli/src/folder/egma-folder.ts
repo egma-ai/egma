@@ -33,6 +33,17 @@ export const TESTS_FOLDER_NAME = "tests";
 /** Reserved for per-agent memory files. Nothing creates it. */
 export const MEMORY_FOLDER_NAME = "memory";
 
+/**
+ * What this folder's first test suite is called when nobody has named one.
+ *
+ * Here rather than in the wizard, because both surfaces that fill this file in
+ * write it and they have to write the same word: a repository connected by the
+ * verb and a repository connected by the wizard are the same repository, and a
+ * suite name that differed between them would be a difference a developer would
+ * find later in a run label they did not choose.
+ */
+export const DEFAULT_SUITE_NAME = "first-suite";
+
 /** Where each part of the folder is, once a repository root is known. */
 export type FolderPaths = {
   readonly root: string;

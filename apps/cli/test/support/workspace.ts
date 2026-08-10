@@ -155,6 +155,11 @@ export async function makeWorkspace(
       if (extra.EGMA_RETELL_API_KEY === undefined) delete env.EGMA_RETELL_API_KEY;
       if (extra.RETELL_API_KEY === undefined) delete env.RETELL_API_KEY;
       if (extra.EGMA_RETELL_AGENT_ID === undefined) delete env.EGMA_RETELL_AGENT_ID;
+      // And a way to reach an agent that the person running the suite happens
+      // to have set is not a way any check may take: which connection egma
+      // creates is what several of them are about.
+      if (extra.EGMA_REACH === undefined) delete env.EGMA_REACH;
+      if (extra.EGMA_PHONE_NUMBER === undefined) delete env.EGMA_PHONE_NUMBER;
       return env;
     },
     async signIn(url, key = "egma_sk_already-held") {

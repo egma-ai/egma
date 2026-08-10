@@ -27,6 +27,8 @@ import { CLI_ENTRY, MANIFEST, makeWorkspace, type Workspace } from "./support/wo
 const KEY = "key_1f4c9b7e2a6d0538c1e7";
 const PROMPT = "You answer the order line.\nNever quote a price.\n";
 
+const DIALLED = "+14155550111";
+
 const ONE_AGENT: FakeRetellScript = {
   keys: [KEY],
   agents: [
@@ -38,6 +40,13 @@ const ONE_AGENT: FakeRetellScript = {
     },
   ],
   llms: [{ llm_id: "llm_0001", general_prompt: PROMPT, general_tools: [{ type: "end_call" }] }],
+  numbers: [
+    {
+      phone_number: DIALLED,
+      nickname: "order line",
+      inbound_agents: [{ agent_id: "agent_0001" }],
+    },
+  ],
 };
 
 const TWO_AGENTS: FakeRetellScript = {
@@ -82,6 +91,10 @@ function egma(
   const env = workspace.env({
     EGMA_URL: platform.url,
     ...(retell === undefined ? {} : { EGMA_RETELL_URL: retell.url }),
+    // Every check written before there was a choice is about the connection
+    // egma made then, and that is the text one. The checks that are about the
+    // choice itself say so in their own arguments, which win over this.
+    EGMA_REACH: "text",
     ...options.env,
   });
 
@@ -135,7 +148,11 @@ describe("egma connect", () => {
     expect(said.connection_id).toMatch(/^con_/u);
     expect(said.connection_name).toBe("retell-1");
     expect(said.connection_type).toBe("retell");
-    expect(said.connection_modality).toBe("voice");
+    expect(said.connection_modality).toBe("chat");
+    expect(said.reach).toBe("text");
+    expect(said.phone_number).toBe("none");
+    expect(said.agent_registration).toBe("created");
+    expect(said.connection_registration).toBe("created");
     expect(said.grounded_in).toBe("retell");
     expect(said.status).toBe("connected");
 
@@ -147,11 +164,13 @@ describe("egma connect", () => {
 
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.registered.sealed).toEqual([KEY]);
+    // The same four things the wizard's own walk writes, so a repository
+    // connected by the verb and one connected by the wizard hold one file.
     expect(await readConfig(path.join(workspace.dir, "egma", "config.yaml"))).toEqual({
       platform: { origin: platform.url, instance: platform.instanceId },
       agent: { name: said.agent_name, id: said.agent_id },
       connection: { name: said.connection_name, id: said.connection_id },
-      suite: null,
+      suite: { name: "first-suite", id: null },
     });
   });
 
@@ -171,9 +190,11 @@ describe("egma connect", () => {
     expect(facts(theirs.stdout).agent_name).toBe("order-line");
     expect(facts(theirs.stdout).registration).toBe("reused");
     expect(facts(ours.stdout).registration).toBe("created");
+    expect(facts(theirs.stdout).agent_registration).toBe("reused");
+    expect(facts(theirs.stdout).connection_registration).toBe("reused");
     expect(theirs.stdout).toContain(
-      "note: This Retell agent was already registered as order-line, so egma kept it " +
-        "and stored the key you just gave. Nothing new was registered.",
+      "note: This voice agent was already registered as order-line, and retell-1 was " +
+        "already the way egma reaches it. Nothing new was registered.",
     );
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.registered.connections).toHaveLength(1);
@@ -342,6 +363,123 @@ describe("egma connect", () => {
     expect(help.stdout).toContain("egma connect [options]");
     expect(help.stdout).toContain("0 connected   2 the key was refused");
     expect(help.stdout).toContain("EGMA_RETELL_API_KEY");
+    expect(help.stdout).toContain("--reach <text|phone>");
+  });
+});
+
+/**
+ * The choice, on the surface a coding agent drives.
+ *
+ * The wizard has a screen for it; this has a flag, an environment variable, and
+ * an exit code for the case nobody said. What must not exist on either surface
+ * is a default — egma picking one of the two would be egma deciding whether to
+ * dial somebody's telephone.
+ */
+describe("which connection egma creates", () => {
+  it("creates only the phone connection, holding the number and nothing else", async () => {
+    retell = await startFakeRetell(ONE_AGENT);
+
+    const result = await egma(["connect", "--reach", "phone"], { stdin: KEY });
+
+    expect(result.code).toBe(CONNECT_EXIT.connected);
+    const said = facts(result.stdout);
+    expect(said.reach).toBe("phone");
+    expect(said.phone_number).toBe(DIALLED);
+    expect(said.connection_type).toBe("phone");
+    expect(said.connection_modality).toBe("voice");
+    expect(said.connection_name).toBe("phone-1");
+
+    expect(platform.registered.connections).toHaveLength(1);
+    expect(platform.registered.connections[0]?.config).toEqual({ phoneNumber: DIALLED });
+    // No Retell, Twilio, LiveKit, SIP or OpenAI credential is anywhere near it.
+    expect(platform.registered.sealed).toEqual([]);
+    expect(JSON.stringify(platform.registered)).not.toContain(KEY);
+
+    // And the committed file names the connection egma really made.
+    const written = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(written.connection).toEqual({ name: "phone-1", id: said.connection_id });
+    expect(JSON.stringify(written)).not.toContain(KEY);
+  });
+
+  it("creates nothing at all when neither way was chosen", async () => {
+    retell = await startFakeRetell(ONE_AGENT);
+
+    const result = await egma(["connect"], { stdin: KEY, env: { EGMA_REACH: "" } });
+
+    expect(result.code).toBe(CONNECT_EXIT.unchosen);
+    expect(facts(result.stdout).status).toBe("unchosen-reach");
+    // Both ways were put on the screen, and neither was taken.
+    expect(result.stdout).toContain("reach_option: text");
+    expect(result.stdout).toContain("reach_option: phone");
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.registered.connections).toHaveLength(0);
+    await expect(readConfig(folderPathsIn(workspace.dir).config)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("refuses a word that is not one of the two, before it reads anything", async () => {
+    retell = await startFakeRetell(ONE_AGENT);
+
+    const result = await egma(["connect", "--reach", "carrier-pigeon"], { stdin: KEY });
+
+    expect(result.code).toBe(CONNECT_EXIT.unchosen);
+    expect(result.stderr).toContain("is not a way egma reaches an agent");
+    expect(retell.requests).toHaveLength(0);
+  });
+
+  it("says which numbers reach the agent when it will not guess between them", async () => {
+    retell = await startFakeRetell({
+      ...ONE_AGENT,
+      numbers: [
+        ...(ONE_AGENT.numbers ?? []),
+        {
+          phone_number: "+14155550999",
+          nickname: "overflow",
+          inbound_agents: [{ agent_id: "agent_0001" }],
+        },
+      ],
+    });
+
+    const unchosen = await egma(["connect", "--reach", "phone"], { stdin: KEY });
+    expect(unchosen.code).toBe(CONNECT_EXIT.unchosen);
+    expect(facts(unchosen.stdout).status).toBe("unchosen-number");
+    expect(unchosen.stdout).toContain(`retell_number: ${DIALLED} order line`);
+    expect(platform.registered.agents).toHaveLength(0);
+
+    const named = await egma(["connect", "--reach", "phone", "--phone-number", "+14155550999"], {
+      stdin: KEY,
+    });
+    expect(named.code).toBe(CONNECT_EXIT.connected);
+    expect(facts(named.stdout).phone_number).toBe("+14155550999");
+  });
+
+  it("says plainly when Retell routes no number to the agent", async () => {
+    retell = await startFakeRetell({ ...ONE_AGENT, numbers: [] });
+
+    const result = await egma(["connect", "--reach", "phone"], { stdin: KEY });
+
+    expect(result.code).toBe(CONNECT_EXIT.noNumbers);
+    expect(facts(result.stdout).status).toBe("no-numbers");
+    expect(result.stderr).toContain("Retell routes no phone number to that agent");
+    expect(platform.registered.agents).toHaveLength(0);
+  });
+
+  it("is deterministic under retry, and says which half it wrote each time", async () => {
+    retell = await startFakeRetell(ONE_AGENT);
+
+    const first = await egma(["connect", "--reach", "phone"], { stdin: KEY });
+    const again = await egma(["connect", "--reach", "phone"], { stdin: KEY });
+
+    expect(facts(first.stdout).agent_registration).toBe("created");
+    expect(facts(first.stdout).connection_registration).toBe("created");
+    expect(facts(again.stdout).agent_registration).toBe("reused");
+    expect(facts(again.stdout).connection_registration).toBe("reused");
+    expect(facts(again.stdout).agent_id).toBe(facts(first.stdout).agent_id);
+    expect(facts(again.stdout).connection_id).toBe(facts(first.stdout).connection_id);
+
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.registered.connections).toHaveLength(1);
   });
 });
 

@@ -472,9 +472,16 @@ export const CONNECTION_REGISTRY: Readonly<
         },
       },
     ],
-    // Nothing dials yet: a customer may register the number they want called,
-    // and a run over it is refused at creation until the adapter lands.
-    simulatorAdapter: false,
+    // The simulator dials. `egma_simulator.plugs.phone.PhoneCall` is registered
+    // for this type and places the call over the deployment's own carrier
+    // trunk, so a run over a phone connection is one egma can conduct.
+    //
+    // **Whether this deployment can dial is a second question, and it is not
+    // asked here.** A platform whose carrier has never been set up will refuse
+    // a phone run at the API, where phone readiness is known — this registry
+    // says only what the shipped simulator holds an adapter for, which is a
+    // fact about the build rather than about one deployment's configuration.
+    simulatorAdapter: true,
   },
   livekit: {
     // Voice only, and only because voice is the lane that exists. The registry

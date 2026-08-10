@@ -15,8 +15,14 @@
  */
 
 import { loginLines, type LoginPrompt } from "../platform/login.ts";
-import type { RetellAgent } from "../retell/client.ts";
-import { keyAskLines, type KeyAsk } from "../retell/connect.ts";
+import type { RetellAgent, RetellNumber } from "../retell/client.ts";
+import {
+  keyAskLines,
+  NUMBER_ASK_LINE,
+  REACH_ASK_LINE,
+  REACH_LINES,
+  type KeyAsk,
+} from "../retell/connect.ts";
 import { simulationLine } from "../run/lines.ts";
 import type { RunView } from "../run/view.ts";
 import type { SkillPlaces } from "../skills/install.ts";
@@ -36,6 +42,10 @@ export type HeadlessRecord = {
   keyAsks: KeyAsk[];
   /** The agents a choice was offered between, when one was. */
   agentChoices: RetellAgent[];
+  /** Whether the choice between text and phone was ever put to anybody. */
+  reachOffered: boolean;
+  /** The numbers a choice was offered between, when one was. */
+  numberChoices: RetellNumber[];
   statuses: string[];
   summary: string;
   /** Every test the coding agent said it had written, in the order it said so. */
@@ -66,6 +76,8 @@ export class HeadlessUI implements WizardUI {
     logins: [],
     keyAsks: [],
     agentChoices: [],
+    reachOffered: false,
+    numberChoices: [],
     statuses: [],
     summary: "",
     written: [],
@@ -136,6 +148,31 @@ export class HeadlessUI implements WizardUI {
     this.record.agentChoices = [...agents];
     for (const agent of agents) {
       this.write(`retell_agent: ${agent.id} ${agent.name}`.trimEnd());
+    }
+  }
+
+  /**
+   * The offer, printed the same way the screen draws it.
+   *
+   * It is printed even though nobody is here to answer it, because whoever
+   * reads this output afterwards has to be able to see that both ways were
+   * offered and that egma chose neither on their behalf.
+   */
+  setReachOffer(open: boolean): void {
+    if (!open) return;
+    this.record.reachOffered = true;
+    this.write(REACH_ASK_LINE);
+    for (const way of ["text", "phone"] as const) {
+      this.write(`reach_option: ${way} ${REACH_LINES[way]}`);
+    }
+  }
+
+  setNumberChoices(numbers: readonly RetellNumber[] | null): void {
+    if (numbers === null) return;
+    this.record.numberChoices = [...numbers];
+    this.write(NUMBER_ASK_LINE);
+    for (const number of numbers) {
+      this.write(`retell_number: ${number.number} ${number.label}`.trimEnd());
     }
   }
 

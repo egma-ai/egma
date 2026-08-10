@@ -134,7 +134,7 @@ describe("commands after a repository is bound", () => {
     const connected = await reachesBound(
       ["connect"],
       "/api/agents",
-      { EGMA_RETELL_API_KEY: PROVIDER_KEY },
+      { EGMA_RETELL_API_KEY: PROVIDER_KEY, EGMA_REACH: "text" },
     );
     expect(connected.code).toBe(0);
     expect(connected.stdout).toContain("status: connected");
@@ -193,7 +193,7 @@ describe("commands after a repository is bound", () => {
       // consent only so a real terminal is not needed in CI.
       wizard = await command(
         ["--headless", "--", process.execPath, FAKE_AGENT, script],
-        { EGMA_RETELL_API_KEY: PROVIDER_KEY },
+        { EGMA_RETELL_API_KEY: PROVIDER_KEY, EGMA_REACH: "text" },
       );
     } finally {
       grading.stop();

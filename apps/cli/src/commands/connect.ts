@@ -15,7 +15,9 @@
 
 import {
   bindRepositoryPlatform,
+  DEFAULT_SUITE_NAME,
   folderPathsIn,
+  readConfig,
   updateConfig,
 } from "../folder/egma-folder.ts";
 import { readCredentials, type VerifiedPlatformAccess } from "../platform/credentials.ts";
@@ -25,9 +27,13 @@ import {
   CUSTODY_LINE,
   KEY_ASK_LINE,
   keyAskLines,
+  NUMBER_ASK_LINE,
+  REACH_ASK_LINE,
+  REACH_LINES,
   registrationLine,
   type ConnectOptions,
   type ConnectOutcome,
+  type Reach,
 } from "../retell/connect.ts";
 import { DRIFT_LINE } from "../retell/prompt-drift.ts";
 
@@ -47,12 +53,22 @@ export const CONNECT_EXIT = {
    * look. The `reason:` line tells them apart for anything that reads.
    */
   unreachable: 4,
-  /** Several agents on the account and nothing said which one. */
+  /**
+   * Something the developer alone decides was not decided.
+   *
+   * One number for four questions — which agent, text or phone, which number,
+   * and a number that is not one of the ones offered — because they mean one
+   * thing to whoever ran the command: egma will not choose on their behalf, and
+   * the answer goes in the command. The `status:` line says which question it
+   * was, and the lines above it list what there was to choose from.
+   */
   unchosen: 5,
   /** No key was given at all. */
   noKey: 6,
   /** This machine holds no egma key, so there is nowhere to register. */
   notSignedIn: 7,
+  /** Retell routes no number to the chosen agent, so the phone reaches nothing. */
+  noNumbers: 8,
   /** Stopped part way through. */
   interrupted: 130,
 } as const;
@@ -62,6 +78,30 @@ export const KEY_VARIABLES = ["EGMA_RETELL_API_KEY", "RETELL_API_KEY"] as const;
 
 /** The environment variable that names which agent, when the account has several. */
 export const AGENT_VARIABLE = "EGMA_RETELL_AGENT_ID";
+
+/** The environment variable that says whether egma reaches the agent by text or phone. */
+export const REACH_VARIABLE = "EGMA_REACH";
+
+/** The environment variable that names the number to dial, when several reach the agent. */
+export const NUMBER_VARIABLE = "EGMA_PHONE_NUMBER";
+
+/** What a developer is told when what they said is not one of the two ways. */
+export function unknownReachRefusal(said: string): string {
+  return (
+    `"${said}" is not a way egma reaches an agent. Say --reach text or ` +
+    `--reach phone, or set ${REACH_VARIABLE}.`
+  );
+}
+
+/** The way that was named, `null` when none was, or the word that was not one. */
+export function reachIn(
+  named: string | null | undefined,
+): { readonly kind: "reach"; readonly reach: Reach } | { readonly kind: "unknown"; readonly said: string } | null {
+  const said = (named ?? "").trim().toLowerCase();
+  if (said === "") return null;
+  if (said === "text" || said === "phone") return { kind: "reach", reach: said };
+  return { kind: "unknown", said };
+}
 
 /** Argument names that would put a secret in the process table. */
 const REFUSED_ARGUMENTS = ["--key", "--api-key", "--retell-key", "--retell-api-key"];
@@ -86,6 +126,10 @@ export type ConnectCommandOptions = {
   readonly cwd: string;
   /** `--retell-agent`, when one was named. */
   readonly agentId: string | null;
+  /** `--reach`: text or phone. Nothing is created when neither was said. */
+  readonly reach: string | null;
+  /** `--phone-number`: which number to dial, when several reach the agent. */
+  readonly phoneNumber: string | null;
   /** `--repo-prompt`: the file to compare what the provider runs against. */
   readonly repoPrompt: string | null;
   readonly env: NodeJS.ProcessEnv;
@@ -136,7 +180,11 @@ function exitCodeFor(outcome: ConnectOutcome): number {
     case "no-agents":
       return CONNECT_EXIT.noAgents;
     case "unchosen":
+    case "unchosen-reach":
+    case "unchosen-number":
       return CONNECT_EXIT.unchosen;
+    case "no-numbers":
+      return CONNECT_EXIT.noNumbers;
     case "no-key":
       return CONNECT_EXIT.noKey;
     case "interrupted":
@@ -163,6 +211,16 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
   if (refused !== null) {
     options.fail(argumentRefusal(refused));
     return CONNECT_EXIT.noKey;
+  }
+
+  // Said before anything is read, because a word egma does not know is the
+  // developer's own typo and finding out after a key has been sent to Retell
+  // would cost them the round trip.
+  const named = reachIn(options.reach ?? options.env[REACH_VARIABLE]);
+  if (named !== null && named.kind === "unknown") {
+    options.out("status: unchosen");
+    options.fail(unknownReachRefusal(named.said));
+    return CONNECT_EXIT.unchosen;
   }
 
   options.out(`url: ${options.access.url}`);
@@ -226,8 +284,27 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       for (const agent of agents) {
         options.out(`retell_agent: ${agent.id} ${agent.name}`.trimEnd());
       }
-      const named = (options.agentId ?? options.env[AGENT_VARIABLE] ?? "").trim();
-      return Promise.resolve(named === "" ? null : named);
+      const wanted = (options.agentId ?? options.env[AGENT_VARIABLE] ?? "").trim();
+      return Promise.resolve(wanted === "" ? null : wanted);
+    },
+    // The same question the wizard's screen asks, and the same two lines, so a
+    // coding agent reading this is told exactly what a person is told. There is
+    // nobody here to answer it, so it is answered in the command or not at all
+    // — and not at all creates nothing, which is the point.
+    chooseReach: () => {
+      options.out(`note: ${REACH_ASK_LINE}`);
+      for (const way of ["text", "phone"] as const) {
+        options.out(`reach_option: ${way} ${REACH_LINES[way]}`);
+      }
+      return Promise.resolve(named === null ? null : named.reach);
+    },
+    chooseNumber: (numbers) => {
+      options.out(`note: ${NUMBER_ASK_LINE}`);
+      for (const number of numbers) {
+        options.out(`retell_number: ${number.number} ${number.label}`.trimEnd());
+      }
+      const wanted = (options.phoneNumber ?? options.env[NUMBER_VARIABLE] ?? "").trim();
+      return Promise.resolve(wanted === "" ? null : wanted);
     },
   });
 
@@ -244,18 +321,32 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
   switch (outcome.kind) {
     case "connected": {
       const { registered, config } = outcome;
-      await updateConfig(folderPathsIn(options.cwd).config, {
+      // The same four things the wizard writes, from the same place, so a
+      // repository connected by the verb and one connected by the wizard hold
+      // the same file. A suite somebody has already named is left alone: it is
+      // their committed file, and this step learned nothing about it.
+      const paths = folderPathsIn(options.cwd);
+      const beforeThis = await readConfig(paths.config).catch(() => null);
+      await updateConfig(paths.config, {
         agent: { name: registered.agent.name, id: registered.agent.id },
         connection: {
           name: registered.connection.name,
           id: registered.connection.id,
         },
+        ...(beforeThis?.suite == null
+          ? { suite: { name: DEFAULT_SUITE_NAME, id: null } }
+          : {}),
       });
       options.out(`retell_agents: ${outcome.onTheAccount}`);
       options.out(`retell_agent_id: ${config.agentId}`);
       options.out(`retell_response_engine: ${config.engine}`);
       options.out(`prompt_characters: ${config.prompt === null ? 0 : config.prompt.length}`);
       options.out(`tools: ${config.tools.length}`);
+      options.out(`reach: ${outcome.reach}`);
+      // The number, or the word that there is none. Absent would read as an
+      // older egma that never printed it; `none` says a text connection dials
+      // nothing, which is a fact about the connection rather than a gap.
+      options.out(`phone_number: ${outcome.number ?? "none"}`);
       options.out(`agent_id: ${registered.agent.id}`);
       options.out(`agent_name: ${registered.agent.name}`);
       options.out(`connection_id: ${registered.connection.id}`);
@@ -266,6 +357,11 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       // agent retrying this verb reads whether it made a second agent from
       // here rather than by counting what the platform holds.
       options.out(`registration: ${registered.result}`);
+      // And the same answer split in two, because a retry cares about each
+      // half: an agent that was already there with a connection that is new is
+      // a different fact from both of them being new.
+      options.out(`agent_registration: ${outcome.registration.agent}`);
+      options.out(`connection_registration: ${outcome.registration.connection}`);
       const already = registrationLine(registered);
       if (already !== null) options.out(`note: ${already}`);
       options.out(driftLine(outcome));
@@ -289,6 +385,28 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       options.out("status: unchosen");
       options.fail(
         `That key reaches ${outcome.agents.length} agents. Name one with --retell-agent, or with ${AGENT_VARIABLE}.`,
+      );
+      break;
+    case "unchosen-reach":
+      options.out("status: unchosen-reach");
+      options.fail(
+        "egma creates the one connection you choose and never both. Say " +
+          `--reach text or --reach phone, or set ${REACH_VARIABLE}. Nothing was written.`,
+      );
+      break;
+    case "unchosen-number":
+      options.out(`retell_numbers: ${outcome.numbers.length}`);
+      options.out("status: unchosen-number");
+      options.fail(
+        `Retell routes ${outcome.numbers.length} numbers to that agent. Name the one egma ` +
+          `should dial with --phone-number, or with ${NUMBER_VARIABLE}. Nothing was written.`,
+      );
+      break;
+    case "no-numbers":
+      options.out("status: no-numbers");
+      options.fail(
+        "Retell routes no phone number to that agent, so there is nothing for egma to " +
+          "dial. Assign one in the Retell dashboard, or connect over text with --reach text.",
       );
       break;
     case "no-key":

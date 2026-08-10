@@ -156,6 +156,11 @@ async function toTheGate(
   await showing(run, "Paste your Retell API key");
   run.write(`${KEY}\r`);
 
+  // Text or phone. Not this check's subject, and not skippable
+  // either: egma never picks one of the two for a developer.
+  await showing(run, "How should egma reach this agent?");
+  run.write("\r");
+
   await showing(run, "Do you already have test cases", "[n] none");
   run.write("n");
 
@@ -272,6 +277,11 @@ describe("the files arriving", () => {
     run.write("\r");
     await showing(run, "Paste your Retell API key");
     run.write(`${KEY}\r`);
+
+    // Text or phone. Not this check's subject, and not skippable
+    // either: egma never picks one of the two for a developer.
+    await showing(run, "How should egma reach this agent?");
+    run.write("\r");
     await showing(run, "Do you already have test cases", "[n] none");
 
     run.write("");
@@ -351,7 +361,7 @@ describe("the gate", () => {
       IN_ORDER[0] as string,
       "default persona",
       "more (↑↓ browse · e opens in $EDITOR)",
-      "Run these against order-line over retell-1 (voice)?",
+      "Run these against order-line over retell-1 (chat)?",
       ...GATE_HINTS,
     );
 
@@ -534,7 +544,7 @@ describe("the gate", () => {
       "5 tests generated",
       'suite "first-suite"',
       IN_ORDER[0] as string,
-      "Run these against order-line over retell-1 (voice)?",
+      "Run these against order-line over retell-1 (chat)?",
       ...GATE_HINTS,
     );
     expect(back).not.toContain("STAND-IN EDITOR HAS THE SCREEN");

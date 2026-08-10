@@ -129,10 +129,35 @@ take, and a key for an account with no agents on it, are told apart by name and
 each is worth one more try. One agent on the account is shown for confirmation
 with nothing to answer; several get a list to choose from.
 
-The agent's configuration — its prompt, its voice, its tools — is pulled and
-registered on egma, together with a connection for reaching it. **What Retell
-answered is kept exactly as it answered it**, beside what egma read out of it,
-so a field egma has no place for today is still there tomorrow.
+The agent's configuration — its prompt, its voice, its tools — is pulled, and
+then egma asks the one question that decides what it creates:
+
+```
+◇ How should egma reach this agent?
+  › Text — egma exchanges messages with the agent. No phone call, nothing dialled.
+    Phone — egma dials one of the agent's numbers and talks to it, as a customer would.
+
+  egma creates the one you choose, and only that one.
+```
+
+Both are real ways to test one voice agent, and they answer different
+questions. Text exercises the prompt, the reasoning and the tools. Phone
+exercises all of that plus the speech stack and the line it is carried on. The
+same test over both is the sharpest thing egma can tell you: passes on text and
+fails on phone means the prompt is fine and the speech stack is not.
+
+**egma creates the connection you chose and never both.** Choose the phone and
+it lists the numbers Retell routes to that agent, you pick one, and the
+connection it writes holds that number and nothing else — no Retell identifier
+and no credential of any kind, because the public telephone network neither
+knows nor cares what answers. Choose text and it writes one Retell chat
+connection for the voice agent you selected, with your key sealed on the
+platform.
+
+**What Retell answered is kept exactly as it answered it**, beside what egma
+read out of it, so a field egma has no place for today is still there tomorrow.
+Nothing in this step writes to your Retell account: every request egma makes to
+it is a read.
 
 If your repository keeps a prompt of its own and it differs from what Retell is
 running, egma says so in one line and carries on. It never blocks: being out of
@@ -155,12 +180,20 @@ EGMA_RETELL_API_KEY=… egma connect
 nothing new. With several agents on the account it lists them and refuses to
 guess; name one with `--retell-agent`.
 
-**Running it twice over the same Retell agent is safe.** egma answers the
-registration you already have rather than making a second one, stores the key
-you just gave, and says which of three things it did on the `registration:`
-line — `created`, `reused`, or `connection_added` when the same agent gained
-another way of being reached. The last two also print a `note:` line saying it
-in plain words.
+It refuses to guess the reach as well. Say `--reach text` or `--reach phone`
+(or set `EGMA_REACH`); with neither, it creates nothing at all and exits 5 —
+egma will not decide on your behalf whether to dial somebody's telephone. With
+`--reach phone` and several numbers routed to the agent, name one with
+`--phone-number` or `EGMA_PHONE_NUMBER`.
+
+**Running it twice over the same voice agent is safe.** egma answers the
+registration you already have rather than making a second one and says which of
+three things it did on the `registration:` line — `created`, `reused`, or
+`connection_added` when the same agent gained another way of being reached. The
+last two also print a `note:` line saying it in plain words. Coming back for the
+second reach lands on the same agent: one voice agent, two ways to reach it, one
+results history. `agent_registration:` and `connection_registration:` say the
+same thing for each half, as `created` or `reused`.
 
 ```
 url: https://app.egma.ai
@@ -169,20 +202,26 @@ retell_agent_id: agent_…
 retell_response_engine: retell-llm
 prompt_characters: 2140
 tools: 7
+reach: phone
+phone_number: +14155550111
 agent_id: agt_01K…
 agent_name: order-line
 connection_id: con_01K…
-connection_name: retell-1
-connection_type: retell
+connection_name: phone-1
+connection_type: phone
 connection_modality: voice
 registration: created
+agent_registration: created
+connection_registration: created
 drift: no
 grounded_in: retell
 status: connected
 
 0 connected   2 the key was refused   3 no agents on that account
-4 Retell or egma did not answer, or refused   5 several agents, none named
-6 no key given   7 not signed in to egma   130 stopped part way
+4 Retell or egma did not answer, or refused
+5 a choice only you can make was not made: which agent, text or phone, or
+  which number   6 no key given   7 not signed in to egma
+8 Retell routes no number to that agent   130 stopped part way
 ```
 
 ## Your tests are files in your repository
@@ -527,6 +566,12 @@ egma run [options]       Run this folder's tests, pinning the version of each.
                        waiting for a verdict. The run carries on on egma.
   --retell-agent <id>  With connect: which agent, when the Retell account
                        holds more than one.
+  --reach <text|phone> With connect and a headless wizard: how egma should
+                       reach the agent. egma creates the one you choose and
+                       never both, and creates nothing when neither is said.
+  --phone-number <e164>
+                       With --reach phone: which of the agent's numbers to
+                       dial, when Retell routes more than one to it.
   --repo-prompt <path> With connect: the prompt file in this repository, so
                        egma can say whether it and Retell have drifted apart.
   --existing-tests <path>
@@ -550,6 +595,8 @@ Environment:
                        read too, so an environment that already has one needs
                        nothing new.
   EGMA_RETELL_AGENT_ID Which Retell agent, same as --retell-agent.
+  EGMA_REACH           text or phone, same as --reach.
+  EGMA_PHONE_NUMBER    Which number to dial, same as --phone-number.
   EGMA_RETELL_URL      The Retell to talk to. Default: https://api.retellai.com
   EGMA_EXISTING_TESTS  Your existing test cases, same as --existing-tests.
   VISUAL, EDITOR       What e opens a generated test in, at the gate.

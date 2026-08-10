@@ -81,6 +81,7 @@ it("verifies an explicitly selected platform and commits its identity on first o
     const env = workspace.env({
       EGMA_RETELL_URL: retell.url,
       EGMA_RETELL_API_KEY: PROVIDER_KEY,
+      EGMA_REACH: "text",
     });
     expect(env.EGMA_URL).toBeUndefined();
 

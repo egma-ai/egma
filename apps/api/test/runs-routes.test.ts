@@ -107,7 +107,7 @@ const RETELL = {
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
 } as const;
 
-/** A number egma can be told to dial, and has no adapter to dial it with. */
+/** A number egma dials: the shipped phone adapter's own connection shape. */
 const PHONE = {
   type: "phone",
   modality: "voice",
@@ -492,28 +492,28 @@ describe("starting a run", () => {
     });
   });
 
-  it("refuses a connection type no simulator adapter has shipped for, at the door", async () => {
-    const { key, oneCaller } = await aCustomerReadyToRun("runs_no_adapter");
-    const dialled = await registerAgentThrough(key, "Old line", PHONE);
+  it("accepts a run over a phone connection, because the phone adapter has shipped", async () => {
+    const { key, oneCaller } = await aCustomerReadyToRun("runs_over_phone");
+    const dialled = await registerAgentThrough(key, "Front desk line", PHONE);
 
-    const refused = await request("POST", "/api/runs", key, {
+    const started = await request("POST", "/api/runs", key, {
       connection: dialled.connectionId,
       test_versions: [oneCaller],
     });
 
-    // The platform's own sentence, relayed word for word by whatever prints it.
-    expect(refused.statusCode).toBe(422);
-    expect(refused.body).toEqual({
-      error: "no_adapter",
-      message:
-        "egma has no simulator adapter for a phone connection yet, so it " +
-        "will not start a run it cannot conduct. Run these tests over a " +
-        "connection egma conducts today: retell, livekit.",
+    // This used to be the `no_adapter` refusal. The adapter is in the shipped
+    // simulator now, so the door opens — and the run is a real one, queued
+    // over the number the customer registered.
+    expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
+    expect(started.body).toMatchObject({
+      status: "pending",
+      connection_id: dialled.connectionId,
+      connection_type: "phone",
+      modality: "voice",
     });
 
-    // And nothing is left queued for a conductor that does not exist.
     const { rows } = await api.database.sql("select id from run");
-    expect(rows).toEqual([]);
+    expect(rows).toEqual([{ id: String(started.body.id) }]);
   });
 
   it("is refused to a viewer, because a run spends money and creates data", async () => {

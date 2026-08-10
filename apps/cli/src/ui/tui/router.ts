@@ -21,6 +21,8 @@ export type ScreenId =
   | "prompts-pointer"
   | "retell-key"
   | "retell-agent"
+  | "reach"
+  | "phone-number"
   | "existing-tests"
   | "generating"
   | "gate"

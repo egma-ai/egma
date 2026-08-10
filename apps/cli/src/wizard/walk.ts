@@ -17,7 +17,6 @@
 import process from "node:process";
 
 import type { DrivenAgentLaunch } from "../acp/registry.ts";
-import { bindRepositoryPlatform } from "../folder/egma-folder.ts";
 import { signedInAt } from "../platform/signed-in.ts";
 import type { ConnectOptions } from "../retell/connect.ts";
 import { homeIn } from "../skills/install.ts";
@@ -131,17 +130,11 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
     return found.report;
   }
 
-  // The last moment before this repository owns anything that only one platform
-  // can resolve. Committed here rather than earlier so a walk that found no
-  // agent leaves the repository exactly as it was, and rather than later so no
-  // identifier can ever exist in this folder without the platform that issued
-  // it written down beside it.
-  await bindRepositoryPlatform(cwd, {
-    origin: options.platform.url,
-    instance: options.platform.instanceId,
-  });
-  ui.pushStatus(`Bound this repository to Egma platform ${options.platform.instanceId}.`);
-
+  // The binding is written inside the connect step, at the last moment before
+  // egma asks the platform to create anything — not here. Bound at this line, a
+  // walk that ended at the key box, at an unanswered choice of agent, or at
+  // "text or phone?" would leave an egma folder behind holding nothing but a
+  // binding, in a repository the developer had decided not to connect.
   const connected = await connectStep({
     ui,
     platform: options.platform,

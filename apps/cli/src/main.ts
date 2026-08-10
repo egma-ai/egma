@@ -21,6 +21,8 @@ import {
   AGENT_VARIABLE,
   argumentRefusal,
   KEY_VARIABLES,
+  NUMBER_VARIABLE,
+  REACH_VARIABLE,
   refusedArgumentIn,
   runConnectCommand,
 } from "./commands/connect.ts";
@@ -125,6 +127,10 @@ export type Invocation = {
   readonly noFollow: boolean;
   /** `--retell-agent`: which agent, when the account holds several. */
   readonly retellAgentId: string | null;
+  /** `--reach`: whether egma reaches the agent by text or by phone. */
+  readonly reach: string | null;
+  /** `--phone-number`: which number to dial, when several reach the agent. */
+  readonly phoneNumber: string | null;
   /** `--repo-prompt`: the repository's prompt, to compare the provider's with. */
   readonly repoPrompt: string | null;
   /** `--existing-tests`: the test cases the developer already had written down. */
@@ -157,6 +163,8 @@ export function parseArgs(argv: readonly string[]): Invocation {
   let force = false;
   let noFollow = false;
   let retellAgentId: string | null = null;
+  let reach: string | null = null;
+  let phoneNumber: string | null = null;
   let repoPrompt: string | null = null;
   let existingTests: string | null = null;
   let agentName: string | null = null;
@@ -186,6 +194,8 @@ export function parseArgs(argv: readonly string[]): Invocation {
     else if (argument === "--force") force = true;
     else if (argument === "--no-follow") noFollow = true;
     else if (argument === "--retell-agent") retellAgentId = argv[(index += 1)] ?? null;
+    else if (argument === "--reach") reach = argv[(index += 1)] ?? null;
+    else if (argument === "--phone-number") phoneNumber = argv[(index += 1)] ?? null;
     else if (argument === "--repo-prompt") repoPrompt = argv[(index += 1)] ?? null;
     else if (argument === "--existing-tests") existingTests = argv[(index += 1)] ?? null;
     else if (argument === "--agent") agentName = argv[(index += 1)] ?? null;
@@ -207,6 +217,8 @@ export function parseArgs(argv: readonly string[]): Invocation {
     force,
     noFollow,
     retellAgentId,
+    reach,
+    phoneNumber,
     repoPrompt,
     existingTests,
     agentName,
@@ -264,6 +276,14 @@ export function helpText(): string {
     "                       waiting for a verdict. The run carries on on egma.",
     "  --retell-agent <id>  With connect: which agent, when the Retell account",
     "                       holds more than one.",
+    "  --reach <text|phone> With connect and a headless wizard: how egma should",
+    "                       reach the agent. text exchanges messages with it;",
+    "                       phone dials one of its numbers. egma creates the one",
+    "                       you choose and never both, and creates nothing when",
+    "                       neither is said.",
+    "  --phone-number <e164>",
+    "                       With --reach phone: which of the agent's numbers to",
+    "                       dial, when Retell routes more than one to it.",
     "  --repo-prompt <path> With connect: the prompt file in this repository, so",
     "                       egma can say whether it and Retell have drifted apart.",
     "  --existing-tests <path>",
@@ -288,6 +308,8 @@ export function helpText(): string {
     "                       is read too, so an environment that already has one",
     "                       needs nothing new.",
     `  ${AGENT_VARIABLE} Which Retell agent, same as --retell-agent.`,
+    `  ${REACH_VARIABLE}            text or phone, same as --reach.`,
+    `  ${NUMBER_VARIABLE}     Which number to dial, same as --phone-number.`,
     `  ${RETELL_URL_VARIABLE}      The Retell to talk to. Default: ${RETELL_API}`,
     `  ${EXISTING_TESTS_VARIABLE}  Your existing test cases, same as --existing-tests.`,
     "  VISUAL, EDITOR       What e opens a generated test in, at the gate.",
@@ -305,19 +327,24 @@ export function helpText(): string {
     "",
     "What egma connect prints, one fact per line:",
     "  url, retell_agents, retell_agent, retell_agent_id, retell_response_engine,",
-    "  prompt_characters, tools, agent_id, agent_name, connection_id,",
-    "  connection_name, connection_type, connection_modality, registration,",
-    "  drift, grounded_in, status",
+    "  prompt_characters, tools, reach_option, retell_number, reach, phone_number,",
+    "  agent_id, agent_name, connection_id, connection_name, connection_type,",
+    "  connection_modality, registration, agent_registration,",
+    "  connection_registration, drift, grounded_in, status",
     "",
     "  registration says which of three things egma did: created, reused (this",
-    "  Retell agent was already registered, so nothing new was written), or",
-    "  connection_added (the same agent gained another way of being reached).",
-    "  The two that are not created also print a note: line saying so plainly.",
+    "  voice agent was already registered and already reached this way, so",
+    "  nothing was written), or connection_added (the same agent gained another",
+    "  way of being reached). The two that are not created also print a note:",
+    "  line saying so plainly. agent_registration and connection_registration",
+    "  say the same thing for each half, as created or reused.",
     "",
     "What egma connect answers with:",
     "  0 connected   2 the key was refused   3 no agents on that account",
-    "  4 Retell or egma did not answer, or refused   5 several agents, none named",
-    "  6 no key given   7 not signed in to egma   130 stopped part way",
+    "  4 Retell or egma did not answer, or refused",
+    "  5 a choice only you can make was not made: which agent, text or phone, or",
+    "    which number   6 no key given   7 not signed in to egma",
+    "  8 Retell routes no number to that agent   130 stopped part way",
     "",
     "What egma init, pull and push print, one fact per line:",
     "  url, folder, and then one line per test: what happened to it, the file,",
@@ -426,7 +453,7 @@ function retellReach(env: NodeJS.ProcessEnv): { readonly url: string } | undefin
  * not change where a secret comes from.
  */
 /** The answers a run with nobody watching can be given in advance. */
-type Held = "retell-key" | "retell-agent" | "existing-tests";
+type Held = "retell-key" | "retell-agent" | "reach" | "phone-number" | "existing-tests";
 
 function headlessAnswers(
   invocation: Invocation,
@@ -442,6 +469,15 @@ function headlessAnswers(
   }
   const named = (invocation.retellAgentId ?? env[AGENT_VARIABLE] ?? "").trim();
   if (named !== "") answers["retell-agent"] = named;
+
+  // Which way to reach the agent is knowledge, not consent: a run with nobody
+  // watching says it in the command or egma creates nothing at all. Left out
+  // deliberately means left out — egma never picks one of the two, because
+  // only one of them dials a real telephone.
+  const way = (invocation.reach ?? env[REACH_VARIABLE] ?? "").trim();
+  if (way !== "") answers["reach"] = way;
+  const dialling = (invocation.phoneNumber ?? env[NUMBER_VARIABLE] ?? "").trim();
+  if (dialling !== "") answers["phone-number"] = dialling;
 
   // Prior work is knowledge and not consent, so a run with nobody watching is
   // pointed at it in the command or it has none — exactly as the pointer to a
@@ -609,6 +645,8 @@ async function runConnect(
       access,
       cwd: path.resolve(invocation.cwd ?? process.cwd()),
       agentId: invocation.retellAgentId,
+      reach: invocation.reach,
+      phoneNumber: invocation.phoneNumber,
       repoPrompt: invocation.repoPrompt,
       env: process.env,
       signal: controller.signal,

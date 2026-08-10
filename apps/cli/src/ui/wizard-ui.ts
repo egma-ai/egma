@@ -11,7 +11,7 @@
  */
 
 import type { LoginPrompt } from "../platform/login.ts";
-import type { RetellAgent } from "../retell/client.ts";
+import type { RetellAgent, RetellNumber } from "../retell/client.ts";
 import type { KeyAsk } from "../retell/connect.ts";
 import type { RunView } from "../run/view.ts";
 import type { SkillPlaces } from "../skills/install.ts";
@@ -41,6 +41,16 @@ export type AskId =
   | "prompts-pointer"
   | "retell-key"
   | "retell-agent"
+  /**
+   * Text or phone: the one question whose answer decides what egma creates.
+   *
+   * A question and never a gate, and one egma never answers on the developer's
+   * behalf. Only one of the two dials a real telephone, and egma choosing that
+   * for somebody would be egma spending their money.
+   */
+  | "reach"
+  /** Which of the agent's numbers to dial, when Retell routes it more than one. */
+  | "phone-number"
   | "existing-tests"
   /**
    * Whether to install the egma skill, and where.
@@ -110,6 +120,24 @@ export interface WizardUI {
    * screen that never appears is how a flow asks nothing.
    */
   setAgentChoices(agents: readonly RetellAgent[] | null): void;
+
+  /**
+   * That the two ways of reaching the agent are on offer, or `null` when they
+   * are not.
+   *
+   * A write and not a question, exactly as the agent choices are: the flow says
+   * the offer is open and the screen collects the word.
+   */
+  setReachOffer(open: boolean): void;
+
+  /**
+   * The numbers Retell routes to the chosen agent, while a choice among them is
+   * open, or `null` when there is no choice to make.
+   *
+   * Set only when there is more than one: one number is not a choice, and a
+   * screen that never appears is how a flow asks nothing.
+   */
+  setNumberChoices(numbers: readonly RetellNumber[] | null): void;
 
   /**
    * Park until the developer has let the flow past this point. A gate that the

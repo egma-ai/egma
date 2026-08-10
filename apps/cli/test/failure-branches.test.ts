@@ -100,9 +100,11 @@ afterEach(async () => {
 /** The walk, with whatever the developer would have answered written down. */
 async function walkWith(options: {
   readonly script: string;
-  readonly answers?: Partial<Record<"prompts-pointer" | "retell-key", string>>;
+  readonly answers?: Partial<Record<"prompts-pointer" | "retell-key" | "reach", string>>;
 }) {
-  const ui = new HeadlessUI({ answers: options.answers ?? {} });
+  // Text unless a check says otherwise: every branch here is about a way the
+  // walk can fail before or after the choice, not about the choice itself.
+  const ui = new HeadlessUI({ answers: { reach: "text", ...(options.answers ?? {}) } });
 
   // A walk that gets as far as a suite ends in a run, and a run ends when
   // verdicts arrive. Nothing here conducts a simulation, so the fixture is

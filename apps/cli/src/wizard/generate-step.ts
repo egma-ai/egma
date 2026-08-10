@@ -37,6 +37,7 @@ import { readdir } from "node:fs/promises";
 
 import {
   createEgmaFolder,
+  DEFAULT_SUITE_NAME,
   readConfig,
   readFolder,
   updateConfig,
@@ -65,9 +66,6 @@ import {
   GenerationTally,
   type GenerationContext,
 } from "./test-generation.ts";
-
-/** What this folder's first test suite is called when nobody has named one. */
-export const DEFAULT_SUITE_NAME = "first-suite";
 
 /**
  * How the step ended, and what it left behind for the step after it.
