@@ -224,8 +224,9 @@ The origin is what you read; the instance identifier is what egma checks, so a
 *different* egma later served at the same address is caught rather than
 believed. An instance older than that check writes the origin alone: the
 repository still uses that instance and nothing else, and only the "is this the
-same egma?" question goes unasked until you update it. Your key is not here — keys live in `~/.egma/credentials`, one per
-instance, so signing in to a second egma never signs you out of the first.
+same egma?" question goes unasked until you update it. Your key is not here —
+keys live in `~/.egma/credentials`, one per instance, so signing in to a second
+egma never signs you out of the first.
 
 One test is one file:
 
