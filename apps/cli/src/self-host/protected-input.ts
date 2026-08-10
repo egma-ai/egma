@@ -121,10 +121,6 @@ async function askWithoutEcho(prompt: string, options: AskOptions): Promise<stri
     output: options.output,
     terminal: true,
   });
-  const hide = (): void => {
-    // One newline of our own, because nothing the person typed was echoed and
-    // the prompt would otherwise stay on the same line as whatever comes next.
-  };
   options.output.write(prompt);
   if (terminal.setRawMode !== undefined) terminal.setRawMode(true);
   try {
@@ -158,7 +154,10 @@ async function askWithoutEcho(prompt: string, options: AskOptions): Promise<stri
   } finally {
     if (terminal.setRawMode !== undefined) terminal.setRawMode(wasRaw);
     asked.close();
+    // One newline of egma's own, because nothing the person typed was echoed
+    // and the prompt would otherwise stay on the same line as whatever comes
+    // next. In the `finally` with the echo, so an interrupted answer leaves
+    // the terminal exactly as it was found.
     options.output.write("\n");
-    hide();
   }
 }

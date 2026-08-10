@@ -30,15 +30,9 @@
  * and prints exactly what it set.
  */
 
-import { existsSync } from "node:fs";
 import path from "node:path";
 
-import {
-  compose,
-  containerOf,
-  DockerMissingError,
-  type ComposeOptions,
-} from "../self-host/compose.ts";
+import { compose, DockerMissingError, type ComposeOptions } from "../self-host/compose.ts";
 import {
   askPlainly,
   askSecret,
@@ -62,7 +56,6 @@ import {
 import {
   findWorkspace,
   NoPlatformWorkspaceError,
-  PLATFORM_DIRECTORY,
   readPlatformConfig,
   writePlatformConfig,
 } from "../self-host/workspace.ts";
@@ -619,14 +612,3 @@ function nonSecretFacts(plan: CarrierPlan): Record<string, string | null> {
 function normalizeNumber(given: string): string {
   return given.replace(/[\s()\-.]/g, "");
 }
-
-/** Whether a directory looks like a platform workspace, without throwing. */
-export function isPlatformWorkspace(directory: string): boolean {
-  try {
-    return existsSync(path.join(findWorkspace(directory), PLATFORM_DIRECTORY)) || true;
-  } catch {
-    return false;
-  }
-}
-
-export { containerOf };

@@ -79,19 +79,3 @@ export async function compose(
     child.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
   });
 }
-
-/**
- * What compose says one service's container is called, or `null`.
- *
- * Used to ask a container what it really holds, rather than to read the code
- * that intended to give it something.
- */
-export async function containerOf(
-  service: string,
-  options: ComposeOptions,
-): Promise<string | null> {
-  const answer = await compose(["ps", "-q", service], options);
-  if (answer.code !== 0) return null;
-  const id = answer.stdout.trim().split("\n")[0]?.trim() ?? "";
-  return id === "" ? null : id;
-}
