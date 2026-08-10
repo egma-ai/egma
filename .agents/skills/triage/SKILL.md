@@ -4,6 +4,13 @@ description: Move issues and external PRs through a state machine of triage role
 disable-model-invocation: true
 ---
 
+<!-- path-routing:start -->
+Repository configuration overrides this skill's default planning paths.
+If a Planning root is defined, resolve `CONTEXT.md`, `docs/adr/`,
+`docs/agents/`, `.scratch/`, and `.out-of-scope/` from that root.
+Skill-local paths remain unchanged.
+<!-- path-routing:end -->
+
 # Triage
 
 Move issues on the project issue tracker through a small state machine of triage roles.
