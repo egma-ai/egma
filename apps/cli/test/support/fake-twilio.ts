@@ -13,7 +13,7 @@
  */
 
 import { createServer, type Server } from "node:http";
-import { AddressInfo } from "node:net";
+import type { AddressInfo } from "node:net";
 
 export type FakeTwilioOptions = {
   /** Numbers the account already owns. Nothing else can be attached. */

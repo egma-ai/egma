@@ -150,10 +150,6 @@ const INSTANCE_SCOPED: ReadonlyMap<string, string> = new Map([
  *
  * A seventh name here is a decision somebody has to make on purpose.
  */
-const DEPLOYMENT_CONFIGURING = [
-  "seedDefaultJudge",
-];
-
 const WORK_DISPATCHING = [
   "claimGradingJobs",
   "claimSimulations",
@@ -177,10 +173,12 @@ const WORK_DISPATCHING = [
  * The rule enforces the second half of that the same way it does for work
  * dispatch: nothing here may be handed an `organizationId` or a `projectId`. A
  * function here that grew one would be an ordinary cross-tenant *write* wearing
- * an exemption, which is worse than the read the list below guards against.
+ * an exemption, which is worse than the read work dispatch guards against.
  *
  * A second name here is a decision somebody has to make on purpose.
  */
+const DEPLOYMENT_CONFIGURING = ["seedDefaultJudge"];
+
 /**
  * What a work-dispatching or deployment-configuring export may not be handed,
  * in any position: an argument named for a customer, or an object argument

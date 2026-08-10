@@ -112,6 +112,23 @@ describe("egma self-host up", () => {
       expect(run.stdout).toContain("phone: setup_required");
       expect(run.stdout).toContain(`connect: npx egma --url ${platform.url}`);
 
+      // Every service it started, named. Four of them — the simulator, the
+      // grader, the SIP gateway and its Redis — publish nothing and have no
+      // page to visit, so this line is the only sign a person gets that they
+      // are running at all.
+      const services = /^services: (.+)$/mu.exec(run.stdout)?.[1]?.split(" ") ?? [];
+      expect(services).toEqual([
+        "postgres",
+        "clickhouse",
+        "api",
+        "web",
+        "simulator",
+        "grader",
+        "livekit",
+        "livekit-sip",
+        "livekit-redis",
+      ]);
+
       const calls = await workspace.dockerCalls();
       // Everything, in one stack. No overlay named, nothing selected by hand.
       expect(calls).toContain("ARGS compose up -d --wait --wait-timeout 300\n");

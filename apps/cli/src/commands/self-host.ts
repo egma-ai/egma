@@ -36,7 +36,9 @@ import { compose, DockerMissingError, type ComposeOptions } from "../self-host/c
 import {
   askPlainly,
   askSecret,
+  keyHint,
   NoAnswerError,
+  StoppedError,
   PLAIN_VARIABLES,
   REFUSED_SECRET_ARGUMENTS,
   SECRET_VARIABLES,
@@ -93,8 +95,24 @@ const PLATFORM_IDENTITY_PATH = "/api/platform";
 const READY_TIMEOUT_MS = 300_000;
 const READY_POLL_MS = 2_000;
 
-/** Which services `self-host up` waits for. */
-const WAITED_FOR = ["postgres", "clickhouse", "api", "web", "livekit"] as const;
+/**
+ * Every service `self-host up` starts, in the order somebody would look for
+ * them. Named in full rather than summarised: four of these — the simulator,
+ * the grader, the SIP gateway and its Redis — publish nothing and have no page
+ * to visit, so a line naming them is the only sign a person gets that they are
+ * running at all.
+ */
+const STARTED = [
+  "postgres",
+  "clickhouse",
+  "api",
+  "web",
+  "simulator",
+  "grader",
+  "livekit",
+  "livekit-sip",
+  "livekit-redis",
+] as const;
 
 /** Which services phone configuration reaches, and therefore what is recreated. */
 const PHONE_SERVICES = ["api", "simulator", "grader"] as const;
@@ -114,6 +132,73 @@ export function isSelfHostInvocation(argv: readonly string[]): boolean {
   return argv[0] === "self-host";
 }
 
+/**
+ * What a self-host command was asked to do.
+ *
+ * Parsed here rather than by filtering out anything beginning with a dash,
+ * which is what this used to do and which was wrong in a way that took the one
+ * escape hatch away from the person who needed it most: the *value* of
+ * `--cwd /tmp/ws` does not begin with a dash, so it was read as part of the
+ * verb and `egma self-host up --cwd /tmp/ws` answered "does not know
+ * 'up /tmp/ws'" — while the refusal for not being in a platform workspace was
+ * telling people to use `--cwd`.
+ *
+ * Both spellings, because both are ordinary: `--cwd X` is what a person types
+ * and `--cwd=X` is what a script generates, and an option that silently does
+ * nothing in one of them is worse than one that does not exist.
+ */
+export type SelfHostInvocation = {
+  readonly verb: string;
+  readonly cwd: string | null;
+  readonly planOnly: boolean;
+  readonly approved: boolean;
+  readonly asJson: boolean;
+  /** Options this command does not know, by name only — never their value. */
+  readonly unknown: readonly string[];
+};
+
+const VALUED_OPTIONS = ["--cwd"] as const;
+const FLAGS = ["--plan", "--apply", "--yes", "--json"] as const;
+
+export function parseSelfHostArgs(argv: readonly string[]): SelfHostInvocation {
+  const words: string[] = [];
+  const unknown: string[] = [];
+  let cwd: string | null = null;
+  const flags = new Set<string>();
+
+  for (let index = 1; index < argv.length; index += 1) {
+    const argument = argv[index] as string;
+    if (!argument.startsWith("-")) {
+      words.push(argument);
+      continue;
+    }
+    const split = argument.indexOf("=");
+    const name = split === -1 ? argument : argument.slice(0, split);
+    const attached = split === -1 ? null : argument.slice(split + 1);
+
+    if ((VALUED_OPTIONS as readonly string[]).includes(name)) {
+      // `--cwd=X` carries its value; `--cwd X` takes the next word, and that
+      // word is consumed here so it can never be read as part of the verb.
+      cwd = attached ?? argv[(index += 1)] ?? null;
+      continue;
+    }
+    if ((FLAGS as readonly string[]).includes(name)) {
+      flags.add(name);
+      continue;
+    }
+    unknown.push(name);
+  }
+
+  return {
+    verb: words.join(" "),
+    cwd,
+    planOnly: flags.has("--plan") && !flags.has("--apply"),
+    approved: flags.has("--yes"),
+    asJson: flags.has("--json"),
+    unknown,
+  };
+}
+
 export async function runSelfHostCommand(options: SelfHostOptions): Promise<number> {
   const leaked = REFUSED_SECRET_ARGUMENTS.find((refused) =>
     options.argv.some((argument) => argument === refused || argument.startsWith(`${refused}=`)),
@@ -123,12 +208,21 @@ export async function runSelfHostCommand(options: SelfHostOptions): Promise<numb
     return SELF_HOST_EXIT.refused;
   }
 
-  const words = options.argv.slice(1).filter((word) => !word.startsWith("-"));
-  const verb = words.join(" ");
+  const invocation = parseSelfHostArgs(options.argv);
+  if (invocation.unknown.length > 0) {
+    // Only the name is said back. Something written as `--thing=value` may be
+    // carrying anything, and a refusal is no place to print it.
+    options.fail(
+      `egma self-host does not know the option ${invocation.unknown[0] as string}. ` +
+        "Run egma --help to see the ones it does.",
+    );
+    return SELF_HOST_EXIT.noWorkspace;
+  }
+  const verb = invocation.verb;
 
   try {
-    if (verb === "up") return await runUp(options);
-    if (verb === "phone setup") return await runPhoneSetup(options);
+    if (verb === "up") return await runUp(options, invocation);
+    if (verb === "phone setup") return await runPhoneSetup(options, invocation);
   } catch (error) {
     if (error instanceof NoPlatformWorkspaceError || error instanceof DockerMissingError) {
       options.out(`status: refused\nreason: ${error.message}`);
@@ -145,6 +239,16 @@ export async function runSelfHostCommand(options: SelfHostOptions): Promise<numb
       options.fail(error.message);
       return SELF_HOST_EXIT.refused;
     }
+    if (error instanceof StoppedError) {
+      // Ctrl-C at a question. The most likely first-run interaction in the
+      // whole command is "I do not have my token to hand", and it used to end
+      // in a Node stack trace — which reads as a bug in egma at the moment
+      // somebody was being careful. Nothing was written, and this says so.
+      options.out("status: stopped");
+      options.out("changed: nothing");
+      options.fail("Stopped. Nothing was written, here or at your carrier.");
+      return SELF_HOST_EXIT.interrupted;
+    }
     throw error;
   }
 
@@ -158,8 +262,11 @@ export async function runSelfHostCommand(options: SelfHostOptions): Promise<numb
 
 // -- up -----------------------------------------------------------------------
 
-async function runUp(options: SelfHostOptions): Promise<number> {
-  const workspace = findWorkspace(options.cwd);
+async function runUp(
+  options: SelfHostOptions,
+  invocation: SelfHostInvocation,
+): Promise<number> {
+  const workspace = findWorkspace(invocation.cwd ?? options.cwd);
   const stored = readPlatformConfig(workspace);
 
   // One address, decided here. The environment wins because a deployment
@@ -231,7 +338,7 @@ async function runUp(options: SelfHostOptions): Promise<number> {
   }
 
   options.out(`platform: ${platform.instanceId}`);
-  options.out(`services: ${WAITED_FOR.join(" ")}`);
+  options.out(`services: ${STARTED.join(" ")}`);
   options.out(`phone: ${platform.phoneState}`);
   if (platform.phoneMissing.length > 0) {
     options.out(`phone_missing: ${platform.phoneMissing.join(", ")}`);
@@ -298,27 +405,12 @@ async function waitForPlatform(
 
 // -- phone setup --------------------------------------------------------------
 
-type PhoneSetupMode = {
-  /** Read and show what would happen; write nothing, anywhere. */
-  readonly planOnly: boolean;
-  /** Approval given in the command, for a run with nobody watching. */
-  readonly approved: boolean;
-  /** Answer with one JSON document instead of lines. */
-  readonly asJson: boolean;
-};
-
-function modeOf(argv: readonly string[]): PhoneSetupMode {
-  const has = (flag: string): boolean => argv.includes(flag);
-  return {
-    planOnly: has("--plan") && !has("--apply"),
-    approved: has("--yes"),
-    asJson: has("--json"),
-  };
-}
-
-async function runPhoneSetup(options: SelfHostOptions): Promise<number> {
-  const workspace = findWorkspace(options.cwd);
-  const mode = modeOf(options.argv);
+async function runPhoneSetup(
+  options: SelfHostOptions,
+  invocation: SelfHostInvocation,
+): Promise<number> {
+  const workspace = findWorkspace(invocation.cwd ?? options.cwd);
+  const mode = invocation;
   const stored = readPlatformConfig(workspace);
   const ask: AskOptions = {
     env: options.env,
@@ -343,16 +435,29 @@ async function runPhoneSetup(options: SelfHostOptions): Promise<number> {
   );
   // The three that are. Never an argument, never echoed, never written to a
   // receipt, and the first of them never written anywhere at all.
-  const authToken = await askSecret(
+  const authAnswer = await askSecret(
     "twilio-auth-token",
     "Twilio Auth Token (used by this command only, never kept)",
     ask,
   );
-  const openaiKey = await askSecret(
+  const openaiAnswer = await askSecret(
     "openai-api-key",
     "OpenAI API key (the persona's voice, its ears, its words and the default judge)",
     ask,
   );
+  const authToken = authAnswer.value;
+  const openaiKey = openaiAnswer.value;
+
+  // Which key this is about to configure the whole platform with, and where it
+  // came from. `OPENAI_API_KEY` is a variable most developers already export,
+  // so a run that reads it asks nothing and looks exactly like a run that was
+  // told — and a stale exported key surfaces an hour later as a provider
+  // refusing every turn rather than as a mistake anybody could see being made.
+  const credentialSources = {
+    twilio_auth_token_from: authAnswer.from,
+    openai_key_from: openaiAnswer.from,
+    openai_key_hint: keyHint(openaiKey),
+  } as const;
 
   const secrets = [authToken, openaiKey] as const;
   const access = {
@@ -376,6 +481,7 @@ async function runPhoneSetup(options: SelfHostOptions): Promise<number> {
 
   const planFacts = {
     command: "self-host phone setup",
+    ...credentialSources,
     account_sid: plan.accountSid,
     source_number: plan.sourceNumber,
     source_number_sid: plan.sourceNumberSid,
@@ -387,36 +493,30 @@ async function runPhoneSetup(options: SelfHostOptions): Promise<number> {
   } as const;
 
   if (mode.planOnly) {
-    const receiptFile = fileReceipt(
-      workspace,
-      {
-        command: "self-host phone setup --plan",
-        at: new Date().toISOString(),
-        result: "planned",
-        facts: nonSecretFacts(plan),
-        steps: plan.steps.map((step) => `${step.action}: ${step.detail}`),
-      },
+    // **No receipt, and no file of any kind.** Planning reads provider state
+    // and changes neither provider nor local state — a receipt is local state,
+    // and one written here made `"changed": "nothing"` and a path to a file
+    // that had just been created two fields of the same answer. It was also
+    // what created `.egma-platform` at the default mode, before the write that
+    // makes it private ever ran.
+    answer(
+      options,
+      mode,
+      { ...planFacts, mode: "plan", status: "planned", changed: "nothing" },
       secrets,
     );
-    answer(options, mode, {
-      ...planFacts,
-      mode: "plan",
-      status: "planned",
-      changed: "nothing",
-      receipt: path.relative(workspace, receiptFile),
-    });
     return SELF_HOST_EXIT.ok;
   }
 
   if (!mode.approved) {
     const approved = await askApproval(options, ask);
     if (!approved) {
-      answer(options, mode, {
-        ...planFacts,
-        mode: "apply",
-        status: "not_approved",
-        changed: "nothing",
-      });
+      answer(
+        options,
+        mode,
+        { ...planFacts, mode: "apply", status: "not_approved", changed: "nothing" },
+        secrets,
+      );
       return SELF_HOST_EXIT.notApproved;
     }
   }
@@ -510,16 +610,16 @@ async function runPhoneSetup(options: SelfHostOptions): Promise<number> {
       // exists without being the second place it exists.
       sip_password: "minted, not recorded",
       speech_provider: "openai",
+      openai_key_hint: credentialSources.openai_key_hint,
+      openai_key_from: credentialSources.openai_key_from,
       configuration_file: path.relative(workspace, configFile),
       platform_url: address,
       phone_state: readiness ?? "unknown",
     },
     steps: applied.steps.map((step) => `${step.action}: ${step.detail}`),
   };
-  const receiptFile = fileReceipt(workspace, receipt, [
-    ...secrets,
-    applied.sipPassword,
-  ]);
+  const allSecrets = [...secrets, applied.sipPassword];
+  const receiptFile = fileReceipt(workspace, receipt, allSecrets);
 
   const done = {
     ...planFacts,
@@ -534,18 +634,23 @@ async function runPhoneSetup(options: SelfHostOptions): Promise<number> {
   } as const;
 
   if (readiness !== "ready") {
-    answer(options, mode, {
+    answer(
+      options,
+      mode,
+      {
       ...done,
       status: "failed",
       reason:
         "the carrier is set up and the configuration is written, but this " +
         "platform did not come back reporting phone readiness. Run the same command " +
         "again — it reuses everything it made and creates no second copy of anything.",
-    });
+      },
+      allSecrets,
+    );
     return SELF_HOST_EXIT.refused;
   }
 
-  answer(options, mode, { ...done, status: "ready" });
+  answer(options, mode, { ...done, status: "ready" }, allSecrets);
   options.fail("");
   options.fail("This egma can place phone calls.");
   options.fail(
@@ -606,13 +711,28 @@ async function askApproval(
  */
 function answer(
   options: SelfHostOptions,
-  mode: PhoneSetupMode,
+  mode: SelfHostInvocation,
   facts: Readonly<Record<string, unknown>>,
+  /**
+   * The secrets this command is holding. Every answer is swept before it is
+   * written, not only the plan: an asymmetric guard in a module whose whole
+   * argument is that the guard is not a review habit is a guard that will
+   * eventually be the wrong half.
+   */
+  secrets: readonly (string | undefined)[] = [],
 ): void {
   if (mode.asJson) {
-    options.out(JSON.stringify(facts, null, 2));
+    const document = JSON.stringify(facts, null, 2);
+    sweptOf(document, secrets);
+    options.out(document);
     return;
   }
+  sweptOf(
+    Object.entries(facts)
+      .map(([name, value]) => `${name}: ${JSON.stringify(value)}`)
+      .join("\n"),
+    secrets,
+  );
   for (const [name, value] of Object.entries(facts)) {
     if (name === "steps") {
       for (const step of value as readonly CarrierStep[]) {

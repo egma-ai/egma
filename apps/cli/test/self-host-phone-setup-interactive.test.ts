@@ -161,4 +161,46 @@ describe("egma self-host phone setup, with somebody watching", () => {
 
     expect(await terminal.exited).toBe(5);
   });
+
+  it("stops with one sentence when Ctrl-C lands on a secret prompt", async () => {
+    // The single most likely first-run interaction in the whole command is
+    // "I do not have my token to hand", and it used to end in a Node stack
+    // trace and `Node.js v24.16.0` — which reads as a bug in egma at the exact
+    // moment somebody was being careful with a credential.
+    terminal = runInTerminal({
+      command: process.execPath,
+      args: [CLI_ENTRY, "self-host", "phone", "setup", "--apply"],
+      cwd: workspace.dir,
+      env: {
+        ...process.env,
+        PATH: `${workspace.binDir}:${process.env.PATH ?? ""}`,
+        EGMA_TWILIO_API_ROOT: twilio.apiRoot,
+        EGMA_TWILIO_TRUNKING_ROOT: twilio.trunkingRoot,
+        EGMA_BASE_URL: platform.url,
+        TWILIO_ACCOUNT_SID: "",
+        TWILIO_AUTH_TOKEN: "",
+        OPENAI_API_KEY: "",
+        EGMA_PHONE_SOURCE_NUMBER: "",
+      },
+    });
+
+    await showing(terminal, "Twilio Account SID");
+    terminal.write(`${ACCOUNT_SID}\r`);
+    await showing(terminal, "already owns");
+    terminal.write(`${SOURCE_NUMBER}\r`);
+    await showing(terminal, "Twilio Auth Token");
+
+    // Ctrl-C, which in raw mode is a byte rather than a signal.
+    terminal.write("\u0003");
+
+    await showing(terminal, "Stopped. Nothing was written");
+    const everything = `${terminal.screen()}\n${terminal.scrollback()}`;
+    expect(everything).not.toContain("Node.js v");
+    expect(everything).not.toContain("at ReadStream");
+
+    // 130 is what a shell means by "stopped part way", and every other verb in
+    // this CLI already answers with it.
+    expect(await terminal.exited).toBe(130);
+    expect(twilio.writes).toEqual([]);
+  });
 });

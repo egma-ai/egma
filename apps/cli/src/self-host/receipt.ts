@@ -24,7 +24,7 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { PLATFORM_DIRECTORY } from "./workspace.ts";
+import { PLATFORM_DIRECTORY, platformDirectory } from "./workspace.ts";
 
 /** Where receipts pile up, newest last. */
 export const RECEIPTS_DIRECTORY = "receipts";
@@ -92,8 +92,10 @@ export function fileReceipt(
   const document = render(receipt);
   sweptOf(document, secrets);
 
-  const directory = path.join(workspace, PLATFORM_DIRECTORY, RECEIPTS_DIRECTORY);
-  mkdirSync(directory, { recursive: true });
+  // Through the one door that makes the platform directory private, so that
+  // whichever write happens to be first cannot decide its mode for good.
+  const directory = path.join(platformDirectory(workspace), RECEIPTS_DIRECTORY);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
   const stamp = receipt.at.replace(/[:.]/g, "-");
   const file = path.join(directory, `${stamp}-${receipt.command.replace(/\s+/g, "-")}.json`);
   writeFileSync(file, document, { mode: 0o644 });

@@ -623,28 +623,18 @@ async function runConnect(
   }
 }
 
-/** `--cwd` for a self-host command, read without the repository parser. */
-function selfHostCwd(argv: readonly string[]): string {
-  const named = argv.indexOf("--cwd");
-  const value = named === -1 ? undefined : argv[named + 1];
-  return path.resolve(value ?? process.cwd());
-}
-
 export async function main(argv: readonly string[]): Promise<void> {
-  // Before anything is parsed or printed: an argument that would have carried
-  // a secret is refused by name, and its value is never repeated back.
-  const leaked = refusedArgumentIn(argv);
-  if (leaked !== null) {
-    process.stderr.write(`${argumentRefusal(leaked)}\n`);
-    process.exitCode = 1;
-    return;
-  }
-
   // The platform operator's half of the CLI, and the one thing here that never
   // reads a repository or resolves a platform binding: `self-host` operates a
   // deployment, and a deployment is not something an agent repository points
-  // at. It is settled before the arguments are parsed for the other half,
-  // because none of those flags mean anything here.
+  // at.
+  //
+  // **It is settled before the repository's own secret-argument refusal**, and
+  // that ordering is not tidiness. Both halves refuse a secret in an argument,
+  // and the repository's refusal talks about a Retell key and `egma connect`.
+  // Answering a platform-workspace command with advice about a different
+  // product, at the exact moment somebody is holding a credential, sends them
+  // to the wrong place while the thing they typed is still in their history.
   if (isSelfHostInvocation(argv)) {
     const controller = new AbortController();
     const onSignal = (): void => controller.abort("interrupt");
@@ -653,7 +643,7 @@ export async function main(argv: readonly string[]): Promise<void> {
     try {
       process.exitCode = await runSelfHostCommand({
         argv,
-        cwd: selfHostCwd(argv),
+        cwd: process.cwd(),
         env: process.env,
         stdin: process.stdin,
         stdout: process.stdout,
@@ -665,6 +655,15 @@ export async function main(argv: readonly string[]): Promise<void> {
       process.off("SIGINT", onSignal);
       process.off("SIGTERM", onSignal);
     }
+    return;
+  }
+
+  // Before anything is parsed or printed: an argument that would have carried
+  // a secret is refused by name, and its value is never repeated back.
+  const leaked = refusedArgumentIn(argv);
+  if (leaked !== null) {
+    process.stderr.write(`${argumentRefusal(leaked)}\n`);
+    process.exitCode = 1;
     return;
   }
 

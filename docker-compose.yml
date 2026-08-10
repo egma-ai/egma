@@ -497,7 +497,14 @@ services:
         ws_url: ws://livekit:7880
         redis:
           address: livekit-redis:6379
-        sip_port: 5060
+        # The port the gateway listens on **and announces**. It moves with
+        # the published port below rather than being fixed at 5060, because
+        # the two are one number: a gateway that listens on 5060 while the
+        # host publishes 5070 tells the carrier to send its in-dialog
+        # requests — a BYE, a re-INVITE — to a port nothing answers on, and
+        # what that looks like is a call that connects and then will not hang
+        # up cleanly.
+        sip_port: ${EGMA_LIVEKIT_SIP_PORT:-5060}
         rtp_port: ${EGMA_LIVEKIT_SIP_RTP_PORT_START:-10000}-${EGMA_LIVEKIT_SIP_RTP_PORT_END:-10020}
         # What address to write into the SDP the carrier reads. Set
         # EGMA_LIVEKIT_SIP_EXTERNAL_IP when you know it — an elastic IP, a
@@ -517,8 +524,8 @@ services:
       # gateway opened, so this is published for what comes *after* the
       # answer — a carrier's BYE and its in-dialog requests go to the
       # address the gateway advertised, not to that flow.
-      - "${EGMA_LIVEKIT_SIP_PORT:-5060}:5060/udp"
-      - "${EGMA_LIVEKIT_SIP_PORT:-5060}:5060/tcp"
+      - "${EGMA_LIVEKIT_SIP_PORT:-5060}:${EGMA_LIVEKIT_SIP_PORT:-5060}/udp"
+      - "${EGMA_LIVEKIT_SIP_PORT:-5060}:${EGMA_LIVEKIT_SIP_PORT:-5060}/tcp"
       # The audio. Narrow, and the same range the config above hands out —
       # they are two halves of one number and moving one without the other
       # is a call that rings and stays silent.

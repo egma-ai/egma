@@ -44,15 +44,57 @@ export const REFUSED_SECRET_ARGUMENTS = [
   "--password",
 ];
 
-/** What a developer is told when they tried to pass a secret as an argument. */
+/**
+ * What a developer is told when they tried to pass a secret as an argument.
+ *
+ * The advice deliberately does not say `TWILIO_AUTH_TOKEN=… egma self-host …`.
+ * An inline assignment is part of the command line, and both zsh and bash write
+ * the whole command line to history — so recommending one, in a refusal whose
+ * stated reason is that arguments are kept in shell history, would be telling
+ * somebody to do the thing they were just refused for.
+ */
 export function secretArgumentRefusal(argument: string): string {
   return [
     `egma will not take a secret in ${argument}. Command arguments are readable by every process on this machine and are kept in shell history.`,
     "",
-    "Type it when setup asks, or put it in the environment of this one command:",
+    "Run it and type the value when setup asks. Nothing you type is echoed.",
     "",
-    `  ${SECRET_VARIABLES["twilio-auth-token"]}=… ${SECRET_VARIABLES["openai-api-key"]}=… egma self-host phone setup --apply --yes`,
+    "For a run with nobody watching, export it from a file first, so the value",
+    "is never a word in any command:",
+    "",
+    `  export ${SECRET_VARIABLES["twilio-auth-token"]}="$(cat twilio-token.txt)"`,
+    `  export ${SECRET_VARIABLES["openai-api-key"]}="$(cat openai-key.txt)"`,
+    "  egma self-host phone setup --apply --yes",
   ].join("\n");
+}
+
+/**
+ * Somebody pressed Ctrl-C at a question.
+ *
+ * Its own type because the command above has to tell it apart from a failure:
+ * "I do not have my token to hand" is the most likely first-run interaction in
+ * the whole command, and it ends in one sentence and exit 130 rather than in a
+ * Node stack trace, which reads as a bug in egma at the moment somebody was
+ * being careful.
+ */
+export class StoppedError extends Error {
+  constructor() {
+    super("stopped at a question");
+    this.name = "StoppedError";
+  }
+}
+
+/**
+ * The last characters of a key, so two keys can be told apart without either
+ * being shown.
+ *
+ * The same hint the platform already keeps beside a project's judge, for the
+ * same reason: a key taken silently from an exported variable is the one a
+ * developer has forgotten they still have, and it surfaces much later as a
+ * provider refusing every turn. Four characters name it and open nothing.
+ */
+export function keyHint(key: string): string {
+  return key.length <= 4 ? "…" : `…${key.slice(-4)}`;
 }
 
 export class NoAnswerError extends Error {
@@ -72,20 +114,34 @@ export type AskOptions = {
   readonly signal?: AbortSignal | undefined;
 };
 
+/** An answer, and where it came from — never the value itself in a log. */
+export type Answered = {
+  readonly value: string;
+  /** `typed` at a keyboard, or the environment variable it was taken from. */
+  readonly from: string;
+};
+
 /**
  * One secret, from the environment if it is there and from the keyboard if it
  * is not. Returned and never printed, never logged, never put in an argument.
+ *
+ * **It says where it took the answer from.** `OPENAI_API_KEY` is a variable
+ * most developers already export, so a run that reads it asks nothing and looks
+ * exactly like a run that was told — and a stale exported key configures the
+ * whole platform silently, surfacing an hour later as a provider refusing every
+ * turn. Naming the source and the key's last four characters costs one line and
+ * makes that visible at the moment it happens.
  */
 export async function askSecret(
   name: SecretName,
   what: string,
   options: AskOptions,
-): Promise<string> {
+): Promise<Answered> {
   const variable = SECRET_VARIABLES[name];
   const held = options.env[variable]?.trim();
-  if (held !== undefined && held !== "") return held;
+  if (held !== undefined && held !== "") return { value: held, from: variable };
   if (options.input.isTTY !== true) throw new NoAnswerError(what, variable);
-  return askWithoutEcho(`${what}: `, options);
+  return { value: await askWithoutEcho(`${what}: `, options), from: "typed" };
 }
 
 /** One ordinary answer, which is not a secret and may be shown as it is typed. */
@@ -135,7 +191,7 @@ async function askWithoutEcho(prompt: string, options: AskOptions): Promise<stri
       };
       const onAbort = (): void => {
         done();
-        reject(new Error("interrupted"));
+        reject(new StoppedError());
       };
       const onData = (chunk: Buffer): void => {
         for (const byte of chunk) {
@@ -143,7 +199,7 @@ async function askWithoutEcho(prompt: string, options: AskOptions): Promise<stri
           // else is going to turn it into one.
           if (byte === 0x03) {
             done();
-            reject(new Error("interrupted"));
+            reject(new StoppedError());
             return;
           }
           if (byte === 0x0d || byte === 0x0a) {

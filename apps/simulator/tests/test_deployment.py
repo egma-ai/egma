@@ -236,3 +236,28 @@ def test_the_gateway_and_its_published_ports_agree_on_the_rtp_range():
     assert len(set(ranges)) == 1, (
         f"the gateway's RTP range and the published one differ: {set(ranges)}"
     )
+
+
+def test_the_gateway_listens_on_the_port_it_is_published_on():
+    """The SIP port is one number, inside the container and out.
+
+    The gateway *announces* the port it listens on, so a gateway listening
+    on 5060 behind a host publishing 5070 tells the carrier to send its
+    in-dialog requests — a BYE, a re-INVITE — to a port nothing answers
+    on. What that looks like is a call that connects and then will not
+    hang up cleanly, which is a long way from the variable that caused it.
+
+    Found by running a platform on a moved port and reading the gateway's
+    own startup line.
+    """
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    variable = r"\$\{EGMA_LIVEKIT_SIP_PORT:-5060\}"
+    assert re.search(rf"^\s*sip_port: {variable}$", compose, re.MULTILINE), (
+        "the gateway's sip_port is fixed while its published port moves; the "
+        "two are one number"
+    )
+    published = re.findall(rf'"{variable}:{variable}/(?:udp|tcp)"', compose)
+    assert len(published) == 2, (
+        "the published SIP port does not map to the same port inside the "
+        f"container; found {len(published)} of the two mappings"
+    )

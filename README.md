@@ -20,9 +20,16 @@ npx egma self-host up
 
 That starts the whole platform and prints the address an agent repository
 points at. Nobody runs a migration step, because there isn't one — the API
-applies its migrations while it boots. `docker compose up` starts exactly the
-same containers; `egma self-host up` also waits for the platform to answer for
-itself and tells you what to type next.
+applies its migrations while it boots.
+
+`docker compose up` starts the same containers, and is not quite the same
+thing. `egma self-host up` also waits for the platform to answer for itself,
+tells you what to type next, and tries once more if the first attempt fails —
+which on a workspace that has never been started it can, because ClickHouse's
+first boot creates its database and restarts itself, and its health check
+answers during the server that is on its way down. Nothing restarts the API
+when that happens, so the bare compose path needs the second `up` typed by
+hand.
 
 | Service | URL |
 | --- | --- |
@@ -389,9 +396,17 @@ before you expect a conversation.
 egma converts what it receives down to the band the line really carries. That
 conversion is not decoration: audio relabelled instead of converted is a voice
 three times too deep and three times too slow, and every measurement taken off
-it is wrong by the same factor. What a simulation's record stamps as its band is
-read back off the audio that really flowed, never copied from what was asked
-for.
+it is wrong by the same factor.
+
+What a simulation's record stamps as its band is read off the frames that
+arrived rather than copied from a constant in egma — but be clear about what
+that does and does not prove. The bridge resamples what the carrier sends down
+to the band the pipeline was assembled at *before* egma sees a frame, so on a
+phone call the measured band is 8 kHz whether the carrier negotiated narrowband
+or G.722. The measurement catches egma's own path going wrong; it cannot report
+what the carrier chose. That is the safe direction — a wideband leg is
+understated rather than a narrowband one overstated — and it is the reason a
+band is never compared across connection types.
 
 Every variable this section mentions is in `.env.example` with its default and
 whether it is required. Anything set to something unusable stops the simulator

@@ -90,20 +90,37 @@ export function readPlatformConfig(workspace: string): Record<string, string> {
 }
 
 /**
+ * The workspace's platform directory, made if it is not there and made private
+ * either way.
+ *
+ * **The `chmod` is the point, not the `mkdir`.** `mkdirSync`'s `mode` applies
+ * only when it creates the directory, so whichever write happened to be first
+ * decided the mode for good — and the documented order runs `--plan` before
+ * `--apply`, so the directory was created by the receipt at the default 0755
+ * and the later private write never tightened it. This is the one door both
+ * writers go through, and it sets the mode every time.
+ */
+export function platformDirectory(workspace: string): string {
+  const directory = path.join(workspace, PLATFORM_DIRECTORY);
+  mkdirSync(directory, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
+  chmodSync(directory, PRIVATE_DIRECTORY_MODE);
+  return directory;
+}
+
+/**
  * Write the platform's configuration, replacing whatever was there.
  *
  * Created private and kept private: it holds the SIP password egma minted and
  * the provider key the deployment speaks with, and a mode is set on every write
  * rather than only at creation, so a file somebody loosened is tightened again
- * the next time setup runs.
+ * the next time setup runs. The directory it sits in is held the same way.
  */
 export function writePlatformConfig(
   workspace: string,
   values: Record<string, string>,
   { header }: { readonly header: readonly string[] },
 ): string {
-  const directory = path.join(workspace, PLATFORM_DIRECTORY);
-  mkdirSync(directory, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
+  platformDirectory(workspace);
   const file = platformConfigPath(workspace);
   const body = [
     ...header.map((line) => (line === "" ? "#" : `# ${line}`)),
