@@ -36,6 +36,7 @@ import { compose, DockerMissingError, type ComposeOptions } from "../self-host/c
 import {
   askPlainly,
   askSecret,
+  asStop,
   keyHint,
   NoAnswerError,
   StoppedError,
@@ -694,6 +695,10 @@ async function askApproval(
       .trim()
       .toLowerCase();
     return answer === "y" || answer === "yes";
+  } catch (stopped) {
+    // Ctrl-C over the approval question is the same stop as Ctrl-C over any
+    // other, and nothing has been written to the carrier at this point.
+    throw asStop(stopped);
   } finally {
     asked.close();
   }

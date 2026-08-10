@@ -144,7 +144,15 @@ export async function askSecret(
   return { value: await askWithoutEcho(`${what}: `, options), from: "typed" };
 }
 
-/** One ordinary answer, which is not a secret and may be shown as it is typed. */
+/**
+ * One ordinary answer, which is not a secret and may be shown as it is typed.
+ *
+ * Ctrl-C here goes through `readline`, which raises its own `AbortError`
+ * rather than the stop the raw reader below raises — and an interruption at
+ * the *first* question, which is what this is, is at least as likely as one at
+ * a secret. Both become the same stop, so the command above has one thing to
+ * catch and a person gets one sentence either way.
+ */
 export async function askPlainly(
   variable: string,
   what: string,
@@ -156,9 +164,23 @@ export async function askPlainly(
   const asked = createInterface({ input: options.input, output: options.output });
   try {
     return (await asked.question(`${what}: `, { signal: options.signal })).trim();
+  } catch (stopped) {
+    throw asStop(stopped);
   } finally {
     asked.close();
   }
+}
+
+/**
+ * Somebody's interruption, whichever shape it arrived in.
+ *
+ * `readline` raises an `AbortError` carrying `ABORT_ERR`, both when it reads
+ * Ctrl-C itself and when the signal this command installs aborts it. Neither is
+ * a failure worth a stack trace.
+ */
+export function asStop(error: unknown): unknown {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === "ABORT_ERR" ? new StoppedError() : error;
 }
 
 /**

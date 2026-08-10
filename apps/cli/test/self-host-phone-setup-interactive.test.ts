@@ -162,7 +162,13 @@ describe("egma self-host phone setup, with somebody watching", () => {
     expect(await terminal.exited).toBe(5);
   });
 
-  it("stops with one sentence when Ctrl-C lands on a secret prompt", async () => {
+  it.each([
+    // The first question of all, read through readline, which raises its own
+    // AbortError; and a secret question, read through the raw reader, which
+    // raises the stop directly. Two code paths, one sentence, one exit code.
+    { at: "the first question", answerFirst: false, showing: "Twilio Account SID" },
+    { at: "a secret question", answerFirst: true, showing: "Twilio Auth Token" },
+  ])("stops with one sentence when Ctrl-C lands on $at", async ({ answerFirst, showing: prompt }) => {
     // The single most likely first-run interaction in the whole command is
     // "I do not have my token to hand", and it used to end in a Node stack
     // trace and `Node.js v24.16.0` — which reads as a bug in egma at the exact
@@ -184,13 +190,15 @@ describe("egma self-host phone setup, with somebody watching", () => {
       },
     });
 
-    await showing(terminal, "Twilio Account SID");
-    terminal.write(`${ACCOUNT_SID}\r`);
-    await showing(terminal, "already owns");
-    terminal.write(`${SOURCE_NUMBER}\r`);
-    await showing(terminal, "Twilio Auth Token");
+    if (answerFirst) {
+      await showing(terminal, "Twilio Account SID");
+      terminal.write(`${ACCOUNT_SID}\r`);
+      await showing(terminal, "already owns");
+      terminal.write(`${SOURCE_NUMBER}\r`);
+    }
+    await showing(terminal, prompt);
 
-    // Ctrl-C, which in raw mode is a byte rather than a signal.
+    // Ctrl-C, which at a secret prompt is a byte rather than a signal.
     terminal.write("\u0003");
 
     await showing(terminal, "Stopped. Nothing was written");
