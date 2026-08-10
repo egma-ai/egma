@@ -602,17 +602,53 @@ async function register(
       // is the whole answer: the next pass finds whatever is there now.
       case "not-found":
         continue;
-      // Nothing here names a connection, so the platform picks the first free
-      // `<type>-<n>` itself and cannot hand back a name already held. Reaching
-      // this means the platform's naming and this build's disagree, and going
-      // round again would register a *second agent* rather than fix it.
-      case "name-taken":
+      /**
+       * Nothing here names a connection, so the platform picks the first free
+       * `<type>-<n>` itself. There is exactly one ordinary way it can still
+       * answer that the name is held: **two connects adding the same reach at
+       * the same instant.** Both got past the check above while neither had
+       * written anything, then one lost the connection-name index.
+       *
+       * The loser's answer is a *reuse*, and it is read rather than assumed:
+       * the winner has committed by the time the index refused this write, so
+       * the agent is read again and the connection that is now there answers.
+       * That is exactly what the same race one level up already does — two
+       * simultaneous registrations settle to one agent because the loser waits
+       * on the index and then reads committed work — and doing it differently
+       * here would tell a developer their egma is out of date when the only
+       * thing that happened is that their other terminal got there first.
+       *
+       * The out-of-date sentence is kept for the case it was written for: the
+       * name really is held and nothing on the agent is the reach that was
+       * refused, which means the platform names connections in a way this
+       * build cannot predict.
+       */
+      case "name-taken": {
+        const now = await readAgent(found.agent.id, platform);
+        if (options.signal.aborted) return { kind: "interrupted" };
+        if (now.kind === "not-authenticated") return notSignedIn;
+        if (now.kind === "refused" || now.kind === "unreachable") {
+          return { kind: "failed", reason: now.reason };
+        }
+        if (now.kind === "not-found") continue;
+
+        const raced = now.connections.find((one) =>
+          isTheSameReach(one, selected.connection),
+        );
+        if (raced !== undefined) {
+          return {
+            kind: "registered",
+            registered: { result: "reused", agent: now.agent, connection: raced },
+            registration: { agent: "reused", connection: "reused" },
+          };
+        }
         return {
           kind: "failed",
           reason:
-            `egma would not name the new connection on ${held.agent.name}, ` +
+            `egma would not name the new connection on ${now.agent.name}, ` +
             "and nothing else was changed. Check that this egma is up to date.",
         };
+      }
       case "refused":
       case "unreachable":
         return { kind: "failed", reason: added.reason };

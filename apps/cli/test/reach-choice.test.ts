@@ -113,7 +113,7 @@ class ScriptedUI extends HeadlessUI {
   }
 }
 
-async function run(answers: Answers) {
+async function run(answers: Answers, fetchImpl?: typeof fetch) {
   const ui = new ScriptedUI(answers);
   const { report, connected } = await connectStep({
     ui,
@@ -126,8 +126,37 @@ async function run(answers: Answers) {
     repoPrompts: null,
     signal: new AbortController().signal,
     retell: { url: retell?.url ?? "http://127.0.0.1:1" },
+    ...(fetchImpl === undefined ? {} : { fetchImpl }),
   });
   return { ui, report, connected };
+}
+
+/**
+ * The other terminal, getting there first.
+ *
+ * The first attempt to attach a connection is really made — so the platform
+ * really holds it, exactly as it would if a second `connect` had won — and then
+ * this run is told the name is taken, which is what the loser of that race is
+ * told. Nothing is faked but the timing.
+ */
+function losingTheRace(): typeof fetch {
+  let raced = false;
+  return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const where = typeof input === "string" ? input : String(input);
+    if (raced || init?.method !== "POST" || !where.endsWith("/connections")) {
+      return fetch(input, init);
+    }
+    raced = true;
+    // The winner's write, made through the same door and committed.
+    await fetch(input, init);
+    return new Response(
+      JSON.stringify({
+        error: "name_taken",
+        message: 'a connection named "phone-1" already exists on this agent',
+      }),
+      { status: 409, headers: { "content-type": "application/json" } },
+    );
+  }) as typeof fetch;
 }
 
 describe("choosing the phone", () => {
@@ -411,6 +440,41 @@ describe("running it twice", () => {
     expect(text.connected?.registered.agent.id).not.toBe(
       phone.connected?.registered.agent.id,
     );
+  });
+
+  /**
+   * Two terminals attaching the same reach at the same instant.
+   *
+   * Both get past the check that says the reach is not there yet, because
+   * neither has written anything when either looks. One then loses the
+   * connection-name index — and the right answer for the loser is the
+   * connection the winner just wrote, because that is what it was going to
+   * create. Telling them their egma is out of date would send a developer to
+   * check a version when the only thing that happened is that their other
+   * terminal got there first.
+   */
+  it("reads the winner's connection as a reuse when it loses the race to attach", async () => {
+    retell = await startFakeRetell(ACCOUNT);
+
+    const text = await run({ reach: "text" });
+    const phone = await run({ reach: "phone" }, losingTheRace());
+
+    expect(phone.report.kind).toBe("connected");
+    expect(phone.connected?.registration).toEqual({
+      agent: "reused",
+      connection: "reused",
+    });
+    expect(phone.connected?.registered.agent.id).toBe(text.connected?.registered.agent.id);
+    expect(phone.connected?.registered.connection.name).toBe("phone-1");
+    expect(phone.connected?.number).toBe(DIALLED);
+
+    // One agent, one connection each way, and no second phone connection left
+    // behind by the write that lost.
+    expect(platform.registered.agents).toHaveLength(1);
+    expect(platform.registered.connections.map((one) => one.name)).toEqual([
+      "retell-1",
+      "phone-1",
+    ]);
   });
 
   it("joins a phone-only agent when the number is one Retell routes to this agent", async () => {
