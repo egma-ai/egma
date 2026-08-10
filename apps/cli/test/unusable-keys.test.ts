@@ -13,7 +13,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -113,6 +113,48 @@ it("leaves the damaged file exactly as it was, on every one of them", async () =
   for (const verb of ["login", "connect", "push", "pull", "run"]) {
     await egma([verb, "--cwd", workspace.dir]);
   }
-  const { readFile } = await import("node:fs/promises");
   expect(await readFile(workspace.credentialsFile, "utf8")).toBe(DAMAGED);
 });
+
+/**
+ * The other way a keys file stops a command: it is there, it is perfectly
+ * well-formed, and this machine cannot open it.
+ *
+ * Told the same way as a damaged one, because it is the same fact about the
+ * same file — and proved through the real command rather than reasoned about,
+ * because the value of a refusal is entirely in whether it arrives.
+ *
+ * Skipped only for a user who can read anything, which cannot be staged for.
+ */
+it.skipIf(process.getuid?.() === 0)(
+  "says the same thing about a keys file it cannot open",
+  async () => {
+    const readable = `${JSON.stringify(
+      { version: 1, platforms: { "https://one.example": { key: "egma_sk_one" } } },
+      null,
+      2,
+    )}\n`;
+    await writeFile(workspace.credentialsFile, readable, "utf8");
+    await chmod(workspace.credentialsFile, 0o000);
+
+    try {
+      // `login` writes and `push` reads, so both doors are checked.
+      for (const verb of ["login", "push"]) {
+        const result = await egma([verb, "--cwd", workspace.dir]);
+        const shown = `${result.stdout}${result.stderr}`;
+
+        expect(result.code, verb).toBe(1);
+        expect(result.stdout, verb).toContain(`status: ${KEYS_UNUSABLE}`);
+        expect(result.stderr, verb).toContain(workspace.credentialsFile);
+        expect(shown, verb).not.toMatch(/^\s+at /mu);
+        expect(shown, verb).not.toContain("EACCES");
+        expect(shown, verb).not.toContain("[cause]");
+      }
+    } finally {
+      await chmod(workspace.credentialsFile, 0o600);
+    }
+
+    // And the key that was in there is still in there.
+    expect(await readFile(workspace.credentialsFile, "utf8")).toBe(readable);
+  },
+);

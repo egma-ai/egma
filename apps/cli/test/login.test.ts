@@ -7,8 +7,18 @@
  * screen, what landed on disk, and what the file it landed in is readable by.
  */
 
-import { chmod, lstat, mkdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
+import process from "node:process";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -589,6 +599,61 @@ describe("writing the key down", () => {
     await writeCredentials(workspace.credentialsFile, held);
     expect(await readCredentials(workspace.credentialsFile, held.url)).toEqual(held);
   });
+
+  /**
+   * A file egma cannot open is not a file that is not there.
+   *
+   * Only `ENOENT` means nobody has signed in yet. Everything else — a
+   * permission change, a directory standing where the file goes — means the
+   * keys exist and cannot be seen, and the write merges what it reads: treat
+   * that as an empty file and the rename replaces every platform's key with
+   * whichever one this run happened to be writing.
+   *
+   * A directory is used here because no user, root included, can read one as a
+   * file, so this half of the proof holds wherever it is run.
+   */
+  it("refuses a keys file it cannot open, rather than taking it for an absent one", async () => {
+    await mkdir(workspace.credentialsFile, { recursive: true });
+
+    await expect(
+      readCredentials(workspace.credentialsFile, held.url),
+    ).rejects.toBeInstanceOf(CredentialsFileUnreadableError);
+    await expect(
+      writeCredentials(workspace.credentialsFile, held),
+    ).rejects.toBeInstanceOf(CredentialsFileUnreadableError);
+
+    // Nothing was put anywhere: not into the path, and not beside it.
+    expect((await stat(workspace.credentialsFile)).isDirectory()).toBe(true);
+    expect(await readdir(workspace.credentialsFile)).toEqual([]);
+  });
+
+  /**
+   * The same rule, with the thing that would have been lost actually present.
+   *
+   * Skipped only for a user who can read anything, because there is no way to
+   * stage an unreadable file for one — and every other run proves it.
+   */
+  it.skipIf(process.getuid?.() === 0)(
+    "keeps another platform's key when the file is there and cannot be read",
+    async () => {
+      const theirs = {
+        url: "https://already-signed-in.example",
+        key: "egma_sk_must-survive-a-refused-write",
+      };
+      await writeCredentials(workspace.credentialsFile, theirs);
+      const asWritten = await readFile(workspace.credentialsFile, "utf8");
+      await chmod(workspace.credentialsFile, 0o000);
+
+      await expect(
+        writeCredentials(workspace.credentialsFile, held),
+      ).rejects.toBeInstanceOf(CredentialsFileUnreadableError);
+
+      await chmod(workspace.credentialsFile, 0o600);
+      expect(await readFile(workspace.credentialsFile, "utf8")).toBe(asWritten);
+      expect(await readCredentials(workspace.credentialsFile, theirs.url)).toEqual(theirs);
+      expect(await readCredentials(workspace.credentialsFile, held.url)).toBeNull();
+    },
+  );
 
   /**
    * Two terminals, two repositories, one machine, one file. The write is a

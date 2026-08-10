@@ -150,18 +150,36 @@ function entriesIn(raw: string, file: string): CredentialEntries {
   return entries;
 }
 
+/**
+ * The keys file's bytes, or `null` when there is no keys file yet.
+ *
+ * **Only `ENOENT` means nobody has signed in here.** Every other way a read can
+ * fail — a permission change, a directory standing where the file goes, a
+ * machine out of descriptors — means the keys are there and egma cannot see
+ * them, which is the one thing that must never be mistaken for an empty file.
+ * The write below merges what this returns, so a read that quietly answered
+ * nothing would be every other platform's key deleted by the next login.
+ *
+ * Both callers go through here rather than each opening the file themselves,
+ * because this distinction is exactly the kind that gets fixed on one path and
+ * left on the other.
+ */
+async function bytesOf(file: string): Promise<string | null> {
+  try {
+    return await readFile(file, "utf8");
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw new CredentialsFileUnreadableError(file, cause);
+  }
+}
+
 /** What is on disk for one platform, or `null` when none is usable there. */
 export async function readCredentials(
   file: string,
   platformUrl: string,
 ): Promise<Credentials | null> {
-  let raw: string;
-  try {
-    raw = await readFile(file, "utf8");
-  } catch {
-    // No file is not a damaged file. Nobody has signed in here yet.
-    return null;
-  }
+  const raw = await bytesOf(file);
+  if (raw === null) return null;
 
   const entries = entriesIn(raw, file);
   let origin: string;
@@ -264,13 +282,12 @@ export async function writeCredentials(
 
   // Read, merge and replace, with nothing else allowed in between.
   await whileLocked(file, async () => {
-    let existing = "";
-    try {
-      existing = await readFile(file, "utf8");
-    } catch {
-      // The first login has nothing to merge.
-    }
-    const entries = new Map(entriesIn(existing, file));
+    // `null` here is the first login, which has nothing to merge. A file that
+    // is there and cannot be read stops this instead: what follows renames a
+    // freshly built document over the target, so carrying on with nothing
+    // merged would replace every platform's key with just this one.
+    const existing = await bytesOf(file);
+    const entries = new Map(entriesIn(existing ?? "", file));
     const origin = normalizePlatformOrigin(credentials.url);
     entries.set(origin, credentials.key);
 
