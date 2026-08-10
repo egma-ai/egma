@@ -885,6 +885,21 @@ export async function deleteMockTool(
  * one. Ordered by identity so a run's frozen world reads in the order the mock
  * tools were authored, which is stable across every run of the project.
  *
+ * **One statement, and that is the point.** An answer and the agents it applies
+ * to are one fact, edited together in one transaction — and Postgres reads at
+ * READ COMMITTED, where every statement takes its own snapshot. Read in two
+ * statements, an edit committing in between gave the answer from before it and
+ * the scope from after it: a pairing that never existed on any row at any
+ * instant, frozen into a run's snapshot and immutable for as long as the run is
+ * kept. A mock tool re-scoped from one agent to another in that window would be
+ * frozen serving the new agent the old answer. One statement sees one snapshot,
+ * so the edit lands wholly before this read or wholly after it, and either way
+ * the run freezes a world that really was.
+ *
+ * The join repeats a mock tool's row once per agent it names. Scopes are a
+ * handful of agents and a project's mock tools are a handful of rows, so the
+ * repetition costs nothing worth a second statement.
+ *
  * Exported to the module, not from the package: it answers a question the run
  * factory has to ask before it writes a header, and the mock-tool tables have
  * one owner, which is this file.
@@ -896,8 +911,19 @@ export async function mockToolsApplyingTo(
   agentId: string,
 ): Promise<readonly MockTool[]> {
   const rows = await on
-    .select(COLUMNS)
+    .select({
+      ...COLUMNS,
+      scopedAgentId: agent.id,
+      scopedAgentName: agent.name,
+    })
     .from(mockTool)
+    // Left, both of them: a mock tool with no scope applies to every agent and
+    // has to come back from this read, not be joined away. The second is left
+    // rather than inner for the reason the two-statement version's was inner —
+    // a junction row whose agent is gone names nobody, and it drops out here
+    // as a null rather than as a missing row.
+    .leftJoin(mockToolAgent, eq(mockToolAgent.mockToolId, mockTool.id))
+    .leftJoin(agent, eq(mockToolAgent.agentId, agent.id))
     .where(
       within(
         auth,
@@ -905,22 +931,30 @@ export async function mockToolsApplyingTo(
         and(eq(mockTool.projectId, projectId), notDeleted),
       ),
     )
-    .orderBy(asc(mockTool.id));
+    // The mock tools in the order they were authored, and each one's agents in
+    // the order the scope named them — the same two orders the two-statement
+    // version produced, so a run's frozen world reads exactly as it did.
+    .orderBy(asc(mockTool.id), asc(mockToolAgent.position));
 
-  const byMockTool = await agentsOfMockTools(
-    on,
-    rows.map((row) => row.id),
+  const byMockTool = new Map<string, MockTool & { agents: MockToolAgent[] }>();
+  for (const { scopedAgentId, scopedAgentName, ...row } of rows) {
+    let one = byMockTool.get(row.id);
+    if (one === undefined) {
+      one = {
+        ...row,
+        answer: answerFromRow(row.answer, row.id),
+        agents: [],
+      };
+      byMockTool.set(row.id, one);
+    }
+    if (scopedAgentId !== null && scopedAgentName !== null) {
+      one.agents.push({ id: scopedAgentId, name: scopedAgentName });
+    }
+  }
+
+  return [...byMockTool.values()].filter(
+    (one) =>
+      one.agents.length === 0 ||
+      one.agents.some((named) => named.id === agentId),
   );
-
-  return rows
-    .map((row) => ({
-      ...row,
-      answer: answerFromRow(row.answer, row.id),
-      agents: byMockTool.get(row.id) ?? [],
-    }))
-    .filter(
-      (one) =>
-        one.agents.length === 0 ||
-        one.agents.some((named) => named.id === agentId),
-    );
 }
