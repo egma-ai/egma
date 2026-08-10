@@ -235,16 +235,18 @@ export type Reached =
 /**
  * Reach the platform this command resolved to, and settle its address.
  *
- * A **bound** repository keeps the address it is bound to, whatever the
- * platform says its own address is. That address is the contract: the key on
- * this machine is filed under it, and every id in the folder was written when
- * it was in use. Only the instance identifier is read, and only to check it.
+ * **The address a repository is bound to is kept exactly as it is.** When the
+ * command resolved to that address, it is the contract — the key on this
+ * machine is filed under it, and every id in the folder was written while it
+ * was in use — so the platform's own opinion of its address changes nothing
+ * there, and the read is only for the instance identifier the check needs.
  *
- * An **unbound** repository is about to write an address into a committed file,
- * so if the platform names a different one for itself, that address is checked
- * before it is believed — it has to answer, and it has to be the same egma.
- * A platform whose configured address is wrong therefore costs a repository
- * nothing: egma keeps the address that worked and says so.
+ * **Any other address may still settle somewhere else.** A repository about to
+ * write an address into a committed file, and a `--url` naming a platform this
+ * repository is not bound to, both take the address the platform gives for
+ * itself — but only after that address answers, and answers as the same egma.
+ * A platform whose configured address is wrong therefore costs nothing: egma
+ * keeps the address that worked and says so out loud.
  */
 export async function reachPlatform(
   access: PlatformAccess,
@@ -281,8 +283,8 @@ export async function reachPlatform(
     url: here,
     identity,
     note:
-      `egma at ${here} says it is reached at ${identity.origin}, and that address is not this ` +
-      `same egma from here. ${here} is what this repository will use.`,
+      `egma at ${here} says it is reached at ${identity.origin}, and this machine cannot reach ` +
+      `the same egma there. ${here} is the address egma will use.`,
   };
 }
 

@@ -28,7 +28,7 @@ import {
 
 // A real subprocess, a real terminal and a test run using every core: the
 // budget is generous so that only a broken wizard can reach it.
-vi.setConfig({ testTimeout: 180_000, hookTimeout: 60_000 });
+vi.setConfig({ testTimeout: 360_000, hookTimeout: 120_000 });
 
 describe("the wizard on a real terminal", () => {
   let workspace: Workspace;

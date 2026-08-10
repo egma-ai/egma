@@ -47,7 +47,7 @@ import {
 // and a whole-walk check under that much company timed out at sixty seconds
 // while passing alone in twenty. The waits inside are event-driven, so a
 // bigger budget costs a healthy run nothing.
-vi.setConfig({ testTimeout: 180_000, hookTimeout: 120_000 });
+vi.setConfig({ testTimeout: 360_000, hookTimeout: 120_000 });
 
 const KEY = "key_2e8a4c6b1d09f735a2c4";
 

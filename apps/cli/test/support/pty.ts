@@ -86,14 +86,19 @@ export type TerminalRun = {
  * inside a test run that is using every core, so the honest budget is one that
  * cannot be reached by a machine merely being busy. A test that is going to
  * fail still fails at once, because the condition is checked on every chunk.
- * Sixty seconds because twenty was reached, and now two minutes because sixty
- * was: a full-repository run beside other work on the same machine held a
- * whole-walk test past it while every check still eventually passed, and a
- * gate that goes red one run in three because a machine was busy stops being
- * read. A wait ends the moment its content paints, so a bigger budget costs a
- * healthy run nothing and costs a broken one only the time to say so.
+ * Twenty was reached, then sixty, then two minutes — each time by a real walk
+ * that was still working when the budget ran out. The last one was caught in
+ * the act: the screen it left behind said `Progress: 3/12`, a driven agent
+ * writing files at a crawl while the rest of the suite had the machine. That
+ * is a slow walk and not a stuck one, and a gate that goes red because a
+ * machine was busy stops being read.
+ *
+ * Five minutes, then. A wait ends the moment its content paints, so this costs
+ * a healthy run nothing at all and costs a broken one only the time it takes
+ * to say so. The real fix is a suite that does not run eight whole wizard
+ * walks beside a Next compile, and that is not this budget's job.
  */
-const WAIT_BUDGET_MS = 120_000;
+const WAIT_BUDGET_MS = 300_000;
 
 export function runInTerminal(options: {
   readonly command: string;
