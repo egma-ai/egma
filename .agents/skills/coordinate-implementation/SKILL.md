@@ -27,18 +27,20 @@ A worktree carries tracked files only. Anything this repo ignores is absent from
 
 The tracker does not live here, and `AGENTS.md` reaches it with a conditional: read it if it is in your checkout, carry on if it is not. **In a fresh worktree it is never there.** So a dispatched agent takes the second branch and builds without the ticket it was given, without the settled vocabulary, and without knowing either existed. Nothing errors. The work comes back fluent and unmoored — and the reviewer, in an identical worktree, grades it against the same blank.
 
-So a worktree is not ready when the code is in it. Cut the code worktree, then cut the tracker into it, at the path `AGENTS.md` names:
+So a worktree is not ready when the code is in it. Don't hand-roll this — `scripts/mount-tracker.sh` does it and then proves it:
 
 ```
-git -C <tracker-repo> fetch origin
-git -C <tracker-repo> worktree add --detach <agent-worktree>/<path> origin/main
+bash .agents/skills/coordinate-implementation/scripts/mount-tracker.sh \
+  --tracker <tracker-repo> --into . --expect .agents/AGENTS.md
 ```
 
-`--detach` is what lets this happen more than once. A branch can be checked out in one worktree only, so the second agent that asks for `main` is refused outright; detached, every agent gets its own copy at the same commit. Fetch first, so an agent dispatched later sees tracker updates you have already landed.
+`--expect` is the point. The script exits non-zero when the file is not there, which turns the one failure that was silent into a stop. The rest it handles so nobody has to remember it: it fetches first, so a later agent sees tracker updates you have already landed; it mounts detached, because a branch can be checked out in one worktree only and the second agent asking for `main` is refused outright; it converges on the ref you ask for rather than accepting a mount left at an older commit; and it leaves nothing half-mounted when it fails, so a retry starts clean. `--remove` unmounts.
 
-The path is already ignored here, so no agent can commit it into this repo by accident.
+**The agent runs it as its first step, from inside its own worktree.** On Claude Code the harness cuts the worktree, so its path is not known until the agent is already running — giving the job to the agent works the same on both harnesses.
 
-**Agents read the tracker. Only you write it** — on `main`, in your own checkout. A commit made on a detached HEAD inside an agent's copy is unreachable the moment that worktree is removed.
+The mount path is already ignored by this repo, so no agent can commit the tracker into it by accident.
+
+**Agents read the tracker. Only you write it** — on `main`, in your own checkout. A commit made in a detached mount is unreachable the moment that worktree is removed.
 
 ## Per-ticket checklist
 
@@ -46,7 +48,7 @@ Copy this for each ticket and tick it off as you go:
 
 ```
 NN — <ticket>
-- [ ] worktree cut, with the tracker in it
+- [ ] worktree cut, mount-tracker.sh exited 0
 - [ ] branch <effort>-tNN cut from <effort>
 - [ ] implemented, full suite green
 - [ ] review loop closed — clean, or capped and reported
@@ -80,8 +82,9 @@ One message, one `Agent` call per frontier ticket, so they run in parallel. Each
 
 - **A name**: `impl-NN`. Unnamed agents cannot be messaged later, and a name reused across tickets makes a send refuse rather than reach the wrong agent.
 - **Opus 5 at the highest reasoning effort available.**
-- **Its own worktree, with the tracker in it.** Parallel agents must never share a checkout. On Claude Code the code worktree comes from the `isolation: "worktree"` flag; on Codex there is no such flag, so cut it yourself with `git worktree add` and pass the path. The tracker is yours to cut either way — no harness flag knows about a second repo.
-- **A self-contained prompt**: the ticket in full; where its worktree is and where the tracker sits inside it; branch `<effort>-tNN` based on the integration branch; follow `/implement` — TDD at pre-agreed seams, typecheck and single test files often, full suite at the end; push the ticket branch and stop there.
+- **Its own worktree.** Parallel agents must never share a checkout. On Claude Code it comes from the `isolation: "worktree"` flag; on Codex there is no such flag, so cut it yourself with `git worktree add` and pass the path.
+- **The mount command, verbatim**, with the tracker repo's path filled in, and the instruction to run it first and stop if it fails. No harness flag knows about a second repo, so this is the only thing that puts the ticket in front of the agent.
+- **A self-contained prompt**: the ticket in full; branch `<effort>-tNN` based on the integration branch; follow `/implement` — TDD at pre-agreed seams, typecheck and single test files often, full suite at the end; push the ticket branch and stop there.
 - **A reporting brief**: branch, commits, what it built, what it deliberately did not build, anything it found that the ticket got wrong.
 
 Agents run in the background and report as they finish. Take each one as it lands rather than waiting for the set — the moment a ticket's last blocker merges, dispatch it.
@@ -92,7 +95,7 @@ Spawn `review-NN` **after** `impl-NN` exists, never before. Where the roster of 
 
 The reviewer runs `/code-review` on the ticket branch: the integration branch as the fixed point, the ticket as the spec. It is not the implementer, because an author reviewing its own work shares its blind spot. It reports findings and changes no code.
 
-It needs the tracker too, cut the same way — a reviewer that cannot read the ticket cannot check the code against it, and grades the work against its own guess instead. That is worse than no review, because it reports back clean.
+It runs the same mount command first, for the same reason — a reviewer that cannot read the ticket cannot check the code against it, and grades the work against its own guess instead. That is worse than no review, because it reports back clean.
 
 Then loop, up to three rounds: findings go to `impl-NN`, which fixes what is right and answers what is wrong rather than obeying it; `review-NN` re-checks. Keep the same two agents throughout. The reviewer remembers what it already raised and what was answered, so nothing rejected comes back, and independence was established the moment it was not the author.
 
@@ -141,7 +144,7 @@ A wide refactor cannot be split into parallel rewrites of the same call sites. E
 Nothing supervises this but you.
 
 - **Silence is not success.** Check the branch — does it exist, does it carry commits, does the suite pass? Never mark a ticket done on an absent report, and never guess at a pending agent's result.
-- **An agent that never quotes its ticket probably cannot see it.** A missing tracker raises nothing; it just reads as an agent working from a thin brief. Check the path before you accept the work.
+- **An agent that never quotes its ticket probably cannot see it.** This is what `mount-tracker.sh --expect` is for: an agent that skipped it, or was dispatched without it, fails no differently from one working off a thin brief. Ask for the line the script printed.
 - **Message before you respawn.** A stalled agent still holds everything it knew, and a message wakes it. A fresh agent starts from nothing.
 - **A whole quiet wave means the machine, not the model** — a dead container daemon, a missing service, a command that failed for permissions without saying so. Fix it and resume; the work on the branches normally survives.
 - **Give suites and builds generous timeouts**, and poll on the work's cadence.
