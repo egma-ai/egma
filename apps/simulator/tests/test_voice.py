@@ -928,21 +928,6 @@ async def test_a_persona_with_no_voice_of_this_providers_gets_the_default_englis
         assert assembled.conductor.speaking_voice.voice_id == DEFAULT_ENGLISH_VOICE_ID
 
 
-async def test_only_a_streaming_transcriber_asks_for_a_pause_after_a_turn(
-    tmp_path: Path,
-):
-    """The pause a real transcriber needs is a real transcriber's cost.
-
-    A full-duplex line spends its own quiet, so nothing pads a turn there;
-    the number is what the turn-shaped legs still add for the connections
-    that have not moved yet.
-    """
-    async with assembled_with(SCRIPTED_PAIR, tmp_path) as scripted:
-        assert scripted.conductor.legs.trailing_quiet_seconds == 0.0
-    async with assembled_with(REAL_PAIR, tmp_path) as real:
-        assert real.conductor.legs.trailing_quiet_seconds > 0.0
-
-
 async def test_a_leg_that_refuses_a_turn_fails_the_simulation_in_its_own_words(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1082,7 +1067,6 @@ def test_a_chat_spec_assembles_no_speech_legs_and_no_audio(tmp_path: Path):
     plug on its own, walked, and its report has no audio to carry."""
     spec = SimulationSpec.from_document(scripted_spec("sim-chat"))
     assembled = assemble(spec, blobs=FilesystemBlobStore(tmp_path))
-    assert assembled.voice is None
     assert assembled.conductor is None
     assert assembled.plug is not None
     assert assembled.audio is None

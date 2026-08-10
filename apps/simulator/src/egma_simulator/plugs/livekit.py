@@ -63,19 +63,22 @@ measured off the audio the recorder really saw.
 
 ## Where a turn begins and ends
 
-Out of the audio itself, because a live room carries no end-of-turn
-signal any more than a phone line does — see
-:mod:`egma_simulator.plugs.audio_turns`.
+Nowhere in here. A live room carries no end-of-turn signal any more than a
+phone line does, so this plug declares none: it is a **duplex line**,
+driven one slice of audio at a time with both directions open at once, and
+where the turns fall is the conductor's reading of that audio. What every
+plug over a live line shares — turning the transport's own frames into
+slices of the same width — is :mod:`egma_simulator.plugs.media_line`.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from ..media import MediaBackendError, MediaSession
+from ..media import MediaBackendError
 from ..media.livekit_room import ROOM_BAND_HZ, LiveKitRoomBackend, RoomSettings
-from . import AgentSpeech, PlugError, Utterance
-from .audio_turns import next_turn
+from . import PlugError
+from .media_line import MediaLine
 
 AGENT_JOIN_SECONDS = 30.0
 """How long the room may stand empty before nobody coming is the answer.
@@ -120,7 +123,7 @@ class LiveKitRoom:
             band_hz=self._band_hz,
             simulation_id=simulation_id,
         )
-        self._session: MediaSession | None = None
+        self._line: MediaLine | None = None
         self._reference: str | None = None
 
     @property
@@ -133,6 +136,13 @@ class LiveKitRoom:
         return self._band_hz
 
     @property
+    def far_end_left(self) -> bool:
+        """Whether the agent has left the room. There is no other signal
+        and no better one: its participant leaving *is* the agent ending
+        the exchange."""
+        return self._line is not None and self._line.far_end_left
+
+    @property
     def backend(self) -> object:
         """The driver holding the room.
 
@@ -142,23 +152,29 @@ class LiveKitRoom:
         """
         return self._backend
 
-    async def open(self) -> AgentSpeech | None:
-        """Make the room, ask for the agent, and hear how it opens."""
+    async def open(self) -> None:
+        """Make the room and wait for the agent to turn up in it.
+
+        Nothing is heard here. The line is open the moment the agent's
+        audio flows, and every sample either side says after that crosses
+        it through :meth:`exchange` — including the agent's opening,
+        which in a real room is simply the first thing it happens to say.
+        """
         try:
-            self._session = await self._backend.create_session()
+            session = await self._backend.create_session()
             await self._backend.dial()
             self._reference = await self._backend.wait_answered(AGENT_JOIN_SECONDS)
-            return await self._listen()
+            self._line = MediaLine(session, band_hz=self._band_hz)
         except MediaBackendError as refused:
             raise PlugError(str(refused), ending=refused.ending) from refused
 
-    async def deliver(self, speech: Utterance) -> AgentSpeech:
-        session = self._session
-        if session is None:
-            raise PlugError("a turn reached the livekit plug before the room did")
+    async def exchange(self, outgoing: bytes) -> bytes:
+        """One slice of the exchange, both directions at once."""
+        line = self._line
+        if line is None:
+            raise PlugError("the room was driven before the agent was in it")
         try:
-            await session.send(speech.pcm)
-            return await self._listen()
+            return await line.carry(outgoing)
         except MediaBackendError as failed:
             # A room that goes wrong mid-exchange is the driver's to name
             # and the plug's to carry: a fault, never an agent that never
@@ -167,15 +183,8 @@ class LiveKitRoom:
 
     async def close(self) -> None:
         """Leave, and delete the room. Safe from every state."""
-        self._session = None
+        self._line = None
         await self._backend.teardown()
-
-    async def _listen(self) -> AgentSpeech:
-        """One turn of the agent's speech, read out of the room itself."""
-        session = self._session
-        if session is None:
-            raise PlugError("the livekit plug listened before the room was joined")
-        return await next_turn(session, self._band_hz)
 
 
 def _read(config: dict[str, Any], credentials: object) -> RoomSettings:

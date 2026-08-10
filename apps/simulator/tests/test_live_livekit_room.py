@@ -101,8 +101,8 @@ from conftest import (
 
 from egma_simulator.media.livekit_room import ROOM_BAND_HZ
 from egma_simulator.media.room import ROOM_PREFIX
-from egma_simulator.pipeline import channels_of
 from egma_simulator.plugs.livekit import AGENT_JOIN_SECONDS
+from egma_simulator.recording import channels_of
 
 LIVEKIT_URL = credential("TEST_LIVEKIT_URL", "LIVEKIT_URL")
 LIVEKIT_API_KEY = credential("TEST_LIVEKIT_API_KEY", "LIVEKIT_API_KEY")

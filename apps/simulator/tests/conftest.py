@@ -583,6 +583,41 @@ def assert_one_speaker_to_a_channel(
         assert text not in said[other], (speaker, text)
 
 
+async def carry(line, outgoing: bytes = b"", *, slices: int = 1) -> bytes:
+    """Drive a duplex line the way the conductor drives it, and keep what
+    came back: the same number of samples each way, every slice, quiet
+    included.
+
+    The one way any voice plug is exercised here, because it is the one
+    way a voice plug is exercised in production — there is no turn-shaped
+    door left to knock on.
+    """
+    from egma_simulator.conductor import LINE_SLICE_SAMPLES
+    from egma_simulator.speech import SAMPLE_WIDTH_BYTES
+
+    width = LINE_SLICE_SAMPLES * SAMPLE_WIDTH_BYTES
+    said = bytearray(outgoing)
+    said += bytes(max(0, slices * width - len(said)))
+    heard = bytearray()
+    for offset in range(0, len(said), width):
+        heard += await line.exchange(bytes(said[offset : offset + width]))
+    return bytes(heard)
+
+
+async def hear(line, said: str = "", *, seconds: float = 3.0) -> str:
+    """What the far end says back over one caller turn and the quiet after
+    it — read as words, which is all a lifecycle test cares about."""
+    from egma_simulator.conductor import LINE_SLICE_SAMPLES
+    from egma_simulator.speech import decode_speech, encode_speech
+
+    band = line.sample_rate_hz
+    spoken = encode_speech(said, band) if said else b""
+    quiet = round(seconds * band / LINE_SLICE_SAMPLES)
+    heard = await carry(line, spoken)
+    heard += await carry(line, slices=quiet)
+    return decode_speech(heard, band)
+
+
 def speech_in_the_recording(recording: bytes) -> list[tuple[str, int, int]]:
     """Every stretch of speech a listener could find, in sample positions.
 

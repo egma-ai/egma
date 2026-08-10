@@ -27,7 +27,6 @@ import uuid
 from collections.abc import Callable
 
 from ..contract import ERROR
-from ..speech import duration_seconds
 from . import MediaBackendError
 
 logger = logging.getLogger(__name__)
@@ -142,22 +141,19 @@ class RoomSession:
         self._left.set()
 
     async def send(self, pcm: bytes) -> None:
-        """The persona's turn, said down the line, and waited out.
+        """One slice of the persona's voice, put on the wire and left there.
 
-        A voice takes as long to say a sentence as the sentence lasts, and
-        the transport writes the audio onto the wire at exactly that rate.
-        Returning before it is all said would start the far end's turn
-        while the persona was still talking — and every measurement of the
-        answer would carry the persona's own speaking time inside it.
+        The transport writes audio out at the rate a voice really travels,
+        so handing it a slice and returning is all there is to do: the
+        pacing is the wire's and the waiting is done on the far end's
+        audio arriving, one slice for one slice.
 
-        What the line carried during all that is then dropped, because it
-        is the far end listening rather than the far end answering. An
-        agent that talks over the persona is lost with it: this seam
-        exchanges whole turns, so speech that overlaps two of them has
-        nowhere to go. What the record then shows is an exchange
-        without interruptions, which is true of what was measured and not
-        of what a live listener would have heard — worth knowing before
-        reading a transcript for barge-in behavior.
+        Nothing that arrived meanwhile is touched, and that is the change
+        this line exists for. It used to wait out the audio's own length
+        and throw away everything the room carried while the persona was
+        speaking — which threw away every word an agent said over the top
+        of it, and left a record that showed an exchange without
+        interruptions whatever really happened.
         """
         from pipecat.frames.frames import OutputAudioRawFrame
 
@@ -166,9 +162,6 @@ class RoomSession:
                 audio=pcm, sample_rate=self._band_hz, num_channels=1
             )
         )
-        await asyncio.sleep(duration_seconds(pcm, self._band_hz))
-        while not self._heard.empty():
-            self._heard.get_nowait()
 
     async def receive(self, seconds: float) -> bytes | None:
         try:

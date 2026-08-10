@@ -31,11 +31,6 @@ logger = logging.getLogger(__name__)
 OnTurn = Callable[[str, str], Awaitable[None]]
 OnTiming = Callable[[str, float], Awaitable[None]]
 OnToolCall = Callable[[str, str | None], Awaitable[None]]
-OnSpeech = Callable[[str, float], Awaitable[None]]
-"""How long one side's audio ran for one turn, ear to ear. Voice only, and
-reported from where the audio is actually observed — the pipeline — because
-a transcript cannot carry it and a clock around the turn would be timing
-this process rather than the conversation."""
 
 OnAnswered = Callable[[], Awaitable[None]]
 """Everything one agent answer produced is on the record — the words it

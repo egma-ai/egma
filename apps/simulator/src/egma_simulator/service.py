@@ -223,8 +223,6 @@ class RunningSimulation:
                 self._spec,
                 blobs=self._blobs,
                 speech=SpeechProviders.from_config(self._config),
-                on_timing=self._on_timing,
-                on_speech=self._on_speech,
             )
             persona = Persona(
                 traits=self._spec.persona_traits,
@@ -367,9 +365,6 @@ class RunningSimulation:
 
     async def _on_timing(self, measure: str, milliseconds: float) -> None:
         self._spans.measure(measure, milliseconds)
-
-    async def _on_speech(self, speaker: str, seconds: float) -> None:
-        self._spans.spoke(speaker, seconds)
 
     async def _on_tool_call(self, name: str, arguments: str | None) -> None:
         self._spans.tool_call(name, arguments)
