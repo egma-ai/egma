@@ -12,6 +12,7 @@ that on the developer's machine.
 
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,11 +36,15 @@ class StubJob:
 
 @dataclass
 class StubRoom:
-    """A room that would notice being spoken to, and never is.
+    """A room with a willing egma in it, which nothing should ever ask.
 
-    Every message the SDK could send goes through ``perform_rpc``. This
-    one records the attempt and fails it, so a test that expected silence
-    and got a message finds out here rather than in a timeout.
+    Every message the SDK could send goes through ``perform_rpc``, and
+    this one **answers** rather than refusing — with a well-formed reply
+    naming a tool it would cover. That is deliberate: a room that failed
+    the call would fail the test at the call, which proves the same thing
+    twice and hides which claim broke. Answering means an SDK that spoke
+    in a production room goes on to succeed, quietly, and is caught by
+    the one thing that would then be untrue — ``asked`` not being empty.
     """
 
     asked: list[str] = field(default_factory=list)
@@ -50,8 +55,8 @@ class StubRoom:
 
     async def perform_rpc(self, *, method: str, **_rest: Any) -> str:
         self.asked.append(method)
-        raise AssertionError(
-            f"the agent said {method!r} in a room with no egma in it"
+        return json.dumps(
+            {"protocol_version": 1, "mocked_tools": ["check_availability"]}
         )
 
 

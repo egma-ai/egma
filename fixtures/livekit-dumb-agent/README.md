@@ -8,7 +8,7 @@ It is a genuine worker on `livekit-agents` 1.6.7 (the pin `docs/livekit.md`
 uses): Silero VAD, OpenAI speech-to-text, `gpt-4o-mini`, OpenAI
 text-to-speech. One OpenAI key runs all three steps.
 
-## The founder's one command
+## One command: watch a mock tool answer
 
 With your values in `~/.egma-livekit.env` (see `.env.example`), from the
 repository root:

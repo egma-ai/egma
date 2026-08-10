@@ -2,12 +2,11 @@
 
 The seam is proved offline against a room-shaped fake, which says the
 exchange is right and nothing at all about whether a real agent's tool
-call really reaches egma across a real room. This file is the other half,
-and it is the effort's founder demo: a spec carrying one mocked tool goes
-in at the control plane, egma makes a room in a real LiveKit project, the
-dumb-agent worker is dispatched into it with the egma SDK wired in, a
-persona asks about Tuesday out loud — and the agent is told, by egma, that
-Tuesday is full.
+call really reaches egma across a real room. This file is the other half:
+a spec carrying one mocked tool goes in at the control plane, egma makes a
+room in a real LiveKit project, the dumb-agent worker is dispatched into
+it with the egma SDK wired in, a persona asks about Tuesday out loud —
+and the agent is told, by egma, that Tuesday is full.
 
 Nothing about that answer exists anywhere but in this file. There is no
 calendar behind the fixture and no calendar behind egma; the branch the
@@ -21,15 +20,24 @@ process's memory:
 
 - **the census arrived** — the agent reported both of its tools by name
   at session start, so mock authoring could start from the real names;
-- **the mocked call was answered from the test's own override** — not
-  from the project's default answer, which says the opposite and is
-  resolved away here exactly as the control plane resolves it;
+- **the answer this spec carried is the answer the agent got**, byte for
+  byte, with the provenance stamp and the mock tool that served it;
 - **the tool egma does not answer for is named uncovered** and has no
   span at all, which is how the record admits a simulation was not fully
   isolated;
-- **the declared delay is the call's duration**, measured on a real
-  round trip, because a mocked backend that answered instantly would make
-  every latency number from a mocked run a flattering lie.
+- **the declared delay really was spent** in the middle of a live
+  conversation, and the record carries it as the call's own duration —
+  because a mocked backend that answered instantly would make every
+  latency number from a mocked run a flattering lie.
+
+A spec arrives with its mock tools **already resolved**: the control
+plane worked the project's defaults and this test's overrides into one
+answer per tool name at run creation, and which of the two won is settled
+and tested there (`apps/api/test/mock-tools-world.test.ts`). Resolving it
+a second time here would be a second implementation of that rule, free to
+disagree with the first. So what this file carries is the answer a
+calendar-is-full override resolves to, and what it proves is that the
+answer reaches a real agent unchanged.
 
 And the transcript reads the way the test intends: the agent says Tuesday
 is full and offers the day the mock named instead, and never once offers
@@ -66,6 +74,7 @@ from conftest import (
     assert_kept_secret,
     credential,
     has_terminal,
+    milliseconds_of,
     span_attribute,
     spans_for,
     terminal_event_for,
@@ -200,30 +209,25 @@ is where a reader sees the agent take it well rather than claim a booking
 it never made.
 """
 
-# Long enough to be unmistakably the declared delay rather than the wire,
-# short enough that a live conversation still fits inside its walls. A
-# real calendar lookup takes about this long, which is the point of the
+# About as long as a real calendar lookup, which is the point of the
 # knob: a mocked run's latency numbers stay comparable to a real one's.
+# Long enough to be unmistakably a delay somebody declared, short enough
+# that a live conversation still fits inside its walls.
 DECLARED_DELAY_MS = 1500
 
-# The room trip is fast and egma's own serving is faster; anything past
-# this on top of the declared delay means the duration is measuring
-# something other than the delay, which is the reading this asserts.
-DELAY_SLACK_MS = 8000
+# What the span may hold beyond the delay. The two ends are egma's own —
+# the moment the call arrived and the moment the answer went back — so
+# what sits inside them besides the sleep is reading a small JSON object
+# and writing one, which is microseconds. A second is room enough for a
+# loaded machine and still tight enough that a delay served twice, or a
+# duration measuring something else entirely, fails here.
+DELAY_SLACK_MS = 1000
 
-# The project's own answer for this tool: a calendar with room in it. The
-# test overrides it, and this is here so that "the override answered" is a
-# fact with an alternative rather than a label — if resolution ever
-# stopped preferring the test, this answer would appear on the record.
-PROJECT_DEFAULT = {
-    "tool_name": BOOKING_TOOL,
-    "answer": {"answer": "Tuesday has 11:00 and 3:30 free."},
-    "delay_milliseconds": 0,
-}
-
-# The test's own override, which is test content and versions with the
-# test exactly as an expected behaviour does.
-TEST_OVERRIDE = {
+# What this simulation answers `check_availability` with, and the only
+# place this answer exists: the calendar-is-full shape a test orders up
+# when it wants that branch. It arrives already resolved — see the module
+# docstring on why nothing here re-runs the control plane's rule.
+MOCKED_ANSWER = {
     "tool_name": BOOKING_TOOL,
     "answer": {"answer": CALENDAR_IS_FULL},
     "delay_milliseconds": DECLARED_DELAY_MS,
@@ -242,20 +246,6 @@ MAX_DURATION_SECONDS = 120
 # the worker being woken and heard, the conversation up to its own
 # duration limit, then the room deleted and the last report delivered.
 WITHIN_SECONDS = AGENT_JOIN_SECONDS + MAX_DURATION_SECONDS + 60
-
-
-def resolved_world() -> list[dict]:
-    """The one world this simulation sees, worked out the way egma works it.
-
-    Project defaults, with the test's own overrides laid over them by tool
-    name — the control plane's rule, applied here because this test stands
-    where the control plane stands. What arrives at a simulator is always
-    already resolved: there is nothing left for it to merge, and nowhere
-    downstream that a second answer could be reached.
-    """
-    overriding = {entry["tool_name"]: entry for entry in [TEST_OVERRIDE]}
-    world = [overriding.pop(entry["tool_name"], entry) for entry in [PROJECT_DEFAULT]]
-    return world + list(overriding.values())
 
 
 def mocked_spec() -> dict:
@@ -277,8 +267,8 @@ def mocked_spec() -> dict:
         scenario=(
             "You are calling to book a dental check-up. Ask whether there "
             "is anything free on Tuesday. If they say Tuesday is full, "
-            "accept whatever day they offer instead, then thank them and "
-            "finish."
+            "accept whatever day they offer instead. Then ask what time "
+            "the practice opens, thank them and finish."
         ),
         personality=(
             "Polite and warm; explains yourself in two or three full "
@@ -286,7 +276,7 @@ def mocked_spec() -> dict:
         ),
         max_turns=MAX_TURNS,
         max_duration_seconds=MAX_DURATION_SECONDS,
-        mock_tools=resolved_world(),
+        mock_tools=[MOCKED_ANSWER],
     )
 
 
@@ -323,18 +313,13 @@ def tool_calls_in(records: list[dict]) -> list[dict]:
     ]
 
 
-def milliseconds_of(span: dict) -> float:
-    return (int(span["endTimeUnixNano"]) - int(span["startTimeUnixNano"])) / 1_000_000
-
-
 def hand_back(spoken: list[tuple[str, str]], call: dict, coverage: dict) -> None:
-    """Print what the founder asked to be handed: the transcript and the
-    record showing the mock answered.
+    """Print the transcript and the record showing the mock answered.
 
     On stdout rather than in an assertion message, because the point of
-    the one command is watching it work rather than reading what failed.
-    pytest keeps this to itself unless the run asks for it with ``-s``,
-    which is what that command does.
+    the one command this test backs is watching it work rather than
+    reading what failed. pytest keeps this to itself unless the run asks
+    for it with ``-s``, which is what that command does.
     """
     print("\n--- the transcript ---")
     for speaker, text in spoken:
@@ -402,8 +387,8 @@ async def test_a_mock_tool_answers_a_real_agent_in_a_real_room(
     spoken = turns_for(records, SIMULATION)
 
     # Handed back before anything else is asserted, because this is what
-    # the founder's one command exists to show — and a run that then fails
-    # an assertion about it is exactly the run where seeing it matters.
+    # the one command exists to show — and a run that then fails an
+    # assertion about it is exactly the run where seeing it matters.
     hand_back(spoken, calls[0], coverage)
 
     # 3. The unmocked tool has no span, in either direction. egma is not
@@ -420,19 +405,19 @@ async def test_a_mock_tool_answers_a_real_agent_in_a_real_room(
     )
     assert "day" in json.loads(span_attribute(call, "egma.tool.arguments"))
 
-    # 4. Answered from the test's own override, and provably not from the
-    #    project's default — which says the opposite and would have been
-    #    served by any resolution that preferred it.
+    # 4. The answer the spec carried is the answer the agent got, byte for
+    #    byte, with the stamp that says where it came from. A result
+    #    never rides without its provenance, so all three are read.
     assert json.loads(span_attribute(call, "egma.tool.result")) == CALENDAR_IS_FULL
-    assert PROJECT_DEFAULT["answer"]["answer"] not in (
-        span_attribute(call, "egma.tool.result") or ""
-    )
     assert span_attribute(call, "egma.tool.provenance") == "mocked"
     assert span_attribute(call, "egma.tool.mock_tool") == BOOKING_TOOL
 
-    # 5. The declared delay is the call's own duration, measured across a
-    #    real room. Bounded above as well as below: a duration that only
-    #    cleared the floor could be measuring anything.
+    # 5. The declared delay really was spent, in the middle of a live
+    #    conversation, and the record carries it as the call's own
+    #    duration — the span's two ends being the moment the call reached
+    #    egma and the moment the answer went back. Bounded above as well
+    #    as below: a duration that only cleared the floor could be
+    #    measuring anything.
     took = milliseconds_of(call)
     assert DECLARED_DELAY_MS <= took < DECLARED_DELAY_MS + DELAY_SLACK_MS, (
         f"the mocked call took {took:.0f}ms against a declared delay of "

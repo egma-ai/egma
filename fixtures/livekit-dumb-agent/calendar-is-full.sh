@@ -15,8 +15,12 @@
 # for a machine that keeps its LiveKit project and its speech providers in
 # different files. They are read left to right, so a later one wins.
 #
-# Nothing here prints a credential. The worker's own log is written to a
-# file whose path is named; only that path is printed, never its contents.
+# Nothing here prints a credential. The worker writes its own log to a
+# file whose path is named — only the path is printed, never the contents
+# — and the file is left behind on purpose, so a run that went wrong can
+# be read afterwards. Before it finishes, this scans that log for every
+# credential it loaded and says so if it finds one; the simulation's own
+# record, logs and write-ahead log are scanned by the test itself.
 
 set -euo pipefail
 
@@ -47,16 +51,25 @@ worker_log="$(mktemp -t egma-dumb-agent-XXXXXX.log)"
 worker_pid=""
 
 stop_the_worker() {
-  if [ -n "$worker_pid" ] && kill -0 "$worker_pid" 2>/dev/null; then
-    kill "$worker_pid" 2>/dev/null || true
+  if [ -n "$worker_pid" ]; then
+    # The whole group, not the one process. `uv run` is a parent with the
+    # agent underneath it, and a worker left alive here would still be
+    # registered with the project — taking the next room somebody's test
+    # opens, which is a failure two directories away from its cause.
+    kill -- "-$worker_pid" 2>/dev/null || kill "$worker_pid" 2>/dev/null || true
     wait "$worker_pid" 2>/dev/null || true
   fi
 }
 trap stop_the_worker EXIT
 
 echo "starting the dumb agent as a worker; its log is $worker_log"
-(cd "$here" && uv run --frozen agent.py dev) >"$worker_log" 2>&1 &
+cd "$here"
+# Job control on for this one line, so the worker becomes a process group
+# of its own and the trap above has a group to end.
+set -m
+uv run --frozen agent.py dev >"$worker_log" 2>&1 &
 worker_pid=$!
+set +m
 
 waited=0
 until grep -q "registered worker" "$worker_log" 2>/dev/null; do
@@ -79,3 +92,23 @@ echo "the worker is registered; conducting the simulation"
 # says which value it was short of, rather than passing quietly.
 cd "$root/apps/simulator"
 uv run --frozen pytest tests/test_live_mock_tools.py -v -s -rs
+
+# The one surface the test cannot reach: the log of the *customer's* own
+# process, which is where the SDK does its talking. Each value goes to
+# grep down a pipe rather than on its command line, so it is never in
+# anything as public as a process list — and only the variable's name is
+# ever printed.
+leaked=""
+for name in LIVEKIT_API_KEY LIVEKIT_API_SECRET OPENAI_API_KEY \
+  DEEPGRAM_API_KEY ELEVENLABS_API_KEY; do
+  value="${!name:-}"
+  [ -n "$value" ] || continue
+  if printf '%s\n' "$value" | grep -qFf - "$worker_log"; then
+    leaked="$leaked $name"
+  fi
+done
+if [ -n "$leaked" ]; then
+  echo "the agent's own log carried:$leaked — see $worker_log" >&2
+  exit 1
+fi
+echo "no credential reached the agent's own log"

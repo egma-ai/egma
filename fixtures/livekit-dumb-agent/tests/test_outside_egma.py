@@ -44,9 +44,13 @@ async def test_a_room_with_no_egma_in_it_leaves_this_agent_alone(metadata, sessi
     assert len(after) == len(before)
     assert all(now is then for now, then in zip(after, before, strict=True))
 
-    # And not one word said. An SDK that discovered egma's absence by
-    # asking would cost every real call a round trip at session start;
-    # the stub room fails such a call, so this list is the receipt.
+    # And not one word said, which is the assertion that carries this
+    # test. An SDK that discovered egma's absence by *asking* would cost
+    # every production session a round trip before it could greet
+    # anybody — and the substitution it installs afterwards is written
+    # into a side table rather than onto the agent, so the objects above
+    # would still be the same ones. The room in this test would answer
+    # such a call happily. This empty list is what says none was made.
     assert context.room.asked == []
 
 

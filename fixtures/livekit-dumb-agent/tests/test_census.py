@@ -58,7 +58,12 @@ def test_mockable_is_called_after_both_objects_exist_and_before_the_session_star
     body = inspect.getsource(entrypoint)
     lines = [line.strip() for line in body.splitlines()]
     def line_of(said: str) -> int:
-        return next(i for i, line in enumerate(lines) if said in line)
+        found = [i for i, line in enumerate(lines) if said in line]
+        # Named rather than left to raise on an empty sequence: what goes
+        # wrong here is somebody renaming a line in `agent.py`, and the
+        # useful failure says which line went missing.
+        assert found, f"no line of entrypoint() carries {said!r}: {lines}"
+        return found[0]
 
     said = line_of("await mockable(")
     built_agent = line_of("agent = FrontDesk()")
