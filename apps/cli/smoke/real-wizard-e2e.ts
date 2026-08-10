@@ -468,12 +468,16 @@ async function walkOnce(options: {
 
     /* [human 3] the provider key */
     await showing(terminal, "the key box", BUDGET.key, "Paste your Retell API key");
-    // What the coding agent said it found, before the key box covers it. It is
-    // recorded rather than acted on: whether discovery pointed at the right
-    // prompts is real information about the wizard, and correcting it at the
-    // picker is what a developer does.
+    // What the coding agent said it found, before the key box covers it.
+    //
+    // Recorded rather than acted on: whether discovery pointed at the right
+    // prompts is real information about the wizard, and correcting the agent at
+    // the picker is what a developer does. It is read off the card the wizard
+    // draws, so a card that has already scrolled reads as "nothing reported" —
+    // which is a gap in this reading and never a claim about what was found.
+    // The whole of what the agent said is in the log the wizard names.
     promptsFound =
-      /Prompts\s{2,}(.+?)\s*$/mu.exec(terminal.scrollback() + terminal.screen())?.[1]?.trim() ??
+      /Prompts\s{2,}(.+?)\s*$/mu.exec(`${terminal.scrollback()}\n${terminal.screen()}`)?.[1]?.trim() ??
       null;
     took("login and finding the agent");
     terminal.write(`${options.key}\r`);
