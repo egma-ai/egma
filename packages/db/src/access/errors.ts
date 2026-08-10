@@ -303,6 +303,37 @@ export class GraderNamedByTestsError extends Error {
 }
 
 /**
+ * A mock tool was written for a tool this project already answers for.
+ *
+ * Matching is by tool name and strictly by it — no arguments are read — so two
+ * rows answering for one tool would be two answers with no rule to choose
+ * between them, and whichever egma picked would be a mocked world nobody
+ * authored. The refusal names the row already standing there, because the two
+ * things worth doing next are both about that row: edit it, or leave it alone
+ * and override the name on the one test that needs the other branch.
+ *
+ * Its own class rather than an `UnprocessableInputError`, because the answer is
+ * different in kind: nothing about the body is wrong, and something is already
+ * there.
+ */
+export class MockToolTakenError extends Error {
+  readonly toolName: string;
+  /** The living mock tool that already answers for it. */
+  readonly mockToolId: string;
+
+  constructor(toolName: string, mockToolId: string) {
+    super(
+      `this project already answers for "${toolName}", with mock tool ` +
+        `${mockToolId}. One answer per tool: edit that one, or override it ` +
+        `on the test that needs a different branch.`,
+    );
+    this.name = "MockToolTakenError";
+    this.toolName = toolName;
+    this.mockToolId = mockToolId;
+  }
+}
+
+/**
  * The trace store read a batch of spans and refused it, and would refuse the
  * identical bytes again.
  *

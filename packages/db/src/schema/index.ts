@@ -5,6 +5,7 @@ export * from "./device.ts";
 export * from "./personas.ts";
 export * from "./agents.ts";
 export * from "./graders.ts";
+export * from "./mock-tools.ts";
 export * from "./tests.ts";
 export * from "./runs.ts";
 export * from "./grading.ts";

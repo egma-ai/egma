@@ -38,6 +38,12 @@ import {
   type SimulationStatus,
   type Verdict,
 } from "../schema/runs.ts";
+import {
+  NO_MOCK_TOOLS,
+  type MockToolSnapshot,
+  type SnapshotDefault,
+  type SnapshotEntry,
+} from "../mock-tools/resolve.ts";
 import { stringRecordFromRow } from "./agents.ts";
 import { validClaimant } from "./claimants.ts";
 import { descriptorOf, noSimulatorAdapterMessage } from "./connection-registry.ts";
@@ -46,7 +52,12 @@ import { RunWriteRefusedError, type RunWriteRefusal } from "./errors.ts";
 import { enqueueGradingJob } from "./grading.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
-import { getTestVersion, type TestVersion } from "./tests.ts";
+import { mockToolsApplyingTo } from "./mock-tools.ts";
+import {
+  getTestVersion,
+  mockOverridesOfVersions,
+  type TestVersion,
+} from "./tests.ts";
 import { within } from "./within.ts";
 
 /**
@@ -147,6 +158,12 @@ export type Run = {
   /** The personas those versions named — provenance, never the pin. */
   readonly requestedPersonaIds: readonly string[];
   readonly connectionSnapshot: ConnectionSnapshot;
+  /**
+   * The mocked world this run executes in, frozen at creation: the project's
+   * mock tools that apply to its agent, and what each pinned version overrode.
+   * `resolveMockTools` turns it into what one simulation is served.
+   */
+  readonly mockToolSnapshot: MockToolSnapshot;
   readonly expectedSimulationCount: number;
   /** Null until the last simulation lands terminal; then written once. */
   readonly completedCount: number | null;
@@ -290,6 +307,7 @@ const RUN_COLUMNS = {
   pinnedTestVersions: run.pinnedTestVersions,
   requestedPersonas: run.requestedPersonas,
   connectionSnapshot: run.connectionSnapshot,
+  mockToolSnapshot: run.mockToolSnapshot,
   expectedSimulationCount: run.expectedSimulationCount,
   completedCount: run.completedCount,
   failedCount: run.failedCount,
@@ -340,6 +358,7 @@ type RunRow = {
   readonly pinnedTestVersions: unknown;
   readonly requestedPersonas: unknown;
   readonly connectionSnapshot: unknown;
+  readonly mockToolSnapshot: unknown;
   readonly expectedSimulationCount: number;
   readonly completedCount: number | null;
   readonly failedCount: number | null;
@@ -505,11 +524,79 @@ function connectionSnapshotFromRow(
   };
 }
 
+/**
+ * The frozen mocked world, read back.
+ *
+ * An older row holds `{}` — the migration wrote it for every run that existed
+ * before a run could freeze a world at all — and it reads as a run that mocked
+ * nothing, which is exactly what those runs did. Everything else is checked to
+ * the shape this file writes, so a hand-edited row fails loudly here rather
+ * than reaching a simulator as a world nobody authored.
+ */
+function mockToolSnapshotFromRow(
+  value: unknown,
+  runId: string,
+): MockToolSnapshot {
+  const malformed = () =>
+    new Error(
+      `run ${runId} holds a mock tool snapshot in a shape egma never writes; the row needs repairing before anybody can read it`,
+    );
+
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw malformed();
+  }
+  const { defaults, overrides } = value as Record<string, unknown>;
+  if (defaults === undefined && overrides === undefined) return NO_MOCK_TOOLS;
+  if (!Array.isArray(defaults)) throw malformed();
+  if (
+    typeof overrides !== "object" ||
+    overrides === null ||
+    Array.isArray(overrides)
+  ) {
+    throw malformed();
+  }
+
+  const entryFromRow = (entry: unknown): SnapshotEntry => {
+    if (typeof entry !== "object" || entry === null) throw malformed();
+    const { toolName, answer, delayMilliseconds } = entry as Record<
+      string,
+      unknown
+    >;
+    if (typeof toolName !== "string" || toolName === "") throw malformed();
+    if (typeof delayMilliseconds !== "number") throw malformed();
+    if (typeof answer !== "object" || answer === null) throw malformed();
+    const held = answer as Record<string, unknown>;
+    if ("error" in held) {
+      if (typeof held.error !== "string" || held.error === "") throw malformed();
+      return { toolName, delayMilliseconds, answer: { error: held.error } };
+    }
+    if (!("answer" in held)) throw malformed();
+    return { toolName, delayMilliseconds, answer: { answer: held.answer } };
+  };
+
+  return {
+    defaults: defaults.map((entry): SnapshotDefault => {
+      const { mockToolId } = (entry ?? {}) as Record<string, unknown>;
+      if (typeof mockToolId !== "string" || mockToolId === "") throw malformed();
+      return { ...entryFromRow(entry), mockToolId };
+    }),
+    overrides: Object.fromEntries(
+      Object.entries(overrides as Record<string, unknown>).map(
+        ([versionId, entries]) => {
+          if (!Array.isArray(entries)) throw malformed();
+          return [versionId, entries.map(entryFromRow)] as const;
+        },
+      ),
+    ),
+  };
+}
+
 function runFromRow(row: RunRow): Run {
   const {
     pinnedTestVersions,
     requestedPersonas,
     connectionSnapshot,
+    mockToolSnapshot,
     status,
     triggeredVia,
     ...rest
@@ -524,6 +611,7 @@ function runFromRow(row: RunRow): Run {
     ),
     requestedPersonaIds: requestedPersonaIdsFromRow(requestedPersonas, row.id),
     connectionSnapshot: connectionSnapshotFromRow(connectionSnapshot, row.id),
+    mockToolSnapshot: mockToolSnapshotFromRow(mockToolSnapshot, row.id),
   };
 }
 
@@ -907,10 +995,60 @@ async function resolvePersonaVersions(
 }
 
 /**
+ * The mocked world this run will execute in, worked out once and frozen.
+ *
+ * **Resolution happens here and nowhere later.** Mock tools are the one
+ * authored thing with no version chain, so an edit landing halfway through a
+ * run would answer the first simulations one way and the rest another — and
+ * nothing on the record would say the world had moved. Freezing at creation is
+ * what makes "every simulation in one run sees one world" a property of the
+ * row rather than of how fast somebody types.
+ *
+ * Two halves, kept apart in the stored shape for the reason the schema file
+ * gives: the project's mock tools that apply to this run's agent — scoping
+ * already applied, so nothing downstream needs to know which agent this was —
+ * and what each pinned version overrides, by version. `resolveMockTools` merges
+ * them for one simulation, and is the only thing that does.
+ */
+async function freezeMockTools(
+  on: Queryable,
+  auth: AuthContext,
+  projectId: string,
+  agentId: string,
+  versionIds: readonly string[],
+): Promise<MockToolSnapshot> {
+  const applying = await mockToolsApplyingTo(on, auth, projectId, agentId);
+  const overriding = await mockOverridesOfVersions(on, versionIds);
+
+  const overrides: Record<string, readonly SnapshotEntry[]> = {};
+  for (const [versionId, entries] of overriding) {
+    // A version that overrides nothing is left out rather than written as an
+    // empty list: the two mean the same thing, and one of them costs nothing.
+    if (entries.length === 0) continue;
+    overrides[versionId] = entries.map((entry) => ({
+      toolName: entry.toolName,
+      answer: entry.answer,
+      delayMilliseconds: entry.delayMilliseconds,
+    }));
+  }
+
+  return {
+    defaults: applying.map((one) => ({
+      toolName: one.toolName,
+      answer: one.answer,
+      delayMilliseconds: one.delayMilliseconds,
+      mockToolId: one.id,
+    })),
+    overrides,
+  };
+}
+
+/**
  * The run, its simulations born `queued`, and the facts stamped at start — the
  * versions it pinned, the personas they named as provenance, the connection's
- * non-secret shape as snapshot, and every simulation's own two pins — in one
- * transaction, so nothing a team triggers can half-exist.
+ * non-secret shape as snapshot, the mocked world it will run in, and every
+ * simulation's own two pins — in one transaction, so nothing a team triggers
+ * can half-exist.
  *
  * **One simulation per test per persona, counted before anything is written.**
  * Two tests naming three people between them is not two conversations; it is
@@ -1099,6 +1237,18 @@ export async function startRun(
       return pinned;
     };
 
+    // Frozen inside the same transaction that writes the header, so an edit
+    // landing between the read and the write cannot reach the row: it either
+    // committed before this read and is in the snapshot, or waits behind it and
+    // changes only the runs started afterwards.
+    const mockToolSnapshot = await freezeMockTools(
+      tx,
+      auth,
+      projectId,
+      reached.agentId,
+      versions.map((one) => one.versionId),
+    );
+
     const [header] = await tx
       .insert(run)
       .values({
@@ -1120,6 +1270,7 @@ export async function startRun(
           environment: reached.environment,
           config: reached.config,
         },
+        mockToolSnapshot,
         expectedSimulationCount: wanted.length,
         retryOfRunId,
         createdAt: now,

@@ -187,6 +187,28 @@ export const run = pgTable(
      * stamped here at start. Never credentials.
      */
     connectionSnapshot: jsonb("connection_snapshot").notNull(),
+    /**
+     * The mocked world this run executes in, resolved once and frozen here.
+     *
+     * Mock tools are the one authored thing that is not versioned, so nothing
+     * else could hold a run still: editing one tomorrow would silently change
+     * what a simulation of this run was answered, and a run half-conducted
+     * under two worlds is a run whose numbers mean nothing. Resolving at
+     * creation is what makes "every simulation in one run sees one world" a
+     * fact about the row rather than a hope about timing.
+     *
+     * It holds the project's mock tools that apply to this run's agent —
+     * scoping already applied — beside what each pinned test version overrode,
+     * rather than a resolved list per version: an override replaces a default
+     * by tool name, and storing the merge per version would copy every default
+     * once per test for nothing. `resolveMockTools` does the merge, and is the
+     * one place it happens.
+     *
+     * Empty on a run written before mock tools existed, and empty on any run
+     * whose project answers for no tool at all — the two read identically
+     * because they mean the same thing: nothing was mocked.
+     */
+    mockToolSnapshot: jsonb("mock_tool_snapshot").notNull(),
     /** Set at start; the denominator a progress page divides by. */
     expectedSimulationCount: integer("expected_simulation_count").notNull(),
     /**
