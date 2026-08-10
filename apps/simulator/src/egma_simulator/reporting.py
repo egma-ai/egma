@@ -133,7 +133,7 @@ class Reporter:
         """The contract's audio block — the band measured at execution and
         the recording's reference — for a voice simulation; ``None`` for a
         chat one, where there is no audio to measure."""
-        self.mock_coverage: dict | None = None
+        self.mock_tool_coverage: dict | None = None
         """Which of the agent's tools mock tools answered for, and which
         ran their own implementations.
 
@@ -308,8 +308,8 @@ class Reporter:
         # absent for absence, because "nobody ever asked" and "the asking
         # happened and nothing came back" are two different facts and a
         # single empty shape could only carry one of them.
-        if self.mock_coverage is not None:
-            facts["mock_coverage"] = self.mock_coverage
+        if self.mock_tool_coverage is not None:
+            facts["mock_tool_coverage"] = self.mock_tool_coverage
         return facts
 
     def completed(self, ending: str, reason: str | None = None) -> None:

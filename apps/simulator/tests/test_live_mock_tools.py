@@ -366,7 +366,7 @@ async def test_a_mock_tool_answers_a_real_agent_in_a_real_room(
     # 1. The census arrived. Both of the agent's tools, by the names the
     #    running process knows them by — which is what makes authoring
     #    start from the real names rather than somebody's memory of them.
-    coverage = facts["mock_coverage"]
+    coverage = facts["mock_tool_coverage"]
     assert coverage is not None, (
         "no coverage stamp on a livekit simulation: egma never stood in "
         "the tool path, so the agent's own tools ran"

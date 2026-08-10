@@ -148,7 +148,7 @@
           "oneOf": [{ "$ref": "#/$defs/audio_band" }, { "type": "null" }]
         },
         "provider_reference": { "$ref": "#/$defs/provider_reference" },
-        "mock_coverage": { "$ref": "#/$defs/mock_coverage" }
+        "mock_tool_coverage": { "$ref": "#/$defs/mock_tool_coverage" }
       }
     },
     "failed_facts": {
@@ -187,7 +187,7 @@
           "oneOf": [{ "$ref": "#/$defs/audio_band" }, { "type": "null" }]
         },
         "provider_reference": { "$ref": "#/$defs/provider_reference" },
-        "mock_coverage": { "$ref": "#/$defs/mock_coverage" }
+        "mock_tool_coverage": { "$ref": "#/$defs/mock_tool_coverage" }
       }
     },
     "canceled_facts": {
@@ -226,7 +226,7 @@
           "oneOf": [{ "$ref": "#/$defs/audio_band" }, { "type": "null" }]
         },
         "provider_reference": { "$ref": "#/$defs/provider_reference" },
-        "mock_coverage": { "$ref": "#/$defs/mock_coverage" }
+        "mock_tool_coverage": { "$ref": "#/$defs/mock_tool_coverage" }
       }
     },
     "tool_name": {
@@ -234,7 +234,7 @@
       "type": "string",
       "minLength": 1
     },
-    "mock_coverage": {
+    "mock_tool_coverage": {
       "description": "Which of the agent's tools mock tools answered for during this simulation, and which reached their real implementations. The one terminal fact that may be omitted, and deliberately: absent means the agent was never asked what tools it has, so nothing was learned and nothing is claimed — which is the honest reading of every report written before this stamp existed, and of every connection egma stands outside the tool path of. Present with three empty lists means the asking happened and no tool came back, whether because nothing was listening or because there was nothing to list: a simulation no mock tool took any part in. A simulation whose tools were answered by mock tools and one whose tools ran for real are different units, exactly as two audio bands are, and comparing their numbers is invalid: this is where that is readable, on the simulation's own facts, with nothing else to consult and nothing editable to ask.",
       "type": "object",
       "additionalProperties": false,

@@ -66,7 +66,7 @@ class Assembled:
         return None if measured is None else measured.as_report()
 
     @property
-    def mock_coverage(self) -> dict | None:
+    def mock_tool_coverage(self) -> dict | None:
         """The contract's coverage stamp, or ``None`` where nothing is claimed."""
         return self.mock_tools.coverage()
 

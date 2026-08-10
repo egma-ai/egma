@@ -342,7 +342,7 @@ describe("the coverage stamp on the terminal facts", () => {
       for (const event of fixture.document.events as Record<string, unknown>[]) {
         const facts = event.facts as Record<string, unknown> | undefined;
         if (facts === undefined) continue;
-        byFixture.set(fixture.name, facts.mock_coverage as Stamp | undefined);
+        byFixture.set(fixture.name, facts.mock_tool_coverage as Stamp | undefined);
       }
     }
     return byFixture;
@@ -434,7 +434,7 @@ describe("the coverage stamp on the terminal facts", () => {
       ...carried,
       events: (carried.events as Record<string, unknown>[]).map((event) => ({
         ...event,
-        facts: { ...(event.facts as Record<string, unknown>), mock_coverage: stamp },
+        facts: { ...(event.facts as Record<string, unknown>), mock_tool_coverage: stamp },
       })),
     };
   }
@@ -443,7 +443,7 @@ describe("the coverage stamp on the terminal facts", () => {
     const carried = await fullyCovered();
     const [event] = carried.events as Record<string, unknown>[];
     const facts = event?.facts as Record<string, unknown> | undefined;
-    const stamp = facts?.mock_coverage as Stamp | undefined;
+    const stamp = facts?.mock_tool_coverage as Stamp | undefined;
     if (stamp === undefined) throw new Error("the fixture carries no stamp");
 
     // Matching is by name and one answer per name, so a name written twice
@@ -459,7 +459,7 @@ describe("the coverage stamp on the terminal facts", () => {
     expect(
       complaints.some((complaint) =>
         complaint.startsWith(
-          "/events/0/facts/mock_coverage/discovered: must NOT have duplicate items",
+          "/events/0/facts/mock_tool_coverage/discovered: must NOT have duplicate items",
         ),
       ),
       complaints.join("; "),
@@ -489,7 +489,7 @@ describe("the coverage stamp on the terminal facts", () => {
         reportComplaints(stamped(await fullyCovered(), partial)),
         `a stamp missing ${dropped} raised no complaint`,
       ).toContain(
-        `/events/0/facts/mock_coverage: must have required property '${dropped}'`,
+        `/events/0/facts/mock_tool_coverage: must have required property '${dropped}'`,
       );
     }
   });

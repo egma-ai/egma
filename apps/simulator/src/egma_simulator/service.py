@@ -277,7 +277,7 @@ class RunningSimulation:
                 # served in the last breath of a conversation is on the
                 # record rather than in a buffer nobody empties.
                 self._record_mock_tool_calls()
-                reporter.mock_coverage = assembled.mock_coverage
+                reporter.mock_tool_coverage = assembled.mock_tool_coverage
                 await model.close()
         except asyncio.CancelledError:
             # The service itself is being torn down mid-walk. Reporting a

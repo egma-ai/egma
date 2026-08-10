@@ -18,7 +18,7 @@
           "recording": "sim_01K3XV5G8Q7T2WZ0BCDEFHJKMN/dual-channel.wav"
         },
         "provider_reference": "egma-sim-01K3XV5G8Q7T2WZ0BCDEFHJKMN",
-        "mock_coverage": {
+        "mock_tool_coverage": {
           "discovered": ["check_calendar", "book_appointment", "send_confirmation_sms"],
           "covered": ["check_calendar", "book_appointment", "send_confirmation_sms"],
           "uncovered": []

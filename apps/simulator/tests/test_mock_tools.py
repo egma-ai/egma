@@ -282,7 +282,7 @@ async def test_a_spec_naming_mocked_tools_comes_back_as_a_record_of_them(
 
     # The coverage stamp: what the agent said it had, what egma stood
     # ready for, and what ran its own implementation untouched.
-    assert terminal_facts(client)["mock_coverage"] == {
+    assert terminal_facts(client)["mock_tool_coverage"] == {
         "discovered": [
             "check_calendar",
             "book_appointment",
@@ -340,7 +340,7 @@ async def test_a_simulation_that_mocks_nothing_records_exactly_what_it_used_to(
     )
 
     assert tool_spans(client) == []
-    assert terminal_facts(client)["mock_coverage"] == {
+    assert terminal_facts(client)["mock_tool_coverage"] == {
         "discovered": [],
         "covered": [],
         "uncovered": [],
@@ -375,7 +375,7 @@ async def test_a_connection_egma_stands_outside_claims_nothing_about_tools(
         blobs=FilesystemBlobStore(tmp_path / "blobs"),
     ).run()
 
-    assert "mock_coverage" not in terminal_facts(client)
+    assert "mock_tool_coverage" not in terminal_facts(client)
 
 
 # -- The exchange, method by method ------------------------------------------
@@ -463,7 +463,7 @@ async def test_a_second_hello_replaces_the_census_rather_than_adding_to_it(
         two_sessions,
     )
 
-    assert terminal_facts(client)["mock_coverage"] == {
+    assert terminal_facts(client)["mock_tool_coverage"] == {
         "discovered": ["check_calendar", "transfer_to_human"],
         "covered": ["check_calendar"],
         "uncovered": ["transfer_to_human"],
@@ -509,7 +509,7 @@ async def test_a_call_the_census_never_reported_lands_late_attached(
     }
     # Covered names the whole set egma stood ready for, so a late-attached
     # name is exactly one that is covered and was never discovered.
-    coverage = terminal_facts(client)["mock_coverage"]
+    coverage = terminal_facts(client)["mock_tool_coverage"]
     assert set(coverage["covered"]) - set(coverage["discovered"]) == {
         "send_confirmation_sms"
     }
@@ -804,7 +804,7 @@ async def test_a_hello_egma_refused_covers_nothing_at_all(
         a_session_egma_will_not_speak_to,
     )
 
-    assert terminal_facts(client)["mock_coverage"] == {
+    assert terminal_facts(client)["mock_tool_coverage"] == {
         "discovered": [],
         "covered": [],
         "uncovered": [],
@@ -842,7 +842,7 @@ async def test_an_exchange_that_cannot_be_offered_never_sinks_the_conversation(
 
     facts = terminal_facts(client)
     assert facts["ending"] == "persona_concluded"
-    assert "mock_coverage" not in facts
+    assert "mock_tool_coverage" not in facts
     assert any(
         "could not offer the mock-tool exchange" in record.getMessage()
         for record in caplog.records
@@ -896,4 +896,4 @@ def test_the_golden_fixture_is_a_spec_the_simulator_reads_whole(tmp_path: Path):
 
     assembled = assemble(spec, blobs=FilesystemBlobStore(tmp_path))
     assert assembled.conductor is not None
-    assert assembled.mock_coverage is None, "no room was joined, so nothing is claimed"
+    assert assembled.mock_tool_coverage is None, "no room was joined, so nothing is claimed"
