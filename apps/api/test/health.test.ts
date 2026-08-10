@@ -116,6 +116,22 @@ describe("configuration", () => {
     );
   });
 
+  it("refuses a base URL that is not one HTTP origin", () => {
+    expect(() =>
+      loadConfig({ ...enough, EGMA_BASE_URL: "ftp://egma.acme.example" }),
+    ).toThrow(/not an HTTP origin/);
+    for (const given of [
+      "https://user:password@egma.acme.example",
+      "https://egma.acme.example/api",
+      "https://egma.acme.example?one=two",
+      "https://egma.acme.example#part",
+    ]) {
+      expect(() => loadConfig({ ...enough, EGMA_BASE_URL: given })).toThrow(
+        /must be only the platform origin/,
+      );
+    }
+  });
+
   it("defaults to the port the compose file publishes", () => {
     expect(loadConfig(enough).port).toBe(3100);
   });

@@ -114,7 +114,7 @@ describe("signing a machine in", () => {
     expect(watched.opened).toEqual([shown.url]);
 
     // The key landed, against the egma that minted it.
-    const held = await readCredentials(workspace.credentialsFile);
+    const held = await readCredentials(workspace.credentialsFile, platform.url);
     expect(held?.url).toBe(platform.url);
     expect(held?.key).toMatch(/^egma_sk_/u);
     expect(held?.key).toBe(platform.device.keys.at(-1));
@@ -131,7 +131,7 @@ describe("signing a machine in", () => {
       whenPrompted: (prompt) => void platform.device.approve(prompt.userCode),
     });
 
-    const held = await readCredentials(workspace.credentialsFile);
+    const held = await readCredentials(workspace.credentialsFile, platform.url);
     const used = await fetch(`${platform.url}/api/keys`, {
       headers: { authorization: `Bearer ${held?.key ?? ""}` },
     });
@@ -151,7 +151,9 @@ describe("signing a machine in", () => {
     });
 
     expect(result.kind).toBe("denied");
-    expect(await readCredentials(workspace.credentialsFile)).toBeNull();
+    expect(
+      await readCredentials(workspace.credentialsFile, platform.url),
+    ).toBeNull();
   });
 
   it("says the code ran out, which is not the same as being told no", async () => {
@@ -162,7 +164,9 @@ describe("signing a machine in", () => {
     });
 
     expect(result.kind).toBe("expired");
-    expect(await readCredentials(workspace.credentialsFile)).toBeNull();
+    expect(
+      await readCredentials(workspace.credentialsFile, platform.url),
+    ).toBeNull();
   });
 
   it("backs off by five seconds when told it is asking too fast, and stays there", async () => {
@@ -230,7 +234,9 @@ describe("signing a machine in", () => {
 
     expect(result.kind).toBe("unreachable");
     expect(result.kind === "unreachable" && result.reason).toContain("127.0.0.1:1");
-    expect(await readCredentials(workspace.credentialsFile)).toBeNull();
+    expect(
+      await readCredentials(workspace.credentialsFile, "http://127.0.0.1:1"),
+    ).toBeNull();
   });
 
   it("stops where it stands when the developer stops it", async () => {
@@ -244,7 +250,9 @@ describe("signing a machine in", () => {
     });
 
     expect(result.kind).toBe("interrupted");
-    expect(await readCredentials(workspace.credentialsFile)).toBeNull();
+    expect(
+      await readCredentials(workspace.credentialsFile, platform.url),
+    ).toBeNull();
   });
 });
 
@@ -272,7 +280,7 @@ describe("a machine that is already signed in", () => {
     });
 
     expect(result.kind).toBe("stored");
-    const held = await readCredentials(workspace.credentialsFile);
+    const held = await readCredentials(workspace.credentialsFile, platform.url);
     expect(held?.key).not.toBe("egma_sk_held-already");
     expect(held?.key).toBe(platform.device.keys.at(-1));
   });
@@ -357,9 +365,9 @@ describe("coming back from a browser on another machine", () => {
 
       expect(result.kind).toBe("stored");
       expect(watched.said).toContain("Checking that one now.");
-      expect((await readCredentials(workspace.credentialsFile))?.key).toBe(
-        platform.device.keys.at(-1),
-      );
+      expect(
+        (await readCredentials(workspace.credentialsFile, platform.url))?.key,
+      ).toBe(platform.device.keys.at(-1));
     });
   }
 
@@ -523,7 +531,7 @@ describe("writing the key down", () => {
     // The key landed in a file nobody else can read — which is only true
     // because a fresh file was renamed over this one rather than written into.
     expect(((await stat(workspace.credentialsFile)).mode & 0o777).toString(8)).toBe("600");
-    expect(await readCredentials(workspace.credentialsFile)).toEqual(held);
+    expect(await readCredentials(workspace.credentialsFile, held.url)).toEqual(held);
   });
 
   it("does not follow a link standing where the key goes", async () => {
@@ -539,7 +547,7 @@ describe("writing the key down", () => {
     expect(await readFile(elsewhere, "utf8")).toBe("not the key\n");
     expect((await lstat(workspace.credentialsFile)).isSymbolicLink()).toBe(false);
     expect(((await stat(workspace.credentialsFile)).mode & 0o777).toString(8)).toBe("600");
-    expect(await readCredentials(workspace.credentialsFile)).toEqual(held);
+    expect(await readCredentials(workspace.credentialsFile, held.url)).toEqual(held);
   });
 
   it("locks the folder down too, and says nothing when it could", async () => {

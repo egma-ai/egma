@@ -222,6 +222,9 @@ export function loadConfig(
   }
 
   const givenBaseUrl = environment.EGMA_BASE_URL?.trim() || "http://localhost:3101";
+  // Keep this check at the service boundary. The CLI is a public package that
+  // is compiled, not bundled, so shared runtime code would also have to be
+  // published. The platform-origin agreement test keeps both checks aligned.
   let parsedBaseUrl: URL;
   try {
     parsedBaseUrl = new URL(givenBaseUrl);

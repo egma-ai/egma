@@ -102,7 +102,7 @@ function entriesIn(raw: string): CredentialEntries {
 /** What is on disk for one platform, or `null` when none is usable there. */
 export async function readCredentials(
   file: string,
-  platformUrl?: string,
+  platformUrl: string,
 ): Promise<Credentials | null> {
   let raw: string;
   try {
@@ -112,21 +112,12 @@ export async function readCredentials(
   }
 
   const entries = entriesIn(raw);
-  let origin: string | undefined;
-  if (platformUrl === undefined) {
-    // Compatibility for readers that inspect a one-platform file. Product
-    // resolution never calls this branch: a machine-wide recent login must
-    // not choose a repository target.
-    if (entries.size !== 1) return null;
-    origin = entries.keys().next().value as string | undefined;
-  } else {
-    try {
-      origin = normalizePlatformOrigin(platformUrl);
-    } catch {
-      return null;
-    }
+  let origin: string;
+  try {
+    origin = normalizePlatformOrigin(platformUrl);
+  } catch {
+    return null;
   }
-  if (origin === undefined) return null;
   const key = entries.get(origin);
   return key === undefined ? null : { url: origin, key };
 }

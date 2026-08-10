@@ -16,6 +16,9 @@ export type PlatformIdentity = {
 
 /** One origin shape for comparison, configuration, and credential lookup. */
 export function normalizePlatformOrigin(candidate: string): string {
+  // This public CLI is compiled, not bundled. Importing the API check would
+  // create a private runtime dependency. The agreement test keeps both checks
+  // aligned until the CLI distribution changes.
   let parsed: URL;
   try {
     parsed = new URL(candidate.trim());
