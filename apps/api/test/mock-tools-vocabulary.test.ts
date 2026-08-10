@@ -89,6 +89,12 @@ describe("the words the mocked world is described in", () => {
       "tool mock",
     );
     expect(bannedWordIn("a stub answers for it")?.instead).toBe("mock tool");
+    // The word in every form it inflects into, and the one form that has a
+    // word of its own to be told to use instead.
+    expect(bannedWordIn("while evaluating the answer")?.found).toBe(
+      "evaluating",
+    );
+    expect(bannedWordIn("the evaluator scores it")?.instead).toBe("grader");
     // `stub` is banned as a name for a mock tool. The room-shaped test double
     // stands in for a LiveKit room, not for one of the agent's tools, and the
     // glossary exempts it — so the guard encodes the exemption rather than

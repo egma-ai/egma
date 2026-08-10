@@ -229,10 +229,10 @@ export type Simulation = {
  * names.
  *
  * `covered` may name a tool absent from `discovered` — coverage is registered
- * by name against the whole simulation, while discovery is a snapshot of its
- * first moment — and `uncovered` is written out rather than left to be worked
- * out, because a reader asking "was this simulation isolated" should not have
- * to do set arithmetic to find out.
+ * by name against the whole simulation, while discovery is only what the agent
+ * has said about itself — and `uncovered` is written out rather than left to be
+ * worked out, because a reader asking "was this simulation isolated" should not
+ * have to do set arithmetic to find out.
  */
 export type MockToolCoverage = {
   readonly discovered: readonly string[];
@@ -685,13 +685,16 @@ function simulationFromRow(row: SimulationRow): Simulation {
  * leak into a caller wearing a type it does not have.
  *
  * Null is not a malformed stamp — it is the honest "nobody ever asked", which
- * every row written before the column existed carries.
+ * every row written before the column existed carries. `undefined` is not that
+ * and is not tolerated: it means the column was never selected, and answering
+ * a read that did not ask with the sentence for a simulation nobody asked is
+ * how a query bug becomes a claim about somebody's agent.
  */
 function mockToolCoverageFromRow(
   value: unknown,
   simulationId: string,
 ): MockToolCoverage | null {
-  if (value === null || value === undefined) return null;
+  if (value === null) return null;
 
   const malformed = (): Error =>
     new Error(

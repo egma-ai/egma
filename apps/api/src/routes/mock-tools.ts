@@ -18,7 +18,7 @@ import type { FastifyInstance } from "fastify";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
-import { answerAsSent, answerAsWritten } from "../http/mock-tools.ts";
+import { answerAsSent, describedMockTool } from "../http/mock-tools.ts";
 import {
   conflict,
   invalid,
@@ -102,19 +102,14 @@ function describedAgent(named: MockToolAgent): Record<string, unknown> {
 }
 
 /**
- * A mock tool as every read of one describes it.
- *
- * The answer's two branches are two keys and never one nullable field, because
- * `null` is a perfectly good thing for a tool to answer and a shape that could
- * not tell it from "no answer" would make an authored `null` unreadable. Only
- * the branch this mock tool is on is written.
+ * A mock tool as every read of one describes it: the shared projection every
+ * mocked answer crosses the wire in, with the three facts only a project's own
+ * row has — its identity, its scope, and when it was written — around it.
  */
 function described(one: MockTool): Record<string, unknown> {
   return {
     id: one.id,
-    tool: one.toolName,
-    ...answerAsWritten(one.answer),
-    delay_ms: one.delayMilliseconds,
+    ...describedMockTool(one),
     agents: one.agents.map(describedAgent),
     created_at: one.createdAt.toISOString(),
     updated_at: one.updatedAt.toISOString(),

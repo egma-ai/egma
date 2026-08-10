@@ -38,13 +38,16 @@ export const BANNED_MOCK_TOOL_WORDS: readonly BannedWord[] = [
   // Same job as `mock tool`, and one job takes one word.
   { pattern: String.raw`stubs?`, instead: "mock tool" },
   { pattern: String.raw`fakes?`, instead: "mock tool" },
-  // Everyone says it, nobody agrees what it points at.
-  { pattern: String.raw`evals?`, instead: "nothing — say what is meant" },
+  // Half the industry means the test by this, the other half the thing
+  // scoring it. Ahead of the wider `eval` pattern below, which would also
+  // match it and would answer with the wrong word to use instead.
+  { pattern: String.raw`evaluators?`, instead: "grader" },
+  // Everyone says it, nobody agrees what it points at — in every form it
+  // inflects into, because `evaluating` is the same word wearing a suffix.
   {
-    pattern: String.raw`evaluations?`,
+    pattern: String.raw`eval(uat\w*|s)?`,
     instead: "nothing — say what is meant",
   },
-  { pattern: String.raw`evaluators?`, instead: "grader" },
 ];
 
 /**
