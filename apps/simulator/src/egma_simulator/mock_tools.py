@@ -203,6 +203,7 @@ class MockToolSeam:
         self._sleep = sleep
         self._standing_ready = False
         self._stood_in_the_path = False
+        self._censuses = 0
         self._discovered: tuple[str, ...] = ()
         self._exchanged: list[ExchangedToolCall] = []
 
@@ -296,12 +297,30 @@ class MockToolSeam:
             if name not in discovered:
                 discovered.append(name)
 
-        replacing = self._discovered if self._stood_in_the_path else None
+        reply = _serialized(
+            {
+                "protocol_version": PROTOCOL_VERSION,
+                "mocked_tools": list(self._answers),
+            }
+        )
+        # Measured before anything here is written down, for the same
+        # reason an answer is measured before its delay is spent: a reply
+        # that cannot be sent tells the other side nothing, so it wraps
+        # nothing, so nothing is covered — and a census recorded ahead of
+        # the refusal would leave the record claiming otherwise. A project
+        # with more mocked tools than one message can name is also a fault
+        # worth naming, where the transport's own complaint would arrive
+        # as a hello that mysteriously failed.
+        _fits_on_the_wire("the list of tools egma answers for", reply)
+
+        replaced = self._censuses
+        self._censuses += 1
+        replacing = self._discovered
         self._discovered = tuple(discovered)
-        # Only now: the reply below is what tells the other side which
-        # tools to wrap, so this is the moment egma really comes to stand
-        # between the agent and its backends. A hello refused above never
-        # reaches here, and nothing was covered by one.
+        # Only now: the reply is what tells the other side which tools to
+        # wrap, so this is the moment egma really comes to stand between
+        # the agent and its backends. A hello refused above never reaches
+        # here, and nothing was covered by one.
         self._stood_in_the_path = True
         logger.info(
             "the agent reported %d tool(s); %d of them are answered by mock "
@@ -309,7 +328,7 @@ class MockToolSeam:
             len(self._discovered),
             sum(1 for name in self._discovered if name in self._answers),
         )
-        if replacing is not None:
+        if replaced:
             # A census is a snapshot of the agent's tools, so a second one
             # is the agent saying what it has *now*. Said out loud because
             # the stamp keeps only the last, and an operator reading a
@@ -320,18 +339,6 @@ class MockToolSeam:
                 len(replacing),
                 len(self._discovered),
             )
-        reply = _serialized(
-            {
-                "protocol_version": PROTOCOL_VERSION,
-                "mocked_tools": list(self._answers),
-            }
-        )
-        # Measured for the same reason an answer is. A project with more
-        # mocked tools than one message can name would otherwise have its
-        # reply refused by the transport, and the far side would learn
-        # only that the hello failed — where a named fault says which
-        # project has outgrown the exchange.
-        _fits_on_the_wire("the list of tools egma answers for", reply)
         return reply
 
     async def tool(self, payload: str) -> str:

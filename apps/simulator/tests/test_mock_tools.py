@@ -381,15 +381,24 @@ async def test_a_connection_egma_stands_outside_claims_nothing_about_tools(
 # -- The exchange, method by method ------------------------------------------
 
 
-async def opened(stub: RoomStub, mock_tools: tuple[MockTool, ...] = ()) -> object:
-    """One room, joined, with egma standing ready to answer in it."""
+async def opened(
+    stub: RoomStub,
+    mock_tools: tuple[MockTool, ...] = (),
+    *,
+    seam: MockToolSeam | None = None,
+) -> object:
+    """One room, joined, with egma standing ready to answer in it.
+
+    ``seam`` is for the one test that has to ask what the seam claims
+    afterwards; everything else only cares what comes back on the wire.
+    """
     spec = SimulationSpec.from_document(mocked_spec())
     plug = livekit_plug.LiveKitRoom(
         modality="voice",
         config={"url": A_URL, "agentName": "front-desk"},
         credentials={"apiKey": A_KEY, "apiSecret": A_SECRET},
         simulation_id=spec.simulation_id,
-        mock_tools=MockToolSeam(mock_tools),
+        mock_tools=seam if seam is not None else MockToolSeam(mock_tools),
         driver=stub.driver,
     )
     await plug.open()
@@ -675,6 +684,37 @@ async def test_an_answer_too_large_for_the_wire_is_refused_naming_the_size():
     assert refusal.code == ANSWER_TOO_LARGE
     assert str(LARGEST_PAYLOAD_BYTES) in refusal.message
     assert "read_the_file" in refusal.message
+    await plug.close()
+
+
+async def test_a_reply_too_large_to_send_covers_nothing_and_records_no_census():
+    """A project with more mocked tools than one message can name.
+
+    Refused before anything is written down, which is the ordering that
+    matters: the reply is what tells the other side which tools to wrap,
+    so a reply that never arrives wrapped nothing — and a census recorded
+    ahead of the refusal would leave the stamp claiming an isolation that
+    did not happen.
+    """
+    stub = RoomStub(greeting="Front desk.")
+    seam = MockToolSeam(
+        tuple(
+            a_mock(f"tool_number_{number:04d}", {"ok": True}) for number in range(900)
+        )
+    )
+    plug = await opened(stub, seam=seam)
+
+    refusal = await refused(
+        stub, HELLO_METHOD, '{"protocol_version":1,"tools":[{"name":"one_tool"}]}'
+    )
+    assert refusal.code == ANSWER_TOO_LARGE
+    assert str(LARGEST_PAYLOAD_BYTES) in refusal.message
+
+    assert seam.coverage() == {
+        "discovered": [],
+        "covered": [],
+        "uncovered": [],
+    }
     await plug.close()
 
 
