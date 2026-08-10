@@ -306,7 +306,6 @@ export {
   createMockTool,
   deleteMockTool,
   editMockTool,
-  getMockTool,
   listMockTools,
   resolveMockToolAgents,
   type DeletedMockTool,

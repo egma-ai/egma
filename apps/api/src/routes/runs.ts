@@ -20,6 +20,7 @@ import type { FastifyInstance } from "fastify";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
+import { answerAsWritten } from "../http/mock-tools.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
 import {
@@ -168,9 +169,7 @@ function describedSimulation(one: ConductedSimulation): Record<string, unknown> 
 function describedMockToolEntry(one: SnapshotEntry): Record<string, unknown> {
   return {
     tool: one.toolName,
-    ...(one.answer.error === undefined
-      ? { answer: one.answer.answer }
-      : { error: one.answer.error }),
+    ...answerAsWritten(one.answer),
     delay_ms: one.delayMilliseconds,
   };
 }
@@ -179,13 +178,11 @@ function describedMockTools(
   snapshot: MockToolSnapshot,
 ): Record<string, unknown> {
   return {
+    // A default is one of those with the row it came from named beside it, so a
+    // reader can go and look at the mock tool the run froze.
     defaults: snapshot.defaults.map((one) => ({
-      tool: one.toolName,
+      ...describedMockToolEntry(one),
       mock_tool_id: one.mockToolId,
-      ...(one.answer.error === undefined
-        ? { answer: one.answer.answer }
-        : { error: one.answer.error }),
-      delay_ms: one.delayMilliseconds,
     })),
     overrides: Object.fromEntries(
       Object.entries(snapshot.overrides).map(([versionId, entries]) => [

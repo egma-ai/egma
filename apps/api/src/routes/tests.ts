@@ -21,6 +21,7 @@ import type { FastifyInstance } from "fastify";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
+import { answerAsSent, answerAsWritten } from "../http/mock-tools.ts";
 import {
   invalid,
   notFound,
@@ -114,9 +115,7 @@ const OVERRIDE_KEYS = ["tool", "answer", "error", "delay_ms"] as const;
 function describedOverride(one: MockOverride): Record<string, unknown> {
   return {
     tool: one.toolName,
-    ...(one.answer.error === undefined
-      ? { answer: one.answer.answer }
-      : { error: one.answer.error }),
+    ...answerAsWritten(one.answer),
     delay_ms: one.delayMilliseconds,
   };
 }
@@ -125,12 +124,12 @@ function describedOverride(one: MockOverride): Record<string, unknown> {
  * The overrides a body carries, as the factory takes them.
  *
  * Almost nothing is judged here: how long a delay may be, how large an answer
- * may be, and what a tool name has to say are the factory's rules, held in one
- * place for a project's mock tools and a test's overrides alike — a second
- * opinion here could come to disagree with the one that matters. What this owns
- * is the shape of the envelope, and that a wrong shape is refused rather than
- * dropped: a dropped override is a branch somebody believes their test forces
- * and it does not.
+ * may be, what a tool name has to say, and whether the two answer keys add up
+ * to one branch are all the factory's rules, held in one place for a project's
+ * mock tools and a test's overrides alike — a second opinion here could come to
+ * disagree with the one that matters. What this owns is the shape of the
+ * envelope, and that a wrong shape is refused rather than dropped: a dropped
+ * override is a branch somebody believes their test forces and it does not.
  */
 type WrittenOverrides =
   | { readonly entries: readonly MockOverrideInput[] }
@@ -166,31 +165,6 @@ function overrideEntries(value: unknown): WrittenOverrides {
           OVERRIDE_KEYS.join(", "),
       };
     }
-
-    const gives = "answer" in written;
-    const fails = "error" in written;
-    if (gives && fails) {
-      return {
-        refusal:
-          "a mock tool answers with one thing: this one sent both answer and " +
-          "error. Send whichever branch the test needs.",
-      };
-    }
-    if (!gives && !fails) {
-      return {
-        refusal:
-          "a mock tool answers with something: send answer with what the " +
-          "tool returns, or error with the failure it raises. This one sent " +
-          "neither.",
-      };
-    }
-    if (fails && typeof written.error !== "string") {
-      return {
-        refusal:
-          "error is the failure this mock tool raises, written as text, and " +
-          `one entry in mock_tools sent ${typeof written.error}.`,
-      };
-    }
     if ("delay_ms" in written && typeof written.delay_ms !== "number") {
       return {
         refusal:
@@ -200,10 +174,8 @@ function overrideEntries(value: unknown): WrittenOverrides {
     }
 
     entries.push({
-      toolName: typeof written.tool === "string" ? written.tool : "",
-      answer: fails
-        ? { error: written.error as string }
-        : { answer: written.answer },
+      toolName: written.tool,
+      answer: answerAsSent(written),
       ...(typeof written.delay_ms === "number"
         ? { delayMilliseconds: written.delay_ms }
         : {}),

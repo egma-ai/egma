@@ -38,7 +38,7 @@ const CALENDAR = {
 } as const;
 
 function request(
-  method: "GET" | "POST" | "PATCH",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   url: string,
   key: string,
   payload?: Record<string, unknown>,
@@ -164,6 +164,26 @@ describe("the gates at the door", () => {
         "tool is the name of the agent's tool this mock tool answers for, " +
         "and this one is blank. Send the tool's name exactly as the agent " +
         "registers it.",
+    });
+    expect(await rowCount()).toBe(0);
+  });
+
+  it("refuses a tool name that is not text, saying so rather than calling it blank", async () => {
+    api = await createApi("mock_tools_tool_shape");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+
+    const refused = await createMockToolThrough(key, {
+      ...CALENDAR,
+      tool: 42,
+    });
+
+    expect(refused.statusCode).toBe(422);
+    expect(refused.body).toEqual({
+      error: "unprocessable",
+      message:
+        "tool is the name of the agent's tool this mock tool answers for, " +
+        "written as text, and this request sent number.",
     });
     expect(await rowCount()).toBe(0);
   });
@@ -457,6 +477,67 @@ describe("editing a mock tool", () => {
         `there is no mock tool ${theirs} on this egma. List the mock tools ` +
         `to see what this project answers for.`,
     });
+  });
+});
+
+describe("removing a mock tool", () => {
+  it("takes it out of the list and frees the tool name it held", async () => {
+    api = await createApi("mock_tools_delete");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const created = await createMockToolThrough(key, { ...CALENDAR });
+    const mockToolId = String(created.body.id);
+
+    const removed = await request(
+      "DELETE",
+      `/api/mock-tools/${mockToolId}`,
+      key,
+    );
+
+    expect(removed.statusCode, JSON.stringify(removed.body)).toBe(200);
+    expect(removed.body).toMatchObject({
+      id: mockToolId,
+      tool: CALENDAR.tool,
+    });
+    expect(removed.body.deleted_at).toBeTypeOf("string");
+
+    const listed = await request("GET", "/api/mock-tools", key);
+    expect(listed.body.items).toEqual([]);
+    expect(await rowCount()).toBe(0);
+
+    // The name it held is free again, which is the whole reason the one-answer
+    // rule is written where a deleted row falls outside it.
+    const again = await createMockToolThrough(key, {
+      tool: CALENDAR.tool,
+      error: "the calendar is unreachable",
+    });
+    expect(again.statusCode, JSON.stringify(again.body)).toBe(201);
+  });
+
+  it("is not found for a mock tool this credential could not have read", async () => {
+    api = await createApi("mock_tools_delete_tenancy");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const grace = await signUp(api.app, "grace@globex.example", "Globex");
+    const created = await createMockToolThrough(
+      await projectKeyFor(api.app, ada),
+      { ...CALENDAR },
+    );
+    const theirs = String(created.body.id);
+
+    const refused = await request(
+      "DELETE",
+      `/api/mock-tools/${theirs}`,
+      await projectKeyFor(api.app, grace),
+    );
+
+    expect(refused.statusCode).toBe(404);
+    expect(refused.body).toEqual({
+      error: "not_found",
+      message:
+        `there is no mock tool ${theirs} on this egma. List the mock tools ` +
+        `to see what this project answers for.`,
+    });
+    expect(await rowCount()).toBe(1);
   });
 });
 

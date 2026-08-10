@@ -1,6 +1,7 @@
 import {
   authorize,
   createMockTool,
+  deleteMockTool,
   editMockTool,
   listMockTools,
   MockToolTakenError,
@@ -10,7 +11,6 @@ import {
   UnprocessableInputError,
   type MockTool,
   type MockToolAgent,
-  type MockToolAnswer,
 } from "@egma/db";
 import { isId } from "@egma/ids";
 import type { FastifyInstance } from "fastify";
@@ -18,6 +18,7 @@ import type { FastifyInstance } from "fastify";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
+import { answerAsSent, answerAsWritten } from "../http/mock-tools.ts";
 import {
   conflict,
   invalid,
@@ -112,57 +113,12 @@ function described(one: MockTool): Record<string, unknown> {
   return {
     id: one.id,
     tool: one.toolName,
-    ...(one.answer.error === undefined
-      ? { answer: one.answer.answer }
-      : { error: one.answer.error }),
+    ...answerAsWritten(one.answer),
     delay_ms: one.delayMilliseconds,
     agents: one.agents.map(describedAgent),
     created_at: one.createdAt.toISOString(),
     updated_at: one.updatedAt.toISOString(),
   };
-}
-
-/**
- * What the body says this tool answers with, or the refusal for a body that
- * says neither or both.
- *
- * A key that arrived is what counts, not a key that arrived truthy: `answer:
- * null`, `answer: 0` and `answer: false` are all answers a tool can give, and a
- * gate that read them as absent would refuse three perfectly ordinary mocks.
- */
-type WrittenAnswer =
-  | { readonly answer: MockToolAnswer }
-  | { readonly refusal: string };
-
-function answerIn(body: Body): WrittenAnswer {
-  const gives = "answer" in body;
-  const fails = "error" in body;
-
-  if (gives && fails) {
-    return {
-      refusal:
-        "a mock tool answers with one thing: this one sent both answer and " +
-        "error. Send whichever branch the test needs.",
-    };
-  }
-  if (!gives && !fails) {
-    return {
-      refusal:
-        "a mock tool answers with something: send answer with what the tool " +
-        "returns, or error with the failure it raises. This one sent neither.",
-    };
-  }
-  if (fails) {
-    if (typeof body.error !== "string") {
-      return {
-        refusal:
-          "error is the failure this mock tool raises, written as text, and " +
-          `this request sent ${typeof body.error}.`,
-      };
-    }
-    return { answer: { error: body.error } };
-  }
-  return { answer: { answer: body.answer } };
 }
 
 /**
@@ -308,8 +264,6 @@ export async function mockToolRoutes(
     const unknown = unknownKeyIn(body);
     if (unknown !== undefined) return invalid(reply, unknown);
 
-    const answer = answerIn(body);
-    if ("refusal" in answer) return unprocessable(reply, answer.refusal);
     const delay = delayIn(body);
     if ("refusal" in delay) return unprocessable(reply, delay.refusal);
     const agents = "agents" in body ? agentEntries(body.agents) : { entries: [] };
@@ -321,8 +275,8 @@ export async function mockToolRoutes(
     const agentIds = await resolveMockToolAgents(acting.auth, agents.entries);
 
     const created = await createMockTool(acting.auth, {
-      toolName: typeof body.tool === "string" ? body.tool : "",
-      answer: answer.answer,
+      toolName: body.tool,
+      answer: answerAsSent(body),
       ...(delay.delayMilliseconds === undefined
         ? {}
         : { delayMilliseconds: delay.delayMilliseconds }),
@@ -353,13 +307,11 @@ export async function mockToolRoutes(
     const unknown = unknownKeyIn(body);
     if (unknown !== undefined) return invalid(reply, unknown);
 
-    // Absent from an edit means "keep what is there", so the two-branch gate
-    // only applies to a body that mentioned one of them at all.
+    // Absent from an edit means "keep what is there", so an answer is handed
+    // down only when the body mentioned one of the two keys at all — and which
+    // of them it mentioned is still the factory's to judge.
     const answer =
-      "answer" in body || "error" in body ? answerIn(body) : undefined;
-    if (answer !== undefined && "refusal" in answer) {
-      return unprocessable(reply, answer.refusal);
-    }
+      "answer" in body || "error" in body ? answerAsSent(body) : undefined;
     const delay = delayIn(body);
     if ("refusal" in delay) return unprocessable(reply, delay.refusal);
     const agents = "agents" in body ? agentEntries(body.agents) : undefined;
@@ -376,10 +328,8 @@ export async function mockToolRoutes(
         : await resolveMockToolAgents(acting.auth, agents.entries);
 
     const edited = await editMockTool(acting.auth, mockToolId, {
-      ...("tool" in body
-        ? { toolName: typeof body.tool === "string" ? body.tool : "" }
-        : {}),
-      ...(answer === undefined ? {} : { answer: answer.answer }),
+      ...("tool" in body ? { toolName: body.tool } : {}),
+      ...(answer === undefined ? {} : { answer }),
       ...(delay.delayMilliseconds === undefined
         ? {}
         : { delayMilliseconds: delay.delayMilliseconds }),
@@ -393,6 +343,44 @@ export async function mockToolRoutes(
     }
 
     return reply.send(described(edited));
+  });
+
+  /**
+   * Stop answering for a tool.
+   *
+   * **A mock tool is the one thing here a project can be worse off for
+   * keeping.** Every one of them applies to every run started afterwards, so a
+   * mistyped tool name left behind is a mocked world nobody meant to author —
+   * which is why removal is a verb here rather than a thing to work around by
+   * editing the row into something harmless.
+   *
+   * The runs already started keep answering exactly what they froze, because a
+   * run's world is a copy rather than a pointer. That is the same property that
+   * lets an edit overwrite in place, applied to the last edit there is.
+   */
+  app.delete(MOCK_TOOL_PATH, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const { mockToolId } = request.params as { mockToolId: string };
+    const query = (request.query ?? {}) as Query;
+
+    authorize(auth, "author_definitions", {
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+    });
+
+    const acting = await actingIn(auth, given(query.project));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+
+    const removed = await deleteMockTool(acting.auth, mockToolId);
+    if (removed === undefined) {
+      return notFound(reply, noSuchMockTool(mockToolId));
+    }
+
+    return reply.send({
+      id: removed.id,
+      tool: removed.toolName,
+      deleted_at: removed.deletedAt.toISOString(),
+    });
   });
 
   /**

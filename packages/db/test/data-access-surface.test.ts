@@ -177,7 +177,6 @@ const CONTEXT_REQUIRING = [
   "getGradingJob",
   "getGradingJobForTrace",
   "getJudgeConfiguration",
-  "getMockTool",
   "getPersona",
   "getPersonaVersion",
   "getRun",

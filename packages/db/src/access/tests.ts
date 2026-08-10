@@ -25,6 +25,7 @@ import {
   validAnswer,
   validDelay,
   validToolName,
+  type MockToolAnswerInput,
 } from "./mock-tools.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
@@ -93,10 +94,15 @@ export type MockOverride = {
   readonly delayMilliseconds: number;
 };
 
-/** An override as it is written down; the delay is what a writer may leave out. */
+/**
+ * An override as it is written down. The delay is what a writer may leave out,
+ * and the answer arrives unjudged for the reason a project mock tool's does:
+ * whether the two keys add up to one branch is one rule, decided in one place,
+ * for both halves of the mocked world.
+ */
 export type MockOverrideInput = {
-  readonly toolName: string;
-  readonly answer: MockToolAnswer;
+  readonly toolName: unknown;
+  readonly answer: MockToolAnswerInput;
   readonly delayMilliseconds?: number | undefined;
 };
 

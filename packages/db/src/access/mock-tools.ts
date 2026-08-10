@@ -42,10 +42,24 @@ import { within } from "./within.ts";
 /** What an answer's own validation is about, so a refusal can name the key. */
 type AnswerKey = "answer" | "error";
 
+/**
+ * What a write says this tool answers with, before anything has judged it.
+ *
+ * Wider than `MockToolAnswer` on purpose, and this is where the rule about the
+ * two keys lives: a caller sends whichever of them it was given and never
+ * decides whether that was one, both or neither — `validAnswer` decides, in one
+ * place, in one set of words. A door that judged it first would be a second
+ * copy of the rule, free to disagree with this one the day either moved.
+ */
+export type MockToolAnswerInput = {
+  readonly answer?: unknown;
+  readonly error?: unknown;
+};
+
 export type NewMockTool = {
   /** The agent's own name for the tool this answers for. */
-  readonly toolName: string;
-  readonly answer: MockToolAnswer;
+  readonly toolName: unknown;
+  readonly answer: MockToolAnswerInput;
   /** How long egma holds the answer back. Absent is no delay at all. */
   readonly delayMilliseconds?: number | undefined;
   /**
@@ -79,8 +93,8 @@ export type MockTool = {
  * so every one of these overwrites what the row said.
  */
 export type MockToolChanges = {
-  readonly toolName?: string;
-  readonly answer?: MockToolAnswer;
+  readonly toolName?: unknown;
+  readonly answer?: MockToolAnswerInput;
   readonly delayMilliseconds?: number;
   /**
    * The agents the mock tool should apply to after this edit. An empty list
@@ -116,8 +130,14 @@ const COLUMNS = {
  * string exactly and a name with an invisible character on the end would never
  * match the tool the agent registered.
  */
-export function validToolName(name: string): string {
-  const trimmed = typeof name === "string" ? name.trim() : "";
+export function validToolName(name: unknown): string {
+  if (typeof name !== "string") {
+    throw new UnprocessableInputError(
+      "tool is the name of the agent's tool this mock tool answers for, " +
+        `written as text, and this request sent ${typeof name}.`,
+    );
+  }
+  const trimmed = name.trim();
   if (trimmed === "") {
     throw new UnprocessableInputError(
       "tool is the name of the agent's tool this mock tool answers for, and " +
@@ -181,7 +201,7 @@ function serializedBytes(value: unknown, key: AnswerKey): number {
  * reading this refusal — not the simulation that would otherwise have
  * discovered it mid-conversation.
  */
-export function validAnswer(answer: MockToolAnswer): MockToolAnswer {
+export function validAnswer(answer: MockToolAnswerInput): MockToolAnswer {
   // A key that is there *and* says something. `answer: null` is an answer a
   // tool can perfectly well give and counts; `answer: undefined` is a key
   // carrying nothing and does not, which is what lets the union's own
@@ -204,18 +224,24 @@ export function validAnswer(answer: MockToolAnswer): MockToolAnswer {
   }
 
   if (fails) {
-    const message = answer.error ?? "";
-    if (typeof message !== "string" || message.trim() === "") {
+    const message = answer.error;
+    if (typeof message !== "string") {
       throw new UnprocessableInputError(
         "error is the failure this mock tool raises, written as text, and " +
-          "this one is blank. Say what the agent's backend would have said.",
+          `this request sent ${typeof message}.`,
       );
     }
-    const bytes = Buffer.byteLength(message, "utf8");
-    if (bytes > LARGEST_MOCK_TOOL_ANSWER_BYTES) {
+    if (message.trim() === "") {
       throw new UnprocessableInputError(
-        tooLarge("error", bytes),
+        "error is the failure this mock tool raises, and this one is blank. " +
+          "Say what the agent's backend would have said.",
       );
+    }
+    // Counted the way the value branch is counted — serialized, because that
+    // is what the exchange carries and a cap measured two ways is two caps.
+    const bytes = serializedBytes(message, "error");
+    if (bytes > LARGEST_MOCK_TOOL_ANSWER_BYTES) {
+      throw new UnprocessableInputError(tooLarge("error", bytes));
     }
     return { error: message };
   }
@@ -247,15 +273,22 @@ function validateAgentIds(ids: readonly string[]): void {
   const seen = new Set<string>();
   for (const id of ids) {
     if (!isId("agt", id)) {
-      throw new UnprocessableInputError(`agents names "${id}", which is not an agent id`);
-    }
-    if (seen.has(id)) {
       throw new UnprocessableInputError(
-        `agents names agent ${id} twice; name each agent once`,
+        `agents names "${id}", which is not an agent id`,
       );
     }
+    if (seen.has(id)) throw new UnprocessableInputError(namedTwice(id));
     seen.add(id);
   }
+}
+
+/**
+ * The sentence a scope naming one agent twice is refused with. Both the ids a
+ * caller handed over and the names the resolver turned into ids come through
+ * it, so the two paths cannot come to say it differently.
+ */
+function namedTwice(agentId: string): string {
+  return `agents names agent ${agentId} twice; name each agent once`;
 }
 
 /**
@@ -427,7 +460,7 @@ export async function resolveMockToolAgents(
     );
   }
 
-  const wanted = named.map((entry) => (typeof entry === "string" ? entry.trim() : ""));
+  const wanted = named.map((entry) => entry.trim());
   if (wanted.length === 0) return [];
 
   const rows = await db()
@@ -455,9 +488,7 @@ export async function resolveMockToolAgents(
 
     if (found === undefined) throw new UnprocessableInputError(noSuchAgent(entry));
     if (resolved.includes(found.id)) {
-      throw new UnprocessableInputError(
-        `agents names agent ${found.id} twice; name each agent once`,
-      );
+      throw new UnprocessableInputError(namedTwice(found.id));
     }
     resolved.push(found.id);
   }
@@ -604,26 +635,6 @@ export async function createMockTool(
     );
 
   return { ...written, answer: answerFromRow(written.answer, written.id) };
-}
-
-export async function getMockTool(
-  auth: AuthContext,
-  id: string,
-): Promise<MockTool | undefined> {
-  authorize(auth, "read", here(auth));
-
-  const [row] = await db()
-    .select(COLUMNS)
-    .from(mockTool)
-    .where(theMockTool(auth, id))
-    .limit(1);
-
-  if (row === undefined) return undefined;
-  return {
-    ...row,
-    answer: answerFromRow(row.answer, row.id),
-    agents: await agentsOf(db(), row.id),
-  };
 }
 
 /**
