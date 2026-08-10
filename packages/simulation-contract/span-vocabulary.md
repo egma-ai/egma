@@ -107,13 +107,14 @@ they always match, because a mock tool is matched to a call by name and by
 nothing else; writing both is what makes the day they stop matching visible on
 the record instead of assumed away.
 
-**What `late_attached` owns.** A closure is registered for every tool name the
-run's answers cover, whether or not the census reported that tool — so a tool
-attached after the census still gets a mocked answer, which is the safe
-outcome. What such a call cannot promise is its arguments: with no real tool to
-copy a signature from, the arguments reaching egma may be trimmed or missing
-altogether. The flag carries that caveat, so a reader never mistakes thin
-arguments for an agent that passed none.
+**What `late_attached` owns.** When a simulation starts, the agent reports the
+tools it has — the census. Answers are then held ready for every tool name the
+run covers, whether or not the census named it, so an agent that gains a tool
+after the census still has that tool answered rather than reaching a real
+backend, which is the safe way round. What such a call cannot promise is its
+arguments: with no tool of the agent's own to take the shape of, what arrives
+may be trimmed or missing altogether. The flag carries that caveat, so a reader
+never takes thin arguments for an agent that passed none.
 
 ## What the fixtures show
 

@@ -1,0 +1,29 @@
+{
+  "contract_version": 1,
+  "simulation_id": "sim_01K3XV5G8Q7T2WZ0BCDEFHJKMN",
+  "events": [
+    {
+      "kind": "status",
+      "event_id": "evt-000412",
+      "at": "2026-08-09T14:21:48.310000Z",
+      "status": "completed",
+      "reason": null,
+      "facts": {
+        "ending": "persona_concluded",
+        "started_at": "2026-08-09T14:18:02.000000Z",
+        "ended_at": "2026-08-09T14:21:48.310000Z",
+        "turn_count": 18,
+        "audio": {
+          "measured_sample_rate_hz": 48000,
+          "recording": "sim_01K3XV5G8Q7T2WZ0BCDEFHJKMN/dual-channel.wav"
+        },
+        "provider_reference": "egma-sim-01K3XV5G8Q7T2WZ0BCDEFHJKMN",
+        "mock_coverage": {
+          "discovered": ["check_calendar", "book_appointment", "send_confirmation_sms"],
+          "covered": ["check_calendar", "book_appointment", "send_confirmation_sms"],
+          "uncovered": []
+        }
+      }
+    }
+  ]
+}
