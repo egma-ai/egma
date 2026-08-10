@@ -292,7 +292,7 @@ describe("the golden span fixtures", () => {
     }
   });
 
-  it("reads the two answered calls back exactly, attribute by attribute", () => {
+  it("read the two answered calls back exactly, attribute by attribute", () => {
     const flush = valid.find(
       (fixture) => fixture.name === "voice-mocked-tool-calls.json",
     );
@@ -321,8 +321,8 @@ describe("the golden span fixtures", () => {
       },
       {
         name: "send_confirmation_sms",
-        // Nothing arrived: this tool was not among those the census reported,
-        // so there was no shape for the arguments to take.
+        // Nothing arrived: this tool was not among those the agent reported
+        // having, so there was no shape for the arguments to take.
         arguments: undefined,
         result: '{"delivered":true}',
         provenance: "mocked",
@@ -332,7 +332,7 @@ describe("the golden span fixtures", () => {
     ]);
   });
 
-  it("shows a mocked call carrying the answer egma served and the mock tool that served it", () => {
+  it("show a mocked call carrying the answer egma served and the mock tool that served it", () => {
     const mocked = valid
       .flatMap((fixture) => spansOf(fixture))
       .filter(
@@ -357,15 +357,15 @@ describe("the golden span fixtures", () => {
         BigInt(span.endTimeUnixNano ?? "0") -
           BigInt(span.startTimeUnixNano ?? "0"),
       ).toBeGreaterThan(0n);
-      // An ordinary mocked call is one whose tool the census reported, so its
-      // arguments arrived whole.
+      // An ordinary mocked call is one whose tool the agent had reported
+      // having, so its arguments arrived whole.
       expect(attributeOf(span.attributes, "egma.tool.arguments")).toBeTypeOf(
         "string",
       );
     }
   });
 
-  it("shows a late-attached call, distinguishable from an ordinary mocked call by its own flag", () => {
+  it("show a late-attached call, distinguishable from an ordinary mocked call by its own flag", () => {
     const late = valid
       .flatMap((fixture) => spansOf(fixture))
       .filter((span) => flagOf(span.attributes, "egma.tool.late_attached"));
@@ -385,7 +385,7 @@ describe("the golden span fixtures", () => {
     }
   });
 
-  it("stamps every recorded answer with how it was answered, so no result is of unknown origin", () => {
+  it("stamp every recorded answer with how it was answered, so no result is of unknown origin", () => {
     for (const fixture of [...valid, ...invalid]) {
       for (const span of spansOf(fixture)) {
         const provenance = attributeOf(span.attributes, "egma.tool.provenance");
@@ -415,7 +415,7 @@ describe("the golden span fixtures", () => {
     }
   });
 
-  it("still carries a call egma only observed, with neither answer nor stamp, so the expand breaks nobody", () => {
+  it("still carry a call egma only observed, with neither answer nor stamp, so the expand breaks nobody", () => {
     const bare = valid
       .flatMap((fixture) => spansOf(fixture))
       .filter(

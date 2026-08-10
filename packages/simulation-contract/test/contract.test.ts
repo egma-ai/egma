@@ -348,10 +348,10 @@ describe("the coverage stamp on the terminal facts", () => {
 
   it("reads back a mixed simulation, which is the one that was not fully isolated", async () => {
     // Three of the agent's four tools ran for real. `send_confirmation_sms` is
-    // covered without having been discovered: the census is a snapshot taken
-    // at session start, and an answer is registered for every name the run
-    // covers, so a tool attached afterwards is answered anyway — and a call
-    // served for it lands flagged late-attached.
+    // covered without having been discovered: what the agent reported is a
+    // snapshot of the simulation's first moment, while an answer is held ready
+    // for every name the simulation covers — so a tool attached afterwards is
+    // answered anyway, and a call served for it lands flagged late-attached.
     expect((await stamps()).get("completed-mocked-mixed-coverage.json")).toEqual({
       discovered: [
         "check_calendar",
@@ -364,12 +364,10 @@ describe("the coverage stamp on the terminal facts", () => {
     });
   });
 
-  it("reads back an empty census, which is a plain unmocked simulation", async () => {
-    expect((await stamps()).get("completed-unmocked-empty-census.json")).toEqual({
-      discovered: [],
-      covered: [],
-      uncovered: [],
-    });
+  it("reads back a simulation where nothing was discovered at all, which is a plain unmocked one", async () => {
+    expect(
+      (await stamps()).get("completed-unmocked-nothing-discovered.json"),
+    ).toEqual({ discovered: [], covered: [], uncovered: [] });
   });
 
   it("leaves the stamp off a simulation nothing offered a seam on, so the expand breaks nobody", async () => {
@@ -393,7 +391,7 @@ describe("the coverage stamp on the terminal facts", () => {
     ]);
   });
 
-  it("never has one tool both covered and uncovered, and keeps uncovered to what the census found", async () => {
+  it("never has one tool both covered and uncovered, and keeps uncovered to what was discovered", async () => {
     for (const [name, stamp] of await stamps()) {
       if (stamp === undefined) continue;
       const covered = new Set(stamp.covered);
@@ -440,13 +438,22 @@ describe("the coverage stamp on the terminal facts", () => {
 
     // Matching is by name and one answer per name, so a name written twice
     // says nothing a name written once does not — and a list that permitted it
-    // would let a miscount look like a wider census.
+    // would let a miscount look like a wider reach.
     const repeated = [...stamp.discovered, stamp.discovered[0] ?? ""];
-    expect(
-      reportComplaints(stamped(carried, { ...stamp, discovered: repeated })),
-    ).toContain(
-      "/events/0/facts/mock_coverage/discovered: must NOT have duplicate items (items ## 0 and 3 are identical)",
+    // The place and the problem, without the pair of indices Ajv adds after
+    // them: which two entries collided is not the fact under test, and pinning
+    // it would make this fail the day the fixture grows a tool.
+    const complaints = reportComplaints(
+      stamped(carried, { ...stamp, discovered: repeated }),
     );
+    expect(
+      complaints.some((complaint) =>
+        complaint.startsWith(
+          "/events/0/facts/mock_coverage/discovered: must NOT have duplicate items",
+        ),
+      ),
+      complaints.join("; "),
+    ).toBe(true);
   });
 
   it("refuses a stamp naming a tool with no name at all", async () => {
@@ -459,20 +466,17 @@ describe("the coverage stamp on the terminal facts", () => {
   });
 
   it("refuses a half-written stamp, because a coverage claim with a list missing claims nothing", async () => {
-    const carried = await fullyCovered();
+    const whole = {
+      discovered: ["check_calendar"],
+      covered: ["check_calendar"],
+      uncovered: [],
+    };
 
-    for (const dropped of ["discovered", "covered", "uncovered"]) {
-      const partial = {
-        ...carried,
-        events: (carried.events as Record<string, unknown>[]).map((event) => {
-          const facts = event.facts as Record<string, unknown>;
-          const stamp = { ...(facts.mock_coverage as Record<string, unknown>) };
-          delete stamp[dropped];
-          return { ...event, facts: { ...facts, mock_coverage: stamp } };
-        }),
-      };
+    for (const dropped of Object.keys(whole)) {
+      const partial: Record<string, unknown> = { ...whole };
+      delete partial[dropped];
       expect(
-        reportComplaints(partial),
+        reportComplaints(stamped(await fullyCovered(), partial)),
         `a stamp missing ${dropped} raised no complaint`,
       ).toContain(
         `/events/0/facts/mock_coverage: must have required property '${dropped}'`,
@@ -591,6 +595,14 @@ describe("the report schema structurally forbids credential material", () => {
  * project has settled against are held out of it here rather than caught in
  * review. The scan covers everything a reader of this package meets: both
  * schemas, both documents beside them, and every golden fixture.
+ *
+ * **What it deliberately cannot catch.** Only the words with no legitimate use
+ * anywhere are listed. The rest of the settled vocabulary is about which
+ * *meaning* a word may carry — `session` is wrong for a conversation and right
+ * for a signed-in one, `call` is wrong for a simulation and right in
+ * `tool_call` — and a scanner that flagged those would cry wolf on every page
+ * until somebody turned it off. Those stay a reading job. This is the floor,
+ * not the ceiling.
  */
 describe("the contract's surface, held to the words the project settled on", () => {
   const BANNED = [
