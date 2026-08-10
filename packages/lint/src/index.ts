@@ -86,13 +86,17 @@ const CONTEXT_ESTABLISHING = [
  * who has no credential to build a context from and never will until they have
  * signed up.
  *
- * This category is narrower than the one above and the rule enforces the reason
- * it is safe: a function here **takes no arguments at all**. With nothing to
- * name, there is no customer to name wrongly, and a boolean carries no row out.
- * A function here that grew a parameter would be an ordinary read wearing an
- * exemption, so the rule refuses it.
+ * This category is narrower than the one above and the rule enforces both parts
+ * of each named exception: no function here takes an argument, and each returns
+ * only the platform fact written beside it. `instanceIsClaimed` returns a
+ * boolean. `platformInstanceId` returns the platform's public, non-secret id.
+ * A parameter or a wider return would make either an ordinary read wearing an
+ * exemption, so the rule refuses both changes.
  */
-const INSTANCE_SCOPED = ["instanceIsClaimed", "platformInstanceId"];
+const INSTANCE_SCOPED: ReadonlyMap<string, string> = new Map([
+  ["instanceIsClaimed", "Promise<boolean>"],
+  ["platformInstanceId", "Promise<string>"],
+]);
 
 /**
  * The exports that dispatch egma's own work across the whole deployment, and
@@ -517,9 +521,10 @@ async function checkExportedCallShapes(root: string): Promise<Violation[]> {
 
       const first = declaration.parameters[0];
       const firstType = first?.type?.getText(declaring);
+      const instanceScopedReturn = INSTANCE_SCOPED.get(name);
       const exempt =
         CONTEXT_ESTABLISHING.includes(name) ||
-        INSTANCE_SCOPED.includes(name) ||
+        instanceScopedReturn !== undefined ||
         WORK_DISPATCHING.includes(name);
       if (!exempt && firstType !== AUTH_CONTEXT) {
         violations.push({
@@ -533,7 +538,7 @@ async function checkExportedCallShapes(root: string): Promise<Violation[]> {
         });
       }
 
-      if (INSTANCE_SCOPED.includes(name) && declaration.parameters.length > 0) {
+      if (instanceScopedReturn !== undefined && declaration.parameters.length > 0) {
         violations.push({
           file,
           line: line(declaration),
@@ -543,6 +548,22 @@ async function checkExportedCallShapes(root: string): Promise<Violation[]> {
             `deployment rather than about a customer, and that only holds ` +
             `while it takes nothing. A parameter would give it a customer to ` +
             `name, and it would be an ordinary read wearing an exemption.`,
+        });
+      }
+
+      if (
+        instanceScopedReturn !== undefined &&
+        declaration.type?.getText(declaring) !== instanceScopedReturn
+      ) {
+        const declared = declaration.type?.getText(declaring) ?? "no declared return type";
+        violations.push({
+          file,
+          line: line(declaration),
+          rule: "every-exported-call-carries-an-auth-context",
+          detail:
+            `${name} skips the ${AUTH_CONTEXT} only because its public ` +
+            `instance fact is ${instanceScopedReturn}. It declares ${declared}; ` +
+            `a wider return would make this an ordinary read wearing an exemption.`,
         });
       }
 

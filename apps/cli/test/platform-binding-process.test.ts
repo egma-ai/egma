@@ -10,9 +10,16 @@ import process from "node:process";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createEgmaFolder, writeTestFile } from "../src/folder/egma-folder.ts";
+import { DEFAULT_TEST_COUNT } from "../src/wizard/test-generation.ts";
 import { startFakeRetell, type FakeRetell } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
-import { CLI_ENTRY, makeWorkspace, type Workspace } from "./support/workspace.ts";
+import { gradeEveryRun } from "./support/grading.ts";
+import {
+  CLI_ENTRY,
+  FAKE_AGENT,
+  makeWorkspace,
+  type Workspace,
+} from "./support/workspace.ts";
 
 const PROVIDER_KEY = "synthetic-retell-key-for-binding-process-test";
 
@@ -81,9 +88,12 @@ describe("commands after a repository is bound", () => {
     args: readonly string[],
     extra: NodeJS.ProcessEnv = {},
   ): Promise<CommandResult> {
+    const env = workspace.env({ EGMA_RETELL_URL: retell.url, ...extra });
+    expect(args).not.toContain("--url");
+    expect(env.EGMA_URL).toBeUndefined();
     const child = spawn(process.execPath, [CLI_ENTRY, ...args], {
       cwd: workspace.dir,
-      env: workspace.env({ EGMA_RETELL_URL: retell.url, ...extra }),
+      env,
     });
     let stdout = "";
     let stderr = "";
@@ -120,7 +130,7 @@ describe("commands after a repository is bound", () => {
     return result;
   }
 
-  it("uses the binding for connect, push, pull, and run", async () => {
+  it("uses the binding for connect, push, pull, run, and the bare wizard", async () => {
     const connected = await reachesBound(
       ["connect"],
       "/api/agents",
@@ -129,13 +139,16 @@ describe("commands after a repository is bound", () => {
     expect(connected.code).toBe(0);
     expect(connected.stdout).toContain("status: connected");
 
-    await writeTestFile(path.join(workspace.dir, "egma", "tests", "moves-appointment.md"), {
-      name: "moves-appointment",
-      personas: [],
-      version: null,
-      scenario: "The persona needs a different appointment time.",
-      expectedBehaviors: ["The agent confirms the new time."],
-    });
+    for (let number = 1; number <= DEFAULT_TEST_COUNT; number += 1) {
+      const name = `moves-appointment-${number}`;
+      await writeTestFile(path.join(workspace.dir, "egma", "tests", `${name}.md`), {
+        name,
+        personas: [],
+        version: null,
+        scenario: `The persona needs a different appointment time in case ${number}.`,
+        expectedBehaviors: ["The agent confirms the new time."],
+      });
+    }
 
     const pushed = await reachesBound(["push"], "/api/tests");
     expect(pushed.code).toBe(0);
@@ -150,5 +163,39 @@ describe("commands after a repository is bound", () => {
     expect(started.stdout).toContain("status: started");
     expect(bound.running.runs).toHaveLength(1);
     expect(other.running.runs).toHaveLength(0);
+
+    const script = await workspace.script({
+      steps: [
+        { kind: "say", text: "egma:found framework retell-sdk\n" },
+        { kind: "stop", reason: "end_turn" },
+      ],
+    });
+    const beforeRequests = bound.records.length;
+    const beforeRuns = bound.running.runs.length;
+    const grading = gradeEveryRun(bound);
+    let wizard: CommandResult;
+    try {
+      // No verb and no platform selector: this is the wizard, with headless
+      // consent only so a real terminal is not needed in CI.
+      wizard = await command(
+        ["--headless", "--", process.execPath, FAKE_AGENT, script],
+        { EGMA_RETELL_API_KEY: PROVIDER_KEY },
+      );
+    } finally {
+      grading.stop();
+    }
+
+    const wizardRequests = bound.records.slice(beforeRequests);
+    expect(wizard.code, wizard.stderr).toBe(0);
+    expect(wizard.stdout).toMatch(/^first-verdict: /mu);
+    expect(wizardRequests[0]).toMatchObject({ method: "GET", path: "/api/platform" });
+    for (const expectedPath of ["/api/agents", "/api/tests", "/api/runs"]) {
+      expect(
+        wizardRequests.some((request) => request.path === expectedPath),
+        expectedPath,
+      ).toBe(true);
+    }
+    expect(bound.running.runs).toHaveLength(beforeRuns + 1);
+    expect(other.records).toEqual([]);
   });
 });

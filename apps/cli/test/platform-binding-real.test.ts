@@ -117,6 +117,39 @@ it("refuses a repository bound to another real local platform before sending its
     const secondIdentity = await identityOf(second);
     expect(secondIdentity.instance_id).not.toBe(firstIdentity.instance_id);
 
+    // Prove the observer is in front of authentication. Platform A's key is
+    // unknown on B, so the old preHandler observer missed this request when B
+    // answered 401. The raw observer must see it, body included.
+    const observerProbe = await fetch(`${second.origin}/api/runs`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${customer.secret}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ probe: "visible-before-authentication" }),
+    });
+    expect(observerProbe.status).toBe(401);
+    expect(
+      observedBySecond.some(
+        (request) =>
+          request.method === "POST" &&
+          request.url === "/api/runs" &&
+          request.rawBody.includes("visible-before-authentication"),
+      ),
+    ).toBe(true);
+    observedBySecond.length = 0;
+
+    // Put A's key in the exact credential slot a broken command would read for
+    // B. Correct code refuses on identity before it reads this slot. If that
+    // fence regresses, the run reaches B with A's key and repository ids, and
+    // the raw request assertions below fail even though B answers 401.
+    await workspace.signIn(second.origin, customer.secret);
+
+    // One public read belongs to the test. The other public read below belongs
+    // to the CLI process. Any command request at all would make this list fail,
+    // including one B rejects before parsing A's identifiers.
+    await identityOf(second);
+
     const result = await run(
       process.execPath,
       [CLI_ENTRY, "run", "--url", second.origin, "--cwd", workspace.dir, "--no-follow"],

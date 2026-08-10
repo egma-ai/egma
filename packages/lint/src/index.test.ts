@@ -286,6 +286,15 @@ describe("an exported call that could reach the database without a customer", ()
     expect(await check(root)).toEqual([]);
   });
 
+  it("allows the platform's public id as its one explicit instance fact", async () => {
+    await withSurface(
+      'export { platformInstanceId } from "./things.ts";\n',
+      "export async function platformInstanceId(): Promise<string> {\n  return 'pf_public';\n}\n",
+    );
+
+    expect(await check(root)).toEqual([]);
+  });
+
   it("refuses that exemption the moment it grows an argument", async () => {
     await withSurface(
       'export { instanceIsClaimed } from "./things.ts";\n',
@@ -297,6 +306,23 @@ describe("an exported call that could reach the database without a customer", ()
       "every-exported-call-carries-an-auth-context",
     ]);
     expect(violations[0]?.detail).toContain("wearing an exemption");
+  });
+
+  it("refuses either instance exception when its result grows wider", async () => {
+    await withSurface(
+      'export { instanceIsClaimed, platformInstanceId } from "./things.ts";\n',
+      "export async function instanceIsClaimed(): Promise<string> {\n  return 'all organizations';\n}\nexport async function platformInstanceId(): Promise<string[]> {\n  return ['pf_public'];\n}\n",
+    );
+
+    const violations = await check(root);
+    expect(rules(violations)).toEqual([
+      "every-exported-call-carries-an-auth-context",
+      "every-exported-call-carries-an-auth-context",
+    ]);
+    expect(violations.map((violation) => violation.detail)).toEqual([
+      expect.stringContaining("instanceIsClaimed"),
+      expect.stringContaining("platformInstanceId"),
+    ]);
   });
 
   /**

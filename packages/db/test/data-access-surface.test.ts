@@ -63,8 +63,9 @@ const CONTEXT_ESTABLISHING = [
 
 /**
  * What answers a question about the deployment rather than about a customer.
- * It takes nothing and returns a boolean, which is what makes it safe without a
- * context; a build rule refuses it the moment it grows an argument.
+ * Neither takes an argument. One returns whether signup is claimed; the other
+ * returns the platform's own public, non-secret id. The build rule pins both
+ * exact return types and refuses either function if it grows an argument.
  */
 const INSTANCE_SCOPED = ["instanceIsClaimed", "platformInstanceId"];
 
