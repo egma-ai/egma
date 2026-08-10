@@ -35,7 +35,7 @@ export type PlatformMockTool = {
 };
 
 /** What a write came back with. */
-export type MockToolWriteAnswer =
+type MockToolWriteAnswer =
   | { readonly kind: "written"; readonly mockTool: PlatformMockTool }
   /** The platform would not take it, in its own words. */
   | { readonly kind: "turned-away"; readonly reason: string };
@@ -72,7 +72,7 @@ function agentNames(value: unknown): readonly string[] {
  * `0` and `[]`: they are what a mock tool says by saying nothing, and writing
  * them would put two lines of noise on every entry a folder holds.
  */
-export function saysFrom(
+function saysFrom(
   body: Record<string, unknown>,
   options: { readonly withAgents: boolean },
 ): Readonly<Record<string, unknown>> {
