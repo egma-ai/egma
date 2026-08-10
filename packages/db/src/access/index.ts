@@ -420,6 +420,7 @@ export {
   type ConductedSimulation,
   type ConnectionSnapshot,
   type FailedEndingReason,
+  type MockToolCoverage,
   type NewRun,
   type Run,
   type RunEvent,

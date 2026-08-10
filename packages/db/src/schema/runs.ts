@@ -408,6 +408,26 @@ export const simulation = pgTable(
      * never parsed; null when the plug had none to offer.
      */
     providerReference: text("provider_reference"),
+    /**
+     * Which of the agent's tools mock tools answered for, and which reached
+     * their real implementations — `{discovered, covered, uncovered}`, the
+     * three name lists the report's stamp carries.
+     *
+     * On the row rather than worked out from the conversation's spans,
+     * because it is the answer to "are these two numbers comparable at all",
+     * and that question has to be answerable from the simulation alone with
+     * nothing else to consult. A mocked simulation and an unmocked one are
+     * different units exactly as two audio bands are, so this sits beside the
+     * measured band for the same reason it does.
+     *
+     * Three states, and the third is why this is nullable rather than
+     * defaulted: null means the agent was never asked what tools it has, so
+     * nothing was learned and nothing is claimed — every row written before
+     * this column, and every connection egma stands outside the tool path of.
+     * Three empty lists is the other absence: the asking happened and no tool
+     * came back.
+     */
+    mockToolCoverage: jsonb("mock_tool_coverage"),
     createdAt: createdAt(),
   },
   (table) => [
@@ -511,6 +531,12 @@ export const simulation = pgTable(
     check(
       "simulation_turn_count_is_a_count",
       sql`${table.turnCount} is null or ${table.turnCount} >= 0`,
+    ),
+    // The coverage stamp is a terminal fact too, and gets its own additive
+    // guard for the same reason the two above did.
+    check(
+      "simulation_mock_tool_coverage_only_when_ended",
+      sql`${table.endedAt} is not null or ${table.mockToolCoverage} is null`,
     ),
     // A chat has no audio: a measured band or a recording on one would be a
     // number nothing produced, so the row refuses to hold it.

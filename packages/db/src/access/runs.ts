@@ -215,7 +215,29 @@ export type Simulation = {
   readonly turnCount: number | null;
   /** The platform's own identifier for the exchange — the one join to the agent's telemetry. */
   readonly providerReference: string | null;
+  /**
+   * Which of the agent's tools mock tools answered for. Null where the agent
+   * was never asked what tools it has, so nothing was learned and nothing is
+   * claimed — which is what every row written before the stamp existed says.
+   */
+  readonly mockToolCoverage: MockToolCoverage | null;
   readonly createdAt: Date;
+};
+
+/**
+ * The coverage stamp as the row holds it: three lists of the agent's own tool
+ * names.
+ *
+ * `covered` may name a tool absent from `discovered` — coverage is registered
+ * by name against the whole simulation, while discovery is a snapshot of its
+ * first moment — and `uncovered` is written out rather than left to be worked
+ * out, because a reader asking "was this simulation isolated" should not have
+ * to do set arithmetic to find out.
+ */
+export type MockToolCoverage = {
+  readonly discovered: readonly string[];
+  readonly covered: readonly string[];
+  readonly uncovered: readonly string[];
 };
 
 /**
@@ -260,6 +282,12 @@ export type SimulationSummaryFacts = {
   /** Measured, never declared; a chat simulation reports none. */
   readonly measuredAudioBandHertz?: number | undefined;
   readonly recordingReference?: string | undefined;
+  /**
+   * Which tools were answered by mock tools and which ran for real. Absent
+   * where the report carried no stamp, which is the honest reading of a
+   * conversation whose agent was never asked what tools it has.
+   */
+  readonly mockToolCoverage?: MockToolCoverage | undefined;
   readonly startedAt?: Date | undefined;
   readonly endedAt?: Date | undefined;
 };
@@ -342,6 +370,7 @@ const SIMULATION_COLUMNS = {
   recordingReference: simulation.recordingReference,
   turnCount: simulation.turnCount,
   providerReference: simulation.providerReference,
+  mockToolCoverage: simulation.mockToolCoverage,
   createdAt: simulation.createdAt,
 } as const;
 
@@ -441,6 +470,17 @@ function summaryFactsWrite(
   }
   if (facts.recordingReference !== undefined) {
     write.recordingReference = facts.recordingReference.trim() || null;
+  }
+  if (facts.mockToolCoverage !== undefined) {
+    // Stored in the shape it is read in, which is the shape the report
+    // carried — three lists of the agent's own names. Copied rather than
+    // referenced so a caller holding the object cannot edit what was landed.
+    const { discovered, covered, uncovered } = facts.mockToolCoverage;
+    write.mockToolCoverage = {
+      discovered: [...discovered],
+      covered: [...covered],
+      uncovered: [...uncovered],
+    };
   }
   if (facts.startedAt !== undefined) write.startedAt = facts.startedAt;
   if (facts.endedAt !== undefined) write.endedAt = facts.endedAt;
@@ -620,11 +660,12 @@ function runFromRow(row: RunRow): Run {
  * inside the vocabulary, so reading one back is a narrowing, not a guess. */
 type SimulationRow = Omit<
   Simulation,
-  "status" | "endingReason" | "modality"
+  "status" | "endingReason" | "modality" | "mockToolCoverage"
 > & {
   readonly status: string;
   readonly endingReason: string | null;
   readonly modality: string;
+  readonly mockToolCoverage: unknown;
 };
 
 function simulationFromRow(row: SimulationRow): Simulation {
@@ -633,6 +674,46 @@ function simulationFromRow(row: SimulationRow): Simulation {
     status: row.status as SimulationStatus,
     endingReason: row.endingReason as SimulationEndingReason | null,
     modality: row.modality as Modality,
+    mockToolCoverage: mockToolCoverageFromRow(row.mockToolCoverage, row.id),
+  };
+}
+
+/**
+ * The shape guard the coverage stamp gets on every read, for the reason the
+ * jsonb columns beside it get one: stored jsonb comes back `unknown`, and a row
+ * somebody hand-edited must fail here, loudly and naming itself, rather than
+ * leak into a caller wearing a type it does not have.
+ *
+ * Null is not a malformed stamp — it is the honest "nobody ever asked", which
+ * every row written before the column existed carries.
+ */
+function mockToolCoverageFromRow(
+  value: unknown,
+  simulationId: string,
+): MockToolCoverage | null {
+  if (value === null || value === undefined) return null;
+
+  const malformed = (): Error =>
+    new Error(
+      `simulation ${simulationId} holds a mock tool coverage stamp in a shape egma never writes; the row needs repairing before anybody can read it`,
+    );
+
+  if (typeof value !== "object" || Array.isArray(value)) throw malformed();
+  const held = value as Record<string, unknown>;
+
+  const names = (key: keyof MockToolCoverage): readonly string[] => {
+    const list = held[key];
+    if (!Array.isArray(list)) throw malformed();
+    for (const name of list) {
+      if (typeof name !== "string") throw malformed();
+    }
+    return list as string[];
+  };
+
+  return {
+    discovered: names("discovered"),
+    covered: names("covered"),
+    uncovered: names("uncovered"),
   };
 }
 

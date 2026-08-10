@@ -10,6 +10,7 @@ import {
   startRun,
   type AuthContext,
   type ConductedSimulation,
+  type MockToolCoverage,
   type MockToolSnapshot,
   type Run,
   type RunEvent,
@@ -140,6 +141,14 @@ const NO_SUCH_RUN =
  * shape from the first day so that nothing a client reads changes when the
  * graders arrive. The events record already has a place to carry one; this row
  * gains its own the day something writes one down.
+ *
+ * `mock_tool_coverage` is here because comparing two of these numbers is only
+ * valid when both conversations were conducted in the same world. A simulation
+ * whose tools were answered by mock tools and one whose tools ran for real are
+ * different units, exactly as two audio bands are, and this is where a reader
+ * finds that out — off the conversation itself, with nothing else to fetch and
+ * nothing editable to ask. Null says the agent was never asked what tools it
+ * has, so nothing was learned and nothing is claimed.
  */
 function describedSimulation(one: ConductedSimulation): Record<string, unknown> {
   return {
@@ -153,6 +162,25 @@ function describedSimulation(one: ConductedSimulation): Record<string, unknown> 
     status: one.status,
     verdict: null,
     reason: one.endingReason,
+    mock_tool_coverage: describedMockToolCoverage(one.mockToolCoverage),
+  };
+}
+
+/**
+ * The coverage stamp as the wire carries it: the report's own three keys, in
+ * the report's own words, or null where there is nothing claimed.
+ *
+ * The names are copied key by key rather than passed through, so the shape a
+ * client reads is decided here and not by whatever a row happens to hold.
+ */
+function describedMockToolCoverage(
+  coverage: MockToolCoverage | null,
+): Record<string, unknown> | null {
+  if (coverage === null) return null;
+  return {
+    discovered: [...coverage.discovered],
+    covered: [...coverage.covered],
+    uncovered: [...coverage.uncovered],
   };
 }
 
