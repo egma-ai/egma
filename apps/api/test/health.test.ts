@@ -116,18 +116,32 @@ describe("configuration", () => {
     );
   });
 
-  it("refuses a base URL that is not one HTTP origin", () => {
+  /**
+   * This one narrowed: a base URL carrying a path used to have its trailing
+   * slashes trimmed and the rest kept. A deployment that had been running that
+   * way meets the refusal for the first time on an upgrade, so the message has
+   * to name the part to remove and the value to use — and it must never repeat
+   * a password back, only the fact that there is one.
+   */
+  it("refuses a base URL that is not one HTTP origin, and says what to change", () => {
     expect(() =>
       loadConfig({ ...enough, EGMA_BASE_URL: "ftp://egma.acme.example" }),
     ).toThrow(/not an HTTP origin/);
-    for (const given of [
-      "https://user:password@egma.acme.example",
-      "https://egma.acme.example/api",
-      "https://egma.acme.example?one=two",
-      "https://egma.acme.example#part",
-    ]) {
+
+    const cases: readonly [string, RegExp][] = [
+      ["https://user:hunter2-not-real@egma.acme.example", /a username or password/],
+      ["https://egma.acme.example/api", /the path \/api/],
+      ["https://egma.acme.example?one=two", /a query/],
+      ["https://egma.acme.example#part", /a fragment/],
+    ];
+    for (const [given, names] of cases) {
+      expect(() => loadConfig({ ...enough, EGMA_BASE_URL: given })).toThrow(names);
+      // The value to put there instead, so nobody has to work it out.
       expect(() => loadConfig({ ...enough, EGMA_BASE_URL: given })).toThrow(
-        /must be only the platform origin/,
+        /Set it to https:\/\/egma\.acme\.example and start egma again/,
+      );
+      expect(() => loadConfig({ ...enough, EGMA_BASE_URL: given })).not.toThrow(
+        /hunter2-not-real/,
       );
     }
   });

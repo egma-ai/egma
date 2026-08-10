@@ -11,7 +11,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -59,44 +59,66 @@ export function credentialsFileIn(env: NodeJS.ProcessEnv): string {
 
 type CredentialEntries = ReadonlyMap<string, string>;
 
-function entriesIn(raw: string): CredentialEntries {
-  try {
-    const held = JSON.parse(raw) as {
-      url?: unknown;
-      key?: unknown;
-      platforms?: unknown;
-    };
-
-    const entries = new Map<string, string>();
-
-    // The first shipped format held one pair. It is read so an upgrade does
-    // not sign a developer out, and the next write moves it into the map.
-    if (typeof held.url === "string" && typeof held.key === "string") {
-      try {
-        const origin = normalizePlatformOrigin(held.url);
-        const key = held.key.trim();
-        if (key !== "") entries.set(origin, key);
-      } catch {
-        // Not a usable legacy entry.
-      }
-    }
-
-    if (typeof held.platforms === "object" && held.platforms !== null) {
-      for (const [givenOrigin, value] of Object.entries(held.platforms)) {
-        if (typeof value !== "object" || value === null || !("key" in value)) continue;
-        const key = typeof value.key === "string" ? value.key.trim() : "";
-        if (key === "") continue;
-        try {
-          entries.set(normalizePlatformOrigin(givenOrigin), key);
-        } catch {
-          // One bad hand-edited key must not hide every usable platform entry.
-        }
-      }
-    }
-    return entries;
-  } catch {
-    return new Map();
+/**
+ * The file is here and egma cannot make sense of it.
+ *
+ * This is a refusal and not a shrug on purpose. Treating an unreadable file as
+ * an empty one reads well until the next login writes: the write starts from
+ * nothing, renames itself over the file, and every other platform's key is
+ * gone. A truncated file is recoverable; a file egma overwrote is not.
+ */
+export class CredentialsFileUnreadableError extends Error {
+  constructor(file: string, cause: unknown) {
+    super(
+      `egma could not read the keys in ${file}, so it stopped rather than write over them. Look at that file. If it is damaged, move it aside and sign in again — you will be signed out of every platform, which is why egma will not do that for you.`,
+      { cause },
+    );
+    this.name = "CredentialsFileUnreadableError";
   }
+}
+
+function entriesIn(raw: string, file: string): CredentialEntries {
+  // An empty file is an empty file: a first login can find one where a folder
+  // was made and nothing was written yet.
+  if (raw.trim() === "") return new Map();
+
+  let held: { url?: unknown; key?: unknown; platforms?: unknown };
+  try {
+    held = JSON.parse(raw) as typeof held;
+  } catch (cause) {
+    throw new CredentialsFileUnreadableError(file, cause);
+  }
+  if (typeof held !== "object" || held === null) {
+    throw new CredentialsFileUnreadableError(file, new Error("not a JSON object"));
+  }
+
+  const entries = new Map<string, string>();
+
+  // The first shipped format held one pair. It is read so an upgrade does not
+  // sign a developer out, and the next write moves it into the map.
+  if (typeof held.url === "string" && typeof held.key === "string") {
+    try {
+      const origin = normalizePlatformOrigin(held.url);
+      const key = held.key.trim();
+      if (key !== "") entries.set(origin, key);
+    } catch {
+      // Not a usable legacy entry.
+    }
+  }
+
+  if (typeof held.platforms === "object" && held.platforms !== null) {
+    for (const [givenOrigin, value] of Object.entries(held.platforms)) {
+      if (typeof value !== "object" || value === null || !("key" in value)) continue;
+      const key = typeof value.key === "string" ? value.key.trim() : "";
+      if (key === "") continue;
+      try {
+        entries.set(normalizePlatformOrigin(givenOrigin), key);
+      } catch {
+        // One bad hand-edited key must not hide every usable platform entry.
+      }
+    }
+  }
+  return entries;
 }
 
 /** What is on disk for one platform, or `null` when none is usable there. */
@@ -108,10 +130,11 @@ export async function readCredentials(
   try {
     raw = await readFile(file, "utf8");
   } catch {
+    // No file is not a damaged file. Nobody has signed in here yet.
     return null;
   }
 
-  const entries = entriesIn(raw);
+  const entries = entriesIn(raw, file);
   let origin: string;
   try {
     origin = normalizePlatformOrigin(platformUrl);
@@ -126,6 +149,59 @@ export type WriteOptions = {
   /** Where a folder egma could not lock down is said out loud. */
   readonly warn?: (line: string) => void;
 };
+
+/** How long a write waits for another one to finish before giving up. */
+const LOCK_WAIT_MS = 5_000;
+/** After this, a lock is a leftover from something that died holding it. */
+const LOCK_STALE_MS = 30_000;
+
+/**
+ * Hold the file while it is read, merged and replaced.
+ *
+ * The write is a read-modify-write over everybody's keys, so two of them
+ * running together is one platform's key being dropped: both read the same
+ * file, both merge their own entry into it, and the second rename wins. Two
+ * terminals in two repositories signing in at once is an ordinary Tuesday, and
+ * the loser finds out the next time a command says "not signed in".
+ *
+ * A neighbouring file taken with `wx` is the whole mechanism, because `wx` is
+ * one atomic question the filesystem answers for exactly one caller. A lock
+ * left behind by something that died is taken over once it is plainly old, so
+ * a crash cannot lock a developer out of signing in.
+ */
+async function whileLocked<T>(file: string, work: () => Promise<T>): Promise<T> {
+  const lock = `${file}.lock`;
+  const until = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      await writeFile(lock, `${String(process.pid)}\n`, {
+        encoding: "utf8",
+        mode: FILE_MODE,
+        flag: "wx",
+      });
+      break;
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
+      const held = await stat(lock).catch(() => undefined);
+      if (held !== undefined && Date.now() - held.mtimeMs > LOCK_STALE_MS) {
+        await rm(lock, { force: true });
+        continue;
+      }
+      if (Date.now() > until) {
+        throw new Error(
+          `egma waited for another egma to finish writing ${file} and it did not. If nothing else is running, delete ${lock} and try again.`,
+        );
+      }
+      await new Promise((resume) => setTimeout(resume, 50));
+    }
+  }
+
+  try {
+    return await work();
+  } finally {
+    await rm(lock, { force: true });
+  }
+}
 
 /**
  * Write the key, owner-readable and no wider.
@@ -161,34 +237,40 @@ export async function writeCredentials(
     );
   }
 
-  let existing = "";
-  try {
-    existing = await readFile(file, "utf8");
-  } catch {
-    // The first login has nothing to merge.
-  }
-  const entries = new Map(entriesIn(existing));
-  const origin = normalizePlatformOrigin(credentials.url);
-  entries.set(origin, credentials.key);
+  // Read, merge and replace, with nothing else allowed in between.
+  await whileLocked(file, async () => {
+    let existing = "";
+    try {
+      existing = await readFile(file, "utf8");
+    } catch {
+      // The first login has nothing to merge.
+    }
+    const entries = new Map(entriesIn(existing, file));
+    const origin = normalizePlatformOrigin(credentials.url);
+    entries.set(origin, credentials.key);
 
-  const platforms = Object.fromEntries(
-    [...entries.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([url, key]) => [url, { key }]),
-  );
-  const document = `${JSON.stringify({ version: 1, platforms }, null, 2)}\n`;
+    const platforms = Object.fromEntries(
+      [...entries.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([url, key]) => [url, { key }]),
+    );
+    const document = `${JSON.stringify({ version: 1, platforms }, null, 2)}\n`;
 
-  const fresh = path.join(folder, `.credentials-${process.pid}-${randomBytes(6).toString("hex")}`);
-  await writeFile(fresh, document, { encoding: "utf8", mode: FILE_MODE, flag: "wx" });
-  try {
-    // The umask can only narrow what a file is created with, never widen it, so
-    // this is the one that makes 0600 true rather than 0600-or-less.
-    await chmod(fresh, FILE_MODE);
-    await rename(fresh, file);
-  } catch (cause) {
-    await rm(fresh, { force: true });
-    throw cause;
-  }
+    const fresh = path.join(
+      folder,
+      `.credentials-${process.pid}-${randomBytes(6).toString("hex")}`,
+    );
+    await writeFile(fresh, document, { encoding: "utf8", mode: FILE_MODE, flag: "wx" });
+    try {
+      // The umask can only narrow what a file is created with, never widen it,
+      // so this is the one that makes 0600 true rather than 0600-or-less.
+      await chmod(fresh, FILE_MODE);
+      await rename(fresh, file);
+    } catch (cause) {
+      await rm(fresh, { force: true });
+      throw cause;
+    }
+  });
 }
 
 export type PlatformChoice = {
@@ -210,34 +292,59 @@ export class UnusableUrlError extends Error {
   }
 }
 
+/** Where a selected address came from. It decides who a refusal names. */
+export type PlatformSource = "--url" | "EGMA_URL" | "binding" | "cloud";
+
+export type SelectedPlatform = {
+  readonly url: string;
+  readonly source: PlatformSource;
+};
+
+const SOURCE_NAMES: Record<PlatformSource, string> = {
+  "--url": "--url",
+  EGMA_URL: "EGMA_URL",
+  binding: "the repository platform binding",
+  cloud: "Egma Cloud",
+};
+
 /**
- * Which egma this command talks to.
+ * Which egma this command talks to, and which of the four places said so.
  *
  * Deliberate beats ambient beats committed: a flag on the command, then the
  * environment, then the repository binding, then Egma Cloud for an unbound
  * repository. A machine-level login never chooses a repository target.
  *
+ * The source travels with the address because a refusal that names the wrong
+ * platform sends a developer to fix something they did not ask for: told to
+ * start the platform this repository is bound to when what they actually named
+ * on the command line is the one that is down.
+ *
  * An address a person typed is checked here, at the edge that takes it, and a
  * bad one is refused by name rather than carried into the flow.
  */
-export function resolvePlatformUrl(choice: PlatformChoice): string {
-  const named: readonly [string, string | null | undefined][] = [
+export function selectPlatform(choice: PlatformChoice): SelectedPlatform {
+  const named: readonly [PlatformSource, string | null | undefined][] = [
     ["--url", choice.flag],
     ["EGMA_URL", choice.env],
-    ["the repository platform binding", choice.binding],
+    ["binding", choice.binding],
   ];
-  for (const [where, candidate] of named) {
+  for (const [source, candidate] of named) {
     const tidy = typeof candidate === "string" ? candidate.trim() : "";
     if (tidy === "") continue;
     try {
-      return normalizePlatformOrigin(tidy);
+      return { url: normalizePlatformOrigin(tidy), source };
     } catch {
       // The rejected value can itself contain a supplied password. Name only
       // the source, never the value.
-      throw new UnusableUrlError(where);
+      throw new UnusableUrlError(SOURCE_NAMES[source]);
     }
   }
-  return DEFAULT_PLATFORM_URL;
+  return { url: DEFAULT_PLATFORM_URL, source: "cloud" };
+}
+
+/** The address alone, for callers that do not have to say where it came from. */
+export function resolvePlatformUrl(choice: PlatformChoice): string {
+  return selectPlatform(choice).url;
 }
 
 /** Which egma a run signs in to, and where the key it gets is kept. */
@@ -261,11 +368,29 @@ export class PlatformBindingMismatchError extends Error {
   }
 }
 
+/**
+ * A bound repository was pointed at a different address than the one it
+ * recorded, whoever is answering there.
+ *
+ * Separate from the instance mismatch above because it is refused before
+ * anybody answers: rebinding is out of this effort either way, and the same
+ * instance served at a new address is still a change to a committed file that
+ * a developer has to make on purpose rather than have made for them.
+ */
+export class BoundPlatformAddressError extends Error {
+  constructor(binding: PlatformBinding, source: PlatformSource, selected: string) {
+    super(
+      `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and ${SOURCE_NAMES[source]} names ${selected} instead. Drop it to use the bound platform. If the platform really has moved, edit the platform origin in egma/config.yaml on purpose — rebinding is not supported yet. No repository identifiers were sent.`,
+    );
+    this.name = "BoundPlatformAddressError";
+  }
+}
+
 /** The bound platform did not answer, and Cloud was deliberately not tried. */
 export class BoundPlatformUnavailableError extends Error {
-  constructor(binding: PlatformBinding, selected: string, cause: unknown) {
+  constructor(binding: PlatformBinding, cause: unknown) {
     super(
-      `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and Egma at ${selected} did not answer. Start the bound platform and run this again. Egma Cloud was not used, and no repository identifiers were sent.`,
+      `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and it did not answer. Start the bound platform and run this again. Egma Cloud was not used, and no repository identifiers were sent.`,
       { cause },
     );
     this.name = "BoundPlatformUnavailableError";
@@ -308,18 +433,28 @@ export async function resolvePlatformAccess(choice: {
 }): Promise<VerifiedPlatformAccess> {
   const credentialsFile = credentialsFileIn(choice.env);
   const binding = await bindingIn(choice.cwd);
-  const selected = resolvePlatformUrl({
+  const selected = selectPlatform({
     flag: choice.flag,
     env: choice.env.EGMA_URL,
     binding: binding?.origin ?? null,
   });
 
+  // Refused before anybody is asked anything: a bound repository is reached at
+  // the address it recorded, and at no other.
+  if (binding !== null && selected.url !== binding.origin) {
+    throw new BoundPlatformAddressError(binding, selected.source, selected.url);
+  }
+
   let identity: PlatformIdentity;
   try {
-    identity = await readPlatformIdentity(selected, choice.fetchImpl);
+    identity = await readPlatformIdentity(selected.url, choice.fetchImpl);
   } catch (cause) {
+    // Safe to name the binding here, and only here: any address that is not the
+    // bound one was already refused above, so a bound repository that got this
+    // far was reaching its own platform. An unbound one is told about the
+    // address it actually named, which is the only one it has.
     if (binding !== null && cause instanceof PlatformUnreachableError) {
-      throw new BoundPlatformUnavailableError(binding, selected, cause);
+      throw new BoundPlatformUnavailableError(binding, cause);
     }
     throw cause;
   }

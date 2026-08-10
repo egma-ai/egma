@@ -2,12 +2,17 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createEgmaFolder } from "../src/folder/egma-folder.ts";
 import {
+  BoundPlatformAddressError,
   BoundPlatformUnavailableError,
   DEFAULT_PLATFORM_URL,
   PlatformBindingMismatchError,
   resolvePlatformAccess,
 } from "../src/platform/credentials.ts";
-import { readPlatformIdentity } from "../src/platform/identity.ts";
+import {
+  PlatformOriginMismatchError,
+  PlatformTimedOutError,
+  readPlatformIdentity,
+} from "../src/platform/identity.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { makeWorkspace, type Workspace } from "./support/workspace.ts";
 
@@ -60,7 +65,7 @@ describe("verifying an Egma platform", () => {
     });
   });
 
-  it("refuses a different explicit platform before any repository identifier is sent", async () => {
+  it("refuses a different explicit address before asking anybody anything", async () => {
     const other = await startPlatform();
     try {
       await createEgmaFolder({
@@ -79,15 +84,47 @@ describe("verifying an Egma platform", () => {
           flag: other.url,
           cwd: workspace.dir,
         }),
-      ).rejects.toBeInstanceOf(PlatformBindingMismatchError);
+      ).rejects.toBeInstanceOf(BoundPlatformAddressError);
 
-      expect(other.records.map((record) => `${record.method} ${record.path}`)).toEqual([
-        "GET /api/platform",
-      ]);
+      // Neither platform was asked so much as who it is. The address a bound
+      // repository uses is decided by the file, so an address that is not the
+      // one in the file is refused without anything leaving this machine.
+      expect(other.records).toEqual([]);
       expect(platform.records).toEqual([]);
     } finally {
       await other.close();
     }
+  });
+
+  /**
+   * The one thing an origin alone cannot tell you, and the reason the instance
+   * identifier is committed beside it: the platform at this address is not the
+   * platform that issued these identifiers. A colleague who rebuilt the local
+   * stack has a new database and therefore a new instance, at the very same
+   * address the repository recorded.
+   */
+  it("refuses a replaced platform answering at the address the repository recorded", async () => {
+    await createEgmaFolder({
+      repository: workspace.dir,
+      config: {
+        platform: {
+          origin: platform.url,
+          instance: "pf_01K3XQ7M4E8YB2FVN0H9TZQWEA",
+        },
+        agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
+        connection: { name: "retell-1", id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES" },
+        suite: null,
+      },
+    });
+
+    await expect(
+      resolvePlatformAccess({ env: workspace.env(), flag: null, cwd: workspace.dir }),
+    ).rejects.toBeInstanceOf(PlatformBindingMismatchError);
+
+    // One question asked, and it was the public one that carries nothing.
+    expect(platform.records.map((record) => `${record.method} ${record.path}`)).toEqual([
+      "GET /api/platform",
+    ]);
   });
 
   it("takes the explicit URL before EGMA_URL, then verifies the selected instance", async () => {
@@ -107,37 +144,86 @@ describe("verifying an Egma platform", () => {
     }
   });
 
-  it("accepts an alias when it reports the bound instance and canonical origin", async () => {
+  /**
+   * The failure this refusal exists for is quiet and expensive.
+   *
+   * `EGMA_BASE_URL` defaults to `http://localhost:3101`. A self-hoster who
+   * never changes it and reaches the stack at `192.168.1.10` gets a clean
+   * identity read — and, if the platform's answer were believed, a CLI that
+   * walks away to `localhost`, where nothing is listening. Bind on the
+   * platform's own host and it is worse: the committed file says `localhost`,
+   * and every teammate who clones it targets their own machine.
+   *
+   * So the address the developer gave is the address egma uses, and a platform
+   * that calls itself something else is a misconfiguration to be told about.
+   */
+  it("refuses a platform that answers to a different address than it was asked at", async () => {
     const canonicalOrigin = "https://canonical.egma.example";
     const alias = await startPlatform({ canonicalOrigin });
     try {
-      await createEgmaFolder({
-        repository: workspace.dir,
-        config: {
-          platform: { origin: canonicalOrigin, instance: alias.instanceId },
-          agent: null,
-          connection: null,
-          suite: null,
-        },
-      });
+      await expect(readPlatformIdentity(alias.url)).rejects.toBeInstanceOf(
+        PlatformOriginMismatchError,
+      );
+      await expect(readPlatformIdentity(alias.url)).rejects.toThrow(canonicalOrigin);
+      await expect(readPlatformIdentity(alias.url)).rejects.toThrow("EGMA_BASE_URL");
 
-      const access = await resolvePlatformAccess({
-        env: workspace.env(),
-        flag: alias.url,
-        cwd: workspace.dir,
-      });
-
-      expect(alias.url).not.toBe(canonicalOrigin);
-      expect(access).toMatchObject({
-        url: canonicalOrigin,
-        instanceId: alias.instanceId,
-      });
-      expect(alias.records.map((record) => `${record.method} ${record.path}`)).toEqual([
-        "GET /api/platform",
-      ]);
+      await expect(
+        resolvePlatformAccess({
+          env: workspace.env(),
+          flag: alias.url,
+          cwd: workspace.dir,
+        }),
+      ).rejects.toBeInstanceOf(PlatformOriginMismatchError);
     } finally {
       await alias.close();
     }
+  });
+
+  it("keeps the address it was given, whatever the platform calls itself", async () => {
+    // The address that comes back is the address that was asked, always: every
+    // key, identifier and committed line downstream is addressed to it.
+    const access = await resolvePlatformAccess({
+      env: workspace.env(),
+      flag: `${platform.url}/`,
+      cwd: workspace.dir,
+    });
+    expect(access.url).toBe(platform.url);
+  });
+
+  it("does not follow a redirect, and says that is what happened", async () => {
+    const requested: string[] = [];
+    await expect(
+      resolvePlatformAccess({
+        env: workspace.env(),
+        flag: "https://behind-a-login.example",
+        cwd: workspace.dir,
+        fetchImpl: async (input) => {
+          requested.push(String(input));
+          return new Response(null, {
+            status: 307,
+            headers: { location: "https://sign-in.example/login" },
+          });
+        },
+      }),
+    ).rejects.toThrow(/redirected to https:\/\/sign-in\.example\/login/u);
+    expect(requested).toEqual(["https://behind-a-login.example/api/platform"]);
+  });
+
+  it("gives up on a platform that takes the connection and says nothing", async () => {
+    const stalled = resolvePlatformAccess({
+      env: workspace.env(),
+      flag: "https://accepts-and-waits.example",
+      cwd: workspace.dir,
+      fetchImpl: async (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(init.signal?.reason ?? new Error("aborted"));
+          });
+        }),
+    });
+
+    await expect(stalled).rejects.toBeInstanceOf(PlatformTimedOutError);
+    await expect(stalled).rejects.toThrow("did not answer within");
   });
 
   it("uses Egma Cloud only when the repository is unbound", async () => {
@@ -160,6 +246,38 @@ describe("verifying an Egma platform", () => {
 
     expect(access.url).toBe(DEFAULT_PLATFORM_URL);
     expect(requested).toEqual([`${DEFAULT_PLATFORM_URL}/api/platform`]);
+  });
+
+  /**
+   * A refusal names the platform the developer asked about.
+   *
+   * Being told to start the platform this repository is bound to, when what you
+   * typed on the command line is a different address that is down, sends you to
+   * fix something you did not ask for.
+   */
+  it("names the address the developer gave when that is the one that is down", async () => {
+    await createEgmaFolder({
+      repository: workspace.dir,
+      config: {
+        platform: { origin: platform.url, instance: platform.instanceId },
+        agent: null,
+        connection: null,
+        suite: null,
+      },
+    });
+    const elsewhere = "http://127.0.0.1:1";
+
+    const refusal = resolvePlatformAccess({
+      env: workspace.env(),
+      flag: elsewhere,
+      cwd: workspace.dir,
+    });
+
+    await expect(refusal).rejects.toBeInstanceOf(BoundPlatformAddressError);
+    await expect(refusal).rejects.toThrow(elsewhere);
+    await expect(refusal).rejects.toThrow("--url");
+    // Nothing was asked at either address, so nothing hung on a dead port.
+    expect(platform.records).toEqual([]);
   });
 
   it("refuses an unavailable bound platform and does not try Egma Cloud", async () => {

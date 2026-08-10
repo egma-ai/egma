@@ -176,6 +176,22 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
     return CONNECT_EXIT.notSignedIn;
   }
 
+  // Before the platform is asked to create anything, and for the same reason
+  // the wizard binds where it does: nothing that only one platform can resolve
+  // may exist in this folder without that platform written down beside it. It
+  // also refuses here, on a repository already bound elsewhere, rather than
+  // after an agent has been registered on the wrong one.
+  try {
+    await bindRepositoryPlatform(options.cwd, {
+      origin: options.access.url,
+      instance: options.access.instanceId,
+    });
+  } catch (cause) {
+    options.out("status: refused");
+    options.fail(cause instanceof Error ? cause.message : String(cause));
+    return CONNECT_EXIT.unreachable;
+  }
+
   // Read once, before anything else could consume it, and held in one local
   // for the length of the command.
   const typed = (await fromStdin(options.stdin)) || fromEnv(options.env);
@@ -212,10 +228,6 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
   switch (outcome.kind) {
     case "connected": {
       const { registered, config } = outcome;
-      await bindRepositoryPlatform(options.cwd, {
-        origin: options.access.url,
-        instance: options.access.instanceId,
-      });
       await updateConfig(folderPathsIn(options.cwd).config, {
         agent: { name: registered.agent.name, id: registered.agent.id },
         connection: {

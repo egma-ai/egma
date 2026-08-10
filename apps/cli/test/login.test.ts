@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openInBrowser } from "../src/platform/browser.ts";
 import { codeFromPaste, startDeviceAuthorization } from "../src/platform/device-flow.ts";
 import {
+  CredentialsFileUnreadableError,
   readCredentials,
   resolvePlatformUrl,
   writeCredentials,
@@ -535,19 +536,79 @@ describe("writing the key down", () => {
   });
 
   it("does not follow a link standing where the key goes", async () => {
+    // Somebody else's keys, in their own file, which this run must leave
+    // exactly as it found them. A write that went through the link rather than
+    // over it would put the fresh key in here.
+    const theirs = `${JSON.stringify(
+      { version: 1, platforms: { "https://theirs.example": { key: "egma_sk_theirs" } } },
+      null,
+      2,
+    )}\n`;
     const elsewhere = path.join(workspace.dir, "somebody-elses-file");
-    await writeFile(elsewhere, "not the key\n", "utf8");
+    await writeFile(elsewhere, theirs, "utf8");
     await mkdir(path.dirname(workspace.credentialsFile), { recursive: true });
     await symlink(elsewhere, workspace.credentialsFile);
 
     await writeCredentials(workspace.credentialsFile, held);
 
     // The link itself was replaced. Nothing was written through it, so the file
-    // it pointed at is exactly as it was.
-    expect(await readFile(elsewhere, "utf8")).toBe("not the key\n");
+    // it pointed at is exactly as it was, byte for byte.
+    expect(await readFile(elsewhere, "utf8")).toBe(theirs);
     expect((await lstat(workspace.credentialsFile)).isSymbolicLink()).toBe(false);
     expect(((await stat(workspace.credentialsFile)).mode & 0o777).toString(8)).toBe("600");
     expect(await readCredentials(workspace.credentialsFile, held.url)).toEqual(held);
+  });
+
+  /**
+   * A file egma cannot make sense of is not an empty file.
+   *
+   * Reading a damaged file as "no keys at all" reads harmlessly and then does
+   * the worst thing in the package: the next login merges into nothing and
+   * renames itself over the file, and every other platform's key is gone. A
+   * truncated file can be repaired by whoever damaged it; one egma has already
+   * overwritten cannot.
+   */
+  it("refuses a damaged file rather than starting from empty and writing over it", async () => {
+    const damaged = '{"version": 1, "platforms": {"https://one.example": {"ke';
+    await mkdir(path.dirname(workspace.credentialsFile), { recursive: true });
+    await writeFile(workspace.credentialsFile, damaged, "utf8");
+
+    await expect(
+      readCredentials(workspace.credentialsFile, "https://one.example"),
+    ).rejects.toBeInstanceOf(CredentialsFileUnreadableError);
+    await expect(
+      writeCredentials(workspace.credentialsFile, held),
+    ).rejects.toBeInstanceOf(CredentialsFileUnreadableError);
+
+    // Still exactly what it was, so whoever can repair it still can.
+    expect(await readFile(workspace.credentialsFile, "utf8")).toBe(damaged);
+
+    // An empty file is a different thing and stays ordinary: a folder can be
+    // made before anything is written into it.
+    await writeFile(workspace.credentialsFile, "", "utf8");
+    await writeCredentials(workspace.credentialsFile, held);
+    expect(await readCredentials(workspace.credentialsFile, held.url)).toEqual(held);
+  });
+
+  /**
+   * Two terminals, two repositories, one machine, one file. The write is a
+   * read-modify-write over everybody's keys, so without a lock the second
+   * rename wins and the first platform's key is gone — and the developer finds
+   * out the next time a command says they are not signed in.
+   */
+  it("keeps every key when several logins land at once", async () => {
+    const many = Array.from({ length: 8 }, (_, index) => ({
+      url: `https://platform-${String(index)}.example`,
+      key: `egma_sk_written-at-the-same-moment-${String(index)}`,
+    }));
+
+    await Promise.all(
+      many.map((one) => writeCredentials(workspace.credentialsFile, one)),
+    );
+
+    for (const one of many) {
+      expect(await readCredentials(workspace.credentialsFile, one.url)).toEqual(one);
+    }
   });
 
   it("locks the folder down too, and says nothing when it could", async () => {

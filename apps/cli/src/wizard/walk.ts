@@ -117,11 +117,6 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
       ui.setExit(refusal);
       return refusal;
     }
-    await bindRepositoryPlatform(cwd, {
-      origin: options.platform.url,
-      instance: options.platform.instanceId,
-    });
-    ui.pushStatus(`Bound this repository to Egma platform ${options.platform.instanceId}.`);
   }
 
   const found = await findTheAgent({ ui, launch, cwd, signal, log });
@@ -135,6 +130,17 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
     ui.setExit(found.report);
     return found.report;
   }
+
+  // The last moment before this repository owns anything that only one platform
+  // can resolve. Committed here rather than earlier so a walk that found no
+  // agent leaves the repository exactly as it was, and rather than later so no
+  // identifier can ever exist in this folder without the platform that issued
+  // it written down beside it.
+  await bindRepositoryPlatform(cwd, {
+    origin: options.platform.url,
+    instance: options.platform.instanceId,
+  });
+  ui.pushStatus(`Bound this repository to Egma platform ${options.platform.instanceId}.`);
 
   const connected = await connectStep({
     ui,

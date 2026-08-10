@@ -53,13 +53,77 @@ export function normalizePlatformOrigin(candidate: string): string {
   return parsed.origin;
 }
 
+/**
+ * How long egma waits for a platform to say who it is.
+ *
+ * This read is in front of every command — push, pull, run, connect, the whole
+ * wizard — so a platform that accepts the connection and then says nothing must
+ * not be able to hang all of them with no output at all. A socket that is
+ * accepted never times out on its own.
+ */
+export const IDENTITY_TIMEOUT_MS = 10_000;
+
+/** What egma says when it cannot tell what the address in front of it is. */
+const NOT_A_PLATFORM =
+  "Check the address. If it is right, this is probably not an Egma platform, or it is older than this copy of egma.";
+
 /** A platform answered, but not with the public contract the CLI requires. */
 export class PlatformIdentityError extends Error {
-  constructor(origin: string) {
-    super(
-      `egma at ${origin} did not return a usable platform identity. Check the address and update egma before you try again.`,
-    );
+  constructor(origin: string, because: string, advice: string = NOT_A_PLATFORM) {
+    super(`egma asked ${origin} which platform it is, and ${because} ${advice}`);
     this.name = "PlatformIdentityError";
+  }
+}
+
+/**
+ * The address answered with a redirect.
+ *
+ * Worth its own sentence, and its own advice, because it is what a sign-in wall
+ * in front of a deployment looks like from here. Following it would turn a
+ * login page into "your egma is out of date", which sends the developer after a
+ * problem they do not have — and this read is on the path of every command, so
+ * the wrong diagnosis would be the first thing they ever see.
+ */
+export class PlatformRedirectedError extends PlatformIdentityError {
+  constructor(origin: string, to: string) {
+    super(
+      origin,
+      to === ""
+        ? "it answered with a redirect somewhere else instead."
+        : `it redirected to ${to} instead.`,
+      "egma does not follow that. Something in front of this address is answering for it — a sign-in page or a proxy — so this is where to look, not at your copy of egma.",
+    );
+    this.name = "PlatformRedirectedError";
+  }
+}
+
+/** The platform accepted the connection and then said nothing. */
+export class PlatformTimedOutError extends PlatformUnreachableError {
+  constructor(origin: string, cause: unknown) {
+    super(origin, cause);
+    this.message = `egma at ${origin} took the connection but did not answer within ${String(
+      IDENTITY_TIMEOUT_MS / 1000,
+    )} seconds. Check that the instance is healthy, then run this again.`;
+    this.name = "PlatformTimedOutError";
+  }
+}
+
+/**
+ * The platform answered to a different address than the one it was asked at.
+ *
+ * egma talks to the address the developer gave it and to no other. A platform
+ * that names a different canonical origin is misconfigured — its
+ * `EGMA_BASE_URL` is not the address people reach it at — and following it
+ * would be the whole failure this ticket exists to prevent: the CLI would leave
+ * for an address nobody chose, and a repository bound on the platform's own
+ * host would commit `http://localhost:3101` into a file every teammate clones.
+ */
+export class PlatformOriginMismatchError extends Error {
+  constructor(asked: string, stated: string) {
+    super(
+      `egma asked ${asked} which platform it is, and it answered that it lives at ${stated}. egma uses the address you gave it and never follows a platform to another one. Set EGMA_BASE_URL on the platform to the address people reach it at and restart it, or use ${stated} here. Nothing was sent.`,
+    );
+    this.name = "PlatformOriginMismatchError";
   }
 }
 
@@ -67,6 +131,16 @@ function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+/**
+ * Who answers at this address.
+ *
+ * The origin that comes back is the origin that was asked, always. The body's
+ * own `origin` is read only to be checked against it, because the one thing
+ * this read must never do is move the conversation somewhere else: everything
+ * after it — the key that is written, the identifiers that are sent, the
+ * binding that is committed to a file other people clone — is addressed to
+ * whatever this returns.
+ */
 export async function readPlatformIdentity(
   selected: string,
   fetchImpl: Fetch = fetch,
@@ -77,23 +151,53 @@ export async function readPlatformIdentity(
     response = await fetchImpl(`${selectedOrigin}${PLATFORM_IDENTITY_PATH}`, {
       method: "GET",
       headers: { accept: "application/json" },
+      // Not followed, and not merely for safety: a redirect is a fact about
+      // this address that the developer needs told, and following it would
+      // hide a sign-in wall behind a contract complaint.
+      redirect: "manual",
+      signal: AbortSignal.timeout(IDENTITY_TIMEOUT_MS),
     });
   } catch (cause) {
-    throw new PlatformUnreachableError(selectedOrigin, cause);
+    const timedOut = cause instanceof Error && cause.name === "TimeoutError";
+    throw timedOut
+      ? new PlatformTimedOutError(selectedOrigin, cause)
+      : new PlatformUnreachableError(selectedOrigin, cause);
   }
 
-  if (!response.ok) throw new PlatformIdentityError(selectedOrigin);
+  if (response.status >= 300 && response.status < 400) {
+    throw new PlatformRedirectedError(
+      selectedOrigin,
+      text(response.headers.get("location")),
+    );
+  }
+  if (!response.ok) {
+    throw new PlatformIdentityError(
+      selectedOrigin,
+      `it answered ${String(response.status)} rather than its identity.`,
+    );
+  }
+
   const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   const instanceId = text(body.instance_id);
-  const statedOrigin = text(body.origin);
-
-  let origin: string;
-  try {
-    origin = normalizePlatformOrigin(statedOrigin);
-  } catch {
-    throw new PlatformIdentityError(selectedOrigin);
+  if (!PLATFORM_INSTANCE_ID.test(instanceId)) {
+    throw new PlatformIdentityError(
+      selectedOrigin,
+      "what came back carries no platform identity egma can use.",
+    );
   }
-  if (!PLATFORM_INSTANCE_ID.test(instanceId)) throw new PlatformIdentityError(selectedOrigin);
 
-  return { instanceId, origin };
+  let stated: string;
+  try {
+    stated = normalizePlatformOrigin(text(body.origin));
+  } catch {
+    throw new PlatformIdentityError(
+      selectedOrigin,
+      "what came back names no address egma can use.",
+    );
+  }
+  if (stated !== selectedOrigin) {
+    throw new PlatformOriginMismatchError(selectedOrigin, stated);
+  }
+
+  return { instanceId, origin: selectedOrigin };
 }

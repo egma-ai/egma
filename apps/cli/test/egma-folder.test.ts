@@ -306,33 +306,48 @@ describe("the test file format", () => {
 });
 
 describe("the egma folder", () => {
-  it("updates the canonical origin only when the stable platform instance is unchanged", async () => {
+  /**
+   * A binding that is already here is never rewritten, in either field.
+   *
+   * This file is committed and every clone of the repository reads it, so a run
+   * that quietly changed it would be moving other people's target for them —
+   * and the origin is the field that would do the most damage, because a
+   * platform that names `http://localhost:3101` as its own address would send
+   * every teammate to their own laptop.
+   */
+  it("never rewrites a platform binding that is already committed", async () => {
     const instance = "pf_01K3XQ7M4E8YB2FVN0H9TZQWEP";
+    const platform = { origin: "https://old.example", instance };
+    const paths = folderPathsIn(workspace.dir);
     await createEgmaFolder({
       repository: workspace.dir,
-      config: {
-        platform: { origin: "https://old.example", instance },
-        agent: null,
-        connection: null,
-        suite: null,
-      },
+      config: { platform, agent: null, connection: null, suite: null },
     });
+    const asCommitted = await readFile(paths.config, "utf8");
 
-    const updated = await bindRepositoryPlatform(workspace.dir, {
-      origin: "https://canonical.example",
-      instance,
-    });
-    expect(updated.platform).toEqual({
-      origin: "https://canonical.example",
-      instance,
-    });
+    // Binding again with what is there is the retry, and it changes no byte.
+    expect((await bindRepositoryPlatform(workspace.dir, platform)).platform).toEqual(
+      platform,
+    );
+    expect(await readFile(paths.config, "utf8")).toBe(asCommitted);
 
+    // The same platform reached at another address is refused, not recorded.
     await expect(
       bindRepositoryPlatform(workspace.dir, {
-        origin: "https://other.example",
+        origin: "https://canonical.example",
+        instance,
+      }),
+    ).rejects.toThrow("will not move a committed platform address");
+
+    // And another platform entirely is the refusal it always was.
+    await expect(
+      bindRepositoryPlatform(workspace.dir, {
+        origin: "https://old.example",
         instance: "pf_01K3XQ7M4E8YB2FVN0H9TZQWEQ",
       }),
     ).rejects.toThrow("Rebinding is not supported yet");
+
+    expect(await readFile(paths.config, "utf8")).toBe(asCommitted);
   });
 
   it("is a config file and a tests directory, and nothing else", async () => {

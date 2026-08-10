@@ -19,7 +19,6 @@ import process from "node:process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { INVALID_KEY_LINE } from "../src/retell/connect.ts";
-import { readConfig } from "../src/folder/egma-folder.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { buildExitLine, buildExitNotice } from "../src/wizard/exit-line.ts";
 import { walk } from "../src/wizard/walk.ts";
@@ -215,15 +214,13 @@ describe("no voice agent anywhere", () => {
       "egma found no voice agent to test. Run egma again where your agent is defined.",
     );
 
-    // Nothing was registered. The verified platform binding remains so a later
-    // wizard run cannot silently move this repository to another platform.
+    // Nothing was registered and no folder was made, because egma never got as
+    // far as knowing what it would have been for. The platform binding is
+    // written at the last moment before this repository owns its first
+    // platform-issued identifier, and that moment never arrived — so a walk
+    // that found nothing leaves the repository exactly as it was.
     expect(platform.registered.agents).toHaveLength(0);
-    expect(await readConfig(path.join(workspace.dir, "egma", "config.yaml"))).toEqual({
-      platform: { origin: platform.url, instance: platform.instanceId },
-      agent: null,
-      connection: null,
-      suite: null,
-    });
+    await expect(readFile(path.join(workspace.dir, "egma", "config.yaml"), "utf8")).rejects.toThrow();
   });
 });
 

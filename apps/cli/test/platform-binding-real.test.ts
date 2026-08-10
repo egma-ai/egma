@@ -10,7 +10,12 @@ import {
   type ObservedInstanceRequest,
 } from "../../api/test/support/instance.ts";
 import { signUp } from "../../api/test/support/traces.ts";
-import { createEgmaFolder, writeTestFile } from "../src/folder/egma-folder.ts";
+import {
+  createEgmaFolder,
+  folderPathsIn,
+  updateConfig,
+  writeTestFile,
+} from "../src/folder/egma-folder.ts";
 import { CLI_ENTRY, makeWorkspace } from "./support/workspace.ts";
 
 const run = promisify(execFile);
@@ -47,8 +52,15 @@ vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
  *
  * Both platforms use the real API application and their own real Postgres
  * database. The built CLI is a separate process. Fixture tests cover branches;
- * this proves that an identifier bound to one actual platform never reaches a
+ * this proves that an identifier issued by one actual platform never reaches a
  * second actual platform.
+ *
+ * The repository is bound to the address the second platform answers at while
+ * naming the first platform's instance, which is what a developer's committed
+ * file really looks like after a colleague rebuilt the local stack: same
+ * address, new database, new platform. It is also the one thing an origin alone
+ * cannot catch, and therefore the reason the instance identifier is committed
+ * beside it.
  */
 it("refuses a repository bound to another real local platform before sending its identifiers", async () => {
   const workspace = await makeWorkspace();
@@ -94,28 +106,6 @@ it("refuses a repository bound to another real local platform before sending its
     expect(createdTest.statusCode, createdTest.body).toBe(201);
     const testResource = createdTest.json() as { id: string; version_id: string };
 
-    await createEgmaFolder({
-      repository: workspace.dir,
-      config: {
-        platform: {
-          origin: firstIdentity.origin,
-          instance: firstIdentity.instance_id,
-        },
-        agent: { name: resources.agent.name, id: resources.agent.id },
-        connection: {
-          name: resources.connection.name,
-          id: resources.connection.id,
-        },
-        suite: { name: "first-suite", id: null },
-      },
-    });
-    await writeTestFile(path.join(workspace.dir, "egma", "tests", "boundary.md"), {
-      name: "Real boundary test",
-      personas: [],
-      version: testResource.version_id,
-      scenario: "The persona asks to move an appointment.",
-      expectedBehaviors: ["The agent confirms the new time."],
-    });
     const repositoryIds = [
       resources.agent.id,
       resources.connection.id,
@@ -133,6 +123,31 @@ it("refuses a repository bound to another real local platform before sending its
     });
     const secondIdentity = await identityOf(second);
     expect(secondIdentity.instance_id).not.toBe(firstIdentity.instance_id);
+
+    // The committed file: the first platform's resources and instance, at the
+    // address the second platform now answers at.
+    await createEgmaFolder({
+      repository: workspace.dir,
+      config: {
+        platform: {
+          origin: secondIdentity.origin,
+          instance: firstIdentity.instance_id,
+        },
+        agent: { name: resources.agent.name, id: resources.agent.id },
+        connection: {
+          name: resources.connection.name,
+          id: resources.connection.id,
+        },
+        suite: { name: "first-suite", id: null },
+      },
+    });
+    await writeTestFile(path.join(workspace.dir, "egma", "tests", "boundary.md"), {
+      name: "Real boundary test",
+      personas: [],
+      version: testResource.version_id,
+      scenario: "The persona asks to move an appointment.",
+      expectedBehaviors: ["The agent confirms the new time."],
+    });
 
     // Prove the observer is in front of authentication. Platform A's key is
     // unknown on B, so the old preHandler observer missed this request when B
@@ -167,10 +182,14 @@ it("refuses a repository bound to another real local platform before sending its
     // including one B rejects before parsing A's identifiers.
     await identityOf(second);
 
-    const result = await egma(
-      ["run", "--url", second.origin, "--cwd", workspace.dir, "--no-follow"],
-      { cwd: workspace.dir, env: workspace.env() },
-    );
+    // No flag: the committed binding chooses the address, and what answers
+    // there is not the platform that issued anything in this folder.
+    const env = workspace.env();
+    expect(env.EGMA_URL).toBeUndefined();
+    const result = await egma(["run", "--cwd", workspace.dir, "--no-follow"], {
+      cwd: workspace.dir,
+      env,
+    });
 
     expect(result.code).toBe(4);
     expect(result.stdout).toContain("status: refused");
@@ -192,6 +211,28 @@ it("refuses a repository bound to another real local platform before sending its
 
     const stored = await second.database.sql<{ count: string }>("select count(*) from run");
     expect(stored.rows).toEqual([{ count: "0" }]);
+
+    // And the cheaper refusal in front of that one: a repository bound to one
+    // address, pointed at another on the command line, stops without asking
+    // anybody anything at all.
+    observedBySecond.length = 0;
+    await updateConfig(folderPathsIn(workspace.dir).config, {
+      platform: {
+        origin: firstIdentity.origin,
+        instance: firstIdentity.instance_id,
+      },
+    });
+    const elsewhere = await egma(
+      ["run", "--url", second.origin, "--cwd", workspace.dir, "--no-follow"],
+      { cwd: workspace.dir, env },
+    );
+
+    expect(elsewhere.code).toBe(4);
+    expect(elsewhere.stdout).toContain("status: refused");
+    expect(elsewhere.stderr).toContain(firstIdentity.origin);
+    expect(elsewhere.stderr).toContain(secondIdentity.origin);
+    expect(elsewhere.stderr).toContain("No repository identifiers were sent");
+    expect(observedBySecond).toEqual([]);
   } finally {
     await first?.close();
     await second?.close();

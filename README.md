@@ -38,6 +38,21 @@ environment; see `.env.example` for the names and their defaults.
 one.** Compose supplies a development default so that `docker compose up` works
 out of the box. Change it before anybody else can reach your instance.
 
+**`EGMA_BASE_URL` is the whole address people reach this instance at, and
+nothing more than that** — scheme, host and port. It is what the pages, the
+login flow and an agent repository all use, and an agent repository will not
+follow an instance to an address the developer did not type: if others reach
+yours at `http://192.168.1.10:3101` while this says `http://localhost:3101`,
+their first command stops and names both addresses instead of quietly talking
+to their own machine.
+
+*Upgrading:* a value carrying a path, query, fragment or credentials is now
+refused when the API starts, where it used to have its trailing slashes trimmed
+and the rest kept. Serving egma under a subpath such as
+`https://egma.example/egma` never worked — the API answers at the root of this
+address — so the fix is to drop everything after the port. The startup message
+names the part to remove.
+
 **`EGMA_SIMULATOR_SERVICE_TOKEN` is what the simulator shows the API to claim
 work, and the API refuses to start without one.** The answers to a claim carry
 your live provider credentials, and port 3100 is published on the host, so the

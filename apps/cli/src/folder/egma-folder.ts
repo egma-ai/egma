@@ -194,12 +194,15 @@ export async function updateConfig(
 }
 
 /**
- * Commit the verified platform before the wizard can create platform-owned
- * resource identifiers.
+ * Commit the verified platform before anything creates platform-owned resource
+ * identifiers.
  *
- * A retry is byte-stable. A verified canonical-origin change for the same
- * stable instance is recorded. A different instance is refused because
- * repository rebinding is a separate product operation.
+ * A retry is byte-stable. **A binding that is already here is never rewritten,
+ * not in either field.** The instance is the identity boundary, and the origin
+ * is the address every clone of this repository will use — so a run that
+ * quietly changed either would be moving other people's repository for them.
+ * Both differences are refused and say what to do about it, and the address one
+ * is normally caught earlier still, before any address is asked anything.
  */
 export async function bindRepositoryPlatform(
   repository: string,
@@ -225,11 +228,12 @@ export async function bindRepositoryPlatform(
         `This repository is already bound to Egma platform ${held.platform.instance} at ${held.platform.origin}. Rebinding is not supported yet.`,
       );
     }
-    // The stable instance is the boundary. Its canonical origin can change,
-    // and the public identity read is the source of truth for that origin.
-    return held.platform.origin === binding.origin
-      ? held
-      : updateConfig(paths.config, { platform: binding });
+    if (held.platform.origin !== binding.origin) {
+      throw new Error(
+        `This repository records Egma platform ${held.platform.instance} at ${held.platform.origin}, and this run reached it at ${binding.origin}. egma will not move a committed platform address for you. Use ${held.platform.origin}, or edit egma/config.yaml on purpose.`,
+      );
+    }
+    return held;
   }
   return updateConfig(paths.config, { platform: binding });
 }

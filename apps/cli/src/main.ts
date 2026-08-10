@@ -31,6 +31,7 @@ import { runPullCommand } from "./commands/pull.ts";
 import { runPushCommand } from "./commands/push.ts";
 import { runRunCommand } from "./commands/run.ts";
 import {
+  BoundPlatformAddressError,
   BoundPlatformUnavailableError,
   credentialsFileIn,
   DEFAULT_PLATFORM_URL,
@@ -42,7 +43,10 @@ import {
   type VerifiedPlatformAccess,
 } from "./platform/credentials.ts";
 import { PlatformUnreachableError } from "./platform/device-flow.ts";
-import { PlatformIdentityError } from "./platform/identity.ts";
+import {
+  PlatformIdentityError,
+  PlatformOriginMismatchError,
+} from "./platform/identity.ts";
 import { RETELL_API } from "./retell/client.ts";
 import { HeadlessUI } from "./ui/headless-ui.ts";
 import { buildExitNotice, exitLines, type ExitReport } from "./wizard/exit-line.ts";
@@ -635,7 +639,12 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
 
-  let launch: DrivenAgentLaunch | undefined;
+  // The wizard's remaining work, held as one closure rather than a launch the
+  // compiler cannot prove is there. Everything a bare command needs — the
+  // keystroke of consent, the coding agent it will drive — is settled here,
+  // before a single network read, and what comes out is either the rest of the
+  // walk or nothing at all.
+  let theWizard: ((access: VerifiedPlatformAccess) => Promise<number>) | null = null;
   if (invocation.verb === null) {
     // Consent is checked before a network read. A piped bare command cannot
     // start either the wizard or platform selection.
@@ -646,6 +655,7 @@ export async function main(argv: readonly string[]): Promise<void> {
       return;
     }
 
+    let launch: DrivenAgentLaunch;
     try {
       launch = launchFrom(invocation);
     } catch (error) {
@@ -655,6 +665,10 @@ export async function main(argv: readonly string[]): Promise<void> {
       }
       throw error;
     }
+    theWizard = async (access) =>
+      invocation.headless
+        ? runHeadless(invocation, launch, cwd, access)
+        : runWizard(launch, cwd, access);
   }
 
   // Which egma, resolved once for every path below, and refused here when the
@@ -673,20 +687,24 @@ export async function main(argv: readonly string[]): Promise<void> {
       process.exitCode = 1;
       return;
     }
+    // Two shapes, and the difference is whether anything is worth retrying.
+    // `unreachable` is nobody answering; `refused` is egma declining to send
+    // this repository's identifiers to the address on offer.
+    const refused =
+      error instanceof PlatformBindingMismatchError ||
+      error instanceof BoundPlatformAddressError ||
+      error instanceof PlatformOriginMismatchError ||
+      error instanceof RepositoryPlatformConfigError;
     if (
+      refused ||
       error instanceof PlatformUnreachableError ||
       error instanceof PlatformIdentityError ||
-      error instanceof PlatformBindingMismatchError ||
-      error instanceof BoundPlatformUnavailableError ||
-      error instanceof RepositoryPlatformConfigError
+      error instanceof BoundPlatformUnavailableError
     ) {
-      const status =
-        error instanceof PlatformBindingMismatchError ||
-        error instanceof RepositoryPlatformConfigError
-          ? "refused"
-          : "unreachable";
-      process.stdout.write(`status: ${status}\nreason: ${error.message}\n`);
-      process.stderr.write(`${error.message}\n`);
+      const status = refused ? "refused" : "unreachable";
+      const message = (error as Error).message;
+      process.stdout.write(`status: ${status}\nreason: ${message}\n`);
+      process.stderr.write(`${message}\n`);
       process.exitCode = 4;
       return;
     }
@@ -712,7 +730,7 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
 
-  process.exitCode = invocation.headless
-    ? await runHeadless(invocation, launch!, cwd, access)
-    : await runWizard(launch!, cwd, access);
+  // Every verb has returned by now, so what is left is the bare command, and
+  // the walk it needs was built above.
+  if (theWizard !== null) process.exitCode = await theWizard(access);
 }

@@ -241,8 +241,25 @@ export function loadConfig(
     parsedBaseUrl.search !== "" ||
     parsedBaseUrl.hash !== ""
   ) {
+    // Named part by part, and with the value it should be, because this is a
+    // narrowing: a deployment that has run happily on a base URL with a path
+    // meets it for the first time on an upgrade, and "must be only the origin"
+    // is not something to have to work out at three in the morning. The
+    // password is never repeated back; only the fact that one is there is.
+    const wrong = [
+      parsedBaseUrl.username !== "" || parsedBaseUrl.password !== ""
+        ? "a username or password"
+        : "",
+      parsedBaseUrl.pathname !== "" && parsedBaseUrl.pathname !== "/"
+        ? `the path ${parsedBaseUrl.pathname}`
+        : "",
+      parsedBaseUrl.search !== "" ? "a query" : "",
+      parsedBaseUrl.hash !== "" ? "a fragment" : "",
+    ].filter((part) => part !== "");
     throw new Error(
-      "EGMA_BASE_URL must be only the platform origin, with no credentials, path, query, or fragment",
+      `EGMA_BASE_URL must be only the address egma is reached at — scheme, host and port, nothing else — and this one carries ${wrong.join(
+        " and ",
+      )}. Set it to ${parsedBaseUrl.origin} and start egma again. Egma serves its whole public surface, including the platform identity the CLI reads, at the root of this address; anything after the port cannot be honoured and is a sign that a proxy is putting egma under a subpath, which is not supported.`,
     );
   }
   const baseUrl = parsedBaseUrl.origin;

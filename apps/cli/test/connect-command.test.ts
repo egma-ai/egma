@@ -17,7 +17,7 @@ import process from "node:process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { CONNECT_EXIT } from "../src/commands/connect.ts";
-import { readConfig } from "../src/folder/egma-folder.ts";
+import { folderPathsIn, readConfig } from "../src/folder/egma-folder.ts";
 import { DRIFT_LINE } from "../src/retell/prompt-drift.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
@@ -199,6 +199,27 @@ describe("egma connect", () => {
     expect(refused.code).toBe(CONNECT_EXIT.invalidKey);
     expect(facts(refused.stdout).status).toBe("invalid-key");
     expect(refused.stderr).toContain("Retell would not take that key");
+  });
+
+  /**
+   * The platform is written down before it is asked to create anything.
+   *
+   * The order is the whole point of the binding: an identifier only one
+   * platform can resolve must never exist in this folder without that platform
+   * recorded beside it. A run that bound afterwards would leave exactly that
+   * gap every time it failed in between — and this run does fail in between,
+   * on a key Retell will not take, with nothing registered.
+   */
+  it("commits the platform before it asks the platform to create anything", async () => {
+    retell = await startFakeRetell(ONE_AGENT);
+
+    const refused = await egma(["connect"], { stdin: "key_not-on-this-account" });
+    expect(refused.code).toBe(CONNECT_EXIT.invalidKey);
+
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(
+      (await readConfig(folderPathsIn(workspace.dir).config)).platform,
+    ).toEqual({ origin: platform.url, instance: platform.instanceId });
   });
 
   it("says an empty account is an empty account, not a bad key", async () => {
