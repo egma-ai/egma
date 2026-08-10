@@ -47,7 +47,7 @@ import {
 
 // A real terminal, real subprocesses and two servers, inside a run using every
 // core: the budget is generous so that only a broken wizard can reach it.
-vi.setConfig({ testTimeout: 360_000, hookTimeout: 120_000 });
+vi.setConfig({ testTimeout: 90_000, hookTimeout: 60_000 });
 
 const CTRL_C = "";
 

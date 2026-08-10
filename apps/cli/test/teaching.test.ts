@@ -34,7 +34,7 @@ import {
   type Workspace,
 } from "./support/workspace.ts";
 
-vi.setConfig({ testTimeout: 360_000, hookTimeout: 120_000 });
+vi.setConfig({ testTimeout: 90_000, hookTimeout: 60_000 });
 
 const KEY = "key_44a0d7c1e6b39f28510d";
 
