@@ -176,28 +176,20 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
     return CONNECT_EXIT.notSignedIn;
   }
 
-  // Before the platform is asked to create anything, and for the same reason
-  // the wizard binds where it does: nothing that only one platform can resolve
-  // may exist in this folder without that platform written down beside it. It
-  // also refuses here, on a repository already bound elsewhere, rather than
-  // after an agent has been registered on the wrong one.
-  try {
-    await bindRepositoryPlatform(options.cwd, {
-      origin: options.access.url,
-      instance: options.access.instanceId,
-    });
-  } catch (cause) {
-    options.out("status: refused");
-    options.fail(cause instanceof Error ? cause.message : String(cause));
-    return CONNECT_EXIT.unreachable;
-  }
-
   // Read once, before anything else could consume it, and held in one local
   // for the length of the command.
   const typed = (await fromStdin(options.stdin)) || fromEnv(options.env);
   let asked = false;
 
-  const outcome = await connect({
+  // A binding written before the key was even read would leave an egma folder
+  // behind every time this command ends at "no key given" — which is the same
+  // wart the wizard used to have, and it belongs here for the same reason it
+  // belonged there. So the binding is written from inside the flow, at the one
+  // moment after which this repository owns something only this platform can
+  // resolve.
+  const binding: { refused: Error | null } = { refused: null };
+
+  const attempt = connect({
     platform: { url: held.url, key: held.key },
     cwd: options.cwd,
     repoPrompts: options.repoPrompt,
@@ -205,6 +197,20 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
     retell: options.retell,
     fetchImpl: options.fetchImpl,
     say: (line) => options.out(`note: ${line}`),
+    beforeRegistering: async () => {
+      try {
+        await bindRepositoryPlatform(options.cwd, {
+          origin: options.access.url,
+          instance: options.access.instanceId,
+        });
+      } catch (cause) {
+        // Carried out rather than answered from in here: the flow has no
+        // ending for this, and an agent must not be registered on a platform
+        // this repository has already refused.
+        binding.refused = cause instanceof Error ? cause : new Error(String(cause));
+        throw cause;
+      }
+    },
     askForKey: () => {
       // The same two lines the wizard's screen draws, so a coding agent reading
       // this is told exactly what a person is told. There is nobody to ask
@@ -224,6 +230,16 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       return Promise.resolve(named === "" ? null : named);
     },
   });
+
+  let outcome: ConnectOutcome;
+  try {
+    outcome = await attempt;
+  } catch (cause) {
+    if (binding.refused === null) throw cause;
+    options.out("status: refused");
+    options.fail(binding.refused.message);
+    return CONNECT_EXIT.unreachable;
+  }
 
   switch (outcome.kind) {
     case "connected": {

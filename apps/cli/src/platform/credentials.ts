@@ -24,7 +24,14 @@ import {
 } from "./identity.ts";
 import { PlatformUnreachableError, type Fetch } from "./device-flow.ts";
 
-/** The egma a command talks to when nothing says otherwise. */
+/**
+ * The address a command falls back to when nothing else names one.
+ *
+ * It is egma's own built-in default and not a platform the developer runs, so
+ * nothing that goes wrong there is theirs to go and inspect. Anything it
+ * answers is reported as "egma's default address is not usable, name yours" —
+ * never as a deployment somebody ought to go and fix.
+ */
 export const DEFAULT_PLATFORM_URL = "https://app.egma.ai";
 
 /** Owner only, on the file and on the folder that holds it. */
@@ -67,13 +74,35 @@ type CredentialEntries = ReadonlyMap<string, string>;
  * nothing, renames itself over the file, and every other platform's key is
  * gone. A truncated file is recoverable; a file egma overwrote is not.
  */
-export class CredentialsFileUnreadableError extends Error {
+/**
+ * Something is wrong with this machine's keys file, and egma stopped.
+ *
+ * One family, because every command reaches this file and none of them owns
+ * it: whoever is driving needs one word to branch on rather than a list to
+ * keep up with.
+ */
+export abstract class KeysUnusableError extends Error {}
+
+/** The `status:` line every command prints when the keys file cannot be used. */
+export const KEYS_UNUSABLE = "unusable-keys";
+
+export class CredentialsFileUnreadableError extends KeysUnusableError {
   constructor(file: string, cause: unknown) {
     super(
       `egma could not read the keys in ${file}, so it stopped rather than write over them. Look at that file. If it is damaged, move it aside and sign in again — you will be signed out of every platform, which is why egma will not do that for you.`,
       { cause },
     );
     this.name = "CredentialsFileUnreadableError";
+  }
+}
+
+/** Another egma held the keys file for longer than this one would wait. */
+export class CredentialsFileBusyError extends KeysUnusableError {
+  constructor(file: string, lock: string) {
+    super(
+      `egma waited for another egma to finish writing ${file} and it did not. If nothing else is running, delete ${lock} and try again.`,
+    );
+    this.name = "CredentialsFileBusyError";
   }
 }
 
@@ -187,11 +216,7 @@ async function whileLocked<T>(file: string, work: () => Promise<T>): Promise<T> 
         await rm(lock, { force: true });
         continue;
       }
-      if (Date.now() > until) {
-        throw new Error(
-          `egma waited for another egma to finish writing ${file} and it did not. If nothing else is running, delete ${lock} and try again.`,
-        );
-      }
+      if (Date.now() > until) throw new CredentialsFileBusyError(file, lock);
       await new Promise((resume) => setTimeout(resume, 50));
     }
   }
@@ -397,6 +422,25 @@ export class BoundPlatformUnavailableError extends Error {
   }
 }
 
+/**
+ * Nothing named a platform, and the built-in default is not one.
+ *
+ * The developer never typed this address, does not run what is at it, and
+ * cannot fix it — so the sentence points at the one move that is theirs: name
+ * their own platform. Every other refusal in this file describes a deployment
+ * somebody can go and look at, and saying that about this address would send a
+ * developer off to inspect a website that is not theirs.
+ */
+export class DefaultPlatformUnusableError extends Error {
+  constructor(cause: unknown) {
+    super(
+      `This repository names no Egma platform, so egma tried its built-in default at ${DEFAULT_PLATFORM_URL}, and that did not answer as an Egma platform. Point egma at yours: run it again with --url <address>, or set EGMA_URL for this shell. Nothing was sent.`,
+      { cause },
+    );
+    this.name = "DefaultPlatformUnusableError";
+  }
+}
+
 /** The committed config could not safely take part in platform resolution. */
 export class RepositoryPlatformConfigError extends Error {
   constructor(cause: unknown) {
@@ -451,11 +495,12 @@ export async function resolvePlatformAccess(choice: {
   } catch (cause) {
     // Safe to name the binding here, and only here: any address that is not the
     // bound one was already refused above, so a bound repository that got this
-    // far was reaching its own platform. An unbound one is told about the
-    // address it actually named, which is the only one it has.
+    // far was reaching its own platform.
     if (binding !== null && cause instanceof PlatformUnreachableError) {
       throw new BoundPlatformUnavailableError(binding, cause);
     }
+    // Nobody chose this address, so nobody can be sent to go and look at it.
+    if (selected.source === "cloud") throw new DefaultPlatformUnusableError(cause);
     throw cause;
   }
 

@@ -5,6 +5,7 @@ import {
   BoundPlatformAddressError,
   BoundPlatformUnavailableError,
   DEFAULT_PLATFORM_URL,
+  DefaultPlatformUnusableError,
   PlatformBindingMismatchError,
   resolvePlatformAccess,
 } from "../src/platform/credentials.ts";
@@ -15,6 +16,16 @@ import {
 } from "../src/platform/identity.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { makeWorkspace, type Workspace } from "./support/workspace.ts";
+
+/** The refusal a promise ended with, or a failure saying it did not refuse. */
+async function refusalFrom(work: Promise<unknown>): Promise<Error> {
+  try {
+    await work;
+  } catch (cause) {
+    return cause as Error;
+  }
+  throw new Error("that was supposed to be refused, and it was not");
+}
 
 describe("verifying an Egma platform", () => {
   let platform: Platform;
@@ -177,6 +188,81 @@ describe("verifying an Egma platform", () => {
     } finally {
       await alias.close();
     }
+  });
+
+  /**
+   * The same refusal, told two ways, because the two situations want different
+   * things done about them.
+   *
+   * `localhost` against `127.0.0.1` is one machine calling itself two names,
+   * and either name reaches it — so saying "or use the other one" is help. A
+   * platform on the network that still calls itself `localhost` is the failure
+   * this refusal exists for, and telling somebody on another machine to use
+   * `localhost` sends them to their own laptop, where nothing is listening.
+   */
+  it("does not offer a loopback address to somebody who is not on that machine", async () => {
+    const onlyItsOwnMachine = await startPlatform({
+      canonicalOrigin: "http://localhost:3101",
+    });
+    try {
+      // Reached across a network, so its own name for itself is no use here.
+      await expect(
+        readPlatformIdentity(onlyItsOwnMachine.url.replace("127.0.0.1", "[::1]")),
+      ).rejects.toThrow();
+
+      const refusal = await refusalFrom(
+        readPlatformIdentity("http://192.168.1.10:3101", async () =>
+          Response.json({
+            instance_id: "pf_01K3XQ7M4E8YB2FVN0H9TZQWEA",
+            origin: "http://localhost:3101",
+          }),
+        ),
+      );
+
+      expect(refusal).toBeInstanceOf(PlatformOriginMismatchError);
+      expect(refusal.message).toContain("names only the platform's own machine");
+      expect(refusal.message).not.toContain("or use http://localhost:3101 here");
+
+      // One machine, two names for itself: the other name is worth offering.
+      const nearby = await refusalFrom(
+        readPlatformIdentity("http://127.0.0.1:3101", async () =>
+          Response.json({
+            instance_id: "pf_01K3XQ7M4E8YB2FVN0H9TZQWEA",
+            origin: "http://localhost:3101",
+          }),
+        ),
+      );
+
+      expect(nearby.message).toContain("or use http://localhost:3101 here");
+      expect(nearby.message).not.toContain("names only the platform's own machine");
+    } finally {
+      await onlyItsOwnMachine.close();
+    }
+  });
+
+  /**
+   * Nobody typed egma's built-in default address, nobody runs what is at it,
+   * and nobody can fix it — so the refusal points at the one move that belongs
+   * to the developer, and never sends them off to inspect a website that is
+   * not theirs.
+   */
+  it("does not send a developer to inspect its own built-in default address", async () => {
+    const refusal = await refusalFrom(
+      resolvePlatformAccess({
+        env: workspace.env(),
+        flag: null,
+        cwd: workspace.dir,
+        fetchImpl: async () =>
+          new Response(null, { status: 307, headers: { location: "/login" } }),
+      }),
+    );
+
+    expect(refusal).toBeInstanceOf(DefaultPlatformUnusableError);
+    expect(refusal.message).toContain(DEFAULT_PLATFORM_URL);
+    expect(refusal.message).toContain("--url <address>");
+    expect(refusal.message).toContain("EGMA_URL");
+    // Not somebody's deployment, so not somebody's misconfiguration.
+    expect(refusal.message).not.toMatch(/sign-in page|proxy|this is where to look/u);
   });
 
   it("keeps the address it was given, whatever the platform calls itself", async () => {

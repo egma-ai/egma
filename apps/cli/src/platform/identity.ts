@@ -108,6 +108,17 @@ export class PlatformTimedOutError extends PlatformUnreachableError {
   }
 }
 
+/** Whether an address only means anything on the machine that says it. */
+function isLoopback(origin: string): boolean {
+  const host = new URL(origin).hostname.toLowerCase();
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "[::1]" ||
+    /^127\./u.test(host)
+  );
+}
+
 /**
  * The platform answered to a different address than the one it was asked at.
  *
@@ -117,11 +128,28 @@ export class PlatformTimedOutError extends PlatformUnreachableError {
  * would be the whole failure this ticket exists to prevent: the CLI would leave
  * for an address nobody chose, and a repository bound on the platform's own
  * host would commit `http://localhost:3101` into a file every teammate clones.
+ *
+ * There are two of these and they want different advice. `localhost` against
+ * `127.0.0.1` is one machine calling itself two names, and either name works —
+ * so offering the other one is useful. A platform on the network still calling
+ * itself `localhost` is the failure above, and offering `localhost` to somebody
+ * on another machine sends them to their own laptop, where nothing is
+ * listening. So the second half of the advice is only given when it is true.
  */
 export class PlatformOriginMismatchError extends Error {
   constructor(asked: string, stated: string) {
+    const statedIsOnlyItsOwnMachine = isLoopback(stated) && !isLoopback(asked);
     super(
-      `egma asked ${asked} which platform it is, and it answered that it lives at ${stated}. egma uses the address you gave it and never follows a platform to another one. Set EGMA_BASE_URL on the platform to the address people reach it at and restart it, or use ${stated} here. Nothing was sent.`,
+      [
+        `egma asked ${asked} which platform it is, and it answered that it lives at ${stated}.`,
+        "egma uses the address you gave it and never follows a platform to another one.",
+        `Set EGMA_BASE_URL on the platform to the address people reach it at and restart it${
+          statedIsOnlyItsOwnMachine
+            ? ` — ${stated} names only the platform's own machine, so nobody else can reach it there.`
+            : `, or use ${stated} here.`
+        }`,
+        "Nothing was sent.",
+      ].join(" "),
     );
     this.name = "PlatformOriginMismatchError";
   }

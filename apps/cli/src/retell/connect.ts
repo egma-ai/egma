@@ -137,6 +137,17 @@ export type ConnectOptions = {
   readonly chooseAgent: (agents: readonly RetellAgent[]) => Promise<string | null>;
   /** One line about what is happening, for whoever is watching. */
   readonly say: (line: string) => void;
+  /**
+   * Run at the last moment before egma is asked to create anything, and only
+   * then.
+   *
+   * This is where the caller writes down which platform is about to own what
+   * comes back. It is a hook rather than something the caller does first
+   * because "the last moment" is in here: every ending above it — no key, a key
+   * Retell will not take, an empty account, an unanswered choice — leaves the
+   * platform with nothing in it, and must leave the repository the same way.
+   */
+  readonly beforeRegistering?: () => Promise<void>;
   /** Where Retell is. Retell's own address when omitted. */
   readonly retell?: RetellReach | undefined;
   readonly fetchImpl?: RegisterOptions["fetchImpl"];
@@ -330,6 +341,7 @@ export async function connect(options: ConnectOptions): Promise<ConnectOutcome> 
   }
 
   const config = pulled.config;
+  await options.beforeRegistering?.();
   const written = await register(keyed, config);
   if (written.kind !== "registered") return written;
 

@@ -202,24 +202,45 @@ describe("egma connect", () => {
   });
 
   /**
-   * The platform is written down before it is asked to create anything.
+   * The platform is written down at one moment: after the last thing that
+   * could still end this command with nothing created, and before the first
+   * thing that creates something.
    *
-   * The order is the whole point of the binding: an identifier only one
-   * platform can resolve must never exist in this folder without that platform
-   * recorded beside it. A run that bound afterwards would leave exactly that
-   * gap every time it failed in between — and this run does fail in between,
-   * on a key Retell will not take, with nothing registered.
+   * Both halves matter. Bind later and an identifier could exist in this folder
+   * with no record of which platform can resolve it. Bind earlier and every
+   * ending that creates nothing — no key, a key Retell will not take, an empty
+   * account, an unanswered choice — leaves an egma folder behind in a
+   * repository the developer had not decided to use egma in yet.
    */
+  it("writes no folder for an ending that created nothing", async () => {
+    retell = await startFakeRetell(ONE_AGENT);
+    const config = folderPathsIn(workspace.dir).config;
+
+    const noKey = await egma(["connect"], { stdin: "" });
+    expect(noKey.code).toBe(CONNECT_EXIT.noKey);
+    await expect(readConfig(config)).rejects.toMatchObject({ code: "ENOENT" });
+
+    const badKey = await egma(["connect"], { stdin: "key_not-on-this-account" });
+    expect(badKey.code).toBe(CONNECT_EXIT.invalidKey);
+    await expect(readConfig(config)).rejects.toMatchObject({ code: "ENOENT" });
+
+    expect(platform.registered.agents).toHaveLength(0);
+  });
+
   it("commits the platform before it asks the platform to create anything", async () => {
     retell = await startFakeRetell(ONE_AGENT);
 
-    const refused = await egma(["connect"], { stdin: "key_not-on-this-account" });
-    expect(refused.code).toBe(CONNECT_EXIT.invalidKey);
+    const connected = await egma(["connect"], { stdin: KEY });
+    expect(connected.code).toBe(CONNECT_EXIT.connected);
 
-    expect(platform.registered.agents).toHaveLength(0);
-    expect(
-      (await readConfig(folderPathsIn(workspace.dir).config)).platform,
-    ).toEqual({ origin: platform.url, instance: platform.instanceId });
+    const written = await readConfig(folderPathsIn(workspace.dir).config);
+    expect(written.platform).toEqual({
+      origin: platform.url,
+      instance: platform.instanceId,
+    });
+    // The order is what makes the file trustworthy: the agent that exists on
+    // the platform is named in the same file as the platform that issued it.
+    expect(written.agent?.id).toBe(platform.registered.agents[0]?.id);
   });
 
   it("says an empty account is an empty account, not a bad key", async () => {

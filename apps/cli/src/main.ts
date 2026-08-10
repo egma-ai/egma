@@ -35,6 +35,9 @@ import {
   BoundPlatformUnavailableError,
   credentialsFileIn,
   DEFAULT_PLATFORM_URL,
+  DefaultPlatformUnusableError,
+  KEYS_UNUSABLE,
+  KeysUnusableError,
   PlatformBindingMismatchError,
   RepositoryPlatformConfigError,
   resolvePlatformAccess,
@@ -268,6 +271,10 @@ export function helpText(): string {
     `  ${RETELL_URL_VARIABLE}      The Retell to talk to. Default: ${RETELL_API}`,
     `  ${EXISTING_TESTS_VARIABLE}  Your existing test cases, same as --existing-tests.`,
     "  VISUAL, EDITOR       What e opens a generated test in, at the gate.",
+    "",
+    "When egma cannot use this machine's keys — the file is damaged, or another",
+    `egma is holding it — every command prints status: ${KEYS_UNUSABLE} with the`,
+    "reason, changes nothing, and answers 1.",
     "",
     "What egma login prints, one fact per line:",
     "  url, code, approve_url, browser, waiting, status, credentials",
@@ -699,7 +706,8 @@ export async function main(argv: readonly string[]): Promise<void> {
       refused ||
       error instanceof PlatformUnreachableError ||
       error instanceof PlatformIdentityError ||
-      error instanceof BoundPlatformUnavailableError
+      error instanceof BoundPlatformUnavailableError ||
+      error instanceof DefaultPlatformUnusableError
     ) {
       const status = refused ? "refused" : "unreachable";
       const message = (error as Error).message;
@@ -711,26 +719,38 @@ export async function main(argv: readonly string[]): Promise<void> {
     throw error;
   }
 
-  // A verb needs no terminal and takes no keystroke: it drives no coding agent,
-  // so there is nothing for a keystroke to agree to.
-  if (invocation.verb === "login") {
-    process.exitCode = await runLogin(invocation, access);
-    return;
-  }
-  if (invocation.verb === "connect") {
-    process.exitCode = await runConnect(invocation, access);
-    return;
-  }
-  if (
-    invocation.verb === "pull" ||
-    invocation.verb === "push" ||
-    invocation.verb === "run"
-  ) {
-    process.exitCode = await runFolderVerb(invocation.verb, invocation, access);
-    return;
-  }
+  try {
+    // A verb needs no terminal and takes no keystroke: it drives no coding
+    // agent, so there is nothing for a keystroke to agree to.
+    if (invocation.verb === "login") {
+      process.exitCode = await runLogin(invocation, access);
+      return;
+    }
+    if (invocation.verb === "connect") {
+      process.exitCode = await runConnect(invocation, access);
+      return;
+    }
+    if (
+      invocation.verb === "pull" ||
+      invocation.verb === "push" ||
+      invocation.verb === "run"
+    ) {
+      process.exitCode = await runFolderVerb(invocation.verb, invocation, access);
+      return;
+    }
 
-  // Every verb has returned by now, so what is left is the bare command, and
-  // the walk it needs was built above.
-  if (theWizard !== null) process.exitCode = await theWizard(access);
+    // Every verb has returned by now, so what is left is the bare command, and
+    // the walk it needs was built above.
+    if (theWizard !== null) process.exitCode = await theWizard(access);
+  } catch (error) {
+    if (!(error instanceof KeysUnusableError)) throw error;
+    // Whatever is wrong with this machine's keys file, egma decided not to
+    // write over it — and a decision is a sentence, not a stack trace. Every
+    // verb can hit this and none of them owns it, so it is caught in the one
+    // place they all pass through, and it answers the same way everywhere
+    // rather than borrowing a number that means something else per verb.
+    process.stdout.write(`status: ${KEYS_UNUSABLE}\nreason: ${error.message}\n`);
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+  }
 }
