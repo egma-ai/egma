@@ -54,7 +54,18 @@ const SPAN_ATTRIBUTE_KEYS = [
   "egma.turn.text",
   "egma.tool.name",
   "egma.tool.arguments",
+  "egma.tool.result",
+  "egma.tool.provenance",
+  "egma.tool.mock_tool",
+  "egma.tool.late_attached",
 ] as const;
+
+/**
+ * How a recorded tool call was answered. One value today, and it is the one
+ * egma can honestly claim: `mocked` says egma itself served the answer, so the
+ * result beside it is not a guess about somebody else's return.
+ */
+const TOOL_PROVENANCES = ["mocked"] as const;
 
 const CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
@@ -84,7 +95,10 @@ type FixtureSpan = {
   readonly endTimeUnixNano?: string;
   readonly attributes?: readonly {
     readonly key: string;
-    readonly value?: { readonly stringValue?: string };
+    readonly value?: {
+      readonly stringValue?: string;
+      readonly boolValue?: boolean;
+    };
   }[];
 };
 
@@ -123,12 +137,20 @@ const valid = await fixturesUnder("valid");
 const invalid = await fixturesUnder("invalid");
 
 function attributeOf(
-  attributes:
-    | readonly { key: string; value?: { stringValue?: string } }[]
-    | undefined,
+  attributes: FixtureSpan["attributes"],
   key: string,
 ): string | undefined {
   return attributes?.find((entry) => entry.key === key)?.value?.stringValue;
+}
+
+/**
+ * A flag attribute, which is a genuine OTLP boolean rather than the word
+ * "true" in a string: a fact that is either so or not so should not arrive as
+ * text somebody has to parse. Absent is the ordinary case and reads as `false`
+ * — a stamp for the thing that did not happen would be on every span.
+ */
+function flagOf(attributes: FixtureSpan["attributes"], key: string): boolean {
+  return attributes?.find((entry) => entry.key === key)?.value?.boolValue === true;
 }
 
 function spansOf(fixture: Fixture): FixtureSpan[] {
@@ -270,22 +292,128 @@ describe("the golden span fixtures", () => {
     }
   });
 
+  it("shows a mocked call carrying the answer egma served and the mock tool that served it", () => {
+    const mocked = valid
+      .flatMap((fixture) => spansOf(fixture))
+      .filter(
+        (span) =>
+          span.name === "tool_call" &&
+          attributeOf(span.attributes, "egma.tool.provenance") === "mocked" &&
+          !flagOf(span.attributes, "egma.tool.late_attached"),
+      );
+    expect(mocked.length).toBeGreaterThan(0);
+
+    for (const span of mocked) {
+      // The answer is egma's own, so recording it invents nothing — and a
+      // mocked call that recorded no answer would be a served call with the
+      // served half missing.
+      expect(attributeOf(span.attributes, "egma.tool.result")).toBeTypeOf(
+        "string",
+      );
+      expect(attributeOf(span.attributes, "egma.tool.mock_tool")).toBeTruthy();
+      // Egma stood between the agent and the answer, so the span brackets the
+      // exchange it conducted rather than being the instant an observer sees.
+      expect(
+        BigInt(span.endTimeUnixNano ?? "0") -
+          BigInt(span.startTimeUnixNano ?? "0"),
+      ).toBeGreaterThan(0n);
+      // An ordinary mocked call is one whose tool the census reported, so its
+      // arguments arrived whole.
+      expect(attributeOf(span.attributes, "egma.tool.arguments")).toBeTypeOf(
+        "string",
+      );
+    }
+  });
+
+  it("shows a late-attached call, distinguishable from an ordinary mocked call by its own flag", () => {
+    const late = valid
+      .flatMap((fixture) => spansOf(fixture))
+      .filter((span) => flagOf(span.attributes, "egma.tool.late_attached"));
+    expect(late.length).toBeGreaterThan(0);
+
+    for (const span of late) {
+      expect(span.name).toBe("tool_call");
+      // Still a mocked call: the flag says which tool it was served for, never
+      // that something other than a mock tool answered.
+      expect(attributeOf(span.attributes, "egma.tool.provenance")).toBe(
+        "mocked",
+      );
+      expect(attributeOf(span.attributes, "egma.tool.mock_tool")).toBeTruthy();
+      expect(attributeOf(span.attributes, "egma.tool.result")).toBeTypeOf(
+        "string",
+      );
+    }
+  });
+
+  it("stamps every recorded answer with how it was answered, so no result is of unknown origin", () => {
+    for (const fixture of [...valid, ...invalid]) {
+      for (const span of spansOf(fixture)) {
+        const provenance = attributeOf(span.attributes, "egma.tool.provenance");
+        if (attributeOf(span.attributes, "egma.tool.result") !== undefined) {
+          expect(
+            provenance,
+            `${fixture.name} records an answer without saying who served it`,
+          ).toBeTypeOf("string");
+        }
+        if (provenance !== undefined) {
+          expect(
+            (TOOL_PROVENANCES as readonly string[]).includes(provenance),
+            `${fixture.name} claims provenance ${provenance}`,
+          ).toBe(true);
+        }
+        // The two mock-shaped attributes belong to a mocked call and nowhere
+        // else: naming a mock tool on a call no mock tool answered would be
+        // the invented structure this vocabulary refuses.
+        if (provenance === undefined) {
+          expect(
+            attributeOf(span.attributes, "egma.tool.mock_tool"),
+            fixture.name,
+          ).toBeUndefined();
+          expect(flagOf(span.attributes, "egma.tool.late_attached")).toBe(false);
+        }
+      }
+    }
+  });
+
+  it("still carries a call egma only observed, with neither answer nor stamp, so the expand breaks nobody", () => {
+    const bare = valid
+      .flatMap((fixture) => spansOf(fixture))
+      .filter(
+        (span) =>
+          span.name === "tool_call" &&
+          attributeOf(span.attributes, "egma.tool.provenance") === undefined,
+      );
+    expect(bare.length).toBeGreaterThan(0);
+    for (const span of bare) {
+      expect(attributeOf(span.attributes, "egma.tool.name")).toBeTruthy();
+      expect(
+        attributeOf(span.attributes, "egma.tool.result"),
+        "an observed call cannot report a return nobody saw",
+      ).toBeUndefined();
+    }
+  });
+
   it("show a voice flush whose turns genuinely overlap, because the shape has to permit it", () => {
-    const voice = valid.find((fixture) => fixture.name.startsWith("voice-"));
-    expect(voice).toBeDefined();
-    const turns = spansOf(voice as Fixture).filter(
-      (span) => span.name === "human_turn" || span.name === "agent_turn",
-    );
-    const crossing = turns.some((one, index) =>
-      turns.some(
-        (other, otherIndex) =>
-          index !== otherIndex &&
-          BigInt(one.startTimeUnixNano ?? "0") <
-            BigInt(other.endTimeUnixNano ?? "0") &&
-          BigInt(other.startTimeUnixNano ?? "0") <
-            BigInt(one.endTimeUnixNano ?? "0"),
-      ),
-    );
+    const voice = valid.filter((fixture) => fixture.name.startsWith("voice-"));
+    expect(voice.length).toBeGreaterThan(0);
+    // Some voice flush overlaps, rather than the first one found doing: voice
+    // fixtures show more than one thing, and picking by position made adding a
+    // second of them a way to break this.
+    const crossing = voice.some((fixture) => {
+      const turns = spansOf(fixture).filter(
+        (span) => span.name === "human_turn" || span.name === "agent_turn",
+      );
+      return turns.some((one, index) =>
+        turns.some(
+          (other, otherIndex) =>
+            index !== otherIndex &&
+            BigInt(one.startTimeUnixNano ?? "0") <
+              BigInt(other.endTimeUnixNano ?? "0") &&
+            BigInt(other.startTimeUnixNano ?? "0") <
+              BigInt(one.endTimeUnixNano ?? "0"),
+        ),
+      );
+    });
     expect(crossing).toBe(true);
   });
 
