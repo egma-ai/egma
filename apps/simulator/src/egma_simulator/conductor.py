@@ -50,8 +50,9 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
+from typing import Any
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.frames.frames import (
@@ -682,6 +683,10 @@ class VoiceConductor:
             self._fault = str(getattr(error, "error", error))
             self._faulted.set()
 
+        # Local bookkeeping — the worker joins the runner's registry and
+        # its bus, and nothing outside this process is asked anything. It
+        # is the one step here that cannot wait on a platform, so it is
+        # the one step not raced against a stop.
         await self._runner.add_workers(self._worker)
         self._running = asyncio.create_task(
             self._runner.run(), name=f"voice-pipeline:{name}"
@@ -689,9 +694,9 @@ class VoiceConductor:
         await self._reach(mouth.started)
         # A listening leg that connects does so once the pipeline starts,
         # and drops anything handed to it before that lands.
-        await self._legs.ready()
+        await self._unless_stopped(self._legs.ready())
 
-        await self._line.open()
+        await self._unless_stopped(self._line.open())
         self._clock = AudioClock(
             sample_rate_hz=self._band_hz, opened_unix_nano=_now()
         )
@@ -1122,6 +1127,10 @@ class VoiceConductor:
         a plan is the whole diagnosis. A stop cause landing is raced too,
         which is what makes a cancel land inside one heartbeat however
         deep in a turn it arrives.
+
+        This is only half of that promise: it holds once the line is open,
+        and :meth:`_unless_stopped` is what holds it while the line is
+        still opening.
         """
         if self._running is None:
             raise PipelineGone("the voice pipeline was driven before it was opened")
@@ -1148,6 +1157,51 @@ class VoiceConductor:
         if stopped in done:
             raise _Stopped()
         raise PipelineGone("the voice pipeline ended before the conversation did")
+
+    async def _unless_stopped(self, step: Coroutine[Any, Any, None]) -> None:
+        """Take one step of opening the exchange, unless a stop lands first.
+
+        Everything after the line is open is raced inside :meth:`_reach`.
+        Opening is not one thing but several, and two of them are real
+        waits on somebody else: a phone may ring for a minute before
+        nobody answering is the answer, a worker has half a minute to turn
+        up in a room, and a listening leg has its own budget to connect
+        in. A cancel directive that landed a heartbeat ago must not sit
+        through any of them — the record is closed, and a simulator that
+        went on ringing a customer's real number afterwards is exactly
+        what "cancellation lands within one heartbeat" exists to prevent.
+
+        The step is cancelled where it stands, which reaches the plug as
+        an ``asyncio.CancelledError`` inside whichever call was in flight
+        — the shape the plug seam documents and tells plugs to let
+        propagate — and :meth:`close` does the tidying up, which the media
+        driver seam already promises is safe from every state, including a
+        dial that never got an answer.
+
+        Raised as :class:`_Stopped`, the same way :meth:`_reach` raises
+        it, so a stop while opening reports the ending it deserves rather
+        than a fault: conducting catches it in one place and the cause on
+        the controls says which of the two it was.
+        """
+        taking = asyncio.ensure_future(step)
+        stopped = asyncio.ensure_future(self._controls.guard(_never()))
+        try:
+            done, _pending = await asyncio.wait(
+                {taking, stopped}, return_when=asyncio.FIRST_COMPLETED
+            )
+        finally:
+            for unfinished in (taking, stopped):
+                if not unfinished.done():
+                    unfinished.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await unfinished
+        if taking in done:
+            # Whatever the step itself raised is the diagnosis — a leg
+            # that never connected, a carrier that refused — and it is
+            # re-raised here rather than swallowed by the tidying above.
+            taking.result()
+            return
+        raise _Stopped()
 
 
 class _Stopped(Exception):

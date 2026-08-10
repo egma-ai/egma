@@ -15,6 +15,8 @@ than approximate.
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -676,6 +678,166 @@ async def test_the_duration_limit_ends_the_simulation_honestly(tmp_path: Path):
     assert observed.conducted.status == "completed"
     assert observed.conducted.ending == "limit_reached"
     assert observed.conducted.reason == "the duration limit (90s) tripped"
+
+
+# -- Stopping a simulation that has not opened yet ----------------------------
+
+STOP_LANDS_WITHIN_SECONDS = 10.0
+"""How long the tests below give a stop to land before they give up.
+
+A bound on *failing*, not a timing assertion: a stop raced properly lands
+on the next turn of the event loop and none of this is ever waited for.
+It is here so that a conductor which stopped racing hangs a test for ten
+seconds rather than for the suite's whole two-minute timeout, with the
+name of the thing that broke on it.
+"""
+
+
+class _NeverAnswers:
+    """A line that is still ringing when the stop lands.
+
+    Written against the duplex seam the way :class:`_StopsMidUtterance` is,
+    and for the same reason: the stop has to arrive while a real call is
+    really in flight. Both fakes the suite ships answer in no wall-clock
+    time at all — deliberately, so that CI pays nothing for the quiet a
+    live line spends — so neither of them can hold an opening exchange
+    open long enough to aim a directive at it.
+
+    A real one holds it for a long time. A phone rings for
+    ``RINGING_SECONDS`` before nobody answering is the answer, and a room
+    waits ``AGENT_JOIN_SECONDS`` for a worker; this stands in for the
+    whole of that with a wait nothing ever ends.
+    """
+
+    def __init__(self, stop: Callable[[], None] | None = None) -> None:
+        self._stop = stop
+        self.closed = False
+
+    @property
+    def provider_reference(self) -> str | None:
+        return None
+
+    @property
+    def sample_rate_hz(self) -> int:
+        return 16000
+
+    @property
+    def far_end_left(self) -> bool:
+        return False
+
+    async def open(self) -> None:
+        if self._stop is not None:
+            # A directive really arrives on a heartbeat's answer, which is
+            # a task of its own landing mid-dial. This is that moment,
+            # named by the test instead of raced for.
+            self._stop()
+        await asyncio.Event().wait()
+
+    async def exchange(self, outgoing: bytes) -> bytes:
+        raise AssertionError("the line was driven, and it never answered")
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+async def stopped_while_opening(
+    tmp_path: Path,
+    stop_with: str,
+    *,
+    legs=None,
+    max_duration_seconds: int = 600,
+    monkeypatch: pytest.MonkeyPatch | None = None,
+) -> tuple[Conducted, _NeverAnswers]:
+    """One simulation stopped before its exchange ever opened."""
+    spec = spec_for(max_duration_seconds=max_duration_seconds)
+    controls = WalkControls()
+    stop = getattr(controls, stop_with)
+    # A leg that never connects is the other long wait in opening; where a
+    # test names one, the line answers the stop instead.
+    line = _NeverAnswers(None if legs is not None else stop)
+    if legs is not None:
+        assert monkeypatch is not None
+        monkeypatch.setattr(conductor_module, "build_legs", legs(stop))
+    conductor = VoiceConductor(
+        line=line,
+        voice=voice_from_traits(spec.persona_traits),
+        blobs=FilesystemBlobStore(tmp_path),
+        recording_key=f"{spec.simulation_id}/dual-channel.wav",
+    )
+    observed = await asyncio.wait_for(
+        observe(conductor, Assembled(conductor=conductor), spec, controls=controls),
+        timeout=STOP_LANDS_WITHIN_SECONDS,
+    )
+    return observed.conducted, line
+
+
+async def test_a_cancel_lands_while_the_line_is_still_ringing(tmp_path: Path):
+    """The promise the platform makes out loud, held where it was broken.
+
+    A cancel directive is honored within one heartbeat so that nothing
+    goes on conversing with a customer's production agent for a simulation
+    the record has already closed. Ringing a real phone number for a
+    minute after the cancel is exactly the scenario that rule exists to
+    prevent, and opening the line used to sit through the whole of it.
+    """
+    conducted, line = await stopped_while_opening(tmp_path, "request_cancel")
+
+    assert conducted.status == "canceled"
+    assert conducted.ending == "canceled"
+    assert conducted.reason is None
+    # And the line was hung up on the way out, from a state it never
+    # finished opening — which is what `close` promises of every state.
+    assert line.closed is True
+
+
+async def test_the_duration_limit_lands_while_the_line_is_still_ringing(
+    tmp_path: Path,
+):
+    """The other hand that stops a simulation, landing in the same place
+    and reported as the other ending — the endings vocabulary unchanged."""
+    conducted, line = await stopped_while_opening(
+        tmp_path, "trip_duration_limit", max_duration_seconds=90
+    )
+
+    assert conducted.status == "completed"
+    assert conducted.ending == "limit_reached"
+    assert conducted.reason == "the duration limit (90s) tripped"
+    assert line.closed is True
+
+
+async def test_a_cancel_lands_while_the_listening_leg_is_still_connecting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The other real wait in opening, and it has its own budget too.
+
+    A streaming transcriber opens its websocket in the background and is
+    given fifteen seconds to manage it. A cancel that landed before any of
+    that must not wait it out either.
+    """
+
+    def never_connecting(stop):
+        def legs(providers, *, voice, sample_rate_hz):
+            async def connecting() -> None:
+                stop()
+                await asyncio.Event().wait()
+
+            return SpeechLegs(
+                stt=ScriptedSTT(sample_rate_hz=sample_rate_hz),
+                tts=ScriptedTTS(voice=voice, sample_rate_hz=sample_rate_hz),
+                voice=voice,
+                listening=connecting,
+            )
+
+        return legs
+
+    conducted, line = await stopped_while_opening(
+        tmp_path, "request_cancel", legs=never_connecting, monkeypatch=monkeypatch
+    )
+
+    assert conducted.status == "canceled"
+    assert conducted.ending == "canceled"
+    # The line was never even reached, and closing it is still safe.
+    assert line.closed is True
 
 
 async def test_a_concluding_turn_that_fills_the_budget_still_concludes(
