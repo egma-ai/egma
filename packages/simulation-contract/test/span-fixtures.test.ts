@@ -292,6 +292,46 @@ describe("the golden span fixtures", () => {
     }
   });
 
+  it("reads the two answered calls back exactly, attribute by attribute", () => {
+    const flush = valid.find(
+      (fixture) => fixture.name === "voice-mocked-tool-calls.json",
+    );
+    expect(flush).toBeDefined();
+    const calls = spansOf(flush as Fixture)
+      .filter((span) => span.name === "tool_call")
+      .map((span) => ({
+        name: attributeOf(span.attributes, "egma.tool.name"),
+        arguments: attributeOf(span.attributes, "egma.tool.arguments"),
+        result: attributeOf(span.attributes, "egma.tool.result"),
+        provenance: attributeOf(span.attributes, "egma.tool.provenance"),
+        mockTool: attributeOf(span.attributes, "egma.tool.mock_tool"),
+        lateAttached: flagOf(span.attributes, "egma.tool.late_attached"),
+      }));
+
+    expect(calls).toEqual([
+      {
+        name: "check_calendar",
+        arguments: '{"date":"2026-08-13","duration_minutes":30}',
+        // The answer that makes the calendar full, which is a branch no real
+        // backend can be asked for on demand.
+        result: '{"slots":[]}',
+        provenance: "mocked",
+        mockTool: "check_calendar",
+        lateAttached: false,
+      },
+      {
+        name: "send_confirmation_sms",
+        // Nothing arrived: this tool was not among those the census reported,
+        // so there was no shape for the arguments to take.
+        arguments: undefined,
+        result: '{"delivered":true}',
+        provenance: "mocked",
+        mockTool: "send_confirmation_sms",
+        lateAttached: true,
+      },
+    ]);
+  });
+
   it("shows a mocked call carrying the answer egma served and the mock tool that served it", () => {
     const mocked = valid
       .flatMap((fixture) => spansOf(fixture))
