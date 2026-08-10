@@ -52,6 +52,7 @@ import {
   TWILIO_API_ROOT,
   TWILIO_TRUNKING_ROOT,
   type CarrierPlan,
+  type CarrierStep,
 } from "../self-host/twilio.ts";
 import {
   findWorkspace,
@@ -366,31 +367,27 @@ async function runPhoneSetup(options: SelfHostOptions): Promise<number> {
   const planDocument = planLines(plan, workspace);
   sweptOf(planDocument.join("\n"), secrets);
 
-  if (mode.asJson) {
-    options.out(
-      JSON.stringify(
-        {
-          command: "self-host phone setup",
-          mode: mode.planOnly ? "plan" : "apply",
-          account_sid: plan.accountSid,
-          source_number: plan.sourceNumber,
-          source_number_sid: plan.sourceNumberSid,
-          trunk_name: plan.trunkName,
-          trunk_sid: plan.trunkSid,
-          trunk_address: plan.trunkAddress,
-          buys_a_number: false,
-          steps: plan.steps,
-        },
-        null,
-        2,
-      ),
-    );
-  } else {
-    for (const line of planDocument) options.out(line);
-  }
+  // In JSON mode the plan is not printed yet: standard output carries exactly
+  // one document, at the end, so that a coding agent can parse the whole answer
+  // rather than pick a document out of a stream of lines. In the plain mode a
+  // person is reading, so the plan goes up as soon as it is known — they are
+  // about to be asked to approve it.
+  if (!mode.asJson) for (const line of planDocument) options.out(line);
+
+  const planFacts = {
+    command: "self-host phone setup",
+    account_sid: plan.accountSid,
+    source_number: plan.sourceNumber,
+    source_number_sid: plan.sourceNumberSid,
+    trunk_name: plan.trunkName,
+    trunk_sid: plan.trunkSid,
+    trunk_address: plan.trunkAddress,
+    buys_a_number: false,
+    steps: plan.steps,
+  } as const;
 
   if (mode.planOnly) {
-    fileReceipt(
+    const receiptFile = fileReceipt(
       workspace,
       {
         command: "self-host phone setup --plan",
@@ -401,16 +398,25 @@ async function runPhoneSetup(options: SelfHostOptions): Promise<number> {
       },
       secrets,
     );
-    options.out("status: planned");
-    options.out("changed: nothing");
+    answer(options, mode, {
+      ...planFacts,
+      mode: "plan",
+      status: "planned",
+      changed: "nothing",
+      receipt: path.relative(workspace, receiptFile),
+    });
     return SELF_HOST_EXIT.ok;
   }
 
   if (!mode.approved) {
     const approved = await askApproval(options, ask);
     if (!approved) {
-      options.out("status: not_approved");
-      options.out("changed: nothing");
+      answer(options, mode, {
+        ...planFacts,
+        mode: "apply",
+        status: "not_approved",
+        changed: "nothing",
+      });
       return SELF_HOST_EXIT.notApproved;
     }
   }
@@ -515,25 +521,31 @@ async function runPhoneSetup(options: SelfHostOptions): Promise<number> {
     applied.sipPassword,
   ]);
 
-  for (const step of applied.steps) options.out(`did: ${step.action} ${step.detail}`);
-  options.out(`trunk: ${applied.trunkSid}`);
-  options.out(`trunk_address: ${applied.trunkAddress}`);
-  options.out(`source_number: ${applied.sourceNumber}`);
-  options.out(`configuration: ${path.relative(workspace, configFile)}`);
-  options.out(`receipt: ${path.relative(workspace, receiptFile)}`);
-  options.out(`phone: ${readiness ?? "unknown"}`);
+  const done = {
+    ...planFacts,
+    mode: "apply",
+    trunk_sid: applied.trunkSid,
+    trunk_address: applied.trunkAddress,
+    steps: applied.steps,
+    configuration: path.relative(workspace, configFile),
+    receipt: path.relative(workspace, receiptFile),
+    platform_url: address,
+    phone: readiness ?? "unknown",
+  } as const;
 
   if (readiness !== "ready") {
-    options.out("status: failed");
-    options.out(
-      "reason: the carrier is set up and the configuration is written, but this " +
+    answer(options, mode, {
+      ...done,
+      status: "failed",
+      reason:
+        "the carrier is set up and the configuration is written, but this " +
         "platform did not come back reporting phone readiness. Run the same command " +
         "again — it reuses everything it made and creates no second copy of anything.",
-    );
+    });
     return SELF_HOST_EXIT.refused;
   }
 
-  options.out("status: ready");
+  answer(options, mode, { ...done, status: "ready" });
   options.fail("");
   options.fail("This egma can place phone calls.");
   options.fail(
@@ -579,6 +591,37 @@ async function askApproval(
     return answer === "y" || answer === "yes";
   } finally {
     asked.close();
+  }
+}
+
+/**
+ * The command's answer, in whichever shape was asked for.
+ *
+ * **Standard output carries exactly one JSON document in JSON mode**, and
+ * nothing else — no lines before it and none after. A document with two plain
+ * lines stuck on the end is not JSON, and a coding agent driving this would
+ * have to go back to parsing terminal text, which is the whole thing the mode
+ * exists to avoid. The story a person reads is the same facts as lines, and
+ * anything conversational is on standard error either way.
+ */
+function answer(
+  options: SelfHostOptions,
+  mode: PhoneSetupMode,
+  facts: Readonly<Record<string, unknown>>,
+): void {
+  if (mode.asJson) {
+    options.out(JSON.stringify(facts, null, 2));
+    return;
+  }
+  for (const [name, value] of Object.entries(facts)) {
+    if (name === "steps") {
+      for (const step of value as readonly CarrierStep[]) {
+        options.out(`${mode.planOnly ? "plan" : "did"}: ${step.action} ${step.detail}`);
+      }
+      continue;
+    }
+    if (name === "command" || name === "mode") continue;
+    options.out(`${name}: ${String(value)}`);
   }
 }
 

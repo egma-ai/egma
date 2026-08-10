@@ -301,6 +301,16 @@ describe("egma self-host phone setup", () => {
     ]);
     expect(run.code).toBe(0);
 
+    // Exactly one document on standard output, and nothing else — a coding
+    // agent driving this parses the whole answer rather than picking a
+    // document out of a stream of lines. Anything conversational is on
+    // standard error, where it cannot break a parse.
+    const answered = JSON.parse(run.stdout) as Record<string, unknown>;
+    expect(answered["status"]).toBe("ready");
+    expect(answered["buys_a_number"]).toBe(false);
+    expect(answered["trunk_sid"]).toBe(EXISTING_TRUNK.sid);
+    expect(answered["receipt"]).toMatch(/^\.egma-platform\/receipts\//u);
+
     const said = `${run.stdout}\n${run.stderr}`;
     expect(said).not.toContain(AUTH_TOKEN);
     expect(said).not.toContain(OPENAI_KEY);
