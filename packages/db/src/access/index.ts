@@ -360,6 +360,7 @@ export type {
 export {
   getJudgeConfiguration,
   resolveJudgeKey,
+  seedDefaultJudge,
   setJudgeConfiguration,
   type JudgeConfiguration,
   type NewJudgeConfiguration,

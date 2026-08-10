@@ -158,14 +158,49 @@ def test_the_simulator_publishes_nothing_in_every_configuration(compose):
     )
 
 
-def test_a_plain_compose_up_starts_no_phone_stack():
-    """The default is the first-run story, and the phone stack is not in
-    it: the gateway needs a network a laptop does not have."""
+def test_a_plain_compose_up_starts_the_whole_phone_stack():
+    """The phone stack is the default stack, not an overlay to ask for.
+
+    It was opt-in until the self-hosted release, and the reversal is the
+    point rather than an accident: a platform that cannot place a phone
+    call is not the product, so `egma self-host up` — and a plain
+    `docker compose up`, which is the same containers — brings all three
+    up. What stays off until `egma self-host phone setup` has run is the
+    simulator's *media backend*, because a simulator told to dial with no
+    trunk refuses to start and platform readiness must never wait on
+    carrier setup. That is asserted below.
+    """
     default = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     for service in ("livekit", "livekit-sip", "livekit-redis"):
-        assert f"\n  {service}:" not in default, (
-            f"docker-compose.yml starts {service}; the phone stack is opt-in"
+        assert f"\n  {service}:" in default, (
+            f"docker-compose.yml does not start {service}; the phone stack "
+            "is part of the default deployment"
         )
+
+
+def test_no_phone_overlay_is_left_to_ask_for_by_name():
+    """The overlay is gone, and a leftover copy of it would be a second
+    deployment story telling somebody to do something with no effect."""
+    assert not (ROOT / "docker-compose.phone.yml").exists(), (
+        "docker-compose.phone.yml is back; the phone stack is in the default "
+        "compose file and there is no overlay to ask for"
+    )
+
+
+def test_the_default_stack_dials_nothing_until_phone_setup_has_run():
+    """Platform readiness does not wait on carrier setup.
+
+    A simulator whose media backend is named starts checking for a trunk
+    at startup and refuses to run without one — so a default that named a
+    backend would make `docker compose up` fail on a machine that has
+    never seen a carrier, which is every machine on its first run.
+    """
+    default = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "EGMA_SIMULATOR_MEDIA_BACKEND: ${EGMA_SIMULATOR_MEDIA_BACKEND:-}" in default, (
+        "docker-compose.yml gives the simulator a media backend by default; a "
+        "simulator told to dial with no trunk refuses to start, so a first "
+        "`up` on a machine with no carrier would fail"
+    )
 
 
 OVERLAY_VARIABLE = re.compile(r"\$\{(EGMA_(?:LIVEKIT|WORKBENCH)_[A-Z0-9_]+)")
@@ -185,12 +220,12 @@ def test_every_variable_an_overlay_reads_is_in_the_env_example(compose):
     assert not missing, f"{compose.name} reads {missing}; .env.example does not"
 
 
-def test_the_phone_overlay_and_its_gateway_agree_on_the_rtp_range():
+def test_the_gateway_and_its_published_ports_agree_on_the_rtp_range():
     """The published range and the configured one are two halves of one
     number. Moving one without the other is a call that rings, is answered,
     and stays silent — the worst failure in the whole stack to diagnose,
     because every layer reports success."""
-    overlay = (ROOT / "docker-compose.phone.yml").read_text(encoding="utf-8")
+    overlay = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     ranges = re.findall(
         r"\$\{EGMA_LIVEKIT_SIP_RTP_PORT_START:-(\d+)\}-"
         r"\$\{EGMA_LIVEKIT_SIP_RTP_PORT_END:-(\d+)\}",

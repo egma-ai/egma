@@ -42,6 +42,16 @@ class MediaLine:
         self._heard = bytearray()
 
     @property
+    def measured_band_hz(self) -> int | None:
+        """The band the audio on this line really arrived at, or ``None``.
+
+        Straight through from the session, because measuring is the
+        driver's — it is the only layer that sees a frame before the line
+        has cut it into slices of its own size.
+        """
+        return self._session.observed_band_hz
+
+    @property
     def far_end_left(self) -> bool:
         """True once the far end is off the line **and** everything it said
         has been handed over.

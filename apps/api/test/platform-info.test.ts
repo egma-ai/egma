@@ -33,10 +33,18 @@ it("keeps one public platform identity across an API restart", async () => {
     const first = await app.inject({ method: "GET", url: "/api/platform" });
     expect(first.statusCode).toBe(200);
     const identity = first.json<Record<string, unknown>>();
-    expect(Object.keys(identity).sort()).toEqual(["instance_id", "origin"]);
+    expect(Object.keys(identity).sort()).toEqual(["instance_id", "origin", "phone"]);
     expect(identity).toEqual({
       instance_id: expect.stringMatching(/^pf_[0-9A-HJKMNP-TV-Z]{26}$/u),
       origin: config.baseUrl,
+      // Phone readiness is a second fact and never a component of the first.
+      // A platform with no carrier is ready — it runs text simulations
+      // perfectly well — and saying otherwise would make the first-run story
+      // impossible to tell. What it says instead is what setup still needs.
+      phone: {
+      state: "setup_required",
+      missing: ["the carrier trunk", "the source number", "the speech provider"],
+    },
     });
 
     await app.close();
@@ -87,7 +95,17 @@ it("reads its identity rather than writing on every public request", async () =>
     await database.sql("delete from platform_instance");
     for (let asked = 0; asked < 5; asked += 1) {
       const again = await app.inject({ method: "GET", url: "/api/platform" });
-      expect(again.json()).toEqual({ instance_id: minted.instance_id, origin: config.baseUrl });
+      expect(again.json()).toEqual({
+        instance_id: minted.instance_id,
+        origin: config.baseUrl,
+        // A platform nobody has set a carrier up on says so here rather than
+        // anywhere a developer has to go looking, and says it separately from
+        // being ready — it runs text simulations perfectly well.
+        phone: {
+          state: "setup_required",
+          missing: ["the carrier trunk", "the source number", "the speech provider"],
+        },
+      });
     }
     expect(
       (await database.sql<{ count: string }>("select count(*) from platform_instance")).rows,
@@ -123,6 +141,10 @@ it("reads its identity rather than writing on every public request", async () =>
     expect(cold.json()).toEqual({
       instance_id: minted.instance_id,
       origin: config.baseUrl,
+      phone: {
+      state: "setup_required",
+      missing: ["the carrier trunk", "the source number", "the speech provider"],
+    },
     });
   } finally {
     await app?.close();

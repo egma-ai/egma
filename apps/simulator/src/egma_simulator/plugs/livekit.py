@@ -136,6 +136,11 @@ class LiveKitRoom:
         return self._band_hz
 
     @property
+    def measured_band_hz(self) -> int | None:
+        """The band this exchange really carried, read off its audio."""
+        return None if self._line is None else self._line.measured_band_hz
+
+    @property
     def far_end_left(self) -> bool:
         """Whether the agent has left the room. There is no other signal
         and no better one: its participant leaving *is* the agent ending

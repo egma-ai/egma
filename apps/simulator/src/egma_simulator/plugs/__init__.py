@@ -259,10 +259,14 @@ class DuplexLine(Protocol):
     positions on it, so a line that skipped its quiet would leave the two
     speakers on two different clocks.
 
-    ``sample_rate_hz`` is the band actually carried — the speech legs are
-    assembled at it and the record's measured band is read from it.
-    ``far_end_left`` is true once the far end is off the line, which is
-    what "the agent ended the exchange" means on a voice connection.
+    ``sample_rate_hz`` is the band the line is *driven* at: the speech
+    legs are assembled at it and every slice is cut to it.
+    ``measured_band_hz`` is the band the audio really arrived at, read
+    back off what flowed, and ``None`` until something has — it is what a
+    record stamps, so that a measured band can never be a copy of a
+    configured one. ``far_end_left`` is true once the far end is off the
+    line, which is what "the agent ended the exchange" means on a voice
+    connection.
     """
 
     @property
@@ -270,6 +274,9 @@ class DuplexLine(Protocol):
 
     @property
     def sample_rate_hz(self) -> int: ...
+
+    @property
+    def measured_band_hz(self) -> int | None: ...
 
     @property
     def far_end_left(self) -> bool: ...

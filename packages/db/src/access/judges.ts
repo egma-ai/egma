@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 
 import { db } from "../client.ts";
 import {
@@ -6,6 +6,7 @@ import {
   JUDGE_PROVIDERS,
   type JudgeProvider,
 } from "../schema/graders.ts";
+import { project } from "../schema/tenancy.ts";
 import { openCredentials, sealCredentials } from "../sealing.ts";
 import type { AuthContext } from "./context.ts";
 import { authorize, here } from "./permissions.ts";
@@ -310,4 +311,78 @@ export async function resolveJudgeKey(
     );
   }
   return key;
+}
+
+/**
+ * Give every project that has configured no judge the platform's own.
+ *
+ * **Why this exists, and why it is not a container-wide key.** A self-hoster
+ * supplies one OpenAI key when they set their platform up, and it is meant to
+ * cover the persona's brain, its voice, its ears and the default judge — asking
+ * the same person for the same key a second time, in a second place, on a
+ * laptop where they are also the only project's admin, buys nothing but a step
+ * to forget. What it must *not* become is a key on the grader: a judge
+ * configured per container is a judge no project chose, spent on conversations
+ * belonging to customers who agreed to neither.
+ *
+ * So this writes the ordinary row. Sealed with the deployment's own encryption
+ * key, opened by the grading engine through the one door that opens it, and
+ * indistinguishable afterwards from a judge the project set for itself. What is
+ * different is only who filled the form in.
+ *
+ * **It never overwrites.** A project that has chosen a judge has chosen it, and
+ * a platform restart is not an occasion to change somebody's model or spend
+ * from a different account. So this is safe to run on every boot, and running it
+ * on every boot is what makes a project created later get one too.
+ *
+ * Not authorized against an `AuthContext` on purpose: there is no user here.
+ * This is the deployment acting on its own configuration, in the same breath as
+ * applying its migrations, and there is no session it could be doing it under.
+ */
+export async function seedDefaultJudge(input: {
+  readonly provider: string;
+  readonly model: string;
+  readonly key: string;
+}): Promise<readonly string[]> {
+  const provider = validProvider(input.provider);
+  const model = validModel(input.model);
+  const key = validKey(input.key);
+
+  const unjudged = await db()
+    .select({
+      id: project.id,
+      organizationId: project.organizationId,
+      createdBy: project.createdBy,
+    })
+    .from(project)
+    .leftJoin(judgeConfiguration, eq(judgeConfiguration.projectId, project.id))
+    .where(isNull(judgeConfiguration.projectId));
+
+  if (unjudged.length === 0) return [];
+
+  const now = new Date();
+  const hint = key.slice(-4);
+  await db()
+    .insert(judgeConfiguration)
+    .values(
+      unjudged.map((row) => ({
+        projectId: row.id,
+        organizationId: row.organizationId,
+        provider,
+        model,
+        // Sealed once per row rather than once for all of them: the envelope
+        // carries its own initialisation vector, and reusing one across rows
+        // is the mistake this repeats a cheap operation to avoid.
+        credentials: sealCredentials({ key }),
+        credentialsHint: hint,
+        createdBy: row.createdBy,
+        updatedAt: now,
+      })),
+    )
+    // A project that gained a judge between the read above and this write kept
+    // it. Nothing here is a race worth locking for; the losing side is the
+    // deployment's default, which is exactly the side that should lose.
+    .onConflictDoNothing({ target: judgeConfiguration.projectId });
+
+  return unjudged.map((row) => row.id);
 }

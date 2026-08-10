@@ -66,6 +66,8 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.utils.time import time_now_iso8601
 
+from .config import DEFAULT_STT_MODEL, DEFAULT_TTS_MODEL, DEFAULT_TTS_VOICE
+
 if TYPE_CHECKING:
     from .config import SimulatorConfig
 
@@ -426,6 +428,12 @@ class SpeechProviders:
 
     deepgram_api_key: str | None = field(default=None, repr=False)
     elevenlabs_api_key: str | None = field(default=None, repr=False)
+    openai_api_key: str | None = field(default=None, repr=False)
+    """One key for both openai legs, because one account serves both."""
+
+    stt_model: str = DEFAULT_STT_MODEL
+    tts_model: str = DEFAULT_TTS_MODEL
+    tts_voice: str = DEFAULT_TTS_VOICE
 
     @classmethod
     def from_config(cls, config: SimulatorConfig) -> SpeechProviders:
@@ -435,6 +443,10 @@ class SpeechProviders:
             vad=config.vad_provider,
             deepgram_api_key=config.deepgram_api_key,
             elevenlabs_api_key=config.elevenlabs_api_key,
+            openai_api_key=config.openai_api_key,
+            stt_model=config.stt_model,
+            tts_model=config.tts_model,
+            tts_voice=config.tts_voice,
         )
 
 
@@ -531,6 +543,8 @@ def build_vad(
 def _mouth(
     providers: SpeechProviders, voice: PersonaVoice, sample_rate_hz: int
 ) -> tuple[FrameProcessor, PersonaVoice, tuple[Callable[[], Awaitable[None]], ...]]:
+    if providers.tts == "openai":
+        return _openai_mouth(providers, voice, sample_rate_hz)
     if providers.tts != "elevenlabs":
         return ScriptedTTS(voice=voice, sample_rate_hz=sample_rate_hz), voice, ()
 
@@ -545,7 +559,9 @@ def _mouth(
     if not providers.elevenlabs_api_key:
         raise SpeechFault("the elevenlabs speaking leg was chosen without a key")
 
-    spoken_with = _voice_from(voice, provider="elevenlabs")
+    spoken_with = _voice_from(
+        voice, provider="elevenlabs", default_voice_id=DEFAULT_ENGLISH_VOICE_ID
+    )
     settings = ElevenLabsHttpTTSService.Settings(voice=spoken_with.voice_id)
     if spoken_with.speed is not None:
         settings.speed = spoken_with.speed
@@ -573,6 +589,8 @@ def _mouth(
 def _ears(
     providers: SpeechProviders, sample_rate_hz: int
 ) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None]:
+    if providers.stt == "openai":
+        return _openai_ears(providers, sample_rate_hz), None
     if providers.stt != "deepgram":
         return ScriptedSTT(sample_rate_hz=sample_rate_hz), None
 
@@ -603,7 +621,147 @@ def _ears(
     return leg, connected
 
 
-def _voice_from(voice: PersonaVoice, *, provider: str) -> PersonaVoice:
+# -- The openai pair, and the band it really speaks at ------------------------
+
+OPENAI_TTS_BAND_HZ = 24000
+"""The band OpenAI's speech endpoint really returns, whatever is asked of it.
+
+It is asked for ``response_format: "pcm"``, and that format is documented
+as 24 kHz 16-bit signed little-endian mono. There is no parameter that
+changes it. So this is not a default this code chose — it is a fact about
+the other end of the wire, and the reason :func:`_openai_mouth` exists.
+"""
+
+
+def _openai_mouth(
+    providers: SpeechProviders, voice: PersonaVoice, sample_rate_hz: int
+) -> tuple[FrameProcessor, PersonaVoice, tuple[Callable[[], Awaitable[None]], ...]]:
+    """The persona's voice, through OpenAI, at the band the line carries.
+
+    **The whole reason this is not three lines.** Pipecat's OpenAI speaking
+    leg asks the provider for raw PCM and then stamps every chunk with the
+    band the *pipeline* was assembled at — it never converts. Assembled on
+    a phone line that is a 24 kHz recording labelled 8 kHz: the persona
+    speaks at a third of the rate, three times too deep, for three times as
+    long, and the only sign is a warning in a log. Every measurement taken
+    off it is wrong by the same factor, and the agent under test hears a
+    voice no caller has.
+
+    So the leg is built at the band the provider really speaks at, and its
+    audio is converted down to the line's band with Pipecat's own stream
+    resampler before it leaves this processor. Conversion, not relabelling.
+    """
+    from pipecat.services.openai.tts import OpenAITTSService
+
+    if not providers.openai_api_key:
+        raise SpeechFault("the openai speaking leg was chosen without a key")
+
+    spoken_with = _voice_from(
+        voice, provider="openai", default_voice_id=providers.tts_voice
+    )
+    settings = OpenAITTSService.Settings(
+        model=providers.tts_model, voice=spoken_with.voice_id
+    )
+    if spoken_with.speed is not None:
+        settings.speed = spoken_with.speed
+    from pipecat.pipeline.pipeline import Pipeline
+
+    leg = Pipeline(
+        [
+            OpenAITTSService(
+                api_key=providers.openai_api_key,
+                # Built at the provider's own band. Handing it the line's
+                # band is what makes it mislabel, so it is never told one.
+                sample_rate=OPENAI_TTS_BAND_HZ,
+                settings=settings,
+            ),
+            _BandCorrection(
+                spoken_at_hz=OPENAI_TTS_BAND_HZ, carried_at_hz=sample_rate_hz
+            ),
+        ]
+    )
+    return leg, spoken_with, ()
+
+
+def _openai_ears(
+    providers: SpeechProviders, sample_rate_hz: int
+) -> FrameProcessor:
+    """What the agent said, transcribed by OpenAI.
+
+    Nothing to correct here, and worth saying why the two legs differ: this
+    one is segmented, so Pipecat hands the provider a WAV it writes itself
+    with the line's own band in its header. The audio and the header agree
+    by construction, and the provider resamples whatever it is given.
+    """
+    from pipecat.services.openai.stt import OpenAISTTService
+
+    if not providers.openai_api_key:
+        raise SpeechFault("the openai listening leg was chosen without a key")
+
+    return OpenAISTTService(
+        api_key=providers.openai_api_key,
+        sample_rate=sample_rate_hz,
+        settings=OpenAISTTService.Settings(model=providers.stt_model),
+    )
+
+
+class _BandCorrection(FrameProcessor):
+    """Converts the audio of the leg above it to the band the line carries.
+
+    Placed after a speaking leg rather than inside one, so the provider's
+    own service stays the stock Pipecat class a release can replace.
+
+    A sample is two bytes and a provider's stream is cut wherever its HTTP
+    chunking fell, so an odd byte waits here for its partner: resampling
+    half a sample shifts every sample after it by a byte, which is noise.
+    """
+
+    def __init__(self, *, spoken_at_hz: int, carried_at_hz: int) -> None:
+        super().__init__()
+        from pipecat.audio.utils import create_stream_resampler
+
+        self.spoken_at_hz = spoken_at_hz
+        self.carried_at_hz = carried_at_hz
+        # A stream resampler rather than a fresh one per chunk: a filter
+        # restarted at every chunk boundary clicks at every chunk boundary.
+        self._resampler = create_stream_resampler()
+        self._pending = bytearray()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if (
+            isinstance(frame, TTSAudioRawFrame)
+            and direction == FrameDirection.DOWNSTREAM
+            and self.spoken_at_hz != self.carried_at_hz
+        ):
+            converted = await self._convert(frame.audio)
+            if converted is None:
+                return
+            await self.push_frame(
+                TTSAudioRawFrame(
+                    audio=converted, sample_rate=self.carried_at_hz, num_channels=1
+                ),
+                direction,
+            )
+            return
+        await self.push_frame(frame, direction)
+
+    async def _convert(self, audio: bytes) -> bytes | None:
+        self._pending.extend(audio)
+        whole_samples = len(self._pending) & ~1
+        if whole_samples == 0:
+            return None
+        taken = bytes(self._pending[:whole_samples])
+        del self._pending[:whole_samples]
+        converted = await self._resampler.resample(
+            taken, self.spoken_at_hz, self.carried_at_hz
+        )
+        return converted or None
+
+
+def _voice_from(
+    voice: PersonaVoice, *, provider: str, default_voice_id: str
+) -> PersonaVoice:
     """The voice one provider can really speak with.
 
     A voice id belongs to the provider it was authored for. A persona
@@ -611,6 +769,11 @@ def _voice_from(voice: PersonaVoice, *, provider: str) -> PersonaVoice:
     it is — is honored. One naming another provider's voice is authoring
     for a deployment this is not, and the sensible default speaks instead:
     the alternative is a simulation that fails on a timbre.
+
+    The default is the caller's, because one provider's default voice id is
+    a string another provider refuses outright. ElevenLabs names voices by
+    a long identifier and OpenAI by a word from a fixed list; handing
+    either one the other's is an error frame at the first turn.
     """
     authored = voice.provider
     if voice.voice_id != DEFAULT_VOICE_ID and authored in (None, provider):
@@ -625,5 +788,5 @@ def _voice_from(voice: PersonaVoice, *, provider: str) -> PersonaVoice:
             provider,
         )
     return PersonaVoice(
-        voice_id=DEFAULT_ENGLISH_VOICE_ID, provider=provider, speed=voice.speed
+        voice_id=default_voice_id, provider=provider, speed=voice.speed
     )

@@ -739,21 +739,50 @@ class VoiceConductor:
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await self._running
 
+    def _measured_band_hz(self) -> int:
+        """The band this simulation's audio really came in at.
+
+        Read off the line, which reads it off the frames themselves —
+        never copied from the band the pipeline was assembled at. The two
+        agree in every configuration that works, and where they do not,
+        the record must carry what happened rather than what was asked
+        for: an 8 kHz stamp on wideband audio, or the reverse, makes every
+        latency and every audio verdict mean something it does not.
+
+        A line that carried nothing has nothing to measure, and then the
+        band it was driven at is the only honest thing left to say — there
+        is no recording to mis-stamp, because there is no audio.
+        """
+        measured = self._line.measured_band_hz
+        if measured is None:
+            return self._band_hz
+        if measured != self._band_hz:
+            logger.warning(
+                "the audio arrived at %d Hz on a line driven at %d Hz; the "
+                "record carries the measured band",
+                measured,
+                self._band_hz,
+            )
+        return measured
+
     async def _write_recording(self) -> None:
         if not self._persona_track and not self._agent_track:
             return
+        measured_band_hz = self._measured_band_hz()
         try:
             reference = await self._blobs.write(
                 self._recording_key,
                 dual_channel_wav(
-                    bytes(self._persona_track), bytes(self._agent_track), self._band_hz
+                    bytes(self._persona_track),
+                    bytes(self._agent_track),
+                    measured_band_hz,
                 ),
             )
         except Exception:
             logger.exception("the recording could not be written; reporting none")
             return
         self.audio = AudioFacts(
-            measured_sample_rate_hz=self._band_hz, recording=reference
+            measured_sample_rate_hz=measured_band_hz, recording=reference
         )
 
     # -- Driving the line -----------------------------------------------------

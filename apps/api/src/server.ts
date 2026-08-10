@@ -16,6 +16,7 @@ import { heartbeatRoutes } from "./routes/heartbeats.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
+import { phoneReadiness } from "./phone-readiness.ts";
 import { platformRoutes } from "./routes/platform.ts";
 import { reportRoutes } from "./routes/reports.ts";
 import { runRoutes } from "./routes/runs.ts";
@@ -153,7 +154,10 @@ export function buildApi(options: ServerOptions): Api {
 
   // Read before login and before any repository identifier is sent. It is
   // public because the CLI uses it to decide whether login is safe to start.
-  void app.register(platformRoutes, { origin: config.baseUrl });
+  void app.register(platformRoutes, {
+    origin: config.baseUrl,
+    phone: phoneReadiness(config.phone),
+  });
 
   // Registered without `fastify-plugin` on purpose: the adapter replaces every
   // body parser inside its own scope so the provider sees the bytes that were

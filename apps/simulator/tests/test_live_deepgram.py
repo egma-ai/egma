@@ -91,6 +91,10 @@ class OneSentenceLine:
         return self._band
 
     @property
+    def measured_band_hz(self) -> int | None:
+        return self._band
+
+    @property
     def far_end_left(self) -> bool:
         return self._left
 

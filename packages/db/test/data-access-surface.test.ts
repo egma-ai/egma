@@ -227,6 +227,7 @@ const CONTEXT_REQUIRING = [
   // connection's credentials at this seam.
   "resolveSimulationConnection",
   "revokeApiKey",
+  "seedDefaultJudge",
   "setJudgeConfiguration",
   "startRun",
   "startSimulation",

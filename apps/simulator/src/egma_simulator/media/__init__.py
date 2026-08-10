@@ -52,6 +52,11 @@ answer and teardown:
   handed rather than choosing: the pipeline above is already assembled at
   it, and a driver that answered with a different one would be handing
   the recorder samples it will mis-time.
+- ``observed_band_hz`` — the band the far end's audio *really arrived at*,
+  read off what flowed, or ``None`` before anything has. What a record
+  stamps as its measured band comes from here, never from the request
+  above it: the two agree in every configuration that works, and the one
+  worth catching is the configuration that does not.
 - ``await send(pcm)`` — the persona's audio, out to the far end, and
   **back as soon as it is away**. It is a small piece of a voice rather
   than a whole turn, and a driver neither waits out its length nor
@@ -187,6 +192,9 @@ class MediaSession(Protocol):
 
     @property
     def sample_rate_hz(self) -> int: ...
+
+    @property
+    def observed_band_hz(self) -> int | None: ...
 
     @property
     def far_end_left(self) -> bool: ...

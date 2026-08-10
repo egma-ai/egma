@@ -150,6 +150,10 @@ const INSTANCE_SCOPED: ReadonlyMap<string, string> = new Map([
  *
  * A seventh name here is a decision somebody has to make on purpose.
  */
+const DEPLOYMENT_CONFIGURING = [
+  "seedDefaultJudge",
+];
+
 const WORK_DISPATCHING = [
   "claimGradingJobs",
   "claimSimulations",
@@ -160,8 +164,27 @@ const WORK_DISPATCHING = [
 ];
 
 /**
- * What a work-dispatching export may not be handed, in any position: an
- * argument named for a customer, or an object argument carrying one. Matched on
+ * The exports through which the deployment configures *itself*, before it has
+ * served a request and while there is no session anything could be done under.
+ *
+ * `seedDefaultJudge` gives the platform's own judge to every project that has
+ * configured none — the self-hoster's one OpenAI key, written into each
+ * project's ordinary sealed row rather than handed to the grader as a
+ * container-wide key. There is no user to build a context from: this happens in
+ * the same breath as applying migrations, on the deployment's own
+ * configuration, and it names no customer.
+ *
+ * The rule enforces the second half of that the same way it does for work
+ * dispatch: nothing here may be handed an `organizationId` or a `projectId`. A
+ * function here that grew one would be an ordinary cross-tenant *write* wearing
+ * an exemption, which is worse than the read the list below guards against.
+ *
+ * A second name here is a decision somebody has to make on purpose.
+ */
+/**
+ * What a work-dispatching or deployment-configuring export may not be handed,
+ * in any position: an argument named for a customer, or an object argument
+ * carrying one. Matched on
  * the text of the parameter and its type, which is how these are written —
  * inline object types with named properties.
  */
@@ -219,6 +242,11 @@ const DELIBERATE_BYPASSES = [
   "packages/db/test/support/database.ts",
   "packages/db/test/support/clickhouse.ts",
   "packages/db/test/migrations.test.ts",
+  // Drops the test databases a timed-out run stranded, before a suite starts.
+  // It exists to speak to the two stores as an operator rather than as egma:
+  // there is no tenancy in `drop database`, and the thing it drops is not a
+  // customer's row but a whole database this repository's own tests made.
+  "packages/db/test/support/sweep-stale-databases.ts",
 ];
 
 const SOURCE_EXTENSIONS = [
@@ -525,7 +553,8 @@ async function checkExportedCallShapes(root: string): Promise<Violation[]> {
       const exempt =
         CONTEXT_ESTABLISHING.includes(name) ||
         instanceScopedReturn !== undefined ||
-        WORK_DISPATCHING.includes(name);
+        WORK_DISPATCHING.includes(name) ||
+        DEPLOYMENT_CONFIGURING.includes(name);
       if (!exempt && firstType !== AUTH_CONTEXT) {
         violations.push({
           file,
@@ -567,7 +596,10 @@ async function checkExportedCallShapes(root: string): Promise<Violation[]> {
         });
       }
 
-      if (WORK_DISPATCHING.includes(name)) {
+      if (
+        WORK_DISPATCHING.includes(name) ||
+        DEPLOYMENT_CONFIGURING.includes(name)
+      ) {
         for (const parameter of declaration.parameters) {
           const written = asWritten(declaring, parameter);
           if (!NAMES_A_CUSTOMER.test(written)) continue;

@@ -175,6 +175,18 @@ services:
       EGMA_SIMULATOR_DEEPGRAM_API_KEY: ${EGMA_SIMULATOR_DEEPGRAM_API_KEY:-}
       EGMA_SIMULATOR_TTS_PROVIDER: ${EGMA_SIMULATOR_TTS_PROVIDER:-scripted}
       EGMA_SIMULATOR_ELEVENLABS_API_KEY: ${EGMA_SIMULATOR_ELEVENLABS_API_KEY:-}
+      # One key for both legs when either names `openai`, because one
+      # account speaks and listens. It is what `egma self-host phone
+      # setup` asks for once, and the same key the persona's brain reads
+      # through EGMA_SIMULATOR_MODEL_API_KEY above.
+      EGMA_SIMULATOR_OPENAI_API_KEY: ${EGMA_SIMULATOR_OPENAI_API_KEY:-}
+      # Which models those legs ask for, and which voice the persona
+      # speaks with when its own traits name none. Models are the
+      # provider's to retire and add, so they are configuration rather
+      # than a constant of the product.
+      EGMA_SIMULATOR_STT_MODEL: ${EGMA_SIMULATOR_STT_MODEL:-}
+      EGMA_SIMULATOR_TTS_MODEL: ${EGMA_SIMULATOR_TTS_MODEL:-}
+      EGMA_SIMULATOR_TTS_VOICE: ${EGMA_SIMULATOR_TTS_VOICE:-}
       # What hears the agent start and stop speaking. Bundled in the image
       # either way, so this downloads nothing at run time.
       EGMA_SIMULATOR_VAD_PROVIDER: ${EGMA_SIMULATOR_VAD_PROVIDER:-scripted}
@@ -190,10 +202,17 @@ services:
       # the inline fields below. Standing the LiveKit and SIP containers up
       # beside this one is a separate, opt-in overlay: those need a public
       # IP, which this file never assumes.
+      #
+      # The LiveKit beside it is the default, filled in from the same pair
+      # the two containers below authenticate each other with, so the
+      # three halves can never disagree. The backend itself stays unset
+      # until `egma self-host phone setup` has run: a simulator told to
+      # dial with no trunk refuses to start, and platform readiness must
+      # not wait on carrier setup.
       EGMA_SIMULATOR_MEDIA_BACKEND: ${EGMA_SIMULATOR_MEDIA_BACKEND:-}
-      EGMA_SIMULATOR_LIVEKIT_URL: ${EGMA_SIMULATOR_LIVEKIT_URL:-}
-      EGMA_SIMULATOR_LIVEKIT_API_KEY: ${EGMA_SIMULATOR_LIVEKIT_API_KEY:-}
-      EGMA_SIMULATOR_LIVEKIT_API_SECRET: ${EGMA_SIMULATOR_LIVEKIT_API_SECRET:-}
+      EGMA_SIMULATOR_LIVEKIT_URL: ${EGMA_SIMULATOR_LIVEKIT_URL:-ws://livekit:7880}
+      EGMA_SIMULATOR_LIVEKIT_API_KEY: ${EGMA_SIMULATOR_LIVEKIT_API_KEY:-${EGMA_LIVEKIT_API_KEY:-egma-devkey}}
+      EGMA_SIMULATOR_LIVEKIT_API_SECRET: ${EGMA_SIMULATOR_LIVEKIT_API_SECRET:-${EGMA_LIVEKIT_API_SECRET:-egma-development-only-livekit-secret-change-it}}
       EGMA_SIMULATOR_SIP_TRUNK_ID: ${EGMA_SIMULATOR_SIP_TRUNK_ID:-}
       EGMA_SIMULATOR_SIP_TRUNK_ADDRESS: ${EGMA_SIMULATOR_SIP_TRUNK_ADDRESS:-}
       EGMA_SIMULATOR_SIP_TRUNK_NUMBER: ${EGMA_SIMULATOR_SIP_TRUNK_NUMBER:-}
@@ -218,6 +237,17 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      livekit:
+        condition: service_healthy
+      # Named even though the simulator never speaks to the gateway
+      # directly — it asks the *server* to place a call, and the server
+      # hands that to whichever gateway has announced itself. Without this
+      # line the gateway is a container nothing depends on, so
+      # `docker compose up simulator` would bring up a phone stack that
+      # cannot place a phone call, and the first thing to notice would be
+      # a dial.
+      livekit-sip:
+        condition: service_started
     # No `healthcheck` here, unlike every other service, and for the same
     # reason there is no `ports`: nothing listens. The other four are
     # probed by asking them something over a port they listen on, and this
@@ -314,6 +344,172 @@ services:
     # is the claim's to notice, by the heartbeats stopping — which is the one
     # place that can act on it, because it is the only side that knows what
     # was claimed.
+
+  # --- The phone stack --------------------------------------------------------
+  #
+  # Three containers: the LiveKit server (the room a call becomes), its SIP
+  # gateway (the thing that speaks to your carrier), and the Redis those two
+  # find each other through. They start with everything else, because a
+  # platform that cannot place a phone call is not the product — `egma
+  # self-host up` brings up one deployment and `egma self-host phone setup`
+  # makes it able to dial. They were an opt-in overlay until the self-hosted
+  # release; that overlay is gone and nothing needs to be asked for by name.
+  #
+  # ## The network truth, container by container
+  #
+  # | Container         | Reachable from the internet? |
+  # |-------------------|------------------------------|
+  # | simulator         | **never** — it publishes nothing, in any configuration |
+  # | livekit (SFU)     | no — its only clients are the two containers beside it |
+  # | livekit-redis     | no |
+  # | **livekit-sip**   | **yes**, for a call that arrives — SIP and its RTP range |
+  #
+  # The gateway is the one honest exception in the whole deployment, and it is
+  # not ours to remove: it is the piece a carrier sends a call's audio *to*. It
+  # advertises an address and a port in the SDP it sends, and the carrier sends
+  # RTP there. On a server with a public IP, or behind a 1:1 NAT with these
+  # ports forwarded, that is routine. On a laptop behind an ordinary home
+  # router it is not — see the README, which says what actually happens when
+  # you try, because we tried.
+  #
+  # **The escape hatch is one variable.** LiveKit Cloud is the same API behind
+  # the same URL, so a deployment that cannot host a gateway points
+  # EGMA_SIMULATOR_LIVEKIT_URL at Cloud and everything else — the trunk, the
+  # plug, the record — is unchanged.
+  #
+  # ## The RTP range is narrow on purpose
+  #
+  # LiveKit's own reference opens 10000-20000/udp. That is ten thousand ports
+  # on somebody's firewall for a deployment that places a handful of calls, and
+  # a range published to the internet is a range to justify. The default here
+  # is 21 ports — about ten calls at once, two ports each — which is more than
+  # the simulator's default capacity of four can use. Widen it with the two
+  # variables below if you raise capacity, and widen your firewall by exactly
+  # as much.
+
+  # The bus the server and the gateway find each other through. Not a store:
+  # nothing here is worth keeping across a restart, so there is no volume,
+  # and nothing outside this network ever speaks to it, so there is no port.
+  livekit-redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # The room a phone call becomes. The simulator joins it outbound and the
+  # answering phone is put into it by the gateway; from the pipeline's point
+  # of view the two are participants in one room and nothing else.
+  #
+  # Its ports are published to this machine's loopback and no further —
+  # the workbench's idiom, for the same reason: a person at this machine
+  # may want to reach it, and nobody else has any business doing so. The
+  # simulator does not come through here; it uses the compose network. That
+  # is also what makes the development key below harmless — it
+  # authenticates traffic that cannot arrive from off this host. Change
+  # `EGMA_LIVEKIT_BIND` and it stops being harmless, so if you ever do,
+  # change the key pair first.
+  livekit:
+    image: livekit/livekit-server:v1.13.5
+    environment:
+      LIVEKIT_KEYS: "${EGMA_LIVEKIT_API_KEY:-egma-devkey}: ${EGMA_LIVEKIT_API_SECRET:-egma-development-only-livekit-secret-change-it}"
+      LIVEKIT_CONFIG: |
+        port: 7880
+        rtc:
+          # One UDP port for every room, rather than a range: this server's
+          # clients are counted in single figures, so there is nothing to
+          # spread across ports.
+          udp_port: 7882
+          tcp_port: 7881
+          # False, and this is the one that matters: with it on, the server
+          # STUNs for a public address and hands that to clients as the
+          # place to send media. Its clients are on this compose network —
+          # the address to give them is this container's own.
+          use_external_ip: false
+          # What the server tells clients to send media to, when its own
+          # address is not the one that works. Empty is right for every
+          # deployment where the clients are containers beside it. Set it
+          # when a client lives outside this network and cannot route into
+          # it — a laptop running Docker Desktop is the case that needs it,
+          # and the value is that machine's own LAN address, with
+          # EGMA_LIVEKIT_BIND=0.0.0.0 so the published ports answer there.
+          node_ip: "${EGMA_LIVEKIT_ADVERTISE_IP:-}"
+        redis:
+          address: livekit-redis:6379
+        logging:
+          level: ${EGMA_LIVEKIT_LOG_LEVEL:-info}
+    ports:
+      - "${EGMA_LIVEKIT_BIND:-127.0.0.1}:7880:7880"
+      - "${EGMA_LIVEKIT_BIND:-127.0.0.1}:7881:7881"
+      - "${EGMA_LIVEKIT_BIND:-127.0.0.1}:7882:7882/udp"
+    depends_on:
+      livekit-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:7880/"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # The gateway: the only container in egma that a carrier talks to.
+  #
+  # It places the call your trunk carries, and turns the phone leg into a
+  # participant in the room above. Its trunk configuration does not live
+  # here — the simulator hands a trunk to LiveKit per call, so a customer's
+  # carrier credentials stay in the simulator's environment and are never
+  # written into a bridge's config file.
+  livekit-sip:
+    image: livekit/sip:v1.9.0
+    # The image's own command names a config file that only exists if you
+    # mount one. This overlay has no files to place, so the entrypoint is
+    # the binary and the configuration is the environment.
+    entrypoint: ["livekit-sip"]
+    environment:
+      SIP_CONFIG_BODY: |
+        api_key: ${EGMA_LIVEKIT_API_KEY:-egma-devkey}
+        api_secret: ${EGMA_LIVEKIT_API_SECRET:-egma-development-only-livekit-secret-change-it}
+        ws_url: ws://livekit:7880
+        redis:
+          address: livekit-redis:6379
+        sip_port: 5060
+        rtp_port: ${EGMA_LIVEKIT_SIP_RTP_PORT_START:-10000}-${EGMA_LIVEKIT_SIP_RTP_PORT_END:-10020}
+        # What address to write into the SDP the carrier reads. Set
+        # EGMA_LIVEKIT_SIP_EXTERNAL_IP when you know it — an elastic IP, a
+        # 1:1 NAT — and the gateway advertises exactly that. Leave it unset
+        # and the gateway asks a STUN server what the world sees, which is
+        # right on a host whose public address it cannot read off an
+        # interface, and is the case the README's spike is about.
+        use_external_ip: ${EGMA_LIVEKIT_SIP_USE_EXTERNAL_IP:-true}
+        nat_1_to_1_ip: "${EGMA_LIVEKIT_SIP_EXTERNAL_IP:-}"
+        # Nothing dials in, so the gateway is told not to advertise a port
+        # for anyone to dial in on.
+        hide_inbound_port: true
+        logging:
+          level: ${EGMA_LIVEKIT_LOG_LEVEL:-info}
+    ports:
+      # SIP signalling. An outbound call's answers come back on the flow the
+      # gateway opened, so this is published for what comes *after* the
+      # answer — a carrier's BYE and its in-dialog requests go to the
+      # address the gateway advertised, not to that flow.
+      - "${EGMA_LIVEKIT_SIP_PORT:-5060}:5060/udp"
+      - "${EGMA_LIVEKIT_SIP_PORT:-5060}:5060/tcp"
+      # The audio. Narrow, and the same range the config above hands out —
+      # they are two halves of one number and moving one without the other
+      # is a call that rings and stays silent.
+      - "${EGMA_LIVEKIT_SIP_RTP_PORT_START:-10000}-${EGMA_LIVEKIT_SIP_RTP_PORT_END:-10020}:${EGMA_LIVEKIT_SIP_RTP_PORT_START:-10000}-${EGMA_LIVEKIT_SIP_RTP_PORT_END:-10020}/udp"
+    depends_on:
+      livekit:
+        condition: service_healthy
+    # No `healthcheck` here, unlike the two above. The gateway serves no
+    # HTTP of its own and the image carries no client to ask it with, so
+    # anything written here would be a check that cannot run. What "ready"
+    # means for this container is not visible from inside it anyway: the
+    # gateway announces itself to the server through Redis, and a call is
+    # dispatched to it or is not — which the server knows and it does not.
+    # It takes about a second, and the first thing that would notice is a
+    # dial, which fails honestly and says so.
 
 volumes:
   postgres-data:

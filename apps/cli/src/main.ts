@@ -31,6 +31,10 @@ import { runPullCommand } from "./commands/pull.ts";
 import { runPushCommand } from "./commands/push.ts";
 import { runRunCommand } from "./commands/run.ts";
 import {
+  isSelfHostInvocation,
+  runSelfHostCommand,
+} from "./commands/self-host.ts";
+import {
   BoundPlatformAddressError,
   BoundPlatformUnavailableError,
   credentialsFileIn,
@@ -230,6 +234,22 @@ export function helpText(): string {
     "                           when egma has moved on since your last pull.",
     "  egma run [options]       Run this folder's tests, pinning the version of",
     "                           each. Follows the run and prints every change.",
+    "",
+    "In a platform workspace — the directory your egma deployment lives in,",
+    "which is never your agent repository:",
+    "",
+    "  egma self-host up               Start the whole platform: API, web,",
+    "                                  both stores, simulator, grader, LiveKit,",
+    "                                  its SIP gateway and their Redis. Prints",
+    "                                  the address an agent repository uses.",
+    "  egma self-host phone setup      Make that platform able to place phone",
+    "                                  calls. Asks for a Twilio account, a",
+    "                                  number it already owns and one OpenAI",
+    "                                  key; shows a plan before it writes",
+    "                                  anything to your carrier. It never buys",
+    "                                  a number. --plan shows the plan and",
+    "                                  stops; --apply --yes --json is the same",
+    "                                  work with nobody watching.",
     "",
     "Options:",
     "  --coding-agent <id>  Which coding agent to drive, named as the agent",
@@ -603,6 +623,13 @@ async function runConnect(
   }
 }
 
+/** `--cwd` for a self-host command, read without the repository parser. */
+function selfHostCwd(argv: readonly string[]): string {
+  const named = argv.indexOf("--cwd");
+  const value = named === -1 ? undefined : argv[named + 1];
+  return path.resolve(value ?? process.cwd());
+}
+
 export async function main(argv: readonly string[]): Promise<void> {
   // Before anything is parsed or printed: an argument that would have carried
   // a secret is refused by name, and its value is never repeated back.
@@ -610,6 +637,34 @@ export async function main(argv: readonly string[]): Promise<void> {
   if (leaked !== null) {
     process.stderr.write(`${argumentRefusal(leaked)}\n`);
     process.exitCode = 1;
+    return;
+  }
+
+  // The platform operator's half of the CLI, and the one thing here that never
+  // reads a repository or resolves a platform binding: `self-host` operates a
+  // deployment, and a deployment is not something an agent repository points
+  // at. It is settled before the arguments are parsed for the other half,
+  // because none of those flags mean anything here.
+  if (isSelfHostInvocation(argv)) {
+    const controller = new AbortController();
+    const onSignal = (): void => controller.abort("interrupt");
+    process.on("SIGINT", onSignal);
+    process.on("SIGTERM", onSignal);
+    try {
+      process.exitCode = await runSelfHostCommand({
+        argv,
+        cwd: selfHostCwd(argv),
+        env: process.env,
+        stdin: process.stdin,
+        stdout: process.stdout,
+        out: (line) => void process.stdout.write(`${line}\n`),
+        fail: (line) => void process.stderr.write(`${line}\n`),
+        signal: controller.signal,
+      });
+    } finally {
+      process.off("SIGINT", onSignal);
+      process.off("SIGTERM", onSignal);
+    }
     return;
   }
 
