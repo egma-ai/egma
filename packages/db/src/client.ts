@@ -1,3 +1,5 @@
+import process from "node:process";
+
 import { drizzle } from "drizzle-orm/node-postgres";
 import { sql } from "drizzle-orm";
 import pg from "pg";
@@ -40,8 +42,31 @@ export function connect(options: ConnectOptions): void {
     connectionString: options.databaseUrl,
     max: options.maxConnections ?? 10,
   });
+  listenForIdleFailures(pool);
   databaseUrl = options.databaseUrl;
   database = drizzle(pool, { schema, casing: "snake_case" });
+}
+
+/**
+ * An idle connection dying is not this process's error to have.
+ *
+ * Postgres restarts, fails over, and disconnects idle backends on an
+ * administrator's word. Each of those reaches the pool as an `error` event on a
+ * client nobody is using — and an `error` event with **no listener at all** is
+ * how Node's EventEmitter turns a survivable event into an uncaught exception,
+ * so a service that never registered one exits on its database's ordinary
+ * maintenance. The pool has already discarded the client by the time this runs;
+ * the next checkout opens a fresh one.
+ *
+ * It is written down rather than swallowed silently, because a service that
+ * loses connections all night should be able to see that it did.
+ */
+function listenForIdleFailures(open: pg.Pool): void {
+  open.on("error", (cause) => {
+    process.stderr.write(
+      `an idle Postgres connection was dropped: ${cause.message}. The pool discarded it; the next query opens another.\n`,
+    );
+  });
 }
 
 export async function disconnect(): Promise<void> {

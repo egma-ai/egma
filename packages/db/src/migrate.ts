@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import process from "node:process";
 
 import pg from "pg";
 
@@ -103,6 +104,13 @@ export async function runMigrations(
 ): Promise<MigrationResult> {
   const migrations = await readMigrations(directory);
   const pool = new pg.Pool({ connectionString: databaseUrl, max: 1 });
+  // A boot-time pool of one, and the same rule as the long-lived one: an
+  // `error` event with no listener is an uncaught exception, so a connection
+  // dropped while migrations run must arrive here rather than take the process
+  // down before it has said what went wrong.
+  pool.on("error", (cause) => {
+    process.stderr.write(`a Postgres connection was dropped while migrating: ${cause.message}\n`);
+  });
   try {
     const client = await pool.connect();
     try {

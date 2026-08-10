@@ -73,7 +73,7 @@ export async function createMigratedDatabase(
   const database = await createEmptyDatabase(label);
   await runMigrations(database.url);
 
-  const pool = new pg.Pool({ connectionString: database.url, max: 4 });
+  const pool = quietPool({ connectionString: database.url, max: 4 });
 
   return {
     ...database,
@@ -83,9 +83,33 @@ export async function createMigratedDatabase(
     },
     async drop() {
       await pool.end().catch(() => undefined);
+      // Only now: dropping is `with (force)`, which terminates whatever backend
+      // is still attached, and a client that was mid-`end()` when its backend
+      // went would raise 57P01 with nobody left to hear it.
       await database.drop();
     },
   };
+}
+
+/**
+ * A pool that cannot take the test run down with it.
+ *
+ * Teardown here is a race by design: `pool.end()` closes each client, and the
+ * `drop database … with (force)` right behind it terminates any backend still
+ * attached. A client caught between the two raises `57P01`, which pg surfaces
+ * as an `error` event on the pool — and an `error` event with **no listener at
+ * all** is an uncaught exception in Node, which vitest reports as an unhandled
+ * error and fails the whole run over, in whichever unlucky file happened to be
+ * tearing down at the time. It made the suite red about one run in three, in a
+ * different file each time.
+ *
+ * So every pool a test opens listens, and says nothing: at this point in a
+ * test's life a dropped connection is the point rather than a fault.
+ */
+export function quietPool(config: pg.PoolConfig): pg.Pool {
+  const pool = new pg.Pool(config);
+  pool.on("error", () => undefined);
+  return pool;
 }
 
 /**
@@ -133,6 +157,9 @@ export async function openSingleConnection(
   url: string,
 ): Promise<SingleConnection> {
   const client = new pg.Client({ connectionString: url });
+  // Same reason as `quietPool`: a client whose backend is terminated under it
+  // at teardown must not turn a passing run into an uncaught exception.
+  client.on("error", () => undefined);
   await client.connect();
   return {
     sql: (text, values) => client.query(text, values as unknown[] | undefined),

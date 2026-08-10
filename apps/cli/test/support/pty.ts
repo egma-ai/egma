@@ -86,12 +86,14 @@ export type TerminalRun = {
  * inside a test run that is using every core, so the honest budget is one that
  * cannot be reached by a machine merely being busy. A test that is going to
  * fail still fails at once, because the condition is checked on every chunk.
- * Sixty seconds because twenty was reached: a full-repository run beside other
- * work on the same machine held a whole-walk test past it while every check
- * still eventually passed. A wait ends the moment its content paints, so a
- * bigger budget costs a healthy run nothing.
+ * Sixty seconds because twenty was reached, and now two minutes because sixty
+ * was: a full-repository run beside other work on the same machine held a
+ * whole-walk test past it while every check still eventually passed, and a
+ * gate that goes red one run in three because a machine was busy stops being
+ * read. A wait ends the moment its content paints, so a bigger budget costs a
+ * healthy run nothing and costs a broken one only the time to say so.
  */
-const WAIT_BUDGET_MS = 60_000;
+const WAIT_BUDGET_MS = 120_000;
 
 export function runInTerminal(options: {
   readonly command: string;
