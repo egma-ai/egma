@@ -5,6 +5,12 @@ description = "The egma SDK: mock tools for LiveKit agents, answered by egma dur
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
+# The text itself, packaged. `license-files` cannot reach outside the project
+# directory, so the repository's LICENSE is copied here rather than pointed at
+# — and without this the wheel declared a licence it did not carry, which is
+# the one thing a licence file exists to prevent. The copy is byte-identical
+# to the repository's, exception clause and all.
+license-files = ["LICENSE"]
 keywords = ["livekit", "voice", "agents", "testing", "mock tools", "egma"]
 classifiers = [
     "Development Status :: 3 - Alpha",

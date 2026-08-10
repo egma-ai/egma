@@ -9,7 +9,6 @@ import {
   resolvePersonaNames,
   TestMovedOnError,
   UnprocessableInputError,
-  type MockOverride,
   type MockOverrideInput,
   type Test,
   type TestPersona,
@@ -21,7 +20,7 @@ import type { FastifyInstance } from "fastify";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
-import { answerAsSent, answerAsWritten } from "../http/mock-tools.ts";
+import { answerAsSent, describedMockTool } from "../http/mock-tools.ts";
 import {
   invalid,
   notFound,
@@ -106,21 +105,6 @@ function describedBehaviors(
 const OVERRIDE_KEYS = ["tool", "answer", "error", "delay_ms"] as const;
 
 /**
- * One override, as the wire carries it in both directions: the tool it answers
- * for, and the branch it answers with. The two branches are two keys and never
- * one nullable field, because `null` is a perfectly good answer for a tool to
- * give and a shape that could not tell it from "no answer" would make an
- * authored `null` unreadable.
- */
-function describedOverride(one: MockOverride): Record<string, unknown> {
-  return {
-    tool: one.toolName,
-    ...answerAsWritten(one.answer),
-    delay_ms: one.delayMilliseconds,
-  };
-}
-
-/**
  * The overrides a body carries, as the factory takes them.
  *
  * Almost nothing is judged here: how long a delay may be, how large an answer
@@ -194,7 +178,7 @@ function described(test: Test): Record<string, unknown> {
     scenario: test.scenario,
     expected_behaviors: describedBehaviors(test.expectedBehaviors),
     personas: test.personas.map(describedPersona),
-    mock_tools: test.mockOverrides.map(describedOverride),
+    mock_tools: test.mockOverrides.map(describedMockTool),
     created_at: test.createdAt.toISOString(),
     updated_at: test.updatedAt.toISOString(),
   };
@@ -211,7 +195,7 @@ function describedVersion(version: TestVersion): Record<string, unknown> {
     scenario: version.scenario,
     expected_behaviors: describedBehaviors(version.expectedBehaviors),
     personas: version.personas.map(describedPersona),
-    mock_tools: version.mockOverrides.map(describedOverride),
+    mock_tools: version.mockOverrides.map(describedMockTool),
     created_at: version.createdAt.toISOString(),
   };
 }

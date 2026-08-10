@@ -8,6 +8,7 @@ import {
   getSimulationTestVersion,
   resolveMockTools,
   resolveSimulationConnection,
+  type Run,
   type SimulationClaim,
 } from "@egma/db";
 import { specComplaints } from "@egma/simulation-contract";
@@ -182,6 +183,22 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
  */
 async function assembledSpec(
   claim: SimulationClaim,
+  /**
+   * The runs already read while answering this one claim request, by id.
+   *
+   * A claim takes up to fifty conversations at once and they are usually a
+   * run's — that is what a run *is* — so the run header would otherwise be
+   * read fifty times for fifty specs that all want the same frozen world. The
+   * cache lives for one request and no longer: the header is frozen from the
+   * moment the run was created, so re-reading it inside one response could
+   * only ever return the same rows, and a cache that outlived the request
+   * would be a second copy of a record somebody may since have deleted.
+   *
+   * Keyed by run id alone, which is safe because every claim in one batch was
+   * read through its own row's tenancy and a run id is unique across the
+   * deployment — two claims naming one run are two conversations of it.
+   */
+  runs: Map<string, Run | undefined>,
 ): Promise<Record<string, unknown> | { readonly unbuildable: string }> {
   const personaVersion = await getPersonaVersion(
     claim.auth,
@@ -203,7 +220,10 @@ async function assembledSpec(
     };
   }
 
-  const run = await getRun(claim.auth, claim.runId);
+  if (!runs.has(claim.runId)) {
+    runs.set(claim.runId, await getRun(claim.auth, claim.runId));
+  }
+  const run = runs.get(claim.runId);
   if (run === undefined) {
     return { unbuildable: "its run could not be read" };
   }
@@ -315,6 +335,9 @@ export async function claimRoutes(
       }
 
       const specs: Record<string, unknown>[] = [];
+      // One read of each run, however many of its conversations this batch
+      // took. Lives exactly as long as this response.
+      const runs = new Map<string, Run | undefined>();
       for (const claim of claims) {
         // A row whose stored shapes will not open — a sealed envelope that no
         // longer decrypts, a column holding something egma never writes —
@@ -322,7 +345,7 @@ export async function claimRoutes(
         // because that too is one row's fault and never the batch's: an
         // escape would abort the whole response and withhold every valid
         // claim beside it from a simulator standing ready to conduct them.
-        const spec = await assembledSpec(claim).catch(
+        const spec = await assembledSpec(claim, runs).catch(
           (fault: unknown): { readonly unbuildable: string } => ({
             unbuildable: fault instanceof Error ? fault.message : String(fault),
           }),

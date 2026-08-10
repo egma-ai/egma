@@ -134,14 +134,7 @@ export type NewRun = {
   readonly label?: string;
 };
 
-/**
- * A string off the wire, with nothing in it a terminal would obey.
- *
- * Same rule and same reason as the other ends of this seam: every one of these
- * is about to be printed on a line a coding agent parses, and a control
- * character is an instruction rather than a character. A test name carrying a
- * line break would turn one printed fact into two.
- */
+/** A whole number off the wire, or zero for anything that is not one. */
 function whole(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 0;
 }

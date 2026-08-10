@@ -88,7 +88,7 @@ PROTOCOL_VERSION = 1
 It rides the dispatch metadata so the other side knows before it says
 anything, and it rides every hello in both directions so a mismatch is
 refused at the first message rather than discovered halfway through a
-conversation.
+simulation.
 """
 
 HELLO_METHOD = "egma.hello"
@@ -240,9 +240,9 @@ class MockToolSeam:
     def exchanged(self) -> list[ExchangedToolCall]:
         """Every call since this was last asked, and then none.
 
-        Drained rather than accumulated, so a caller authoring spans from
-        them can be called as often as it likes and no call is ever
-        written down twice.
+        Drained rather than accumulated, so whoever authors spans from
+        them can ask as often as it likes and no call is ever written
+        down twice.
         """
         taken, self._exchanged = self._exchanged, []
         return taken
@@ -524,7 +524,7 @@ def _fits_on_the_wire(what: str, message: str) -> None:
 
     Measured before a delay is spent rather than after: an answer that
     cannot be sent is a fault to raise at once, not something to make a
-    conversation wait thirty seconds for. And refused here rather than by
+    simulation wait thirty seconds for. And refused here rather than by
     the transport, because the transport's own complaint arrives at the
     far side as a call that mysteriously failed, where this one names the
     thing that outgrew the message.

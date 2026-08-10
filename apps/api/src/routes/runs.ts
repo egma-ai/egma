@@ -14,14 +14,13 @@ import {
   type MockToolSnapshot,
   type Run,
   type RunEvent,
-  type SnapshotEntry,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
-import { answerAsWritten } from "../http/mock-tools.ts";
+import { describedMockTool } from "../http/mock-tools.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
 import {
@@ -193,15 +192,10 @@ function describedMockToolCoverage(
  * once per test for nothing. A reader who wants the merge asks for the run's
  * simulations and applies the overrides of the version each one names — which
  * is what the simulator is handed when it claims one.
+ *
+ * Each entry is the one projection every group of mocked answers is described
+ * by; only the `mock_tool_id` beside a default is this read's own.
  */
-function describedMockToolEntry(one: SnapshotEntry): Record<string, unknown> {
-  return {
-    tool: one.toolName,
-    ...answerAsWritten(one.answer),
-    delay_ms: one.delayMilliseconds,
-  };
-}
-
 function describedMockTools(
   snapshot: MockToolSnapshot,
 ): Record<string, unknown> {
@@ -209,13 +203,13 @@ function describedMockTools(
     // A default is one of those with the row it came from named beside it, so a
     // reader can go and look at the mock tool the run froze.
     defaults: snapshot.defaults.map((one) => ({
-      ...describedMockToolEntry(one),
+      ...describedMockTool(one),
       mock_tool_id: one.mockToolId,
     })),
     overrides: Object.fromEntries(
       Object.entries(snapshot.overrides).map(([versionId, entries]) => [
         versionId,
-        entries.map(describedMockToolEntry),
+        entries.map(describedMockTool),
       ]),
     ),
   };

@@ -502,8 +502,9 @@ function contentFromRow(value: unknown, versionId: string): TestContent {
       return {
         toolName,
         // The mock-tool factory's own guard, so a hand-edited answer fails the
-        // same way on both halves of the mocked world.
-        answer: answerFromRow(answer, versionId),
+        // same way on both halves of the mocked world — naming the version it
+        // is actually stored on, because there is no mock tool with this id.
+        answer: answerFromRow(answer, versionId, "test version"),
         delayMilliseconds,
       };
     }),

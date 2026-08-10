@@ -7,7 +7,11 @@ import ajvFormats from "ajv-formats";
 import type { FormatsPlugin } from "ajv-formats";
 import { describe, expect, it } from "vitest";
 
-import { reportComplaints, specComplaints } from "@egma/simulation-contract";
+import {
+  bannedWordIn,
+  reportComplaints,
+  specComplaints,
+} from "@egma/simulation-contract";
 
 // ajv-formats ships CommonJS whose module.exports is the plugin function
 // itself; under NodeNext TypeScript types the default import as a namespace,
@@ -604,27 +608,14 @@ describe("the report schema structurally forbids credential material", () => {
  * a schema property outlives the prose that explained it — so the words the
  * project has settled against are held out of it here rather than caught in
  * review. The scan covers everything a reader of this package meets: both
- * schemas, both documents beside them, and every golden fixture.
+ * schemas, every document beside them, and every golden fixture.
  *
- * **What it deliberately cannot catch.** Only the words with no legitimate use
- * anywhere are listed. The rest of the settled vocabulary is about which
- * *meaning* a word may carry — `session` is wrong for a conversation and right
- * for a signed-in one, `call` is wrong for a simulation and right in
- * `tool_call` — and a scanner that flagged those would cry wolf on every page
- * until somebody turned it off. Those stay a reading job. This is the floor,
- * not the ceiling.
+ * The list itself is `src/vocabulary.ts`, shared with the guard over the
+ * platform's own mock-tool surface. Two lists written separately had already
+ * drifted apart, which is precisely the failure a vocabulary guard exists to
+ * prevent — so there is one, and both scanners read it.
  */
 describe("the contract's surface, held to the words the project settled on", () => {
-  const BANNED = [
-    // Same job as `mock tool`, and one job takes one word.
-    /\bstubs?\b/i,
-    /\bfakes?\b/i,
-    // The entity's name, inverted.
-    /\btool[ _-]mocks?\b/i,
-    // Everyone says it, nobody agrees what it points at.
-    /\beval(uat\w*|s)?\b/i,
-  ];
-
   it("uses none of them, anywhere a reader of this package looks", async () => {
     const files = (
       await readdir(packageRoot, { recursive: true, withFileTypes: true })
@@ -638,14 +629,12 @@ describe("the contract's surface, held to the words the project settled on", () 
 
     for (const file of files) {
       const at = path.join(file.parentPath, file.name);
-      const text = await readFile(at, "utf8");
-      for (const banned of BANNED) {
-        const found = banned.exec(text);
-        expect(
-          found?.[0],
-          `${path.relative(packageRoot, at)} uses "${found?.[0]}"`,
-        ).toBeUndefined();
-      }
+      const found = bannedWordIn(await readFile(at, "utf8"));
+      expect(
+        found?.found,
+        `${path.relative(packageRoot, at)} uses "${found?.found}"; ` +
+          `say ${found?.instead}`,
+      ).toBeUndefined();
     }
   });
 });

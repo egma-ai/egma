@@ -329,10 +329,21 @@ function namedTwice(agentId: string): string {
  * written, exactly as an old persona's voice provider is taken on trust once it
  * is a string.
  */
-export function answerFromRow(value: unknown, id: string): MockToolAnswer {
+export function answerFromRow(
+  value: unknown,
+  id: string,
+  /**
+   * What the thing holding this answer is called, for the sentence. A mock
+   * tool's own row by default — and a test version's stored overrides go
+   * through the same guard, so the refusal has to be able to name that
+   * instead. Naming the wrong one sends whoever reads it looking for a mock
+   * tool with a test version's id, which is a row that does not exist.
+   */
+  noun = "mock tool",
+): MockToolAnswer {
   const malformed = () =>
     new Error(
-      `mock tool ${id} holds an answer in a shape egma never writes; the row needs repairing before anybody can read it`,
+      `${noun} ${id} holds an answer in a shape egma never writes; the row needs repairing before anybody can read it`,
     );
 
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
