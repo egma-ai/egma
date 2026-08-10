@@ -35,6 +35,7 @@ vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 const KEY = "key_h4j7d2s9f5g8k1l3m6n0";
 
 const DIALLED = "+14155550111";
+const ALSO_DIALLED = "+14155550999";
 
 const ONE_AGENT: FakeRetellScript = {
   keys: [KEY],
@@ -329,6 +330,61 @@ describe("the choice between text and phone", () => {
     expect(platform.registered.connections[0]?.config).toEqual({ phoneNumber: DIALLED });
     expect(platform.registered.sealed).toEqual([]);
     expect(run.raw()).not.toContain(KEY);
+  });
+
+  it("asks which number to dial when Retell routes the agent more than one", async () => {
+    retell = await startFakeRetell({
+      ...ONE_AGENT,
+      numbers: [
+        ...(ONE_AGENT.numbers ?? []),
+        {
+          phone_number: ALSO_DIALLED,
+          nickname: "overflow",
+          inbound_agents: [{ agent_id: "agent_0001" }],
+        },
+      ],
+    });
+    const run = await wizard();
+
+    await showing(run, "Paste your Retell API key");
+    run.write(`${KEY}\n`);
+    await showing(run, "How should egma reach this agent?");
+    run.write("\u001B[B");
+    await showing(run, "\u203a Phone");
+    run.write("\r");
+
+    // Two numbers reach this agent, so there is a real choice and the wizard
+    // makes it. Both are numbers Retell routes here; a number somebody else
+    // answers is never on this screen at all.
+    const listed = await showing(
+      run,
+      "Which number should egma dial?",
+      DIALLED,
+      ALSO_DIALLED,
+      "[enter] dial this one",
+    );
+    expect(listed).toContain("order line");
+
+    run.write("\u001B[B");
+    await showing(run, `\u203a ${ALSO_DIALLED}`);
+    run.write("\r");
+
+    await showing(run, "Do you already have test cases", "[n] none");
+    run.write("n");
+    await showing(run, "price-question", "[enter] run");
+    const grading = gradeEveryRun(platform);
+    run.write("\r");
+
+    const exited = await run.exited;
+    grading.stop();
+    expect(exited).toBe(0);
+
+    // The one that was highlighted is the one egma will dial, and it is the
+    // whole of what the connection holds.
+    expect(platform.registered.connections).toHaveLength(1);
+    expect(platform.registered.connections[0]?.config).toEqual({
+      phoneNumber: ALSO_DIALLED,
+    });
   });
 
   it("creates nothing when the developer takes neither way", async () => {

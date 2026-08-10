@@ -31,10 +31,17 @@ export const secrets: string[] = [];
 /** Every check that did not hold, in the order they were found. */
 export const problems: string[] = [];
 
-/** The text with everything in `secrets` taken out of it. */
+/**
+ * The text with everything in `secrets` taken out of it.
+ *
+ * Nothing that is not a string is one, and the guard is not defensive tidying:
+ * a check that pushed `undefined` — a field that moved, an answer that was not
+ * the shape it used to be — would crash *here*, while printing the failure it
+ * was in the middle of reporting, and take the real reason down with it.
+ */
 export function redact(text: string): string {
   return [...new Set(secrets)]
-    .filter((one) => one.length > 3)
+    .filter((one) => typeof one === "string" && one.length > 3)
     .sort((left, right) => right.length - left.length)
     .reduce((held, one) => held.split(one).join("<redacted>"), text);
 }
