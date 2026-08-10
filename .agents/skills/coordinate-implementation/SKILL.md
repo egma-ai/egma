@@ -158,12 +158,14 @@ Before landing:
 4. Resolve conflicts in the ticket branch.
 5. Run the full suite.
 6. Rerun independent review against that exact integration commit, even when the refresh was conflict-free.
-7. Require the refreshed branch to pass the review gate again.
-8. Fetch the remote integration branch again and require its commit to equal the recorded commit.
-9. Fast-forward the local integration branch to the reviewed ticket branch.
-10. Push normally. A rejected push means the remote moved; never force it.
+7. Push the reviewed refresh to the ticket branch.
+8. Run the pull-request review gate against that pushed commit.
+9. If either gate causes changes, have the implementer commit and push them, then repeat the full suite and both gates against that commit.
+10. Fetch the remote integration branch again and require its commit to equal the recorded commit.
+11. Fast-forward the local integration branch to the reviewed ticket branch.
+12. Push normally. A rejected push means the remote moved; never force it.
 
-If the integration branch moved or the push was rejected, repeat the refresh, full suite, and independent review while keeping landing serial.
+If the integration branch moved or the push was rejected, repeat the whole landing gate while keeping landing serial.
 
 The guarded push is the merge. Confirm the integration branch remains green, then release the lock.
 
