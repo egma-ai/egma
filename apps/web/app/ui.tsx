@@ -25,7 +25,7 @@ export function Brand() {
   return (
     <Image
       className={styles.brand}
-      src="/prototype/egma-logo.png"
+      src="/brand/egma-logo.png"
       alt="egma"
       width={146}
       height={31}
