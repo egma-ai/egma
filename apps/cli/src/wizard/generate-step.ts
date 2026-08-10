@@ -335,16 +335,22 @@ async function folderFor(options: GenerateStepOptions): Promise<FolderPaths> {
     name: options.registered.connection.name,
     id: options.registered.connection.id,
   };
+  // The binding goes in the file the moment the file is written, in the same
+  // write as the ids it belongs to. Adding it a line later would leave a
+  // window — however short — in which egma/config.yaml holds one platform's
+  // identifiers and names no platform, which is the state ADR-0008 exists to
+  // prevent and the state a crash would freeze.
+  const binding = options.binding ?? null;
   const folder = await createEgmaFolder({
     repository: options.cwd,
-    config: { platform: null, agent, connection, suite: { name: DEFAULT_SUITE_NAME, id: null } },
+    config: { platform: binding, agent, connection, suite: { name: DEFAULT_SUITE_NAME, id: null } },
   });
-  if (!folder.created) await updateConfig(folder.paths.config, { agent, connection });
-
-  // One writer for a binding, wherever the folder came from: it writes when the
-  // file names no platform yet and leaves a file that already names one alone.
-  if (options.binding !== undefined && options.binding !== null) {
-    await bindRepository(options.cwd, options.binding);
+  if (!folder.created) {
+    await updateConfig(folder.paths.config, { agent, connection });
+    // A folder that was already here was not born with it. It writes when the
+    // file names no platform yet, and leaves one that already names a platform
+    // alone: rebinding is not part of this decision.
+    if (binding !== null) await bindRepository(options.cwd, binding);
   }
   return folder.paths;
 }

@@ -113,6 +113,23 @@ export function quietPool(config: pg.PoolConfig): pg.Pool {
 }
 
 /**
+ * The same, for a test that holds one connection itself.
+ *
+ * A `pg.Client` carries the identical trap: `error` with no listener is an
+ * uncaught exception, and awaiting `end()` before the drop does not close the
+ * window — the backend can be terminated while a statement is still in flight,
+ * or the drop can land first when a test fails part way and skips its own
+ * cleanup. This is not `openSingleConnection`, which hands back a narrow
+ * `sql`/`close` pair: a test that wants `client.query<Row>` typed to its own
+ * row shape gets the client itself, already listening.
+ */
+export function quietClient(url: string): pg.Client {
+  const client = new pg.Client({ connectionString: url });
+  client.on("error", () => undefined);
+  return client;
+}
+
+/**
  * The master key the connected module seals credentials under in tests. Fixed
  * and well-formed — 32 bytes as 64 hex characters — because the tests assert
  * what sealing does, never that this particular key is secret.

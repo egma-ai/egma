@@ -13,7 +13,7 @@ import {
   readMigrations,
   runMigrations,
 } from "../src/migrate.ts";
-import { createEmptyDatabase, type EmptyDatabase } from "./support/database.ts";
+import { createEmptyDatabase, quietClient, type EmptyDatabase } from "./support/database.ts";
 
 describe("the migration files", () => {
   it("are numbered plain SQL, applied in that order", async () => {
@@ -93,7 +93,7 @@ describe("applying migrations on boot", () => {
   });
 
   it("leaves the citext extension in place", async () => {
-    const client = new pg.Client({ connectionString: database.url });
+    const client = quietClient(database.url);
     await client.connect();
     try {
       const { rows } = await client.query<{ extname: string }>(
@@ -167,7 +167,7 @@ describe("the boot-time advisory lock", () => {
 
   it("is what makes a second instance wait", async () => {
     const { namespace, id } = MIGRATION_ADVISORY_LOCK;
-    const holder = new pg.Client({ connectionString: database.url });
+    const holder = quietClient(database.url);
     await holder.connect();
     await holder.query(`select pg_advisory_lock(${namespace}, ${id})`);
 
@@ -216,7 +216,7 @@ describe("the persona rename (0005)", () => {
     }
     await runMigrations(database.url, beforeTheRename);
 
-    client = new pg.Client({ connectionString: database.url });
+    client = quietClient(database.url);
     await client.connect();
     await client.query("begin");
     await client.query(
@@ -333,7 +333,7 @@ describe("the persona junction's rename (0008)", () => {
     }
     await runMigrations(database.url, beforeTheRename);
 
-    client = new pg.Client({ connectionString: database.url });
+    client = quietClient(database.url);
     await client.connect();
     await client.query("begin");
     await client.query(
@@ -470,7 +470,7 @@ describe("the simulation's test pin (0009)", () => {
     }
     await runMigrations(database.url, beforeThePin);
 
-    client = new pg.Client({ connectionString: database.url });
+    client = quietClient(database.url);
     await client.connect();
     await client.query(
       "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
@@ -630,7 +630,7 @@ describe("the re-grade's narrowing (0013)", () => {
     }
     await runMigrations(database.url, beforeTheNarrowing);
 
-    client = new pg.Client({ connectionString: database.url });
+    client = quietClient(database.url);
     await client.connect();
     await client.query(
       "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
@@ -738,7 +738,7 @@ describe("the run-events record and the run's pin (0014)", () => {
     // A customer's work, written the way that release wrote it: a run over a
     // connection, one conversation inside it, and no pinned-version column
     // anywhere — which is exactly what 0014 has to upgrade over.
-    client = new pg.Client({ connectionString: database.url });
+    client = quietClient(database.url);
     await client.connect();
     await client.query(
       "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
@@ -886,7 +886,7 @@ describe("the dispatch-failure vocabulary (0015)", () => {
     // one conversation still queued, and one already landed with the old
     // vocabulary — because 0015 re-validates the widened checks over every
     // row that exists, so they have to hold for what the old release wrote.
-    client = new pg.Client({ connectionString: database.url });
+    client = quietClient(database.url);
     await client.connect();
     await client.query(
       "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
@@ -1261,7 +1261,7 @@ describe("the simulation's summary facts (0016)", () => {
     // queued, one finished, and one that release's own claim path landed as
     // dispatch_failed. The last two are the rows the new columns are about,
     // and the rows their guards re-validate on the way in.
-    client = new pg.Client({ connectionString: database.url });
+    client = quietClient(database.url);
     await client.connect();
     await seedACustomersWork(client, work);
     await insertSimulation(client, work, {
@@ -1370,7 +1370,7 @@ describe("the conversation leaving the row, over work already there (0017)", () 
       before0017.map((migration) => migration.name),
     );
 
-    const client = new pg.Client({ connectionString: database.url });
+    const client = quietClient(database.url);
     await client.connect();
     const work: ACustomersWork = {
       organization: newId("org"),
@@ -1511,7 +1511,7 @@ describe("the livekit connection type (0018)", () => {
     }
     await runMigrations(database.url, beforeLiveKit);
 
-    client = new pg.Client({ connectionString: database.url });
+    client = quietClient(database.url);
     await client.connect();
     await client.query(
       "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
@@ -1635,7 +1635,7 @@ describe("the connection type leaving the simulation row (0019)", () => {
     // A customer's work as the release before this one wrote it: every
     // simulation carrying its own copy of the connection type, which is the
     // column the upgrade takes away underneath them.
-    client = new pg.Client({ connectionString: database.url });
+    client = quietClient(database.url);
     await client.connect();
     await seedACustomersWork(client, work);
     await insertSimulation(client, work, {

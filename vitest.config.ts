@@ -1,7 +1,7 @@
 import { availableParallelism } from "node:os";
 import { fileURLToPath } from "node:url";
 
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 const resolve = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
@@ -23,8 +23,13 @@ const resolve = (path: string) => fileURLToPath(new URL(path, import.meta.url));
  * and a walk reached five — because the walk is not slow, it is starved.
  *
  * So they run in a pool of their own, one at a time, while the rest of the
- * suite runs beside them at full width. They add nothing to the wall clock:
- * together they are about two minutes, inside a run that is five.
+ * suite runs beside them on the other cores.
+ *
+ * It costs about fifty seconds on a four-core box — a run went from 331s to
+ * 385s, a sixth longer — and the time is queueing, not work: the total time
+ * spent inside tests barely moves. That is the trade, made deliberately. A
+ * sixth of the wall clock buys a gate that can be believed, and a gate that is
+ * red one run in three is one nobody reads.
  */
 const WALKS = [
   "apps/cli/test/binding-across-platforms.test.ts",
@@ -96,7 +101,9 @@ export default defineConfig({
         test: {
           name: "rest",
           include: EVERYTHING_ELSE,
-          exclude: WALKS,
+          // Spread, never replaced: setting `exclude` drops vitest's own
+          // list, and with it `node_modules` and `dist`.
+          exclude: [...configDefaults.exclude, ...WALKS],
           env: { LOG_LEVEL: "silent" },
           testTimeout: 30_000,
           hookTimeout: 60_000,
