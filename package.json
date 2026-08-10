@@ -15,9 +15,10 @@
     "db:up": "docker compose up -d --wait postgres clickhouse",
     "db:down": "docker compose down",
     "db:generate": "pnpm --filter @egma/db generate",
-    "test": "pnpm db:up && { vitest run; ts=$?; pnpm test:simulator; sim=$?; pnpm test:sdk; sdk=$?; exit $(( ts || sim || sdk )); }",
+    "test": "pnpm db:up && { vitest run; ts=$?; pnpm test:simulator; sim=$?; pnpm test:sdk; sdk=$?; pnpm test:fixture; fix=$?; exit $(( ts || sim || sdk || fix )); }",
     "test:simulator": "pnpm --filter @egma/simulator test",
     "test:sdk": "pnpm --filter @egma/sdk-python test",
+    "test:fixture": "pnpm --filter @egma/livekit-dumb-agent test",
     "test:watch": "vitest"
   },
   "devDependencies": {

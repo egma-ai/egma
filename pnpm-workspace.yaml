@@ -1,5 +1,6 @@
 packages:
   - apps/*
+  - fixtures/*
   - packages/*
   - sdks/*
 

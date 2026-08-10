@@ -163,11 +163,16 @@ class EgmaInTheRoom:
         self.asked: list[tuple[str, dict]] = []
 
     async def join(self, room_name: str) -> None:
+        # Connected first, then the methods. A room has no local
+        # participant to register anything on until it is in one — and
+        # egma's own driver registers in this same order, the moment the
+        # room is joined, which is still before the agent's worker is
+        # asked for and so still before any census could arrive.
+        await self.room.connect(LIVEKIT_URL, _token(room_name, EGMA_IDENTITY))
         self.room.local_participant.register_rpc_method(
             seam.HELLO_METHOD, self._hello
         )
         self.room.local_participant.register_rpc_method(seam.TOOL_METHOD, self._tool)
-        await self.room.connect(LIVEKIT_URL, _token(room_name, EGMA_IDENTITY))
 
     async def _hello(self, invocation: rtc.RpcInvocationData) -> str:
         self.asked.append((seam.HELLO_METHOD, json.loads(invocation.payload)))
