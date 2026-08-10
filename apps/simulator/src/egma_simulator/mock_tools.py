@@ -58,6 +58,10 @@ A call for a name **outside** this simulation's answers is refused, on
 the wire and on the record. It is a protocol error — the other side was
 told exactly which names egma answers for — and quietly letting it
 through would put a call egma never answered on the record as one it did.
+Its span carries the provenance ``refused``: no result and no mock tool,
+because nothing answered it, but a stamp all the same. A span with no
+stamp means egma watched the call go past to a real backend, and a
+refused call is the opposite of that.
 
 The simulation's terminal facts carry the **coverage stamp**: which tools
 the agent reported, which egma stood ready for, and which ran their own
@@ -175,6 +179,15 @@ class ExchangedToolCall:
     late_attached: bool
     """True where the census never named this tool. Absent from the record
     otherwise: a stamp for the ordinary case would ride every span."""
+
+    refused: bool
+    """True where egma was asked and said no — a call for a name outside
+    this simulation's answers.
+
+    Its own fact on the record, because the alternative reading is the
+    opposite one. A call carrying no stamp at all means egma watched it go
+    past to a real backend; a refused call never reached a backend at all.
+    Told apart here so a reader is never left to guess which happened."""
 
     began_unix_nano: int
     ended_unix_nano: int
@@ -371,11 +384,15 @@ class MockToolSeam:
 
         mock = self._answers.get(name)
         if mock is None:
-            # Never a pass-through. The other side was told which names
-            # egma answers for, so a call for any other name is that side
-            # asking for something it was never offered — and answering it
-            # anyway, or waving it through, would put a tool egma had no
-            # answer for on the record as one it served.
+            # Never a pass-through — and the record says so out loud. The
+            # other side was told which names egma answers for, so a call
+            # for any other name is that side asking for something it was
+            # never offered; answering it anyway, or waving it through,
+            # would put a tool egma had no answer for on the record as one
+            # it served. Written down as *refused* rather than as a bare
+            # observation, because a bare observation is the record's way
+            # of saying the real tool ran with egma nowhere near it, and
+            # here the opposite happened.
             self._write_down(
                 ExchangedToolCall(
                     name=name,
@@ -383,6 +400,7 @@ class MockToolSeam:
                     answer=None,
                     mock_tool=None,
                     late_attached=False,
+                    refused=True,
                     began_unix_nano=began,
                     ended_unix_nano=self._clock(),
                 )
@@ -432,6 +450,7 @@ class MockToolSeam:
                 answer=recorded,
                 mock_tool=mock.tool_name,
                 late_attached=name not in self._discovered,
+                refused=False,
                 began_unix_nano=began,
                 ended_unix_nano=self._clock(),
             )

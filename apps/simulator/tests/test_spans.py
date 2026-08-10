@@ -205,14 +205,14 @@ def test_a_tool_call_is_one_instant_carrying_what_was_observed():
 
 
 def test_a_call_egma_answered_carries_the_whole_exchange():
-    """The golden file's own two calls, authored by the emitter.
+    """The golden file's own three calls, authored by the emitter.
 
-    ``voice-mocked-tool-calls.json`` is the vocabulary as bytes for a call
-    egma served: an ordinary one with its arguments whole and its declared
-    delay showing as the span's own duration, and a late-attached one
-    whose arguments never arrived. What the emitter produces has to be
-    those attributes exactly, or the two sides of the contract have
-    drifted.
+    ``voice-mocked-tool-calls.json`` is the vocabulary as bytes for every
+    call that reaches egma: an ordinary served one with its arguments
+    whole and its declared delay showing as the span's own duration, a
+    late-attached one whose arguments never arrived, and one egma refused.
+    What the emitter produces has to be those attributes exactly, or the
+    two sides of the contract have drifted.
     """
     golden = spans_of(fixture("voice-mocked-tool-calls.json"))
     spans, sink, _clock = emitter()
@@ -224,6 +224,7 @@ def test_a_call_egma_answered_carries_the_whole_exchange():
             answer=attribute(served, "egma.tool.result"),
             mock_tool=attribute(served, "egma.tool.mock_tool"),
             late_attached=flag(served, "egma.tool.late_attached") is True,
+            refused=attribute(served, "egma.tool.provenance") == "refused",
             began_unix_nano=int(served["startTimeUnixNano"]),
             ended_unix_nano=int(served["endTimeUnixNano"]),
         )
@@ -282,6 +283,67 @@ def test_a_result_is_never_recorded_without_the_stamp_that_placed_it():
                 "check_calendar", began_unix_nano=1, ended_unix_nano=2, **half
             )
         assert "one fact" in str(refused.value)
+
+
+def test_a_refused_call_is_stamped_and_carries_nothing_it_was_never_given():
+    """The stamp that keeps a refusal from reading as a pass-through.
+
+    A call egma would not answer never reached a backend. A call with no
+    stamp at all *did* — the real tool ran with egma nowhere near it. The
+    two are opposite facts about the agent's own systems, so the record
+    gives them different shapes.
+    """
+    spans, sink, _clock = emitter()
+    spans.opened()
+    spans.tool_exchange(
+        "charge_card",
+        arguments='{"amount_cents":4200}',
+        refused=True,
+        began_unix_nano=1,
+        ended_unix_nano=2,
+    )
+    spans.tool_call("lookup_weather", '{"city":"Berlin"}')
+    spans.flush()
+
+    refused_call, observed = named(sink.documents[0], "tool_call")
+    assert attribute(refused_call, "egma.tool.provenance") == "refused"
+    # Nothing answered it, so there is nothing to record as an answer and no
+    # mock tool to name.
+    assert attribute(refused_call, "egma.tool.result") is None
+    assert attribute(refused_call, "egma.tool.mock_tool") is None
+    # And the call egma only watched go past still carries no stamp, which is
+    # what makes the two readable apart.
+    assert attribute(observed, "egma.tool.provenance") is None
+
+
+def test_the_two_stamps_of_one_moment_are_never_written_together():
+    """A refusal and an answer are opposite halves of the same instant,
+    and only one of them happened. And late-attached is a caveat about a
+    call egma *served*: on a call nothing served it would be a stamp with
+    no fact under it."""
+    spans, _sink, _clock = emitter()
+    spans.opened()
+
+    with pytest.raises(ValueError) as both:
+        spans.tool_exchange(
+            "check_calendar",
+            answer='{"slots":[]}',
+            mock_tool="check_calendar",
+            refused=True,
+            began_unix_nano=1,
+            ended_unix_nano=2,
+        )
+    assert "only one of them happened" in str(both.value)
+
+    with pytest.raises(ValueError) as unserved:
+        spans.tool_exchange(
+            "charge_card",
+            late_attached=True,
+            refused=True,
+            began_unix_nano=1,
+            ended_unix_nano=2,
+        )
+    assert "nothing to qualify" in str(unserved.value)
 
 
 @pytest.mark.parametrize(

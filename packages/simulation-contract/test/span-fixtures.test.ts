@@ -61,11 +61,15 @@ const SPAN_ATTRIBUTE_KEYS = [
 ] as const;
 
 /**
- * How a recorded tool call was answered. One value today, and it is the one
- * egma can honestly claim: `mocked` says egma itself served the answer, so the
- * result beside it is not a guess about somebody else's return.
+ * How a recorded tool call was answered — the two things egma can honestly
+ * claim about a call that reached it. `mocked` says egma itself served the
+ * answer, so the result beside it is not a guess about somebody else's return.
+ * `refused` says egma was asked and would not answer, so nothing ran at all.
+ *
+ * An absent stamp is neither of them and is the third fact: egma was not in
+ * the path, and the agent's own backend ran unobserved.
  */
-const TOOL_PROVENANCES = ["mocked"] as const;
+const TOOL_PROVENANCES = ["mocked", "refused"] as const;
 
 const CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
@@ -292,7 +296,7 @@ describe("the golden span fixtures", () => {
     }
   });
 
-  it("read the two answered calls back exactly, attribute by attribute", () => {
+  it("read the flush's calls back exactly, attribute by attribute", () => {
     const flush = valid.find(
       (fixture) => fixture.name === "voice-mocked-tool-calls.json",
     );
@@ -329,7 +333,63 @@ describe("the golden span fixtures", () => {
         mockTool: "send_confirmation_sms",
         lateAttached: true,
       },
+      {
+        name: "charge_card",
+        // A tool this simulation answers for nothing of. The arguments
+        // arrived and are kept — they are what the agent tried to do — but
+        // nothing was served, so there is no result and no mock tool.
+        arguments: '{"amount_cents":4200}',
+        result: undefined,
+        provenance: "refused",
+        mockTool: undefined,
+        lateAttached: false,
+      },
     ]);
+  });
+
+  /**
+   * The distinction this stamp exists for. A refused call and a call egma
+   * never stood in the path of are opposite facts — the backend did not run,
+   * versus the backend ran and egma saw only that it was called — and written
+   * the same way a reader could not tell them apart.
+   */
+  it("tell a refused call apart from one egma was never in the path of", () => {
+    const calls = valid
+      .flatMap((fixture) => spansOf(fixture))
+      .filter((span) => span.name === "tool_call");
+
+    const refused = calls.filter(
+      (span) =>
+        attributeOf(span.attributes, "egma.tool.provenance") === "refused",
+    );
+    const unobserved = calls.filter(
+      (span) =>
+        attributeOf(span.attributes, "egma.tool.provenance") === undefined,
+    );
+    expect(refused.length).toBeGreaterThan(0);
+    expect(unobserved.length).toBeGreaterThan(0);
+
+    for (const span of refused) {
+      // Nothing answered it, so there is nothing to record as an answer and
+      // no mock tool to name — and the flag that qualifies a served call has
+      // nothing here to qualify.
+      expect(attributeOf(span.attributes, "egma.tool.result")).toBeUndefined();
+      expect(
+        attributeOf(span.attributes, "egma.tool.mock_tool"),
+      ).toBeUndefined();
+      expect(flagOf(span.attributes, "egma.tool.late_attached")).toBe(false);
+      // The tool the agent asked for is kept: what it tried to do is the
+      // whole value of a refusal being on the record.
+      expect(attributeOf(span.attributes, "egma.tool.name")).toBeTruthy();
+    }
+
+    // And no unstamped call can be mistaken for one of them: the two sets do
+    // not overlap, which is the property the stamp was added to create.
+    for (const span of unobserved) {
+      expect(
+        attributeOf(span.attributes, "egma.tool.provenance"),
+      ).toBeUndefined();
+    }
   });
 
   it("show a mocked call carrying the answer egma served and the mock tool that served it", () => {

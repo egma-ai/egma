@@ -394,6 +394,7 @@ class RunningSimulation:
                 answer=call.answer,
                 mock_tool=call.mock_tool,
                 late_attached=call.late_attached,
+                refused=call.refused,
                 began_unix_nano=call.began_unix_nano,
                 ended_unix_nano=call.ended_unix_nano,
             )

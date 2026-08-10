@@ -558,12 +558,15 @@ async def test_a_call_outside_the_answers_is_refused_and_never_waved_through(
         asks_for_the_unmocked,
     )
 
-    # On the record too, and honestly: a call that was seen and not
-    # answered carries neither a result nor a provenance stamp.
+    # On the record too, and honestly: no result and no mock tool, because
+    # nothing answered it — but stamped `refused`, because egma was in the
+    # path and said no. A span with no stamp at all is the other fact
+    # entirely: the real tool ran, with egma nowhere near it.
     (refused_call,) = tool_spans(client)
     assert attributes_of(refused_call) == {
         "egma.tool.name": "charge_card",
         "egma.tool.arguments": '{"amount":4200}',
+        "egma.tool.provenance": "refused",
     }
 
 
@@ -896,4 +899,6 @@ def test_the_golden_fixture_is_a_spec_the_simulator_reads_whole(tmp_path: Path):
 
     assembled = assemble(spec, blobs=FilesystemBlobStore(tmp_path))
     assert assembled.conductor is not None
-    assert assembled.mock_tool_coverage is None, "no room was joined, so nothing is claimed"
+    assert (
+        assembled.mock_tool_coverage is None
+    ), "no room was joined, so nothing is claimed"

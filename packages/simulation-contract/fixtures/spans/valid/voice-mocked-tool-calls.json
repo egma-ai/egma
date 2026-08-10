@@ -51,6 +51,23 @@
                 { "key": "egma.tool.mock_tool", "value": { "stringValue": "send_confirmation_sms" } },
                 { "key": "egma.tool.late_attached", "value": { "boolValue": true } }
               ]
+            },
+            {
+              "traceId": "0198fbb134d14b89a5dfe7a4f00abd4c",
+              "spanId": "cc30000000000004",
+              "parentSpanId": "cc30000000000001",
+              "name": "tool_call",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1785931233900000000",
+              "endTimeUnixNano": "1785931233901000000",
+              "attributes": [
+                { "key": "egma.tool.name", "value": { "stringValue": "charge_card" } },
+                {
+                  "key": "egma.tool.arguments",
+                  "value": { "stringValue": "{\"amount_cents\":4200}" }
+                },
+                { "key": "egma.tool.provenance", "value": { "stringValue": "refused" } }
+              ]
             }
           ]
         }

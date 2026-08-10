@@ -409,12 +409,19 @@ describe("the contract's golden flushes, posted with the service token", () => {
       // A call served for a tool the agent had not reported having. Its
       // arguments never arrived, and an absent fact stays absent.
       ["send_confirmation_sms", "", '{"delivered":true}'],
+      // A call egma would not answer: the arguments are what the agent tried
+      // to do, and there is no result because nothing served it.
+      ["charge_card", '{"amount_cents":4200}', ""],
     ]);
 
     expect(rows[0]?.payload).toContain('"egma.tool.provenance"');
     expect(rows[0]?.payload).toContain('"mocked"');
     expect(rows[1]?.payload).toContain('"egma.tool.late_attached"');
     expect(rows[1]?.payload).toContain('"boolValue":true');
+    // The refusal's own stamp survives the door whole. Without it the row
+    // would read exactly like a call egma was never in the path of, which is
+    // the opposite fact about whether the agent's backend ran.
+    expect(rows[2]?.payload).toContain('"refused"');
   });
 });
 

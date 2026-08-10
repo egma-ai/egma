@@ -82,15 +82,31 @@ TOOL_NAME_ATTRIBUTE = "egma.tool.name"
 TOOL_ARGUMENTS_ATTRIBUTE = "egma.tool.arguments"
 TOOL_RESULT_ATTRIBUTE = "egma.tool.result"
 TOOL_PROVENANCE_ATTRIBUTE = "egma.tool.provenance"
-TOOL_MOCK_TOOL_ATTRIBUTE = "egma.tool.mock_tool"
+MOCK_TOOL_ATTRIBUTE = "egma.tool.mock_tool"
 TOOL_LATE_ATTACHED_ATTRIBUTE = "egma.tool.late_attached"
 
 MOCKED_PROVENANCE = "mocked"
 """How the call was answered: a mock tool answered, and egma served it.
 
-The one value there is. Its absence is the other half of the vocabulary —
-a call egma watched go past and did not answer — and that absence is what
-makes a recorded result honest, because a result never rides without it.
+A result never rides without this, because a result with nothing to say
+where it came from would read as a return value egma observed rather than
+one it authored.
+"""
+
+REFUSED_PROVENANCE = "refused"
+"""How the call was answered: egma was asked and said no.
+
+The agent called a tool egma had told it egma answers for nothing of —
+a protocol error, refused on the wire and never waved through. It carries
+no result, because there was none, and no mock tool, because none
+answered.
+
+**It is a provenance and not an absence, and that is the whole reason it
+exists.** An absent stamp means the call was observed and not answered —
+a connection egma stands outside the tool path of, where the real tool
+ran. A refusal is the opposite fact: egma *was* in the path, and the tool
+did not run. Written the same way, a reader could not tell a refused call
+from a real backend quietly doing the work.
 """
 
 SPAN_KIND = "SPAN_KIND_INTERNAL"
@@ -340,6 +356,7 @@ class SpanEmitter:
         answer: str | None = None,
         mock_tool: str | None = None,
         late_attached: bool = False,
+        refused: bool = False,
         began_unix_nano: int,
         ended_unix_nano: int,
     ) -> None:
@@ -358,6 +375,12 @@ class SpanEmitter:
         authored, and recording it invents nothing. So the two travel
         together or not at all, and this refuses to write one without the
         other rather than leaving the record to be read two ways.
+
+        **A refused call is stamped too, and for the mirror reason.** No
+        result, no mock tool — nothing answered it — but egma was in the
+        path and said no, and an unstamped span says the opposite: that
+        the call went past egma to a real backend. Two facts that far
+        apart may not share one shape.
         """
         if (answer is None) != (mock_tool is None):
             raise ValueError(
@@ -365,13 +388,31 @@ class SpanEmitter:
                 "one fact: an answer with nothing to say where it came from "
                 "would read as a result egma observed rather than authored"
             )
+        if refused and answer is not None:
+            raise ValueError(
+                "a refused call is one egma would not answer, so it cannot "
+                "carry an answer: the two stamps describe opposite halves of "
+                "the same moment and only one of them happened"
+            )
+        if late_attached and answer is None:
+            # The flag says a tool the census never named was *served*
+            # anyway. On a call nothing served, it would be a caveat about
+            # arguments nobody was answered about — a stamp with no fact
+            # under it.
+            raise ValueError(
+                "late-attached is a caveat about a call egma served for a "
+                "tool the census never named, so it has nothing to qualify "
+                "on a call egma did not answer"
+            )
         attributes: dict[str, str | bool] = {TOOL_NAME_ATTRIBUTE: name}
         if arguments is not None:
             attributes[TOOL_ARGUMENTS_ATTRIBUTE] = arguments
         if answer is not None and mock_tool is not None:
             attributes[TOOL_RESULT_ATTRIBUTE] = answer
             attributes[TOOL_PROVENANCE_ATTRIBUTE] = MOCKED_PROVENANCE
-            attributes[TOOL_MOCK_TOOL_ATTRIBUTE] = mock_tool
+            attributes[MOCK_TOOL_ATTRIBUTE] = mock_tool
+        elif refused:
+            attributes[TOOL_PROVENANCE_ATTRIBUTE] = REFUSED_PROVENANCE
         if late_attached:
             # Only ever true. A stamp for the ordinary case would ride
             # every span, and a reader would learn nothing from finding it.
