@@ -71,7 +71,7 @@ empty calendar, a booking service that is down. The project's own live in
 `egma/mock-tools.md`, the tool named in the heading and the answer in the block
 under it:
 
-```markdown
+`````markdown
 ## Mock tools
 ### check_availability
 ```json
@@ -80,7 +80,7 @@ under it:
   "delay_ms": 250
 }
 ```
-```
+`````
 
 - **`answer`** is whatever that tool returns — any shape, including `null`.
 - **`error`** instead of `answer` is the failure it raises. One of the two,

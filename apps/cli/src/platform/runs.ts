@@ -22,9 +22,10 @@
  * make.
  */
 
-import { PlatformUnreachableError, type Fetch } from "./device-flow.ts";
+import type { Fetch } from "./device-flow.ts";
 import { PlatformRefusedError } from "./refused.ts";
 import type { SignedIn } from "./signed-in.ts";
+import { ask, saidBy, text, textList } from "./wire.ts";
 
 /**
  * How far one simulation got.
@@ -141,15 +142,6 @@ export type NewRun = {
  * character is an instruction rather than a character. A test name carrying a
  * line break would turn one printed fact into two.
  */
-function text(value: unknown): string {
-  return typeof value === "string" ? value.replaceAll(/[\p{Cc}\p{Cf}]/gu, "").trim() : "";
-}
-
-function textList(value: unknown): readonly string[] {
-  if (!Array.isArray(value)) return [];
-  return value.map((item) => text(item)).filter((item) => item !== "");
-}
-
 function whole(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 0;
 }
@@ -226,46 +218,6 @@ function eventFrom(body: Record<string, unknown>): RunEvent | null {
     verdict: verdictOf(body.verdict),
     reason: text(body.reason) === "" ? null : text(body.reason),
   };
-}
-
-async function bodyOf(response: Response): Promise<Record<string, unknown>> {
-  return (await response.json().catch(() => ({}))) as Record<string, unknown>;
-}
-
-/** What the platform said about a refusal, or egma's own words for a silence. */
-function saidBy(body: Record<string, unknown>, status: number): string {
-  const message = text(body.message);
-  return message === "" ? `egma answered ${status} and said nothing about it` : message;
-}
-
-type Call = {
-  readonly signedIn: SignedIn;
-  readonly path: string;
-  readonly method?: string;
-  readonly body?: unknown;
-  readonly fetchImpl?: Fetch;
-  readonly signal?: AbortSignal;
-};
-
-async function ask(call: Call): Promise<{ response: Response; body: Record<string, unknown> }> {
-  const fetchImpl = call.fetchImpl ?? fetch;
-
-  let response: Response;
-  try {
-    response = await fetchImpl(`${call.signedIn.url}${call.path}`, {
-      method: call.method ?? "GET",
-      headers: {
-        authorization: `Bearer ${call.signedIn.key}`,
-        ...(call.body === undefined ? {} : { "content-type": "application/json" }),
-      },
-      ...(call.body === undefined ? {} : { body: JSON.stringify(call.body) }),
-      ...(call.signal === undefined ? {} : { signal: call.signal }),
-    });
-  } catch (cause) {
-    throw new PlatformUnreachableError(call.signedIn.url, cause);
-  }
-
-  return { response, body: await bodyOf(response) };
 }
 
 /**

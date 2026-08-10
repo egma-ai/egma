@@ -8,9 +8,11 @@
  * content and versions with the test.
  *
  * Both places hold the identical block, so there is one thing to learn and one
- * thing to read:
+ * thing to write. Where the two differ is only in how the section is *found* —
+ * a test file has three sections and takes the last of them, the project's file
+ * is prose and then this one — and each file says why where it does it:
  *
- * ```markdown
+ * ````markdown
  * ## Mock tools
  * ### check_availability
  * ```json
@@ -19,7 +21,7 @@
  *   "delay_ms": 250
  * }
  * ```
- * ```
+ * ````
  *
  * **The heading is the tool's name and the block is what egma sends.** An
  * answer is whatever shape that tool's own contract has — an object, a list, a
@@ -217,9 +219,29 @@ export function writeMockTools(
   return lines;
 }
 
-/** Whether two entries say exactly the same thing, keys and order included. */
+/**
+ * What one entry says, in a shape two entries can be compared by.
+ *
+ * The entry's own keys are put in one order first, because the order somebody
+ * typed `delay_ms` and `answer` in is not something they said — egma has one
+ * order it writes them in, and a file that arrived in another is the same mock
+ * tool. What is inside each of those keys is left exactly as it is, and is
+ * compared by its serialization: an answer is whatever shape that tool's own
+ * contract has, so there is no set of fields to be exhaustive over, and the
+ * platform compares an answer the same way for the same reason.
+ */
+function saidInOneOrder(entry: MockToolEntry): string {
+  const says = entry.says;
+  return JSON.stringify(
+    Object.keys(says)
+      .sort()
+      .map((key) => [key, says[key]]),
+  );
+}
+
+/** Whether two entries say the same thing, whatever order they say it in. */
 export function sameMockTool(a: MockToolEntry, b: MockToolEntry): boolean {
-  return a.tool === b.tool && JSON.stringify(a.says) === JSON.stringify(b.says);
+  return a.tool === b.tool && saidInOneOrder(a) === saidInOneOrder(b);
 }
 
 /** Whether two lists of mock tools say the same thing, in the same order. */

@@ -54,13 +54,13 @@ Rules for the file, and none of them is optional:
   different answer from one of the agent's tools — an empty calendar, a booking
   service that is down — and it looks like this:
 
-  ```markdown
+  ````markdown
   ## Mock tools
   ### check_availability
   ```json
   { "answer": { "slots": [] } }
   ```
-  ```
+  ````
 
   The heading is the tool's name, exactly as the agent registers it. The block
   holds `answer` with what the tool returns, or `error` with the failure it

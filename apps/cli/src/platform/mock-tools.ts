@@ -22,9 +22,10 @@
  */
 
 import type { MockToolEntry } from "../folder/mock-tools.ts";
-import { PlatformUnreachableError, type Fetch } from "./device-flow.ts";
-import type { SignedIn } from "./signed-in.ts";
+import type { Fetch } from "./device-flow.ts";
 import { PlatformRefusedError } from "./refused.ts";
+import type { SignedIn } from "./signed-in.ts";
+import { ask, saidBy, text } from "./wire.ts";
 
 /** A mock tool as the platform currently has it. */
 export type PlatformMockTool = {
@@ -40,21 +41,15 @@ export type MockToolWriteAnswer =
   | { readonly kind: "turned-away"; readonly reason: string };
 
 /**
- * A string off the wire, with nothing in it a terminal would obey — the rule
- * every read of this API follows, and for the reason the test end states.
+ * The agents a mock tool is scoped to, by name — the shape a file writes.
  *
- * It is applied to the names and to nothing else. **An answer is data and is
- * never printed**: it is written into a fenced JSON block, where a control
- * character comes out escaped and can move no cursor, and stripping characters
- * out of somebody's answer would be egma quietly editing the mocked world it
- * was handed — and would leave the folder saying something the platform does
- * not, for every push after this one.
+ * The names go through the wire's own reader, as every name off this API does.
+ * **An answer does not, and that is deliberate**: an answer is data, is never
+ * printed, and is written into a fenced JSON block where a control character
+ * comes out escaped and can move no cursor. Taking characters out of it would
+ * be egma quietly editing the mocked world it was handed, and would leave the
+ * folder saying something the platform does not for every push after this one.
  */
-function text(value: unknown): string {
-  return typeof value === "string" ? value.replaceAll(/[\p{Cc}\p{Cf}]/gu, "").trim() : "";
-}
-
-/** The agents a mock tool is scoped to, by name — the shape a file writes. */
 function agentNames(value: unknown): readonly string[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) => {
@@ -108,44 +103,6 @@ function mockToolFrom(body: Record<string, unknown>): PlatformMockTool {
 /** What a file sends: the heading's tool, and everything the block said. */
 function writeBody(entry: MockToolEntry): Record<string, unknown> {
   return { ...entry.says, tool: entry.tool };
-}
-
-async function bodyOf(response: Response): Promise<Record<string, unknown>> {
-  return (await response.json().catch(() => ({}))) as Record<string, unknown>;
-}
-
-/** What the platform said about a refusal, or egma's own words for a silence. */
-function saidBy(body: Record<string, unknown>, status: number): string {
-  const message = text(body.message).trim();
-  return message === "" ? `egma answered ${status} and said nothing about it` : message;
-}
-
-type Call = {
-  readonly signedIn: SignedIn;
-  readonly path: string;
-  readonly method?: string;
-  readonly body?: unknown;
-  readonly fetchImpl?: Fetch;
-};
-
-async function ask(call: Call): Promise<{ response: Response; body: Record<string, unknown> }> {
-  const fetchImpl = call.fetchImpl ?? fetch;
-
-  let response: Response;
-  try {
-    response = await fetchImpl(`${call.signedIn.url}${call.path}`, {
-      method: call.method ?? "GET",
-      headers: {
-        authorization: `Bearer ${call.signedIn.key}`,
-        ...(call.body === undefined ? {} : { "content-type": "application/json" }),
-      },
-      ...(call.body === undefined ? {} : { body: JSON.stringify(call.body) }),
-    });
-  } catch (cause) {
-    throw new PlatformUnreachableError(call.signedIn.url, cause);
-  }
-
-  return { response, body: await bodyOf(response) };
 }
 
 /**

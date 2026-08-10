@@ -923,6 +923,70 @@ describe("the folder carries mock tools", () => {
     expect(valuesOf(again.stdout, "mock-tool-unchanged")).toEqual(["check_availability"]);
   });
 
+  it("names a mock tools file it cannot read on a pull too, and leaves it alone", async () => {
+    // The verb a refusal tells a developer to run is the last one allowed to
+    // fall over on a half-typed file. It writes nothing rather than merging
+    // what it cannot read, because the mock tools somebody is drafting in there
+    // are invisible to it and the platform's answer would land on top of them.
+    platform.mocking.add({ tool: "check_availability", answer: { slots: [] } });
+    await makeFolder();
+    const broken = ["## Mock tools", "### send_sms", "```json", "{sent: true", "```", ""].join(
+      "\n",
+    );
+    await writeFile(mockToolsFile(), broken, "utf8");
+
+    const result = await egma(["pull"]);
+
+    expect(result.code).toBe(0);
+    expect(factOf(result.stdout, "status")).toBe("pulled");
+    expect(valuesOf(result.stdout, "kept")).toEqual(["mock-tools"]);
+    expect(factOf(result.stdout, "reason")).toContain("send_sms");
+    expect(factOf(result.stdout, "mock-tools")).toBe("0");
+    expect(await readMockTools()).toBe(broken);
+    // Every printed line is still a fact somebody can act on: no stack trace,
+    // and nothing that is not `key: value`.
+    expect(result.stderr).toBe("");
+    for (const line of result.stdout.trimEnd().split("\n")) {
+      expect(line, line).toMatch(/^[a-z-]+: /u);
+    }
+  });
+
+  it("says nothing changed when a file only put the same keys in another order", async () => {
+    platform.mocking.add({
+      tool: "check_availability",
+      answer: { slots: [] },
+      delayMilliseconds: 250,
+    });
+    platform.tests.add({
+      name: "calendar-is-full",
+      scenario: "Nothing is free next week.",
+      expectedBehaviors: ["The agent offers to take a message."],
+      mockTools: [{ tool: "check_availability", answer: { slots: [] }, delay_ms: 250 }],
+    });
+    await makeFolder();
+    await egma(["pull"]);
+
+    // The order somebody types `delay_ms` and `answer` in is not something they
+    // said — egma has one order it writes them in. A folder that thought
+    // otherwise would report an edit that edited nothing, every time.
+    await writeMockTools([["check_availability", { delay_ms: 250, answer: { slots: [] } }]]);
+    const held = await readTest("calendar-is-full.md");
+    await writeTest(
+      "calendar-is-full.md",
+      held.replace(
+        /## Mock tools[\s\S]*$/u,
+        `${mockToolSection([["check_availability", { delay_ms: 250, answer: { slots: [] } }]])}`,
+      ),
+    );
+
+    const result = await egma(["push"]);
+
+    expect(result.code).toBe(0);
+    expect(valuesOf(result.stdout, "mock-tool-unchanged")).toEqual(["check_availability"]);
+    expect(valuesOf(result.stdout, "unchanged")).toEqual(["calendar-is-full"]);
+    expect(platform.tests.versionsOf("calendar-is-full")).toBe(1);
+  });
+
   it("keeps a mock tool nobody has pushed, and never writes over it", async () => {
     platform.mocking.add({ tool: "check_availability", answer: { slots: [] } });
     await makeFolder();

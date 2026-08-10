@@ -8,7 +8,7 @@
 
 import { PlatformUnreachableError } from "../platform/device-flow.ts";
 import { PlatformRefusedError } from "../platform/refused.ts";
-import { pullMockTools } from "../sync/mock-tools.ts";
+import { MOCK_TOOLS_SHOWN, pullMockTools } from "../sync/mock-tools.ts";
 import { pullTests } from "../sync/pull.ts";
 import { FOLDER_EXIT, readyToSync, type FolderCommandOptions } from "./folder-verbs.ts";
 
@@ -47,6 +47,11 @@ export async function runPullCommand(options: FolderCommandOptions): Promise<num
   // are two things, and something reading these lines has to be able to tell
   // one from the other without knowing which order they came in.
   for (const tool of mocked.tools) options.out(`mock-tool: ${tool}`);
+  if (mocked.unreadable !== null) {
+    options.out("kept: mock-tools");
+    options.out(`file: ${MOCK_TOOLS_SHOWN}`);
+    options.out(`reason: ${mocked.unreadable}`);
+  }
 
   options.out(`tests: ${report.tests.length}`);
   options.out(`mock-tools: ${mocked.tools.length}`);

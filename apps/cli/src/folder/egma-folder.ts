@@ -186,6 +186,9 @@ const MOCK_TOOLS_HEADER = [
   "Neither verb removes one: a block taken out of this file comes back on the next",
   "`egma pull`, exactly as deleting a test file does not delete the test.",
   "",
+  "This prose is egma's own. Either verb rewrites the whole file from what egma",
+  "holds, so a note added up here does not survive the next one.",
+  "",
   "A test that needs a different answer writes it under the same heading in its own",
   "file. That override is the test's own content, and is versioned with the test.",
   "",
@@ -198,11 +201,19 @@ export function serializeMockToolsFile(
   // section: this file is the mock tools, and one with none has to say where
   // the first one goes.
   const written = writeMockTools(entries);
-  return `${[...MOCK_TOOLS_HEADER, ...(written.length === 0 ? [MOCK_TOOLS_HEADING] : written), ""].join("\n")}`;
+  const section = written.length === 0 ? [MOCK_TOOLS_HEADING] : written;
+  return [...MOCK_TOOLS_HEADER, ...section, ""].join("\n");
 }
 
 /**
  * The mock tools one file says, whatever prose somebody wrote above them.
+ *
+ * The *first* heading opens the section here, where a test file takes its last
+ * one. The difference is the shape of the two documents rather than two minds
+ * about one rule: everything above the heading in this file is the prose egma
+ * writes at the top — whose own title deliberately does not read as the section
+ * heading — and everything below it is mock tools, one of which could perfectly
+ * well be a tool somebody named `mock tools`.
  *
  * A file with no heading at all is read as holding none rather than refused: a
  * folder somebody emptied on purpose is still a folder egma can push.

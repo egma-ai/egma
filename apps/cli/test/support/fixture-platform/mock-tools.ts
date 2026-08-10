@@ -33,9 +33,17 @@ import {
   LONGEST_MOCK_TOOL_DELAY_MILLISECONDS,
 } from "@egma/db";
 
-import { given, isId, newId, NOT_AUTHENTICATED, PAGE_SIZE, text } from "./reading.ts";
+import {
+  cannotActIn,
+  given,
+  isId,
+  newId,
+  NOT_AUTHENTICATED,
+  PAGE_SIZE,
+  refuse,
+  text,
+} from "./reading.ts";
 import type { FixtureAnswer, FixtureRequest, RouteGroup } from "./server.ts";
-import { cannotActIn, refuse } from "./tests.ts";
 
 /** What one mock tool answers with: one branch, never both and never none. */
 export type MockAnswer = { readonly answer: unknown } | { readonly error: string };

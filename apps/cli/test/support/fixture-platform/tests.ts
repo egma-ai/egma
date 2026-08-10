@@ -41,11 +41,13 @@ import {
   type MockAnswer,
 } from "./mock-tools.ts";
 import {
+  cannotActIn,
   given,
   isId,
   newId,
   NOT_AUTHENTICATED,
   PAGE_SIZE,
+  refuse,
   text,
   textList,
 } from "./reading.ts";
@@ -144,27 +146,6 @@ const NO_EXPECTED_VERSION =
   "named no expected_version_id. Send the version_id you last read " +
   "for this test, or read the test again and send the version it " +
   "names now.";
-
-/**
- * A project this credential may not act in.
- *
- * One sentence for reads and writes alike. A surface that refused a stranger's
- * project on a write and answered an empty list on a read would have two rules,
- * and the empty list is the worse half: it reads as "you have no tests there"
- * rather than as "that is not yours to ask about".
- */
-export function cannotActIn(projectId: string): string {
-  return (
-    `this credential may not act in project ${projectId}. A credential ` +
-    `authorized for one project acts in that one, and a key for the whole ` +
-    `organization acts in any project of that organization. Leave project out ` +
-    `to use the project this credential already acts in.`
-  );
-}
-
-export function refuse(status: number, error: string, message: string): FixtureAnswer {
-  return { status, body: { error, message } };
-}
 
 /**
  * The personas a body names, in the order it named them.

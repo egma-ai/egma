@@ -68,12 +68,17 @@ describe("a mock tool in a file", () => {
     expect(writeMockTools([])).toEqual([]);
   });
 
-  it("keeps the order the keys were written in, because egma compares them that way", () => {
+  it("writes the keys in the order it was handed them, and reads them back so", () => {
+    // Writing does not reorder anything, because everything egma writes is
+    // handed to it in the one order egma projects an answer into. What that
+    // buys is the round trip: the bytes are decided by the value, so a `pull`
+    // straight after a `push` computes the same file and finds nothing to do.
     const one = written([{ tool: "t", says: { delay_ms: 10, answer: 1 } }]);
     const other = written([{ tool: "t", says: { answer: 1, delay_ms: 10 } }]);
 
     expect(one).not.toBe(other);
     expect(read(one)).toEqual([{ tool: "t", says: { delay_ms: 10, answer: 1 } }]);
+    expect(read(other)).toEqual([{ tool: "t", says: { answer: 1, delay_ms: 10 } }]);
   });
 
   it("reads a file somebody typed by hand, however they typed it", () => {
@@ -143,6 +148,26 @@ describe("a mock tool in a file", () => {
     const list = ["## Mock tools", "### check_availability", "```json", "[1, 2]", "```"].join("\n");
 
     expect(() => read(list)).toThrow(/"check_availability".*\{"answer"/su);
+  });
+
+  it("compares two entries by what they say, not by the order they say it in", () => {
+    // The order somebody typed the entry's own keys in is not something they
+    // said: egma has one order it writes them in, and a file that arrived in
+    // another is the same mock tool. What is *inside* those keys is compared as
+    // written, because an answer is whatever shape that tool's contract has and
+    // the platform compares an answer the same way.
+    expect(
+      sameMockTools(
+        [{ tool: "t", says: { delay_ms: 250, answer: { a: 1, b: 2 } } }],
+        [{ tool: "t", says: { answer: { a: 1, b: 2 }, delay_ms: 250 } }],
+      ),
+    ).toBe(true);
+    expect(
+      sameMockTools(
+        [{ tool: "t", says: { answer: { a: 1, b: 2 } } }],
+        [{ tool: "t", says: { answer: { b: 2, a: 1 } } }],
+      ),
+    ).toBe(false);
   });
 
   it("compares two lists the way egma compares them: same order, same keys", () => {

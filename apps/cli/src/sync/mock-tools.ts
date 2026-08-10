@@ -43,10 +43,20 @@ export type MockToolsOptions = {
 };
 
 export type PullMockToolsReport = {
-  /** Every mock tool the file now holds, in the order it holds them. */
+  /** Every mock tool this pull wrote into the file, in the order it wrote them. */
   readonly tools: readonly string[];
   /** False when the file already said exactly this. */
   readonly written: boolean;
+  /**
+   * Why the file was left exactly as it is, when egma could not read it.
+   *
+   * A pull cannot merge what it cannot read: the mock tools somebody is
+   * drafting in there are invisible to it, and writing the platform's answer
+   * over the top would destroy the one file they most need to look at. So it
+   * is named and left, which is what a pull does with a test file it cannot
+   * read too.
+   */
+  readonly unreadable: string | null;
 };
 
 /** One mock tool after a push, and what happened to it. */
@@ -83,20 +93,34 @@ export async function pullMockTools(
   options: MockToolsOptions,
 ): Promise<PullMockToolsReport> {
   const { signedIn, paths, fetchImpl } = options;
+
+  // Read before anything is asked of the platform, and read first of all: a
+  // file egma cannot read is a pull that writes nothing rather than a pull that
+  // ends on an exception. This verb is the one a refusal tells a developer to
+  // run, so it is the last one allowed to fall over on a half-typed file.
+  let authored: readonly MockToolEntry[];
+  try {
+    authored = await readMockToolsFile(paths.mockTools);
+  } catch (problem) {
+    return {
+      tools: [],
+      written: false,
+      unreadable: problem instanceof Error ? problem.message : String(problem),
+    };
+  }
+
   const held = await listMockTools(
     signedIn,
     ...(fetchImpl === undefined ? [] : ([fetchImpl] as const)),
   );
 
   const onPlatform = new Set(held.map((one) => one.entry.tool));
-  const drafts = (await readMockToolsFile(paths.mockTools)).filter(
-    (entry) => !onPlatform.has(entry.tool),
-  );
+  const drafts = authored.filter((entry) => !onPlatform.has(entry.tool));
 
   const entries = [...held.map((one) => one.entry), ...drafts].sort(byToolName);
   const { changed } = await writeMockToolsFile(paths.mockTools, entries);
 
-  return { tools: entries.map((entry) => entry.tool), written: changed };
+  return { tools: entries.map((entry) => entry.tool), written: changed, unreadable: null };
 }
 
 /**

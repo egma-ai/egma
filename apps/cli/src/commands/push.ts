@@ -35,10 +35,13 @@ export async function runPushCommand(options: FolderCommandOptions): Promise<num
   let mocked: PushMockToolsReport = { mockTools: [], turnedAway: [] };
   try {
     report = await pushTests({ signedIn: ready.signedIn, paths: ready.paths });
-    // A refusal is a refusal about the whole folder: "nothing was uploaded" is
-    // the sentence a developer reads, and a push that had quietly landed the
-    // mocked world on its way to saying it would have made that untrue.
-    if (!(report.uploadedNothing && report.conflicts.length > 0)) {
+    // A push that is going to be refused stops where it is. The refusal ends on
+    // "run egma pull, look at what changed, then push again", and a push that
+    // had gone on to land the mocked world would have made that sentence a lie
+    // about half the folder — including in the race where the platform's own
+    // door caught the conflict after some tests had already landed.
+    const refused = report.conflicts.length > 0;
+    if (!refused) {
       mocked = await pushMockTools({ signedIn: ready.signedIn, paths: ready.paths });
     }
   } catch (cause) {

@@ -224,7 +224,7 @@ your agent's tools while a simulation runs, so a test never reaches your real
 backend and can ask for the branch you want to see — an empty calendar, a
 booking service that is down.
 
-```markdown
+``````markdown
 ## Mock tools
 ### check_availability
 ```json
@@ -233,7 +233,7 @@ booking service that is down.
   "delay_ms": 250
 }
 ```
-```
+``````
 
 Send `error` instead of `answer` for the failure a tool raises, `delay_ms` to
 make a mocked backend take as long as the real one, and `agents` to narrow a
