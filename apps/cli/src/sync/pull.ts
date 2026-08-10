@@ -59,6 +59,7 @@ export function fileFromPlatform(test: PlatformTest): TestFile {
     version: test.versionId,
     scenario: test.scenario,
     expectedBehaviors: test.expectedBehaviors,
+    mockTools: test.mockTools,
   };
 }
 

@@ -1,51 +1,9 @@
 {
-  "id": "c34cdc31-8a65-4e8b-98f8-7129a7fbb144",
+  "id": "ba3a1e6a-8e97-4da3-ac1c-f8a556ff3e6e",
   "prevId": "a178e921-67e2-4bb6-8d82-e69a733b07b4",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.platform_instance": {
-      "name": "platform_instance",
-      "schema": "",
-      "columns": {
-        "only": {
-          "name": "only",
-          "type": "boolean",
-          "primaryKey": true,
-          "notNull": true,
-          "default": true
-        },
-        "id": {
-          "name": "id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "platform_instance_only_one": {
-          "name": "platform_instance_only_one",
-          "value": "\"platform_instance\".\"only\""
-        },
-        "platform_instance_id_prefix": {
-          "name": "platform_instance_id_prefix",
-          "value": "\"platform_instance\".\"id\" ~ '^ins_[0-9A-HJKMNP-TV-Z]{26}$'"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.account": {
       "name": "account",
       "schema": "",
@@ -2482,6 +2440,319 @@
       },
       "isRLSEnabled": false
     },
+    "public.mock_tool": {
+      "name": "mock_tool",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tool_name": {
+          "name": "tool_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "answer": {
+          "name": "answer",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "delay_milliseconds": {
+          "name": "delay_milliseconds",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "mock_tool_project_id_tool_name_unique": {
+          "name": "mock_tool_project_id_tool_name_unique",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "tool_name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"mock_tool\".\"deleted_at\" is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mock_tool_organization_id_project_id_idx": {
+          "name": "mock_tool_organization_id_project_id_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"mock_tool\".\"deleted_at\" is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "mock_tool_organization_id_organization_id_fk": {
+          "name": "mock_tool_organization_id_organization_id_fk",
+          "tableFrom": "mock_tool",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "mock_tool_created_by_user_id_fk": {
+          "name": "mock_tool_created_by_user_id_fk",
+          "tableFrom": "mock_tool",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "mock_tool_project_organization_fk": {
+          "name": "mock_tool_project_organization_fk",
+          "tableFrom": "mock_tool",
+          "tableTo": "project",
+          "columnsFrom": [
+            "project_id",
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "mock_tool_id_project_id_unique": {
+          "name": "mock_tool_id_project_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "project_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "mock_tool_id_prefix": {
+          "name": "mock_tool_id_prefix",
+          "value": "\"mock_tool\".\"id\" ~ '^mck_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "mock_tool_delay_within_budget": {
+          "name": "mock_tool_delay_within_budget",
+          "value": "\"mock_tool\".\"delay_milliseconds\" between 0 and 30000"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.mock_tool_agent": {
+      "name": "mock_tool_agent",
+      "schema": "",
+      "columns": {
+        "mock_tool_id": {
+          "name": "mock_tool_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "mock_tool_agent_agent_id_idx": {
+          "name": "mock_tool_agent_agent_id_idx",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "mock_tool_agent_mock_tool_id_mock_tool_id_fk": {
+          "name": "mock_tool_agent_mock_tool_id_mock_tool_id_fk",
+          "tableFrom": "mock_tool_agent",
+          "tableTo": "mock_tool",
+          "columnsFrom": [
+            "mock_tool_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "mock_tool_agent_agent_id_agent_id_fk": {
+          "name": "mock_tool_agent_agent_id_agent_id_fk",
+          "tableFrom": "mock_tool_agent",
+          "tableTo": "agent",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "mock_tool_agent_mock_tool_project_fk": {
+          "name": "mock_tool_agent_mock_tool_project_fk",
+          "tableFrom": "mock_tool_agent",
+          "tableTo": "mock_tool",
+          "columnsFrom": [
+            "mock_tool_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "id",
+            "project_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "mock_tool_agent_agent_project_fk": {
+          "name": "mock_tool_agent_agent_project_fk",
+          "tableFrom": "mock_tool_agent",
+          "tableTo": "agent",
+          "columnsFrom": [
+            "agent_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "id",
+            "project_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "mock_tool_agent_pk": {
+          "name": "mock_tool_agent_pk",
+          "columns": [
+            "mock_tool_id",
+            "agent_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "mock_tool_agent_mock_tool_id_position_unique": {
+          "name": "mock_tool_agent_mock_tool_id_position_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "mock_tool_id",
+            "position"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "mock_tool_agent_mock_tool_id_prefix": {
+          "name": "mock_tool_agent_mock_tool_id_prefix",
+          "value": "\"mock_tool_agent\".\"mock_tool_id\" ~ '^mck_[0-9A-HJKMNP-TV-Z]{26}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.test": {
       "name": "test",
       "schema": "",
@@ -3012,6 +3283,12 @@
         },
         "connection_snapshot": {
           "name": "connection_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mock_tool_snapshot": {
+          "name": "mock_tool_snapshot",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true

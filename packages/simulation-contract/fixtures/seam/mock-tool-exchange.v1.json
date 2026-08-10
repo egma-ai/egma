@@ -1,0 +1,49 @@
+{
+  "this_document": "The mock-tool exchange as bytes. egma's simulator and the egma SDK a customer installs each hold their own copy of these constants and each build and read these shapes, deliberately: an SDK reaching into egma's services for a constant would drag egma's dependencies into the customer's process and tie the version they run to the version egma deploys. The exchange is a contract, so the two halves are held together by tests against this file rather than by an import — which is also the only thing that still works the day one half is written in another language. Both suites read it, so a version, a method name, a code, a shape or a cap that moves on one side fails a hermetic test on that side.",
+  "protocol_version": 1,
+  "methods": {
+    "hello": "egma.hello",
+    "tool": "egma.tool"
+  },
+  "limits": {
+    "largest_payload_bytes": 15360,
+    "longest_delay_milliseconds": 30000
+  },
+  "refusals": [
+    { "code": 901, "means": "A message this exchange cannot read at all." },
+    { "code": 902, "means": "A call for a name this simulation has no answer for." },
+    { "code": 903, "means": "An answer that would not fit on the wire." },
+    { "code": 904, "means": "A hello in a version of this exchange egma does not speak." }
+  ],
+  "reserved_for_the_transport": {
+    "from": 1001,
+    "to": 1999,
+    "means": "The transport's own errors — a method nobody registered, a recipient that is not there, a payload it cannot carry. egma refuses in 901-999 so a code always says whose complaint it is: an answer egma would not give, or a message that never reached egma at all."
+  },
+  "messages": {
+    "hello_request": {
+      "bytes": "{\"protocol_version\":1,\"tools\":[{\"name\":\"check_calendar\",\"schema\":{\"type\":\"object\",\"properties\":{\"day\":{\"type\":\"string\"}}}},{\"name\":\"charge_card\",\"schema\":{\"type\":\"object\",\"properties\":{\"amount_cents\":{\"type\":\"integer\"}}}}]}",
+      "says": "Sent once when the agent's session starts: the protocol version, and the census — every tool the agent has, by name, with its schema. This agent has two, and this simulation answers for one of them."
+    },
+    "hello_reply": {
+      "bytes": "{\"protocol_version\":1,\"mocked_tools\":[\"check_calendar\"]}",
+      "says": "egma's answer: the version it speaks, and the names it will answer for. The other side stands a courier in front of exactly those and leaves every other tool alone — which is why charge_card is absent here, and why a call to it is refused with 902 rather than served."
+    },
+    "tool_request": {
+      "bytes": "{\"name\":\"check_calendar\",\"arguments\":{\"day\":\"2026-08-13\"}}",
+      "says": "One call to a wrapped tool: the tool's name, and the arguments as an object."
+    },
+    "tool_request_without_arguments": {
+      "bytes": "{\"name\":\"check_calendar\"}",
+      "says": "The same call where this side could not see the arguments — a tool attached after the census, whose courier has no signature to read them through. The key is left off entirely, because an empty object would put 'this call had no arguments' on the record, which is a different and untrue thing."
+    },
+    "tool_reply_answer": {
+      "bytes": "{\"answer\":{\"slots\":[]}}",
+      "says": "What the mock tool holds, tagged. The tag is the whole point: it lets the far side tell 'return this to the model' from 'raise this at the model' even when the authored value itself looks like a failure. Nothing guesses from the shape of a value."
+    },
+    "tool_reply_error": {
+      "bytes": "{\"error\":\"the calendar service is unavailable\"}",
+      "says": "The failure branch a test forces, in the mock tool author's own sentence — it reaches the model, so it is theirs and not the SDK's."
+    }
+  }
+}

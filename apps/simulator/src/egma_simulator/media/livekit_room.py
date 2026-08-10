@@ -64,10 +64,22 @@ different things:
 - **Room metadata** is the connection's own configured JSON, verbatim.
   It is the customer's to write and egma's to pass through untouched —
   the place an agent reads whatever its own deployment needs.
-- **Dispatch metadata** is egma's context and only egma's: the simulation
-  this room is conducting and the modality it is in. It carries **nothing
-  of the test's content** — no scenario text, no persona, no expected
-  behavior — because an agent that reads its script stops being under test.
+- **Dispatch metadata** is egma's context and only egma's: which
+  simulation this room is conducting, the modality it is in, who egma is
+  in the room, and which version of the mock-tool exchange that
+  participant speaks. It carries **nothing of the test's content** — no
+  scenario text, no persona, no expected behavior, and no mock answer —
+  because an agent that reads its script stops being under test.
+
+## Answering for the agent's tools
+
+A room driver is also where egma stands in the agent's tool path, for the
+simulations that mock anything. The two methods are registered on egma's
+participant the moment the room is joined, and what answers them knows
+nothing about rooms — see :mod:`egma_simulator.mock_tools`, which owns
+the exchange, the record it leaves, and the coverage stamp. Room
+membership is the whole of the authorisation, which is why a room with no
+egma participant leaves the agent's tools untouched by construction.
 
 ## Which failed ending a refusal deserves
 
@@ -98,13 +110,21 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
 from ..contract import AGENT_NEVER_JOINED, ERROR
+from ..mock_tools import (
+    HELLO_METHOD,
+    PROTOCOL_VERSION,
+    TOOL_METHOD,
+    MockToolSeam,
+)
 from ..redaction import SecretRegistry
 from . import MediaBackendError
 from .room import (
+    PERSONA_IDENTITY,
     QUOTED_REFUSAL_CHARS,
     JoinedRoom,
     RoomSession,
@@ -115,6 +135,8 @@ from .room import (
     room_name_for,
     room_token,
 )
+
+logger = logging.getLogger(__name__)
 
 ROOM_BAND_HZ = 16000
 """The band an exchange in a room is carried at.
@@ -168,16 +190,35 @@ message, short of pasting a page of HTML into a simulation's record.
 """
 
 
-def dispatch_metadata(simulation_id: str) -> str:
+def dispatch_metadata(simulation_id: str, *, egma_identity: str) -> str:
     """egma's context for one dispatched worker, and nothing else's.
 
-    The simulation this room is conducting and the modality it is in —
-    enough for an agent to line its own telemetry up with egma's record,
-    and nothing at all about what the test is going to ask it. An agent
-    that could read its script would stop being under test.
+    Four facts, and every one of them is about *where egma is*, never
+    about what the test asks:
+
+    - ``simulationId`` — which simulation this room is conducting, so an
+      agent can line its own telemetry up with egma's record.
+    - ``modality`` — that it is a voice one.
+    - ``egmaIdentity`` — who egma is in this room. It is the address the
+      agent's side sends a mock-tool call to, and it is the whole of the
+      authorisation: a room with no such participant has nobody to ask,
+      which is every production room.
+    - ``protocolVersion`` — which version of that exchange egma speaks,
+      so the other side knows before it says anything.
+
+    **Nothing of the test's content, ever.** No scenario, no persona, no
+    expected behavior, and no mock answer — an answer reaches the agent
+    only at the moment it calls the tool, because an agent that could read
+    its script would stop being under test.
     """
     return json.dumps(
-        {"simulationId": simulation_id, "modality": "voice"}, separators=(",", ":")
+        {
+            "simulationId": simulation_id,
+            "modality": "voice",
+            "egmaIdentity": egma_identity,
+            "protocolVersion": PROTOCOL_VERSION,
+        },
+        separators=(",", ":"),
     )
 
 
@@ -493,10 +534,12 @@ class LiveKitRoomBackend:
         settings: RoomSettings,
         band_hz: int,
         simulation_id: str,
+        mock_tools: MockToolSeam | None = None,
     ) -> None:
         self._settings = settings
         self._band_hz = band_hz
         self._simulation_id = simulation_id
+        self._mock_tools = mock_tools
         # One registry per driver, so what this driver quotes from the
         # platform goes through the same scrubbing a log line does rather
         # than through a second implementation of it.
@@ -526,7 +569,49 @@ class LiveKitRoomBackend:
         """Get a way into the room, join it, and answer with its audio."""
         way_in = await self._way_in()
         self._room = self._joined_room(way_in)
-        return await self._room.join()
+        session = await self._room.join()
+        self._answer_for_mocked_tools()
+        return session
+
+    def _answer_for_mocked_tools(self) -> None:
+        """Stand ready to answer for the agent's tools, in the room.
+
+        Done the moment the room is joined and before the worker is asked
+        for, because the agent's side says hello as its session starts —
+        a handler registered afterwards would be a race with the first
+        thing the agent does.
+
+        Both methods go on whether or not this simulation mocks anything.
+        A room where egma answers for no tools still answers the hello
+        with an empty list, which is how the agent's side learns to wrap
+        nothing and leave every tool alone — and it is what puts the
+        agent's own tool list on the record, so a simulation that isolated
+        nothing still says so.
+
+        **Nothing here may sink a conversation that would otherwise have
+        run.** Offering the methods is the one step in this driver that
+        the simulation does not depend on: a room where egma answered for
+        nothing is exactly the room every simulation was before mock tools
+        existed, and failing the whole thing over it would make a feature
+        nobody asked for on this connection into a way to lose a test run.
+        So a refusal is logged loudly and the exchange is simply never
+        offered — and the record then claims nothing about tools, which is
+        the truth, because egma never stood in their path.
+        """
+        if self._mock_tools is None or self._room is None:
+            return
+        try:
+            self._room.register_rpc(HELLO_METHOD, self._mock_tools.hello)
+            self._room.register_rpc(TOOL_METHOD, self._mock_tools.tool)
+        except Exception as unoffered:
+            logger.error(
+                "egma could not offer the mock-tool exchange in %s, so every "
+                "tool the agent has will run its own implementation: %s",
+                self._room_name,
+                self._quotable(repr(unoffered)),
+            )
+            return
+        self._mock_tools.standing_ready()
 
     async def _way_in(self) -> WayIn:
         """A token and a room, however this connection comes by them.
@@ -652,7 +737,15 @@ class LiveKitRoomBackend:
         request = api.CreateAgentDispatchRequest(
             room=self._room_name,
             agent_name=self._settings.agent_name,
-            metadata=dispatch_metadata(self._simulation_id),
+            # The identity the token grants, not a name invented here: the
+            # agent's side addresses its mock-tool calls to exactly this
+            # participant, so a metadata block naming anybody else would
+            # send them to nobody. Dispatching happens only on the shape
+            # that mints its own token, which is the shape that signs this
+            # identity — see `room_token`.
+            metadata=dispatch_metadata(
+                self._simulation_id, egma_identity=PERSONA_IDENTITY
+            ),
         )
         await self._asked(
             request,

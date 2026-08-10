@@ -3,6 +3,8 @@
 The first open-source platform purpose-built to help teams shipping voice agents
 gain trust in the agent they ship to production.
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/egma-ai/egma)
+
 ## Running it
 
 You need Docker with Compose. Nothing else.
@@ -377,9 +379,9 @@ recipe to run it safely.
 
 ## Working on it
 
-Node 24 and pnpm 10. The simulator is Python, managed by
-[uv](https://docs.astral.sh/uv/) — install it too, and `pnpm test` covers
-both worlds.
+Node 24 and pnpm 10. Two things here are Python, managed by
+[uv](https://docs.astral.sh/uv/) — the simulator and the SDK a customer
+installs — so install uv too, and `pnpm test` covers all three worlds.
 
 ```bash
 pnpm install
@@ -435,6 +437,10 @@ packages/simulation-contract
                 The versioned JSON contract between the control plane and the
                 simulator: a schema per direction, golden fixtures beside
                 them, and the suite that holds both to the fixtures.
+sdks/python     The package a customer installs inside their own LiveKit
+                agent, so egma can answer for the agent's tools while a
+                simulation runs and touch nothing anywhere else. Published
+                to PyPI as `egma`. Own toolchain (uv); see its README.
 ```
 
 The two processes answer on **one origin**. The web application proxies the

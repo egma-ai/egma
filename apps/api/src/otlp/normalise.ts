@@ -199,14 +199,23 @@ const SIMULATOR_TURN_NAMES: ReadonlySet<string> = new Set([
 const SIMULATOR_TURN_TEXT = "egma.turn.text";
 
 /**
- * No `result` key, deliberately: the simulator observes the call from egma's
- * side of the connection and not the return, and a key for a fact nobody
- * observes would be the invented structure this file refuses. When a platform
- * starts reporting results, the vocabulary grows the line.
+ * The result key is here now, and the reason it was once absent is the reason
+ * it belongs: this file refuses invented structure, and a result egma itself
+ * served is not invented. The simulator answers a mocked tool call from inside
+ * the exchange, so the answer is authored rather than observed — and the
+ * vocabulary only lets it be written down beside the provenance stamp saying
+ * where it came from. A call egma merely watched go past still carries
+ * neither.
+ *
+ * The stamp itself, the mock tool that answered, and the late-attached flag
+ * have no columns of their own and are not given one here. They are in the
+ * span's payload, whole, like every other attribute the row does not lift out;
+ * a column earns its place by being queried, and nothing queries these yet.
  */
 const SIMULATOR_TOOL = {
   name: "egma.tool.name",
   arguments: "egma.tool.arguments",
+  result: "egma.tool.result",
 } as const;
 
 /**

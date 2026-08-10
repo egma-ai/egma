@@ -211,6 +211,10 @@ describe("claiming work", () => {
     expect(spec.persona).toEqual({ traits: NEUTRAL_TRAITS });
     expect(spec.scenario).toEqual({ instructions: RESCHEDULING.scenario });
     expect(spec.limits).toEqual({ max_duration_seconds: 600, max_turns: 60 });
+    // A run that mocks nothing hands over the work order it always did.
+    // An empty list would be a claim about tools where this project has
+    // made none, and most projects have made none.
+    expect("mock_tools" in spec).toBe(false);
 
     // The row carries the claim, and the run has started.
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
@@ -220,6 +224,128 @@ describe("claiming work", () => {
 
     const header = await ask(api.app, "GET", `/api/runs/${runId}`, key);
     expect(header.body.status).toBe("running");
+  });
+
+  it("carries the answers this simulation serves, resolved into one world", async () => {
+    api = await createApi("claims_mock_tools");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+
+    const registered = await ask(api.app, "POST", "/api/agents", key, {
+      name: "Front desk",
+      connection: RETELL,
+    });
+    expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
+    const connectionId = (registered.body.connection as { id: string }).id;
+    await createPersona(contextFor(ada, "member"), {
+      name: "Impatient Rita",
+      traits: NEUTRAL_TRAITS,
+    });
+
+    // The project's world: two tools answered for every test it runs.
+    for (const written of [
+      { tool: "check_availability", answer: { slots: ["Tuesday 14:00"] } },
+      { tool: "send_confirmation_sms", answer: { delivered: true }, delay_ms: 250 },
+    ]) {
+      const authored = await ask(api.app, "POST", "/api/mock-tools", key, written);
+      expect(authored.statusCode, JSON.stringify(authored.body)).toBe(201);
+    }
+
+    // And one test that forces a branch the project's world does not have.
+    const pushed = await ask(api.app, "POST", "/api/tests", key, {
+      ...RESCHEDULING,
+      personas: ["Impatient Rita"],
+      mock_tools: [
+        { tool: "check_availability", answer: { slots: [] } },
+        { tool: "book_appointment", error: "the booking service is down" },
+      ],
+    });
+    expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
+
+    await aQueuedRun(key, connectionId, String(pushed.body.version_id));
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 4,
+      wait_seconds: 0,
+    });
+    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
+    const spec = (answered.body.specs as Record<string, unknown>[])[0];
+    if (spec === undefined) throw new Error("no spec came back");
+    expect(specComplaints(spec)).toEqual([]);
+
+    // The override beat the default of the same name and took its place;
+    // the default the test said nothing about stayed; and the override for
+    // a tool no default covers joined the end. One world, decided here, so
+    // there is nothing left for the simulator to choose between.
+    expect(spec.mock_tools).toEqual([
+      {
+        tool_name: "check_availability",
+        answer: { answer: { slots: [] } },
+        delay_milliseconds: 0,
+      },
+      {
+        tool_name: "send_confirmation_sms",
+        answer: { answer: { delivered: true } },
+        delay_milliseconds: 250,
+      },
+      {
+        tool_name: "book_appointment",
+        answer: { error: "the booking service is down" },
+        delay_milliseconds: 0,
+      },
+    ]);
+  });
+
+  it("goes on serving the world its run froze after the mock tool is edited", async () => {
+    api = await createApi("claims_mock_snapshot");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+
+    const registered = await ask(api.app, "POST", "/api/agents", key, {
+      name: "Front desk",
+      connection: RETELL,
+    });
+    const connectionId = (registered.body.connection as { id: string }).id;
+    await createPersona(contextFor(ada, "member"), {
+      name: "Impatient Rita",
+      traits: NEUTRAL_TRAITS,
+    });
+    const authored = await ask(api.app, "POST", "/api/mock-tools", key, {
+      tool: "check_availability",
+      answer: { slots: ["Tuesday 14:00"] },
+    });
+    const pushed = await ask(api.app, "POST", "/api/tests", key, {
+      ...RESCHEDULING,
+      personas: ["Impatient Rita"],
+    });
+    await aQueuedRun(key, connectionId, String(pushed.body.version_id));
+
+    // The edit lands after the run was created, which is the case the
+    // snapshot exists for: a mock tool is unversioned and an edit
+    // overwrites the row, so a run reading the row at claim time would
+    // hand two simulations of one run two different worlds.
+    const edited = await ask(
+      api.app,
+      "PATCH",
+      `/api/mock-tools/${String(authored.body.id)}`,
+      key,
+      { answer: { slots: [] } },
+    );
+    expect(edited.statusCode, JSON.stringify(edited.body)).toBe(200);
+
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 4,
+      wait_seconds: 0,
+    });
+    const spec = (answered.body.specs as Record<string, unknown>[])[0];
+    expect(spec?.mock_tools).toEqual([
+      {
+        tool_name: "check_availability",
+        answer: { answer: { slots: ["Tuesday 14:00"] } },
+        delay_milliseconds: 0,
+      },
+    ]);
   });
 
   it("splits one queue between two claimants without handing anything out twice", async () => {

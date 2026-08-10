@@ -7,7 +7,11 @@ import ajvFormats from "ajv-formats";
 import type { FormatsPlugin } from "ajv-formats";
 import { describe, expect, it } from "vitest";
 
-import { reportComplaints, specComplaints } from "@egma/simulation-contract";
+import {
+  bannedWordIn,
+  reportComplaints,
+  specComplaints,
+} from "@egma/simulation-contract";
 
 // ajv-formats ships CommonJS whose module.exports is the plugin function
 // itself; under NodeNext TypeScript types the default import as a namespace,
@@ -100,6 +104,16 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     property: "limits",
   },
   "spec/modality-unknown.json": { at: "/modality", keyword: "enum" },
+  // An answer is a value *or* a failure, and the tagged shape is what keeps
+  // an authored `null` tellable from no answer at all. One that claims both
+  // is refused inside the branch that would have taken the value: the
+  // failure has nowhere to sit beside it, and there is no rule that would
+  // choose between them.
+  "spec/mock-tool-answering-two-ways.json": {
+    at: "/mock_tools/0/answer",
+    keyword: "additionalProperties",
+    property: "error",
+  },
   "spec/unknown-field.json": {
     at: "",
     keyword: "additionalProperties",
@@ -308,6 +322,184 @@ describe("what the golden fixtures cover", () => {
 });
 
 /**
+ * The coverage stamp: which of the agent's tools egma stood ready to answer
+ * for, and which ran their real implementations untouched.
+ *
+ * It rides the terminal facts for the same reason the measured audio band
+ * does. Two simulations are only comparable when they were the same kind of
+ * thing, and a simulation whose backends were answered by mock tools is not
+ * the same kind of thing as one that reached the real ones — so the fact has
+ * to be readable from the simulation's own record, without asking anything
+ * that is editable afterwards, and without joining anything at all.
+ */
+describe("the coverage stamp on the terminal facts", () => {
+  type Stamp = {
+    readonly discovered: readonly string[];
+    readonly covered: readonly string[];
+    readonly uncovered: readonly string[];
+  };
+
+  /** Each valid report fixture's stamp, or undefined where it carries none. */
+  async function stamps(): Promise<Map<string, Stamp | undefined>> {
+    const byFixture = new Map<string, Stamp | undefined>();
+    for (const fixture of await fixturesUnder("report", "valid")) {
+      for (const event of fixture.document.events as Record<string, unknown>[]) {
+        const facts = event.facts as Record<string, unknown> | undefined;
+        if (facts === undefined) continue;
+        byFixture.set(fixture.name, facts.mock_tool_coverage as Stamp | undefined);
+      }
+    }
+    return byFixture;
+  }
+
+  it("reads back a simulation whose every discovered tool was covered", async () => {
+    expect((await stamps()).get("completed-mocked-fully-covered.json")).toEqual({
+      discovered: ["check_calendar", "book_appointment", "send_confirmation_sms"],
+      covered: ["check_calendar", "book_appointment", "send_confirmation_sms"],
+      uncovered: [],
+    });
+  });
+
+  it("reads back a mixed simulation, which is the one that was not fully isolated", async () => {
+    // Three of the agent's four tools ran for real. `send_confirmation_sms` is
+    // covered without having been discovered: what the agent reported is a
+    // snapshot of the simulation's first moment, while an answer is held ready
+    // for every name the simulation covers — so a tool attached afterwards is
+    // answered anyway, and a call served for it lands flagged late-attached.
+    expect((await stamps()).get("completed-mocked-mixed-coverage.json")).toEqual({
+      discovered: [
+        "check_calendar",
+        "book_appointment",
+        "lookup_customer",
+        "transfer_to_human",
+      ],
+      covered: ["check_calendar", "send_confirmation_sms"],
+      uncovered: ["book_appointment", "lookup_customer", "transfer_to_human"],
+    });
+  });
+
+  it("reads back a simulation where nothing was discovered at all, which is a plain unmocked one", async () => {
+    expect(
+      (await stamps()).get("completed-unmocked-nothing-discovered.json"),
+    ).toEqual({ discovered: [], covered: [], uncovered: [] });
+  });
+
+  it("leaves the stamp off a simulation nothing offered a seam on, so the expand breaks nobody", async () => {
+    const unstamped = [...(await stamps())].filter(
+      ([, stamp]) => stamp === undefined,
+    );
+    // The fixtures that predate mock tools still validate untouched, and their
+    // silence is the honest reading: egma never asked this agent what tools it
+    // had, so the record claims nothing about them.
+    expect(unstamped.length).toBeGreaterThan(0);
+  });
+
+  it("says at a glance whether mock tools took part, without joining anything", async () => {
+    const involved = [...(await stamps())]
+      .filter(([, stamp]) => stamp !== undefined && stamp.covered.length > 0)
+      .map(([name]) => name)
+      .sort();
+    expect(involved).toEqual([
+      "completed-mocked-fully-covered.json",
+      "completed-mocked-mixed-coverage.json",
+    ]);
+  });
+
+  it("never has one tool both covered and uncovered, and keeps uncovered to what was discovered", async () => {
+    for (const [name, stamp] of await stamps()) {
+      if (stamp === undefined) continue;
+      const covered = new Set(stamp.covered);
+      // Uncovered is exactly the discovered tools nothing answered for. The
+      // three lists are written out rather than derived, the way turn_count is
+      // written out rather than counted from the spans, and this is what holds
+      // the written answer to the arithmetic it stands for.
+      expect(stamp.uncovered, name).toEqual(
+        stamp.discovered.filter((tool) => !covered.has(tool)),
+      );
+    }
+  });
+
+  /** The stamp of a fully covered simulation, as a fixture holds it. */
+  async function fullyCovered(): Promise<Record<string, unknown>> {
+    return readJson(
+      "fixtures",
+      "report",
+      "valid",
+      "completed-mocked-fully-covered.json",
+    );
+  }
+
+  /** The same document with its stamp replaced by the given one. */
+  function stamped(
+    carried: Record<string, unknown>,
+    stamp: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return {
+      ...carried,
+      events: (carried.events as Record<string, unknown>[]).map((event) => ({
+        ...event,
+        facts: { ...(event.facts as Record<string, unknown>), mock_tool_coverage: stamp },
+      })),
+    };
+  }
+
+  it("refuses a tool named twice in one list, because a name is a tool and not a count", async () => {
+    const carried = await fullyCovered();
+    const [event] = carried.events as Record<string, unknown>[];
+    const facts = event?.facts as Record<string, unknown> | undefined;
+    const stamp = facts?.mock_tool_coverage as Stamp | undefined;
+    if (stamp === undefined) throw new Error("the fixture carries no stamp");
+
+    // Matching is by name and one answer per name, so a name written twice
+    // says nothing a name written once does not — and a list that permitted it
+    // would let a miscount look like a wider reach.
+    const repeated = [...stamp.discovered, stamp.discovered[0] ?? ""];
+    // The place and the problem, without the pair of indices Ajv adds after
+    // them: which two entries collided is not the fact under test, and pinning
+    // it would make this fail the day the fixture grows a tool.
+    const complaints = reportComplaints(
+      stamped(carried, { ...stamp, discovered: repeated }),
+    );
+    expect(
+      complaints.some((complaint) =>
+        complaint.startsWith(
+          "/events/0/facts/mock_tool_coverage/discovered: must NOT have duplicate items",
+        ),
+      ),
+      complaints.join("; "),
+    ).toBe(true);
+  });
+
+  it("refuses a stamp naming a tool with no name at all", async () => {
+    const carried = await fullyCovered();
+    expect(
+      reportComplaints(
+        stamped(carried, { discovered: [""], covered: [], uncovered: [""] }),
+      ).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("refuses a half-written stamp, because a coverage claim with a list missing claims nothing", async () => {
+    const whole = {
+      discovered: ["check_calendar"],
+      covered: ["check_calendar"],
+      uncovered: [],
+    };
+
+    for (const dropped of Object.keys(whole)) {
+      const partial: Record<string, unknown> = { ...whole };
+      delete partial[dropped];
+      expect(
+        reportComplaints(stamped(await fullyCovered(), partial)),
+        `a stamp missing ${dropped} raised no complaint`,
+      ).toContain(
+        `/events/0/facts/mock_tool_coverage: must have required property '${dropped}'`,
+      );
+    }
+  });
+});
+
+/**
  * Credentials travel in exactly one direction: the spec. The report schema
  * does not merely lack a credentials field — it is written so that no document
  * carrying one can validate, which is what "structurally forbids" means. These
@@ -407,6 +599,42 @@ describe("the report schema structurally forbids credential material", () => {
       expect(ajv.errorsText(validators.report.errors)).toContain(
         "must NOT have additional properties",
       );
+    }
+  });
+});
+
+/**
+ * One thing has one name. The contract is where a word becomes permanent —
+ * a schema property outlives the prose that explained it — so the words the
+ * project has settled against are held out of it here rather than caught in
+ * review. The scan covers everything a reader of this package meets: both
+ * schemas, every document beside them, and every golden fixture.
+ *
+ * The list itself is `src/vocabulary.ts`, shared with the guard over the
+ * platform's own mock-tool surface. Two lists written separately had already
+ * drifted apart, which is precisely the failure a vocabulary guard exists to
+ * prevent — so there is one, and both scanners read it.
+ */
+describe("the contract's surface, held to the words the project settled on", () => {
+  it("uses none of them, anywhere a reader of this package looks", async () => {
+    const files = (
+      await readdir(packageRoot, { recursive: true, withFileTypes: true })
+    ).filter(
+      (entry) =>
+        entry.isFile() &&
+        (entry.name.endsWith(".json") || entry.name.endsWith(".md")) &&
+        !entry.parentPath.includes("node_modules"),
+    );
+    expect(files.length).toBeGreaterThan(0);
+
+    for (const file of files) {
+      const at = path.join(file.parentPath, file.name);
+      const found = bannedWordIn(await readFile(at, "utf8"));
+      expect(
+        found?.found,
+        `${path.relative(packageRoot, at)} uses "${found?.found}"; ` +
+          `say ${found?.instead}`,
+      ).toBeUndefined();
     }
   });
 });

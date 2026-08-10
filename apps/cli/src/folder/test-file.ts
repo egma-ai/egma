@@ -17,7 +17,14 @@
  * …prose…
  * ## Expected behaviors
  * 1. …ordered statements…
+ * ## Mock tools
+ * …the tools this test answers for itself…
  * ```
+ *
+ * The third heading is there only when the test overrides one of the project's
+ * mock tools. An override is test content — it versions with the test exactly
+ * as an expected behavior does — which is why it lives in the test's own file
+ * and not beside the project's.
  *
  * `version:` is absent on a file nothing has synced yet, and its presence is
  * what makes the refusal rule checkable: without a pin there is nothing on the
@@ -30,6 +37,12 @@
  * immediately after `push` change zero bytes.
  */
 
+import {
+  MOCK_TOOLS_LINE,
+  readMockTools,
+  writeMockTools,
+  type MockToolEntry,
+} from "./mock-tools.ts";
 import {
   listAt,
   readYaml,
@@ -50,12 +63,17 @@ export type TestFile = {
   readonly scenario: string;
   /** In the order they were authored. */
   readonly expectedBehaviors: readonly string[];
+  /**
+   * The tools this test answers for itself, overriding the project's for the
+   * length of this test. Empty leaves the project's mock tools the whole world.
+   */
+  readonly mockTools: readonly MockToolEntry[];
 };
 
 export const SCENARIO_HEADING = "## Scenario";
 export const EXPECTED_BEHAVIORS_HEADING = "## Expected behaviors";
 
-/** Either heading, however many hashes and whatever case it was written in. */
+/** Any of the three headings, however many hashes and in whatever case. */
 const SCENARIO_LINE = /^#{1,6}\s*scenario\s*$/iu;
 const EXPECTED_BEHAVIORS_LINE = /^#{1,6}\s*expected\s+behaviou?rs\s*$/iu;
 
@@ -83,28 +101,49 @@ function frontmatterOf(document: string, where: string): {
 }
 
 /**
- * The body's two parts.
+ * The body's three parts.
  *
- * The expected-behaviors heading is the one boundary, so a scenario that has
- * headings of its own inside it keeps them. Anything before a scenario heading
- * — or a body with no heading at all — is read as the scenario, because a file
- * a person started typing is still a file egma should be able to push.
+ * The two headings after the scenario are the boundaries, so a scenario that
+ * has headings of its own inside it keeps them. Anything before a scenario
+ * heading — or a body with no heading at all — is read as the scenario, because
+ * a file a person started typing is still a file egma should be able to push.
  *
- * The boundary is the *last* heading and the scenario opens at the *first* one,
- * so a scenario whose prose quotes either heading keeps it. egma writes each
- * heading once, which makes first and last the same line in every file egma
- * has written.
+ * Each boundary is the *last* heading of its kind and the scenario opens at the
+ * *first* one, so a scenario whose prose quotes any of them keeps it. egma
+ * writes each heading once, which makes first and last the same line in every
+ * file egma has written.
+ *
+ * The mock tools heading is the one egma does not always write, so "the last
+ * one" is not enough on its own: a test that overrides nothing and whose prose
+ * quotes the heading has exactly one, and it is the prose's. What settles it is
+ * the order egma writes the sections in — mock tools last — so the heading is
+ * read as the section's only where it stands below the expected behaviors, and
+ * anywhere above them it is prose the scenario keeps.
  */
-function partsOf(body: string): { readonly scenario: string; readonly behaviors: string } {
+function partsOf(body: string): {
+  readonly scenario: string;
+  readonly behaviors: string;
+  readonly mockTools: readonly string[];
+} {
   const lines = body.split("\n");
   const startsAt = lines.findIndex((line) => SCENARIO_LINE.test(line.trim()));
-  const boundary = lines.findLastIndex((line) => EXPECTED_BEHAVIORS_LINE.test(line.trim()));
+  const behaviorsAt = lines.findLastIndex((line) =>
+    EXPECTED_BEHAVIORS_LINE.test(line.trim()),
+  );
+  const lastMockTools = lines.findLastIndex((line) => MOCK_TOOLS_LINE.test(line.trim()));
+  const mockToolsAt = lastMockTools > behaviorsAt ? lastMockTools : -1;
 
   const from = startsAt === -1 ? 0 : startsAt + 1;
-  const to = boundary === -1 ? lines.length : boundary;
+  const scenarioTo = Math.min(
+    behaviorsAt === -1 ? lines.length : behaviorsAt,
+    mockToolsAt === -1 ? lines.length : mockToolsAt,
+  );
+  const behaviorsTo = mockToolsAt === -1 ? lines.length : mockToolsAt;
+
   return {
-    scenario: lines.slice(from, Math.max(from, to)).join("\n").trim(),
-    behaviors: boundary === -1 ? "" : lines.slice(boundary + 1).join("\n"),
+    scenario: lines.slice(from, Math.max(from, scenarioTo)).join("\n").trim(),
+    behaviors: behaviorsAt === -1 ? "" : lines.slice(behaviorsAt + 1, behaviorsTo).join("\n"),
+    mockTools: mockToolsAt === -1 ? [] : lines.slice(mockToolsAt + 1),
   };
 }
 
@@ -146,7 +185,7 @@ export function parseTestFile(
   fallbackName: string,
 ): TestFile {
   const { mapping, body } = frontmatterOf(document, where);
-  const { scenario, behaviors } = partsOf(body);
+  const { scenario, behaviors, mockTools } = partsOf(body);
 
   return {
     name: textAt(mapping, "name") ?? fallbackName,
@@ -154,6 +193,7 @@ export function parseTestFile(
     version: textAt(mapping, "version"),
     scenario,
     expectedBehaviors: behaviorsIn(behaviors),
+    mockTools: readMockTools(mockTools, where),
   };
 }
 
@@ -208,6 +248,10 @@ export function serializeTestFile(file: TestFile): string {
     ...(scenario === "" ? [] : [scenario]),
     EXPECTED_BEHAVIORS_HEADING,
     ...behaviors,
+    // Last, and absent altogether on the ordinary test that overrides nothing:
+    // a heading with nothing under it would read as a claim about a mocked
+    // world this test does not make.
+    ...writeMockTools(file.mockTools),
     "",
   ].join("\n");
 }

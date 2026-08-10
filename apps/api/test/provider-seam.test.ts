@@ -106,6 +106,8 @@ describe("the provider's footprint on the schema", () => {
     "invitation",
     "judge_configuration",
     "membership",
+    "mock_tool",
+    "mock_tool_agent",
     "organization",
     "organization_settings",
     "persona",

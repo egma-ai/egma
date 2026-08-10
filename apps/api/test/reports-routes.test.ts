@@ -446,6 +446,89 @@ describe("the lifecycle lands", () => {
     expect(row?.providerReference).toBe("CA7e2b9c1d4f6a8e0b");
   });
 
+  /**
+   * The stamp is what says whether two simulations' numbers may be compared at
+   * all, so it has to survive the whole way: off the report, onto the row, and
+   * out of the run's own read with nothing else to fetch.
+   */
+  it("lands the coverage stamp and serves it back on the run's simulations", async () => {
+    const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
+      "reports_coverage",
+    );
+    const { runId, simulationId } = await aRunningSimulation(
+      key,
+      connectionId,
+      versionId,
+    );
+
+    const answered = await report(simulationId, [
+      terminalEvent("completed", "persona_concluded", {
+        mock_tool_coverage: {
+          discovered: ["check_calendar", "send_confirmation"],
+          covered: ["check_calendar"],
+          uncovered: ["send_confirmation"],
+        },
+      }),
+    ]);
+    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
+
+    const row = await getSimulation(contextFor(ada, "member"), simulationId);
+    expect(row?.mockToolCoverage).toEqual({
+      discovered: ["check_calendar", "send_confirmation"],
+      covered: ["check_calendar"],
+      uncovered: ["send_confirmation"],
+    });
+
+    // And readable by whoever asks for the run — the different-units rule
+    // answered off the conversation itself, without joining anything.
+    const read = await ask(api.app, "GET", `/api/runs/${runId}`, key);
+    const [served] = read.body.simulations as {
+      readonly mock_tool_coverage: unknown;
+    }[];
+    expect(served?.mock_tool_coverage).toEqual({
+      discovered: ["check_calendar", "send_confirmation"],
+      covered: ["check_calendar"],
+      uncovered: ["send_confirmation"],
+    });
+  });
+
+  /**
+   * The two silences, which are two different facts. A report with no stamp is
+   * a conversation whose agent was never asked what tools it has; a stamp of
+   * three empty lists is the asking happening and nothing coming back. Landing
+   * either as the other would put a claim on the record the simulator declined
+   * to make.
+   */
+  it("keeps a report with no stamp apart from one whose stamp is empty", async () => {
+    const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
+      "reports_coverage_absent",
+    );
+
+    const silent = await aRunningSimulation(key, connectionId, versionId);
+    expect(
+      (await report(silent.simulationId, [
+        terminalEvent("completed", "persona_concluded"),
+      ])).statusCode,
+    ).toBe(200);
+    expect(
+      (await getSimulation(contextFor(ada, "member"), silent.simulationId))
+        ?.mockToolCoverage,
+    ).toBeNull();
+
+    const asked = await aRunningSimulation(key, connectionId, versionId);
+    expect(
+      (await report(asked.simulationId, [
+        terminalEvent("completed", "persona_concluded", {
+          mock_tool_coverage: { discovered: [], covered: [], uncovered: [] },
+        }),
+      ])).statusCode,
+    ).toBe(200);
+    expect(
+      (await getSimulation(contextFor(ada, "member"), asked.simulationId))
+        ?.mockToolCoverage,
+    ).toEqual({ discovered: [], covered: [], uncovered: [] });
+  });
+
   it("refuses audio facts for a chat conversation, which has none to measure", async () => {
     const { key, connectionId, versionId } = await aCustomerReadyToRun(
       "reports_chat_audio",

@@ -202,6 +202,7 @@ status: connected
 ```
 egma/
   config.yaml     which egma, and what this folder points at on it
+  mock-tools.md   what egma answers for the agent's tools with
   tests/          one markdown file per test
 ```
 
@@ -248,6 +249,30 @@ reschedule this week. They are short on time and irritated.
 Name a persona only when the situation needs a particular kind of person on the
 other end; leave `personas` out and the default one applies. `version:` is
 absent until `pull` or `push` writes it.
+
+`egma/mock-tools.md` is the mocked world: a **mock tool** answers for one of
+your agent's tools while a simulation runs, so a test never reaches your real
+backend and can ask for the branch you want to see — an empty calendar, a
+booking service that is down.
+
+``````markdown
+## Mock tools
+### check_availability
+```json
+{
+  "answer": { "slots": [] },
+  "delay_ms": 250
+}
+```
+``````
+
+Send `error` instead of `answer` for the failure a tool raises, `delay_ms` to
+make a mocked backend take as long as the real one, and `agents` to narrow a
+mock tool to some of your agents rather than all of them. A test that needs a
+different answer writes the same section into its own file, below its expected
+behaviors — that override belongs to the test and is versioned with it, while
+the project's own mock tools are the one authored thing egma does not version,
+so pushing an edit writes over what was there.
 
 ## Your first suite of tests
 

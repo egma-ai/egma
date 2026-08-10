@@ -1,6 +1,8 @@
 packages:
   - apps/*
+  - fixtures/*
   - packages/*
+  - sdks/*
 
 onlyBuiltDependencies:
   - node-pty
