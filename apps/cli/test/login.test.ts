@@ -557,6 +557,47 @@ describe("writing the key down", () => {
     expect((folder.mode & 0o777).toString(8)).toBe("700");
   });
 
+  it("migrates the old single-platform file without losing or exposing its key", async () => {
+    const legacy = {
+      url: "https://OLD.example/",
+      key: "egma_sk_preserved-from-the-old-format",
+    };
+    const next = {
+      url: "https://second.example",
+      key: "egma_sk_added-after-the-upgrade",
+    };
+    await mkdir(path.dirname(workspace.credentialsFile), { recursive: true });
+    await writeFile(workspace.credentialsFile, `${JSON.stringify(legacy)}\n`, {
+      encoding: "utf8",
+      mode: 0o644,
+    });
+
+    expect(await readCredentials(workspace.credentialsFile, legacy.url)).toEqual({
+      url: "https://old.example",
+      key: legacy.key,
+    });
+    const said: string[] = [];
+    await writeCredentials(workspace.credentialsFile, next, {
+      warn: (line) => said.push(line),
+    });
+
+    expect(await readCredentials(workspace.credentialsFile, legacy.url)).toEqual({
+      url: "https://old.example",
+      key: legacy.key,
+    });
+    expect(await readCredentials(workspace.credentialsFile, next.url)).toEqual(next);
+    expect(((await stat(workspace.credentialsFile)).mode & 0o777).toString(8)).toBe("600");
+    expect(said.join("\n")).not.toContain(legacy.key);
+    expect(said.join("\n")).not.toContain(next.key);
+    expect(JSON.parse(await readFile(workspace.credentialsFile, "utf8"))).toEqual({
+      version: 1,
+      platforms: {
+        "https://old.example": { key: legacy.key },
+        "https://second.example": { key: next.key },
+      },
+    });
+  });
+
   it("keeps one key per normalized platform origin", async () => {
     const first = { url: "https://ONE.example/", key: "egma_sk_for-one" };
     const second = { url: "http://localhost:4310", key: "egma_sk_for-two" };

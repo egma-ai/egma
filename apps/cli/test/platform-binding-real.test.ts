@@ -1,10 +1,16 @@
 import { execFile } from "node:child_process";
+import path from "node:path";
 import { promisify } from "node:util";
 
 import { expect, it, vi } from "vitest";
 
-import { startInstance, type Instance } from "../../api/test/support/instance.ts";
-import { createEgmaFolder } from "../src/folder/egma-folder.ts";
+import {
+  startInstance,
+  type Instance,
+  type ObservedInstanceRequest,
+} from "../../api/test/support/instance.ts";
+import { signUp } from "../../api/test/support/traces.ts";
+import { createEgmaFolder, writeTestFile } from "../src/folder/egma-folder.ts";
 import { CLI_ENTRY, makeWorkspace } from "./support/workspace.ts";
 
 const run = promisify(execFile);
@@ -35,6 +41,41 @@ it("refuses a repository bound to another real local platform before sending its
   try {
     first = await startInstance("cli_platform_binding_first", { web: false });
     const firstIdentity = await identityOf(first);
+    const customer = await signUp(first.api, "binding@acme.example", "Acme Binding");
+    const registered = await first.api.inject({
+      method: "POST",
+      url: "/api/agents",
+      headers: { authorization: `Bearer ${customer.secret}` },
+      payload: {
+        name: "Real receptionist",
+        connection: {
+          name: "real-retell-1",
+          type: "retell",
+          modality: "chat",
+          config: { retellAgentId: "synthetic-agent-on-platform-a" },
+          credentials: { apiKey: "synthetic-key-used-only-by-this-test" },
+        },
+      },
+    });
+    expect(registered.statusCode, registered.body).toBe(201);
+    const resources = registered.json() as {
+      agent: { id: string; name: string };
+      connection: { id: string; name: string };
+    };
+
+    const createdTest = await first.api.inject({
+      method: "POST",
+      url: "/api/tests",
+      headers: { authorization: `Bearer ${customer.secret}` },
+      payload: {
+        name: "Real boundary test",
+        scenario: "The persona asks to move an appointment.",
+        expected_behaviors: ["The agent confirms the new time."],
+        personas: [],
+      },
+    });
+    expect(createdTest.statusCode, createdTest.body).toBe(201);
+    const testResource = createdTest.json() as { id: string; version_id: string };
 
     await createEgmaFolder({
       repository: workspace.dir,
@@ -43,16 +84,36 @@ it("refuses a repository bound to another real local platform before sending its
           origin: firstIdentity.origin,
           instance: firstIdentity.instance_id,
         },
-        agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
-        connection: { name: "phone-1", id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES" },
+        agent: { name: resources.agent.name, id: resources.agent.id },
+        connection: {
+          name: resources.connection.name,
+          id: resources.connection.id,
+        },
         suite: { name: "first-suite", id: null },
       },
     });
+    await writeTestFile(path.join(workspace.dir, "egma", "tests", "boundary.md"), {
+      name: "Real boundary test",
+      personas: [],
+      version: testResource.version_id,
+      scenario: "The persona asks to move an appointment.",
+      expectedBehaviors: ["The agent confirms the new time."],
+    });
+    const repositoryIds = [
+      resources.agent.id,
+      resources.connection.id,
+      testResource.id,
+      testResource.version_id,
+    ];
 
     await first.close();
     first = undefined;
 
-    second = await startInstance("cli_platform_binding_second", { web: false });
+    const observedBySecond: ObservedInstanceRequest[] = [];
+    second = await startInstance("cli_platform_binding_second", {
+      web: false,
+      observeRequest: (request) => observedBySecond.push(request),
+    });
     const secondIdentity = await identityOf(second);
     expect(secondIdentity.instance_id).not.toBe(firstIdentity.instance_id);
 
@@ -75,6 +136,17 @@ it("refuses a repository bound to another real local platform before sending its
     expect(result.stderr).toContain(firstIdentity.instance_id);
     expect(result.stderr).toContain(secondIdentity.instance_id);
     expect(result.stderr).toContain("No repository identifiers were sent");
+
+    const identifierBearing = observedBySecond.filter((request) => {
+      const shown = JSON.stringify(request);
+      return repositoryIds.some((identifier) => shown.includes(identifier));
+    });
+    expect(identifierBearing).toEqual([]);
+    expect(
+      observedBySecond
+        .filter((request) => request.url.startsWith("/api/"))
+        .map((request) => `${request.method} ${request.url}`),
+    ).toEqual(["GET /api/platform", "GET /api/platform"]);
 
     const stored = await second.database.sql<{ count: string }>("select count(*) from run");
     expect(stored.rows).toEqual([{ count: "0" }]);

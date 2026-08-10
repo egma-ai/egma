@@ -47,7 +47,12 @@ export type Platform = FixturePlatform & {
   signedInWith(key: string): void;
 };
 
-export async function startPlatform(): Promise<Platform> {
+export type StartPlatformOptions = {
+  /** What the identity route names when this socket is only an alias. */
+  readonly canonicalOrigin?: string;
+};
+
+export async function startPlatform(options: StartPlatformOptions = {}): Promise<Platform> {
   let device!: DeviceControls;
   let registered!: AgentControls;
   let tests!: TestControls;
@@ -55,7 +60,7 @@ export async function startPlatform(): Promise<Platform> {
   let identity!: PlatformIdentityControls;
 
   const platform = await startFixturePlatform((origin) => {
-    const platformGroup = platformRoutes(origin);
+    const platformGroup = platformRoutes(() => options.canonicalOrigin ?? origin());
     identity = platformGroup.controls;
     const deviceGroup = deviceRoutes(origin);
     device = deviceGroup.controls;

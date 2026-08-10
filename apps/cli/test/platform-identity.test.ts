@@ -107,6 +107,39 @@ describe("verifying an Egma platform", () => {
     }
   });
 
+  it("accepts an alias when it reports the bound instance and canonical origin", async () => {
+    const canonicalOrigin = "https://canonical.egma.example";
+    const alias = await startPlatform({ canonicalOrigin });
+    try {
+      await createEgmaFolder({
+        repository: workspace.dir,
+        config: {
+          platform: { origin: canonicalOrigin, instance: alias.instanceId },
+          agent: null,
+          connection: null,
+          suite: null,
+        },
+      });
+
+      const access = await resolvePlatformAccess({
+        env: workspace.env(),
+        flag: alias.url,
+        cwd: workspace.dir,
+      });
+
+      expect(alias.url).not.toBe(canonicalOrigin);
+      expect(access).toMatchObject({
+        url: canonicalOrigin,
+        instanceId: alias.instanceId,
+      });
+      expect(alias.records.map((record) => `${record.method} ${record.path}`)).toEqual([
+        "GET /api/platform",
+      ]);
+    } finally {
+      await alias.close();
+    }
+  });
+
   it("uses Egma Cloud only when the repository is unbound", async () => {
     const requested: string[] = [];
     const access = await resolvePlatformAccess({

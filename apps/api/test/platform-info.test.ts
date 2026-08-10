@@ -1,42 +1,54 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { connect, disconnect } from "@egma/db";
+import type { FastifyInstance } from "fastify";
+import { expect, it } from "vitest";
 
-import { createApi, type TestApi } from "./support/api.ts";
+import { buildApi } from "../src/server.ts";
+import {
+  createMigratedDatabase,
+  TEST_ENCRYPTION_KEY,
+} from "../../../packages/db/test/support/database.ts";
+import { testConfig } from "./support/api.ts";
 
 /**
- * The public identity of one Egma platform.
+ * The public identity survives the API object that first read it.
  *
- * The CLI reads this before it has a credential and before it sends one
- * repository identifier. A real database is part of this seam because the
- * instance identity must survive an API restart instead of changing with the
- * process that happened to answer.
+ * Both objects use the same real Postgres database. Closing the first object
+ * before building the second makes this a restart proof, not two reads from
+ * one process-local value.
  */
-describe("the public platform identity", () => {
-  let api: TestApi;
-
-  beforeAll(async () => {
-    api = await createApi("platform_info");
+it("keeps one public platform identity across an API restart", async () => {
+  const database = await createMigratedDatabase("platform_info_restart");
+  connect({
+    databaseUrl: database.url,
+    maxConnections: 4,
+    encryptionKey: TEST_ENCRYPTION_KEY,
   });
+  const config = testConfig({ databaseUrl: database.url });
+  let app: FastifyInstance | undefined;
 
-  afterAll(async () => {
-    await api.close();
-  });
-
-  it("returns one stable, non-secret identity and the canonical origin without a credential", async () => {
-    const first = await api.app.inject({ method: "GET", url: "/api/platform" });
-    const second = await api.app.inject({ method: "GET", url: "/api/platform" });
-
+  try {
+    app = buildApi({ config }).app;
+    await app.ready();
+    const first = await app.inject({ method: "GET", url: "/api/platform" });
     expect(first.statusCode).toBe(200);
-    expect(second.statusCode).toBe(200);
-
     const identity = first.json<Record<string, unknown>>();
     expect(Object.keys(identity).sort()).toEqual(["instance_id", "origin"]);
     expect(identity).toEqual({
       instance_id: expect.stringMatching(/^pf_[0-9A-HJKMNP-TV-Z]{26}$/u),
-      origin: api.config.baseUrl,
+      origin: config.baseUrl,
     });
-    expect(second.json()).toEqual(identity);
 
-    const shown = JSON.stringify(identity);
-    expect(shown).not.toMatch(/secret|token|credential|cloud/iu);
-  });
+    await app.close();
+    app = buildApi({ config }).app;
+    await app.ready();
+    const afterRestart = await app.inject({ method: "GET", url: "/api/platform" });
+
+    expect(afterRestart.statusCode).toBe(200);
+    expect(afterRestart.json()).toEqual(identity);
+    expect(JSON.stringify(identity)).not.toMatch(/secret|token|credential|cloud/iu);
+  } finally {
+    await app?.close();
+    await disconnect();
+    await database.drop();
+  }
 });

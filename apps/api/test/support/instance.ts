@@ -86,6 +86,14 @@ export type InstanceOptions = {
    * answers.
    */
   readonly web?: boolean;
+  /** Every request after its body is parsed, for boundary tests. */
+  readonly observeRequest?: (request: ObservedInstanceRequest) => void;
+};
+
+export type ObservedInstanceRequest = {
+  readonly method: string;
+  readonly url: string;
+  readonly body: unknown;
 };
 
 /** A port nothing is listening on, so two test files never collide. */
@@ -161,6 +169,15 @@ export async function startInstance(
       EGMA_SINGLE_ORGANIZATION: "false",
     }),
   });
+  if (options.observeRequest !== undefined) {
+    app.addHook("preHandler", async (request) => {
+      options.observeRequest?.({
+        method: request.method,
+        url: request.url,
+        body: request.body,
+      });
+    });
+  }
   await app.listen({ host: "127.0.0.1", port: apiPort });
 
   const web: ChildProcess | undefined = withPages
