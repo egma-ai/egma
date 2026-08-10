@@ -52,7 +52,7 @@ NN — <ticket>
 - [ ] review loop closed — clean, or capped and reported
 - [ ] PR opened against <effort>
 - [ ] every PR review bot thread fixed or answered
-- [ ] re-run against the current <effort> head, still green
+- [ ] re-run against the exact head it merges into, still green
 - [ ] merged into <effort>, ticket recorded
 ```
 
@@ -108,9 +108,15 @@ The loop ends in one of three states, and you report which:
 
 The bot's comments arrive minutes after the PR opens, sometimes in waves as later pushes get re-reviewed. Fix in the same branch, never a follow-up PR. Reply on the thread when a comment is wrong and it is not acting on it, so the record shows the comment was weighed. Ready when every thread is fixed or answered.
 
-**You merge, not the agent.** Only you know what else is in flight. Check the git state and merge one PR at a time.
+**You merge, not the agent.** Only you know what else is in flight. Read the git state before every merge.
 
-**Each merge makes every other open ticket branch stale.** They were built and reviewed against an integration head that no longer exists. Git stops a textual conflict; it does not stop a sibling that renamed what this branch still calls, or changed a behaviour this branch still assumes — the merge is clean and the suite is broken. So after each merge, send every open ticket branch back to its `impl-NN` to take the new integration head and re-run the full suite. It still holds the context, so this is cheap. A branch that has not been run against the head it is merging into is unverified, whatever the review said earlier.
+**One rule governs landing: a branch may merge only if its last full-suite run was against the exact commit it is merging into.** Everything else here follows from that.
+
+Every merge moves the integration head, so every other open branch fails the rule the instant one lands. They were built and reviewed against a head that no longer exists. Git stops a textual conflict; it does not stop a sibling that renamed what this branch still calls, or changed a behaviour this branch still assumes — the merge is clean and the suite is broken.
+
+So land one branch at a time, and refresh only the branch you are landing next: send it back to its `impl-NN` to take the current head and re-run the full suite, then merge it while that head still stands. It holds the context, so each refresh is cheap.
+
+Refreshing the whole queue at once looks faster and is not. The first merge invalidates every run still in flight, and those branches have to go round again — the same staleness, one level down. Implementation stays parallel; only landing is serial. That is the price of an integration branch that is green at every commit rather than green at the end.
 
 Record the outcome on the ticket once it is merged and green — status resolved, the PR, what landed, what each gate found. That commit goes wherever the tracker lives, from your own checkout, not this repo and not an agent's.
 
