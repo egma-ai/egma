@@ -36,7 +36,13 @@ import {
   type AdvanceStep,
   type Platform,
 } from "./support/fixture-platform/index.ts";
-import { CLI_ENTRY, makeWorkspace, waitUntil, type Workspace } from "./support/workspace.ts";
+import {
+  CLI_ENTRY,
+  makeWorkspace,
+  platformNamed,
+  waitUntil,
+  type Workspace,
+} from "./support/workspace.ts";
 
 const run = promisify(execFile);
 
@@ -104,6 +110,7 @@ async function makeFolder(registered: Registered | null): Promise<void> {
   // never rewrites a config that is already there — and a check that changes
   // what the folder points at is exactly the thing that rule protects against.
   await writeConfig(made.paths.config, {
+    platform: null,
     agent: registered === null ? null : { name: "order-line", id: registered.agentId },
     connection: registered === null ? null : { name: "retell-1", id: registered.connectionId },
     suite: { name: "first-suite", id: null },
@@ -148,7 +155,7 @@ async function egmaRun(
   const failures: string[] = [];
 
   const running = runRunCommand({
-    access: { url: platform.url, credentialsFile: workspace.credentialsFile },
+    access: platformNamed({ url: platform.url, credentialsFile: workspace.credentialsFile }),
     cwd: workspace.dir,
     out: (line) => lines.push(line),
     fail: (line) => failures.push(line),
@@ -627,10 +634,10 @@ describe("egma run", () => {
     const code = await runRunCommand({
       // A credentials file with nothing in it, which is a machine that has
       // never logged in.
-      access: {
+      access: platformNamed({
         url: platform.url,
         credentialsFile: path.join(workspace.dir, "no-such-credentials"),
-      },
+      }),
       cwd: workspace.dir,
       out: (line) => lines.push(line),
       fail: (line) => failures.push(line),

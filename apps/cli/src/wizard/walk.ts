@@ -17,6 +17,7 @@
 import process from "node:process";
 
 import type { DrivenAgentLaunch } from "../acp/registry.ts";
+import { bindRepository, identityOnce, type IdentityHolder } from "../platform/binding.ts";
 import { signedInAt } from "../platform/signed-in.ts";
 import type { ConnectOptions } from "../retell/connect.ts";
 import { homeIn } from "../skills/install.ts";
@@ -108,6 +109,13 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
     return report;
   }
 
+  // Who the platform says it is, asked at most once and only when the walk is
+  // about to write something that belongs to it.
+  const identityOf: IdentityHolder =
+    options.platform === undefined
+      ? () => Promise.resolve(null)
+      : identityOnce(options.platform.url, options.platform.identity, { signal });
+
   // Before anything is driven: who this is. Nothing else in the walk can name
   // an agent, a connection or a test until egma knows whose they are.
   if (options.platform !== undefined) {
@@ -115,6 +123,21 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
     if (refusal !== null) {
       ui.setExit(refusal);
       return refusal;
+    }
+
+    // Signed in. A folder that is already here — a second developer's clone,
+    // an `egma init` — is bound to this platform now, so every later command
+    // in it finds the same egma without being told. A repository with no
+    // folder yet is bound by the step that makes one, which is the same moment
+    // its first platform-owned id lands in it.
+    const bound = await bindRepository(cwd, identityOf);
+    if (bound.kind === "bound") {
+      ui.pushStatus(`This repository uses egma at ${bound.binding.origin}.`);
+    }
+    if (bound.kind === "unknown-platform") {
+      ui.pushStatus(
+        `egma at ${options.platform.url} would not say which egma it is, so this repository names no platform. Update that egma, then run this again.`,
+      );
     }
   }
 
@@ -159,6 +182,9 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
     registered: connected.connected.registered,
     config: connected.connected.config,
     facts: found.facts,
+    // The folder this step makes is born naming the egma that owns the ids
+    // about to go into it.
+    identity: await identityOf(),
     ...(options.howManyTests === undefined ? {} : { howMany: options.howManyTests }),
   });
 

@@ -16,11 +16,14 @@ export default defineConfig({
   },
   test: {
     // The CLI tests drive the built entry point, because that is what a
-    // developer runs, and the grader test drives the one its image runs.
-    // Building both here keeps two test files from racing to build one.
+    // developer runs; the grader test drives the one its image runs; and the
+    // platform-binding acceptance check starts two whole APIs as real
+    // processes, which run the built one too. Building them here keeps two
+    // test files from racing to build one.
     globalSetup: [
       "apps/cli/test/support/build-cli.ts",
       "apps/grader/test/support/build-grader.ts",
+      "apps/api/test/support/build-api.ts",
     ],
     include: [
       "packages/*/src/**/*.test.ts",

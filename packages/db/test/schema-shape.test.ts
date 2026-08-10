@@ -24,6 +24,7 @@ const IDENTIFIER_SQL_TYPE = 'text COLLATE "C"';
  * test version points at pin `tstv_`.
  */
 const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
+  platform_instance: "ins",
   user: "usr",
   session: "ses",
   account: "acc",

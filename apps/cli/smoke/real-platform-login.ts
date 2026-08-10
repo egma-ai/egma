@@ -20,7 +20,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -31,6 +31,7 @@ import type { Browser, Page } from "playwright-core";
 
 import { openBrowser } from "../../api/test/support/browser.ts";
 import { startInstance, type Instance } from "../../api/test/support/instance.ts";
+import { readCredentialsFor } from "../src/platform/credentials.ts";
 import { runInTerminal } from "../test/support/pty.ts";
 import {
   approveOnly,
@@ -69,11 +70,8 @@ function envFor(home: Home): NodeJS.ProcessEnv {
 }
 
 /** What is on disk after a login, and what the file is readable by. */
-async function heldIn(home: Home): Promise<{ url: string; key: string; mode: string }> {
-  const held = JSON.parse(await readFile(home.credentials, "utf8")) as {
-    url: string;
-    key: string;
-  };
+async function heldIn(home: Home, url: string): Promise<{ url: string; key: string; mode: string }> {
+  const held = (await readCredentialsFor(home.credentials, url)) ?? { url: "", key: "" };
   const mode = ((await stat(home.credentials)).mode & 0o777).toString(8);
   return { ...held, mode };
 }
@@ -178,7 +176,7 @@ async function theWizard(instance: Instance, page: Page): Promise<void> {
     say("");
     say(`scrollback: ${terminal.scrollback().trim()}`);
 
-    const held = await heldIn(home);
+    const held = await heldIn(home, instance.origin);
     check(held.url === instance.origin, "the key is stored against this instance");
     check(held.key.startsWith("egma_sk_"), "the key is a real minted key");
     check(held.mode === "600", `the credentials file is 0600 (it is 0${held.mode})`);
@@ -228,17 +226,22 @@ async function theVerb(instance: Instance, page: Page): Promise<void> {
     check(stdout.includes("status: stored"), "egma login said it stored a key");
     saysNothingAboutTenancy(stdout, "egma login");
 
-    const held = await heldIn(home);
+    const held = await heldIn(home, instance.origin);
     check(held.mode === "600", `the credentials file is 0600 (it is 0${held.mode})`);
     check(await keyWorks(instance.origin, held.key), "the stored key works on a real request");
 
-    // The second run needs nothing said at all: the address rode along with the
-    // key, and a key already held is not minted twice.
-    const again = await run(process.execPath, [CLI_ENTRY, "login"], { env: envFor(home) });
+    // A second run against the same egma mints nothing: the key this machine
+    // holds for that instance is the key it keeps. The address is said again
+    // here because nothing in this throwaway folder is a repository — a
+    // repository says which egma it belongs to and every command reads it
+    // there, which is what `smoke:walk` proves.
+    const again = await run(process.execPath, [CLI_ENTRY, "login", "--url", instance.origin], {
+      env: envFor(home),
+    });
     check(
       again.stdout.includes("status: already-stored") &&
         again.stdout.includes(`url: ${instance.origin}`),
-      "a second run found the instance and the key with nothing said",
+      "a second run found the key it already held and minted no other",
     );
   } finally {
     await rm(home.folder, { recursive: true, force: true });

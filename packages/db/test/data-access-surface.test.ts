@@ -62,11 +62,13 @@ const CONTEXT_ESTABLISHING = [
 ];
 
 /**
- * What answers a question about the deployment rather than about a customer.
- * It takes nothing and returns a boolean, which is what makes it safe without a
- * context; a build rule refuses it the moment it grows an argument.
+ * What answers a question about the deployment rather than about a customer:
+ * whether anybody has claimed this egma, and what this egma calls itself. Each
+ * takes nothing and answers one fact about the deployment, which is what makes
+ * them safe without a context; a build rule refuses either the moment it grows
+ * an argument.
  */
-const INSTANCE_SCOPED = ["instanceIsClaimed"];
+const INSTANCE_SCOPED = ["instanceIsClaimed", "platformInstanceId"];
 
 /**
  * What hands egma's own services their work, and what keeps a dispatch honest

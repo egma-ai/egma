@@ -32,6 +32,9 @@ const config: NextConfig = {
           destination: `${api}/api/signup/:path*`,
         },
         { source: "/api/me", destination: `${api}/api/me` },
+        // Which egma this is. A repository reads it before it holds a key, and
+        // it reads it on the origin a person typed — which is this one.
+        { source: "/api/platform", destination: `${api}/api/platform` },
         { source: "/api/sign-out", destination: `${api}/api/sign-out` },
         {
           source: "/api/device/:path*",

@@ -9,12 +9,14 @@
  */
 
 import { execFile, spawn } from "node:child_process";
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { readCredentialsFor } from "../src/platform/credentials.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { CLI_ENTRY, makeWorkspace, type Workspace } from "./support/workspace.ts";
 
@@ -34,6 +36,21 @@ afterEach(async () => {
   await platform.close();
   await workspace.remove();
 });
+
+/**
+ * Say, in the repository, which egma it belongs to — what the wizard writes
+ * after its first login, and the only thing a later command reads it from.
+ */
+async function bindWorkspaceTo(named: Platform): Promise<void> {
+  await mkdir(path.join(workspace.dir, "egma", "tests"), { recursive: true });
+  await writeFile(
+    path.join(workspace.dir, "egma", "config.yaml"),
+    ["platform:", `  origin: ${named.url}`, `  instance: ${named.identity.instanceId}`, ""].join(
+      "\n",
+    ),
+    "utf8",
+  );
+}
 
 type Result = { stdout: string; stderr: string; code: number };
 
@@ -84,17 +101,14 @@ describe("egma login", () => {
     expect((await readFile(browser.opened, "utf8")).trim()).toBe(said.approve_url);
 
     // The key is on disk, and nobody else on the machine can read it.
-    const held = JSON.parse(await readFile(workspace.credentialsFile, "utf8")) as {
-      url: string;
-      key: string;
-    };
-    expect(held.url).toBe(platform.url);
-    expect(held.key).toBe(platform.device.keys.at(-1));
+    const held = await readCredentialsFor(workspace.credentialsFile, platform.url);
+    expect(held?.url).toBe(platform.url);
+    expect(held?.key).toBe(platform.device.keys.at(-1));
     expect(((await stat(workspace.credentialsFile)).mode & 0o777).toString(8)).toBe("600");
 
     // And it works on a request that needs one.
     const used = await fetch(`${platform.url}/api/keys`, {
-      headers: { authorization: `Bearer ${held.key}` },
+      headers: { authorization: `Bearer ${held?.key ?? ""}` },
     });
     expect(used.status).toBe(200);
   });
@@ -125,11 +139,16 @@ describe("egma login", () => {
     expect(facts(stdout).status).toBe("stored");
   });
 
-  it("keeps the address it was given, so later commands never repeat it", async () => {
-    // A self-hoster sets it once, for one shell.
+  it("is said once: the repository keeps the address, so later commands do not", async () => {
+    // A self-hoster names it once, for one shell.
     const first = await egma(["login"], { EGMA_URL: platform.url });
     expect(first.code).toBe(0);
     expect(facts(first.stdout).status).toBe("stored");
+
+    // The repository this walk is in says which egma it belongs to — which is
+    // what the wizard writes there, and what a machine's own last login is
+    // deliberately never allowed to say.
+    await bindWorkspaceTo(platform);
 
     // And the next command finds it with nothing said at all: no flag, and the
     // variable gone from the environment.
@@ -146,14 +165,14 @@ describe("egma login", () => {
 
   it("signs in again when told to, even though a key is already held", async () => {
     await egma(["login", "--url", platform.url]);
-    const again = await egma(["login", "--force"]);
+    const again = await egma(["login", "--force", "--url", platform.url]);
 
     expect(again.code).toBe(0);
     expect(facts(again.stdout).status).toBe("stored");
     expect(platform.device.keys).toHaveLength(2);
 
-    const held = JSON.parse(await readFile(workspace.credentialsFile, "utf8")) as { key: string };
-    expect(held.key).toBe(platform.device.keys.at(-1));
+    const held = await readCredentialsFor(workspace.credentialsFile, platform.url);
+    expect(held?.key).toBe(platform.device.keys.at(-1));
   });
 
   it("answers 2 when the login is denied, and stores nothing", async () => {

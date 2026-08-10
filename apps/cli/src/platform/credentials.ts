@@ -1,11 +1,19 @@
 /**
- * The key egma mints for this machine, and which egma it belongs to.
+ * The keys egma mints for this machine, one per egma it has signed in to.
  *
  * One flat file in the developer's home folder, readable by nobody else. It
- * holds two facts, and they are kept together because they always travel
- * together: a key minted against one instance means nothing against another, so
- * remembering the key without remembering the address would leave a developer
- * re-typing the address on every command afterwards.
+ * holds a list rather than a single key, because a developer uses Egma Cloud
+ * and a self-hosted egma from the same machine and a key minted against one
+ * means nothing against the other. Each entry is keyed by the platform's
+ * normalized origin, so signing in to one platform never replaces the key for
+ * another — and so a command can ask for the key belonging to the egma it is
+ * about to talk to rather than for "the key".
+ *
+ * **What is stored here never decides which egma a command talks to.** That is
+ * the repository's business (see `binding.ts`) or the developer's, said in
+ * `--url` or `EGMA_URL`. A machine-wide "last signed in to" would quietly aim
+ * one repository's identifiers at another repository's platform, which is the
+ * failure ADR-0008 exists to remove.
  *
  * The folder is resolved rather than assumed. That is what lets a test and a
  * check against a real instance each run a whole login without ever reading or
@@ -28,7 +36,7 @@ const FILE_MODE = 0o600;
 const FOLDER_MODE = 0o700;
 
 export type Credentials = {
-  /** The egma that minted this key. */
+  /** The egma that minted this key, as a normalized origin. */
   readonly url: string;
   /** The key itself, handed over once at the end of login and kept here. */
   readonly key: string;
@@ -56,35 +64,81 @@ export function credentialsFileIn(env: NodeJS.ProcessEnv): string {
 /**
  * An address in the one shape everything else compares against.
  *
- * A trailing slash and a stored address that differs from a typed one only by
- * that slash are the same instance, and treating them as two would mint a
- * second key for the same egma.
+ * Two addresses are the same platform when this makes them the same string, and
+ * that decides three things at once: which stored key a command uses, whether a
+ * repository's binding matches the address in hand, and whether a second login
+ * replaces a key or adds one. So the differences that are not differences are
+ * taken out here — a trailing slash, the case of the scheme and the host, and a
+ * port that is the scheme's own. A path is kept, because an egma served under
+ * one is a different egma from the one served at the root beside it.
  */
-export function tidyUrl(url: string): string {
-  return url.trim().replace(/\/+$/u, "");
+export function normalizePlatformOrigin(url: string): string {
+  const trimmed = url.trim().replace(/\/+$/u, "");
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    // Not an address at all. It is handed back as it was written, so whoever
+    // takes it next refuses it by name rather than refusing something else.
+    return trimmed;
+  }
+
+  const port =
+    (parsed.protocol === "http:" && parsed.port === "80") ||
+    (parsed.protocol === "https:" && parsed.port === "443")
+      ? ""
+      : parsed.port;
+  const authority = `${parsed.hostname.toLowerCase()}${port === "" ? "" : `:${port}`}`;
+  const under = parsed.pathname.replace(/\/+$/u, "");
+  return `${parsed.protocol.toLowerCase()}//${authority}${under}`;
 }
 
-/** What is on disk, or `null` when there is nothing usable there. */
-export async function readCredentials(file: string): Promise<Credentials | null> {
+/** Every platform this machine holds a key for, in the order they were added. */
+export async function readAllCredentials(file: string): Promise<readonly Credentials[]> {
   let raw: string;
   try {
     raw = await readFile(file, "utf8");
   } catch {
-    return null;
+    return [];
   }
 
+  let held: unknown;
   try {
-    const held = JSON.parse(raw) as { url?: unknown; key?: unknown };
-    const url = typeof held.url === "string" ? tidyUrl(held.url) : "";
-    const key = typeof held.key === "string" ? held.key.trim() : "";
-    if (url === "" || key === "") return null;
-    return { url, key };
+    held = JSON.parse(raw);
   } catch {
     // A file somebody edited by hand, or half a write. Either way there is
     // nothing to log in with, and saying so sends the developer through login
     // rather than through a parse error.
-    return null;
+    return [];
   }
+
+  const document = held as { platforms?: unknown; url?: unknown; key?: unknown };
+  // The shape before there could be two: one key, one address, at the top
+  // level. It is read as the one entry it is, so a developer who signed in
+  // before this file grew a list stays signed in.
+  const entries = Array.isArray(document.platforms)
+    ? document.platforms
+    : [{ url: document.url, key: document.key }];
+
+  const found: Credentials[] = [];
+  for (const entry of entries) {
+    const one = entry as { url?: unknown; key?: unknown };
+    const url = typeof one.url === "string" ? normalizePlatformOrigin(one.url) : "";
+    const key = typeof one.key === "string" ? one.key.trim() : "";
+    if (url === "" || key === "") continue;
+    if (found.some((already) => already.url === url)) continue;
+    found.push({ url, key });
+  }
+  return found;
+}
+
+/** The key for one egma, or `null` when this machine holds none for it. */
+export async function readCredentialsFor(
+  file: string,
+  url: string,
+): Promise<Credentials | null> {
+  const wanted = normalizePlatformOrigin(url);
+  return (await readAllCredentials(file)).find((held) => held.url === wanted) ?? null;
 }
 
 export type WriteOptions = {
@@ -93,20 +147,23 @@ export type WriteOptions = {
 };
 
 /**
- * Write the key, owner-readable and no wider.
+ * Keep a key, beside the keys for every other egma this machine knows.
  *
- * The key is written to a fresh file beside the target and renamed over it,
- * which is the only way to be sure of the mode it lands with. `writeFile` with
- * a mode applies that mode when it *creates* a file and never afterwards, so
- * writing straight at the target would put the key inside whatever was already
- * there, keeping whatever that was readable by — and if the target is a symlink
- * it would put the key wherever the link points. A rename replaces the name
- * itself, symlink and all, and it either happened or it did not, so no reader
- * ever sees half a file.
+ * An entry for the same platform is replaced — a second login against one egma
+ * has one answer — and every other entry is carried through untouched, which is
+ * the whole promise: signing in here does not sign anybody out there.
+ *
+ * The file is written fresh beside the target and renamed over it, which is the
+ * only way to be sure of the mode it lands with. `writeFile` with a mode applies
+ * that mode when it *creates* a file and never afterwards, so writing straight
+ * at the target would put the keys inside whatever was already there, keeping
+ * whatever that was readable by — and if the target is a symlink it would put
+ * them wherever the link points. A rename replaces the name itself, symlink and
+ * all, and it either happened or it did not, so no reader ever sees half a file.
  *
  * The new file is created with `wx`, so it is this run's file or nothing.
  */
-export async function writeCredentials(
+export async function rememberCredentials(
   file: string,
   credentials: Credentials,
   options: WriteOptions = {},
@@ -126,8 +183,10 @@ export async function writeCredentials(
     );
   }
 
+  const url = normalizePlatformOrigin(credentials.url);
+  const kept = (await readAllCredentials(file)).filter((held) => held.url !== url);
   const document = `${JSON.stringify(
-    { url: tidyUrl(credentials.url), key: credentials.key },
+    { platforms: [...kept, { url, key: credentials.key }] },
     null,
     2,
   )}\n`;
@@ -150,9 +209,12 @@ export type PlatformChoice = {
   readonly flag?: string | null;
   /** `EGMA_URL`, which is how a self-hoster sets it for a whole shell. */
   readonly env?: string | undefined;
-  /** What the last successful login wrote, so it is set once and not again. */
-  readonly stored?: string | null;
+  /** The origin this repository is bound to, when it is bound to one. */
+  readonly binding?: string | null;
 };
+
+/** Which of the four places decided which egma this command talks to. */
+export type PlatformSource = "flag" | "environment" | "binding" | "cloud";
 
 /** What a developer is told when the address they named is not one. */
 export class UnusableUrlError extends Error {
@@ -167,60 +229,36 @@ export class UnusableUrlError extends Error {
 /**
  * Which egma this command talks to.
  *
- * Deliberate beats ambient beats remembered: a flag on the command, then the
- * environment, then what login already stored, then egma's own address. The
- * order is what makes "set it once" true — after a first login against a
- * self-hosted instance, every later command finds it without being told again.
+ * Deliberate beats ambient beats committed: a flag on the command, then the
+ * environment, then the platform this repository is bound to, then Egma Cloud
+ * for a repository that is bound to nothing. **What this machine signed in to
+ * last is not in the list**, and that is the decision rather than an omission —
+ * a machine-wide target would let the last login in one repository redirect the
+ * next command in another, which is how identifiers cross platforms (ADR-0008).
  *
  * An address a person typed is checked here, at the edge that takes it, and a
  * bad one is refused by name rather than carried into the flow — because the
- * next thing that happens to it is that a browser is started on it. What login
- * stored is only ever an address that already passed this, so a file somebody
- * edited by hand is stepped over rather than made into a refusal on every
- * command afterwards.
+ * next thing that happens to it is that a browser is started on it. A binding
+ * is only ever written from an address that already passed this, so a config
+ * file somebody edited by hand is stepped over rather than made into a refusal
+ * on every command afterwards.
  */
-export function resolvePlatformUrl(choice: PlatformChoice): string {
-  const named: readonly [string, string | null | undefined][] = [
-    ["--url", choice.flag],
-    ["EGMA_URL", choice.env],
+export function resolvePlatformUrl(choice: PlatformChoice): {
+  readonly url: string;
+  readonly source: PlatformSource;
+} {
+  const named: readonly [string, PlatformSource, string | null | undefined][] = [
+    ["--url", "flag", choice.flag],
+    ["EGMA_URL", "environment", choice.env],
   ];
-  for (const [where, candidate] of named) {
-    const tidy = typeof candidate === "string" ? tidyUrl(candidate) : "";
+  for (const [where, source, candidate] of named) {
+    const tidy = typeof candidate === "string" ? normalizePlatformOrigin(candidate) : "";
     if (tidy === "") continue;
     if (!isWebAddress(tidy)) throw new UnusableUrlError(where, tidy);
-    return tidy;
+    return { url: tidy, source };
   }
 
-  const stored = typeof choice.stored === "string" ? tidyUrl(choice.stored) : "";
-  if (stored !== "" && isWebAddress(stored)) return stored;
-  return DEFAULT_PLATFORM_URL;
-}
-
-/** Which egma a run signs in to, and where the key it gets is kept. */
-export type PlatformAccess = {
-  readonly url: string;
-  readonly credentialsFile: string;
-};
-
-/**
- * Resolved once, in one place, so the wizard and every verb read the same
- * answer from the same three places in the same order. Two copies of this would
- * be two answers to "which egma is this", and the one that is wrong would be
- * the one that wrote the key.
- */
-export async function resolvePlatformAccess(choice: {
-  readonly env: NodeJS.ProcessEnv;
-  /** `--url`, when one was given. */
-  readonly flag: string | null;
-}): Promise<PlatformAccess> {
-  const credentialsFile = credentialsFileIn(choice.env);
-  const stored = await readCredentials(credentialsFile);
-  return {
-    url: resolvePlatformUrl({
-      flag: choice.flag,
-      env: choice.env.EGMA_URL,
-      stored: stored?.url ?? null,
-    }),
-    credentialsFile,
-  };
+  const bound = typeof choice.binding === "string" ? normalizePlatformOrigin(choice.binding) : "";
+  if (bound !== "" && isWebAddress(bound)) return { url: bound, source: "binding" };
+  return { url: DEFAULT_PLATFORM_URL, source: "cloud" };
 }

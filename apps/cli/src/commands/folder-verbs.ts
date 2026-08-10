@@ -10,7 +10,7 @@
  */
 
 import { readConfig, folderPathsIn, type FolderPaths } from "../folder/egma-folder.ts";
-import type { PlatformAccess } from "../platform/credentials.ts";
+import type { PlatformAccess } from "../platform/binding.ts";
 import { notSignedInRefusal, signedInAt, type SignedIn } from "../platform/signed-in.ts";
 
 export const FOLDER_EXIT = {

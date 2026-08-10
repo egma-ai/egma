@@ -71,6 +71,7 @@ import { fileURLToPath } from "node:url";
 import { startInstance, type Instance } from "../../api/test/support/instance.ts";
 import { DEFAULT_DRIVEN_AGENT_ID, launchForId } from "../src/acp/registry.ts";
 import { parseTestFile } from "../src/folder/test-file.ts";
+import { readCredentialsFor } from "../src/platform/credentials.ts";
 import { skillPlacesFor } from "../src/skills/install.ts";
 import { runInTerminal, type TerminalRun } from "../test/support/pty.ts";
 import { NO_BROWSER, PASSWORD } from "./support/approving-person.ts";
@@ -280,10 +281,8 @@ async function showing(
  */
 async function rememberNames(origin: string, home: string): Promise<void> {
   try {
-    const held = JSON.parse(await readFile(path.join(home, "credentials"), "utf8")) as {
-      key?: unknown;
-    };
-    if (typeof held.key !== "string") return;
+    const held = await readCredentialsFor(path.join(home, "credentials"), origin);
+    if (held === null) return;
     const agents = await ask(origin, held.key, "/api/agents");
     const items = Array.isArray(agents.body.items)
       ? (agents.body.items as Record<string, unknown>[])
@@ -434,10 +433,10 @@ async function walkOnce(options: {
     const runId = /\brun_[0-9A-HJKMNP-TV-Z]{26}/u.exec(runScreen)?.[0] ?? "";
     if (runId === "") throw new Error("the run screen named no run");
 
-    const held = JSON.parse(await readFile(path.join(home, "credentials"), "utf8")) as {
-      url: string;
-      key: string;
-    };
+    const held = (await readCredentialsFor(
+      path.join(home, "credentials"),
+      options.instance.origin,
+    )) ?? { url: "", key: "" };
     secrets.push(held.key);
 
     // What arrives in place of a verdict, asked while the wizard is still

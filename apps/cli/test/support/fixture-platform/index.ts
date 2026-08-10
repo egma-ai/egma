@@ -10,12 +10,14 @@ import { newId } from "../../../../../packages/ids/src/index.ts";
 import { agentRoutes, type AgentControls } from "./agents.ts";
 import { controlRoutes } from "./controls.ts";
 import { deviceRoutes, type DeviceControls } from "./device.ts";
+import { platformRoutes, type PlatformIdentityControls } from "./platform.ts";
 import { runControlRoutes, runRoutes, type RunControls } from "./runs.ts";
 import { startFixturePlatform, type FixturePlatform } from "./server.ts";
 import { testRoutes, type TestControls } from "./tests.ts";
 
 export type { AgentControls } from "./agents.ts";
 export type { DeviceControls } from "./device.ts";
+export type { PlatformIdentityControls } from "./platform.ts";
 export type {
   AdvanceStep,
   RunControls,
@@ -29,6 +31,8 @@ export type { FixturePlatform, Observation } from "./server.ts";
 export type { SeedTest, SeededTest, TestControls } from "./tests.ts";
 
 export type Platform = FixturePlatform & {
+  /** Who this fixture says it is, and how to make it somebody else. */
+  readonly identity: PlatformIdentityControls;
   /** What a person in a browser would do, done directly. */
   readonly device: DeviceControls;
   /** What was registered, and what the platform was handed to seal. */
@@ -45,12 +49,18 @@ export type Platform = FixturePlatform & {
 };
 
 export async function startPlatform(): Promise<Platform> {
+  let identity!: PlatformIdentityControls;
   let device!: DeviceControls;
   let registered!: AgentControls;
   let tests!: TestControls;
   let running!: RunControls;
 
   const platform = await startFixturePlatform((origin) => {
+    // First, because it is the first thing a repository asks and the only
+    // thing it asks before it holds a key.
+    const platformGroup = platformRoutes(origin);
+    identity = platformGroup.controls;
+
     const deviceGroup = deviceRoutes(origin);
     device = deviceGroup.controls;
 
@@ -79,6 +89,7 @@ export async function startPlatform(): Promise<Platform> {
     running = runGroup.controls;
 
     return [
+      platformGroup.group,
       deviceGroup.group,
       agentGroup.group,
       testGroup.group,
@@ -90,6 +101,7 @@ export async function startPlatform(): Promise<Platform> {
 
   return {
     ...platform,
+    identity,
     device,
     registered,
     tests,

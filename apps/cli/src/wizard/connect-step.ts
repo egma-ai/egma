@@ -12,7 +12,7 @@
  */
 
 import type { Registered } from "../platform/agents.ts";
-import { readCredentials } from "../platform/credentials.ts";
+import { signedInAt } from "../platform/signed-in.ts";
 import type { RetellConfig } from "../retell/client.ts";
 import { RetellKey } from "../retell/key.ts";
 import {
@@ -92,7 +92,9 @@ export type Connected = {
 export async function connectStep(options: ConnectStepOptions): Promise<Connected> {
   const { ui, signal } = options;
 
-  const held = await readCredentials(options.platform.credentialsFile);
+  // The key for the platform this walk resolved to, never whichever key this
+  // machine happens to hold: the agent being registered belongs to one egma.
+  const held = await signedInAt(options.platform);
   if (held === null) {
     return {
       report: {

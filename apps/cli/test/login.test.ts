@@ -15,9 +15,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openInBrowser } from "../src/platform/browser.ts";
 import { codeFromPaste, startDeviceAuthorization } from "../src/platform/device-flow.ts";
 import {
-  readCredentials,
+  normalizePlatformOrigin,
+  readAllCredentials,
+  readCredentialsFor,
+  rememberCredentials,
   resolvePlatformUrl,
-  writeCredentials,
   DEFAULT_PLATFORM_URL,
   UnusableUrlError,
 } from "../src/platform/credentials.ts";
@@ -114,7 +116,7 @@ describe("signing a machine in", () => {
     expect(watched.opened).toEqual([shown.url]);
 
     // The key landed, against the egma that minted it.
-    const held = await readCredentials(workspace.credentialsFile);
+    const held = await readCredentialsFor(workspace.credentialsFile, platform.url);
     expect(held?.url).toBe(platform.url);
     expect(held?.key).toMatch(/^egma_sk_/u);
     expect(held?.key).toBe(platform.device.keys.at(-1));
@@ -131,7 +133,7 @@ describe("signing a machine in", () => {
       whenPrompted: (prompt) => void platform.device.approve(prompt.userCode),
     });
 
-    const held = await readCredentials(workspace.credentialsFile);
+    const held = await readCredentialsFor(workspace.credentialsFile, platform.url);
     const used = await fetch(`${platform.url}/api/keys`, {
       headers: { authorization: `Bearer ${held?.key ?? ""}` },
     });
@@ -151,7 +153,7 @@ describe("signing a machine in", () => {
     });
 
     expect(result.kind).toBe("denied");
-    expect(await readCredentials(workspace.credentialsFile)).toBeNull();
+    expect(await readCredentialsFor(workspace.credentialsFile, platform.url)).toBeNull();
   });
 
   it("says the code ran out, which is not the same as being told no", async () => {
@@ -162,7 +164,7 @@ describe("signing a machine in", () => {
     });
 
     expect(result.kind).toBe("expired");
-    expect(await readCredentials(workspace.credentialsFile)).toBeNull();
+    expect(await readCredentialsFor(workspace.credentialsFile, platform.url)).toBeNull();
   });
 
   it("backs off by five seconds when told it is asking too fast, and stays there", async () => {
@@ -230,7 +232,7 @@ describe("signing a machine in", () => {
 
     expect(result.kind).toBe("unreachable");
     expect(result.kind === "unreachable" && result.reason).toContain("127.0.0.1:1");
-    expect(await readCredentials(workspace.credentialsFile)).toBeNull();
+    expect(await readCredentialsFor(workspace.credentialsFile, platform.url)).toBeNull();
   });
 
   it("stops where it stands when the developer stops it", async () => {
@@ -244,7 +246,7 @@ describe("signing a machine in", () => {
     });
 
     expect(result.kind).toBe("interrupted");
-    expect(await readCredentials(workspace.credentialsFile)).toBeNull();
+    expect(await readCredentialsFor(workspace.credentialsFile, platform.url)).toBeNull();
   });
 });
 
@@ -272,7 +274,7 @@ describe("a machine that is already signed in", () => {
     });
 
     expect(result.kind).toBe("stored");
-    const held = await readCredentials(workspace.credentialsFile);
+    const held = await readCredentialsFor(workspace.credentialsFile, platform.url);
     expect(held?.key).not.toBe("egma_sk_held-already");
     expect(held?.key).toBe(platform.device.keys.at(-1));
   });
@@ -287,7 +289,7 @@ describe("a machine that is already signed in", () => {
     });
 
     expect(result.kind).toBe("stored");
-    expect((await readCredentials(workspace.credentialsFile))?.url).toBe(platform.url);
+    expect((await readCredentialsFor(workspace.credentialsFile, platform.url))?.url).toBe(platform.url);
   });
 });
 
@@ -349,7 +351,7 @@ describe("coming back from a browser on another machine", () => {
 
       expect(result.kind).toBe("stored");
       expect(watched.said).toContain("Checking that one now.");
-      expect((await readCredentials(workspace.credentialsFile))?.key).toBe(
+      expect((await readCredentialsFor(workspace.credentialsFile, platform.url))?.key).toBe(
         platform.device.keys.at(-1),
       );
     });
@@ -394,26 +396,58 @@ describe("reading a code out of whatever was pasted", () => {
 });
 
 describe("which egma a command talks to", () => {
-  it("takes the flag first, then the environment, then what was stored", () => {
+  it("takes the flag first, then the environment, then what this repository is bound to", () => {
     expect(
       resolvePlatformUrl({
         flag: "http://flag.example/",
         env: "http://env.example",
-        stored: "http://stored.example",
+        binding: "http://bound.example",
       }),
-    ).toBe("http://flag.example");
+    ).toEqual({ url: "http://flag.example", source: "flag" });
 
     expect(
-      resolvePlatformUrl({ flag: null, env: "http://env.example", stored: "http://stored.example" }),
-    ).toBe("http://env.example");
+      resolvePlatformUrl({
+        flag: null,
+        env: "http://env.example",
+        binding: "http://bound.example",
+      }),
+    ).toEqual({ url: "http://env.example", source: "environment" });
 
-    // Which is what "set it once" means: after the first login, nothing has to
-    // say the address again.
-    expect(resolvePlatformUrl({ flag: null, stored: "http://stored.example/" })).toBe(
-      "http://stored.example",
-    );
+    // Which is what "one explicit step" means: after the first onboarding, the
+    // repository says which egma and nothing has to say it again.
+    expect(resolvePlatformUrl({ flag: null, binding: "http://bound.example/" })).toEqual({
+      url: "http://bound.example",
+      source: "binding",
+    });
 
-    expect(resolvePlatformUrl({ flag: null, env: "", stored: null })).toBe(DEFAULT_PLATFORM_URL);
+    expect(resolvePlatformUrl({ flag: null, env: "", binding: null })).toEqual({
+      url: DEFAULT_PLATFORM_URL,
+      source: "cloud",
+    });
+  });
+
+  it("never asks what this machine signed in to last", () => {
+    // The whole of ADR-0008 in one assertion: a key held for one egma cannot
+    // aim a command at it. Only a flag, the environment, or this repository's
+    // own committed binding can.
+    expect(
+      resolvePlatformUrl({ flag: null, env: undefined, binding: null }),
+    ).toEqual({ url: DEFAULT_PLATFORM_URL, source: "cloud" });
+  });
+
+  it("reads two spellings of one address as one platform", () => {
+    for (const written of [
+      "HTTP://Egma.Example:80/",
+      "http://egma.example:80",
+      "http://EGMA.example/",
+    ]) {
+      expect(normalizePlatformOrigin(written)).toBe("http://egma.example");
+    }
+    expect(normalizePlatformOrigin("https://egma.example:443/")).toBe("https://egma.example");
+    // A port that is not the scheme's own, and a path, are both differences
+    // that make a different platform.
+    expect(normalizePlatformOrigin("http://egma.example:3101/")).toBe("http://egma.example:3101");
+    expect(normalizePlatformOrigin("https://egma.example/team/")).toBe("https://egma.example/team");
   });
 
   it("refuses an address that is not one, and names where it came from", () => {
@@ -427,11 +461,63 @@ describe("which egma a command talks to", () => {
     expect(() => resolvePlatformUrl({ flag: "ftp://egma.example" })).toThrow(/--url/u);
     expect(() => resolvePlatformUrl({ flag: null, env: "ftp://egma.example" })).toThrow(/EGMA_URL/u);
 
-    // A credentials file somebody edited by hand is stepped over rather than
-    // made into a refusal on every command afterwards.
-    expect(resolvePlatformUrl({ flag: null, stored: "javascript:alert(1)" })).toBe(
-      DEFAULT_PLATFORM_URL,
+    // A config file somebody edited by hand is stepped over rather than made
+    // into a refusal on every command afterwards.
+    expect(resolvePlatformUrl({ flag: null, binding: "javascript:alert(1)" })).toEqual({
+      url: DEFAULT_PLATFORM_URL,
+      source: "cloud",
+    });
+  });
+});
+
+describe("the keys this machine holds", () => {
+  it("keeps one per egma, so signing in to one does not sign the other out", async () => {
+    const cloud = { url: "https://app.egma.example", key: "egma_sk_cloud" };
+    const local = { url: "http://localhost:3101", key: "egma_sk_local" };
+
+    await rememberCredentials(workspace.credentialsFile, cloud);
+    await rememberCredentials(workspace.credentialsFile, local);
+
+    expect(await readAllCredentials(workspace.credentialsFile)).toEqual([cloud, local]);
+    expect(await readCredentialsFor(workspace.credentialsFile, cloud.url)).toEqual(cloud);
+    expect(await readCredentialsFor(workspace.credentialsFile, "http://localhost:3101/")).toEqual(
+      local,
     );
+    expect(await readCredentialsFor(workspace.credentialsFile, "http://elsewhere.example")).toBeNull();
+  });
+
+  it("replaces the key for one egma and leaves every other key where it was", async () => {
+    const cloud = { url: "https://app.egma.example", key: "egma_sk_cloud" };
+    await rememberCredentials(workspace.credentialsFile, cloud);
+    await rememberCredentials(workspace.credentialsFile, {
+      url: "http://localhost:3101",
+      key: "egma_sk_first",
+    });
+
+    await rememberCredentials(workspace.credentialsFile, {
+      url: "http://localhost:3101",
+      key: "egma_sk_second",
+    });
+
+    expect(await readAllCredentials(workspace.credentialsFile)).toEqual([
+      cloud,
+      { url: "http://localhost:3101", key: "egma_sk_second" },
+    ]);
+  });
+
+  it("reads a file written before there could be two", async () => {
+    // One key at the top level, which is the shape egma wrote until a
+    // repository could name its own platform.
+    await mkdir(path.dirname(workspace.credentialsFile), { recursive: true });
+    await writeFile(
+      workspace.credentialsFile,
+      `${JSON.stringify({ url: "https://app.egma.example/", key: "egma_sk_from-before" })}\n`,
+      "utf8",
+    );
+
+    expect(
+      await readCredentialsFor(workspace.credentialsFile, "https://app.egma.example"),
+    ).toEqual({ url: "https://app.egma.example", key: "egma_sk_from-before" });
   });
 });
 
@@ -511,12 +597,12 @@ describe("writing the key down", () => {
     await writeFile(workspace.credentialsFile, "{}\n", "utf8");
     await chmod(workspace.credentialsFile, 0o644);
 
-    await writeCredentials(workspace.credentialsFile, held);
+    await rememberCredentials(workspace.credentialsFile, held);
 
     // The key landed in a file nobody else can read — which is only true
     // because a fresh file was renamed over this one rather than written into.
     expect(((await stat(workspace.credentialsFile)).mode & 0o777).toString(8)).toBe("600");
-    expect(await readCredentials(workspace.credentialsFile)).toEqual(held);
+    expect(await readCredentialsFor(workspace.credentialsFile, held.url)).toEqual(held);
   });
 
   it("does not follow a link standing where the key goes", async () => {
@@ -525,14 +611,14 @@ describe("writing the key down", () => {
     await mkdir(path.dirname(workspace.credentialsFile), { recursive: true });
     await symlink(elsewhere, workspace.credentialsFile);
 
-    await writeCredentials(workspace.credentialsFile, held);
+    await rememberCredentials(workspace.credentialsFile, held);
 
     // The link itself was replaced. Nothing was written through it, so the file
     // it pointed at is exactly as it was.
     expect(await readFile(elsewhere, "utf8")).toBe("not the key\n");
     expect((await lstat(workspace.credentialsFile)).isSymbolicLink()).toBe(false);
     expect(((await stat(workspace.credentialsFile)).mode & 0o777).toString(8)).toBe("600");
-    expect(await readCredentials(workspace.credentialsFile)).toEqual(held);
+    expect(await readCredentialsFor(workspace.credentialsFile, held.url)).toEqual(held);
   });
 
   it("locks the folder down too, and says nothing when it could", async () => {
@@ -541,8 +627,8 @@ describe("writing the key down", () => {
     // that the ordinary run really does narrow it, and that the line about
     // failing to is not said when nothing failed.
     const said: string[] = [];
-    await writeCredentials(workspace.credentialsFile, held, {
-      warn: (line) => said.push(line),
+    await rememberCredentials(workspace.credentialsFile, held, {
+      warn: (line: string) => said.push(line),
     });
 
     expect(said).toEqual([]);

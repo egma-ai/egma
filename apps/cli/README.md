@@ -101,10 +101,20 @@ wider it needs to be instead of drawing an address that breaks across two lines.
 EGMA_URL=http://localhost:3101 egma
 ```
 
-or `--url`. It is kept beside the key after the first login, so later commands
-find it without being told again. `3101` is where `docker compose up` puts an
-instance; see [Trying it on an instance of your own](#trying-it-on-an-instance-of-your-own),
+or `--url`. You say it once: the wizard writes that instance into
+`egma/config.yaml`, and every later command in the repository finds it there
+without being told again. `3101` is where `docker compose up` puts an instance;
+see [Trying it on an instance of your own](#trying-it-on-an-instance-of-your-own),
 which is also where the `egma` in that line comes from today.
+
+Which egma a command talks to is decided in this order: `--url`, then
+`EGMA_URL`, then the instance named in `egma/config.yaml`, then Egma Cloud for a
+repository that names none. **What this machine signed in to last is never the
+answer.** The ids in `egma/config.yaml` exist on one instance and nowhere else,
+so the repository says which one and every command checks it: an instance that
+is down stops the command instead of falling back to Egma Cloud, and an address
+naming a different egma is refused outright with nothing sent to it. Moving a
+repository between instances is not supported yet.
 
 ## Connecting your voice agent
 
@@ -189,13 +199,29 @@ status: connected
 
 ```
 egma/
-  config.yaml     what this folder points at — names and ids
+  config.yaml     which egma, and what this folder points at on it
   tests/          one markdown file per test
 ```
 
 `egma init` makes it. Everything in it is committed: nothing secret ever lands
 here, so there are no gitignore lines to write and none to forget. Your tests
 are code your team reviews in pull requests.
+
+`config.yaml` opens by naming the instance the ids under it belong to:
+
+```yaml
+platform:
+  origin: http://localhost:3101
+  instance: ins_01K…
+agent:
+  name: order-line
+  id: agt_01K…
+```
+
+The origin is what you read; the instance identifier is what egma checks, so a
+*different* egma later served at the same address is caught rather than
+believed. Your key is not here — keys live in `~/.egma/credentials`, one per
+instance, so signing in to a second egma never signs you out of the first.
 
 One test is one file:
 
@@ -360,6 +386,11 @@ status: completed
 6 a simulation errored, so nothing concluded   130 stopped part way
 ```
 
+Two numbers are not about the run and are the same for every command: **4** when
+the egma this repository is bound to did not answer, and **8** when the address
+in hand is a different egma from the bound one. Neither is ever a quiet fallback
+to somewhere else.
+
 `--no-follow` starts the run and returns at once, without waiting for a verdict
 — for when you want the suite going and will read the results page later.
 
@@ -518,9 +549,10 @@ egma run [options]       Run this folder's tests, pinning the version of each.
   --coding-agent <id>  Which coding agent to drive, named as the agent
                        registry names it. Default: claude-acp
   --cwd <path>         The folder to work in. Default: this folder.
-  --url <address>      The egma to talk to, for a self-hosted one. Kept
-                       after the first login, so it is set once. EGMA_URL
-                       does the same for a whole shell.
+  --url <address>      The egma to talk to, for a self-hosted one. Say it
+                       once: the wizard writes it into egma/config.yaml,
+                       and every later command in this repository finds it
+                       there. EGMA_URL does the same for a whole shell.
   --force              With login: sign in again even when this machine
                        already holds a key.
   --no-follow          With run: start the run and return at once, without
@@ -541,6 +573,15 @@ egma run [options]       Run this folder's tests, pinning the version of each.
                        and the task taken as already agreed to.
   -h, --help           Print this.
   -v, --version        Print the version.
+
+Which egma a command talks to:
+  --url, then EGMA_URL, then the platform named in egma/config.yaml, then
+  Egma Cloud for a repository that names none. What this machine signed in
+  to last is never the answer: the ids in egma/config.yaml exist on one
+  platform, so the repository says which one and every command checks it.
+  A bound platform that is down stops the command — nothing falls back to
+  Egma Cloud — and an address naming a different egma is refused, because
+  moving a repository between platforms is not supported yet.
 
 Environment:
   EGMA_URL             The egma to talk to, for a whole shell. Same as --url.

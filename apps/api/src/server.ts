@@ -16,6 +16,7 @@ import { heartbeatRoutes } from "./routes/heartbeats.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
+import { platformRoutes } from "./routes/platform.ts";
 import { reportRoutes } from "./routes/reports.ts";
 import { runRoutes } from "./routes/runs.ts";
 import { signOutRoutes } from "./routes/sign-out.ts";
@@ -157,6 +158,12 @@ export function buildApi(options: ServerOptions): Api {
     prefix: AUTH_BASE_PATH,
     handler: identity.handler,
   });
+
+  // Which egma this is, answered to anybody who asks. Outside the credentialed
+  // scope on purpose and beside the health check for the same reason: a
+  // repository asks it before there is a key to ask with, and the answer names
+  // the deployment rather than anything inside it.
+  void app.register(platformRoutes, { baseUrl: config.baseUrl });
 
   void app.register(signupRoutes, {
     identity,

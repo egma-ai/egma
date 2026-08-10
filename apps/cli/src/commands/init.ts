@@ -34,6 +34,10 @@ function named(name: string | null): NamedThing | null {
 
 export async function runInitCommand(options: InitCommandOptions): Promise<number> {
   const config: FolderConfig = {
+    // Nothing here talks to egma, so nothing here knows which egma this
+    // repository will belong to. The first command that reaches a platform
+    // writes that in.
+    platform: null,
     agent: named(options.names.agent),
     connection: named(options.names.connection),
     suite: named(options.names.suite),

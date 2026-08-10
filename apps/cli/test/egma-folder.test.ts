@@ -309,6 +309,10 @@ describe("the egma folder", () => {
     const folder = await createEgmaFolder({
       repository: workspace.dir,
       config: {
+        platform: {
+          origin: "http://localhost:3101",
+          instance: "ins_01K3XQ7M4E8YB2FVN0H9TZQWET",
+        },
         agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
         connection: { name: "retell-1", id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES" },
         suite: { name: "first-suite", id: null },
@@ -331,7 +335,11 @@ describe("the egma folder", () => {
         "# What this folder points at on egma.",
         "#",
         "# Committed on purpose: nothing in this folder is secret. egma writes an id",
-        "# beside each name once it has registered one.",
+        "# beside each name once it has registered one, and names the egma those ids",
+        "# belong to.",
+        "platform:",
+        "  origin: http://localhost:3101",
+        "  instance: ins_01K3XQ7M4E8YB2FVN0H9TZQWET",
         "agent:",
         "  name: receptionist",
         "  id: agt_01K3XQ7M4E8YB2FVN0H9TZQWER",
@@ -352,7 +360,12 @@ describe("the egma folder", () => {
     expect(written).toContain("agent:");
     expect(written).toContain("connection:");
     expect(written).toContain("suite:");
-    expect(folder.config).toEqual({ agent: null, connection: null, suite: null });
+    expect(folder.config).toEqual({
+      platform: null,
+      agent: null,
+      connection: null,
+      suite: null,
+    });
     // And what it wrote is what it reads back.
     expect(parseConfig(written, "config.yaml")).toEqual(folder.config);
   });
@@ -360,14 +373,24 @@ describe("the egma folder", () => {
   it("recognises a folder that is already here and changes not one byte of it", async () => {
     const first = await createEgmaFolder({
       repository: workspace.dir,
-      config: { agent: { name: "receptionist", id: null }, connection: null, suite: null },
+      config: {
+        platform: null,
+        agent: { name: "receptionist", id: null },
+        connection: null,
+        suite: null,
+      },
     });
     const before = await readFile(first.paths.config, "utf8");
     await writeFile(path.join(first.paths.tests, "kept.md"), GENERATED, "utf8");
 
     const second = await createEgmaFolder({
       repository: workspace.dir,
-      config: { agent: { name: "something-else", id: null }, connection: null, suite: null },
+      config: {
+        platform: null,
+        agent: { name: "something-else", id: null },
+        connection: null,
+        suite: null,
+      },
     });
 
     expect(second.created).toBe(false);
@@ -393,7 +416,12 @@ describe("the egma folder", () => {
   it("writes an id beside a name once egma has registered one", async () => {
     const folder = await createEgmaFolder({
       repository: workspace.dir,
-      config: { agent: { name: "receptionist", id: null }, connection: null, suite: null },
+      config: {
+        platform: null,
+        agent: { name: "receptionist", id: null },
+        connection: null,
+        suite: null,
+      },
     });
 
     const updated = await updateConfig(folder.paths.config, {
@@ -416,13 +444,54 @@ describe("the egma folder", () => {
     expect(config.suite).toEqual({ name: "first-suite", id: null });
   });
 
+  it("names the egma the ids under it belong to, and reads it back", () => {
+    const platform = {
+      origin: "http://localhost:3101",
+      instance: "ins_01K3XQ7M4E8YB2FVN0H9TZQWET",
+    };
+    const document = serializeConfig({
+      platform,
+      agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
+      connection: null,
+      suite: null,
+    });
+
+    // First in the file, because it owns every identifier under it.
+    expect(document.split("\n").filter((line) => !line.startsWith("#"))[0]).toBe("platform:");
+    expect(parseConfig(document, "config.yaml").platform).toEqual(platform);
+    // A second write finds nothing to change.
+    expect(serializeConfig(parseConfig(document, "config.yaml"))).toBe(document);
+  });
+
+  it("reads an origin somebody named by hand as a binding with no instance", () => {
+    // Still bound: the repository talks to that egma and to nothing else. Only
+    // the check that the egma answering there is the same one is skipped,
+    // because the file names nothing to check against.
+    for (const written of [
+      "platform: http://localhost:3101\n",
+      "platform:\n  origin: http://localhost:3101\n",
+    ]) {
+      expect(parseConfig(written, "config.yaml").platform).toEqual({
+        origin: "http://localhost:3101",
+        instance: null,
+      });
+    }
+  });
+
+  it("reads a config that names no egma at all, because most do not yet", () => {
+    expect(parseConfig("agent: receptionist\n", "config.yaml").platform).toBeNull();
+    expect(parseConfig("platform:\n", "config.yaml").platform).toBeNull();
+  });
+
   it("reads what it writes, and steps over comments while it does", () => {
     const document = serializeConfig({
+      platform: null,
       agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
       connection: null,
       suite: null,
     });
     expect(readYaml(document, "config.yaml")).toEqual({
+      platform: null,
       agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
       connection: null,
       suite: null,
@@ -432,6 +501,7 @@ describe("the egma folder", () => {
   it("writes a name that needs quoting, and reads it back with its own spaces", () => {
     for (const name of ["the front desk: mornings", "shift #2", "  padded  ", "2026", "yes"]) {
       const written = serializeConfig({
+        platform: null,
         agent: { name, id: null },
         connection: null,
         suite: null,

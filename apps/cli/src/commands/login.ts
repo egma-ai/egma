@@ -13,7 +13,7 @@
  */
 
 import { openInBrowser } from "../platform/browser.ts";
-import type { PlatformAccess } from "../platform/credentials.ts";
+import type { PlatformAccess } from "../platform/binding.ts";
 import { logIn, loginLines, type LoginResult } from "../platform/login.ts";
 
 /** What each ending means to whoever ran the command. */

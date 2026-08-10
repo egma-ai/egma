@@ -31,6 +31,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readConfig } from "../src/folder/egma-folder.ts";
 import { parseTestFile } from "../src/folder/test-file.ts";
+import { readCredentialsFor } from "../src/platform/credentials.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { buildExitNotice, exitLines } from "../src/wizard/exit-line.ts";
 import { walk } from "../src/wizard/walk.ts";
@@ -42,6 +43,7 @@ import {
   RETELL_FIXTURE_REPO,
   filesUnder,
   makeWorkspace,
+  platformNamed,
   type Workspace,
 } from "./support/workspace.ts";
 
@@ -212,14 +214,14 @@ describe("the whole walk, offline", () => {
         launch: { ...workspace.launch(script), id: "claude-acp" },
         cwd: workspace.dir,
         signal: new AbortController().signal,
-        platform: {
+        platform: platformNamed({
           url: platform.url,
           credentialsFile: workspace.credentialsFile,
-          openBrowser: async (url) => {
+          openBrowser: async (url: string) => {
             const code = new URL(url).searchParams.get("user_code") ?? "";
             return platform.device.approve(code);
           },
-        },
+        }),
         retell: { url: retell.url },
         howManyTests: SUITE_SIZE,
         home,
@@ -263,12 +265,9 @@ describe("the whole walk, offline", () => {
 
     /* this machine is signed in, and to this egma */
 
-    const held = JSON.parse(await readFile(workspace.credentialsFile, "utf8")) as {
-      url: string;
-      key: string;
-    };
-    expect(held.url).toBe(platform.url);
-    expect(platform.device.keys).toContain(held.key);
+    const held = await readCredentialsFor(workspace.credentialsFile, platform.url);
+    expect(held?.url).toBe(platform.url);
+    expect(platform.device.keys).toContain(held?.key);
 
     /* the agent and the way to reach it are on egma */
 

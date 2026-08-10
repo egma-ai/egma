@@ -87,6 +87,21 @@ a verb (`egma login`, `egma connect`, `egma push`, `egma run`) that prints one
 fact per line and answers with a number, for a coding agent driving it with
 nobody watching. `apps/cli/README.md` is the whole of it.
 
+**You name your instance once.** The wizard writes it into `egma/config.yaml`
+beside the ids it registered, so every later command in that repository — with
+no `EGMA_URL` and no `--url` — talks to the same egma. The two lines it writes
+are the instance's address and the name that instance minted for itself; neither
+is a secret, and both are meant to be committed. Your key is not in that file:
+keys live in `~/.egma/credentials`, one per instance, so signing in to a second
+egma never signs you out of the first.
+
+A repository that names no instance uses Egma Cloud. A repository that names one
+uses it and nothing else: if that instance is down, the command stops and says
+so rather than quietly asking Egma Cloud about ids only your instance has, and
+an `--url` pointing at a *different* egma is refused for the same reason. Moving
+a repository from one instance to another is not supported yet — change the file
+by hand if you have to.
+
 **Where it stops today, said plainly.** The run is created and followed live,
 and no verdict arrives: nothing claims a simulation yet, so the run stays
 pending and every simulation stays queued. Both services below are real — the

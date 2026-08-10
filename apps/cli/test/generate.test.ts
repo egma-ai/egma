@@ -39,6 +39,7 @@ import {
   FAKE_AGENT,
   MANIFEST,
   makeWorkspace,
+  platformNamed,
   type Workspace,
 } from "./support/workspace.ts";
 
@@ -171,7 +172,7 @@ async function runWalk(options: {
       launch: workspace.launch(options.script),
       cwd: workspace.dir,
       signal: new AbortController().signal,
-      platform: { url: platform.url, credentialsFile: workspace.credentialsFile },
+      platform: platformNamed({ url: platform.url, credentialsFile: workspace.credentialsFile }),
       retell: { url: retell.url },
       home: path.join(workspace.dir, "pretend-home"),
       runPollMs: 20,
@@ -310,10 +311,9 @@ describe("the whole generate step", () => {
     // The belt above is a courtesy, and this is why it is only a courtesy: the
     // platform is the authority, and it refuses the same file in its own words.
     // Two doors, one answer, and the file is on disk after both of them.
-    const signedIn = await signedInAt({
-      url: platform.url,
-      credentialsFile: workspace.credentialsFile,
-    });
+    const signedIn = await signedInAt(
+      platformNamed({ url: platform.url, credentialsFile: workspace.credentialsFile }),
+    );
     const pushed = await pushTests({
       signedIn: signedIn as NonNullable<typeof signedIn>,
       paths: folderPathsIn(workspace.dir),

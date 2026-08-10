@@ -11,8 +11,11 @@
  * never named here — the terminal's job is a code, an address, and a key.
  */
 
+import type {
+  PlatformAccess as ResolvedPlatform,
+  PlatformIdentity,
+} from "../platform/binding.ts";
 import { openInBrowser } from "../platform/browser.ts";
-import type { PlatformAccess as ResolvedPlatform } from "../platform/credentials.ts";
 import { logIn, type LogInOptions } from "../platform/login.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
 import type { ExitReport } from "./exit-line.ts";
@@ -20,6 +23,15 @@ import { stopReport } from "./stop.ts";
 
 /** How the wizard reaches egma, and where the key it gets is kept. */
 export type PlatformAccess = ResolvedPlatform & {
+  /**
+   * Who this platform said it is, when somebody has already asked.
+   *
+   * A bound repository has its platform checked before the wizard starts, so
+   * the answer is already in hand and asking again would be a second request
+   * for one fact. `null` means nobody has asked yet, and the walk asks at the
+   * moment it has something to write.
+   */
+  readonly identity?: PlatformIdentity | null;
   /** Starts a browser. The developer's own opener when omitted. */
   readonly openBrowser?: LogInOptions["openBrowser"];
 };

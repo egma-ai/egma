@@ -25,8 +25,13 @@ export const ID_BODY_LENGTH = 26;
  * The identity prefixes (`ses_`, `acc_`, `vrf_`, `dvc_`) cover the tables the
  * auth provider reads and writes; egma mints their identifiers with the same
  * generator so one format covers every table.
+ *
+ * `ins_` is first because it names the deployment itself rather than anything
+ * inside one: it is what an egma calls itself, and what an agent repository
+ * commits to say which egma its other identifiers came from.
  */
 export const ID_PREFIXES = [
+  "ins",
   "usr",
   "ses",
   "acc",

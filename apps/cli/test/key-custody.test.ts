@@ -31,6 +31,7 @@ import {
   MANIFEST,
   filesUnder,
   makeWorkspace,
+  platformNamed,
   waitUntil,
   type Workspace,
 } from "./support/workspace.ts";
@@ -146,7 +147,7 @@ describe("a whole run, swept afterwards", () => {
         launch: workspace.launch(script),
         cwd: workspace.dir,
         signal: new AbortController().signal,
-        platform: { url: platform.url, credentialsFile: workspace.credentialsFile },
+        platform: platformNamed({ url: platform.url, credentialsFile: workspace.credentialsFile }),
         retell: { url: retell.url },
         home: path.join(workspace.dir, "pretend-home"),
         runPollMs: 20,

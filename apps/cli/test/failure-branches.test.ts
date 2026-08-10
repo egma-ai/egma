@@ -30,6 +30,7 @@ import {
   CLI_ENTRY,
   RETELL_FIXTURE_REPO,
   makeWorkspace,
+  platformNamed,
   type Workspace,
 } from "./support/workspace.ts";
 
@@ -116,7 +117,7 @@ async function walkWith(options: {
       launch: workspace.launch(options.script),
       cwd: workspace.dir,
       signal: new AbortController().signal,
-      platform: { url: platform.url, credentialsFile: workspace.credentialsFile },
+      platform: platformNamed({ url: platform.url, credentialsFile: workspace.credentialsFile }),
       retell: { url: retell.url },
       howManyTests: 1,
       home: path.join(workspace.dir, "pretend-home"),

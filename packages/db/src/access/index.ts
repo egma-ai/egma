@@ -30,10 +30,13 @@
  * this category is a deliberate act: a test names them all and fails when an
  * eighth appears.
  *
- * **Instance-scoped.** `instanceIsClaimed`, and only it. It takes nothing and
- * returns a boolean, so it can neither name a customer nor carry a row out. It
- * is asked by the one caller with no credential at all — somebody looking at a
- * signup form — and the same test names it.
+ * **Instance-scoped.** `instanceIsClaimed` and `platformInstanceId`, and only
+ * those two. Each takes nothing, so neither can name a customer, and each
+ * answers one fact about the deployment itself — whether anybody has signed up
+ * here, and what this deployment calls itself — so neither can carry a row out.
+ * They are asked by the callers with no credential at all: somebody looking at
+ * a signup form, and an agent repository asking which platform it is bound to.
+ * The same test names them.
  *
  * **Work-dispatching.** `claimGradingJobs`, `watchGradingWork`,
  * `claimSimulations`, `recordSimulationHeartbeat`, `sweepOrphanedSimulations`
@@ -165,6 +168,7 @@ export {
   type ProvisionedOrganization,
 } from "./provisioning.ts";
 export { instanceIsClaimed } from "./instance.ts";
+export { platformInstanceId } from "./platform-instance.ts";
 
 export {
   readOrganization,

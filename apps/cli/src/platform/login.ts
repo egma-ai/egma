@@ -13,8 +13,9 @@
  */
 
 import {
-  readCredentials,
-  writeCredentials,
+  normalizePlatformOrigin,
+  readCredentialsFor,
+  rememberCredentials,
   type Credentials,
 } from "./credentials.ts";
 import {
@@ -188,8 +189,8 @@ export async function logIn(options: LogInOptions): Promise<LoginResult> {
   const now = options.now ?? Date.now;
   const fetchImpl = options.fetchImpl ?? fetch;
 
-  const held = await readCredentials(options.credentialsFile);
-  if (options.force !== true && held !== null && held.url === options.url) {
+  const held = await readCredentialsFor(options.credentialsFile, options.url);
+  if (options.force !== true && held !== null) {
     return { kind: "already-stored", url: held.url, key: held.key };
   }
 
@@ -236,8 +237,14 @@ export async function logIn(options: LogInOptions): Promise<LoginResult> {
 
     switch (collected.kind) {
       case "key": {
-        const credentials: Credentials = { url: options.url, key: collected.key };
-        await writeCredentials(options.credentialsFile, credentials);
+        // Kept beside the keys for every other egma this machine knows, never
+        // instead of them: a developer signs in to Egma Cloud and to their own
+        // platform, and one login must not sign them out of the other.
+        const credentials: Credentials = {
+          url: normalizePlatformOrigin(options.url),
+          key: collected.key,
+        };
+        await rememberCredentials(options.credentialsFile, credentials);
         return { kind: "stored", url: credentials.url, key: credentials.key };
       }
       case "denied":

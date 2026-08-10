@@ -13,8 +13,8 @@
  * nobody reads.
  */
 
-import type { PlatformAccess } from "../platform/credentials.ts";
-import { readCredentials } from "../platform/credentials.ts";
+import type { PlatformAccess } from "../platform/binding.ts";
+import { signedInAt } from "../platform/signed-in.ts";
 import { RetellKey } from "../retell/key.ts";
 import {
   connect,
@@ -163,7 +163,10 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
 
   options.out(`url: ${options.access.url}`);
 
-  const held = await readCredentials(options.access.credentialsFile);
+  // The key for the egma this command resolved to, and never "the key this
+  // machine holds": a key minted on another platform would register this
+  // agent somewhere the repository does not belong.
+  const held = await signedInAt(options.access);
   if (held === null) {
     options.out("status: not-signed-in");
     options.fail(

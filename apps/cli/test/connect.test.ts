@@ -28,7 +28,7 @@ import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { connectStep } from "../src/wizard/connect-step.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
-import { makeWorkspace, type Workspace } from "./support/workspace.ts";
+import { makeWorkspace, platformNamed, type Workspace } from "./support/workspace.ts";
 
 /** A key shaped like a real one, and belonging to nobody. */
 const KEY = "key_1f4c9b7e2a6d0538c1e7";
@@ -126,7 +126,7 @@ async function run(options: RunOptions) {
 
   const { report, connected } = await connectStep({
     ui,
-    platform: { url: platform.url, credentialsFile: workspace.credentialsFile },
+    platform: platformNamed({ url: platform.url, credentialsFile: workspace.credentialsFile }),
     cwd: workspace.dir,
     repoPrompts: options.repoPrompts ?? null,
     signal: new AbortController().signal,

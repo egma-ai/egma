@@ -61,30 +61,69 @@ export type NamedThing = {
 };
 
 /**
+ * The egma every identifier in this file belongs to.
+ *
+ * An agent, a connection and a test version exist on one platform and mean
+ * nothing on another, so the file that carries them says which one wrote them.
+ * Both halves are committed and neither is a credential: the origin is what a
+ * person reads, and the instance identifier is what a command checks — an
+ * address alone cannot tell a restored deployment from a different egma later
+ * served at the same place. See ADR-0008.
+ */
+export type PlatformBinding = {
+  /** The platform's canonical origin, normalized. */
+  readonly origin: string;
+  /**
+   * The identifier that platform minted for itself.
+   *
+   * `null` only for a file somebody wrote by hand naming an origin and no
+   * instance. That still binds the repository to that origin — nothing falls
+   * back to Egma Cloud — and only the instance check is skipped, because there
+   * is nothing to check it against.
+   */
+  readonly instance: string | null;
+};
+
+/**
  * What the folder points at. Each may be unset — the folder can exist before
  * the thing it names does, which is what lets `egma init` run in a repository
  * that has not been connected to anything yet.
  */
 export type FolderConfig = {
+  readonly platform: PlatformBinding | null;
   readonly agent: NamedThing | null;
   readonly connection: NamedThing | null;
   readonly suite: NamedThing | null;
 };
 
-export const EMPTY_CONFIG: FolderConfig = { agent: null, connection: null, suite: null };
+export const EMPTY_CONFIG: FolderConfig = {
+  platform: null,
+  agent: null,
+  connection: null,
+  suite: null,
+};
 
-/** The three keys, in the order they are written and read. */
+/** The three named things, in the order they are written and read. */
 const CONFIG_KEYS = ["agent", "connection", "suite"] as const;
 
 const CONFIG_HEADER = [
   "# What this folder points at on egma.",
   "#",
   "# Committed on purpose: nothing in this folder is secret. egma writes an id",
-  "# beside each name once it has registered one.",
+  "# beside each name once it has registered one, and names the egma those ids",
+  "# belong to.",
 ];
 
 export function serializeConfig(config: FolderConfig): string {
   const lines = [...CONFIG_HEADER];
+  // First, because it owns every identifier under it.
+  lines.push("platform:");
+  if (config.platform !== null) {
+    lines.push(`  origin: ${yamlScalar(config.platform.origin)}`);
+    if (config.platform.instance !== null && config.platform.instance !== "") {
+      lines.push(`  instance: ${yamlScalar(config.platform.instance)}`);
+    }
+  }
   for (const key of CONFIG_KEYS) {
     const named = config[key];
     if (named === null) {
@@ -102,6 +141,16 @@ export function serializeConfig(config: FolderConfig): string {
 
 export function parseConfig(document: string, where: string): FolderConfig {
   const mapping = readYaml(document, where);
+
+  const readBinding = (): PlatformBinding | null => {
+    const under = mappingAtKey(mapping, "platform");
+    // A key written as `platform: http://egma.example` is somebody naming the
+    // origin by hand, which binds the repository to it and says no more.
+    const origin = under === null ? textAt(mapping, "platform") : textAt(under, "origin");
+    if (origin === null) return null;
+    return { origin, instance: under === null ? null : textAt(under, "instance") };
+  };
+
   const read = (key: (typeof CONFIG_KEYS)[number]): NamedThing | null => {
     const under = mappingAtKey(mapping, key);
     if (under === null) {
@@ -114,7 +163,12 @@ export function parseConfig(document: string, where: string): FolderConfig {
     return name === null ? null : { name, id: textAt(under, "id") };
   };
 
-  return { agent: read("agent"), connection: read("connection"), suite: read("suite") };
+  return {
+    platform: readBinding(),
+    agent: read("agent"),
+    connection: read("connection"),
+    suite: read("suite"),
+  };
 }
 
 export async function readConfig(file: string): Promise<FolderConfig> {
@@ -136,6 +190,7 @@ export async function updateConfig(
 ): Promise<FolderConfig> {
   const held = await readConfig(file);
   const updated: FolderConfig = {
+    platform: changes.platform === undefined ? held.platform : changes.platform,
     agent: changes.agent === undefined ? held.agent : changes.agent,
     connection: changes.connection === undefined ? held.connection : changes.connection,
     suite: changes.suite === undefined ? held.suite : changes.suite,

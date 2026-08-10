@@ -17,7 +17,14 @@ import process from "node:process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runInTerminal, showing } from "./support/pty.ts";
-import { CLI_ENTRY, FAKE_AGENT, MANIFEST, makeWorkspace, type Workspace } from "./support/workspace.ts";
+import {
+  CLI_ENTRY,
+  FAKE_AGENT,
+  MANIFEST,
+  NO_PLATFORM,
+  makeWorkspace,
+  type Workspace,
+} from "./support/workspace.ts";
 
 // A real subprocess, a real terminal and a test run using every core: the
 // budget is generous so that only a broken wizard can reach it.
@@ -29,7 +36,9 @@ describe("the wizard on a real terminal", () => {
   beforeEach(async () => {
     workspace = await makeWorkspace({ "package.json": MANIFEST });
     // Login has its own checks; these are about what a real terminal draws.
-    await workspace.signIn("https://egma.invalid");
+    // Said out loud rather than inferred from the key on disk: which egma a
+    // command talks to is never what this machine signed in to last.
+    await workspace.signIn(NO_PLATFORM);
   });
 
   afterEach(async () => {
@@ -52,7 +61,7 @@ describe("the wizard on a real terminal", () => {
       command: process.execPath,
       args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
       cwd: workspace.dir,
-      env: workspace.env(),
+      env: workspace.env({ EGMA_URL: NO_PLATFORM }),
     });
 
     try {
@@ -107,7 +116,7 @@ describe("the wizard on a real terminal", () => {
       command: process.execPath,
       args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
       cwd: workspace.dir,
-      env: workspace.env(),
+      env: workspace.env({ EGMA_URL: NO_PLATFORM }),
     });
 
     try {
@@ -145,7 +154,7 @@ describe("the wizard on a real terminal", () => {
       command: process.execPath,
       args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
       cwd: workspace.dir,
-      env: workspace.env(),
+      env: workspace.env({ EGMA_URL: NO_PLATFORM }),
     });
 
     try {
@@ -169,7 +178,7 @@ describe("the wizard on a real terminal", () => {
       command: process.execPath,
       args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
       cwd: workspace.dir,
-      env: workspace.env(),
+      env: workspace.env({ EGMA_URL: NO_PLATFORM }),
     });
 
     try {
@@ -198,7 +207,7 @@ describe("the wizard on a real terminal", () => {
       command: process.execPath,
       args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
       cwd: workspace.dir,
-      env: workspace.env(),
+      env: workspace.env({ EGMA_URL: NO_PLATFORM }),
     });
 
     try {

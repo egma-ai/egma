@@ -63,6 +63,7 @@ import type { Browser, Page } from "playwright-core";
 import { openBrowser } from "../../api/test/support/browser.ts";
 import { startInstance, type Instance } from "../../api/test/support/instance.ts";
 import { folderPathsIn, updateConfig } from "../src/folder/egma-folder.ts";
+import { readCredentialsFor } from "../src/platform/credentials.ts";
 import { parseTestFile } from "../src/folder/test-file.ts";
 import { startFakeRetell, type FakeRetell } from "../test/support/fake-retell.ts";
 import { NO_BROWSER, signUpAndApprove } from "./support/approving-person.ts";
@@ -309,7 +310,7 @@ async function signIn(
   check(first(ran.said, "status") === "stored", "egma login said it stored a key");
 
   const file = path.join(String(env.EGMA_HOME), "credentials");
-  const held = JSON.parse(await readFile(file, "utf8")) as { url: string; key: string };
+  const held = (await readCredentialsFor(file, instance.origin)) ?? { url: "", key: "" };
   secrets.push(held.key);
   const mode = ((await stat(file)).mode & 0o777).toString(8);
   check(mode === "600", `the credentials file is 0600 (it is 0${mode})`);
@@ -680,8 +681,12 @@ async function main(): Promise<void> {
       EGMA_HOME: home,
       BROWSER: NO_BROWSER,
       EGMA_RETELL_URL: vendor.url,
+      // Named for this shell, the way a self-hoster names it. The verbs here
+      // run in a folder that is not a bound repository, and what this machine
+      // signed in to last is deliberately never a target — so the address is
+      // said rather than remembered.
+      EGMA_URL: instance.origin,
     };
-    delete env.EGMA_URL;
     delete env[KEY_VARIABLE];
     delete env.EGMA_RETELL_API_KEY;
     delete env.EGMA_RETELL_AGENT_ID;

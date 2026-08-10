@@ -30,6 +30,7 @@ import {
   FAKE_AGENT,
   RETELL_FIXTURE_REPO,
   makeWorkspace,
+  platformNamed,
   type Workspace,
 } from "./support/workspace.ts";
 
@@ -250,7 +251,7 @@ describe("the pane, while the files land", () => {
           launch: second.launch(await scriptFor(second)),
           cwd: second.dir,
           signal: new AbortController().signal,
-          platform: { url: elsewhere.url, credentialsFile: second.credentialsFile },
+          platform: platformNamed({ url: elsewhere.url, credentialsFile: second.credentialsFile }),
           retell: { url: retell.url },
           home: path.join(second.dir, "pretend-home"),
           runPollMs: 20,

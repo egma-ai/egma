@@ -14,6 +14,7 @@ import {
   CLI_ENTRY,
   FAKE_AGENT,
   MANIFEST,
+  NO_PLATFORM,
   PRETEND_OLD_NODE,
   isAlive,
   makeWorkspace,
@@ -30,7 +31,7 @@ async function egma(
   try {
     const { stdout, stderr } = await run(process.execPath, [CLI_ENTRY, ...args], {
       cwd: workspace.dir,
-      env: workspace.env(),
+      env: workspace.env({ EGMA_URL: NO_PLATFORM }),
     });
     return { stdout, stderr, code: 0 };
   } catch (error) {
@@ -47,7 +48,9 @@ describe("the egma command", () => {
     // These checks are about driving a coding agent, so the machine they run on
     // is already signed in and login costs them nothing. Login itself is proved
     // in the checks that are about login.
-    await workspace.signIn("https://egma.invalid");
+    // Said out loud rather than inferred from the key on disk: which egma a
+    // command talks to is never what this machine signed in to last.
+    await workspace.signIn(NO_PLATFORM);
   });
 
   afterEach(async () => {
@@ -59,7 +62,7 @@ describe("the egma command", () => {
       const child = spawn(
         process.execPath,
         ["--import", PRETEND_OLD_NODE, CLI_ENTRY, "--help"],
-        { cwd: workspace.dir, env: workspace.env() },
+        { cwd: workspace.dir, env: workspace.env({ EGMA_URL: NO_PLATFORM }) },
       );
       let stderr = "";
       child.stderr.setEncoding("utf8");
@@ -229,7 +232,7 @@ describe("the egma command", () => {
     const child = spawn(
       process.execPath,
       [CLI_ENTRY, "--headless", "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
-      { cwd: workspace.dir, env: workspace.env() },
+      { cwd: workspace.dir, env: workspace.env({ EGMA_URL: NO_PLATFORM }) },
     );
     let stdout = "";
     child.stdout.setEncoding("utf8");

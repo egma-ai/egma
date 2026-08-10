@@ -10,6 +10,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import type { DrivenAgentLaunch } from "../../src/acp/registry.ts";
+import type { PlatformAccess } from "../../src/platform/binding.ts";
 import type { FakeScript } from "./fake-agent.ts";
 
 export const FAKE_AGENT = fileURLToPath(new URL("./fake-agent.ts", import.meta.url));
@@ -46,6 +47,21 @@ export const CLI_ENTRY = fileURLToPath(new URL("../../dist/bin.js", import.meta.
 export const PRETEND_OLD_NODE = fileURLToPath(
   new URL("./pretend-old-node.ts", import.meta.url),
 );
+
+/**
+ * A platform as `--url` resolves one: an address, a key file, and a repository
+ * bound to nothing.
+ *
+ * Every check that drives a step directly builds one through here, so a new
+ * field on the resolved shape lands in one place rather than in a dozen. What a
+ * bound repository does is checked where it is decided — in `main`, before a
+ * step is reached — and never by handing a step a binding it does not read.
+ */
+export function platformNamed<Extra extends object>(
+  platform: { readonly url: string; readonly credentialsFile: string } & Extra,
+): PlatformAccess & Extra {
+  return { source: "flag", binding: null, ...platform };
+}
 
 export type Workspace = {
   readonly dir: string;
@@ -110,6 +126,16 @@ export type WorkspaceOptions = {
 export const NO_BROWSER = "/usr/bin/true";
 
 /**
+ * An egma that is not an egma.
+ *
+ * Where a check points when it is about driving a coding agent and not about
+ * the platform. Nothing answers there, and the workspace is signed in to it, so
+ * the walk's login step costs no request and no check can reach a real egma —
+ * not by accident, and not because somebody's shell had an address in it.
+ */
+export const NO_PLATFORM = "https://egma.invalid";
+
+/**
  * A Retell that is not Retell.
  *
  * Every run started from here is pointed at a closed port unless the check
@@ -158,7 +184,9 @@ export async function makeWorkspace(
     },
     async signIn(url, key = "egma_sk_already-held") {
       await mkdir(egmaFolder, { recursive: true, mode: 0o700 });
-      await writeFile(credentialsFile, `${JSON.stringify({ url, key })}\n`, {
+      // Written the way a login writes it: a list, keyed by platform, because
+      // one machine holds a key for each egma it has signed in to.
+      await writeFile(credentialsFile, `${JSON.stringify({ platforms: [{ url, key }] })}\n`, {
         encoding: "utf8",
         mode: 0o600,
       });

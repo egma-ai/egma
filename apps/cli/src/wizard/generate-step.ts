@@ -46,6 +46,7 @@ import {
 import { driveOneTask } from "../acp/drive.ts";
 import type { DrivenAgentLaunch } from "../acp/registry.ts";
 import type { Registered } from "../platform/agents.ts";
+import { bindingFor, type PlatformIdentity } from "../platform/binding.ts";
 import type { SignedIn } from "../platform/signed-in.ts";
 import type { RetellConfig } from "../retell/client.ts";
 import { pushTests } from "../sync/push.ts";
@@ -108,6 +109,11 @@ export type GenerateStepOptions = {
   readonly config: RetellConfig;
   /** What the find-the-agent step reported. */
   readonly facts: Facts;
+  /**
+   * Who the platform said it is, so a folder made here is born naming the egma
+   * that owns the ids about to be written into it.
+   */
+  readonly identity?: PlatformIdentity | null;
   /** How many tests a first suite holds. The default when it is left out. */
   readonly howMany?: number;
 };
@@ -312,6 +318,12 @@ const PERSONAS_EGMA_HOLDS: readonly string[] = [];
  * A folder that is already here keeps its own config file — it is somebody's
  * committed file — except for the two things egma has just learned and it has
  * not: which agent, and which connection.
+ *
+ * A folder made here is born naming the platform those two ids came from. That
+ * is the first moment this repository holds anything a platform owns, and the
+ * binding is the sentence that says which platform owns it. A folder that is
+ * already bound keeps the binding it has: rebinding is not part of this
+ * decision (ADR-0008), and a walk against another egma never reaches here.
  */
 async function folderFor(options: GenerateStepOptions): Promise<FolderPaths> {
   const agent = {
@@ -322,12 +334,20 @@ async function folderFor(options: GenerateStepOptions): Promise<FolderPaths> {
     name: options.registered.connection.name,
     id: options.registered.connection.id,
   };
+  const identity = options.identity ?? null;
+  const platform = identity === null ? null : bindingFor(identity);
 
   const folder = await createEgmaFolder({
     repository: options.cwd,
-    config: { agent, connection, suite: { name: DEFAULT_SUITE_NAME, id: null } },
+    config: { platform, agent, connection, suite: { name: DEFAULT_SUITE_NAME, id: null } },
   });
-  if (!folder.created) await updateConfig(folder.paths.config, { agent, connection });
+  if (!folder.created) {
+    await updateConfig(folder.paths.config, {
+      agent,
+      connection,
+      ...(folder.config.platform === null && platform !== null ? { platform } : {}),
+    });
+  }
   return folder.paths;
 }
 

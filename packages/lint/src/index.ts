@@ -84,15 +84,18 @@ const CONTEXT_ESTABLISHING = [
  * The exports that answer a question about the deployment rather than about a
  * customer. `instanceIsClaimed` is asked by somebody looking at a signup form,
  * who has no credential to build a context from and never will until they have
- * signed up.
+ * signed up. `platformInstanceId` is asked by an agent repository finding out
+ * which platform owns the identifiers it commits, which is a question asked
+ * before anybody signs in and again on every command afterwards.
  *
  * This category is narrower than the one above and the rule enforces the reason
  * it is safe: a function here **takes no arguments at all**. With nothing to
- * name, there is no customer to name wrongly, and a boolean carries no row out.
- * A function here that grew a parameter would be an ordinary read wearing an
- * exemption, so the rule refuses it.
+ * name, there is no customer to name wrongly, and what comes back is one fact
+ * about the deployment rather than any row. A function here that grew a
+ * parameter would be an ordinary read wearing an exemption, so the rule refuses
+ * it.
  */
-const INSTANCE_SCOPED = ["instanceIsClaimed"];
+const INSTANCE_SCOPED = ["instanceIsClaimed", "platformInstanceId"];
 
 /**
  * The exports that dispatch egma's own work across the whole deployment, and

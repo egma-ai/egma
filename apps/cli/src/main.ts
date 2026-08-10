@@ -30,7 +30,14 @@ import { runLoginCommand } from "./commands/login.ts";
 import { runPullCommand } from "./commands/pull.ts";
 import { runPushCommand } from "./commands/push.ts";
 import { runRunCommand } from "./commands/run.ts";
-import { resolvePlatformAccess, UnusableUrlError } from "./platform/credentials.ts";
+import {
+  BOUND_ELSEWHERE_EXIT,
+  PLATFORM_UNREACHABLE_EXIT,
+  resolvePlatformAccess,
+  settlePlatform,
+  type PlatformIdentity,
+} from "./platform/binding.ts";
+import { UnusableUrlError } from "./platform/credentials.ts";
 import { RETELL_API } from "./retell/client.ts";
 import { HeadlessUI } from "./ui/headless-ui.ts";
 import { buildExitNotice, exitLines, type ExitReport } from "./wizard/exit-line.ts";
@@ -216,9 +223,10 @@ export function helpText(): string {
     "  --coding-agent <id>  Which coding agent to drive, named as the agent",
     `                       registry names it. Default: ${DEFAULT_DRIVEN_AGENT_ID}`,
     "  --cwd <path>         The folder to work in. Default: this folder.",
-    "  --url <address>      The egma to talk to, for a self-hosted one. Kept",
-    "                       after the first login, so it is set once. EGMA_URL",
-    "                       does the same for a whole shell.",
+    "  --url <address>      The egma to talk to, for a self-hosted one. Say it",
+    "                       once: the wizard writes it into egma/config.yaml,",
+    "                       and every later command in this repository finds it",
+    "                       there. EGMA_URL does the same for a whole shell.",
     "  --force              With login: sign in again even when this machine",
     "                       already holds a key.",
     "  --no-follow          With run: start the run and return at once, without",
@@ -239,6 +247,15 @@ export function helpText(): string {
     "                       and the task taken as already agreed to.",
     "  -h, --help           Print this.",
     "  -v, --version        Print the version.",
+    "",
+    "Which egma a command talks to:",
+    "  --url, then EGMA_URL, then the platform named in egma/config.yaml, then",
+    "  Egma Cloud for a repository that names none. What this machine signed in",
+    "  to last is never the answer: the ids in egma/config.yaml exist on one",
+    "  platform, so the repository says which one and every command checks it.",
+    "  A bound platform that is down stops the command — nothing falls back to",
+    "  Egma Cloud — and an address naming a different egma is refused, because",
+    "  moving a repository between platforms is not supported yet.",
     "",
     "Environment:",
     "  EGMA_URL             The egma to talk to, for a whole shell. Same as --url.",
@@ -298,6 +315,10 @@ export function helpText(): string {
     "  4 egma did not answer, or refused",
     "  5 egma would not start the run, and said why",
     "  6 a simulation errored, so nothing concluded   130 stopped part way",
+    "",
+    "What every command answers when the platform is the problem:",
+    "  4 the egma this repository is bound to did not answer",
+    "  8 the address in hand is a different egma from the bound one",
     "",
     `The agent registry was mirrored on ${REGISTRY_SNAPSHOT_MIRRORED_ON}.`,
   ].join("\n");
@@ -607,12 +628,14 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
 
+  const cwd = path.resolve(invocation.cwd ?? process.cwd());
+
   // Which egma, resolved once for every path below, and refused here when the
   // address a developer named is not one. A bad address is turned away before
   // anything is started on it rather than after.
   let access: PlatformAccess;
   try {
-    access = await resolvePlatformAccess({ env: process.env, flag: invocation.url });
+    access = await resolvePlatformAccess({ env: process.env, flag: invocation.url, cwd });
   } catch (error) {
     if (error instanceof UnusableUrlError) {
       process.stderr.write(`${error.message}\n`);
@@ -620,6 +643,34 @@ export async function main(argv: readonly string[]): Promise<void> {
       return;
     }
     throw error;
+  }
+
+  // `init` makes a folder and talks to nothing, so it is the one command that
+  // runs whether or not this repository's platform is up.
+  if (invocation.verb === "init") {
+    process.exitCode = await runFolderVerb("init", invocation, access);
+    return;
+  }
+
+  // Everything else is about to name an identifier that exists on exactly one
+  // platform. A repository that says which platform that is has the address in
+  // hand checked against it before a single identifier is sent; a repository
+  // that says nothing has nothing to check and costs no request.
+  const settled = await settlePlatform(access);
+  if (settled.kind !== "ok") {
+    process.stdout.write(`url: ${access.url}\n`);
+    if (access.binding !== null) {
+      process.stdout.write(
+        `bound_to: ${access.binding.origin}${access.binding.instance === null ? "" : ` ${access.binding.instance}`}\n`,
+      );
+    }
+    process.stdout.write(
+      `status: ${settled.kind === "elsewhere" ? "bound-elsewhere" : "unreachable"}\n`,
+    );
+    process.stderr.write(`${settled.reason}\n`);
+    process.exitCode =
+      settled.kind === "elsewhere" ? BOUND_ELSEWHERE_EXIT : PLATFORM_UNREACHABLE_EXIT;
+    return;
   }
 
   // A verb needs no terminal and takes no keystroke: it drives no coding agent,
@@ -633,7 +684,6 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
   if (
-    invocation.verb === "init" ||
     invocation.verb === "pull" ||
     invocation.verb === "push" ||
     invocation.verb === "run"
@@ -653,8 +703,6 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
 
-  const cwd = path.resolve(invocation.cwd ?? process.cwd());
-
   let launch: DrivenAgentLaunch;
   try {
     launch = launchFrom(invocation);
@@ -668,7 +716,11 @@ export async function main(argv: readonly string[]): Promise<void> {
     throw error;
   }
 
+  // Who this platform said it is, carried into the walk: it is what the wizard
+  // writes into the repository once the developer is signed in.
+  const platform: PlatformAccess = { ...access, identity: settled.identity };
+
   process.exitCode = invocation.headless
-    ? await runHeadless(invocation, launch, cwd, access)
-    : await runWizard(launch, cwd, access);
+    ? await runHeadless(invocation, launch, cwd, platform)
+    : await runWizard(launch, cwd, platform);
 }
