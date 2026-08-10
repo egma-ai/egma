@@ -46,7 +46,12 @@ import {
   secretArgumentRefusal,
   type AskOptions,
 } from "../self-host/protected-input.ts";
-import { fileReceipt, sweptOf, type Receipt } from "../self-host/receipt.ts";
+import {
+  fileReceipt,
+  SecretInReceiptError,
+  sweptOf,
+  type Receipt,
+} from "../self-host/receipt.ts";
 import {
   applyCarrier,
   ARTIFACT_NAME,
@@ -237,6 +242,16 @@ export async function runSelfHostCommand(options: SelfHostOptions): Promise<numb
     }
     if (error instanceof CarrierError) {
       options.out(`status: refused\nreason: ${error.message}`);
+      options.fail(error.message);
+      return SELF_HOST_EXIT.refused;
+    }
+    if (error instanceof SecretInReceiptError) {
+      // The sweep fired. Nothing was written and nothing was printed, and
+      // saying so in a sentence matters more here than anywhere: a stack trace
+      // over a leak reads as "egma is broken and may have leaked", when what
+      // happened is the opposite — a guard caught something before it left.
+      options.out("status: refused");
+      options.out("changed: nothing");
       options.fail(error.message);
       return SELF_HOST_EXIT.refused;
     }

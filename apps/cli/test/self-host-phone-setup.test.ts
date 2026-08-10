@@ -436,6 +436,31 @@ describe("egma self-host phone setup", () => {
     expect((await stat(configuration)).mode & 0o777).toBe(0o600);
   });
 
+  it("refuses to print an answer that carries a secret, rather than printing it", async () => {
+    // The guard is not a review habit, so it is worth proving it fires. A
+    // carrier that echoed the key back — in a trunk name, in a refusal, in
+    // anything egma quotes — would otherwise put it in the plan, the terminal
+    // and the receipt at once. Nothing quotes a provider today; the point is
+    // that the day something does, this stops rather than leaks.
+    twilio = await startFakeTwilio({
+      numbers: { [SOURCE_NUMBER]: NUMBER_SID },
+      existingTrunk: { sid: `TK${OPENAI_KEY}`, domain: EXISTING_TRUNK.domain },
+      existingCredentialList: EXISTING_LIST,
+      credentialListAttached: true,
+      numberAttached: true,
+    });
+
+    const run = await runSetup(workspace, twilio, platform, ["phone", "setup", "--plan"]);
+
+    expect(run.code).toBe(4);
+    expect(`${run.stdout}\n${run.stderr}`).not.toContain(OPENAI_KEY);
+    expect(run.stderr).toContain("refused to write");
+    expect(run.stdout).toContain("changed: nothing");
+    // A sentence, not a stack trace: a guard catching something is the
+    // opposite of egma being broken, and it should not read like it.
+    expect(run.stderr).not.toContain("Node.js v");
+  });
+
   it("refuses a secret offered as a command argument, before it does anything", async () => {
     twilio = await startFakeTwilio({ numbers: { [SOURCE_NUMBER]: NUMBER_SID } });
 
