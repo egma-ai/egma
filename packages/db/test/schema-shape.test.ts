@@ -307,7 +307,6 @@ describe("every enumerated value", () => {
       { table: "run", column: "triggered_via" },
       { table: "simulation", column: "status" },
       { table: "simulation", column: "ending_reason" },
-      { table: "simulation", column: "connection_type" },
       { table: "simulation", column: "modality" },
       { table: "run_event", column: "kind" },
       { table: "run_event", column: "verdict" },

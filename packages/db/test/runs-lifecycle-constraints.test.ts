@@ -205,7 +205,6 @@ async function insertSimulation(
     test_id: testId,
     test_version_id: testVersionId,
     position: 1,
-    connection_type: "retell",
     modality: "chat",
     status,
     ...shapeOf(status),

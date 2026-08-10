@@ -183,7 +183,6 @@ export type Simulation = {
   readonly testId: string | null;
   readonly testVersionId: string | null;
   readonly position: number;
-  readonly connectionType: ConnectionType;
   readonly modality: Modality;
   readonly status: SimulationStatus;
   readonly endingReason: SimulationEndingReason | null;
@@ -312,7 +311,6 @@ const SIMULATION_COLUMNS = {
   testId: simulation.testId,
   testVersionId: simulation.testVersionId,
   position: simulation.position,
-  connectionType: simulation.connectionType,
   modality: simulation.modality,
   status: simulation.status,
   endingReason: simulation.endingReason,
@@ -534,11 +532,10 @@ function runFromRow(row: RunRow): Run {
  * inside the vocabulary, so reading one back is a narrowing, not a guess. */
 type SimulationRow = Omit<
   Simulation,
-  "status" | "endingReason" | "connectionType" | "modality"
+  "status" | "endingReason" | "modality"
 > & {
   readonly status: string;
   readonly endingReason: string | null;
-  readonly connectionType: string;
   readonly modality: string;
 };
 
@@ -547,7 +544,6 @@ function simulationFromRow(row: SimulationRow): Simulation {
     ...row,
     status: row.status as SimulationStatus,
     endingReason: row.endingReason as SimulationEndingReason | null,
-    connectionType: row.connectionType as ConnectionType,
     modality: row.modality as Modality,
   };
 }
@@ -1147,7 +1143,6 @@ export async function startRun(
           testId: version.testId,
           testVersionId: version.versionId,
           position: index + 1,
-          connectionType: reached.type,
           modality: reached.modality,
           status: "queued",
           createdAt: now,
@@ -1551,7 +1546,6 @@ export type SimulationClaim = {
   /** What is being checked; both absent only on an upgraded instance's history. */
   readonly testId: string | null;
   readonly testVersionId: string | null;
-  readonly connectionType: ConnectionType;
   readonly modality: Modality;
   readonly claimedBy: string;
   readonly claimedAt: Date;
@@ -1575,7 +1569,6 @@ const SIMULATION_CLAIM_COLUMNS = {
   personaVersionId: simulation.personaVersionId,
   testId: simulation.testId,
   testVersionId: simulation.testVersionId,
-  connectionType: simulation.connectionType,
   modality: simulation.modality,
   claimedBy: simulation.claimedBy,
   claimedAt: simulation.claimedAt,
@@ -1744,7 +1737,6 @@ export async function claimSimulations(
       personaVersionId: row.personaVersionId,
       testId: row.testId,
       testVersionId: row.testVersionId,
-      connectionType: row.connectionType as ConnectionType,
       modality: row.modality as Modality,
       claimedBy: row.claimedBy ?? claimant,
       claimedAt: row.claimedAt ?? now,

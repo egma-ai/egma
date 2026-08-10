@@ -348,7 +348,6 @@ describe("starting a run", () => {
     expect(started.connectionSnapshot.type).toBe("retell");
     expect(started.connectionSnapshot.modality).toBe("chat");
     expect(started.connectionSnapshot.environment).toBe("staging");
-    expect(started.simulations[0]?.connectionType).toBe("retell");
     expect(started.simulations[0]?.modality).toBe("chat");
 
     await updateConnection(actingAsAcme(), agentId, connectionId, {
