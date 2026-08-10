@@ -84,6 +84,23 @@ services:
       # prerequisite for anything, including adding a second person.
       EGMA_SMTP_URL: ${EGMA_SMTP_URL:-}
       EGMA_MAIL_FROM: ${EGMA_MAIL_FROM:-}
+      # What this process knows about the carrier: three non-secret facts,
+      # written by `egma self-host phone setup`, from which it reports the
+      # platform's phone state. No token, no password, no provider key — the
+      # API neither dials nor speaks, and phone authority lives in the
+      # container that uses it.
+      EGMA_PHONE_TRUNK_ADDRESS: ${EGMA_PHONE_TRUNK_ADDRESS:-}
+      EGMA_PHONE_SOURCE_NUMBER: ${EGMA_PHONE_SOURCE_NUMBER:-}
+      EGMA_PHONE_SPEECH_PROVIDER: ${EGMA_PHONE_SPEECH_PROVIDER:-}
+      # The judge a project is given when it has configured none, from the one
+      # OpenAI key phone setup asked for. Written into each project's own
+      # sealed row on boot and never over one that is already there. It is here
+      # rather than on the grader on purpose: a judge configured per container
+      # is a judge no project chose. All three or none — the API refuses to
+      # start on half, because half a judge errors every verdict it is given.
+      EGMA_JUDGE_PROVIDER: ${EGMA_JUDGE_PROVIDER:-}
+      EGMA_JUDGE_MODEL: ${EGMA_JUDGE_MODEL:-}
+      EGMA_JUDGE_API_KEY: ${EGMA_JUDGE_API_KEY:-}
     ports:
       # Published on the host, so that a self-hoster who already runs
       # something on these can move egma rather than move the other thing —

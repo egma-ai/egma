@@ -187,13 +187,27 @@ async function runUp(options: SelfHostOptions): Promise<number> {
   options.out(`workspace: ${workspace}`);
   options.out(`url: ${address}`);
 
-  const started = await compose(
-    ["up", "-d", "--wait", "--wait-timeout", "300"],
-    composeOptions,
-  );
+  // Twice, on a workspace that has never been started. ClickHouse's own
+  // entrypoint starts a server, creates the database, stops it and starts the
+  // real one — and its health check answers during the first of those, so the
+  // API can be released to connect to a server that is on its way down. It
+  // exits, compose reports a dependency failure, and a second `up` succeeds
+  // against the stores that now exist. Measured on a clean workspace here, so
+  // this is not defensive coding: it is the first run, and a first run that
+  // fails once and works when you type the same thing again is a product that
+  // taught its first user to distrust it.
+  let started = await compose(["up", "-d", "--wait", "--wait-timeout", "300"], composeOptions);
+  if (started.code !== 0) {
+    options.fail(
+      "one of the services did not come up on the first try. That is usual on a " +
+        "workspace that has never been started, because a store's first boot " +
+        "creates its database and restarts itself. Trying once more.",
+    );
+    started = await compose(["up", "-d", "--wait", "--wait-timeout", "300"], composeOptions);
+  }
   if (started.code !== 0) {
     options.out("status: failed");
-    options.out("reason: docker compose could not bring the platform up");
+    options.out("reason: docker compose could not bring the platform up, twice");
     return SELF_HOST_EXIT.refused;
   }
 

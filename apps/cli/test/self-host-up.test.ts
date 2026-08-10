@@ -148,6 +148,39 @@ describe("egma self-host up", () => {
     }
   });
 
+  it("tries once more when a store's first boot takes the API down with it", async () => {
+    // Measured on a clean workspace against real containers: ClickHouse's
+    // entrypoint starts a server, creates the database, stops it and starts the
+    // real one — and its health check answers during the first of those, so the
+    // API is released to connect to a server on its way down and exits. A
+    // second `up` works. A first run that fails once and works when you type
+    // the same thing again is a product that taught its first user to distrust
+    // it, so the command types it again itself.
+    const platform = await startPlatform((own) => own);
+    const workspace = await makeWorkspace();
+    const failFirst = path.join(workspace.binDir, "docker");
+    const calls = path.join(workspace.dir, "docker-calls.txt");
+    await writeFile(
+      failFirst,
+      `#!/bin/sh\necho "ARGS $@" >> "${calls}"\n` +
+        `n=$(grep -c "^ARGS compose up" "${calls}")\n` +
+        `if [ "$n" -le 1 ]; then exit 1; fi\nexit 0\n`,
+    );
+    await chmod(failFirst, 0o755);
+
+    try {
+      const run = await runUp(workspace, { EGMA_BASE_URL: platform.url });
+
+      expect(run.code).toBe(0);
+      expect(run.stdout).toContain("status: ready");
+      expect(run.stderr).toContain("did not come up on the first try");
+      const said = await workspace.dockerCalls();
+      expect(said.match(/^ARGS compose up/gmu)).toHaveLength(2);
+    } finally {
+      await platform.close();
+    }
+  });
+
   it("refuses in a directory that is not a platform workspace", async () => {
     const notAWorkspace = await mkdtemp(path.join(tmpdir(), "egma-not-platform-"));
     const workspace = await makeWorkspace();
