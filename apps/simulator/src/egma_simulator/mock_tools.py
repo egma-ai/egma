@@ -24,11 +24,12 @@ in the room, before anything real runs — two methods and no more:
   exchange down: what was asked, what was served, and how long it took.
 
 Both directions are JSON objects in a string, because that is what the
-transport carries, and the answer travels in **the shape it was authored
-in** — ``{"answer": …}`` or ``{"error": …}`` — from the authoring row,
-through the run's snapshot, through the claimed spec, onto the wire. One
-shape end to end means nothing in between re-tags it, and nothing in
-between can invent a difference.
+transport carries, and the answer travels on the wire in **the shape it
+was authored in** — ``{"answer": …}`` or ``{"error": …}`` — from the
+authoring row, through the run's snapshot, through the claimed spec, onto
+the wire. One shape all that way means nothing in between re-tags it, and
+the tag is what lets the other side tell "return this" from "raise this"
+even when the authored value itself looks like a failure.
 
 ## Nothing here knows about LiveKit
 
@@ -36,16 +37,16 @@ The two handlers take a payload string and answer with one; a refusal is
 :class:`MockToolRefusal`, which whoever registered them turns into their
 transport's own error. That is what keeps the exchange — report the call,
 receive an answer — a contract rather than a room feature, and it is why
-the room driver can register these against a real LiveKit and a
-room-shaped fake alike with nothing here changing.
+the room driver can register these against a real LiveKit and against the
+room-shaped stand-in CI runs, with nothing here changing.
 
 ## What lands on the record
 
 Every call egma answers becomes a ``tool_call`` span: the name, the
-arguments as they arrived, the answer as it was served, the provenance
-stamp, and the mock tool that answered. The span brackets the exchange —
-the round trip plus the declared delay — so a delay is readable as the
-time it really took, with no second field to disagree with it.
+arguments as they arrived, what the call was given, the provenance stamp,
+and the mock tool that answered. The span brackets the exchange — the
+round trip plus the declared delay — so a delay is readable as the time
+it really took, with no second field to disagree with it.
 
 A call served for a tool the census never named is flagged
 **late-attached**: answers stand ready for every name this simulation
@@ -122,10 +123,6 @@ UNSUPPORTED_PROTOCOL_VERSION = 904
 # carry. Two blocks that cannot collide means an error code always says
 # whose complaint it is.
 
-MOCKED = "mocked"
-"""The one provenance a served call carries: a mock tool answered it."""
-
-
 class MockToolRefusal(Exception):
     """egma refusing one message of the exchange, in its own words.
 
@@ -158,8 +155,12 @@ class ExchangedToolCall:
     """The arguments as JSON, or ``None`` where the call carried none."""
 
     answer: str | None
-    """The answer as it was served, JSON-encoded — or ``None`` for a call
-    egma refused, which is a call nobody was answered about."""
+    """What the call was given, JSON-encoded: the tool's own return value,
+    or the tagged failure where the mock tool answered with one — a
+    failure has no return value, and a record that could not tell the two
+    apart would read a mocked failure as a tool that returned a string.
+    ``None`` for a call egma refused, which is a call nobody was answered
+    about at all."""
 
     mock_tool: str | None
     """The mock tool that answered, by name. ``None`` exactly where
@@ -201,7 +202,7 @@ class MockToolSeam:
         self._clock = clock
         self._sleep = sleep
         self._standing_ready = False
-        self._spoken_to = False
+        self._stood_in_the_path = False
         self._discovered: tuple[str, ...] = ()
         self._exchanged: list[ExchangedToolCall] = []
 
@@ -234,16 +235,25 @@ class MockToolSeam:
         reading of every connection egma is not in the path of, and of a
         room that was never joined.
 
-        Three empty lists where it stood ready and nobody ever spoke to
-        it: the asking happened, and no tool came back. Where somebody did
-        speak, ``covered`` is every name egma stood ready to answer for —
-        which is exactly what the hello reply told them — and ``uncovered``
-        is the discovered names left over, the tools that ran their own
-        implementations untouched and unobserved.
+        Three empty lists where it stood ready and nothing was ever really
+        covered: the asking happened, and no tool came back.
+
+        **``covered`` is a claim about isolation, so it is only ever made
+        where isolation really happened.** The names go on the stamp once
+        egma has told somebody what it answers for — a hello it answered —
+        or once it has actually answered a call. A hello egma *refused*
+        covers nothing: the other side wrapped nothing, so every tool it
+        has ran its own implementation, and a stamp claiming those names
+        were covered would be the record saying a simulation was isolated
+        when it was not. That is the one thing this stamp exists to make
+        impossible.
+
+        ``uncovered`` is the discovered names left over — the tools that
+        ran their own implementations, untouched and unobserved.
         """
         if not self._standing_ready:
             return None
-        covered = tuple(self._answers) if self._spoken_to else ()
+        covered = tuple(self._answers) if self._stood_in_the_path else ()
         return {
             "discovered": list(self._discovered),
             "covered": list(covered),
@@ -261,12 +271,6 @@ class MockToolSeam:
         census is a snapshot of the agent's tools, and an agent that
         re-announces itself is announcing what it has *now*.
         """
-        # Set before anything is read, on both methods, because what it
-        # answers is "did anything speak this exchange to egma at all" —
-        # and a session whose hello egma could not read is still a session
-        # that was there. It is the difference between a stamp saying no
-        # tool came back and one saying nobody ever asked.
-        self._spoken_to = True
         asked = _object(HELLO_METHOD, payload)
         _speaks_this_version(asked)
 
@@ -276,7 +280,7 @@ class MockToolSeam:
                 MALFORMED_REQUEST,
                 f"{HELLO_METHOD} carries the agent's tools as a list of "
                 '{"name": …} objects, and this one carries '
-                f"{_named(census)}",
+                f"{_kind_of(census)}",
             )
         discovered: list[str] = []
         for entry in census:
@@ -286,30 +290,53 @@ class MockToolSeam:
                     MALFORMED_REQUEST,
                     f"every tool in an {HELLO_METHOD} census names itself: "
                     'each entry is {"name": "the_tool", "schema": …} and one '
-                    f"of these carries {_named(name)} for its name",
+                    f"of these carries {_kind_of(name)} for its name",
                 )
             name = name.strip()
             if name not in discovered:
                 discovered.append(name)
 
+        replacing = self._discovered if self._stood_in_the_path else None
         self._discovered = tuple(discovered)
+        # Only now: the reply below is what tells the other side which
+        # tools to wrap, so this is the moment egma really comes to stand
+        # between the agent and its backends. A hello refused above never
+        # reaches here, and nothing was covered by one.
+        self._stood_in_the_path = True
         logger.info(
             "the agent reported %d tool(s); %d of them are answered by mock "
             "tools",
             len(self._discovered),
             sum(1 for name in self._discovered if name in self._answers),
         )
-        return _serialized(
+        if replacing is not None:
+            # A census is a snapshot of the agent's tools, so a second one
+            # is the agent saying what it has *now*. Said out loud because
+            # the stamp keeps only the last, and an operator reading a
+            # coverage stamp that surprises them deserves to find the
+            # moment it changed.
+            logger.info(
+                "a second census replaced the first: %d tool(s) became %d",
+                len(replacing),
+                len(self._discovered),
+            )
+        reply = _serialized(
             {
                 "protocol_version": PROTOCOL_VERSION,
                 "mocked_tools": list(self._answers),
             }
         )
+        # Measured for the same reason an answer is. A project with more
+        # mocked tools than one message can name would otherwise have its
+        # reply refused by the transport, and the far side would learn
+        # only that the hello failed — where a named fault says which
+        # project has outgrown the exchange.
+        _fits_on_the_wire("the list of tools egma answers for", reply)
+        return reply
 
     async def tool(self, payload: str) -> str:
         """One tool call: waited out, answered, and written down."""
         began = self._clock()
-        self._spoken_to = True
         asked = _object(TOOL_METHOD, payload)
 
         name = asked.get("name")
@@ -317,7 +344,7 @@ class MockToolSeam:
             raise MockToolRefusal(
                 MALFORMED_REQUEST,
                 f"{TOOL_METHOD} names the tool being called, and this one "
-                f"names {_named(name)}",
+                f"names {_kind_of(name)}",
             )
         name = name.strip()
 
@@ -326,7 +353,7 @@ class MockToolSeam:
             raise MockToolRefusal(
                 MALFORMED_REQUEST,
                 f"{TOOL_METHOD} carries the call's arguments as a JSON "
-                f"object or not at all, and {name} carried {_named(arguments)}",
+                f"object or not at all, and {name} carried {_kind_of(arguments)}",
             )
         written = None if arguments is None else _serialized(arguments)
 
@@ -362,10 +389,27 @@ class MockToolSeam:
                 f"nothing to answer with. It answers for: {offered}",
             )
 
-        # The answer is the reply: the tagged object travels as authored,
-        # so what goes on the wire is the same bytes the record keeps.
+        # Two shapes, and the difference is the whole of why the answer is
+        # tagged. The **wire** carries the tag, because the other side has
+        # to know whether to return this to the model or raise it, and an
+        # authored value that happened to look like a failure would
+        # otherwise be one. The **record** carries what the call was given
+        # — the tool's own return value, untagged, because that is what
+        # the agent received and what a grader reads. A failure has no
+        # return value to record, so there the tag stays: it is what keeps
+        # a mocked failure from reading as a tool that returned a string.
         served = _serialized(mock.answer)
-        _fits_on_the_wire(name, served)
+        _fits_on_the_wire(f"the mock tool for {name!r}", served)
+        #
+        # Known and accepted: a tool whose own return value is an object
+        # with an `error` key records the same bytes a mocked failure
+        # does. The record's vocabulary gives the branch no slot of its
+        # own, and inventing one here would be this file deciding what the
+        # contract says.
+        recorded = served if mock.fails else _serialized(mock.answer["answer"])
+        # Answered, so egma really did stand between this tool and its
+        # backend — which is what the coverage stamp claims.
+        self._stood_in_the_path = True
         if mock.delay_milliseconds:
             await self._sleep(mock.delay_milliseconds / 1000)
 
@@ -373,7 +417,7 @@ class MockToolSeam:
             ExchangedToolCall(
                 name=name,
                 arguments=written,
-                answer=served,
+                answer=recorded,
                 mock_tool=mock.tool_name,
                 late_attached=name not in self._discovered,
                 began_unix_nano=began,
@@ -403,7 +447,7 @@ def _object(method: str, payload: str) -> dict:
         raise MockToolRefusal(
             MALFORMED_REQUEST,
             f"{method} carries a JSON object, and this payload carries "
-            f"{_named(asked)}",
+            f"{_kind_of(asked)}",
         )
     return asked
 
@@ -422,7 +466,7 @@ def _speaks_this_version(asked: dict) -> None:
     declared = (
         repr(version)
         if isinstance(version, int) and not isinstance(version, bool)
-        else _named(version)
+        else _kind_of(version)
     )
     raise MockToolRefusal(
         UNSUPPORTED_PROTOCOL_VERSION,
@@ -436,26 +480,28 @@ def _serialized(value: object) -> str:
     return json.dumps(value, separators=(",", ":"))
 
 
-def _fits_on_the_wire(name: str, served: str) -> None:
-    """Refuse an answer the transport could not carry, before it is waited for.
+def _fits_on_the_wire(what: str, message: str) -> None:
+    """Refuse a message the transport could not carry, before it is sent.
 
-    Measured before the delay is spent rather than after: an answer that
+    Measured before a delay is spent rather than after: an answer that
     cannot be sent is a fault to raise at once, not something to make a
-    conversation wait three seconds for.
+    conversation wait thirty seconds for. And refused here rather than by
+    the transport, because the transport's own complaint arrives at the
+    far side as a call that mysteriously failed, where this one names the
+    thing that outgrew the message.
     """
-    bytes_over_the_wire = len(served.encode())
+    bytes_over_the_wire = len(message.encode())
     if bytes_over_the_wire <= LARGEST_PAYLOAD_BYTES:
         return
     raise MockToolRefusal(
         ANSWER_TOO_LARGE,
-        f"the mock tool for {name!r} answers with {bytes_over_the_wire} "
-        f"bytes, and one message of this exchange holds at most "
-        f"{LARGEST_PAYLOAD_BYTES}. An answer that needs more than that is a "
-        "document rather than a tool answer",
+        f"{what} is {bytes_over_the_wire} bytes, and one message of this "
+        f"exchange holds at most {LARGEST_PAYLOAD_BYTES}. An answer that "
+        "needs more than that is a document rather than a tool answer",
     )
 
 
-def _named(value: object) -> str:
+def _kind_of(value: object) -> str:
     """What arrived, named by kind rather than quoted.
 
     A refusal says what shape it got, never the bytes it got: the payload

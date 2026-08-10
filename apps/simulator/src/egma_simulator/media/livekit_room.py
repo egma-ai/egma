@@ -110,6 +110,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -134,6 +135,8 @@ from .room import (
     room_name_for,
     room_token,
 )
+
+logger = logging.getLogger(__name__)
 
 ROOM_BAND_HZ = 16000
 """The band an exchange in a room is carried at.
@@ -584,11 +587,30 @@ class LiveKitRoomBackend:
         nothing and leave every tool alone — and it is what puts the
         agent's own tool list on the record, so a simulation that isolated
         nothing still says so.
+
+        **Nothing here may sink a conversation that would otherwise have
+        run.** Offering the methods is the one step in this driver that
+        the simulation does not depend on: a room where egma answered for
+        nothing is exactly the room every simulation was before mock tools
+        existed, and failing the whole thing over it would make a feature
+        nobody asked for on this connection into a way to lose a test run.
+        So a refusal is logged loudly and the exchange is simply never
+        offered — and the record then claims nothing about tools, which is
+        the truth, because egma never stood in their path.
         """
         if self._mock_tools is None or self._room is None:
             return
-        self._room.register_rpc(HELLO_METHOD, self._mock_tools.hello)
-        self._room.register_rpc(TOOL_METHOD, self._mock_tools.tool)
+        try:
+            self._room.register_rpc(HELLO_METHOD, self._mock_tools.hello)
+            self._room.register_rpc(TOOL_METHOD, self._mock_tools.tool)
+        except Exception as unoffered:
+            logger.error(
+                "egma could not offer the mock-tool exchange in %s, so every "
+                "tool the agent has will run its own implementation: %s",
+                self._room_name,
+                self._quotable(repr(unoffered)),
+            )
+            return
         self._mock_tools.standing_ready()
 
     async def _way_in(self) -> WayIn:

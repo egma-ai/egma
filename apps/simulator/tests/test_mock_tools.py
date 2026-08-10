@@ -168,7 +168,10 @@ async def conducted_record(
     )
 
     async def agent_side() -> None:
-        await stub.standing_ready.wait()
+        # A room where the exchange was never offered has nothing to wait
+        # for, which is exactly what the far side would find on a live one.
+        if stub.refuses_rpc is None:
+            await stub.standing_ready.wait()
         await session(stub)
 
     await asyncio.gather(simulation.run(), agent_side())
@@ -199,6 +202,32 @@ def milliseconds_of(span: dict) -> float:
     return (
         int(span["endTimeUnixNano"]) - int(span["startTimeUnixNano"])
     ) / 1_000_000
+
+
+def golden_result_for(tool_name: str) -> str:
+    """What the contract's own golden flush records for one served call.
+
+    The seam and the published bytes are the two halves of one promise,
+    and a test that restated the bytes here could only prove the seam
+    agrees with this file. This reads them off the golden flush, so a
+    change to either side fails.
+    """
+    from egma_simulator.contract import contract_dir
+
+    document = json.loads(
+        (
+            contract_dir()
+            / "fixtures"
+            / "spans"
+            / "valid"
+            / "voice-mocked-tool-calls.json"
+        ).read_text(encoding="utf-8")
+    )
+    for span in document["resourceSpans"][0]["scopeSpans"][0]["spans"]:
+        held = attributes_of(span)
+        if held.get("egma.tool.name") == tool_name:
+            return held["egma.tool.result"]
+    raise AssertionError(f"the golden flush records no call to {tool_name}")
 
 
 def terminal_facts(client: RecordingControlPlane) -> dict:
@@ -268,16 +297,22 @@ async def test_a_spec_naming_mocked_tools_comes_back_as_a_record_of_them(
     assert attributes_of(calendar) == {
         "egma.tool.name": "check_calendar",
         "egma.tool.arguments": '{"date":"2026-08-13"}',
-        "egma.tool.result": '{"answer":{"slots":[]}}',
+        # What the call was given: the tool's own return value, which is
+        # what the agent received and what a grader reads. Held to the
+        # golden file rather than restated, so the record the seam writes
+        # and the record the contract publishes cannot drift apart.
+        "egma.tool.result": golden_result_for("check_calendar"),
         "egma.tool.provenance": "mocked",
         "egma.tool.mock_tool": "check_calendar",
     }
+    assert attributes_of(calendar)["egma.tool.result"] == '{"slots":[]}'
     # The declared delay is readable as the time the exchange took, and
     # there is no attribute repeating the number for the two to disagree.
     assert milliseconds_of(calendar) >= A_DECLARED_DELAY_MS
 
-    # The failure branch travels as authored: a test that wants the
-    # apology path gets the words its author wrote, not egma's summary.
+    # A failure has no return value, so the tag stays on: what a test that
+    # wants the apology path gets is the words its author wrote, kept
+    # tellable from a tool that returned a string.
     assert attributes_of(booking)["egma.tool.result"] == (
         '{"error":"the booking service is not accepting requests"}'
     )
@@ -368,10 +403,19 @@ def a_mock(
     error: str | None = None,
     delay_milliseconds: int = 0,
 ) -> MockTool:
+    """The same resolved answer, read as the simulator reads it.
+
+    Built from :func:`answers` rather than beside it, so a suite exercising
+    the seam directly and one going in through a spec document cannot come
+    to disagree about what an answer looks like.
+    """
+    written = answers(
+        tool_name, answer, error=error, delay_milliseconds=delay_milliseconds
+    )
     return MockTool(
-        tool_name=tool_name,
-        answer={"error": error} if error is not None else {"answer": answer},
-        delay_milliseconds=delay_milliseconds,
+        tool_name=written["tool_name"],
+        answer=written["answer"],
+        delay_milliseconds=written["delay_milliseconds"],
     )
 
 
@@ -446,7 +490,10 @@ async def test_a_call_the_census_never_reported_lands_late_attached(
     (served,) = tool_spans(client)
     assert attributes_of(served) == {
         "egma.tool.name": "send_confirmation_sms",
-        "egma.tool.result": '{"answer":{"delivered":true}}',
+        # Held to the golden flush, which records this very call: the
+        # arguments never arrived, so the attribute is absent rather than
+        # empty, and a reader never takes thin arguments for none passed.
+        "egma.tool.result": golden_result_for("send_confirmation_sms"),
         "egma.tool.provenance": "mocked",
         "egma.tool.mock_tool": "send_confirmation_sms",
         "egma.tool.late_attached": True,
@@ -689,38 +736,77 @@ async def test_no_credential_and_no_test_content_ever_rides_an_answer(
             assert kept not in answered
 
 
-async def test_a_session_egma_could_not_read_still_counts_as_somebody_asking(
+async def test_a_hello_egma_refused_covers_nothing_at_all(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """Two different sentences, and the record has to keep them apart.
+    """The stamp never claims an isolation that did not happen.
 
-    A session whose hello egma could not read was still a session that was
-    there. So the stamp says the tools egma stood ready for and no
-    discovered tools at all — which reads as "something is on the other
-    side and its census did not arrive", where three empty lists would
-    read as "nobody was ever there".
+    A session whose hello egma refused was told nothing, so it wrapped
+    nothing, so every tool it has ran its own implementation. Naming those
+    tools covered would be the record saying the simulation was isolated
+    when it was not — which is the one thing this stamp exists to make
+    impossible.
     """
     stub = RoomStub(greeting="Front desk.", replies=["Noted."])
 
-    async def a_session_that_speaks_badly(agent: RoomStub) -> None:
+    async def a_session_egma_will_not_speak_to(agent: RoomStub) -> None:
         from livekit import rtc
 
-        with pytest.raises(rtc.RpcError):
-            await agent.room.perform_rpc(HELLO_METHOD, "{]")
+        with pytest.raises(rtc.RpcError) as refusal:
+            await agent.says_hello("check_calendar", protocol_version=99)
+        assert refusal.value.code == UNSUPPORTED_PROTOCOL_VERSION
 
     client = await conducted_record(
         tmp_path,
         monkeypatch,
         stub,
         mocked_spec(mock_tools=[answers("check_calendar", {"slots": []})]),
-        a_session_that_speaks_badly,
+        a_session_egma_will_not_speak_to,
     )
 
     assert terminal_facts(client)["mock_coverage"] == {
         "discovered": [],
-        "covered": ["check_calendar"],
+        "covered": [],
         "uncovered": [],
     }
+
+
+async def test_an_exchange_that_cannot_be_offered_never_sinks_the_conversation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    """Nothing about mock tools may fail a conversation that would have run.
+
+    A room where egma answered for nothing is exactly the room every
+    simulation was before mock tools existed, so a participant that will
+    not take the methods costs the exchange and nothing else: it is said
+    loudly, the conversation goes on, and the record claims nothing about
+    tools — which is the truth, because egma never stood in their path.
+    """
+    caplog.set_level("ERROR")
+    stub = RoomStub(
+        greeting="Front desk.",
+        replies=["Noted."],
+        refuses_rpc="this participant takes no methods",
+    )
+
+    async def nobody_can_ask(_agent: RoomStub) -> None:
+        return None
+
+    client = await conducted_record(
+        tmp_path,
+        monkeypatch,
+        stub,
+        mocked_spec(mock_tools=[answers("check_calendar", {"slots": []})]),
+        nobody_can_ask,
+    )
+
+    facts = terminal_facts(client)
+    assert facts["ending"] == "persona_concluded"
+    assert "mock_coverage" not in facts
+    assert any(
+        "could not offer the mock-tool exchange" in record.getMessage()
+        for record in caplog.records
+    )
 
 
 # -- What the seam claims, and when ------------------------------------------

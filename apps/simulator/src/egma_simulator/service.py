@@ -276,7 +276,7 @@ class RunningSimulation:
                 # stamp is read and before anything is sealed, so a call
                 # served in the last breath of a conversation is on the
                 # record rather than in a buffer nobody empties.
-                self._on_tool_calls()
+                self._record_mock_tool_calls()
                 reporter.mock_coverage = assembled.mock_coverage
                 await model.close()
         except asyncio.CancelledError:
@@ -372,10 +372,10 @@ class RunningSimulation:
         precisely that answer whose evidence must not sit in a buffer
         waiting for the agent to speak again.
         """
-        self._on_tool_calls()
+        self._record_mock_tool_calls()
         self._spans.flush()
 
-    def _on_tool_calls(self) -> None:
+    def _record_mock_tool_calls(self) -> None:
         """Every mock-tool call egma has exchanged since this last asked.
 
         Taken rather than pushed: the exchange happens in whatever task the

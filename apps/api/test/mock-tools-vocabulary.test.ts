@@ -35,6 +35,13 @@ const SURFACE = [
   "apps/api/src/routes/mock-tools.ts",
   "apps/api/src/routes/tests.ts",
   "apps/api/src/routes/runs.ts",
+  "apps/api/src/routes/claims.ts",
+  // The other two ends of the same surface: the document the control plane
+  // hands the simulator, and the simulator's own side of the exchange that
+  // serves what it carries. A word that slipped into either would be read by
+  // whoever writes the agent's side.
+  "packages/simulation-contract/schemas/simulation-spec.v1.schema.json",
+  "apps/simulator/src/egma_simulator/mock_tools.py",
 ];
 
 /**

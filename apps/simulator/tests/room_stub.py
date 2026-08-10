@@ -51,6 +51,8 @@ The script it is built with:
   under test.
 - ``refuses_room`` / ``refuses_dispatch`` — the platform's own words when
   it will not make the room, or will not dispatch into it.
+- ``refuses_rpc`` — a participant that will not take the mock-tool methods
+  at all, which must cost the exchange and never the conversation.
 """
 
 from __future__ import annotations
@@ -180,6 +182,9 @@ class StubRoom:
         server runs, rather than about a second conversion written beside
         it.
         """
+        refusal = self._backend.stub.refuses_rpc
+        if refusal is not None:
+            raise RuntimeError(refusal)
         self._methods[method] = answering(handler)
         self._backend.stub.standing_ready.set()
 
@@ -345,6 +350,9 @@ class RoomStub:
     agent_publishes_audio: bool = True
     refuses_room: str | None = None
     refuses_dispatch: str | None = None
+    refuses_rpc: str | None = None
+    """A participant that will not take the mock-tool methods at all — the
+    one refusal that must cost the exchange and nothing else."""
 
     rooms: list[CreatedRoom] = field(default_factory=list)
     """Every room this LiveKit was asked to make, in order."""
