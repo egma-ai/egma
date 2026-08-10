@@ -1,7 +1,7 @@
 -- The connection's type leaves the simulation row. A run reaches its agent
 -- over exactly one connection, and the run header already holds that
 -- connection's whole non-secret shape in `connection_snapshot` — which is
--- where every reader of a connection type takes one from. The per-simulation
+-- where a run's own connection type is read back from. The per-simulation
 -- copy was written out of the same object as the snapshot, in the same
 -- transaction, and nothing ever read it back: a duplicate of a per-run fact,
 -- stored per row, on the largest table there is.

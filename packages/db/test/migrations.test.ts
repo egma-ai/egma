@@ -1147,6 +1147,12 @@ async function seedACustomersWork(
  */
 type SimulationShape = "queued" | "completed" | "dispatch_failed";
 
+/**
+ * Writes `connection_type`, which 0019 drops — so this helper can only seed
+ * a schema that has not migrated that far yet. Every block that uses it
+ * replays to a pinned point before inserting; a block that migrates to the
+ * head first must write its own insert.
+ */
 async function insertSimulation(
   client: pg.Client,
   work: ACustomersWork,
@@ -1540,7 +1546,7 @@ describe("the livekit connection type (0018)", () => {
   });
 
   it("is what is still pending on a database that already holds connections", async () => {
-    // Through 0018 and no further, the way the block below it stops at 0017.
+    // Through 0018 and no further, the way the 0017 block above it stops.
     // What this block asserts next — the two checks the one list of types
     // feeds — is true of the schema 0018 left behind and stopped being true of
     // the newest schema the moment a later migration dropped one of them. A
@@ -1658,7 +1664,7 @@ describe("the connection type leaving the simulation row (0019)", () => {
     expect(result.applied.every((name) => name >= "0019")).toBe(true);
   });
 
-  it("takes the check and the column, in that order and both", async () => {
+  it("takes the check and the column, both of them", async () => {
     // Asked of the schema rather than of a row: a column nothing selects any
     // more is not the same fact as a column that does not exist, and a check
     // left behind on a dropped column could not exist at all — so the two
@@ -1701,9 +1707,10 @@ describe("the connection type leaving the simulation row (0019)", () => {
         where conname = 'connection_type_allowed'`,
     );
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.definition).toContain(
-      "ARRAY['retell'::text, 'phone'::text, 'livekit'::text]",
-    );
+    // Containment, not the exact list: the next transport widens this check,
+    // and that upgrade's story belongs to its own block — the exact list as
+    // 0018 left it is already pinned in 0018's.
+    expect(rows[0]?.definition).toContain("'livekit'::text");
   });
 
   it("keeps modality, which rides the row for a reason the type never had", async () => {
