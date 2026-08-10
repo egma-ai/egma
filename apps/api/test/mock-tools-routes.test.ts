@@ -312,6 +312,32 @@ describe("the gates at the door", () => {
     });
     expect(await rowCount()).toBe(1);
   });
+
+  it("refuses the second of two writes that arrived at the same instant", async () => {
+    api = await createApi("mock_tools_race");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+
+    // Neither knows about the other, so both pass the factory's own check and
+    // the database's unique index is what settles it. The loser is owed a
+    // sentence rather than a fault.
+    const [first, second] = await Promise.all([
+      createMockToolThrough(key, { ...CALENDAR }),
+      createMockToolThrough(key, {
+        tool: CALENDAR.tool,
+        error: "the calendar is unreachable",
+      }),
+    ]);
+
+    const answers = [first, second];
+    expect(answers.filter((one) => one.statusCode === 201)).toHaveLength(1);
+    const refused = answers.find((one) => one.statusCode !== 201);
+    expect(refused?.statusCode, JSON.stringify(refused?.body)).toBe(409);
+    expect(String(refused?.body.message)).toContain(
+      `this project already answers for "${CALENDAR.tool}"`,
+    );
+    expect(await rowCount()).toBe(1);
+  });
 });
 
 /** An agent, registered the way the product registers one. */

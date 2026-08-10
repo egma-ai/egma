@@ -16,6 +16,7 @@ import {
   ProjectOutsideOrganizationError,
   UnprocessableInputError,
 } from "./errors.ts";
+import { lostToConstraint } from "./agents.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
@@ -470,13 +471,41 @@ async function scopeTo(
   );
 }
 
+/** The unique index's own name, so the loser of a race is recognised by it. */
+const ONE_ANSWER_PER_TOOL = "mock_tool_project_id_tool_name_unique";
+
+/**
+ * The refusal both writes share, for the moment the database says this project
+ * already answers for the tool.
+ *
+ * **Two writes arriving at the same instant both pass the check below**, and
+ * the unique index is what stops the second — so the loser is answered here, in
+ * the same words rather than as a driver error. Which row won is read fresh, on
+ * a connection outside the transaction the violation just rolled back; if the
+ * winner has since been deleted there is nothing honest to name, and the
+ * refusal says the same thing without naming one.
+ */
+async function refusingATakenTool(
+  auth: AuthContext,
+  projectId: string,
+  toolName: string,
+  error: unknown,
+): Promise<never> {
+  if (!lostToConstraint(error, ONE_ANSWER_PER_TOOL)) throw error;
+  throw new MockToolTakenError(
+    toolName,
+    await answeredAlreadyBy(db(), auth, projectId, toolName),
+  );
+}
+
 /**
  * Whether this project already answers for the tool, and which row does.
  *
  * The unique index refuses the second row anyway, and that second line is what
- * covers migration scripts and manual fixes. A write that comes through this
- * module is refused before it reaches the database, so the refusal can name the
- * row standing in the way and say what to do instead.
+ * covers migration scripts, manual fixes and the two writes that arrived at the
+ * same instant. A write that comes through this module is refused before it
+ * reaches the database, so the refusal can name the row standing in the way and
+ * say what to do instead.
  */
 async function answeredAlreadyBy(
   on: Queryable,
@@ -531,31 +560,35 @@ export async function createMockTool(
 
   const id = newId("mck");
 
-  const written = await db().transaction(async (tx) => {
-    const taken = await answeredAlreadyBy(tx, auth, projectId, toolName);
-    if (taken !== undefined) throw new MockToolTakenError(toolName, taken);
-    await validateNamedAgents(tx, auth, projectId, agentIds);
+  const written = await db()
+    .transaction(async (tx) => {
+      const taken = await answeredAlreadyBy(tx, auth, projectId, toolName);
+      if (taken !== undefined) throw new MockToolTakenError(toolName, taken);
+      await validateNamedAgents(tx, auth, projectId, agentIds);
 
-    const [row] = await tx
-      .insert(mockTool)
-      .values({
-        id,
-        organizationId: auth.organizationId,
-        projectId,
-        toolName,
-        answer,
-        delayMilliseconds,
-        createdBy: auth.userId,
-      })
-      .returning(COLUMNS);
+      const [row] = await tx
+        .insert(mockTool)
+        .values({
+          id,
+          organizationId: auth.organizationId,
+          projectId,
+          toolName,
+          answer,
+          delayMilliseconds,
+          createdBy: auth.userId,
+        })
+        .returning(COLUMNS);
 
-    if (row === undefined) throw new Error("the mock tool was not written");
+      if (row === undefined) throw new Error("the mock tool was not written");
 
-    await scopeTo(tx, id, projectId, agentIds);
-    // Read back inside the transaction, so what the create answers with is what
-    // the transaction wrote and checked.
-    return { ...row, agents: await agentsOf(tx, id) };
-  });
+      await scopeTo(tx, id, projectId, agentIds);
+      // Read back inside the transaction, so what the create answers with is
+      // what the transaction wrote and checked.
+      return { ...row, agents: await agentsOf(tx, id) };
+    })
+    .catch((error: unknown) =>
+      refusingATakenTool(auth, projectId, toolName, error),
+    );
 
   return { ...written, answer: answerFromRow(written.answer, written.id) };
 }
@@ -611,6 +644,16 @@ export async function editMockTool(
   const agentIds = changes.agentIds;
   if (agentIds !== undefined) validateAgentIds(agentIds);
 
+  /**
+   * Which project the row turned out to be in, kept for the refusal outside.
+   * A rename can lose the same race a create can, and the loser is answered in
+   * the same words — which needs the project the winner is in, and only the
+   * locked row knows it: the credential may be for the whole customer and name
+   * none. Set before anything can violate the index, so the refusal path can
+   * never read it unset.
+   */
+  let home: string | undefined;
+
   const written = await db().transaction(async (tx) => {
     const [locked] = await tx
       .select({ ...COLUMNS, currentToolName: mockTool.toolName })
@@ -620,6 +663,7 @@ export async function editMockTool(
       .for("update");
 
     if (locked === undefined) return undefined;
+    home = locked.projectId;
 
     if (toolName !== undefined && toolName !== locked.currentToolName) {
       const taken = await answeredAlreadyBy(
@@ -659,6 +703,13 @@ export async function editMockTool(
     }
 
     return { ...row, agents: await agentsOf(tx, locked.id) };
+  }).catch((error: unknown) => {
+    // A rename that lost the same race a create can lose. Nothing before the
+    // row is locked can violate the index, so `home` is always set by the time
+    // this can be reached — and if it somehow is not, the original error goes
+    // on rather than a refusal built from a project nobody read.
+    if (home === undefined) throw error;
+    return refusingATakenTool(auth, home, toolName ?? "", error);
   });
 
   if (written === undefined) return undefined;
