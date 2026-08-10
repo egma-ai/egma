@@ -188,7 +188,7 @@ export async function logIn(options: LogInOptions): Promise<LoginResult> {
   const now = options.now ?? Date.now;
   const fetchImpl = options.fetchImpl ?? fetch;
 
-  const held = await readCredentials(options.credentialsFile);
+  const held = await readCredentials(options.credentialsFile, options.url);
   if (options.force !== true && held !== null && held.url === options.url) {
     return { kind: "already-stored", url: held.url, key: held.key };
   }

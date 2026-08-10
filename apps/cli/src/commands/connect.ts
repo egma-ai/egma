@@ -13,8 +13,12 @@
  * nobody reads.
  */
 
-import type { PlatformAccess } from "../platform/credentials.ts";
-import { readCredentials } from "../platform/credentials.ts";
+import {
+  bindRepositoryPlatform,
+  folderPathsIn,
+  updateConfig,
+} from "../folder/egma-folder.ts";
+import { readCredentials, type VerifiedPlatformAccess } from "../platform/credentials.ts";
 import { RetellKey } from "../retell/key.ts";
 import {
   connect,
@@ -77,7 +81,7 @@ export function argumentRefusal(argument: string): string {
 
 export type ConnectCommandOptions = {
   /** Which egma, and where this machine's key is. Resolved once, by the caller. */
-  readonly access: PlatformAccess;
+  readonly access: VerifiedPlatformAccess;
   /** The folder a repository prompt path is resolved against. */
   readonly cwd: string;
   /** `--retell-agent`, when one was named. */
@@ -163,7 +167,7 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
 
   options.out(`url: ${options.access.url}`);
 
-  const held = await readCredentials(options.access.credentialsFile);
+  const held = await readCredentials(options.access.credentialsFile, options.access.url);
   if (held === null) {
     options.out("status: not-signed-in");
     options.fail(
@@ -208,6 +212,17 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
   switch (outcome.kind) {
     case "connected": {
       const { registered, config } = outcome;
+      await bindRepositoryPlatform(options.cwd, {
+        origin: options.access.url,
+        instance: options.access.instanceId,
+      });
+      await updateConfig(folderPathsIn(options.cwd).config, {
+        agent: { name: registered.agent.name, id: registered.agent.id },
+        connection: {
+          name: registered.connection.name,
+          id: registered.connection.id,
+        },
+      });
       options.out(`retell_agents: ${outcome.onTheAccount}`);
       options.out(`retell_agent_id: ${config.agentId}`);
       options.out(`retell_response_engine: ${config.engine}`);

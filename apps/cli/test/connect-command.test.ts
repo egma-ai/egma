@@ -17,6 +17,7 @@ import process from "node:process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { CONNECT_EXIT } from "../src/commands/connect.ts";
+import { readConfig } from "../src/folder/egma-folder.ts";
 import { DRIFT_LINE } from "../src/retell/prompt-drift.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
@@ -146,6 +147,12 @@ describe("egma connect", () => {
 
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.registered.sealed).toEqual([KEY]);
+    expect(await readConfig(path.join(workspace.dir, "egma", "config.yaml"))).toEqual({
+      platform: { origin: platform.url, instance: platform.instanceId },
+      agent: { name: said.agent_name, id: said.agent_id },
+      connection: { name: said.connection_name, id: said.connection_id },
+      suite: null,
+    });
   });
 
   it("takes the key from the environment, under either name", async () => {

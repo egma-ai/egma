@@ -126,7 +126,11 @@ async function run(options: RunOptions) {
 
   const { report, connected } = await connectStep({
     ui,
-    platform: { url: platform.url, credentialsFile: workspace.credentialsFile },
+    platform: {
+      url: platform.url,
+      instanceId: platform.instanceId,
+      credentialsFile: workspace.credentialsFile,
+    },
     cwd: workspace.dir,
     repoPrompts: options.repoPrompts ?? null,
     signal: new AbortController().signal,

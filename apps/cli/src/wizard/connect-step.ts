@@ -92,7 +92,10 @@ export type Connected = {
 export async function connectStep(options: ConnectStepOptions): Promise<Connected> {
   const { ui, signal } = options;
 
-  const held = await readCredentials(options.platform.credentialsFile);
+  const held = await readCredentials(
+    options.platform.credentialsFile,
+    options.platform.url,
+  );
   if (held === null) {
     return {
       report: {

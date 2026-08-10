@@ -325,9 +325,22 @@ async function folderFor(options: GenerateStepOptions): Promise<FolderPaths> {
 
   const folder = await createEgmaFolder({
     repository: options.cwd,
-    config: { agent, connection, suite: { name: DEFAULT_SUITE_NAME, id: null } },
+    config: {
+      platform: null,
+      agent,
+      connection,
+      suite: { name: DEFAULT_SUITE_NAME, id: null },
+    },
   });
-  if (!folder.created) await updateConfig(folder.paths.config, { agent, connection });
+  if (!folder.created) {
+    await updateConfig(folder.paths.config, {
+      agent,
+      connection,
+      ...(folder.config.suite === null
+        ? { suite: { name: DEFAULT_SUITE_NAME, id: null } }
+        : {}),
+    });
+  }
   return folder.paths;
 }
 

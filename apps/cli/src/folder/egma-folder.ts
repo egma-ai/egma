@@ -60,18 +60,32 @@ export type NamedThing = {
   readonly id: string | null;
 };
 
+/** The non-secret identity of the one Egma platform that owns this folder. */
+export type PlatformBinding = {
+  /** The platform's canonical, normalized web origin. */
+  readonly origin: string;
+  /** The stable platform-instance identifier read from that origin. */
+  readonly instance: string;
+};
+
 /**
  * What the folder points at. Each may be unset — the folder can exist before
  * the thing it names does, which is what lets `egma init` run in a repository
  * that has not been connected to anything yet.
  */
 export type FolderConfig = {
+  readonly platform: PlatformBinding | null;
   readonly agent: NamedThing | null;
   readonly connection: NamedThing | null;
   readonly suite: NamedThing | null;
 };
 
-export const EMPTY_CONFIG: FolderConfig = { agent: null, connection: null, suite: null };
+export const EMPTY_CONFIG: FolderConfig = {
+  platform: null,
+  agent: null,
+  connection: null,
+  suite: null,
+};
 
 /** The three keys, in the order they are written and read. */
 const CONFIG_KEYS = ["agent", "connection", "suite"] as const;
@@ -85,6 +99,13 @@ const CONFIG_HEADER = [
 
 export function serializeConfig(config: FolderConfig): string {
   const lines = [...CONFIG_HEADER];
+  if (config.platform == null) {
+    lines.push("platform:");
+  } else {
+    lines.push("platform:");
+    lines.push(`  origin: ${yamlScalar(config.platform.origin)}`);
+    lines.push(`  instance: ${yamlScalar(config.platform.instance)}`);
+  }
   for (const key of CONFIG_KEYS) {
     const named = config[key];
     if (named === null) {
@@ -102,6 +123,28 @@ export function serializeConfig(config: FolderConfig): string {
 
 export function parseConfig(document: string, where: string): FolderConfig {
   const mapping = readYaml(document, where);
+  const platformMapping = mappingAtKey(mapping, "platform");
+  const platformScalar = textAt(mapping, "platform");
+  const platform =
+    platformMapping === null
+      ? (() => {
+          if (platformScalar !== null) {
+            throw new Error(
+              `${where} has a platform value without an origin and instance. Run the Egma wizard to repair the repository binding.`,
+            );
+          }
+          return null;
+        })()
+      : (() => {
+          const origin = textAt(platformMapping, "origin");
+          const instance = textAt(platformMapping, "instance");
+          if (origin === null || instance === null) {
+            throw new Error(
+              `${where} has an incomplete platform binding. Run the Egma wizard to repair it.`,
+            );
+          }
+          return { origin, instance };
+        })();
   const read = (key: (typeof CONFIG_KEYS)[number]): NamedThing | null => {
     const under = mappingAtKey(mapping, key);
     if (under === null) {
@@ -114,7 +157,12 @@ export function parseConfig(document: string, where: string): FolderConfig {
     return name === null ? null : { name, id: textAt(under, "id") };
   };
 
-  return { agent: read("agent"), connection: read("connection"), suite: read("suite") };
+  return {
+    platform,
+    agent: read("agent"),
+    connection: read("connection"),
+    suite: read("suite"),
+  };
 }
 
 export async function readConfig(file: string): Promise<FolderConfig> {
@@ -136,12 +184,54 @@ export async function updateConfig(
 ): Promise<FolderConfig> {
   const held = await readConfig(file);
   const updated: FolderConfig = {
+    platform: changes.platform === undefined ? held.platform : changes.platform,
     agent: changes.agent === undefined ? held.agent : changes.agent,
     connection: changes.connection === undefined ? held.connection : changes.connection,
     suite: changes.suite === undefined ? held.suite : changes.suite,
   };
   await writeConfig(file, updated);
   return updated;
+}
+
+/**
+ * Commit the verified platform before the wizard can create platform-owned
+ * resource identifiers.
+ *
+ * A retry is byte-stable. A verified canonical-origin change for the same
+ * stable instance is recorded. A different instance is refused because
+ * repository rebinding is a separate product operation.
+ */
+export async function bindRepositoryPlatform(
+  repository: string,
+  binding: PlatformBinding,
+): Promise<FolderConfig> {
+  const paths = folderPathsIn(repository);
+  let held: FolderConfig;
+  try {
+    held = await readConfig(paths.config);
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+    return (
+      await createEgmaFolder({
+        repository,
+        config: { ...EMPTY_CONFIG, platform: binding },
+      })
+    ).config;
+  }
+
+  if (held.platform !== null) {
+    if (held.platform.instance !== binding.instance) {
+      throw new Error(
+        `This repository is already bound to Egma platform ${held.platform.instance} at ${held.platform.origin}. Rebinding is not supported yet.`,
+      );
+    }
+    // The stable instance is the boundary. Its canonical origin can change,
+    // and the public identity read is the source of truth for that origin.
+    return held.platform.origin === binding.origin
+      ? held
+      : updateConfig(paths.config, { platform: binding });
+  }
+  return updateConfig(paths.config, { platform: binding });
 }
 
 export type CreateFolderOptions = {

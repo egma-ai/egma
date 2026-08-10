@@ -16,6 +16,7 @@ import { heartbeatRoutes } from "./routes/heartbeats.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
+import { platformRoutes } from "./routes/platform.ts";
 import { reportRoutes } from "./routes/reports.ts";
 import { runRoutes } from "./routes/runs.ts";
 import { signOutRoutes } from "./routes/sign-out.ts";
@@ -149,6 +150,10 @@ export function buildApi(options: ServerOptions): Api {
       .code(healthy ? 200 : 503)
       .send({ status: healthy ? "ok" : "unavailable", postgres, clickhouse });
   });
+
+  // Read before login and before any repository identifier is sent. It is
+  // public because the CLI uses it to decide whether login is safe to start.
+  void app.register(platformRoutes, { origin: config.baseUrl });
 
   // Registered without `fastify-plugin` on purpose: the adapter replaces every
   // body parser inside its own scope so the provider sees the bytes that were

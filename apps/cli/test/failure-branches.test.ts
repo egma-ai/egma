@@ -19,6 +19,7 @@ import process from "node:process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { INVALID_KEY_LINE } from "../src/retell/connect.ts";
+import { readConfig } from "../src/folder/egma-folder.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { buildExitLine, buildExitNotice } from "../src/wizard/exit-line.ts";
 import { walk } from "../src/wizard/walk.ts";
@@ -116,7 +117,11 @@ async function walkWith(options: {
       launch: workspace.launch(options.script),
       cwd: workspace.dir,
       signal: new AbortController().signal,
-      platform: { url: platform.url, credentialsFile: workspace.credentialsFile },
+      platform: {
+        url: platform.url,
+        instanceId: platform.instanceId,
+        credentialsFile: workspace.credentialsFile,
+      },
       retell: { url: retell.url },
       howManyTests: 1,
       home: path.join(workspace.dir, "pretend-home"),
@@ -210,10 +215,15 @@ describe("no voice agent anywhere", () => {
       "egma found no voice agent to test. Run egma again where your agent is defined.",
     );
 
-    // Nothing was registered and no folder was made, because egma never got as
-    // far as knowing what it would have been for.
+    // Nothing was registered. The verified platform binding remains so a later
+    // wizard run cannot silently move this repository to another platform.
     expect(platform.registered.agents).toHaveLength(0);
-    await expect(readFile(path.join(workspace.dir, "egma", "config.yaml"), "utf8")).rejects.toThrow();
+    expect(await readConfig(path.join(workspace.dir, "egma", "config.yaml"))).toEqual({
+      platform: { origin: platform.url, instance: platform.instanceId },
+      agent: null,
+      connection: null,
+      suite: null,
+    });
   });
 });
 

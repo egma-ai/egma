@@ -46,7 +46,7 @@ async function egma(args: readonly string[], env: NodeJS.ProcessEnv = {}): Promi
   try {
     const { stdout, stderr } = await run(process.execPath, [CLI_ENTRY, ...args], {
       cwd: workspace.dir,
-      env: workspace.env(env),
+      env: workspace.env({ EGMA_URL: platform.url, ...env }),
     });
     return { stdout, stderr, code: 0 };
   } catch (error) {
@@ -593,7 +593,7 @@ describe("both verbs, run with nobody watching", () => {
 
     const child = spawn(process.execPath, [CLI_ENTRY, "pull"], {
       cwd: workspace.dir,
-      env: workspace.env(),
+      env: workspace.env({ EGMA_URL: platform.url }),
       stdio: ["ignore", "pipe", "pipe"],
     });
 

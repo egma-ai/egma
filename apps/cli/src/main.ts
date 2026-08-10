@@ -30,11 +30,23 @@ import { runLoginCommand } from "./commands/login.ts";
 import { runPullCommand } from "./commands/pull.ts";
 import { runPushCommand } from "./commands/push.ts";
 import { runRunCommand } from "./commands/run.ts";
-import { resolvePlatformAccess, UnusableUrlError } from "./platform/credentials.ts";
+import {
+  BoundPlatformUnavailableError,
+  credentialsFileIn,
+  DEFAULT_PLATFORM_URL,
+  PlatformBindingMismatchError,
+  RepositoryPlatformConfigError,
+  resolvePlatformAccess,
+  UnusableUrlError,
+  type PlatformAccess,
+  type VerifiedPlatformAccess,
+} from "./platform/credentials.ts";
+import { PlatformUnreachableError } from "./platform/device-flow.ts";
+import { PlatformIdentityError } from "./platform/identity.ts";
 import { RETELL_API } from "./retell/client.ts";
 import { HeadlessUI } from "./ui/headless-ui.ts";
 import { buildExitNotice, exitLines, type ExitReport } from "./wizard/exit-line.ts";
-import type { PlatformAccess } from "./wizard/login-step.ts";
+import type { PlatformAccess as WizardPlatformAccess } from "./wizard/login-step.ts";
 import { pasteFallbackMessage } from "./wizard/no-coding-agent.ts";
 import type { StopReason } from "./wizard/stop.ts";
 
@@ -216,9 +228,9 @@ export function helpText(): string {
     "  --coding-agent <id>  Which coding agent to drive, named as the agent",
     `                       registry names it. Default: ${DEFAULT_DRIVEN_AGENT_ID}`,
     "  --cwd <path>         The folder to work in. Default: this folder.",
-    "  --url <address>      The egma to talk to, for a self-hosted one. Kept",
-    "                       after the first login, so it is set once. EGMA_URL",
-    "                       does the same for a whole shell.",
+    "  --url <address>      The egma to talk to. The wizard records its verified",
+    "                       identity in egma/config.yaml. EGMA_URL selects one",
+    "                       for a whole shell.",
     "  --force              With login: sign in again even when this machine",
     "                       already holds a key.",
     "  --no-follow          With run: start the run and return at once, without",
@@ -242,7 +254,8 @@ export function helpText(): string {
     "",
     "Environment:",
     "  EGMA_URL             The egma to talk to, for a whole shell. Same as --url.",
-    "  EGMA_HOME            The folder egma keeps this machine's key in.",
+    "  EGMA_HOME            The folder egma keeps this machine's keys in, one",
+    "                       for each platform origin.",
     "                       Default: ~/.egma",
     `  ${KEY_VARIABLES[0]}  Your Retell key, for egma connect. ${KEY_VARIABLES[1]}`,
     "                       is read too, so an environment that already has one",
@@ -411,7 +424,7 @@ async function runHeadless(
   invocation: Invocation,
   launch: DrivenAgentLaunch,
   cwd: string,
-  platform: PlatformAccess,
+  platform: WizardPlatformAccess,
 ): Promise<number> {
   const controller = new AbortController();
   const stop = (reason: StopReason): void => controller.abort(reason);
@@ -446,7 +459,7 @@ async function runHeadless(
 async function runWizard(
   launch: DrivenAgentLaunch,
   cwd: string,
-  platform: PlatformAccess,
+  platform: WizardPlatformAccess,
 ): Promise<number> {
   const { startTui, walk } = await wizardMachinery();
   const controller = new AbortController();
@@ -551,7 +564,10 @@ async function runLogin(invocation: Invocation, access: PlatformAccess): Promise
 }
 
 /** The connect verb: a key from a pipe or the environment, and plain lines. */
-async function runConnect(invocation: Invocation, access: PlatformAccess): Promise<number> {
+async function runConnect(
+  invocation: Invocation,
+  access: VerifiedPlatformAccess,
+): Promise<number> {
   const controller = new AbortController();
   const onSignal = (): void => controller.abort("interrupt");
   process.on("SIGINT", onSignal);
@@ -607,16 +623,71 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
 
+  const cwd = path.resolve(invocation.cwd ?? process.cwd());
+
+  // `init` is only a local folder write. It never verifies a platform, signs
+  // in, or sends an identifier anywhere.
+  if (invocation.verb === "init") {
+    process.exitCode = await runFolderVerb(invocation.verb, invocation, {
+      url: DEFAULT_PLATFORM_URL,
+      credentialsFile: credentialsFileIn(process.env),
+    });
+    return;
+  }
+
+  let launch: DrivenAgentLaunch | undefined;
+  if (invocation.verb === null) {
+    // Consent is checked before a network read. A piped bare command cannot
+    // start either the wizard or platform selection.
+    const drawable = process.stdout.isTTY === true && process.stdin.isTTY === true;
+    if (!invocation.headless && !drawable) {
+      process.stderr.write(`${noTerminalRefusal()}\n`);
+      process.exitCode = 1;
+      return;
+    }
+
+    try {
+      launch = launchFrom(invocation);
+    } catch (error) {
+      if (error instanceof UnlaunchableDrivenAgentError) {
+        process.stdout.write(`${error.message}\n\n${pasteFallbackMessage()}\n`);
+        return;
+      }
+      throw error;
+    }
+  }
+
   // Which egma, resolved once for every path below, and refused here when the
   // address a developer named is not one. A bad address is turned away before
   // anything is started on it rather than after.
-  let access: PlatformAccess;
+  let access: VerifiedPlatformAccess;
   try {
-    access = await resolvePlatformAccess({ env: process.env, flag: invocation.url });
+    access = await resolvePlatformAccess({
+      env: process.env,
+      flag: invocation.url,
+      cwd,
+    });
   } catch (error) {
     if (error instanceof UnusableUrlError) {
       process.stderr.write(`${error.message}\n`);
       process.exitCode = 1;
+      return;
+    }
+    if (
+      error instanceof PlatformUnreachableError ||
+      error instanceof PlatformIdentityError ||
+      error instanceof PlatformBindingMismatchError ||
+      error instanceof BoundPlatformUnavailableError ||
+      error instanceof RepositoryPlatformConfigError
+    ) {
+      const status =
+        error instanceof PlatformBindingMismatchError ||
+        error instanceof RepositoryPlatformConfigError
+          ? "refused"
+          : "unreachable";
+      process.stdout.write(`status: ${status}\nreason: ${error.message}\n`);
+      process.stderr.write(`${error.message}\n`);
+      process.exitCode = 4;
       return;
     }
     throw error;
@@ -633,7 +704,6 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
   if (
-    invocation.verb === "init" ||
     invocation.verb === "pull" ||
     invocation.verb === "push" ||
     invocation.verb === "run"
@@ -642,33 +712,7 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
 
-  // The wizard earns consent with one keystroke, and a terminal that cannot
-  // deliver one cannot give it. Falling back to a run nobody agreed to would
-  // drive the developer's coding agent because a pipe was on the end of the
-  // command, so egma refuses and names the flag that means "I agree".
-  const drawable = process.stdout.isTTY === true && process.stdin.isTTY === true;
-  if (!invocation.headless && !drawable) {
-    process.stderr.write(`${noTerminalRefusal()}\n`);
-    process.exitCode = 1;
-    return;
-  }
-
-  const cwd = path.resolve(invocation.cwd ?? process.cwd());
-
-  let launch: DrivenAgentLaunch;
-  try {
-    launch = launchFrom(invocation);
-  } catch (error) {
-    if (error instanceof UnlaunchableDrivenAgentError) {
-      // There is no coding agent here for egma to drive, so there is nothing to
-      // open a wizard for. The developer gets the words that work anyway.
-      process.stdout.write(`${error.message}\n\n${pasteFallbackMessage()}\n`);
-      return;
-    }
-    throw error;
-  }
-
   process.exitCode = invocation.headless
-    ? await runHeadless(invocation, launch, cwd, access)
-    : await runWizard(launch, cwd, access);
+    ? await runHeadless(invocation, launch!, cwd, access)
+    : await runWizard(launch!, cwd, access);
 }

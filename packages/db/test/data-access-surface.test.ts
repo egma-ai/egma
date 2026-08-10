@@ -66,7 +66,7 @@ const CONTEXT_ESTABLISHING = [
  * It takes nothing and returns a boolean, which is what makes it safe without a
  * context; a build rule refuses it the moment it grows an argument.
  */
-const INSTANCE_SCOPED = ["instanceIsClaimed"];
+const INSTANCE_SCOPED = ["instanceIsClaimed", "platformInstanceId"];
 
 /**
  * What hands egma's own services their work, and what keeps a dispatch honest

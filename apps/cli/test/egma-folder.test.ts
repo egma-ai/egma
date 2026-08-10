@@ -13,6 +13,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  bindRepositoryPlatform,
   createEgmaFolder,
   folderPathsIn,
   parseConfig,
@@ -305,10 +306,43 @@ describe("the test file format", () => {
 });
 
 describe("the egma folder", () => {
+  it("updates the canonical origin only when the stable platform instance is unchanged", async () => {
+    const instance = "pf_01K3XQ7M4E8YB2FVN0H9TZQWEP";
+    await createEgmaFolder({
+      repository: workspace.dir,
+      config: {
+        platform: { origin: "https://old.example", instance },
+        agent: null,
+        connection: null,
+        suite: null,
+      },
+    });
+
+    const updated = await bindRepositoryPlatform(workspace.dir, {
+      origin: "https://canonical.example",
+      instance,
+    });
+    expect(updated.platform).toEqual({
+      origin: "https://canonical.example",
+      instance,
+    });
+
+    await expect(
+      bindRepositoryPlatform(workspace.dir, {
+        origin: "https://other.example",
+        instance: "pf_01K3XQ7M4E8YB2FVN0H9TZQWEQ",
+      }),
+    ).rejects.toThrow("Rebinding is not supported yet");
+  });
+
   it("is a config file and a tests directory, and nothing else", async () => {
     const folder = await createEgmaFolder({
       repository: workspace.dir,
       config: {
+        platform: {
+          origin: "http://127.0.0.1:3101",
+          instance: "pf_01K3XQ7M4E8YB2FVN0H9TZQWEP",
+        },
         agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
         connection: { name: "retell-1", id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES" },
         suite: { name: "first-suite", id: null },
@@ -332,6 +366,9 @@ describe("the egma folder", () => {
         "#",
         "# Committed on purpose: nothing in this folder is secret. egma writes an id",
         "# beside each name once it has registered one.",
+        "platform:",
+        "  origin: http://127.0.0.1:3101",
+        "  instance: pf_01K3XQ7M4E8YB2FVN0H9TZQWEP",
         "agent:",
         "  name: receptionist",
         "  id: agt_01K3XQ7M4E8YB2FVN0H9TZQWER",
@@ -352,7 +389,12 @@ describe("the egma folder", () => {
     expect(written).toContain("agent:");
     expect(written).toContain("connection:");
     expect(written).toContain("suite:");
-    expect(folder.config).toEqual({ agent: null, connection: null, suite: null });
+    expect(folder.config).toEqual({
+      platform: null,
+      agent: null,
+      connection: null,
+      suite: null,
+    });
     // And what it wrote is what it reads back.
     expect(parseConfig(written, "config.yaml")).toEqual(folder.config);
   });
@@ -360,14 +402,24 @@ describe("the egma folder", () => {
   it("recognises a folder that is already here and changes not one byte of it", async () => {
     const first = await createEgmaFolder({
       repository: workspace.dir,
-      config: { agent: { name: "receptionist", id: null }, connection: null, suite: null },
+      config: {
+        platform: null,
+        agent: { name: "receptionist", id: null },
+        connection: null,
+        suite: null,
+      },
     });
     const before = await readFile(first.paths.config, "utf8");
     await writeFile(path.join(first.paths.tests, "kept.md"), GENERATED, "utf8");
 
     const second = await createEgmaFolder({
       repository: workspace.dir,
-      config: { agent: { name: "something-else", id: null }, connection: null, suite: null },
+      config: {
+        platform: null,
+        agent: { name: "something-else", id: null },
+        connection: null,
+        suite: null,
+      },
     });
 
     expect(second.created).toBe(false);
@@ -393,7 +445,12 @@ describe("the egma folder", () => {
   it("writes an id beside a name once egma has registered one", async () => {
     const folder = await createEgmaFolder({
       repository: workspace.dir,
-      config: { agent: { name: "receptionist", id: null }, connection: null, suite: null },
+      config: {
+        platform: null,
+        agent: { name: "receptionist", id: null },
+        connection: null,
+        suite: null,
+      },
     });
 
     const updated = await updateConfig(folder.paths.config, {
@@ -418,11 +475,13 @@ describe("the egma folder", () => {
 
   it("reads what it writes, and steps over comments while it does", () => {
     const document = serializeConfig({
+      platform: null,
       agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
       connection: null,
       suite: null,
     });
     expect(readYaml(document, "config.yaml")).toEqual({
+      platform: null,
       agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
       connection: null,
       suite: null,
@@ -432,6 +491,7 @@ describe("the egma folder", () => {
   it("writes a name that needs quoting, and reads it back with its own spaces", () => {
     for (const name of ["the front desk: mornings", "shift #2", "  padded  ", "2026", "yes"]) {
       const written = serializeConfig({
+        platform: null,
         agent: { name, id: null },
         connection: null,
         suite: null,

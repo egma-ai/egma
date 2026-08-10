@@ -31,6 +31,7 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   device_code: "dvc",
   organization: "org",
   organization_settings: "org",
+  platform_instance: "pf",
   project: "prj",
   membership: "mbr",
   invitation: "inv",

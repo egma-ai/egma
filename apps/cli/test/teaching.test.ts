@@ -250,7 +250,11 @@ describe("the pane, while the files land", () => {
           launch: second.launch(await scriptFor(second)),
           cwd: second.dir,
           signal: new AbortController().signal,
-          platform: { url: elsewhere.url, credentialsFile: second.credentialsFile },
+          platform: {
+            url: elsewhere.url,
+            instanceId: elsewhere.instanceId,
+            credentialsFile: second.credentialsFile,
+          },
           retell: { url: retell.url },
           home: path.join(second.dir, "pretend-home"),
           runPollMs: 20,

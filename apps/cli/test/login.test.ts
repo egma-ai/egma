@@ -287,7 +287,15 @@ describe("a machine that is already signed in", () => {
     });
 
     expect(result.kind).toBe("stored");
-    expect((await readCredentials(workspace.credentialsFile))?.url).toBe(platform.url);
+    expect((await readCredentials(workspace.credentialsFile, platform.url))?.url).toBe(
+      platform.url,
+    );
+    expect(
+      await readCredentials(workspace.credentialsFile, "https://somewhere.else.example"),
+    ).toEqual({
+      url: "https://somewhere.else.example",
+      key: "egma_sk_for-somewhere-else",
+    });
   });
 });
 
@@ -394,26 +402,26 @@ describe("reading a code out of whatever was pasted", () => {
 });
 
 describe("which egma a command talks to", () => {
-  it("takes the flag first, then the environment, then what was stored", () => {
+  it("takes the flag first, then the environment, then the repository binding", () => {
     expect(
       resolvePlatformUrl({
         flag: "http://flag.example/",
         env: "http://env.example",
-        stored: "http://stored.example",
+        binding: "http://bound.example",
       }),
     ).toBe("http://flag.example");
 
     expect(
-      resolvePlatformUrl({ flag: null, env: "http://env.example", stored: "http://stored.example" }),
+      resolvePlatformUrl({ flag: null, env: "http://env.example", binding: "http://bound.example" }),
     ).toBe("http://env.example");
 
-    // Which is what "set it once" means: after the first login, nothing has to
-    // say the address again.
-    expect(resolvePlatformUrl({ flag: null, stored: "http://stored.example/" })).toBe(
-      "http://stored.example",
+    // The repository, not the latest login on the machine, is what makes the
+    // selection stable after onboarding.
+    expect(resolvePlatformUrl({ flag: null, binding: "http://bound.example/" })).toBe(
+      "http://bound.example",
     );
 
-    expect(resolvePlatformUrl({ flag: null, env: "", stored: null })).toBe(DEFAULT_PLATFORM_URL);
+    expect(resolvePlatformUrl({ flag: null, env: "", binding: null })).toBe(DEFAULT_PLATFORM_URL);
   });
 
   it("refuses an address that is not one, and names where it came from", () => {
@@ -427,11 +435,10 @@ describe("which egma a command talks to", () => {
     expect(() => resolvePlatformUrl({ flag: "ftp://egma.example" })).toThrow(/--url/u);
     expect(() => resolvePlatformUrl({ flag: null, env: "ftp://egma.example" })).toThrow(/EGMA_URL/u);
 
-    // A credentials file somebody edited by hand is stepped over rather than
-    // made into a refusal on every command afterwards.
-    expect(resolvePlatformUrl({ flag: null, stored: "javascript:alert(1)" })).toBe(
-      DEFAULT_PLATFORM_URL,
-    );
+    // A committed binding is never stepped over in favour of Cloud.
+    expect(() =>
+      resolvePlatformUrl({ flag: null, binding: "javascript:alert(1)" }),
+    ).toThrow(/repository platform binding/u);
   });
 });
 
@@ -548,5 +555,22 @@ describe("writing the key down", () => {
     expect(said).toEqual([]);
     const folder = await stat(path.dirname(workspace.credentialsFile));
     expect((folder.mode & 0o777).toString(8)).toBe("700");
+  });
+
+  it("keeps one key per normalized platform origin", async () => {
+    const first = { url: "https://ONE.example/", key: "egma_sk_for-one" };
+    const second = { url: "http://localhost:4310", key: "egma_sk_for-two" };
+
+    await writeCredentials(workspace.credentialsFile, first);
+    await writeCredentials(workspace.credentialsFile, second);
+
+    expect(await readCredentials(workspace.credentialsFile, "https://one.example")).toEqual({
+      url: "https://one.example",
+      key: first.key,
+    });
+    expect(await readCredentials(workspace.credentialsFile, second.url)).toEqual(second);
+    expect(
+      await readCredentials(workspace.credentialsFile, "https://not-signed-in.example"),
+    ).toBeNull();
   });
 });

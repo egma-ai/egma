@@ -92,7 +92,7 @@ const CONTEXT_ESTABLISHING = [
  * A function here that grew a parameter would be an ordinary read wearing an
  * exemption, so the rule refuses it.
  */
-const INSTANCE_SCOPED = ["instanceIsClaimed"];
+const INSTANCE_SCOPED = ["instanceIsClaimed", "platformInstanceId"];
 
 /**
  * The exports that dispatch egma's own work across the whole deployment, and

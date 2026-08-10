@@ -17,6 +17,7 @@
 import process from "node:process";
 
 import type { DrivenAgentLaunch } from "../acp/registry.ts";
+import { bindRepositoryPlatform } from "../folder/egma-folder.ts";
 import { signedInAt } from "../platform/signed-in.ts";
 import type { ConnectOptions } from "../retell/connect.ts";
 import { homeIn } from "../skills/install.ts";
@@ -116,6 +117,11 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
       ui.setExit(refusal);
       return refusal;
     }
+    await bindRepositoryPlatform(cwd, {
+      origin: options.platform.url,
+      instance: options.platform.instanceId,
+    });
+    ui.pushStatus(`Bound this repository to Egma platform ${options.platform.instanceId}.`);
   }
 
   const found = await findTheAgent({ ui, launch, cwd, signal, log });

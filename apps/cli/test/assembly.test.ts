@@ -31,6 +31,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readConfig } from "../src/folder/egma-folder.ts";
 import { parseTestFile } from "../src/folder/test-file.ts";
+import { readCredentials } from "../src/platform/credentials.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { buildExitNotice, exitLines } from "../src/wizard/exit-line.ts";
 import { walk } from "../src/wizard/walk.ts";
@@ -214,6 +215,7 @@ describe("the whole walk, offline", () => {
         signal: new AbortController().signal,
         platform: {
           url: platform.url,
+          instanceId: platform.instanceId,
           credentialsFile: workspace.credentialsFile,
           openBrowser: async (url) => {
             const code = new URL(url).searchParams.get("user_code") ?? "";
@@ -263,12 +265,9 @@ describe("the whole walk, offline", () => {
 
     /* this machine is signed in, and to this egma */
 
-    const held = JSON.parse(await readFile(workspace.credentialsFile, "utf8")) as {
-      url: string;
-      key: string;
-    };
-    expect(held.url).toBe(platform.url);
-    expect(platform.device.keys).toContain(held.key);
+    const held = await readCredentials(workspace.credentialsFile, platform.url);
+    expect(held?.url).toBe(platform.url);
+    expect(platform.device.keys).toContain(held?.key ?? "");
 
     /* the agent and the way to reach it are on egma */
 
@@ -359,6 +358,10 @@ describe("the whole walk, offline", () => {
     // The folder's config names what egma registered, so a second developer
     // cloning this repository lands on the same agent.
     const config = await readConfig(path.join(workspace.dir, "egma", "config.yaml"));
+    expect(config.platform).toEqual({
+      origin: platform.url,
+      instance: platform.instanceId,
+    });
     expect(config.agent).toMatchObject({
       name: "order-line",
       id: platform.registered.agents[0]?.id,

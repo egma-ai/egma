@@ -221,12 +221,28 @@ export function loadConfig(
     );
   }
 
-  const baseUrl = environment.EGMA_BASE_URL?.trim() || "http://localhost:3101";
+  const givenBaseUrl = environment.EGMA_BASE_URL?.trim() || "http://localhost:3101";
+  let parsedBaseUrl: URL;
   try {
-    new URL(baseUrl);
+    parsedBaseUrl = new URL(givenBaseUrl);
   } catch {
-    throw new Error(`EGMA_BASE_URL is not a URL: ${baseUrl}`);
+    throw new Error("EGMA_BASE_URL is not a URL");
   }
+  if (!["http:", "https:"].includes(parsedBaseUrl.protocol)) {
+    throw new Error("EGMA_BASE_URL is not an HTTP origin");
+  }
+  if (
+    parsedBaseUrl.username !== "" ||
+    parsedBaseUrl.password !== "" ||
+    (parsedBaseUrl.pathname !== "" && parsedBaseUrl.pathname !== "/") ||
+    parsedBaseUrl.search !== "" ||
+    parsedBaseUrl.hash !== ""
+  ) {
+    throw new Error(
+      "EGMA_BASE_URL must be only the platform origin, with no credentials, path, query, or fragment",
+    );
+  }
+  const baseUrl = parsedBaseUrl.origin;
 
   return {
     smtp: smtpSettings(environment, baseUrl),
@@ -234,7 +250,7 @@ export function loadConfig(
     clickhouseUrl,
     host: environment.HOST?.trim() || "0.0.0.0",
     port,
-    baseUrl: baseUrl.replace(/\/+$/, ""),
+    baseUrl,
     authSecret,
     encryptionKey,
     singleOrganization: flag(environment, "EGMA_SINGLE_ORGANIZATION", true),

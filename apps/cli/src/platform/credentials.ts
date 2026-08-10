@@ -1,11 +1,9 @@
 /**
- * The key egma mints for this machine, and which egma it belongs to.
+ * The keys Egma mints for this machine, keyed by platform origin.
  *
- * One flat file in the developer's home folder, readable by nobody else. It
- * holds two facts, and they are kept together because they always travel
- * together: a key minted against one instance means nothing against another, so
- * remembering the key without remembering the address would leave a developer
- * re-typing the address on every command afterwards.
+ * One file in the developer's home folder is readable by nobody else. Each key
+ * stays beside the normalized origin that minted it. The file never chooses a
+ * repository target; the repository binding does that.
  *
  * The folder is resolved rather than assumed. That is what lets a test and a
  * check against a real instance each run a whole login without ever reading or
@@ -18,7 +16,13 @@ import { homedir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 
-import { isWebAddress } from "./address.ts";
+import { folderPathsIn, readConfig, type PlatformBinding } from "../folder/egma-folder.ts";
+import {
+  normalizePlatformOrigin,
+  readPlatformIdentity,
+  type PlatformIdentity,
+} from "./identity.ts";
+import { PlatformUnreachableError, type Fetch } from "./device-flow.ts";
 
 /** The egma a command talks to when nothing says otherwise. */
 export const DEFAULT_PLATFORM_URL = "https://app.egma.ai";
@@ -53,19 +57,53 @@ export function credentialsFileIn(env: NodeJS.ProcessEnv): string {
   return path.join(egmaFolderIn(env), "credentials");
 }
 
-/**
- * An address in the one shape everything else compares against.
- *
- * A trailing slash and a stored address that differs from a typed one only by
- * that slash are the same instance, and treating them as two would mint a
- * second key for the same egma.
- */
-export function tidyUrl(url: string): string {
-  return url.trim().replace(/\/+$/u, "");
+type CredentialEntries = ReadonlyMap<string, string>;
+
+function entriesIn(raw: string): CredentialEntries {
+  try {
+    const held = JSON.parse(raw) as {
+      url?: unknown;
+      key?: unknown;
+      platforms?: unknown;
+    };
+
+    const entries = new Map<string, string>();
+
+    // The first shipped format held one pair. It is read so an upgrade does
+    // not sign a developer out, and the next write moves it into the map.
+    if (typeof held.url === "string" && typeof held.key === "string") {
+      try {
+        const origin = normalizePlatformOrigin(held.url);
+        const key = held.key.trim();
+        if (key !== "") entries.set(origin, key);
+      } catch {
+        // Not a usable legacy entry.
+      }
+    }
+
+    if (typeof held.platforms === "object" && held.platforms !== null) {
+      for (const [givenOrigin, value] of Object.entries(held.platforms)) {
+        if (typeof value !== "object" || value === null || !("key" in value)) continue;
+        const key = typeof value.key === "string" ? value.key.trim() : "";
+        if (key === "") continue;
+        try {
+          entries.set(normalizePlatformOrigin(givenOrigin), key);
+        } catch {
+          // One bad hand-edited key must not hide every usable platform entry.
+        }
+      }
+    }
+    return entries;
+  } catch {
+    return new Map();
+  }
 }
 
-/** What is on disk, or `null` when there is nothing usable there. */
-export async function readCredentials(file: string): Promise<Credentials | null> {
+/** What is on disk for one platform, or `null` when none is usable there. */
+export async function readCredentials(
+  file: string,
+  platformUrl?: string,
+): Promise<Credentials | null> {
   let raw: string;
   try {
     raw = await readFile(file, "utf8");
@@ -73,18 +111,24 @@ export async function readCredentials(file: string): Promise<Credentials | null>
     return null;
   }
 
-  try {
-    const held = JSON.parse(raw) as { url?: unknown; key?: unknown };
-    const url = typeof held.url === "string" ? tidyUrl(held.url) : "";
-    const key = typeof held.key === "string" ? held.key.trim() : "";
-    if (url === "" || key === "") return null;
-    return { url, key };
-  } catch {
-    // A file somebody edited by hand, or half a write. Either way there is
-    // nothing to log in with, and saying so sends the developer through login
-    // rather than through a parse error.
-    return null;
+  const entries = entriesIn(raw);
+  let origin: string | undefined;
+  if (platformUrl === undefined) {
+    // Compatibility for readers that inspect a one-platform file. Product
+    // resolution never calls this branch: a machine-wide recent login must
+    // not choose a repository target.
+    if (entries.size !== 1) return null;
+    origin = entries.keys().next().value as string | undefined;
+  } else {
+    try {
+      origin = normalizePlatformOrigin(platformUrl);
+    } catch {
+      return null;
+    }
   }
+  if (origin === undefined) return null;
+  const key = entries.get(origin);
+  return key === undefined ? null : { url: origin, key };
 }
 
 export type WriteOptions = {
@@ -126,11 +170,22 @@ export async function writeCredentials(
     );
   }
 
-  const document = `${JSON.stringify(
-    { url: tidyUrl(credentials.url), key: credentials.key },
-    null,
-    2,
-  )}\n`;
+  let existing = "";
+  try {
+    existing = await readFile(file, "utf8");
+  } catch {
+    // The first login has nothing to merge.
+  }
+  const entries = new Map(entriesIn(existing));
+  const origin = normalizePlatformOrigin(credentials.url);
+  entries.set(origin, credentials.key);
+
+  const platforms = Object.fromEntries(
+    [...entries.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([url, key]) => [url, { key }]),
+  );
+  const document = `${JSON.stringify({ version: 1, platforms }, null, 2)}\n`;
 
   const fresh = path.join(folder, `.credentials-${process.pid}-${randomBytes(6).toString("hex")}`);
   await writeFile(fresh, document, { encoding: "utf8", mode: FILE_MODE, flag: "wx" });
@@ -150,15 +205,15 @@ export type PlatformChoice = {
   readonly flag?: string | null;
   /** `EGMA_URL`, which is how a self-hoster sets it for a whole shell. */
   readonly env?: string | undefined;
-  /** What the last successful login wrote, so it is set once and not again. */
-  readonly stored?: string | null;
+  /** The platform committed in this agent repository. */
+  readonly binding?: string | null;
 };
 
 /** What a developer is told when the address they named is not one. */
 export class UnusableUrlError extends Error {
-  constructor(where: string, given: string) {
+  constructor(where: string) {
     super(
-      `${where} is ${given}, and egma cannot talk to that. Give a whole address that starts with http:// or https://.`,
+      `${where} is not a platform origin Egma can use. Give a whole address that starts with http:// or https:// and contains no credentials, path, query, or fragment.`,
     );
     this.name = "UnusableUrlError";
   }
@@ -167,32 +222,30 @@ export class UnusableUrlError extends Error {
 /**
  * Which egma this command talks to.
  *
- * Deliberate beats ambient beats remembered: a flag on the command, then the
- * environment, then what login already stored, then egma's own address. The
- * order is what makes "set it once" true — after a first login against a
- * self-hosted instance, every later command finds it without being told again.
+ * Deliberate beats ambient beats committed: a flag on the command, then the
+ * environment, then the repository binding, then Egma Cloud for an unbound
+ * repository. A machine-level login never chooses a repository target.
  *
  * An address a person typed is checked here, at the edge that takes it, and a
- * bad one is refused by name rather than carried into the flow — because the
- * next thing that happens to it is that a browser is started on it. What login
- * stored is only ever an address that already passed this, so a file somebody
- * edited by hand is stepped over rather than made into a refusal on every
- * command afterwards.
+ * bad one is refused by name rather than carried into the flow.
  */
 export function resolvePlatformUrl(choice: PlatformChoice): string {
   const named: readonly [string, string | null | undefined][] = [
     ["--url", choice.flag],
     ["EGMA_URL", choice.env],
+    ["the repository platform binding", choice.binding],
   ];
   for (const [where, candidate] of named) {
-    const tidy = typeof candidate === "string" ? tidyUrl(candidate) : "";
+    const tidy = typeof candidate === "string" ? candidate.trim() : "";
     if (tidy === "") continue;
-    if (!isWebAddress(tidy)) throw new UnusableUrlError(where, tidy);
-    return tidy;
+    try {
+      return normalizePlatformOrigin(tidy);
+    } catch {
+      // The rejected value can itself contain a supplied password. Name only
+      // the source, never the value.
+      throw new UnusableUrlError(where);
+    }
   }
-
-  const stored = typeof choice.stored === "string" ? tidyUrl(choice.stored) : "";
-  if (stored !== "" && isWebAddress(stored)) return stored;
   return DEFAULT_PLATFORM_URL;
 }
 
@@ -201,6 +254,52 @@ export type PlatformAccess = {
   readonly url: string;
   readonly credentialsFile: string;
 };
+
+/** Platform access after its public identity has answered. */
+export type VerifiedPlatformAccess = PlatformAccess & {
+  readonly instanceId: string;
+};
+
+/** A selected instance is not the platform committed in this repository. */
+export class PlatformBindingMismatchError extends Error {
+  constructor(binding: PlatformBinding, selected: PlatformIdentity) {
+    super(
+      `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, but the selected address identifies platform ${selected.instanceId} at ${selected.origin}. Remove --url or EGMA_URL to use the bound platform. Rebinding is not supported yet. No repository identifiers were sent.`,
+    );
+    this.name = "PlatformBindingMismatchError";
+  }
+}
+
+/** The bound platform did not answer, and Cloud was deliberately not tried. */
+export class BoundPlatformUnavailableError extends Error {
+  constructor(binding: PlatformBinding, selected: string, cause: unknown) {
+    super(
+      `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and Egma at ${selected} did not answer. Start the bound platform and run this again. Egma Cloud was not used, and no repository identifiers were sent.`,
+      { cause },
+    );
+    this.name = "BoundPlatformUnavailableError";
+  }
+}
+
+/** The committed config could not safely take part in platform resolution. */
+export class RepositoryPlatformConfigError extends Error {
+  constructor(cause: unknown) {
+    super(
+      "Egma could not read this repository's egma/config.yaml, so it did not select a platform. Fix that file and run this again. Egma Cloud was not used.",
+      { cause },
+    );
+    this.name = "RepositoryPlatformConfigError";
+  }
+}
+
+async function bindingIn(repository: string): Promise<PlatformBinding | null> {
+  try {
+    return (await readConfig(folderPathsIn(repository).config)).platform;
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw new RepositoryPlatformConfigError(cause);
+  }
+}
 
 /**
  * Resolved once, in one place, so the wizard and every verb read the same
@@ -212,15 +311,35 @@ export async function resolvePlatformAccess(choice: {
   readonly env: NodeJS.ProcessEnv;
   /** `--url`, when one was given. */
   readonly flag: string | null;
-}): Promise<PlatformAccess> {
+  /** The agent repository whose binding is part of resolution. */
+  readonly cwd: string;
+  readonly fetchImpl?: Fetch;
+}): Promise<VerifiedPlatformAccess> {
   const credentialsFile = credentialsFileIn(choice.env);
-  const stored = await readCredentials(credentialsFile);
+  const binding = await bindingIn(choice.cwd);
+  const selected = resolvePlatformUrl({
+    flag: choice.flag,
+    env: choice.env.EGMA_URL,
+    binding: binding?.origin ?? null,
+  });
+
+  let identity: PlatformIdentity;
+  try {
+    identity = await readPlatformIdentity(selected, choice.fetchImpl);
+  } catch (cause) {
+    if (binding !== null && cause instanceof PlatformUnreachableError) {
+      throw new BoundPlatformUnavailableError(binding, selected, cause);
+    }
+    throw cause;
+  }
+
+  if (binding !== null && binding.instance !== identity.instanceId) {
+    throw new PlatformBindingMismatchError(binding, identity);
+  }
+
   return {
-    url: resolvePlatformUrl({
-      flag: choice.flag,
-      env: choice.env.EGMA_URL,
-      stored: stored?.url ?? null,
-    }),
+    url: identity.origin,
+    instanceId: identity.instanceId,
     credentialsFile,
   };
 }

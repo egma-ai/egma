@@ -10,6 +10,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import type { DrivenAgentLaunch } from "../../src/acp/registry.ts";
+import { writeCredentials } from "../../src/platform/credentials.ts";
 import type { FakeScript } from "./fake-agent.ts";
 
 export const FAKE_AGENT = fileURLToPath(new URL("./fake-agent.ts", import.meta.url));
@@ -157,11 +158,7 @@ export async function makeWorkspace(
       return env;
     },
     async signIn(url, key = "egma_sk_already-held") {
-      await mkdir(egmaFolder, { recursive: true, mode: 0o700 });
-      await writeFile(credentialsFile, `${JSON.stringify({ url, key })}\n`, {
-        encoding: "utf8",
-        mode: 0o600,
-      });
+      await writeCredentials(credentialsFile, { url, key });
     },
     async browser() {
       // `BROWSER` names one command, exactly as it does for every other tool
