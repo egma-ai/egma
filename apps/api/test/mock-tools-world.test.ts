@@ -1,4 +1,11 @@
-import { getRun, resolveMockTools } from "@egma/db";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+
+import {
+  getRun,
+  LONGEST_MOCK_TOOL_DELAY_MILLISECONDS,
+  resolveMockTools,
+} from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
@@ -533,5 +540,40 @@ describe("no version chain exists for a mock tool", () => {
       "mock_tool",
       "mock_tool_agent",
     ]);
+  });
+});
+
+/**
+ * The delay an author may write and the delay the simulator will be handed are
+ * one number written in two places — a constant here and a `maximum` in the
+ * contract's own schema, in two languages, neither able to import the other.
+ *
+ * They have to agree or the guarantee stops holding at exactly the moment it
+ * matters: an authoring gate admitting what the work order refuses would let a
+ * mock tool be saved and then make every run that used it undispatchable, and
+ * the reverse would hand the simulator a delay the exchange carrying it cannot
+ * survive. Nothing enforces the agreement but this.
+ */
+describe("the longest delay, said in two places", () => {
+  it("admits at authoring exactly what the work order admits", async () => {
+    const schema = JSON.parse(
+      await readFile(
+        fileURLToPath(
+          new URL(
+            "../../../packages/simulation-contract/schemas/simulation-spec.v1.schema.json",
+            import.meta.url,
+          ),
+        ),
+        "utf8",
+      ),
+    ) as {
+      $defs: {
+        mock_tool: { properties: { delay_milliseconds: { maximum: number } } };
+      };
+    };
+
+    expect(schema.$defs.mock_tool.properties.delay_milliseconds.maximum).toBe(
+      LONGEST_MOCK_TOOL_DELAY_MILLISECONDS,
+    );
   });
 });

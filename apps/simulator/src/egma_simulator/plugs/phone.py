@@ -94,12 +94,14 @@ class PhoneCall:
         config: dict[str, Any],
         credentials: object,
         simulation_id: str | None = None,
+        mock_tools: object = None,
         media: MediaSettings | None = None,
     ) -> None:
         # A phone call is reached over the public telephone network, which
         # has never carried anything but a number, so this plug has
-        # nothing to tell the far end about the simulation.
-        del simulation_id
+        # nothing to tell the far end about the simulation and no way to
+        # stand in front of its tools.
+        del simulation_id, mock_tools
 
         # Which bridge and which trunk were checked at startup; this reads
         # the result rather than the environment, so nothing here can be

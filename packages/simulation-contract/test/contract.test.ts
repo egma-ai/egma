@@ -100,6 +100,16 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     property: "limits",
   },
   "spec/modality-unknown.json": { at: "/modality", keyword: "enum" },
+  // An answer is a value *or* a failure, and the tagged shape is what keeps
+  // an authored `null` tellable from no answer at all. One that claims both
+  // is refused inside the branch that would have taken the value: the
+  // failure has nowhere to sit beside it, and there is no rule that would
+  // choose between them.
+  "spec/mock-tool-answering-two-ways.json": {
+    at: "/mock_tools/0/answer",
+    keyword: "additionalProperties",
+    property: "error",
+  },
   "spec/unknown-field.json": {
     at: "",
     keyword: "additionalProperties",

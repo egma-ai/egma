@@ -133,6 +133,16 @@ class Reporter:
         """The contract's audio block — the band measured at execution and
         the recording's reference — for a voice simulation; ``None`` for a
         chat one, where there is no audio to measure."""
+        self.mock_coverage: dict | None = None
+        """Which of the agent's tools mock tools answered for, and which
+        ran their own implementations.
+
+        The one terminal fact that may be left out, and ``None`` is how it
+        is left out: absent means the agent was never asked what tools it
+        has, so nothing was learned and nothing is claimed — the honest
+        reading of every connection egma stands outside the tool path of.
+        Present with three empty lists is a different sentence: the asking
+        happened and no tool came back."""
 
     def _mint_event_id(self) -> str:
         self._sequence += 1
@@ -285,7 +295,7 @@ class Reporter:
         )
 
     def _terminal_facts(self, ending: str) -> dict:
-        return {
+        facts = {
             "ending": ending,
             "started_at": self.started_at,
             "ended_at": moment(),
@@ -293,6 +303,14 @@ class Reporter:
             "audio": self.audio,
             "provider_reference": self.provider_reference,
         }
+        # Written only where there is something to say. Every other fact
+        # here is required and carries `null` for absence; this one is
+        # absent for absence, because "nobody ever asked" and "the asking
+        # happened and nothing came back" are two different facts and a
+        # single empty shape could only carry one of them.
+        if self.mock_coverage is not None:
+            facts["mock_coverage"] = self.mock_coverage
+        return facts
 
     def completed(self, ending: str, reason: str | None = None) -> None:
         self._enqueue(

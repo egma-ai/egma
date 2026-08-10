@@ -23,10 +23,11 @@ that cannot be conducted an honest failure before anything is dialled.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .blob import BlobStore
 from .conductor import DEFAULT_CONDUCT, ConductParameters, VoiceConductor
+from .mock_tools import ExchangedToolCall, MockToolSeam
 from .plugs import DuplexLine, PlatformPlug, PlugError, plug_for
 from .recording import RECORDING_NAME
 from .spec import SimulationSpec
@@ -51,11 +52,27 @@ class Assembled:
     conductor: VoiceConductor | None = None
     """The Pipecat pipeline conducting a full-duplex voice simulation."""
 
+    mock_tools: MockToolSeam = field(default_factory=MockToolSeam)
+    """egma's side of the mock-tool exchange, for whichever plug can offer
+    it. Always here and never ``None``, because whether egma really stood
+    in the agent's tool path is the seam's own answer to give — a plug
+    that cannot offer it simply never says it is standing ready, and the
+    record then claims nothing about tools."""
+
     @property
     def audio(self) -> dict | None:
         """The contract's audio block once the exchange is over, else ``None``."""
         measured = None if self.conductor is None else self.conductor.audio
         return None if measured is None else measured.as_report()
+
+    @property
+    def mock_coverage(self) -> dict | None:
+        """The contract's coverage stamp, or ``None`` where nothing is claimed."""
+        return self.mock_tools.coverage()
+
+    def tool_calls(self) -> list[ExchangedToolCall]:
+        """Every mock-tool call since this was last asked, and then none."""
+        return self.mock_tools.exchanged()
 
 
 def assemble(
@@ -82,14 +99,20 @@ def assemble(
         raise PlugError(
             f"no platform plug for connection type {spec.connection_type!r}"
         )
+    # Built for every simulation, and handed to every plug: which of them
+    # can put egma in front of the agent's tools is the plug's own answer,
+    # not a list kept here of the ones that can. A plug that cannot takes
+    # it and drops it, and the seam then says there is nothing to claim.
+    mock_tools = MockToolSeam(spec.mock_tools)
     plug = factory(
         modality=spec.modality,
         config=spec.connection_config,
         credentials=spec.credentials,
         simulation_id=spec.simulation_id,
+        mock_tools=mock_tools,
     )
     if spec.modality != "voice":
-        return Assembled(plug=plug)
+        return Assembled(plug=plug, mock_tools=mock_tools)
 
     if not isinstance(plug, DuplexLine):
         # Unreachable through the shipped registry, and kept because the
@@ -107,5 +130,6 @@ def assemble(
             blobs=blobs,
             recording_key=f"{spec.simulation_id}/{RECORDING_NAME}",
             parameters=parameters or DEFAULT_CONDUCT,
-        )
+        ),
+        mock_tools=mock_tools,
     )
