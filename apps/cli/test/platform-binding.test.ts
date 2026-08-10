@@ -280,6 +280,58 @@ describe("a platform that will not say which egma it is", () => {
     // Nothing was aimed at the other egma on this machine either.
     expect(elsewhere.records).toHaveLength(0);
   });
+
+  /**
+   * Address is all such a binding holds, so address is what it checks. That is
+   * the weaker check — it cannot tell a second name for one server from a
+   * second server — but it fails safe: it refuses a platform that might have
+   * been the right one rather than sending one platform's ids to another.
+   */
+  it("refuses another address anyway, because address is all it has to go on", async () => {
+    here.identity.staysQuiet();
+    await repositoryOn(
+      here,
+      { agent: "agt_01K3XQ7M4E8YB2FVN0H9TZQWET", connection: "con_01K3XQ7M4E8YB2FVN0H9TZQWEU" },
+      { instance: null },
+    );
+    await workspace.signIn(elsewhere.url, elsewhere.device.mint());
+
+    const refused = await egma(["pull", "--cwd", workspace.dir, "--url", elsewhere.url]);
+
+    expect(refused.code).toBe(BOUND_ELSEWHERE_EXIT);
+    expect(facts(refused.stdout).status).toBe("bound-elsewhere");
+    expect(facts(refused.stdout).bound_to).toBe(here.url);
+    expect(refused.stderr).toContain("too old to say which egma it is");
+    expect(refused.stderr).toContain("--url");
+    // The platform it was aimed at heard the one question that names nothing —
+    // who are you — and not one identifier.
+    expect(elsewhere.records.map((one) => one.path)).toEqual(["/api/platform"]);
+  });
+
+  it("still uses its own address when the same server is named a second way", async () => {
+    // The safe way round has a cost, and this is it: `localhost` and
+    // `127.0.0.1` are one server, and a binding with no instance cannot know
+    // that. Named explicitly, the second name is refused like any other.
+    here.identity.staysQuiet();
+    await repositoryOn(
+      here,
+      { agent: "agt_01K3XQ7M4E8YB2FVN0H9TZQWEV", connection: "con_01K3XQ7M4E8YB2FVN0H9TZQWEW" },
+      { instance: null },
+    );
+    await workspace.signIn(here.url, here.device.mint());
+
+    const refused = await egma([
+      "pull",
+      "--cwd",
+      workspace.dir,
+      "--url",
+      here.url.replace("127.0.0.1", "localhost"),
+    ]);
+
+    expect(refused.code).toBe(BOUND_ELSEWHERE_EXIT);
+    // Said without it, the same command is the bound platform's own.
+    expect((await egma(["pull", "--cwd", workspace.dir])).code).toBe(0);
+  });
 });
 
 describe("a bound repository", () => {

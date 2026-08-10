@@ -29,7 +29,10 @@
  * **A platform that will not name itself is still bound to.** By origin alone.
  * A folder holding one platform's ids while naming no platform is exactly the
  * crossing this file exists to prevent, and an older deployment that has no
- * identity endpoint yet must not produce one.
+ * identity endpoint yet must not produce one. Origin is then also the check,
+ * which is the weaker one: a second name for that same server reads as a
+ * different platform and is refused. Refusing a platform that may be the right
+ * one is the safe way round; accepting one that is wrong is not.
  */
 
 import {
@@ -307,23 +310,43 @@ export type Settled =
  */
 export function settleBinding(access: PlatformAccess, reached: Reached): Settled {
   const bound = access.binding;
-  if (reached.kind === "silent") {
-    // A repository bound by origin alone is bound to a platform that never
-    // named itself, so this read failing is what that platform always does and
-    // is not news. The command carries on against the address the binding
-    // names — which is the promise being kept — and if that platform is really
-    // down the verb says so in its own words.
-    return bound === null || bound.instance === null
-      ? { kind: "ok" }
-      : { kind: "unreachable", reason: `${reached.reason}\n\n${boundPlatformLine(bound)}` };
+  if (bound === null) return { kind: "ok" };
+
+  const here = reached.kind === "answered" ? reached.url : normalizePlatformOrigin(access.url);
+
+  // "Is this the platform this repository belongs to?", answered the strongest
+  // way the two sides allow. An identifier is the strong answer: it survives a
+  // platform being served under a second name, and it catches a *different*
+  // egma put behind the first one. An address is the weak answer, and it is
+  // all there is when the binding predates the identity endpoint — two names
+  // for one server then read as two platforms. Weak is not the wrong way
+  // round, though: it refuses a platform that may well be the right one, and
+  // it never accepts one that is wrong.
+  const isTheBoundOne =
+    reached.kind === "answered" && bound.instance !== null
+      ? bound.instance === reached.identity.instance
+      : here === normalizePlatformOrigin(bound.origin);
+
+  if (!isTheBoundOne) {
+    return {
+      kind: "elsewhere",
+      reason: differentPlatformRefusal(
+        access,
+        bound,
+        reached.kind === "answered" ? reached.identity : null,
+      ),
+    };
   }
-  if (bound === null || bound.instance === null || bound.instance === reached.identity.instance) {
-    return { kind: "ok" };
-  }
-  return {
-    kind: "elsewhere",
-    reason: differentPlatformRefusal(access, bound, reached.identity),
-  };
+
+  // The right platform, and it said nothing. A binding with no instance was
+  // written against a platform that had no identity to give, so silence there
+  // is what that platform always does and is not news — the command carries
+  // on, and if the platform is really down the verb says so in its own words.
+  // Any other silence is a platform that is down, and the command stops rather
+  // than going on to Egma Cloud with ids that do not exist there.
+  return reached.kind === "silent" && bound.instance !== null
+    ? { kind: "unreachable", reason: `${reached.reason}\n\n${boundPlatformLine(bound)}` }
+    : { kind: "ok" };
 }
 
 /**
@@ -349,23 +372,17 @@ function boundPlatformLine(binding: PlatformBinding): string {
 function differentPlatformRefusal(
   access: PlatformAccess,
   binding: PlatformBinding,
-  found: PlatformIdentity,
+  found: PlatformIdentity | null,
 ): string {
   // Which of the two things happened is decided by the address rather than by
   // where the address came from: naming the bound origin and finding a
   // different egma behind it is a replaced platform, whoever typed it.
-  const sameAddress = normalizePlatformOrigin(access.url) === binding.origin;
-  const named = sameAddress
-    ? null
-    : access.source === "flag"
-      ? "--url"
-      : access.source === "environment"
-        ? "EGMA_URL"
-        : null;
+  const sameAddress =
+    normalizePlatformOrigin(access.url) === normalizePlatformOrigin(binding.origin);
 
-  if (named === null) {
-    // Nobody named anything: the bound origin is answering, and a different
-    // egma is behind it. A new deployment, or a different database.
+  if (sameAddress && found !== null && binding.instance !== null) {
+    // Nobody named another address: the bound origin is answering, and a
+    // different egma is behind it. A new deployment, or a different database.
     return [
       `This repository is bound to the egma at ${binding.origin}, and the egma answering there now is a different one.`,
       "",
@@ -373,10 +390,26 @@ function differentPlatformRefusal(
     ].join("\n");
   }
 
+  const named =
+    access.source === "flag" ? "--url" : access.source === "environment" ? "EGMA_URL" : null;
+  const undo =
+    named === null ? "" : ` Run this without ${named} to use the platform this repository belongs to.`;
+
+  if (binding.instance === null) {
+    // Bound by address alone, to a platform too old to have named itself. Two
+    // names for that one server are indistinguishable from two platforms here,
+    // so the one the repository holds is the only one it will talk to.
+    return [
+      `${named ?? "The address in hand"} names the egma at ${access.url}, and this repository is bound to the egma at ${binding.origin}.`,
+      "",
+      `The agent, connection and test ids in egma/config.yaml were minted on that egma and exist nowhere else. It is too old to say which egma it is, so nothing here can tell whether ${access.url} is another name for it — and egma does not guess with ids that exist in one place. Nothing was sent.${undo}`,
+    ].join("\n");
+  }
+
   return [
-    `${named} names the egma at ${access.url}, and this repository is bound to the egma at ${binding.origin}.`,
+    `${named ?? "The address in hand"} names the egma at ${access.url}, and this repository is bound to the egma at ${binding.origin}.`,
     "",
-    `The agent, connection and test ids in egma/config.yaml were minted on ${binding.instance} and exist nowhere else, so egma sent that platform nothing. Run this without ${named} to use the platform this repository belongs to.`,
+    `The agent, connection and test ids in egma/config.yaml were minted on ${binding.instance} and exist nowhere else, so egma sent that platform nothing.${undo}`,
   ].join("\n");
 }
 
