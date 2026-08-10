@@ -104,7 +104,7 @@ describe("egma's skills", () => {
   it("say what is in the folder, and agree with the README about it", () => {
     const layout = [
       "egma/",
-      "  config.yaml     what this folder points at — names and ids",
+      "  config.yaml     which egma, and what this folder points at on it",
       "  mock-tools.md   what egma answers for the agent's tools with",
       "  tests/          one markdown file per test",
     ].join("\n");

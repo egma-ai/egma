@@ -27,15 +27,17 @@ the work; `--help` is the current detail.
 
 ```
 egma/
-  config.yaml     what this folder points at — names and ids
+  config.yaml     which egma, and what this folder points at on it
   mock-tools.md   what egma answers for the agent's tools with
   tests/          one markdown file per test
 ```
 
-Read `egma/config.yaml` first. It names the **agent** — the developer's voice
-agent, the thing under test — the **connection** egma reaches it over, and the
-**test suite** this folder is. Each carries a name a person reads and an id
-egma uses. Nothing in the folder is secret, so all of it is committed.
+Read `egma/config.yaml` first. It opens by naming the **egma** this folder
+belongs to, because everything under that line was minted there and exists
+nowhere else. Then the **agent** — the developer's voice agent, the thing under
+test — the **connection** egma reaches it over, and the **test suite** this
+folder is. Each carries a name a person reads and an id egma uses. Nothing in
+the folder is secret, so all of it is committed.
 
 One test is one file:
 

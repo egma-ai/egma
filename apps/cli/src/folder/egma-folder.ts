@@ -3,7 +3,7 @@
  *
  * ```
  * egma/
- *   config.yaml     what this folder points at — names and ids
+ *   config.yaml     which egma, and what this folder points at on it
  *   mock-tools.md   what egma answers for the agent's tools with
  *   tests/          one markdown file per test
  * ```
