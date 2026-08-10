@@ -93,6 +93,60 @@
           "minimum": 1
         }
       }
+    },
+    "mock_tools": {
+      "description": "The answers this simulation serves for the agent's tools, already resolved: one entry per tool name, the project's default or the test's override, whichever applies — worked out once by the control plane so that every simulation in one run sees one world and nothing downstream can reach a second answer. Absent, which is the ordinary case, means egma answers for nothing: every tool the agent has runs its own implementation, untouched and unobserved. Order is the order the answers were authored, and it is stable so that two runs of one project read alike.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/mock_tool" }
+    }
+  },
+  "$defs": {
+    "mock_tool": {
+      "description": "One tool name, and what egma answers when the agent calls it. Matching is by the name and strictly by it: a mock tool never reads a call's arguments, so there is no matcher here and nowhere for one to go.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool_name", "answer", "delay_milliseconds"],
+      "properties": {
+        "tool_name": {
+          "description": "The agent's own name for the tool, verbatim. Never parsed, never folded, never matched loosely.",
+          "type": "string",
+          "minLength": 1
+        },
+        "answer": { "$ref": "#/$defs/mock_tool_answer" },
+        "delay_milliseconds": {
+          "description": "How long egma holds the answer back before serving it, so a mocked backend takes as long as the real one would. The ceiling is arithmetic rather than taste: the exchange carrying an answer has a 45-second budget, of which 10 seconds is allowed for the round trip and 5 for egma's own serving margin — so 30 000 is what is left, and a delay this document admits can never collide with the transport that has to carry it.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30000
+        }
+      }
+    },
+    "mock_tool_answer": {
+      "description": "What the tool returns, or the failure it raises — travelling in the shape it is served in, so nothing between the authoring and the wire re-tags it. Two shapes rather than one with a nullable failure, because `null` is a perfectly good answer for a tool to give and a shape that could not tell it from 'no answer' would make an authored `null` unserveable. Exactly one of the two keys is ever written.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["answer"],
+          "properties": {
+            "answer": {
+              "description": "The value the tool returns, of whatever shape its own contract has — including `null` and bare scalars. Bounded by what the exchange carrying it holds: 15 KiB once serialized, refused at authoring time with the honest reason."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["error"],
+          "properties": {
+            "error": {
+              "description": "The failure the tool raises, as text — how a test orders up the branch a real backend cannot be asked for.",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
     }
   }
 }

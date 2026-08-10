@@ -80,6 +80,19 @@ def attribute(span: dict, key: str) -> str | None:
     return None
 
 
+def flag(span: dict, key: str) -> bool | None:
+    """One attribute the vocabulary declares a genuine boolean, read as one.
+
+    Deliberately not through :func:`attribute`: a flag that arrived as a
+    string would come back from that one looking perfectly fine, and this
+    is the reader that would notice.
+    """
+    for entry in span.get("attributes", []):
+        if entry["key"] == key:
+            return entry["value"]["boolValue"]
+    return None
+
+
 def duration_ns(span: dict) -> int:
     return int(span["endTimeUnixNano"]) - int(span["startTimeUnixNano"])
 
@@ -189,6 +202,86 @@ def test_a_tool_call_is_one_instant_carrying_what_was_observed():
     # its arguments, and an absent fact is the honest record of that.
     assert attribute(calls[1], "egma.tool.name") == "send_confirmation_sms"
     assert attribute(calls[1], "egma.tool.arguments") is None
+
+
+def test_a_call_egma_answered_carries_the_whole_exchange():
+    """The golden file's own two calls, authored by the emitter.
+
+    ``voice-mocked-tool-calls.json`` is the vocabulary as bytes for a call
+    egma served: an ordinary one with its arguments whole and its declared
+    delay showing as the span's own duration, and a late-attached one
+    whose arguments never arrived. What the emitter produces has to be
+    those attributes exactly, or the two sides of the contract have
+    drifted.
+    """
+    golden = spans_of(fixture("voice-mocked-tool-calls.json"))
+    spans, sink, _clock = emitter()
+    spans.opened()
+    for served in golden:
+        spans.tool_exchange(
+            attribute(served, "egma.tool.name"),
+            arguments=attribute(served, "egma.tool.arguments"),
+            answer=attribute(served, "egma.tool.result"),
+            mock_tool=attribute(served, "egma.tool.mock_tool"),
+            late_attached=flag(served, "egma.tool.late_attached") is True,
+            began_unix_nano=int(served["startTimeUnixNano"]),
+            ended_unix_nano=int(served["endTimeUnixNano"]),
+        )
+    spans.flush()
+
+    authored = named(sink.documents[0], "tool_call")
+    for mine, theirs in zip(authored, golden, strict=True):
+        assert mine["attributes"] == theirs["attributes"]
+        assert duration_ns(mine) == duration_ns(theirs)
+
+    # And the declared delay really is the duration, with no attribute
+    # anywhere repeating the number for the two to disagree about.
+    assert duration_ns(authored[0]) == 250 * 1_000_000
+    assert flag(authored[1], "egma.tool.late_attached") is True
+
+
+def test_the_late_attached_flag_is_a_genuine_boolean_and_only_ever_true():
+    """A flag written as the string ``"true"`` is a flag every reader has
+    to know to parse, and one of them eventually will not. It is absent
+    for the ordinary case, because a stamp that rode every span would tell
+    a reader nothing."""
+    spans, sink, _clock = emitter()
+    spans.opened()
+    spans.tool_exchange(
+        "send_confirmation_sms",
+        answer='{"delivered":true}',
+        mock_tool="send_confirmation_sms",
+        late_attached=True,
+        began_unix_nano=1,
+        ended_unix_nano=2,
+    )
+    spans.tool_exchange(
+        "check_calendar",
+        answer='{"slots":[]}',
+        mock_tool="check_calendar",
+        began_unix_nano=3,
+        ended_unix_nano=4,
+    )
+    spans.flush()
+
+    late, ordinary = named(sink.documents[0], "tool_call")
+    assert flag(late, "egma.tool.late_attached") is True
+    assert flag(ordinary, "egma.tool.late_attached") is None
+
+
+def test_a_result_is_never_recorded_without_the_stamp_that_placed_it():
+    """The contract's one inviolable rule about a tool call, held here
+    rather than discovered by a reader of the record: an answer with
+    nothing to say where it came from would read as a result egma observed
+    rather than one it authored."""
+    spans, _sink, _clock = emitter()
+    spans.opened()
+    for half in ({"answer": '{"slots":[]}'}, {"mock_tool": "check_calendar"}):
+        with pytest.raises(ValueError) as refused:
+            spans.tool_exchange(
+                "check_calendar", began_unix_nano=1, ended_unix_nano=2, **half
+            )
+        assert "one fact" in str(refused.value)
 
 
 @pytest.mark.parametrize(

@@ -1,0 +1,38 @@
+{
+  "contract_version": 1,
+  "simulation_id": "sim_01K4RE4P0D3S8VXHNB2GQZT6MF",
+  "modality": "voice",
+  "connection": {
+    "type": "livekit",
+    "config": {
+      "url": "wss://lakeside-dental.livekit.cloud"
+    },
+    "credentials": {
+      "apiKey": "APIexample0key0",
+      "apiSecret": "example0secret0value0not0a0real0one"
+    }
+  },
+  "persona": {
+    "traits": {
+      "personality": "Terse caller who sticks to the point.",
+      "language": "en-US"
+    }
+  },
+  "scenario": {
+    "instructions": "Ask whether Thursday morning is free."
+  },
+  "limits": {
+    "max_duration_seconds": 300,
+    "max_turns": 40
+  },
+  "mock_tools": [
+    {
+      "tool_name": "check_calendar",
+      "answer": {
+        "answer": { "slots": [] },
+        "error": "the calendar service is down"
+      },
+      "delay_milliseconds": 0
+    }
+  ]
+}

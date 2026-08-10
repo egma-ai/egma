@@ -24,6 +24,13 @@ It is a subclass rather than a stand-in for exactly that reason: a fake
 written beside the driver would drift from it, and the first anybody
 would know is a live call.
 
+The room carries two channels and this one carries both. Beside the
+audio, a room is where the agent's side asks egma to answer for its
+tools — so the room here registers the methods the driver registers,
+refuses what the transport refuses, and lets a test say the two things a
+session says: hello, and one tool call. What answers them is egma's own
+code, unchanged, with no LiveKit and no network anywhere.
+
 The script it is built with:
 
 - ``greeting`` — what the agent says the moment it is in the room.
@@ -49,13 +56,33 @@ The script it is built with:
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass, field
 
 from egma_simulator.media.livekit_room import LiveKitRoomBackend, platform_refusal
+from egma_simulator.media.room import answering
 from egma_simulator.media.scripted import ScriptedSession
+from egma_simulator.mock_tools import (
+    HELLO_METHOD,
+    LARGEST_PAYLOAD_BYTES,
+    PROTOCOL_VERSION,
+    TOOL_METHOD,
+)
 
 AGENT_IDENTITY = "agent-under-test"
 """Who the agent is in the room, once its worker turns up."""
+
+
+@dataclass(frozen=True)
+class RpcAsk:
+    """One incoming call, in the shape a handler is handed by the room.
+
+    Only the payload matters to anything egma registers — room membership
+    is the authorisation, so who called and how long they will wait decide
+    nothing on this side.
+    """
+
+    payload: str
 
 
 @dataclass(frozen=True)
@@ -90,13 +117,24 @@ class StubSession(ScriptedSession):
 
 
 class StubRoom:
-    """The room itself: who is in it, and what can be heard in it."""
+    """The room itself: who is in it, what can be heard in it, and what
+    can be called in it.
+
+    The calling half is the room's second channel, and it is as real as
+    the audio one: the methods registered below are the driver's own, the
+    refusals are the driver's own conversion of them, and the caller side
+    behaves the way the transport behaves — a method nobody registered is
+    refused, and a payload too large for one message is refused before it
+    is carried. So an agent's side of the mock-tool exchange can be
+    written against this room and is written against the real one.
+    """
 
     def __init__(self, backend: RoomStubBackend, *, band_hz: int) -> None:
         self._backend = backend
         self._band_hz = band_hz
         self._session: StubSession | None = None
         self._joined = False
+        self._methods: dict[str, object] = {}
         self.arrivals = asyncio.Event()
         self.who_arrived: list[str] = []
 
@@ -130,6 +168,45 @@ class StubRoom:
         if self._session is not None:
             self._session.hang_up()
         self._session = None
+
+    # -- The room's other channel: what can be called in it -------------------
+
+    def register_rpc(self, method: str, handler: object) -> None:
+        """Offer one method on egma's participant, the driver's own way.
+
+        The handler is wrapped by :func:`egma_simulator.media.room.answering`
+        — the very wrapper the real room registers — so what a refusal
+        becomes on the wire is proved here about the code a customer's
+        server runs, rather than about a second conversion written beside
+        it.
+        """
+        self._methods[method] = answering(handler)
+        self._backend.stub.standing_ready.set()
+
+    async def perform_rpc(self, method: str, payload: str) -> str:
+        """Call a method on egma's participant, the way the transport does.
+
+        Everything the transport would refuse before egma ever sees it is
+        refused here for the same reasons and with the same codes: a
+        method nobody registered, a request too large to carry, and a
+        reply too large to carry back. What is left is the handler's own
+        answer, or the handler's own refusal.
+        """
+        from livekit import rtc
+
+        if len(payload.encode()) > LARGEST_PAYLOAD_BYTES:
+            raise rtc.RpcError._built_in(
+                rtc.RpcError.ErrorCode.REQUEST_PAYLOAD_TOO_LARGE
+            )
+        handler = self._methods.get(method)
+        if handler is None:
+            raise rtc.RpcError._built_in(rtc.RpcError.ErrorCode.UNSUPPORTED_METHOD)
+        answered = await handler(RpcAsk(payload=payload))
+        if len(answered.encode()) > LARGEST_PAYLOAD_BYTES:
+            raise rtc.RpcError._built_in(
+                rtc.RpcError.ErrorCode.RESPONSE_PAYLOAD_TOO_LARGE
+            )
+        return answered
 
     def agent_arrives(self) -> None:
         """The worker turns up, and — unless it is broken — is heard."""
@@ -188,7 +265,9 @@ class RoomStubBackend(LiveKitRoomBackend):
         # endpoint, and the server URL that answer named, are what egma
         # really went to the room with.
         self.stub.joined_with.append(way_in)
-        return StubRoom(self, band_hz=self._band_hz)
+        room = StubRoom(self, band_hz=self._band_hz)
+        self.stub.joined_rooms.append(room)
+        return room
 
     async def _delete_room(self) -> None:
         self.stub.deleted.append(self.room_name)
@@ -290,8 +369,60 @@ class RoomStub:
 
     backends: list[RoomStubBackend] = field(default_factory=list)
 
+    joined_rooms: list[StubRoom] = field(default_factory=list)
+    """Every room egma joined, in order — where the exchange's other side
+    knocks."""
+
+    standing_ready: asyncio.Event = field(default_factory=asyncio.Event)
+    """Set once egma has offered the exchange in the room.
+
+    What a session waits for before it says hello — the same thing that
+    really decides it on a live room, where an agent's side finds egma by
+    the identity in its dispatch metadata or finds nobody at all."""
+
     def driver(self, **built: object) -> RoomStubBackend:
         """The factory a plug is handed, in place of the real driver."""
         backend = RoomStubBackend(self, **built)
         self.backends.append(backend)
         return backend
+
+    # -- The agent's side of the mock-tool exchange ---------------------------
+    #
+    # What a session in this room would say to egma, said in a line. It is
+    # deliberately thin: everything below builds the payload the exchange
+    # documents and hands it to the room, so what a test proves is proved
+    # about egma's answers rather than about a helper's cleverness.
+
+    @property
+    def room(self) -> StubRoom:
+        """The room egma joined. One simulation joins exactly one."""
+        return self.joined_rooms[-1]
+
+    async def says_hello(
+        self,
+        *tools: str,
+        schemas: dict[str, object] | None = None,
+        protocol_version: int = PROTOCOL_VERSION,
+    ) -> dict:
+        """The census: every tool the agent has, and what egma answers for."""
+        return json.loads(
+            await self.room.perform_rpc(
+                HELLO_METHOD,
+                json.dumps(
+                    {
+                        "protocol_version": protocol_version,
+                        "tools": [
+                            {"name": name, "schema": (schemas or {}).get(name, {})}
+                            for name in tools
+                        ],
+                    }
+                ),
+            )
+        )
+
+    async def calls(self, name: str, arguments: dict | None = None) -> dict:
+        """One tool call, asked of egma and answered by it."""
+        asked: dict = {"name": name}
+        if arguments is not None:
+            asked["arguments"] = arguments
+        return json.loads(await self.room.perform_rpc(TOOL_METHOD, json.dumps(asked)))

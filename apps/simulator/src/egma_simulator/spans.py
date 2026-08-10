@@ -80,6 +80,18 @@ so there is no second field free to disagree with it."""
 TURN_TEXT_ATTRIBUTE = "egma.turn.text"
 TOOL_NAME_ATTRIBUTE = "egma.tool.name"
 TOOL_ARGUMENTS_ATTRIBUTE = "egma.tool.arguments"
+TOOL_RESULT_ATTRIBUTE = "egma.tool.result"
+TOOL_PROVENANCE_ATTRIBUTE = "egma.tool.provenance"
+TOOL_MOCK_TOOL_ATTRIBUTE = "egma.tool.mock_tool"
+TOOL_LATE_ATTACHED_ATTRIBUTE = "egma.tool.late_attached"
+
+MOCKED_PROVENANCE = "mocked"
+"""How the call was answered: a mock tool answered, and egma served it.
+
+The one value there is. Its absence is the other half of the vocabulary —
+a call egma watched go past and did not answer — and that absence is what
+makes a recorded result honest, because a result never rides without it.
+"""
 
 SPAN_KIND = "SPAN_KIND_INTERNAL"
 """Every span here is work this process did itself. Nothing egma emits is a
@@ -149,7 +161,10 @@ class _Span:
     name: str
     started_unix_nano: int
     ended_unix_nano: int
-    attributes: dict[str, str] = field(default_factory=dict)
+    attributes: dict[str, str | bool] = field(default_factory=dict)
+    """Text unless the vocabulary calls for a genuine boolean, which one
+    attribute does: a flag written as the string ``"true"`` is a flag every
+    reader has to know to parse, and one of them eventually will not."""
 
     def as_otlp(self, *, trace_id: str, parent_span_id: str | None) -> dict:
         document: dict = {
@@ -166,7 +181,14 @@ class _Span:
         }
         if self.attributes:
             document["attributes"] = [
-                {"key": key, "value": {"stringValue": value}}
+                {
+                    "key": key,
+                    "value": (
+                        {"boolValue": value}
+                        if isinstance(value, bool)
+                        else {"stringValue": value}
+                    ),
+                }
                 for key, value in self.attributes.items()
             ]
         return document
@@ -207,7 +229,7 @@ class SpanEmitter:
         *,
         started_unix_nano: int,
         ended_unix_nano: int,
-        attributes: dict[str, str] | None = None,
+        attributes: dict[str, str | bool] | None = None,
     ) -> _Span:
         span = _Span(
             span_id=self._mint(),
@@ -298,16 +320,66 @@ class SpanEmitter:
 
         One instant: the platform reports the invocation, not its span, and
         stretching it over a guess would be inventing a fact nobody
-        measured. There is no result attribute for the same reason.
+        measured. Nothing of the answer is recorded for the same reason —
+        egma did not see it. A call egma *answered* is a different story
+        and goes through :meth:`tool_exchange`.
         """
-        attributes = {TOOL_NAME_ATTRIBUTE: name}
+        now = self._clock()
+        self.tool_exchange(
+            name,
+            arguments=arguments,
+            began_unix_nano=now,
+            ended_unix_nano=now,
+        )
+
+    def tool_exchange(
+        self,
+        name: str,
+        *,
+        arguments: str | None = None,
+        answer: str | None = None,
+        mock_tool: str | None = None,
+        late_attached: bool = False,
+        began_unix_nano: int,
+        ended_unix_nano: int,
+    ) -> None:
+        """One tool call, bracketed by the exchange egma conducted.
+
+        Where egma *answered* the call, the two ends are the moment the
+        call arrived and the moment the answer went back — the round trip
+        plus whatever delay the mock tool declared — so a declared delay
+        is readable as the time it really took and no attribute repeats
+        the number for the two to disagree about.
+
+        **A result never rides without its provenance.** The rule that
+        looks like an exception — never record half an exchange nobody
+        observed — is about the *agent's* return values, which egma does
+        not see. An answer egma itself served is not observed, it is
+        authored, and recording it invents nothing. So the two travel
+        together or not at all, and this refuses to write one without the
+        other rather than leaving the record to be read two ways.
+        """
+        if (answer is None) != (mock_tool is None):
+            raise ValueError(
+                "a tool call's result and the mock tool that served it are "
+                "one fact: an answer with nothing to say where it came from "
+                "would read as a result egma observed rather than authored"
+            )
+        attributes: dict[str, str | bool] = {TOOL_NAME_ATTRIBUTE: name}
         if arguments is not None:
             attributes[TOOL_ARGUMENTS_ATTRIBUTE] = arguments
-        now = self._clock()
+        if answer is not None and mock_tool is not None:
+            attributes[TOOL_RESULT_ATTRIBUTE] = answer
+            attributes[TOOL_PROVENANCE_ATTRIBUTE] = MOCKED_PROVENANCE
+            attributes[TOOL_MOCK_TOOL_ATTRIBUTE] = mock_tool
+        if late_attached:
+            # Only ever true. A stamp for the ordinary case would ride
+            # every span, and a reader would learn nothing from finding it.
+            attributes[TOOL_LATE_ATTACHED_ATTRIBUTE] = True
         self._author(
             TOOL_CALL_SPAN,
-            started_unix_nano=now,
-            ended_unix_nano=now,
+            started_unix_nano=began_unix_nano,
+            ended_unix_nano=ended_unix_nano,
             attributes=attributes,
         )
 

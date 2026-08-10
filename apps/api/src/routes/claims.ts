@@ -4,7 +4,9 @@ import {
   claimSimulations,
   failSimulationDispatch,
   getPersonaVersion,
+  getRun,
   getSimulationTestVersion,
+  resolveMockTools,
   resolveSimulationConnection,
   type SimulationClaim,
 } from "@egma/db";
@@ -49,10 +51,10 @@ import { invalid, notTheService } from "../http/refusals.ts";
  * What goes back is the whole work order: for each claimed simulation, a
  * fully assembled spec — persona traits as the pinned version saved them,
  * the pinned test version's scenario, the connection's config with its
- * credentials unsealed, and the platform's limits — validated against the
- * contract schema before a byte of it is sent. This is the only place
- * credential material ever travels; the report direction structurally has
- * nowhere to put it.
+ * credentials unsealed, the answers this simulation's mock tools serve, and
+ * the platform's limits — validated against the contract schema before a
+ * byte of it is sent. This is the only place credential material ever
+ * travels; the report direction structurally has nowhere to put it.
  */
 
 export type ClaimRoutesOptions = {
@@ -201,6 +203,27 @@ async function assembledSpec(
     };
   }
 
+  const run = await getRun(claim.auth, claim.runId);
+  if (run === undefined) {
+    return { unbuildable: "its run could not be read" };
+  }
+
+  // Resolved here and nowhere else. `resolveMockTools` is the one place a
+  // project default and a test override are folded together, and the
+  // snapshot it folds was frozen when the run was created — so every
+  // simulation in one run is served one world, and a mock tool edited
+  // mid-run tears nothing. The simulator receives the answers already
+  // decided, exactly as it receives everything else: flattened, with
+  // nothing left to look up and nothing left to choose between.
+  const mockTools = resolveMockTools(
+    run.mockToolSnapshot,
+    claim.testVersionId,
+  ).map((mock) => ({
+    tool_name: mock.toolName,
+    answer: mock.answer,
+    delay_milliseconds: mock.delayMilliseconds,
+  }));
+
   const spec = {
     contract_version: CONTRACT_VERSION,
     simulation_id: claim.id,
@@ -213,7 +236,16 @@ async function assembledSpec(
     persona: { traits: personaVersion.traits },
     scenario: { instructions: testVersion.scenario },
     limits: SIMULATION_LIMITS[claim.modality],
+    // Left out entirely where the run mocks nothing, which is what most
+    // runs do: a simulation egma answers no tool for is byte for byte the
+    // work order it was before mock tools existed, and an empty list
+    // would be a claim about tools where there is nothing to claim.
+    ...(mockTools.length === 0 ? {} : { mock_tools: mockTools }),
   };
+  // `mockToolId` is deliberately not among the fields sent. The simulator
+  // records which mock tool answered by its tool name, which is the whole
+  // of how one is matched; an identifier it would carry and never read is
+  // a field two sides could come to disagree about.
 
   // Validated on the way out, against the same schema the simulator compiles
   // on the way in — so a document that does not speak the contract is this
