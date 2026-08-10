@@ -45,6 +45,7 @@ export const ID_PREFIXES = [
   "prsv",
   "grd",
   "grv",
+  "mck",
   "ste",
   "run",
   "sim",

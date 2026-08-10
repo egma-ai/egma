@@ -16,6 +16,7 @@ import {
   createEgmaFolder,
   folderPathsIn,
   parseConfig,
+  parseMockToolsFile,
   readFolder,
   readFolderTests,
   serializeConfig,
@@ -85,6 +86,7 @@ describe("the test file format", () => {
       version: null,
       scenario: "The caller has an emergency at 2am.",
       expectedBehaviors: ["The agent gives the emergency number."],
+      mockTools: [],
     };
 
     const document = serializeTestFile(fresh);
@@ -163,6 +165,7 @@ describe("the test file format", () => {
       version: null,
       scenario: "s",
       expectedBehaviors: ["b"],
+      mockTools: [],
     };
 
     const document = serializeTestFile(awkward);
@@ -196,6 +199,7 @@ describe("the test file format", () => {
       version: null,
       scenario: "The situation.",
       expectedBehaviors: ["The agent does a thing."],
+      mockTools: [],
     };
 
     const held: readonly (readonly [string, TestFile])[] = [
@@ -242,6 +246,53 @@ describe("the test file format", () => {
       ["a statement in another script", { ...plain, expectedBehaviors: ["予約 🎧 — done"] }],
       ["nothing to check at all", { ...plain, expectedBehaviors: [] }],
       ["a pinned version", { ...plain, version: "tstv_01K3XQ7M4E8YB2FVN0H9TZQWER" }],
+      [
+        "an override the test answers a tool with",
+        { ...plain, mockTools: [{ tool: "check_availability", says: { answer: { slots: [] } } }] },
+      ],
+      [
+        "an override that fails, after a delay",
+        {
+          ...plain,
+          mockTools: [
+            { tool: "book_appointment", says: { error: "the booking service is unreachable", delay_ms: 800 } },
+          ],
+        },
+      ],
+      [
+        "an override answering nothing at all, which egma's door refuses",
+        { ...plain, mockTools: [{ tool: "check_availability", says: { answer: null } }] },
+      ],
+      [
+        "two overrides, in the order they were authored",
+        {
+          ...plain,
+          mockTools: [
+            { tool: "b_second", says: { answer: 2 } },
+            { tool: "a_first", says: { answer: 1 } },
+          ],
+        },
+      ],
+      [
+        "an override whose answer quotes every heading in the file",
+        {
+          ...plain,
+          mockTools: [
+            {
+              tool: "read_note",
+              says: {
+                answer: {
+                  note: "## Scenario\n## Expected behaviors\n## Mock tools\n### not a tool\n```",
+                },
+              },
+            },
+          ],
+        },
+      ],
+      [
+        "prose quoting the mock tools heading",
+        { ...plain, scenario: "before\n## Mock tools\nafter" },
+      ],
     ];
 
     it.each(held)("writes %s as a file that reads back as itself", (_what, test) => {
@@ -305,7 +356,7 @@ describe("the test file format", () => {
 });
 
 describe("the egma folder", () => {
-  it("is a config file and a tests directory, and nothing else", async () => {
+  it("is a config file, a mock tools file and a tests directory, and nothing else", async () => {
     const folder = await createEgmaFolder({
       repository: workspace.dir,
       config: {
@@ -316,7 +367,11 @@ describe("the egma folder", () => {
     });
 
     expect(folder.created).toBe(true);
-    expect(await readdir(folder.paths.root)).toEqual(["config.yaml", "tests"]);
+    expect(await readdir(folder.paths.root)).toEqual([
+      "config.yaml",
+      "mock-tools.md",
+      "tests",
+    ]);
     expect((await stat(folder.paths.tests)).isDirectory()).toBe(true);
 
     // Reserved, and deliberately not made.
@@ -324,6 +379,14 @@ describe("the egma folder", () => {
 
     // Nothing secret, so nothing to keep out of git.
     await expect(stat(path.join(folder.paths.root, ".gitignore"))).rejects.toThrow();
+
+    // The mock tools file is here from the start and holds none: the folder is
+    // what teaches where a mock tool goes, and a file that is not there teaches
+    // nobody.
+    const mocks = await readFile(folder.paths.mockTools, "utf8");
+    expect(mocks).toContain("## Mock tools");
+    expect(mocks).not.toContain("```");
+    expect(parseMockToolsFile(mocks, "egma/mock-tools.md")).toEqual([]);
     const written = await readFile(folder.paths.config, "utf8");
     expect(written).not.toContain("egma_sk_");
     expect(written).toBe(

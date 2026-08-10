@@ -112,6 +112,7 @@ const FILE = {
     "verifies who it is speaking to before discussing the booking",
     "confirms the new time back before finishing",
   ],
+  mockTools: [],
 } as const;
 
 function fileAt(name: string): string {
@@ -318,6 +319,7 @@ describe("push, against a real instance", () => {
         scenario: "The file's own words.",
         expectedBehaviors: [...FILE.expectedBehaviors],
         personas: [],
+        mockTools: [],
       },
       fetchImpl,
     );

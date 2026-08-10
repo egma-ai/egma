@@ -21,6 +21,7 @@
 
 import path from "node:path";
 
+import { sameMockTools } from "../folder/mock-tools.ts";
 import type { TestFile } from "../folder/test-file.ts";
 import {
   readFolder,
@@ -120,6 +121,7 @@ function inputFrom(test: TestFile): TestInput {
     scenario: test.scenario,
     expectedBehaviors: test.expectedBehaviors,
     personas: test.personas,
+    mockTools: test.mockTools,
   };
 }
 
@@ -129,15 +131,18 @@ function sameList(a: readonly string[], b: readonly string[]): boolean {
 
 /**
  * Whether the file says exactly what the platform already holds. Order is
- * content in both lists: an expected behaviors list is one a reader goes down,
- * and personas are named in the order they were authored.
+ * content in all three lists: an expected behaviors list is one a reader goes
+ * down, personas are named in the order they were authored, and the platform
+ * compares a test's mock tools in the order they were written — so a folder
+ * that thought order was nothing would mint a version saying nothing.
  */
 export function sameAsPlatform(file: TestFile, test: PlatformTest): boolean {
   return (
     file.name === test.name &&
     file.scenario === test.scenario &&
     sameList(file.expectedBehaviors, test.expectedBehaviors) &&
-    sameList(file.personas, test.personas)
+    sameList(file.personas, test.personas) &&
+    sameMockTools(file.mockTools, test.mockTools)
   );
 }
 

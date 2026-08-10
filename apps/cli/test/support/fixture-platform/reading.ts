@@ -52,6 +52,33 @@ export function textList(value: unknown): readonly string[] {
 }
 
 /**
+ * A project this credential may not act in.
+ *
+ * One sentence for reads and writes alike, and for every group that has one to
+ * make. A surface that refused a stranger's project on a write and answered an
+ * empty list on a read would have two rules, and the empty list is the worse
+ * half: it reads as "you have no tests there" rather than as "that is not yours
+ * to ask about".
+ */
+export function cannotActIn(projectId: string): string {
+  return (
+    `this credential may not act in project ${projectId}. A credential ` +
+    `authorized for one project acts in that one, and a key for the whole ` +
+    `organization acts in any project of that organization. Leave project out ` +
+    `to use the project this credential already acts in.`
+  );
+}
+
+/** One refusal, in the envelope every refusal in this API arrives in. */
+export function refuse(
+  status: number,
+  error: string,
+  message: string,
+): { readonly status: number; readonly body: Record<string, unknown> } {
+  return { status, body: { error, message } };
+}
+
+/**
  * What every group answers a request carrying no key, or one this instance
  * never minted, word for word as the real credential door answers it.
  *

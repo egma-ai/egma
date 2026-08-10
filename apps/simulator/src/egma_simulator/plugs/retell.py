@@ -83,10 +83,14 @@ class RetellChat:
         config: dict[str, Any],
         credentials: object,
         simulation_id: str | None = None,
+        mock_tools: object = None,
     ) -> None:
         # Retell mints its own chat id and that is what a report joins on,
-        # so this plug has nothing to tell it about the simulation.
-        del simulation_id
+        # so this plug has nothing to tell it about the simulation. egma
+        # is not in this agent's tool path either — a chat over somebody
+        # else's platform has no room to stand in — so its record honestly
+        # claims nothing about tools.
+        del simulation_id, mock_tools
 
         if modality != "chat":
             raise PlugError(

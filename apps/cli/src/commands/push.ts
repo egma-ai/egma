@@ -1,5 +1,5 @@
 /**
- * `egma push`: upload the folder's tests, or refuse and say which ones moved.
+ * `egma push`: upload what the folder says, or refuse and say what moved.
  *
  * The refusal is the reason this verb exists in this shape. It names every test
  * the platform has moved on, one per line, so that whoever reads it — a person
@@ -8,7 +8,8 @@
  */
 
 import { PlatformUnreachableError } from "../platform/device-flow.ts";
-import { PlatformRefusedError } from "../platform/tests.ts";
+import { PlatformRefusedError } from "../platform/refused.ts";
+import { pushMockTools, type PushMockToolsReport } from "../sync/mock-tools.ts";
 import { pushTests, type PushConflict } from "../sync/push.ts";
 import { FOLDER_EXIT, readyToSync, type FolderCommandOptions } from "./folder-verbs.ts";
 
@@ -31,8 +32,18 @@ export async function runPushCommand(options: FolderCommandOptions): Promise<num
   options.out(`folder: ${ready.paths.root}`);
 
   let report;
+  let mocked: PushMockToolsReport = { mockTools: [], turnedAway: [] };
   try {
     report = await pushTests({ signedIn: ready.signedIn, paths: ready.paths });
+    // A push that is going to be refused stops where it is. The refusal ends on
+    // "run egma pull, look at what changed, then push again", and a push that
+    // had gone on to land the mocked world would have made that sentence a lie
+    // about half the folder — including in the race where the platform's own
+    // door caught the conflict after some tests had already landed.
+    const refused = report.conflicts.length > 0;
+    if (!refused) {
+      mocked = await pushMockTools({ signedIn: ready.signedIn, paths: ready.paths });
+    }
   } catch (cause) {
     if (cause instanceof PlatformUnreachableError || cause instanceof PlatformRefusedError) {
       options.out("status: unreachable");
@@ -49,10 +60,19 @@ export async function runPushCommand(options: FolderCommandOptions): Promise<num
     options.out(`version: ${test.versionId}`);
   }
 
+  // Under keys of their own, never under the tests': a mock tool has no version
+  // to print beside it, and something reading these lines has to be able to
+  // tell one kind of thing from the other.
+  for (const tool of mocked.mockTools) {
+    options.out(`mock-tool-${tool.state}: ${tool.tool}`);
+  }
+
   // Turned away, in egma's own words. The refusal egma can see coming — no
-  // expected behaviors — is said before anything uploads; a refusal only the
-  // platform can make arrives in the platform's words.
-  for (const turned of report.turnedAway) {
+  // expected behaviors, a file it cannot read — is said before anything
+  // uploads; a refusal only the platform can make arrives in the platform's
+  // words, which is where every rule about what a mock tool may say is held.
+  const turnedAway = [...report.turnedAway, ...mocked.turnedAway];
+  for (const turned of turnedAway) {
     options.out(`turned-away: ${turned.name}`);
     options.out(`file: ${turned.shown}`);
     options.out(`reason: ${turned.reason}`);
@@ -70,10 +90,11 @@ export async function runPushCommand(options: FolderCommandOptions): Promise<num
   }
 
   options.out(`tests: ${report.tests.length}`);
-  if (report.turnedAway.length > 0) {
+  options.out(`mock-tools: ${mocked.mockTools.length}`);
+  if (turnedAway.length > 0) {
     options.out("status: turned-away");
     options.fail(
-      `egma would not take ${report.turnedAway.length === 1 ? "one test" : `${report.turnedAway.length} tests`}. The reason above is egma's own; fix the ${report.turnedAway.length === 1 ? "file" : "files"} and push again.`,
+      `egma would not take ${turnedAway.length === 1 ? "one of these" : `${turnedAway.length} of these`}. The reason above is egma's own; fix the ${turnedAway.length === 1 ? "file" : "files"} and push again.`,
     );
     return FOLDER_EXIT.turnedAway;
   }

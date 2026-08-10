@@ -10,6 +10,8 @@ import {
   startRun,
   type AuthContext,
   type ConductedSimulation,
+  type MockToolCoverage,
+  type MockToolSnapshot,
   type Run,
   type RunEvent,
 } from "@egma/db";
@@ -18,6 +20,7 @@ import type { FastifyInstance } from "fastify";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
+import { describedMockTool } from "../http/mock-tools.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
 import {
@@ -137,6 +140,14 @@ const NO_SUCH_RUN =
  * shape from the first day so that nothing a client reads changes when the
  * graders arrive. The events record already has a place to carry one; this row
  * gains its own the day something writes one down.
+ *
+ * `mock_tool_coverage` is here because comparing two of these numbers is only
+ * valid when both conversations were conducted in the same world. A simulation
+ * whose tools were answered by mock tools and one whose tools ran for real are
+ * different units, exactly as two audio bands are, and this is where a reader
+ * finds that out — off the conversation itself, with nothing else to fetch and
+ * nothing editable to ask. Null says the agent was never asked what tools it
+ * has, so nothing was learned and nothing is claimed.
  */
 function describedSimulation(one: ConductedSimulation): Record<string, unknown> {
   return {
@@ -150,6 +161,57 @@ function describedSimulation(one: ConductedSimulation): Record<string, unknown> 
     status: one.status,
     verdict: null,
     reason: one.endingReason,
+    mock_tool_coverage: describedMockToolCoverage(one.mockToolCoverage),
+  };
+}
+
+/**
+ * The coverage stamp as the wire carries it: the report's own three keys, in
+ * the report's own words, or null where there is nothing claimed.
+ *
+ * The names are copied key by key rather than passed through, so the shape a
+ * client reads is decided here and not by whatever a row happens to hold.
+ */
+function describedMockToolCoverage(
+  coverage: MockToolCoverage | null,
+): Record<string, unknown> | null {
+  if (coverage === null) return null;
+  return {
+    discovered: [...coverage.discovered],
+    covered: [...coverage.covered],
+    uncovered: [...coverage.uncovered],
+  };
+}
+
+/**
+ * The mocked world a run froze, as every read of the run describes it.
+ *
+ * Two halves rather than one resolved list per test version, because that is
+ * how it is stored and for the same reason: an override replaces a default by
+ * tool name, and answering the merge per version would repeat every default
+ * once per test for nothing. A reader who wants the merge asks for the run's
+ * simulations and applies the overrides of the version each one names — which
+ * is what the simulator is handed when it claims one.
+ *
+ * Each entry is the one projection every group of mocked answers is described
+ * by; only the `mock_tool_id` beside a default is this read's own.
+ */
+function describedMockTools(
+  snapshot: MockToolSnapshot,
+): Record<string, unknown> {
+  return {
+    // A default is one of those with the row it came from named beside it, so a
+    // reader can go and look at the mock tool the run froze.
+    defaults: snapshot.defaults.map((one) => ({
+      ...describedMockTool(one),
+      mock_tool_id: one.mockToolId,
+    })),
+    overrides: Object.fromEntries(
+      Object.entries(snapshot.overrides).map(([versionId, entries]) => [
+        versionId,
+        entries.map(describedMockTool),
+      ]),
+    ),
   };
 }
 
@@ -168,6 +230,10 @@ function describedRun(
     modality: one.connectionSnapshot.modality,
     label: one.label,
     test_versions: [...one.pinnedTestVersionIds],
+    // The world this run was frozen into. It never changes after creation,
+    // whatever anybody edits, which is what a reader comparing two runs' numbers
+    // has to be able to check for themselves.
+    mock_tools: describedMockTools(one.mockToolSnapshot),
     expected_simulation_count: one.expectedSimulationCount,
     // Null until all three land together at the finish. A count that appeared
     // one at a time would let a reader do arithmetic on a half-settled run.

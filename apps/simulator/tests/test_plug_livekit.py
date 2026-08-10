@@ -52,7 +52,13 @@ from egma_simulator.media.livekit_room import (
     RoomSettings,
     dispatch_metadata,
 )
-from egma_simulator.media.room import PERSONA_IDENTITY, ROOM_PREFIX, RoomSession
+from egma_simulator.media.room import (
+    PERSONA_IDENTITY,
+    ROOM_PREFIX,
+    RoomSession,
+    room_token,
+)
+from egma_simulator.mock_tools import PROTOCOL_VERSION
 from egma_simulator.model import GOODBYE, ScriptedModel
 from egma_simulator.persona import Persona
 from egma_simulator.pipeline import assemble
@@ -564,17 +570,62 @@ async def test_the_dispatch_carries_egmas_context_and_none_of_the_test(
     )
 
     carried = json.loads(stub.dispatches[0].metadata)
-    assert carried == {"simulationId": A_SIMULATION, "modality": "voice"}
+    assert carried == {
+        "simulationId": A_SIMULATION,
+        "modality": "voice",
+        "egmaIdentity": PERSONA_IDENTITY,
+        "protocolVersion": PROTOCOL_VERSION,
+    }
     for word in ("Tuesday", "Thursday", "Margaret", "cleaning", A_PERSONALITY):
         assert word not in stub.dispatches[0].metadata
 
 
 def test_egmas_context_is_the_same_string_wherever_it_is_built():
     """Written out once, so the sentence a worker parses cannot drift."""
-    assert json.loads(dispatch_metadata("sim_01ABC")) == {
+    assert json.loads(
+        dispatch_metadata("sim_01ABC", egma_identity="egma-persona")
+    ) == {
         "simulationId": "sim_01ABC",
         "modality": "voice",
+        "egmaIdentity": "egma-persona",
+        "protocolVersion": PROTOCOL_VERSION,
     }
+
+
+async def test_the_dispatch_names_the_participant_the_token_really_opens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The identity in the metadata is the address a mock-tool call goes to.
+
+    An agent's side sends its calls to whoever the metadata names, so a
+    name invented for the message rather than taken from the token would
+    address a participant that is not in the room — and every mocked tool
+    would quietly run for real.
+    """
+    stub = RoomStub(greeting="Front desk.", replies=["Noted."])
+    await room_walk(
+        tmp_path, stub, monkeypatch, agent_name="front-desk", scenario="One point."
+    )
+
+    named = json.loads(stub.dispatches[0].metadata)["egmaIdentity"]
+    minted = jwt_identity(
+        room_token(A_KEY, A_SECRET, stub.rooms[0].name)
+    )
+    assert named == minted == PERSONA_IDENTITY
+
+
+def jwt_identity(token: str) -> str:
+    """Whose token this is, read out of the token itself.
+
+    Decoded rather than asserted against a constant, because the question
+    is whether the two really agree — the metadata is only right if it
+    names the identity the signed token actually grants.
+    """
+    import base64
+
+    claims = token.split(".")[1]
+    padded = claims + "=" * (-len(claims) % 4)
+    return json.loads(base64.urlsafe_b64decode(padded))["sub"]
 
 
 @pytest.mark.parametrize(

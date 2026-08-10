@@ -16,6 +16,7 @@ import { heartbeatRoutes } from "./routes/heartbeats.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
+import { mockToolRoutes } from "./routes/mock-tools.ts";
 import { reportRoutes } from "./routes/reports.ts";
 import { runRoutes } from "./routes/runs.ts";
 import { signOutRoutes } from "./routes/sign-out.ts";
@@ -200,6 +201,13 @@ export function buildApi(options: ServerOptions): Api {
   // group here, so the credentialed hook and the routes it protects cannot come
   // apart and one group's error handler never answers another's refusals.
   void app.register(testRoutes, { provider: identity.provider, rateLimit });
+
+  // The mocked world a project's simulations run in: what egma answers with
+  // when the agent calls one of its tools, so a test never books a real
+  // appointment. Its own scope like every other group, so its refusals — a tool
+  // this project already answers for among them — never reach another group's
+  // error handler.
+  void app.register(mockToolRoutes, { provider: identity.provider, rateLimit });
 
   // What a terminal starts and then watches: a run over one connection,
   // pinning exact versions, and the numbered feed a follower resumes from.

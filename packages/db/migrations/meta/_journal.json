@@ -141,6 +141,20 @@
       "when": 1786319406614,
       "tag": "0019_simulation_connection_type_leaves_the_row",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1786340326382,
+      "tag": "0020_mock_tools",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1786376582546,
+      "tag": "0021_mock_tool_coverage",
+      "breakpoints": true
     }
   ]
 }

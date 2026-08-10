@@ -147,15 +147,18 @@ const CONTEXT_REQUIRING = [
   "createApiKey",
   "createGrader",
   "createInvitation",
+  "createMockTool",
   "createPersona",
   "createProject",
   "createTest",
   "deactivateUser",
   "deleteAgent",
   "deleteGrader",
+  "deleteMockTool",
   "deletePersona",
   "deleteTest",
   "editGrader",
+  "editMockTool",
   "editPersona",
   "editTest",
   "failSimulation",
@@ -187,6 +190,7 @@ const CONTEXT_REQUIRING = [
   "listGraders",
   "listGradingJobsForSimulation",
   "listMembers",
+  "listMockTools",
   "listPendingInvitations",
   "listPersonas",
   "listProjects",
@@ -217,6 +221,10 @@ const CONTEXT_REQUIRING = [
   // The second secret egma holds, on the first one's terms: the read answers a
   // reference and a hint, and this is the one door to the plaintext behind it.
   "resolveJudgeKey",
+  // The same translation for a mock tool's scope: names off a reviewed file
+  // turned into the agents it applies to. It reads agents and nothing else, and
+  // only ones the context already reaches.
+  "resolveMockToolAgents",
   // Names off a reviewed file turned into the identity a version names. It
   // reads personas and nothing else, and only ones the context already reaches.
   "resolvePersonaNames",
@@ -258,6 +266,10 @@ const VALUES = [
   // that would leave a live test checking one thing fewer than it says it does.
   "GraderNamedByTestsError",
   "LastAdminError",
+  // A second answer for a tool this project already answers for. Its own class
+  // because nothing about the body is wrong and something is already there,
+  // which is a different answer in kind.
+  "MockToolTakenError",
   "NotPermittedError",
   "PersonaNamedByTestsError",
   "ProjectOutsideOrganizationError",
@@ -300,6 +312,25 @@ const READ_LIMITS = [
 ];
 
 /**
+ * What a mock tool's answer may cost the exchange that carries it, and the two
+ * pure functions that read one.
+ *
+ * The two numbers are exported for the reason the read limits above are: a
+ * refusal has to say what the cap is, and a cap named in two places is a cap
+ * that will one day disagree with itself. `resolveMockTools` is the fold's
+ * shape exactly — a snapshot a caller already holds goes in, the answers one
+ * simulation is served come out — and it is exported because merging a project
+ * default with a test override has to happen in exactly one place.
+ */
+const THE_MOCKED_WORLD = [
+  "LARGEST_MOCK_TOOL_ANSWER_BYTES",
+  "LONGEST_MOCK_TOOL_DELAY_MILLISECONDS",
+  "NO_MOCK_TOOLS",
+  "isErrorAnswer",
+  "resolveMockTools",
+];
+
+/**
  * The fold, and the vocabulary it is written in.
  *
  * These take no `AuthContext` and are the only exports that reach nothing at
@@ -339,6 +370,7 @@ describe("the data-access module's surface", () => {
         ...VALUES,
         ...READ_LIMITS,
         ...THE_FOLD,
+        ...THE_MOCKED_WORLD,
       ].sort(),
     );
   });

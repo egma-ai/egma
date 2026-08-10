@@ -43,6 +43,10 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   grader_version: "grv",
   // The project's default judge, keyed by the project it is the judge for.
   judge_configuration: "prj",
+  mock_tool: "mck",
+  // The scope's junction, pinning the mock tool it narrows — the shape both
+  // test junctions have, for the same reason.
+  mock_tool_agent: "mck",
   test: "tst",
   test_version: "tstv",
   test_persona: "tstv",

@@ -153,7 +153,7 @@ export type Answer = {
 /** One request with a key on it, answered by the API in this process. */
 export async function request(
   app: FastifyInstance,
-  method: "GET" | "POST" | "PATCH",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   url: string,
   key: string,
   payload?: Record<string, unknown>,

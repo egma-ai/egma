@@ -3,8 +3,9 @@
  *
  * It asks nothing and it needs no key, because nothing here talks to egma. What
  * it makes is a folder a team commits: a config file naming what the folder
- * points at, and a directory for the tests. Nothing secret can land in either,
- * so there is no gitignore line to write.
+ * points at, a file for the mock tools this project answers with, and a
+ * directory for the tests. Nothing secret can land in any of them, so there is
+ * no gitignore line to write.
  *
  * Running it twice is safe. A folder that is already here is recognised and
  * left as it is — the second developer to clone the repository runs the same
@@ -43,6 +44,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<numbe
 
   options.out(`folder: ${folder.paths.root}`);
   options.out(`config: ${folder.paths.config}`);
+  options.out(`mock-tools: ${folder.paths.mockTools}`);
   options.out(`tests: ${folder.paths.tests}`);
   for (const key of ["agent", "connection", "suite"] as const) {
     const thing = folder.config[key];
