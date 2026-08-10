@@ -90,8 +90,14 @@ echo "the worker is registered; conducting the simulation"
 # the whole point of this command, watching the promise work rather than
 # reading a line that says a test passed. -rs so that a run which skips
 # says which value it was short of, rather than passing quietly.
+#
+# The status is kept rather than acted on, because the scan below has to
+# run on the run that went *wrong*: a refusal quoting somebody else's
+# words is the likeliest way a credential ever reaches a log, and that is
+# a thing only a failed run produces.
+conducted=0
 cd "$root/apps/simulator"
-uv run --frozen pytest tests/test_live_mock_tools.py -v -s -rs
+uv run --frozen pytest tests/test_live_mock_tools.py -v -s -rs || conducted=$?
 
 # The one surface the test cannot reach: the log of the *customer's* own
 # process, which is where the SDK does its talking. Each value goes to
@@ -112,3 +118,5 @@ if [ -n "$leaked" ]; then
   exit 1
 fi
 echo "no credential reached the agent's own log"
+
+exit "$conducted"
