@@ -191,10 +191,11 @@ Before merging:
 3. Update it against that exact integration commit.
 4. Resolve conflicts in the ticket branch.
 5. Run the full suite.
-6. Rerun independent review if conflict resolution changed code.
-7. Confirm the integration commit has not moved.
+6. Rerun independent review against that exact integration commit, even when the refresh was conflict-free.
+7. Require the refreshed branch to pass the review gate again.
+8. Confirm the integration commit has not moved.
 
-If the integration branch moved, repeat the refresh and verification.
+If the integration branch moved, repeat the refresh, full suite, and independent review.
 
 Merge only while the verified integration commit is still current. Confirm the integration branch remains green after the merge.
 
