@@ -4,7 +4,9 @@ A voice simulation is a chat simulation with two more legs. The persona
 brain still writes the words — it never learns that they are spoken — and
 these are what carry them: a text-to-speech leg giving the persona a
 voice, and a speech-to-text leg turning what comes back into the
-transcript's ``agent`` turns.
+transcript's ``agent`` turns. A third leg listens for *whether* anybody is
+speaking rather than for words — the voice activity detector — and it is
+chosen here on the same terms as the other two.
 
 Both legs are ordinary Pipecat frame processors, in the two places a
 real provider's service sits — ElevenLabs speaking, Deepgram listening —
@@ -42,11 +44,14 @@ import asyncio
 import logging
 import math
 import struct
+import sys
+from array import array
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
+from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
@@ -58,7 +63,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import STTSettings
-from pipecat.services.stt_service import STTService
+from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.utils.time import time_now_iso8601
 
 if TYPE_CHECKING:
@@ -71,6 +76,14 @@ SAMPLE_WIDTH_BYTES = 2
 
 SAMPLES_PER_BYTE = 240
 """How many samples one encoded byte occupies — 30 ms at 8 kHz, 5 ms at 48 kHz."""
+
+SPEECH_LEVEL = 500
+"""The sample level, out of 32767, above which audio is somebody talking.
+
+A line is never digitally silent — it carries comfort noise, and a
+threshold is what tells that apart from speech. Set low enough to hear a
+quiet talker and high enough to ignore a line's own hiss.
+"""
 
 TONE_BASE_HZ = 200
 TONE_STEP_HZ = 10
@@ -97,18 +110,6 @@ A streaming transcriber opens its connection in the background and
 *silently drops* audio handed to it before that connection is up. The
 first thing a voice exchange does is hand it the agent's greeting, so
 without this wait the first turn of a real call would vanish."""
-
-TRANSCRIBER_QUIET_SECONDS = 0.5
-"""The pause a streaming transcriber is given after a turn's last word.
-
-A transcriber decides an utterance is over by hearing the speaker stop,
-and a plug hands over a turn that ends on its last sample. Asking it to
-commit instead — which is what the end-of-turn mark does — is a race it
-loses often enough to matter: the whole turn arrives at once, the ask
-arrives a millisecond later, and what comes back is a *provisional*
-transcript and then nothing, forever. Half a second of quiet is what a
-real line would have carried anyway, and it is heard rather than waited
-for, so it costs the exchange no time at all."""
 
 
 @dataclass(frozen=True)
@@ -207,6 +208,25 @@ def spoken_seconds(pcm: bytes, sample_rate_hz: int) -> float:
     )
 
 
+def peak_level(pcm: bytes) -> int:
+    """The loudest sample in one stretch of audio.
+
+    PCM is always little-endian and ``array`` holds samples in this
+    machine's byte order, so the two agree only on a little-endian
+    machine and a swap is what makes them agree anywhere else.
+    """
+    samples = array("h")
+    samples.frombytes(pcm[: len(pcm) // SAMPLE_WIDTH_BYTES * SAMPLE_WIDTH_BYTES])
+    if sys.byteorder != "little":
+        samples.byteswap()
+    return max((abs(sample) for sample in samples), default=0)
+
+
+def carries_speech(pcm: bytes) -> bool:
+    """Whether somebody is talking in this stretch of audio."""
+    return peak_level(pcm) >= SPEECH_LEVEL
+
+
 def decode_speech(pcm: bytes, sample_rate_hz: int) -> str:
     """What was said, read out of the samples and nothing else.
 
@@ -287,8 +307,17 @@ class ScriptedTTS(FrameProcessor):
         await self.push_frame(TTSStoppedFrame())
 
 
-class ScriptedSTT(STTService):
-    """What the agent said, read back out of the audio it arrived as."""
+class ScriptedSTT(SegmentedSTTService):
+    """What the agent said, read back out of the audio it arrived as.
+
+    Segmented rather than streaming, because that is what this leg
+    honestly is: it reads a whole stretch of speech at once. A full-duplex
+    line hands its pipeline one small slice of audio at a time and never a
+    turn, so a leg that transcribed each slice on its own would read every
+    utterance as a string of fragments. The base class here is the one a
+    local model subclasses: it buffers between the voice detector's start
+    and stop and calls :meth:`run_stt` once with the whole utterance.
+    """
 
     def __init__(self, *, sample_rate_hz: int) -> None:
         super().__init__(
@@ -296,6 +325,11 @@ class ScriptedSTT(STTService):
             settings=STTSettings(model=None, language=None),
             ttfs_p99_latency=1.0,
         )
+
+    @property
+    def wants_wav_segments(self) -> bool:
+        """Raw PCM, not a WAV file: the codec reads samples, not headers."""
+        return False
 
     def can_generate_metrics(self) -> bool:
         return False
@@ -308,6 +342,54 @@ class ScriptedSTT(STTService):
         )
 
 
+class ScriptedVAD(VADAnalyzer):
+    """Hears the scripted codec exactly, and nothing else.
+
+    A voice activity detector answers one question — is somebody speaking
+    in this window of audio — and the scripted codec answers it without a
+    model: a tone is loud and quiet is exactly zero samples. So this leg
+    reads the samples and says so, which makes every speech boundary it
+    reports a sample position rather than a probability.
+
+    That exactness is what the record rests on. A window is one encoded
+    byte wide, so a scripted utterance begins and ends on a window
+    boundary at every band; the detector confirms speech one window in and
+    silence :data:`QUIET_WINDOWS` windows later, and both are corrected
+    back by exactly those windows — so the interval it hands over is the
+    interval that was really spoken, to the sample.
+
+    Silero is the leg a live simulation hears with; see :func:`build_vad`.
+    """
+
+    SPEAKING_WINDOWS = 1
+    """How many windows of speech confirm that somebody started talking."""
+
+    QUIET_WINDOWS = 4
+    """How many windows of silence confirm that they stopped. Long enough
+    to sit through a gap between words, short enough that the persona is
+    not left waiting on somebody who has finished."""
+
+    def __init__(self, *, sample_rate_hz: int, window_samples: int) -> None:
+        self._window_samples = window_samples
+        super().__init__(
+            sample_rate=sample_rate_hz,
+            params=VADParams(
+                confidence=0.5,
+                # Loudness is already the whole of this leg's answer, so a
+                # second loudness gate could only disagree with it.
+                min_volume=0.0,
+                start_secs=self.SPEAKING_WINDOWS * window_samples / sample_rate_hz,
+                stop_secs=self.QUIET_WINDOWS * window_samples / sample_rate_hz,
+            ),
+        )
+
+    def num_frames_required(self) -> int:
+        return self._window_samples
+
+    def voice_confidence(self, buffer: bytes) -> float:
+        return 1.0 if carries_speech(buffer) else 0.0
+
+
 # -- Choosing a pair ---------------------------------------------------------
 
 
@@ -315,9 +397,10 @@ class SpeechFault(RuntimeError):
     """A speech leg could not be built, or could not be made able to hear.
 
     Deliberately not a ``PlugError``: that word names a platform refusing,
-    and this is the persona's own mouth or ears. Either way the walk
-    reports a failed simulation, and the reason on the record is what
-    tells a reader which of the two happened.
+    and this is the persona's own mouth or ears. Either way the simulation
+    is reported failed, and the reason on the record is what tells a
+    reader which of the two happened. Voice only, and raised out of the
+    voice conductor: the walk has no speech legs to hear one from.
     """
 
 
@@ -335,6 +418,12 @@ class SpeechProviders:
 
     stt: str = "scripted"
     tts: str = "scripted"
+    vad: str = "scripted"
+    """Which leg hears *whether* the far end is speaking. ``scripted``
+    reads the test codec exactly and needs no model; ``silero`` is the
+    production detector, and it ships inside the pinned pipecat wheel, so
+    choosing it downloads nothing."""
+
     deepgram_api_key: str | None = field(default=None, repr=False)
     elevenlabs_api_key: str | None = field(default=None, repr=False)
 
@@ -343,6 +432,7 @@ class SpeechProviders:
         return cls(
             stt=config.stt_provider,
             tts=config.tts_provider,
+            vad=config.vad_provider,
             deepgram_api_key=config.deepgram_api_key,
             elevenlabs_api_key=config.elevenlabs_api_key,
         )
@@ -366,11 +456,6 @@ class SpeechLegs:
 
     listening: Callable[[], Awaitable[None]] | None = None
     """Waits until the listening leg can hear, for a leg that connects."""
-
-    trailing_quiet_seconds: float = 0.0
-    """The pause this listening leg wants after a turn's last word, added
-    to what it is given to hear. Zero for a leg that reads a whole
-    utterance at once — see :data:`TRANSCRIBER_QUIET_SECONDS`."""
 
     closers: tuple[Callable[[], Awaitable[None]], ...] = ()
     """What a leg holds open beyond the pipeline's own teardown."""
@@ -408,15 +493,39 @@ def build_legs(
     pipeline stays the validation step it has always been.
     """
     speaking, spoken_with, closers = _mouth(providers, voice, sample_rate_hz)
-    listening_leg, listening, trailing_quiet = _ears(providers, sample_rate_hz)
+    listening_leg, listening = _ears(providers, sample_rate_hz)
     return SpeechLegs(
         stt=listening_leg,
         tts=speaking,
         voice=spoken_with,
         listening=listening,
-        trailing_quiet_seconds=trailing_quiet,
         closers=closers,
     )
+
+
+def build_vad(
+    providers: SpeechProviders, *, sample_rate_hz: int, window_samples: int
+) -> VADAnalyzer:
+    """The leg this simulation hears speech *starting and stopping* with.
+
+    Chosen at assembly and nowhere else, exactly like the mouth and the
+    ears: the scripted detector reads the test codec's samples, so CI's
+    every speech boundary is a sample position and the same one every
+    run; Silero is what a live simulation listens with, and it is asked
+    for by name because loading a model is a cost only a deployment that
+    wants it should pay.
+    """
+    if providers.vad != "silero":
+        return ScriptedVAD(
+            sample_rate_hz=sample_rate_hz, window_samples=window_samples
+        )
+
+    # Imported here and not at the top of the file, for the reason every
+    # provider in this module is: an unconfigured simulator must not load
+    # a model it will never run. The quarantine suite holds this.
+    from pipecat.audio.vad.silero import SileroVADAnalyzer
+
+    return SileroVADAnalyzer(sample_rate=sample_rate_hz)
 
 
 def _mouth(
@@ -463,9 +572,9 @@ def _mouth(
 
 def _ears(
     providers: SpeechProviders, sample_rate_hz: int
-) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None, float]:
+) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None]:
     if providers.stt != "deepgram":
-        return ScriptedSTT(sample_rate_hz=sample_rate_hz), None, 0.0
+        return ScriptedSTT(sample_rate_hz=sample_rate_hz), None
 
     from pipecat.services.deepgram.stt import DeepgramSTTService
 
@@ -491,7 +600,7 @@ def _ears(
             )
         await connection_ready.wait()
 
-    return leg, connected, TRANSCRIBER_QUIET_SECONDS
+    return leg, connected
 
 
 def _voice_from(voice: PersonaVoice, *, provider: str) -> PersonaVoice:

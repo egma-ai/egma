@@ -41,7 +41,7 @@ from conftest import (
     words_of,
 )
 
-from egma_simulator.pipeline import AGENT_CHANNEL, PERSONA_CHANNEL, channels_of
+from egma_simulator.recording import AGENT_CHANNEL, PERSONA_CHANNEL, channels_of
 from egma_simulator.speech import decode_speech
 
 DEEPGRAM_API_KEY = credential("TEST_DEEPGRAM_API_KEY", "DEEPGRAM_API_KEY")
@@ -96,6 +96,10 @@ async def test_a_real_voice_speaks_and_real_ears_read_it_back(
             "EGMA_SIMULATOR_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
             "EGMA_SIMULATOR_TTS_PROVIDER": "elevenlabs",
             "EGMA_SIMULATOR_ELEVENLABS_API_KEY": ELEVENLABS_API_KEY,
+            # Real speech needs the real detector: the scripted one reads
+            # the test codec, where quiet is exactly no samples, and a
+            # synthesized voice is neither that loud nor that silent.
+            "EGMA_SIMULATOR_VAD_PROVIDER": "silero",
         },
     )
 

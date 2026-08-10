@@ -5,7 +5,7 @@ knows how to open a session with a bridge, ask that bridge to place a call
 over a trunk, learn whether anybody came on the line, carry audio both
 ways, and tear the call down. Everything above it is backend-blind: the
 phone plug drives this seam, the speech legs and the recorder see only
-audio, and the walk and the report never learn which bridge ran.
+audio, and the conductor and the report never learn which bridge ran.
 
 This docstring is the driver author's whole brief. If writing a new
 driver requires reading anything beyond this file, that is a bug in this
@@ -53,17 +53,17 @@ answer and teardown:
   it, and a driver that answered with a different one would be handing
   the recorder samples it will mis-time.
 - ``await send(pcm)`` — the persona's audio, out to the far end, and
-  **back only once it has all been said**. A line carries a voice in real
-  time, so a driver over a real line waits out the audio's own length and
-  drops whatever arrived while it was playing: that was the far end
-  listening, not answering, and counting it would put the persona's own
-  speaking time inside every measurement of the answer. A driver with no
-  real line to wait on returns at once, which is why CI pays none of it.
+  **back as soon as it is away**. It is a small piece of a voice rather
+  than a whole turn, and a driver neither waits out its length nor
+  touches what arrives while it is playing: both directions of a line are
+  open at once, and the far end speaking over the persona is exactly the
+  thing the record exists to hold. Real-time pacing is the transport's
+  own, which is why a fake line costs a deterministic test nothing.
 - ``await receive(seconds)`` — the next audio that arrived, or ``None``
   when none arrived within ``seconds``. Quiet is audio: a real line
   carries comfort noise between words, and a driver must hand it over
-  rather than hide it, because the plug reads the far end's turn
-  boundaries out of it.
+  rather than hide it, because the count of samples that crossed the line
+  is the conversation's own clock.
 - ``far_end_left`` — true once the far end is off the line. On LiveKit
   that is the SIP participant leaving the room, and it is exactly what
   "the agent hung up" means.

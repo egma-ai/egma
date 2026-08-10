@@ -143,7 +143,9 @@ default. Three are worth knowing about before anything else:
   voice simulation costs nothing. Set them to `elevenlabs` and `deepgram` —
   with `EGMA_SIMULATOR_ELEVENLABS_API_KEY` and
   `EGMA_SIMULATOR_DEEPGRAM_API_KEY` — and the persona speaks with a human
-  voice and hears real words. Each leg is chosen on its own.
+  voice and hears real words. Each leg is chosen on its own, and
+  `EGMA_SIMULATOR_VAD_PROVIDER=silero` is the third: what hears a real
+  agent start and stop speaking, keyless and bundled.
 - **`EGMA_SIMULATOR_CAPACITY` is how many conversations happen at once.** The
   simulator claims only what it can hold, so a big run degrades into a queue
   rather than into overload.
@@ -324,7 +326,9 @@ brings it out to listen to.
 The persona speaks in a deterministic test tone unless you name real speech
 providers, and a real agent hears that as noise. Set
 `EGMA_SIMULATOR_TTS_PROVIDER`, `EGMA_SIMULATOR_STT_PROVIDER` and their keys
-before you expect a conversation.
+before you expect a conversation, and `EGMA_SIMULATOR_VAD_PROVIDER=silero`
+with them: that is what hears a real agent start and stop speaking, and it
+needs no key.
 
 Every variable this section mentions is in `.env.example` with its default and
 whether it is required. Anything set to something unusable stops the simulator

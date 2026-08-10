@@ -1,9 +1,15 @@
 """The phone plug, and the driver seam it stands on.
 
-The plug's whole job is a call's lifecycle — dial, hear the answer, carry
-speech both ways, notice the far end hanging up, end deliberately — so
-what is pinned here is exactly that, against the scripted media backend:
-no LiveKit server, no trunk, no carrier, no network.
+The plug's whole job is a call's lifecycle — dial, wait for somebody to
+pick up, carry both directions of the line at once, notice the far end
+hanging up, end deliberately — so what is pinned here is exactly that,
+against the scripted media backend: no LiveKit server, no trunk, no
+carrier, no network.
+
+The line is driven the way the conductor drives it, one slice of audio at
+a time, because that is the only door a voice plug has. Nothing here asks
+for a turn: where a turn falls is the conductor's reading of the audio,
+and this file is about the audio.
 
 The failure paths get the same treatment, because a call that never
 became a conversation is the outcome a phone plug has to be honest about:
@@ -21,8 +27,9 @@ from __future__ import annotations
 import inspect
 
 import pytest
-from conftest import SENTINEL_TRUNK_ENV
+from conftest import SENTINEL_TRUNK_ENV, carry, hear
 
+from egma_simulator.conductor import LINE_SLICE_SAMPLES
 from egma_simulator.config import MediaSettings
 from egma_simulator.contract import ERROR, NOT_ANSWERED
 from egma_simulator.media import (
@@ -35,18 +42,26 @@ from egma_simulator.media import (
     sip_refusal,
 )
 from egma_simulator.media.livekit import LiveKitBackend
-from egma_simulator.media.scripted import REFUSALS, ScriptedBackend
-from egma_simulator.plugs import PlugError, plug_for
-from egma_simulator.plugs.audio_turns import SPEECH_LEVEL, carries_speech
+from egma_simulator.media.scripted import REFUSALS, ScriptedBackend, ScriptedSession
+from egma_simulator.plugs import DuplexLine, PlugError, plug_for
 from egma_simulator.plugs.phone import (
     BACKEND_VARIABLE,
     TELEPHONY_BAND_HZ,
     PhoneCall,
 )
 from egma_simulator.redaction import REDACTED, SecretRegistry
-from egma_simulator.speech import decode_speech, encode_speech, silence
+from egma_simulator.speech import (
+    SPEECH_LEVEL,
+    carries_speech,
+    decode_speech,
+    encode_speech,
+    leading_silence_seconds,
+)
 
 A_NUMBER = "+15551234567"
+THREE_SECONDS_OF_SLICES = round(3.0 * TELEPHONY_BAND_HZ / LINE_SLICE_SAMPLES)
+"""Long enough for anything the far end has queued to have crossed."""
+
 SCRIPTED = MediaSettings(backend="scripted")
 """A deployment that places its calls through the scripted bridge."""
 
@@ -61,13 +76,15 @@ def phone(script: dict | None = None, *, media=SCRIPTED, **config) -> PhoneCall:
     )
 
 
-def said(speech) -> str:
-    """What one answered turn actually carried, read out of its samples."""
-    return decode_speech(speech.audio.pcm, speech.audio.sample_rate_hz)
-
-
 def test_the_registry_knows_the_phone_plug():
     assert plug_for("phone") is PhoneCall
+
+
+def test_a_phone_call_is_a_full_duplex_line():
+    """The seam it wears is what decides which conductor it gets, so the
+    verbs are the thing to pin — and a call has them now, exactly as the
+    loopback counterpart does."""
+    assert isinstance(phone({"replies": ["Noted."]}), DuplexLine)
 
 
 # -- One whole call ----------------------------------------------------------
@@ -82,22 +99,22 @@ async def test_the_plug_dials_converses_and_hangs_up():
     )
     assert plug.provider_reference is None, "no call exists before it is placed"
 
-    answered = await plug.open()
-    assert said(answered) == "Lakeside Dental, how can I help?"
-    assert answered.ended is False
+    await plug.open()
     # The join to the bridge's own telemetry, the way the chat plug offers
     # Retell's chat id.
     assert plug.provider_reference == "scripted-sip-participant-1"
     assert plug.backend.dialled == [A_NUMBER]
 
-    first = await plug.deliver(_utterance("I need to move my cleaning."))
-    assert said(first) == "Of course — could I take your name?"
-    second = await plug.deliver(_utterance("Margaret Hale."))
-    assert said(second) == "Booked for Thursday."
+    assert await hear(plug) == "Lakeside Dental, how can I help?"
+    assert not plug.far_end_left
+    assert await hear(plug, "I need to move my cleaning.") == (
+        "Of course — could I take your name?"
+    )
+    assert await hear(plug, "Margaret Hale.") == "Booked for Thursday."
     await plug.close()
 
-    # And the far end's side of the same story: both persona turns really
-    # went down the line, in order.
+    # And the far end's side of the same story: both stretches of persona
+    # speech really went down the line, in order.
     heard = [
         decode_speech(pcm, TELEPHONY_BAND_HZ)
         for pcm in plug.backend.session.heard
@@ -105,37 +122,34 @@ async def test_the_plug_dials_converses_and_hangs_up():
     assert heard == ["I need to move my cleaning.", "Margaret Hale."]
 
 
-async def test_a_line_that_answers_and_says_nothing_lets_the_persona_speak_first():
-    """A phone answered in silence is ordinary, and it is not a fault."""
+async def test_a_line_that_answers_and_says_nothing_carries_quiet():
+    """A phone answered in silence is ordinary, and it is not a fault. The
+    line carries the quiet, because that is what the persona would hear —
+    and how the conductor learns nobody is going to speak first."""
     plug = phone({"replies": ["Go on."]})
-    answered = await plug.open()
-    assert answered.audio is None
-    assert answered.ended is False
+    await plug.open()
+    assert await carry(plug, slices=20) == bytes(20 * LINE_SLICE_SAMPLES * 2)
     await plug.close()
 
 
-async def test_a_turn_the_far_end_answers_with_nothing_is_a_turn_without_words():
+async def test_a_stretch_of_speech_the_far_end_answers_with_nothing_stays_quiet():
     """The budget for quiet is spent in audio, so this costs CI nothing.
 
-    Without it the turn would wait on a far end that never speaks until
-    the simulation's duration limit, and the record would say "limit
-    reached" about a line nobody was talking on.
+    Without it a spent script would leave the line waiting on a far end
+    that never speaks until the simulation's duration limit, and the
+    record would say "limit reached" about a line nobody was talking on.
     """
     plug = phone({"replies": ["Only one thing to say."]})
     await plug.open()
-    assert said(await plug.deliver(_utterance("First point."))) == (
-        "Only one thing to say."
-    )
-
-    spent = await plug.deliver(_utterance("Second point."))
-    assert spent.audio is None
-    assert spent.ended is False
+    assert await hear(plug, "First point.") == "Only one thing to say."
+    assert await hear(plug, "Second point.") == ""
+    assert not plug.far_end_left
     await plug.close()
 
 
 async def test_the_far_end_hanging_up_ends_the_exchange_with_its_last_words():
-    """The SIP participant leaving the room is the agent ending it, and
-    what it said on the way out is still on the record."""
+    """The SIP participant leaving the room is the agent ending the call,
+    and what it said on the way out still crossed the line first."""
     plug = phone(
         {
             "greeting": "Front desk.",
@@ -144,39 +158,134 @@ async def test_the_far_end_hanging_up_ends_the_exchange_with_its_last_words():
         }
     )
     await plug.open()
+    assert await hear(plug) == "Front desk."
 
-    goodbye = await plug.deliver(_utterance("That is everything."))
-    assert said(goodbye) == "All sorted, goodbye now."
-    assert goodbye.ended is True, "the far end went and the plug did not notice"
+    assert await hear(plug, "That is everything.") == "All sorted, goodbye now."
+    assert plug.far_end_left, "the far end went and the line did not notice"
     await plug.close()
 
 
 async def test_a_far_end_that_hangs_up_saying_nothing_still_ends_the_exchange():
     plug = phone({"greeting": "Front desk.", "hangs_up_after_replies": True})
     await plug.open()
-    gone = await plug.deliver(_utterance("Hello?"))
-    assert gone.audio is None
-    assert gone.ended is True
+    assert await hear(plug) == "Front desk."
+    assert plug.far_end_left
     await plug.close()
 
 
-async def test_the_quiet_before_the_first_word_is_handed_up_as_quiet():
-    """Time-to-first-word is read out of the audio a plug returns, so the
-    quiet a line really carried has to be in it — at its real length, and
+async def test_the_line_holds_its_last_words_until_they_have_been_handed_over():
+    """A bridge knows the leg is down as soon as its own queue empties,
+    which is a slice or two before those samples reach the conductor. A
+    line that said so early would end the exchange on words nothing had
+    heard."""
+    plug = phone(
+        {
+            "greeting": "A goodbye long enough to still be arriving.",
+            "hangs_up_after_replies": True,
+        }
+    )
+    await plug.open()
+    # One slice in, the goodbye is still arriving and the line says so.
+    heard = await carry(plug, slices=1)
+    assert not plug.far_end_left
+    heard += await carry(plug, slices=THREE_SECONDS_OF_SLICES)
+    assert decode_speech(heard, TELEPHONY_BAND_HZ) == (
+        "A goodbye long enough to still be arriving."
+    )
+    assert plug.far_end_left
+    await plug.close()
+
+
+async def test_the_quiet_before_the_first_word_is_carried_as_quiet():
+    """Time-to-first-word is read out of the audio the line carries, so
+    the quiet a line really had has to be in it — at its real length, and
     as quiet rather than as whatever noise the line was making."""
     plug = phone({"greeting": "Hello there.", "answer_delay_seconds": 0.4})
-    answered = await plug.open()
+    await plug.open()
+    heard = await carry(plug, slices=THREE_SECONDS_OF_SLICES)
     await plug.close()
 
-    band = answered.audio.sample_rate_hz
-    quiet = silence(0.4, band)
-    assert answered.audio.pcm == quiet + encode_speech("Hello there.", band)
+    asked_for = round(0.4 * TELEPHONY_BAND_HZ)
+    quiet = round(leading_silence_seconds(heard, TELEPHONY_BAND_HZ) * TELEPHONY_BAND_HZ)
+    assert asked_for <= quiet < asked_for + LINE_SLICE_SAMPLES
+    assert decode_speech(heard, TELEPHONY_BAND_HZ) == "Hello there."
+
+
+async def test_the_quiet_before_an_answer_is_spent_on_the_line():
+    """And the same on an answer, where the wait is spent listening to the
+    persona stop rather than queued in front of the words."""
+    plug = phone({"replies": ["Yes."], "answer_delay_seconds": 0.5})
+    await plug.open()
+    await carry(plug, encode_speech("A question.", TELEPHONY_BAND_HZ))
+    heard = await carry(plug, slices=THREE_SECONDS_OF_SLICES)
+    await plug.close()
+
+    asked_for = round(0.5 * TELEPHONY_BAND_HZ)
+    quiet = round(leading_silence_seconds(heard, TELEPHONY_BAND_HZ) * TELEPHONY_BAND_HZ)
+    assert asked_for <= quiet < asked_for + LINE_SLICE_SAMPLES
+    assert decode_speech(heard, TELEPHONY_BAND_HZ) == "Yes."
+
+
+async def test_far_end_speech_arriving_while_the_persona_speaks_is_heard():
+    """The drop is gone, and this is the test that says so.
+
+    The far end starts talking while the persona is still mid-sentence.
+    The line used to wait out the persona's own audio and throw away
+    everything that arrived meanwhile, so an agent talking over the
+    persona vanished from the record entirely. Now both directions cross
+    in the same slices: the far end's words come back while the persona's
+    are still going out, and the call carries on afterwards.
+    """
+    plug = phone({"greeting": "Talking over you now.", "replies": ["And on we go."]})
+    await plug.open()
+
+    # One long stretch of persona speech, driven slice by slice, with the
+    # far end's greeting already on its way.
+    said = encode_speech(
+        "A long sentence the persona is still in the middle of saying.",
+        TELEPHONY_BAND_HZ,
+    )
+    heard = await carry(plug, said)
+
+    assert len(heard) == len(said), "the two directions left the same clock"
+    assert decode_speech(heard, TELEPHONY_BAND_HZ) == "Talking over you now."
+    # And the persona really was still speaking when it arrived.
+    assert carries_speech(said[-LINE_SLICE_SAMPLES * 2 :])
+
+    # Conducted on, rather than merely survived: the call goes to its next
+    # answer with nothing lost in between.
+    assert await hear(plug, "And I carried on.") == "And on we go."
+    await plug.close()
+
+
+async def test_a_session_neither_waits_out_the_persona_nor_forgets_the_far_end():
+    """The same claim one layer down, on the seam that did the dropping.
+
+    ``send`` used to wait out the audio's own length and then empty
+    everything the line had carried meanwhile. Both halves are gone: it
+    returns at once, and what arrived is still there to be received.
+    """
+    session = ScriptedSession(band_hz=TELEPHONY_BAND_HZ, delay_seconds=0.0)
+    session.say("Over the top of you.")
+    queued = len(session._pending)
+
+    await session.send(encode_speech("A whole sentence going out.", TELEPHONY_BAND_HZ))
+
+    assert len(session._pending) == queued, "the far end's audio was thrown away"
+    assert await session.receive(0.03) is not None
 
 
 async def test_closing_a_call_that_was_never_dialled_is_safe():
     """``close`` is called whatever happened, including before ``open``."""
     plug = phone({"replies": ["Noted."]})
     await plug.close()
+    await plug.close()
+
+
+async def test_a_line_driven_before_the_call_was_answered_is_refused():
+    plug = phone({"replies": ["Noted."]})
+    with pytest.raises(PlugError):
+        await plug.exchange(bytes(LINE_SLICE_SAMPLES * 2))
     await plug.close()
 
 
@@ -373,6 +482,8 @@ def test_the_deployment_the_simulator_started_with_is_what_places_the_call(
 
 
 def test_speech_is_told_from_the_quiet_a_line_carries():
+    from egma_simulator.speech import silence
+
     band = 8000
     assert carries_speech(encode_speech("hello", band))
     assert not carries_speech(silence(0.1, band))
@@ -506,9 +617,3 @@ async def test_a_livekit_server_that_answers_nowhere_fails_without_a_secret():
     assert refusal.value.ending == ERROR
     for secret in settings.secrets:
         assert secret not in told
-
-
-def _utterance(text: str, band: int = TELEPHONY_BAND_HZ):
-    from egma_simulator.plugs import Utterance
-
-    return Utterance(pcm=encode_speech(text, band), sample_rate_hz=band)

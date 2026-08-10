@@ -1,9 +1,9 @@
 """The conversation, authored as OpenTelemetry spans.
 
-One ``SpanEmitter`` serves one simulation. Everything the walk observes —
-each turn with who said it and what was said, each tool call the platform
-reported, each measurement — becomes a span, stamped when it happened and
-handed to a flush as an ordinary OTLP export document. On the wire that
+One ``SpanEmitter`` serves one simulation. Everything a conductor
+observes — each turn with who said it and what was said, each tool call
+the platform reported, each measurement — becomes a span, stamped when it
+happened and handed to a flush as an ordinary OTLP export document. On the wire that
 document is what any exporter would send, which is the whole point of
 speaking OTLP: a simulation arrives at the same ingest door a customer's
 agent posts to, and is the same shape at rest.
@@ -36,9 +36,17 @@ timing span is named for the measure it takes and its own duration *is*
 the number, so it is opened one measurement before the moment it was
 taken. A turn is opened for as long as it was spoken — one instant on
 chat, where a message has no duration, and ear to ear on voice. Two turns
-may cross in time: that is how barge-in will be represented when the
-persona becomes a full-duplex caller, and the shape already permits it
-rather than being widened later.
+may cross in time: that is how barge-in is represented now that the
+persona is full-duplex, and the shape always permitted it rather
+than being widened later.
+
+**Where a turn's two ends come from depends on who conducted it.** Chat's
+walk observes a turn at one moment and this stamps it there, which is the
+whole truth about a message that was never spoken. A voice conductor knows
+both ends before it says anything, because it read them off the audio
+itself, and hands both over — see :meth:`SpanEmitter.spoken_turn`. Only
+the second is exact enough for turns that cross, and every voice
+simulation goes through it.
 """
 
 from __future__ import annotations
@@ -80,7 +88,6 @@ client or server span: the conversation is not an RPC."""
 _CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _EGMA_SIMULATION_ID = re.compile(r"^sim_([0-9A-HJKMNP-TV-Z]{26})$")
 
-_NANOSECONDS_PER_SECOND = 1_000_000_000
 _NANOSECONDS_PER_MILLISECOND = 1_000_000
 
 Flush = Callable[[dict], None]
@@ -188,14 +195,6 @@ class SpanEmitter:
             span_id=self._mint(), name=ROOT_SPAN, started_unix_nano=0, ended_unix_nano=0
         )
         self._pending: list[_Span] = []
-        self._open_turn: dict[str, _Span] = {}
-        """A turn authored before anything measured how long it was spoken
-        for — the persona's own words, which are decided a moment before
-        they are said. It stays open until the flush that carries it."""
-        self._unspoken_for: dict[str, float] = {}
-        """The other order: audio measured before its words are known,
-        which is every turn the agent takes, since it is heard and then
-        read. Spent by the next turn that speaker takes."""
         self._sealed = False
 
     def _mint(self) -> str:
@@ -220,7 +219,7 @@ class SpanEmitter:
         self._pending.append(span)
         return span
 
-    # -- What the walk observes ----------------------------------------------
+    # -- What a conductor observes ---------------------------------------------
 
     def opened(self) -> None:
         """The conversation began. Stamps the root's start and nothing else."""
@@ -229,46 +228,69 @@ class SpanEmitter:
     def turn(self, speaker: str, text: str) -> None:
         """One transcript turn, by whichever of the two speakers took it.
 
-        A turn is one instant unless something measured how long it was
-        spoken for — which on chat nothing ever does, because a message has
-        no duration. On voice the audio says, and it arrives on either side
-        of this call: the agent's is heard before it is read, and the
-        persona's is said after it is decided. Both are joined by
-        :meth:`spoke`, and a turn nobody timed is left the instant it
-        honestly was rather than given a made-up length.
+        One instant, which is the whole truth about a message: chat is
+        where this is used and a message has no duration. A turn that was
+        *spoken* has two ends read off the audio, and it comes through
+        :meth:`spoken_turn` instead.
         """
         name = TURN_SPAN_OF.get(speaker)
         if name is None:
             raise ValueError(f"a turn was taken by {speaker!r}, who is not a speaker")
 
         now = self._clock()
-        spoken_seconds = self._unspoken_for.pop(speaker, None)
-        began = (
-            now
-            if spoken_seconds is None
-            else now - int(spoken_seconds * _NANOSECONDS_PER_SECOND)
-        )
-        span = self._author(
+        self._author(
             name,
-            started_unix_nano=began,
+            started_unix_nano=now,
             ended_unix_nano=now,
             attributes={TURN_TEXT_ATTRIBUTE: text},
         )
-        if spoken_seconds is None:
-            self._open_turn[speaker] = span
 
-    def spoke(self, speaker: str, seconds: float) -> None:
-        """How long one side's audio ran for one turn, ear to ear.
+    def spoken_turn(
+        self,
+        speaker: str,
+        text: str,
+        *,
+        began_unix_nano: int,
+        ended_unix_nano: int,
+    ) -> None:
+        """One transcript turn whose both ends are already known.
 
-        Voice only, and the one fact a transcript cannot carry. It reaches
-        the turn it belongs to whichever way round the two were observed.
+        The turn above is one instant on the wall clock, which is exact
+        enough only for a message nobody spoke. Giving a spoken turn its
+        length by subtracting the audio's duration from the moment the
+        turn was observed would make "did these two turns overlap" a
+        question about when Python happened to run.
+
+        So a conductor that knows both ends says both, and says them from
+        the audio itself. What arrives here is already the answer — two
+        instants on the conversation's own clock, converted once from
+        sample positions — and this authors the span and nothing else.
         """
-        span = self._open_turn.pop(speaker, None)
-        if span is None:
-            self._unspoken_for[speaker] = seconds
-            return
-        span.started_unix_nano = span.ended_unix_nano - int(
-            seconds * _NANOSECONDS_PER_SECOND
+        name = TURN_SPAN_OF.get(speaker)
+        if name is None:
+            raise ValueError(f"a turn was taken by {speaker!r}, who is not a speaker")
+        self._author(
+            name,
+            started_unix_nano=began_unix_nano,
+            ended_unix_nano=ended_unix_nano,
+            attributes={TURN_TEXT_ATTRIBUTE: text},
+        )
+
+    def measured(
+        self, measure: str, *, began_unix_nano: int, ended_unix_nano: int
+    ) -> None:
+        """One measurement whose interval is already known, both ends.
+
+        :meth:`measure` takes a number and brackets it against the wall
+        clock. This takes the interval instead, for the same reason
+        :meth:`spoken_turn` exists: a voice measure is read off the
+        conversation's audio, and the two instants that bracket it are
+        the measurement rather than a rendering of it.
+        """
+        self._author(
+            measure,
+            started_unix_nano=began_unix_nano,
+            ended_unix_nano=ended_unix_nano,
         )
 
     def tool_call(self, name: str, arguments: str | None) -> None:
@@ -316,7 +338,6 @@ class SpanEmitter:
         """
         self._hand_over(self._pending)
         self._pending = []
-        self._forget_unjoined_audio()
 
     def sealed(self) -> None:
         """Close the conversation: everything left, with the root last.
@@ -330,18 +351,6 @@ class SpanEmitter:
         self._root.ended_unix_nano = self._clock()
         self._hand_over([*self._pending, self._root])
         self._pending = []
-        self._forget_unjoined_audio()
-
-    def _forget_unjoined_audio(self) -> None:
-        """End of an exchange: nothing measured in it reaches the next one.
-
-        A turn still waiting on its own length has left — nothing can widen
-        a span already on the wire, so it stays the instant it honestly
-        was — and a length that never found its turn is dropped rather than
-        given to whoever speaks next.
-        """
-        self._open_turn.clear()
-        self._unspoken_for.clear()
 
     def _hand_over(self, spans: list[_Span]) -> None:
         if not spans:

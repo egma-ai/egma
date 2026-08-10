@@ -31,11 +31,6 @@ logger = logging.getLogger(__name__)
 OnTurn = Callable[[str, str], Awaitable[None]]
 OnTiming = Callable[[str, float], Awaitable[None]]
 OnToolCall = Callable[[str, str | None], Awaitable[None]]
-OnSpeech = Callable[[str, float], Awaitable[None]]
-"""How long one side's audio ran for one turn, ear to ear. Voice only, and
-reported from where the audio is actually observed — the pipeline — because
-a transcript cannot carry it and a clock around the turn would be timing
-this process rather than the conversation."""
 
 OnAnswered = Callable[[], Awaitable[None]]
 """Everything one agent answer produced is on the record — the words it
@@ -114,7 +109,7 @@ class WalkControls:
 
 @dataclass(frozen=True)
 class Conducted:
-    """How one walk ended."""
+    """How one simulation ended, whichever conductor ran it."""
 
     status: str
     """``completed`` or ``canceled`` — conducting never fails by walking;
@@ -129,6 +124,38 @@ class Conducted:
 
     provider_reference: str | None
     """The platform's own identifier for the exchange, from the plug."""
+
+
+# -- The endings vocabulary, written once for both conductors ----------------
+#
+# Chat is walked and voice is conducted by a Pipecat pipeline, and the two
+# agree on nothing about how a conversation runs. They do agree on how one
+# *ends*: the same four endings, in the same words, because a reader
+# comparing the same scenario over both modalities is comparing exactly
+# that. The sentences are asserted verbatim by the acceptance suite, so a
+# second copy of one is a way for the two to drift apart silently.
+
+Ending = tuple[str, str]
+"""One ending: the contract's word for it, and the prose a report carries."""
+
+PERSONA_CONCLUDED: Ending = (
+    "persona_concluded",
+    "the persona concluded the scenario",
+)
+AGENT_ENDED: Ending = ("agent_ended", "the agent ended the exchange")
+
+
+def turn_limit_reached(max_turns: int) -> Ending:
+    """The turn limit tripped, named with the budget that ran out."""
+    return "limit_reached", f"the turn limit ({max_turns} turns) tripped"
+
+
+def duration_limit_reached(max_duration_seconds: float) -> Ending:
+    """The duration limit tripped, named with the budget that ran out."""
+    return (
+        "limit_reached",
+        f"the duration limit ({max_duration_seconds}s) tripped",
+    )
 
 
 async def conduct(
@@ -159,7 +186,8 @@ async def conduct(
     def budget_spent() -> bool:
         return len(history) >= max_turns
 
-    def ended(ending: str, reason: str | None) -> Conducted:
+    def ended(named: Ending) -> Conducted:
+        ending, reason = named
         return Conducted(
             status="completed",
             ending=ending,
@@ -168,7 +196,7 @@ async def conduct(
         )
 
     def limit_by_turns() -> Conducted:
-        return ended("limit_reached", f"the turn limit ({max_turns} turns) tripped")
+        return ended(turn_limit_reached(max_turns))
 
     watchdog = asyncio.create_task(
         _duration_watchdog(max_duration_seconds, controls),
@@ -187,9 +215,7 @@ async def conduct(
             reply = await controls.guard(persona.next_turn(history))
             await record("human", reply.text)
             if reply.concluded:
-                return ended(
-                    "persona_concluded", "the persona concluded the scenario"
-                )
+                return ended(PERSONA_CONCLUDED)
 
             # The agent's move — not asked for when its answer could not
             # be recorded anyway: the limit ends the walk before a phantom
@@ -211,7 +237,7 @@ async def conduct(
             if answer.text is not None:
                 await record("agent", answer.text)
             if answer.ended:
-                return ended("agent_ended", "the agent ended the exchange")
+                return ended(AGENT_ENDED)
             # The answer is whole, whatever it turned out to carry. Said
             # here rather than beside the turn above, because an answer
             # with no words is still an answer, and a boundary read off
@@ -225,10 +251,7 @@ async def conduct(
                 reason=None,
                 provider_reference=plug.provider_reference,
             )
-        return ended(
-            "limit_reached",
-            f"the duration limit ({max_duration_seconds}s) tripped",
-        )
+        return ended(duration_limit_reached(max_duration_seconds))
     finally:
         watchdog.cancel()
         with contextlib.suppress(asyncio.CancelledError):

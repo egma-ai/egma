@@ -28,7 +28,7 @@ from conftest import (
     turns_for,
 )
 
-from egma_simulator.pipeline import AGENT_CHANNEL, PERSONA_CHANNEL, channels_of
+from egma_simulator.recording import AGENT_CHANNEL, PERSONA_CHANNEL, channels_of
 from egma_simulator.speech import decode_speech
 
 ELEVENLABS_API_KEY = credential("TEST_ELEVENLABS_API_KEY", "ELEVENLABS_API_KEY")

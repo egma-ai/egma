@@ -101,8 +101,8 @@ from conftest import (
 
 from egma_simulator.media.livekit_room import ROOM_BAND_HZ
 from egma_simulator.media.room import ROOM_PREFIX
-from egma_simulator.pipeline import channels_of
 from egma_simulator.plugs.livekit import AGENT_JOIN_SECONDS
+from egma_simulator.recording import channels_of
 
 LIVEKIT_URL = credential("TEST_LIVEKIT_URL", "LIVEKIT_URL")
 LIVEKIT_API_KEY = credential("TEST_LIVEKIT_API_KEY", "LIVEKIT_API_KEY")
@@ -387,8 +387,8 @@ async def test_the_simulator_holds_a_real_conversation_in_a_real_room(
     # not to be.
     #
     # Ends rather than starts, and that is the claim changing rather than
-    # its spelling: a voice turn's span opens backwards from the moment the
-    # turn was observed, so two turns may legally overlap. That overlap is
+    # its spelling: a voice turn's span carries the two positions its audio
+    # really ran between, so two turns may legally overlap. That overlap is
     # barge-in, and it is a fact about the conversation rather than a fault
     # in the record.
     stamped = [int(span["endTimeUnixNano"]) for span in timed]

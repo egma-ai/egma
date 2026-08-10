@@ -230,18 +230,30 @@ def test_a_measure_brackets_the_interval_it_measured():
 
 
 def test_two_turns_may_cross_in_time():
-    """Barge-in's record format, proved on the shape rather than promised."""
+    """Barge-in's record format, proved on the shape rather than promised.
+
+    Both ends of a spoken turn arrive together, off the conversation's own
+    audio clock, so two of them crossing is a fact about the audio rather
+    than about when either was noticed.
+    """
     spans, sink, clock = emitter()
     spans.opened()
 
     # The agent speaks for 7.3 seconds; the persona starts answering 5.75
     # seconds in and runs 1.62 seconds past the end of it.
-    clock.tick(7.3)
-    spans.spoke("agent", 7.3)
-    spans.turn("agent", "Thursday at three, or Friday at ten?")
-    clock.tick(1.62)
-    spans.turn("human", "Sorry — Friday, Friday at ten is perfect.")
-    spans.spoke("human", 3.17)
+    opened = clock.at
+    spans.spoken_turn(
+        "agent",
+        "Thursday at three, or Friday at ten?",
+        began_unix_nano=opened,
+        ended_unix_nano=opened + 7_300_000_000,
+    )
+    spans.spoken_turn(
+        "human",
+        "Sorry — Friday, Friday at ten is perfect.",
+        began_unix_nano=opened + 5_750_000_000,
+        ended_unix_nano=opened + 5_750_000_000 + 3_170_000_000,
+    )
     spans.flush()
 
     agent = named(sink.documents[0], "agent_turn")[0]
@@ -253,33 +265,20 @@ def test_two_turns_may_cross_in_time():
     assert int(human["endTimeUnixNano"]) > int(agent["endTimeUnixNano"])
 
 
-def test_a_turn_spoken_before_its_words_are_known_still_gets_its_interval():
-    """The agent's audio is heard, then read; the turn is one thing either way."""
-    spans, sink, clock = emitter()
-    spans.opened()
-    clock.tick(4.0)
-    spans.spoke("agent", 4.0)
-    spans.turn("agent", "Of course — could I take your name?")
-    spans.flush()
+def test_a_turn_nobody_spoke_is_an_instant():
+    """Chat messages have no duration, and one is not invented for them.
 
-    turn = named(sink.documents[0], "agent_turn")[0]
-    assert duration_ns(turn) == 4_000_000_000
-
-
-def test_a_turn_whose_speech_is_never_measured_stays_an_instant():
-    """Chat never measures speech, and a turn nobody timed is not invented."""
+    The two ways a turn is authored are one per conductor: the walk knows
+    only when a message arrived, and the voice conductor knows both ends
+    of the audio. Nothing joins them after the fact any more.
+    """
     spans, sink, _clock = emitter()
     spans.opened()
     spans.turn("human", "Hello.")
     spans.flush()
-    spans.spoke("human", 2.0)
-    spans.turn("human", "Still there?")
-    spans.flush()
 
-    first = named(sink.documents[0], "human_turn")[0]
-    second = named(sink.documents[1], "human_turn")[0]
-    assert duration_ns(first) == 0
-    assert duration_ns(second) == 2_000_000_000
+    only = named(sink.documents[0], "human_turn")[0]
+    assert duration_ns(only) == 0
 
 
 # -- The trace's own shape ------------------------------------------------

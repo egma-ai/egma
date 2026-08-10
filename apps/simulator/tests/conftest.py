@@ -569,7 +569,7 @@ def assert_one_speaker_to_a_channel(
     samples of each channel, transcribed — so this says what a person
     would hear, not what the simulator believed it wrote.
     """
-    from egma_simulator.pipeline import channels_of
+    from egma_simulator.recording import channels_of
     from egma_simulator.speech import decode_speech
 
     persona_audio, agent_audio, band = channels_of(recording)
@@ -581,6 +581,76 @@ def assert_one_speaker_to_a_channel(
         other = "agent" if speaker == "human" else "human"
         assert text in said[speaker], (speaker, text)
         assert text not in said[other], (speaker, text)
+
+
+async def carry(line, outgoing: bytes = b"", *, slices: int = 1) -> bytes:
+    """Drive a duplex line the way the conductor drives it, and keep what
+    came back: the same number of samples each way, every slice, quiet
+    included.
+
+    The one way any voice plug is exercised here, because it is the one
+    way a voice plug is exercised in production — there is no turn-shaped
+    door left to knock on.
+    """
+    from egma_simulator.conductor import LINE_SLICE_SAMPLES
+    from egma_simulator.speech import SAMPLE_WIDTH_BYTES
+
+    width = LINE_SLICE_SAMPLES * SAMPLE_WIDTH_BYTES
+    said = bytearray(outgoing)
+    said += bytes(max(0, slices * width - len(said)))
+    heard = bytearray()
+    for offset in range(0, len(said), width):
+        heard += await line.exchange(bytes(said[offset : offset + width]))
+    return bytes(heard)
+
+
+async def hear(line, said: str = "", *, seconds: float = 3.0) -> str:
+    """What the far end says back over one persona turn and the quiet after
+    it — read as words, which is all a lifecycle test cares about."""
+    from egma_simulator.conductor import LINE_SLICE_SAMPLES
+    from egma_simulator.speech import decode_speech, encode_speech
+
+    band = line.sample_rate_hz
+    spoken = encode_speech(said, band) if said else b""
+    quiet = round(seconds * band / LINE_SLICE_SAMPLES)
+    heard = await carry(line, spoken)
+    heard += await carry(line, slices=quiet)
+    return decode_speech(heard, band)
+
+
+def speech_in_the_recording(recording: bytes) -> list[tuple[str, int, int]]:
+    """Every stretch of speech a listener could find, in sample positions.
+
+    Read the way a listener would read it, one slice of the line at a
+    time: loud is somebody talking and quiet is nobody, on each channel
+    separately, and the results put back in the order they were spoken.
+    What comes out is the conversation as the audio holds it, which is
+    what a turn span claims to be about.
+    """
+    from egma_simulator.conductor import LINE_SLICE_SAMPLES
+    from egma_simulator.recording import channels_of
+    from egma_simulator.speech import SAMPLE_WIDTH_BYTES, carries_speech
+
+    width = LINE_SLICE_SAMPLES * SAMPLE_WIDTH_BYTES
+    persona_audio, agent_audio, _band = channels_of(recording)
+    heard: list[tuple[str, int, int]] = []
+    for speaker, channel in (("human", persona_audio), ("agent", agent_audio)):
+        opened: int | None = None
+        slices = range(0, len(channel) - width + 1, width)
+        for position, offset in enumerate(slices):
+            speaking = carries_speech(channel[offset : offset + width])
+            if speaking and opened is None:
+                opened = position
+            elif not speaking and opened is not None:
+                heard.append(
+                    (
+                        speaker,
+                        opened * LINE_SLICE_SAMPLES,
+                        position * LINE_SLICE_SAMPLES,
+                    )
+                )
+                opened = None
+    return sorted(heard, key=lambda run: run[1])
 
 
 # -- Record readers: the acceptance suite's entire vocabulary -----------------

@@ -34,6 +34,11 @@ STT_PROVIDERS = ("scripted", "deepgram")
 TTS_PROVIDERS = ("scripted", "elevenlabs")
 """What the persona speaks with. ``scripted`` needs no account and no network."""
 
+VAD_PROVIDERS = ("scripted", "silero")
+"""How the persona hears the agent start and stop speaking. Neither needs
+an account or a network: ``silero`` ships inside the pinned pipecat wheel
+and downloads nothing, and ``scripted`` reads the test codec exactly."""
+
 SPEECH_PROVIDER_KEYS = {
     "deepgram": "EGMA_SIMULATOR_DEEPGRAM_API_KEY",
     "elevenlabs": "EGMA_SIMULATOR_ELEVENLABS_API_KEY",
@@ -354,6 +359,12 @@ class SimulatorConfig:
     ``elevenlabs``. Chosen apart from the ears on purpose — a real mouth
     with scripted ears is a configuration somebody will want."""
 
+    vad_provider: str = "scripted"
+    """What tells the persona the agent has started or stopped speaking:
+    ``scripted`` (the test codec read exactly, so every boundary is a
+    sample position) or ``silero``. Chosen apart from the other two for
+    the same reason, and needing no key either way."""
+
     deepgram_api_key: str | None = field(default=None, repr=False)
     """The Deepgram key. Required when the ``deepgram`` ears are chosen;
     kept out of the dataclass repr, and registered for redaction."""
@@ -431,6 +442,9 @@ class SimulatorConfig:
         tts_provider = _one_of(
             "EGMA_SIMULATOR_TTS_PROVIDER", TTS_PROVIDERS, "scripted"
         )
+        vad_provider = _one_of(
+            "EGMA_SIMULATOR_VAD_PROVIDER", VAD_PROVIDERS, "scripted"
+        )
         speech_keys = {
             provider: _speech_key(provider)
             for provider in (stt_provider, tts_provider)
@@ -467,6 +481,7 @@ class SimulatorConfig:
             model_api_key=model_api_key,
             stt_provider=stt_provider,
             tts_provider=tts_provider,
+            vad_provider=vad_provider,
             deepgram_api_key=speech_keys.get("deepgram"),
             elevenlabs_api_key=speech_keys.get("elevenlabs"),
             media=MediaSettings.from_env(),

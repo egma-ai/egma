@@ -2,15 +2,16 @@
 
 One long-poll claim loop asks the control plane for exactly as much work as
 the executor has room for. Each claimed spec becomes one running simulation
-— a task walking the pipe, and a task beating every few seconds — and a
-cancel directive arriving on a beat's answer stops the walk at that beat.
+— a task conducting the exchange, and a task beating every few seconds —
+and a cancel directive arriving on a beat's answer stops the conducting at
+that beat.
 Every arrow points out: the simulator is never dialled into.
 
 A running simulation writes two records of itself and this is where they
 are joined. The lifecycle goes to the control plane as report events; the
-conversation goes to the OTLP ingest as spans, authored here from what the
-walk and the pipeline observe. Neither says what the other says: a turn, a
-tool call and a measurement are spans and only spans, and what the
+conversation goes to the OTLP ingest as spans, authored here from what
+whichever conductor ran observed. Neither says what the other says: a
+turn, a tool call and a measurement are spans and only spans, and what the
 lifecycle carries about them is the one summary fact a reader of a single
 simulation asks for — how many turns it reached. Both go through one
 reporter, so they are delivered in the order they happened and the
@@ -140,13 +141,15 @@ class AsyncioExecutor:
 
 
 class RunningSimulation:
-    """One claimed spec being conducted: the pipe walk and its heartbeat.
+    """One claimed spec being conducted, and its heartbeat.
 
-    It is also the one place that sees everything the walk observes, which
-    is why the conversation's spans are authored here rather than deeper
-    in: the walk knows turns and tool calls, the pipeline knows the audio,
-    and neither knows the other. Both report to the callbacks below, and
-    what comes out is one emitter for chat and voice alike.
+    It is also the one place that sees everything a conductor observes,
+    which is why the conversation's spans are authored here rather than
+    deeper in. There are two conductors and they observe in two
+    currencies: the walk sees a turn at the moment it happened, and the
+    voice conductor sees both ends of one, read off the audio. Both report
+    to the callbacks below, and what comes out is one emitter for chat and
+    voice alike.
     """
 
     def __init__(
@@ -208,39 +211,61 @@ class RunningSimulation:
         self._spans.opened()
         try:
             # The model first, because the pipeline below holds things that
-            # have to be given back and only the walk gives them back.
+            # have to be given back and only conducting gives them back.
             model = build_model_client(self._config, self._spec)
-            # One pipeline per simulation, built from its own spec: the plug
-            # that knows the platform, and — for voice — the speech legs
-            # around it, whichever pair this deployment configured.
-            # Assembling is validation, so a connection config the plug does
-            # not understand is an honest failure, not a crash.
+            # One pipeline per simulation, built from its own spec: the
+            # plug that knows the platform, and — for voice — the speech
+            # legs around it, whichever set this deployment configured.
+            # Assembling also decides which of the two conductors this
+            # simulation gets. It is validation, so a connection config
+            # the plug does not understand is an honest failure rather
+            # than a crash.
             assembled = assemble(
                 self._spec,
                 blobs=self._blobs,
                 speech=SpeechProviders.from_config(self._config),
-                on_timing=self._on_timing,
-                on_speech=self._on_speech,
+            )
+            persona = Persona(
+                traits=self._spec.persona_traits,
+                scenario_instructions=self._spec.scenario_instructions,
+                model=model,
             )
             try:
-                conducted = await conduct(
-                    persona=Persona(
-                        traits=self._spec.persona_traits,
-                        scenario_instructions=self._spec.scenario_instructions,
-                        model=model,
-                    ),
-                    plug=assembled.plug,
-                    max_turns=self._spec.limits.max_turns,
-                    max_duration_seconds=self._spec.limits.max_duration_seconds,
-                    on_turn=self._on_turn,
-                    on_timing=self._on_timing,
-                    on_tool_call=self._on_tool_call,
-                    on_answered=self._on_answered,
-                    controls=self._controls,
-                    name=f"sim:{self.simulation_id}",
-                )
+                # Which of the two conductors this simulation gets was
+                # decided by assembly, from the spec alone. Both answer
+                # the same `Conducted`, so nothing below this line knows
+                # which one ran.
+                if assembled.conductor is not None:
+                    conducted = await assembled.conductor.conduct(
+                        persona=persona,
+                        max_turns=self._spec.limits.max_turns,
+                        max_duration_seconds=(
+                            self._spec.limits.max_duration_seconds
+                        ),
+                        controls=self._controls,
+                        name=f"sim:{self.simulation_id}",
+                        on_utterance=self._on_utterance,
+                        on_measured=self._on_measured,
+                        on_answered=self._on_answered,
+                    )
+                else:
+                    assert assembled.plug is not None
+                    conducted = await conduct(
+                        persona=persona,
+                        plug=assembled.plug,
+                        max_turns=self._spec.limits.max_turns,
+                        max_duration_seconds=(
+                            self._spec.limits.max_duration_seconds
+                        ),
+                        on_turn=self._on_turn,
+                        on_timing=self._on_timing,
+                        on_tool_call=self._on_tool_call,
+                        on_answered=self._on_answered,
+                        controls=self._controls,
+                        name=f"sim:{self.simulation_id}",
+                    )
             finally:
-                # The walk closed the pipeline on its way out, whatever
+                # Conducting closed the pipeline on its way out, whatever
                 # happened, so whatever was recorded is measured by now.
                 reporter.audio = assembled.audio
                 await model.close()
@@ -294,6 +319,35 @@ class RunningSimulation:
             elapsed_ms = (loop.time() - self._first_human_at) * 1000
             self._spans.measure("first_response_latency", elapsed_ms)
 
+    async def _on_utterance(
+        self, speaker: str, text: str, began_unix_nano: int, ended_unix_nano: int
+    ) -> None:
+        """One turn a voice conductor read off the audio, both ends known.
+
+        The same span the walk's turns become, authored from the audio
+        timeline instead of from the wall clock — which is what lets two
+        of them cross when the persona and the agent speak at once. The
+        turn count is tallied here exactly as it is above, because it is
+        the same fact about the same conversation.
+        """
+        self._spans.spoken_turn(
+            speaker,
+            text,
+            began_unix_nano=began_unix_nano,
+            ended_unix_nano=ended_unix_nano,
+        )
+        self._reporter.turn_count += 1
+
+    async def _on_measured(
+        self, measure: str, began_unix_nano: int, ended_unix_nano: int
+    ) -> None:
+        """One measurement a voice conductor read off the audio timeline."""
+        self._spans.measured(
+            measure,
+            began_unix_nano=began_unix_nano,
+            ended_unix_nano=ended_unix_nano,
+        )
+
     async def _on_answered(self) -> None:
         """One flush per answer, which is where the conversation actually
         has a seam: the persona's turn, whatever the agent did while
@@ -302,19 +356,16 @@ class RunningSimulation:
         Finer would be a request per span; coarser would be a transcript
         that only exists once it is over.
 
-        The walk says when an answer is whole rather than this file
-        inferring it from a turn arriving, because an answer that made a
-        tool call and said nothing produces no turn — and it is precisely
-        that answer whose evidence must not sit in a buffer waiting for
-        the agent to speak again.
+        Whichever conductor ran says when an answer is whole rather than
+        this file inferring it from a turn arriving, because an answer that
+        made a tool call and said nothing produces no turn — and it is
+        precisely that answer whose evidence must not sit in a buffer
+        waiting for the agent to speak again.
         """
         self._spans.flush()
 
     async def _on_timing(self, measure: str, milliseconds: float) -> None:
         self._spans.measure(measure, milliseconds)
-
-    async def _on_speech(self, speaker: str, seconds: float) -> None:
-        self._spans.spoke(speaker, seconds)
 
     async def _on_tool_call(self, name: str, arguments: str | None) -> None:
         self._spans.tool_call(name, arguments)
@@ -334,8 +385,9 @@ class RunningSimulation:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                # Ending this loop would leave the walk running with no way
-                # to ever hear a cancel directive. Nothing is worth that.
+                # Ending this loop would leave the simulation running with
+                # no way to ever hear a cancel directive. Nothing is worth
+                # that.
                 logger.exception(
                     "heartbeat for %s hit an unexpected fault", self.simulation_id
                 )
