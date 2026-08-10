@@ -1,0 +1,34 @@
+import type { Metadata } from "next";
+import { IBM_Plex_Mono, Instrument_Sans } from "next/font/google";
+import { notFound } from "next/navigation";
+
+import { DesignSystemPrototype } from "./prototype.tsx";
+
+export const metadata: Metadata = {
+  title: "Egma UI prototype",
+  robots: { index: false, follow: false },
+};
+
+const sans = Instrument_Sans({
+  subsets: ["latin"],
+  variable: "--prototype-sans",
+});
+
+const mono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  variable: "--prototype-mono",
+  weight: ["400", "500", "600"],
+});
+
+/**
+ * PROTOTYPE ONLY: three design directions, each applied to sign-in,
+ * transcripts, and transcript detail. This route never renders in production.
+ */
+export default function DesignSystemPrototypePage() {
+  if (process.env.NODE_ENV === "production") notFound();
+  return (
+    <div className={`${sans.variable} ${mono.variable}`}>
+      <DesignSystemPrototype />
+    </div>
+  );
+}
