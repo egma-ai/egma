@@ -31,17 +31,19 @@ import { runPullCommand } from "./commands/pull.ts";
 import { runPushCommand } from "./commands/push.ts";
 import { runRunCommand } from "./commands/run.ts";
 import {
+  asReached,
   BOUND_ELSEWHERE_EXIT,
   PLATFORM_UNREACHABLE_EXIT,
+  reachPlatform,
   resolvePlatformAccess,
-  settlePlatform,
-  type PlatformIdentity,
+  settleBinding,
+  type PlatformAccess,
 } from "./platform/binding.ts";
 import { UnusableUrlError } from "./platform/credentials.ts";
 import { RETELL_API } from "./retell/client.ts";
 import { HeadlessUI } from "./ui/headless-ui.ts";
 import { buildExitNotice, exitLines, type ExitReport } from "./wizard/exit-line.ts";
-import type { PlatformAccess } from "./wizard/login-step.ts";
+import type { WizardPlatform } from "./wizard/login-step.ts";
 import { pasteFallbackMessage } from "./wizard/no-coding-agent.ts";
 import type { StopReason } from "./wizard/stop.ts";
 
@@ -255,7 +257,9 @@ export function helpText(): string {
     "  platform, so the repository says which one and every command checks it.",
     "  A bound platform that is down stops the command — nothing falls back to",
     "  Egma Cloud — and an address naming a different egma is refused, because",
-    "  moving a repository between platforms is not supported yet.",
+    "  moving a repository between platforms is not supported yet. egma login is",
+    "  the one exception: a key belongs to a machine rather than to a folder, so",
+    "  you can always sign in to another egma from here.",
     "",
     "Environment:",
     "  EGMA_URL             The egma to talk to, for a whole shell. Same as --url.",
@@ -432,7 +436,7 @@ async function runHeadless(
   invocation: Invocation,
   launch: DrivenAgentLaunch,
   cwd: string,
-  platform: PlatformAccess,
+  platform: WizardPlatform,
 ): Promise<number> {
   const controller = new AbortController();
   const stop = (reason: StopReason): void => controller.abort(reason);
@@ -467,7 +471,7 @@ async function runHeadless(
 async function runWizard(
   launch: DrivenAgentLaunch,
   cwd: string,
-  platform: PlatformAccess,
+  platform: WizardPlatform,
 ): Promise<number> {
   const { startTui, walk } = await wizardMachinery();
   const controller = new AbortController();
@@ -652,12 +656,23 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
 
-  // Everything else is about to name an identifier that exists on exactly one
-  // platform. A repository that says which platform that is has the address in
-  // hand checked against it before a single identifier is sent; a repository
-  // that says nothing has nothing to check and costs no request.
-  const settled = await settlePlatform(access);
-  if (settled.kind !== "ok") {
+  // Everything else asks the platform who it is before it says anything to it,
+  // and before anybody signs in. Two things ride on the answer: the address the
+  // rest of this command uses — one string for the request, the key and the
+  // binding — and whether this repository is allowed to talk to it at all.
+  const reached = await reachPlatform(access);
+  const settled = settleBinding(access, reached);
+  const platform = asReached(access, reached);
+  if (reached.kind === "answered" && reached.note !== undefined) {
+    process.stdout.write(`note: ${reached.note}\n`);
+  }
+
+  // `login` is not refused by a binding, on purpose. It names no identifier of
+  // this repository's and writes no file in it: it mints a machine-level key,
+  // filed by platform, which ADR-0008 already keeps independent of any
+  // repository. Refusing it would leave a developer whose own platform is down
+  // unable to sign in to any egma from this directory, for no safety gained.
+  if (settled.kind !== "ok" && invocation.verb !== "login") {
     process.stdout.write(`url: ${access.url}\n`);
     if (access.binding !== null) {
       process.stdout.write(
@@ -676,11 +691,11 @@ export async function main(argv: readonly string[]): Promise<void> {
   // A verb needs no terminal and takes no keystroke: it drives no coding agent,
   // so there is nothing for a keystroke to agree to.
   if (invocation.verb === "login") {
-    process.exitCode = await runLogin(invocation, access);
+    process.exitCode = await runLogin(invocation, platform);
     return;
   }
   if (invocation.verb === "connect") {
-    process.exitCode = await runConnect(invocation, access);
+    process.exitCode = await runConnect(invocation, platform);
     return;
   }
   if (
@@ -688,7 +703,7 @@ export async function main(argv: readonly string[]): Promise<void> {
     invocation.verb === "push" ||
     invocation.verb === "run"
   ) {
-    process.exitCode = await runFolderVerb(invocation.verb, invocation, access);
+    process.exitCode = await runFolderVerb(invocation.verb, invocation, platform);
     return;
   }
 
@@ -715,10 +730,6 @@ export async function main(argv: readonly string[]): Promise<void> {
     }
     throw error;
   }
-
-  // Who this platform said it is, carried into the walk: it is what the wizard
-  // writes into the repository once the developer is signed in.
-  const platform: PlatformAccess = { ...access, identity: settled.identity };
 
   process.exitCode = invocation.headless
     ? await runHeadless(invocation, launch, cwd, platform)

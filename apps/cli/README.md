@@ -114,7 +114,9 @@ answer.** The ids in `egma/config.yaml` exist on one instance and nowhere else,
 so the repository says which one and every command checks it: an instance that
 is down stops the command instead of falling back to Egma Cloud, and an address
 naming a different egma is refused outright with nothing sent to it. Moving a
-repository between instances is not supported yet.
+repository between instances is not supported yet. `egma login` is the one
+command a binding never turns away — a key belongs to this machine rather than
+to this folder — so you can always sign in to another instance from here.
 
 ## Connecting your voice agent
 
@@ -220,7 +222,9 @@ agent:
 
 The origin is what you read; the instance identifier is what egma checks, so a
 *different* egma later served at the same address is caught rather than
-believed. Your key is not here — keys live in `~/.egma/credentials`, one per
+believed. An instance older than that check writes the origin alone: the
+repository still uses that instance and nothing else, and only the "is this the
+same egma?" question goes unasked until you update it. Your key is not here — keys live in `~/.egma/credentials`, one per
 instance, so signing in to a second egma never signs you out of the first.
 
 One test is one file:
@@ -581,7 +585,9 @@ Which egma a command talks to:
   platform, so the repository says which one and every command checks it.
   A bound platform that is down stops the command — nothing falls back to
   Egma Cloud — and an address naming a different egma is refused, because
-  moving a repository between platforms is not supported yet.
+  moving a repository between platforms is not supported yet. egma login is
+  the one exception: a key belongs to a machine rather than to a folder, so
+  you can always sign in to another egma from here.
 
 Environment:
   EGMA_URL             The egma to talk to, for a whole shell. Same as --url.

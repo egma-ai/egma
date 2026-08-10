@@ -11,27 +11,21 @@
  * never named here — the terminal's job is a code, an address, and a key.
  */
 
-import type {
-  PlatformAccess as ResolvedPlatform,
-  PlatformIdentity,
-} from "../platform/binding.ts";
+import type { PlatformAccess } from "../platform/binding.ts";
 import { openInBrowser } from "../platform/browser.ts";
 import { logIn, type LogInOptions } from "../platform/login.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
 import type { ExitReport } from "./exit-line.ts";
 import { stopReport } from "./stop.ts";
 
-/** How the wizard reaches egma, and where the key it gets is kept. */
-export type PlatformAccess = ResolvedPlatform & {
-  /**
-   * Who this platform said it is, when somebody has already asked.
-   *
-   * A bound repository has its platform checked before the wizard starts, so
-   * the answer is already in hand and asking again would be a second request
-   * for one fact. `null` means nobody has asked yet, and the walk asks at the
-   * moment it has something to write.
-   */
-  readonly identity?: PlatformIdentity | null;
+/**
+ * The platform a walk runs against: everything a verb is handed, and one thing
+ * only a wizard needs.
+ *
+ * A name of its own rather than a second `PlatformAccess`, so a reader of any
+ * signature knows which of the two shapes is in hand.
+ */
+export type WizardPlatform = PlatformAccess & {
   /** Starts a browser. The developer's own opener when omitted. */
   readonly openBrowser?: LogInOptions["openBrowser"];
 };
@@ -45,7 +39,7 @@ export type PlatformAccess = ResolvedPlatform & {
  * answered is neither.
  */
 export async function logInStep(
-  platform: PlatformAccess,
+  platform: WizardPlatform,
   ui: WizardUI,
   signal: AbortSignal,
 ): Promise<ExitReport | null> {

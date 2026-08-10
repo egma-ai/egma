@@ -17,7 +17,7 @@
 import process from "node:process";
 
 import type { DrivenAgentLaunch } from "../acp/registry.ts";
-import { bindRepository, identityOnce, type IdentityHolder } from "../platform/binding.ts";
+import { bindingFor, bindRepository } from "../platform/binding.ts";
 import { signedInAt } from "../platform/signed-in.ts";
 import type { ConnectOptions } from "../retell/connect.ts";
 import { homeIn } from "../skills/install.ts";
@@ -28,7 +28,7 @@ import { findTheAgent } from "./discovery.ts";
 import { openDrivenAgentLog, type DrivenAgentLog } from "./driven-agent-log.ts";
 import type { ExitReport } from "./exit-line.ts";
 import { generateStep } from "./generate-step.ts";
-import { logInStep, type PlatformAccess } from "./login-step.ts";
+import { logInStep, type WizardPlatform } from "./login-step.ts";
 import { runStep } from "./run-step.ts";
 import { stopReport, untilAborted } from "./stop.ts";
 
@@ -44,7 +44,7 @@ export type WalkOptions = {
    * in to nothing — which is how the checks that are only about driving a
    * coding agent stay about that.
    */
-  readonly platform?: PlatformAccess;
+  readonly platform?: WizardPlatform;
   /** Where Retell is. Retell's own address when omitted. */
   readonly retell?: ConnectOptions["retell"];
   /** How many tests a first suite holds. egma's own default when omitted. */
@@ -109,16 +109,16 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
     return report;
   }
 
-  // Who the platform says it is, asked at most once and only when the walk is
-  // about to write something that belongs to it.
-  const identityOf: IdentityHolder =
-    options.platform === undefined
-      ? () => Promise.resolve(null)
-      : identityOnce(options.platform.url, options.platform.identity, { signal });
+  // The platform was asked who it is before this walk started, and the answer
+  // decided the one address everything here uses — the key, the requests, and
+  // the two lines a binding is. A platform that would not say still binds the
+  // repository to its address, because a folder holding this platform's ids
+  // and naming no platform is the crossing ADR-0008 exists to prevent.
+  const binding = options.platform === undefined ? null : bindingFor(options.platform);
 
   // Before anything is driven: who this is. Nothing else in the walk can name
   // an agent, a connection or a test until egma knows whose they are.
-  if (options.platform !== undefined) {
+  if (options.platform !== undefined && binding !== null) {
     const refusal = await logInStep(options.platform, ui, signal);
     if (refusal !== null) {
       ui.setExit(refusal);
@@ -130,14 +130,14 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
     // in it finds the same egma without being told. A repository with no
     // folder yet is bound by the step that makes one, which is the same moment
     // its first platform-owned id lands in it.
-    const bound = await bindRepository(cwd, identityOf);
+    const bound = await bindRepository(cwd, binding);
     if (bound.kind === "bound") {
       ui.pushStatus(`This repository uses egma at ${bound.binding.origin}.`);
-    }
-    if (bound.kind === "unknown-platform") {
-      ui.pushStatus(
-        `egma at ${options.platform.url} would not say which egma it is, so this repository names no platform. Update that egma, then run this again.`,
-      );
+      if (bound.binding.instance === null) {
+        ui.pushStatus(
+          `That egma would not say which egma it is, so this repository names its address and no more. Update it, and egma can tell it from a different one later.`,
+        );
+      }
     }
   }
 
@@ -184,7 +184,7 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
     facts: found.facts,
     // The folder this step makes is born naming the egma that owns the ids
     // about to go into it.
-    identity: await identityOf(),
+    binding,
     ...(options.howManyTests === undefined ? {} : { howMany: options.howManyTests }),
   });
 

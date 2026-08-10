@@ -35,8 +35,18 @@ const API_ENTRY = fileURLToPath(new URL("../../../api/dist/index.js", import.met
 const BOOT_MS = 60_000;
 
 export type RealPlatform = {
-  /** The address a repository is pointed at, and the origin it answers as. */
+  /**
+   * The address a repository is pointed at — the one a developer types.
+   *
+   * Deliberately **not** the address this deployment is configured with. On a
+   * real self-host `EGMA_BASE_URL` is another name for the same server, and a
+   * CLI that files its key under one name and its binding under the other
+   * leaves a repository that signs in and is "not signed in" a second later.
+   * These two differ here so that nothing can be equal by construction.
+   */
   readonly origin: string;
+  /** What the deployment is configured with, and therefore answers as. */
+  readonly canonicalOrigin: string;
   /** What this deployment minted for itself, read over the public contract. */
   readonly instanceId: string;
   /** Everything the process has written to its log, in order. */
@@ -89,6 +99,9 @@ export async function startRealPlatform(label: string): Promise<RealPlatform> {
   const traceStore: EmptyTraceStore = await createEmptyTraceStore(label);
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
+  // The same server under its other name, which is what a self-host's
+  // `EGMA_BASE_URL` almost always is.
+  const canonicalOrigin = `http://localhost:${port}`;
 
   const api: ChildProcess = spawn(process.execPath, [API_ENTRY], {
     env: {
@@ -98,7 +111,7 @@ export async function startRealPlatform(label: string): Promise<RealPlatform> {
       EGMA_AUTH_SECRET: `a-secret-only-${label}-uses`,
       EGMA_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
       EGMA_SIMULATOR_SERVICE_TOKEN: `egma_st_held-by-${label}-alone`,
-      EGMA_BASE_URL: origin,
+      EGMA_BASE_URL: canonicalOrigin,
       HOST: "127.0.0.1",
       PORT: String(port),
       // A line per request, which is how these checks know what a platform was
@@ -152,12 +165,13 @@ export async function startRealPlatform(label: string): Promise<RealPlatform> {
 
     return {
       origin,
+      canonicalOrigin,
       instanceId,
       log: () => log,
       pathsAsked: () =>
         [...log.matchAll(/"url":"([^"]+)"/gu)].map((match) => match[1] as string),
       async signUp(email) {
-        const created = await fetch(`${origin}/api/signup`, {
+        const created = await fetch(`${canonicalOrigin}/api/signup`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -167,21 +181,21 @@ export async function startRealPlatform(label: string): Promise<RealPlatform> {
           }),
         });
         if (created.status !== 201) {
-          throw new Error(`${origin} would not sign anybody up: ${await created.text()}`);
+          throw new Error(`${canonicalOrigin} would not sign anybody up: ${await created.text()}`);
         }
         return (created.headers.getSetCookie() ?? [])
           .map((cookie) => cookie.split(";", 1)[0])
           .join("; ");
       },
       async approve(userCode, cookie) {
-        const approved = await fetch(`${origin}/api/device/approve`, {
+        const approved = await fetch(`${canonicalOrigin}/api/device/approve`, {
           method: "POST",
           headers: { "content-type": "application/json", cookie },
           body: JSON.stringify({ user_code: userCode }),
         });
         const answer = (await approved.json()) as { status?: string };
         if (answer.status !== "approved") {
-          throw new Error(`${origin} would not approve ${userCode}: ${JSON.stringify(answer)}`);
+          throw new Error(`${canonicalOrigin} would not approve ${userCode}: ${JSON.stringify(answer)}`);
         }
       },
       stop,

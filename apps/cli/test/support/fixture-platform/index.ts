@@ -61,7 +61,11 @@ export async function startPlatform(): Promise<Platform> {
     const platformGroup = platformRoutes(origin);
     identity = platformGroup.controls;
 
-    const deviceGroup = deviceRoutes(origin);
+    // Every address this fixture hands out comes from the one it calls its
+    // own, the way a deployment's all come from `EGMA_BASE_URL`.
+    const self = (): string => identity.origin;
+
+    const deviceGroup = deviceRoutes(self);
     device = deviceGroup.controls;
 
     // Which customer this is comes from the key, so every group that writes
@@ -82,7 +86,7 @@ export async function startPlatform(): Promise<Platform> {
     // connection it executes over is the one the agent group registered.
     const runGroup = runRoutes({
       holdsKey,
-      origin,
+      origin: self,
       versionById: testGroup.versionById,
       connectionById: agentGroup.connectionById,
     });

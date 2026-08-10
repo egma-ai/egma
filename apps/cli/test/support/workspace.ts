@@ -60,7 +60,7 @@ export const PRETEND_OLD_NODE = fileURLToPath(
 export function platformNamed<Extra extends object>(
   platform: { readonly url: string; readonly credentialsFile: string } & Extra,
 ): PlatformAccess & Extra {
-  return { source: "flag", binding: null, ...platform };
+  return { source: "flag", binding: null, identity: null, ...platform };
 }
 
 export type Workspace = {

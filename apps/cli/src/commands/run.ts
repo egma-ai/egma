@@ -63,6 +63,11 @@ export const RUN_EXIT = {
   interrupted: 130,
 } as const;
 
+// Two more numbers reach a caller of this verb, and neither is decided here:
+// the platform check every command passes through first answers 4 when the
+// egma this repository is bound to did not answer, and
+// `BOUND_ELSEWHERE_EXIT` when the address in hand is a different egma.
+
 export type RunCommandOptions = FolderCommandOptions & {
   /**
    * Start the run and return, without waiting for a single verdict.

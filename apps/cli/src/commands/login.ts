@@ -37,6 +37,10 @@ export const LOGIN_EXIT = {
   interrupted: 130,
 } as const;
 
+// A binding never turns this verb away — a key is machine-level and names no
+// resource of this repository's — so `BOUND_ELSEWHERE_EXIT` is the one number
+// in the platform check that `egma login` cannot answer.
+
 export type LoginCommandOptions = {
   /** Which egma, and where the key goes. Resolved once, by the caller. */
   readonly access: PlatformAccess;

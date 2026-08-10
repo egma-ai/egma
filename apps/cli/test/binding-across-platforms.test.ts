@@ -9,6 +9,9 @@
  *
  * What it proves, in one walk:
  *
+ * - the two addresses a platform has — the one a developer types and the one it
+ *   is configured with — settle into one, so the key and the binding can never
+ *   name different strings;
  * - a machine holds a key for each platform, and neither login disturbs the
  *   other;
  * - the wizard writes the platform it signed in to into the committed file, and
@@ -19,7 +22,9 @@
  * - an explicit address naming the *other* platform is refused, and that
  *   platform's own log proves it was never told a single identifier;
  * - a bound platform that is down stops the command instead of falling back to
- *   Egma Cloud.
+ *   Egma Cloud;
+ * - and nothing either platform was told, and nothing either printed, holds a
+ *   key.
  *
  * The steps share one repository and one pair of platforms and run in order:
  * they are one walk written as several claims, not several independent checks.
@@ -84,6 +89,9 @@ afterAll(async () => {
 
 type Result = { stdout: string; stderr: string; code: number };
 
+/** Everything the command has printed in this walk, for the sweep at the end. */
+const transcript: string[] = [];
+
 async function egma(args: readonly string[], env: NodeJS.ProcessEnv = {}): Promise<Result> {
   try {
     const { stdout, stderr } = await run(process.execPath, [CLI_ENTRY, ...args], {
@@ -94,9 +102,11 @@ async function egma(args: readonly string[], env: NodeJS.ProcessEnv = {}): Promi
       // does is a failure to read rather than a suite to wait out.
       timeout: 90_000,
     });
+    transcript.push(stdout, stderr);
     return { stdout, stderr, code: 0 };
   } catch (error) {
     const failure = error as { stdout?: string; stderr?: string; code?: number };
+    transcript.push(failure.stdout ?? "", failure.stderr ?? "");
     return { stdout: failure.stdout ?? "", stderr: failure.stderr ?? "", code: failure.code ?? 1 };
   }
 }
@@ -171,6 +181,9 @@ describe("two platforms on one machine", () => {
     expect(here.instanceId).toMatch(/^ins_[0-9A-HJKMNP-TV-Z]{26}$/u);
     expect(elsewhere.instanceId).toMatch(/^ins_[0-9A-HJKMNP-TV-Z]{26}$/u);
     expect(here.instanceId).not.toBe(elsewhere.instanceId);
+    // And each answers as an address that is not the one it is dialled at, so
+    // nothing below can pass by the two strings happening to be equal.
+    expect(here.canonicalOrigin).not.toBe(here.origin);
   });
 
   it("each mint this machine a key, and neither login replaces the other", async () => {
@@ -187,7 +200,12 @@ describe("two platforms on one machine", () => {
     const held = JSON.parse(await readFile(workspace.credentialsFile, "utf8")) as {
       platforms: { url: string; key: string }[];
     };
-    expect(held.platforms.map((one) => one.url)).toEqual([here.origin, elsewhere.origin]);
+    // Under the address each platform gave for itself — the one the binding
+    // will name — and not under the address that was typed.
+    expect(held.platforms.map((one) => one.url)).toEqual([
+      here.canonicalOrigin,
+      elsewhere.canonicalOrigin,
+    ]);
     for (const one of held.platforms) keys.set(one.url, one.key);
 
     // Each key opens a door on the platform that minted it, and is refused by
@@ -197,7 +215,7 @@ describe("two platforms on one machine", () => {
       [here, elsewhere],
       [elsewhere, here],
     ] as const) {
-      const key = keys.get(platform.origin) ?? "";
+      const key = keys.get(platform.canonicalOrigin) ?? "";
       const asKeyholder = { authorization: `Bearer ${key}` };
       expect((await fetch(`${platform.origin}/api/keys`, { headers: asKeyholder })).status).toBe(200);
       expect((await fetch(`${other.origin}/api/keys`, { headers: asKeyholder })).status).toBe(401);
@@ -228,13 +246,13 @@ describe("two platforms on one machine", () => {
 
     const written = await readFile(path.join(workspace.dir, "egma", "config.yaml"), "utf8");
     expect(parseConfig(written, "config.yaml").platform).toEqual({
-      origin: here.origin,
+      origin: here.canonicalOrigin,
       instance: here.instanceId,
     });
 
     // Committed on purpose, and therefore never a credential.
     expect(written).not.toContain("egma_sk_");
-    expect(written).not.toContain(keys.get(here.origin) ?? "no key");
+    expect(written).not.toContain(keys.get(here.canonicalOrigin) ?? "no key");
   }, LONG);
 
   it("use the bound platform with nothing said, and print a run address on it", async () => {
@@ -251,7 +269,7 @@ describe("two platforms on one machine", () => {
           credentials: RetellKey.from(PRETEND_RETELL_KEY) ?? undefined,
         },
       },
-      { url: here.origin, key: keys.get(here.origin) ?? "" },
+      { url: here.canonicalOrigin, key: keys.get(here.canonicalOrigin) ?? "" },
     );
     expect(registered.kind, JSON.stringify(registered)).toBe("registered");
     if (registered.kind !== "registered") return;
@@ -284,19 +302,19 @@ describe("two platforms on one machine", () => {
     // Nothing on the command says which egma. The repository does.
     const pushed = await egma(["push", "--cwd", workspace.dir]);
     expect(pushed.code, pushed.stderr).toBe(0);
-    expect(facts(pushed.stdout).url).toBe(here.origin);
+    expect(facts(pushed.stdout).url).toBe(here.canonicalOrigin);
 
     const started = await egma(["run", "--cwd", workspace.dir, "--no-follow"]);
     expect(started.code, started.stderr).toBe(0);
     const said = facts(started.stdout);
-    expect(said.url).toBe(here.origin);
+    expect(said.url).toBe(here.canonicalOrigin);
     expect(said.status).toBe("started");
 
     // A run address on this platform, and one a person can paste anywhere: no
     // key, no token, no query at all.
-    expect(said.results).toMatch(new RegExp(`^${here.origin}/runs/run_`, "u"));
+    expect(said.results).toMatch(new RegExp(`^${here.canonicalOrigin}/runs/run_`, "u"));
     expect(said.results).not.toContain("?");
-    expect(said.results).not.toContain(keys.get(here.origin) ?? "no key");
+    expect(said.results).not.toContain(keys.get(here.canonicalOrigin) ?? "no key");
     owned.push(said.run as string);
 
     const version = parseConfig(await readFile(config, "utf8"), "config.yaml");
@@ -309,9 +327,9 @@ describe("two platforms on one machine", () => {
     const named = await egma(["push", "--cwd", workspace.dir, "--url", elsewhere.origin]);
     expect(named.code).toBe(BOUND_ELSEWHERE_EXIT);
     expect(facts(named.stdout).status).toBe("bound-elsewhere");
-    expect(facts(named.stdout).bound_to).toBe(`${here.origin} ${here.instanceId}`);
+    expect(facts(named.stdout).bound_to).toBe(`${here.canonicalOrigin} ${here.instanceId}`);
     expect(named.stderr).toContain("--url");
-    expect(named.stderr).toContain(here.origin);
+    expect(named.stderr).toContain(here.canonicalOrigin);
 
     const fromTheShell = await egma(["run", "--cwd", workspace.dir], {
       EGMA_URL: elsewhere.origin,
@@ -328,7 +346,7 @@ describe("two platforms on one machine", () => {
     for (const identifier of owned) {
       expect(elsewhere.log()).not.toContain(identifier);
     }
-    expect(elsewhere.log()).not.toContain(keys.get(here.origin) ?? "no key");
+    expect(elsewhere.log()).not.toContain(keys.get(here.canonicalOrigin) ?? "no key");
   }, LONG);
 
   it("stop when the bound platform is down, and never fall back to Egma Cloud", async () => {
@@ -339,10 +357,24 @@ describe("two platforms on one machine", () => {
 
     expect(result.code).toBe(PLATFORM_UNREACHABLE_EXIT);
     expect(facts(result.stdout).status).toBe("unreachable");
-    expect(facts(result.stdout).url).toBe(here.origin);
-    expect(result.stderr).toContain(here.origin);
+    expect(facts(result.stdout).url).toBe(here.canonicalOrigin);
+    expect(result.stderr).toContain(here.canonicalOrigin);
     expect(result.stderr).toContain("Egma Cloud");
     // And it did not quietly try the other egma on this machine either.
     expect(elsewhere.pathsAsked().slice(before)).toEqual([]);
   }, LONG);
+
+  it("said nothing, anywhere, that holds a key", () => {
+    // Every line either platform logged, and every line the command printed
+    // across the whole walk, swept for both keys this machine now holds. The
+    // committed file is checked where it is written; this is the rest of it.
+    const secrets = [...keys.values()];
+    expect(secrets).toHaveLength(2);
+
+    for (const secret of secrets) {
+      expect(here.log(), "the bound platform's log").not.toContain(secret);
+      expect(elsewhere.log(), "the other platform's log").not.toContain(secret);
+      expect(transcript.join("\n"), "what the command printed").not.toContain(secret);
+    }
+  });
 });

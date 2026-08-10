@@ -9,10 +9,13 @@
  * configuration; neither is a credential; the keys stay in the developer's home
  * folder, keyed by the same origin.
  *
- * Three rules, and every one of them is here rather than spread over the verbs:
+ * Four rules, and every one of them is here rather than spread over the verbs:
  *
- * **A bound repository is checked before anything is sent.** Every command
- * reads the platform's own identity first, and only then talks to it.
+ * **Ask who it is first, then sign in.** Every command reads the platform's own
+ * identity before it says anything to it and before anybody signs in, and the
+ * address that read settles is the one address the rest of the command uses —
+ * for its requests, for the key it looks up or files, and for the binding it
+ * writes. One platform is one string, always.
  *
  * **A bound platform that is unavailable stops the command.** It never falls
  * back to Egma Cloud, because the ids in hand do not exist there and a cloud
@@ -22,6 +25,11 @@
  * **A different platform stops the command too.** Rebinding a repository is not
  * part of this decision (ADR-0008), so an explicit address naming another egma
  * is refused with what it would have taken to be right, and nothing is sent.
+ *
+ * **A platform that will not name itself is still bound to.** By origin alone.
+ * A folder holding one platform's ids while naming no platform is exactly the
+ * crossing this file exists to prevent, and an older deployment that has no
+ * identity endpoint yet must not produce one.
  */
 
 import {
@@ -41,12 +49,23 @@ import { PlatformUnreachableError, type Fetch } from "./device-flow.ts";
 
 /** Which egma a run signs in to, where its key is kept, and how egma decided. */
 export type PlatformAccess = {
+  /**
+   * The one address this command uses: for every request, for the key it looks
+   * up or files, and for the binding it writes. Settled by `reachPlatform`
+   * before anything is sent.
+   */
   readonly url: string;
   readonly credentialsFile: string;
   /** Which of the four places named this platform. */
   readonly source: PlatformSource;
   /** What this repository is bound to, or `null` when it is bound to nothing. */
   readonly binding: PlatformBinding | null;
+  /**
+   * Who answered at `url`, or `null` when nobody did or the platform would not
+   * say. Read before signing in, because the binding written afterwards is made
+   * of it and a repository must never hold ids from a platform it cannot name.
+   */
+  readonly identity: PlatformIdentity | null;
 };
 
 /** What a platform says about itself. */
@@ -91,11 +110,35 @@ export async function resolvePlatformAccess(choice: {
     env: choice.env.EGMA_URL,
     binding: binding?.origin ?? null,
   });
-  return { url, credentialsFile: credentialsFileIn(choice.env), source, binding };
+  return {
+    url,
+    credentialsFile: credentialsFileIn(choice.env),
+    source,
+    binding,
+    // Nobody has asked the platform anything yet. `reachPlatform` does that,
+    // before this command signs in or names an identifier.
+    identity: null,
+  };
 }
 
 /** Where a platform says who it is. The one unauthenticated read egma makes. */
 const IDENTITY_PATH = "/api/platform";
+
+/**
+ * How long egma waits for a platform to say who it is.
+ *
+ * This one read sits in front of every command, so the wait in front of every
+ * command is this. It is a few hundred bytes from an endpoint that touches one
+ * row it has already cached, and Node's own default is five minutes — which is
+ * five minutes of a terminal that looks hung rather than a platform that is.
+ */
+const IDENTITY_TIMEOUT_MS = 10_000;
+
+/** The caller's signal, with a bound wait of egma's own around it. */
+function withinTimeout(signal: AbortSignal | undefined): AbortSignal {
+  const timeout = AbortSignal.timeout(IDENTITY_TIMEOUT_MS);
+  return signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
+}
 
 /**
  * Ask a platform who it is.
@@ -115,7 +158,7 @@ export async function readPlatformIdentity(
   try {
     response = await fetchImpl(at, {
       headers: { accept: "application/json" },
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      signal: withinTimeout(options.signal),
     });
   } catch (cause) {
     throw new PlatformUnreachableError(url, cause);
@@ -160,56 +203,135 @@ function plain(value: unknown): string {
   return typeof value === "string" ? value.replaceAll(/[\p{Cc}\p{Cf}]/gu, "").trim() : "";
 }
 
-/** How a bound repository's check came out. */
-export type Settled =
-  /** Nothing stands in the way. The identity is read only when it was needed. */
-  | { readonly kind: "ok"; readonly identity: PlatformIdentity | null }
-  /** The platform this repository belongs to did not answer. */
-  | { readonly kind: "unreachable"; readonly reason: string }
-  /** The address in hand leads to a different egma from the bound one. */
-  | { readonly kind: "elsewhere"; readonly reason: string };
-
 export type SettleOptions = {
   readonly fetchImpl?: Fetch;
   readonly signal?: AbortSignal;
 };
 
 /**
- * Check the platform in hand against the one this repository belongs to.
+ * The address egma will use for the whole of this command, and who answers
+ * there — settled before anything is sent and before anybody signs in.
  *
- * An unbound repository is asked nothing and refused nothing: there is no
- * identifier here that belongs anywhere, so any platform is a fair target and
- * Egma Cloud is the default one. It costs no request either, which matters
- * because a bare `npx egma` in a repository with nothing in it should not put
- * a round trip in front of the first screen.
+ * **One address, decided once.** What follows uses it for every request, for
+ * the key it looks up or files, and for the binding it writes. Two strings for
+ * one platform is the bug this exists to make unrepresentable: a key filed
+ * under the address a developer typed and a binding written from the address
+ * the platform reports leave a repository that signs in successfully and is
+ * "not signed in" on the very next command.
  */
-export async function settlePlatform(
+export type Reached =
+  /** Something answered, and said which egma it is. */
+  | {
+      readonly kind: "answered";
+      /** The address to use from here on, normalized. */
+      readonly url: string;
+      readonly identity: PlatformIdentity;
+      /** One line worth saying out loud, when anything surprising happened. */
+      readonly note?: string;
+    }
+  /** Nothing answered there, or what did would not say which egma it is. */
+  | { readonly kind: "silent"; readonly reason: string };
+
+/**
+ * Reach the platform this command resolved to, and settle its address.
+ *
+ * A **bound** repository keeps the address it is bound to, whatever the
+ * platform says its own address is. That address is the contract: the key on
+ * this machine is filed under it, and every id in the folder was written when
+ * it was in use. Only the instance identifier is read, and only to check it.
+ *
+ * An **unbound** repository is about to write an address into a committed file,
+ * so if the platform names a different one for itself, that address is checked
+ * before it is believed — it has to answer, and it has to be the same egma.
+ * A platform whose configured address is wrong therefore costs a repository
+ * nothing: egma keeps the address that worked and says so.
+ */
+export async function reachPlatform(
   access: PlatformAccess,
   options: SettleOptions = {},
-): Promise<Settled> {
-  if (access.binding === null) {
-    return { kind: "ok", identity: null };
-  }
+): Promise<Reached> {
+  const here = normalizePlatformOrigin(access.url);
 
-  const bound = access.binding;
   let identity: PlatformIdentity;
   try {
-    identity = await readPlatformIdentity(access.url, {
-      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-    });
+    identity = await readPlatformIdentity(here, options);
   } catch (cause) {
-    const reason = cause instanceof Error ? cause.message : String(cause);
-    return { kind: "unreachable", reason: `${reason}\n\n${boundPlatformLine(bound)}` };
+    return { kind: "silent", reason: cause instanceof Error ? cause.message : String(cause) };
   }
 
-  if (bound.instance === null || bound.instance === identity.instance) {
-    return { kind: "ok", identity };
+  // The address this repository is bound to is the contract — the key on this
+  // machine is filed under it and every id in the folder was written while it
+  // was in use — so it is kept whatever the platform says its own address is.
+  const isTheBoundOne =
+    access.binding !== null && normalizePlatformOrigin(access.binding.origin) === here;
+  if (isTheBoundOne || identity.origin === here) {
+    return { kind: "answered", url: here, identity };
+  }
+
+  try {
+    const there = await readPlatformIdentity(identity.origin, options);
+    if (there.instance === identity.instance) {
+      return { kind: "answered", url: identity.origin, identity: there };
+    }
+  } catch {
+    // Falls through to the address that answered, with the note below.
+  }
+  return {
+    kind: "answered",
+    url: here,
+    identity,
+    note:
+      `egma at ${here} says it is reached at ${identity.origin}, and that address is not this ` +
+      `same egma from here. ${here} is what this repository will use.`,
+  };
+}
+
+/** How a bound repository's check came out. */
+export type Settled =
+  /** Nothing stands in the way. */
+  | { readonly kind: "ok" }
+  /** The platform this repository belongs to did not answer. */
+  | { readonly kind: "unreachable"; readonly reason: string }
+  /** The address in hand leads to a different egma from the bound one. */
+  | { readonly kind: "elsewhere"; readonly reason: string };
+
+/**
+ * Hold what answered against what this repository belongs to.
+ *
+ * An unbound repository is refused nothing: no identifier here belongs
+ * anywhere, so any platform is a fair target and a platform that will not name
+ * itself is one egma can still work with — it is bound by origin alone, and
+ * `reachPlatform` above has already settled which origin that is.
+ */
+export function settleBinding(access: PlatformAccess, reached: Reached): Settled {
+  const bound = access.binding;
+  if (reached.kind === "silent") {
+    // A repository bound by origin alone is bound to a platform that never
+    // named itself, so this read failing is what that platform always does and
+    // is not news. The command carries on against the address the binding
+    // names — which is the promise being kept — and if that platform is really
+    // down the verb says so in its own words.
+    return bound === null || bound.instance === null
+      ? { kind: "ok" }
+      : { kind: "unreachable", reason: `${reached.reason}\n\n${boundPlatformLine(bound)}` };
+  }
+  if (bound === null || bound.instance === null || bound.instance === reached.identity.instance) {
+    return { kind: "ok" };
   }
   return {
     kind: "elsewhere",
-    reason: differentPlatformRefusal(access, bound, identity),
+    reason: differentPlatformRefusal(access, bound, reached.identity),
   };
+}
+
+/**
+ * The platform as it stands after being reached: the settled address, and who
+ * answered there when anybody did.
+ */
+export function asReached(access: PlatformAccess, reached: Reached): PlatformAccess {
+  return reached.kind === "silent"
+    ? access
+    : { ...access, url: reached.url, identity: reached.identity };
 }
 
 /** The sentence that says what egma will not do instead, whatever went wrong. */
@@ -268,31 +390,6 @@ function differentPlatformRefusal(
 export const PLATFORM_UNREACHABLE_EXIT = 4;
 export const BOUND_ELSEWHERE_EXIT = 8;
 
-/**
- * Who this platform is, asked at most once and only when somebody asks.
- *
- * Lazy on purpose. The answer is needed exactly when something belonging to
- * this platform is about to be written into the repository, and a walk that
- * never gets that far — no coding agent, no key, a developer who quit at the
- * first screen — should not have spent a request on it. A platform that will
- * not say answers `null`: the walk carries on and the repository stays bound to
- * nothing, which is what it already was.
- */
-export type IdentityHolder = () => Promise<PlatformIdentity | null>;
-
-export function identityOnce(
-  url: string,
-  known: PlatformIdentity | null | undefined,
-  options: { readonly fetchImpl?: Fetch; readonly signal?: AbortSignal } = {},
-): IdentityHolder {
-  let asked: Promise<PlatformIdentity | null> | undefined;
-  return () => {
-    if (known !== null && known !== undefined) return Promise.resolve(known);
-    asked ??= readPlatformIdentity(url, options).catch(() => null);
-    return asked;
-  };
-}
-
 /** What binding this repository came to. */
 export type Bound =
   /** It was not bound and now it is. */
@@ -300,21 +397,20 @@ export type Bound =
   /** It already named a platform, and that is the one it keeps. */
   | { readonly kind: "already"; readonly binding: PlatformBinding }
   /** There is no folder here yet, so there is nothing to write into. */
-  | { readonly kind: "no-folder" }
-  /** The platform would not say who it is, so there is nothing to write. */
-  | { readonly kind: "unknown-platform" };
+  | { readonly kind: "no-folder" };
 
 /**
- * Write the binding, once.
+ * Write the binding, once, and from one place.
  *
  * Only into a folder that is already here, and only when it names no platform
  * yet: the file is somebody's committed file, and rebinding is not part of this
- * decision. A repository with no folder is bound by the step that makes one,
- * which is the same moment its first platform-owned id lands in it.
+ * decision. Two callers reach this — the walk, the moment a developer is signed
+ * in, and the step that makes the folder — and both hand it the same value, so
+ * there is one writer and no second opinion about what a binding says.
  */
 export async function bindRepository(
   repository: string,
-  identityOf: IdentityHolder,
+  binding: PlatformBinding,
 ): Promise<Bound> {
   const config = folderPathsIn(repository).config;
 
@@ -326,15 +422,27 @@ export async function bindRepository(
   }
   if (held.platform !== null) return { kind: "already", binding: held.platform };
 
-  const identity = await identityOf();
-  if (identity === null) return { kind: "unknown-platform" };
-
-  const binding = bindingFor(identity);
   await updateConfig(config, { platform: binding });
   return { kind: "bound", binding };
 }
 
-/** The two lines a binding is, from what the platform said about itself. */
-export function bindingFor(identity: PlatformIdentity): PlatformBinding {
-  return { origin: identity.origin, instance: identity.instance };
+/**
+ * The binding for the platform in hand: the address this command settled on,
+ * and the name that platform gave itself.
+ *
+ * **A platform that will not name itself still binds the repository**, by
+ * origin alone. That is the case an older self-hosted deployment presents —
+ * `/api/platform` is newer than the rest of the door — and the alternative is
+ * the one thing ADR-0008 exists to prevent: a folder holding a self-hosted
+ * platform's agent and test ids while naming no platform, so the next command
+ * resolves to Egma Cloud and sends them there. `settleBinding` reads a binding
+ * with no instance as "this origin, and never anywhere else", which keeps the
+ * whole of that promise; what it gives up is only the ability to notice that a
+ * *different* egma has since been served at the same address.
+ */
+export function bindingFor(access: PlatformAccess): PlatformBinding {
+  return {
+    origin: normalizePlatformOrigin(access.url),
+    instance: access.identity?.instance ?? null,
+  };
 }

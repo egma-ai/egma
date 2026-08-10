@@ -19,8 +19,26 @@ import type { RouteGroup } from "./server.ts";
 export type PlatformIdentityControls = {
   /** What this fixture currently calls itself. */
   readonly instanceId: string;
+  /**
+   * The address this fixture gives out as its own — for its identity, for the
+   * approval address a login is sent to, and for a run's results address. One
+   * base address behind all three, exactly as a real deployment has one
+   * `EGMA_BASE_URL` behind all three.
+   */
+  readonly origin: string;
   /** Answer as a different egma from now on, as a replacement would. */
   becomeAnother(): string;
+  /**
+   * Answer with an address of its own that is not the one it was reached at —
+   * a deployment whose configured base address is another name for the same
+   * server, which is what `EGMA_BASE_URL` is on nearly every self-host.
+   */
+  saysItIsAt(elsewhere: string): void;
+  /**
+   * Stop answering who it is at all, as a deployment older than this endpoint
+   * does. Everything else it serves goes on working.
+   */
+  staysQuiet(): void;
 };
 
 export function platformRoutes(origin: () => string): {
@@ -28,14 +46,25 @@ export function platformRoutes(origin: () => string): {
   readonly controls: PlatformIdentityControls;
 } {
   let instanceId = newId("ins");
+  let saidOrigin: string | null = null;
+  let quiet = false;
 
   const controls: PlatformIdentityControls = {
     get instanceId() {
       return instanceId;
     },
+    get origin() {
+      return saidOrigin ?? origin();
+    },
     becomeAnother() {
       instanceId = newId("ins");
       return instanceId;
+    },
+    saysItIsAt(elsewhere) {
+      saidOrigin = elsewhere;
+    },
+    staysQuiet() {
+      quiet = true;
     },
   };
 
@@ -47,10 +76,16 @@ export function platformRoutes(origin: () => string): {
         {
           method: "GET",
           path: "/api/platform",
-          handle: () => ({
-            status: 200,
-            body: { instance_id: instanceId, origin: origin() },
-          }),
+          handle: () =>
+            quiet
+              ? {
+                  status: 404,
+                  body: { error: "not_found", message: "nothing serves /api/platform" },
+                }
+              : {
+                  status: 200,
+                  body: { instance_id: instanceId, origin: saidOrigin ?? origin() },
+                },
         },
       ],
     },

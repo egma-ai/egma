@@ -30,6 +30,10 @@ export const FOLDER_EXIT = {
   interrupted: 130,
 } as const;
 
+// And two the platform check answers before any of these verbs runs: 4 when
+// the egma this repository is bound to did not answer, and
+// `BOUND_ELSEWHERE_EXIT` when the address in hand is a different egma.
+
 /** What every one of these verbs is handed. */
 export type FolderCommandOptions = {
   readonly access: PlatformAccess;

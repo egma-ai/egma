@@ -42,11 +42,12 @@ import {
   updateConfig,
   type FolderPaths,
   type FolderTest,
+  type PlatformBinding,
 } from "../folder/egma-folder.ts";
 import { driveOneTask } from "../acp/drive.ts";
 import type { DrivenAgentLaunch } from "../acp/registry.ts";
 import type { Registered } from "../platform/agents.ts";
-import { bindingFor, type PlatformIdentity } from "../platform/binding.ts";
+import { bindRepository } from "../platform/binding.ts";
 import type { SignedIn } from "../platform/signed-in.ts";
 import type { RetellConfig } from "../retell/client.ts";
 import { pushTests } from "../sync/push.ts";
@@ -110,10 +111,10 @@ export type GenerateStepOptions = {
   /** What the find-the-agent step reported. */
   readonly facts: Facts;
   /**
-   * Who the platform said it is, so a folder made here is born naming the egma
-   * that owns the ids about to be written into it.
+   * The egma that owns the ids about to be written here, so a folder made in
+   * this step is born naming it.
    */
-  readonly identity?: PlatformIdentity | null;
+  readonly binding?: PlatformBinding | null;
   /** How many tests a first suite holds. The default when it is left out. */
   readonly howMany?: number;
 };
@@ -334,19 +335,16 @@ async function folderFor(options: GenerateStepOptions): Promise<FolderPaths> {
     name: options.registered.connection.name,
     id: options.registered.connection.id,
   };
-  const identity = options.identity ?? null;
-  const platform = identity === null ? null : bindingFor(identity);
-
   const folder = await createEgmaFolder({
     repository: options.cwd,
-    config: { platform, agent, connection, suite: { name: DEFAULT_SUITE_NAME, id: null } },
+    config: { platform: null, agent, connection, suite: { name: DEFAULT_SUITE_NAME, id: null } },
   });
-  if (!folder.created) {
-    await updateConfig(folder.paths.config, {
-      agent,
-      connection,
-      ...(folder.config.platform === null && platform !== null ? { platform } : {}),
-    });
+  if (!folder.created) await updateConfig(folder.paths.config, { agent, connection });
+
+  // One writer for a binding, wherever the folder came from: it writes when the
+  // file names no platform yet and leaves a file that already names one alone.
+  if (options.binding !== undefined && options.binding !== null) {
+    await bindRepository(options.cwd, options.binding);
   }
   return folder.paths;
 }

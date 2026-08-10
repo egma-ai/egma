@@ -100,7 +100,8 @@ uses it and nothing else: if that instance is down, the command stops and says
 so rather than quietly asking Egma Cloud about ids only your instance has, and
 an `--url` pointing at a *different* egma is refused for the same reason. Moving
 a repository from one instance to another is not supported yet — change the file
-by hand if you have to.
+by hand if you have to. `egma login` is never refused this way: a key belongs to
+your machine, not to the folder you are standing in.
 
 **Where it stops today, said plainly.** The run is created and followed live,
 and no verdict arrives: nothing claims a simulation yet, so the run stays

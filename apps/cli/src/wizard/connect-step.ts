@@ -26,13 +26,13 @@ import {
 import { DRIFT_LINE } from "../retell/prompt-drift.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
 import type { ExitReport } from "./exit-line.ts";
-import type { PlatformAccess } from "./login-step.ts";
+import type { WizardPlatform } from "./login-step.ts";
 import { ACTION_MARK, DETAIL_MARK } from "./status.ts";
 import { stopReport, untilAborted } from "./stop.ts";
 
 export type ConnectStepOptions = {
   readonly ui: WizardUI;
-  readonly platform: PlatformAccess;
+  readonly platform: WizardPlatform;
   /** The folder the repository's prompt is looked for in. */
   readonly cwd: string;
   /** Where the find-the-agent step said the prompts live. */

@@ -444,6 +444,12 @@ describe("which egma a command talks to", () => {
       expect(normalizePlatformOrigin(written)).toBe("http://egma.example");
     }
     expect(normalizePlatformOrigin("https://egma.example:443/")).toBe("https://egma.example");
+    // A name and a password written into an address are dropped rather than
+    // carried: egma never sends them, and two addresses that differ only by
+    // who typed a password into them are one platform.
+    expect(normalizePlatformOrigin("https://ada:hunter2@egma.example")).toBe(
+      "https://egma.example",
+    );
     // A port that is not the scheme's own, and a path, are both differences
     // that make a different platform.
     expect(normalizePlatformOrigin("http://egma.example:3101/")).toBe("http://egma.example:3101");

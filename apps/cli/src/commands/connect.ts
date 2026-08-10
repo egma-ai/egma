@@ -53,6 +53,11 @@ export const CONNECT_EXIT = {
   interrupted: 130,
 } as const;
 
+// Two more reach a caller and neither is decided here: the platform check
+// every command passes through first answers 4 when the egma this repository
+// is bound to did not answer, and `BOUND_ELSEWHERE_EXIT` when the address in
+// hand is a different egma.
+
 /** The environment variables the key may arrive in, in the order they are read. */
 export const KEY_VARIABLES = ["EGMA_RETELL_API_KEY", "RETELL_API_KEY"] as const;
 
