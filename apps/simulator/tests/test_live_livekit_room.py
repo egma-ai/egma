@@ -387,8 +387,8 @@ async def test_the_simulator_holds_a_real_conversation_in_a_real_room(
     # not to be.
     #
     # Ends rather than starts, and that is the claim changing rather than
-    # its spelling: a voice turn's span opens backwards from the moment the
-    # turn was observed, so two turns may legally overlap. That overlap is
+    # its spelling: a voice turn's span carries the two positions its audio
+    # really ran between, so two turns may legally overlap. That overlap is
     # barge-in, and it is a fact about the conversation rather than a fault
     # in the record.
     stamped = [int(span["endTimeUnixNano"]) for span in timed]

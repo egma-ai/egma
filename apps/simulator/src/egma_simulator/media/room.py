@@ -366,15 +366,15 @@ async def delete_room(
     dispatched worker, the persona's own connection — so it is done on
     every path out. A room that was never created, or a server that
     cannot be reached to be told, has nothing left to be told; that is
-    logged rather than raised, because a refusal here would eat the walk's
-    own answer.
+    logged rather than raised, because a refusal here would eat the
+    conductor's own answer.
     """
     from livekit import api
 
     # Built inside the guard, not before it: a client that cannot even be
     # constructed — a URL nothing can parse — must not turn teardown into
-    # a raise, because whatever raises here replaces the walk's own answer
-    # with a complaint about tidying up.
+    # a raise, because whatever raises here replaces the conductor's own
+    # answer with a complaint about tidying up.
     lkapi = None
     try:
         lkapi = api.LiveKitAPI(url, api_key, api_secret)

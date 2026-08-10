@@ -14,31 +14,34 @@ a time because both directions of it are open at once.
 from __future__ import annotations
 
 import pytest
+from conftest import carry, hear
 
+from egma_simulator.conductor import LINE_SLICE_SAMPLES
 from egma_simulator.plugs import (
     AgentReply,
     DuplexLine,
     PlugError,
     plug_for,
 )
+from egma_simulator.plugs.loopback import FALLBACK_REPLY as SPOKEN_FALLBACK
 from egma_simulator.plugs.loopback import (
-    CALLER_FINISHED_SECONDS,
+    PERSONA_FINISHED_SECONDS,
     SUPPORTED_BANDS_HZ,
     LoopbackCounterpart,
     negotiated_band,
 )
-from egma_simulator.plugs.loopback import FALLBACK_REPLY as SPOKEN_FALLBACK
 from egma_simulator.plugs.scripted import FALLBACK_REPLY, ScriptedCounterpart
 from egma_simulator.speech import (
-    SAMPLES_PER_BYTE,
     decode_speech,
     encode_speech,
     leading_silence_seconds,
     silence,
 )
 
-SLICE_SAMPLES = SAMPLES_PER_BYTE
-"""One slice of the line, the same one the conductor drives it with."""
+# The line is driven at the width the conductor really drives it at,
+# imported rather than re-derived: a slice that stopped being one encoded
+# byte would leave these tests passing against a width production never
+# uses.
 
 
 def scripted(config: dict, *, modality: str = "chat") -> ScriptedCounterpart:
@@ -47,32 +50,6 @@ def scripted(config: dict, *, modality: str = "chat") -> ScriptedCounterpart:
 
 def loopback(config: dict, *, modality: str = "voice") -> LoopbackCounterpart:
     return LoopbackCounterpart(modality=modality, config=config, credentials=None)
-
-
-async def carry(
-    line: LoopbackCounterpart, outgoing: bytes = b"", *, slices: int = 1
-) -> bytes:
-    """Drive the line the way the conductor drives it, and keep what came
-    back: the same number of samples each way, every slice, quiet
-    included."""
-    width = SLICE_SAMPLES * 2
-    said = bytearray(outgoing)
-    said += bytes(max(0, slices * width - len(said)))
-    heard = bytearray()
-    for offset in range(0, len(said), width):
-        heard += await line.exchange(bytes(said[offset : offset + width]))
-    return bytes(heard)
-
-
-async def hear(line: LoopbackCounterpart, said: str = "", *, seconds: float = 3.0):
-    """What the far end says back over one caller turn and the quiet after
-    it — read as words, which is all any test here cares about."""
-    band = line.sample_rate_hz
-    spoken = encode_speech(said, band) if said else b""
-    quiet = round(seconds * band / SLICE_SAMPLES)
-    heard = await carry(line, spoken)
-    heard += await carry(line, slices=quiet)
-    return decode_speech(heard, band)
 
 
 def test_the_registry_knows_the_two_plugs_and_nothing_imaginary():
@@ -198,15 +175,15 @@ async def test_the_loopback_counterpart_can_end_the_exchange():
     assert silent.far_end_left
 
 
-async def test_the_counterpart_hears_the_caller_stop_by_listening():
+async def test_the_counterpart_hears_the_persona_stop_by_listening():
     """Nothing tells it where a turn ended, because nothing tells a real
     platform either: it answers once the line has been quiet long enough
-    for the caller to have finished."""
+    for the persona to have finished."""
     line = loopback({"replies": ["Yes."]})
     await line.open()
     await carry(line, encode_speech("A question.", 16000))
 
-    nearly = round(CALLER_FINISHED_SECONDS * 16000 / SLICE_SAMPLES) - 1
+    nearly = round(PERSONA_FINISHED_SECONDS * 16000 / LINE_SLICE_SAMPLES) - 1
     assert decode_speech(await carry(line, slices=nearly), 16000) == ""
     assert decode_speech(await carry(line, slices=200), 16000) == "Yes."
 
@@ -219,11 +196,11 @@ async def test_the_quiet_before_an_answer_is_spent_on_the_line():
     line = loopback({"replies": ["Yes."], "answer_delay_seconds": 0.5})
     await line.open()
     await carry(line, encode_speech("A question.", 16000))
-    heard = await carry(line, slices=round(3.0 * 16000 / SLICE_SAMPLES))
+    heard = await carry(line, slices=round(3.0 * 16000 / LINE_SLICE_SAMPLES))
 
     asked_for = round(0.5 * 16000)
     quiet = round(leading_silence_seconds(heard, 16000) * 16000)
-    assert asked_for <= quiet < asked_for + SLICE_SAMPLES
+    assert asked_for <= quiet < asked_for + LINE_SLICE_SAMPLES
     assert decode_speech(heard, 16000) == "Yes."
 
 
@@ -232,11 +209,11 @@ async def test_a_greeting_is_the_first_thing_on_the_line():
     conversation the moment the line does."""
     line = loopback({"greeting": "Front desk."})
     await line.open()
-    heard = await carry(line, slices=round(3.0 * 16000 / SLICE_SAMPLES))
+    heard = await carry(line, slices=round(3.0 * 16000 / LINE_SLICE_SAMPLES))
     assert heard.startswith(encode_speech("Front desk.", 16000))
 
 
-async def test_a_counterpart_that_echoes_hands_back_the_caller_own_words():
+async def test_a_counterpart_that_echoes_hands_back_the_personas_own_words():
     line = loopback({"echoes_what_it_hears": True})
     await line.open()
     assert await hear(line, "Say that again.") == "Say that again."
@@ -248,7 +225,7 @@ async def test_the_line_is_quiet_when_nobody_is_speaking():
     line = loopback({"replies": ["Noted."]})
     await line.open()
     assert await carry(line, slices=4) == silence(
-        4 * SLICE_SAMPLES / 16000, 16000
+        4 * LINE_SLICE_SAMPLES / 16000, 16000
     )
 
 

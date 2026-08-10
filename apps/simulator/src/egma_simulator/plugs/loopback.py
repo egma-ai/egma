@@ -10,22 +10,22 @@ know, exchanged as sound instead of text.
 It is not a shortcut around the seam. It implements the same full-duplex
 line surface a phone or a browser transport will, which is what makes the
 acceptance suite's voice simulations representative of the ones that
-follow: it is driven one slice of audio at a time, it hears the caller
-only as samples, and it decides for itself when the caller has stopped.
+follow: it is driven one slice of audio at a time, it hears the persona
+only as samples, and it decides for itself when the persona has stopped.
 
 Its config keys, like every plug's, are its own:
 
 - ``greeting`` (string, optional) — spoken by the agent the moment the
   exchange opens. Absent: the persona speaks first.
 - ``replies`` (list of strings, default empty) — the agent's answers, in
-  order, one per stretch of caller speech.
+  order, one per stretch of persona speech.
 - ``ends_after_replies`` (bool, default false) — when true, the last
   scripted reply ends the exchange (with no replies at all, the exchange
-  ends silently once the caller has spoken once). When false, a spent
+  ends silently once the persona has spoken once). When false, a spent
   script falls back to a fixed holding line forever.
 - ``echoes_what_it_hears`` (bool, default false) — the telephone company's
   own echo test line: instead of reading a script, the counterpart answers
-  with the caller's own audio. It replaces the script, so it cannot be
+  with the persona's own audio. It replaces the script, so it cannot be
   combined with ``replies`` or ``ends_after_replies``. What it buys is a
   whole exchange whose agent side is real speech rather than the scripted
   codec — the only way, short of dialling somebody, to hear real speech
@@ -43,11 +43,11 @@ Its config keys, like every plug's, are its own:
 - ``provider_reference`` (string, optional) — offered as the platform's
   own identifier for the exchange, the way a real plug offers a leg id.
 
-## How it decides the caller has stopped
+## How it decides the persona has stopped
 
-The same way a real far end does: by listening. Every slice the caller
+The same way a real far end does: by listening. Every slice the persona
 sends is either speech or quiet — :func:`egma_simulator.speech.carries_speech`
-answers that from the samples — and once the caller has spoken and then
+answers that from the samples — and once the persona has spoken and then
 been quiet long enough, the counterpart says its next line. Nothing tells
 it where a turn ended, because nothing tells a real platform either.
 """
@@ -67,8 +67,8 @@ from . import PlugError
 FALLBACK_REPLY = "Is there anything else I can help you with?"
 """What the agent says once its script is spent but the exchange holds."""
 
-CALLER_FINISHED_SECONDS = 0.2
-"""How much quiet the counterpart hears before it takes the caller's turn
+PERSONA_FINISHED_SECONDS = 0.2
+"""How much quiet the counterpart hears before it takes the persona's turn
 to be over.
 
 Every far end has a number like this, because hearing somebody stop is the
@@ -183,7 +183,7 @@ class LoopbackCounterpart:
 
         self._delivered = 0
         self._saying = b""
-        self._heard_the_caller = False
+        self._heard_the_persona = False
         self._quiet_samples = 0
         self._echoed_back = bytearray()
         self._ends_when_said = False
@@ -211,7 +211,7 @@ class LoopbackCounterpart:
             )
 
     async def exchange(self, outgoing: bytes) -> bytes:
-        """One slice of the line: say what is due, and hear the caller.
+        """One slice of the line: say what is due, and hear the persona.
 
         Answering is decided on everything heard *before* this slice,
         because that is all a far end can have heard by the time it puts
@@ -231,9 +231,9 @@ class LoopbackCounterpart:
     # -- Listening ----------------------------------------------------------
 
     def _hear(self, outgoing: bytes) -> None:
-        """What the far end makes of the slice the caller just sent."""
+        """What the far end makes of the slice the persona just sent."""
         if carries_speech(outgoing):
-            self._heard_the_caller = True
+            self._heard_the_persona = True
             self._quiet_samples = 0
             if self._echoes:
                 self._echoed_back += outgoing
@@ -241,8 +241,8 @@ class LoopbackCounterpart:
         self._quiet_samples += len(outgoing) // SAMPLE_WIDTH_BYTES
 
     def _due_to_speak(self) -> bool:
-        """Whether the caller has finished and the answer delay is spent."""
-        if self._left or self._saying or not self._heard_the_caller:
+        """Whether the persona has finished and the answer delay is spent."""
+        if self._left or self._saying or not self._heard_the_persona:
             return False
         return self._quiet_samples >= self._quiet_before_answering()
 
@@ -250,16 +250,16 @@ class LoopbackCounterpart:
         """How many samples of quiet the counterpart waits out, in all.
 
         The configured delay, and never less than what it takes to hear a
-        caller stop — see :data:`CALLER_FINISHED_SECONDS`.
+        persona stop — see :data:`PERSONA_FINISHED_SECONDS`.
         """
         return round(
-            max(self._answer_delay_seconds, CALLER_FINISHED_SECONDS) * self._band_hz
+            max(self._answer_delay_seconds, PERSONA_FINISHED_SECONDS) * self._band_hz
         )
 
     # -- Speaking -----------------------------------------------------------
 
     def _say_the_next_thing(self) -> None:
-        self._heard_the_caller = False
+        self._heard_the_persona = False
 
         if self._echoes:
             # Whatever arrived, sent straight back — after the same quiet

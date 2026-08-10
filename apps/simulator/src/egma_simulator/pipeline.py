@@ -74,8 +74,8 @@ def assemble(
     ``speech`` is where a deployment's choice of real providers enters,
     and the only place: the spec says what the simulation is, the
     configuration says what carries it. Left alone it is the scripted
-    pair, so a caller with nothing to say about providers gets exactly
-    the pipeline it always got.
+    pair, so a deployment with nothing to say about providers gets
+    exactly the pipeline it always got.
     """
     factory = plug_for(spec.connection_type)
     if factory is None:

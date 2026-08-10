@@ -18,6 +18,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from conftest import (
@@ -33,6 +34,7 @@ from egma_simulator import conductor as conductor_module
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.conductor import (
     LINE_SLICE_SAMPLES,
+    AudioClock,
     ConductParameters,
     VoiceConductor,
 )
@@ -522,7 +524,7 @@ async def test_an_exchange_the_agent_ends_still_leaves_a_recording(
 
 
 async def test_the_persona_opens_when_the_far_end_does_not(tmp_path: Path):
-    """No greeting is not a broken call: a caller who hears nothing speaks
+    """No greeting is not a broken call: a persona who hears nothing speaks
     first, after listening for as long as the parameters say.
 
     How long it listened is spent on the line rather than slept through,
@@ -567,7 +569,7 @@ async def test_the_turn_limit_ends_the_simulation_where_it_says(tmp_path: Path):
 
 
 class _StopsMidUtterance:
-    """A line that puts a hand on the controls while the caller is talking.
+    """A line that puts a hand on the controls while the persona is talking.
 
     Written against the duplex seam rather than around it, so what it
     stops is a real utterance really in flight: the counterpart behind it
@@ -674,6 +676,292 @@ async def test_the_duration_limit_ends_the_simulation_honestly(tmp_path: Path):
     assert observed.conducted.status == "completed"
     assert observed.conducted.ending == "limit_reached"
     assert observed.conducted.reason == "the duration limit (90s) tripped"
+
+
+async def test_a_concluding_turn_that_fills_the_budget_still_concludes(
+    tmp_path: Path,
+):
+    """Chat and voice end the same scenario the same way at the same limit.
+
+    The walk checks its budget *before* letting the persona move, so a
+    concluding turn it allowed can never also be the turn that trips the
+    limit. Reading the count afterwards on voice would report
+    ``limit_reached`` for the very turn that concluded the scenario — the
+    same run, two endings, depending only on the modality.
+    """
+    observed = await voice_simulation(
+        tmp_path,
+        scenario="One point.",
+        greeting="Front desk, hello.",
+        replies=["Noted."],
+        max_turns=4,
+    )
+    assert [text for _speaker, text in observed.turns][-1] == GOODBYE
+    assert len(observed.turns) == 4
+    assert observed.conducted.ending == "persona_concluded"
+    assert observed.conducted.reason == "the persona concluded the scenario"
+
+
+# -- Overlap: what the record refuses to invent -------------------------------
+
+
+class _TalksOverThePersona:
+    """A line whose far end starts speaking while the persona still is.
+
+    Written against the duplex seam rather than around it, the way
+    :class:`_StopsMidUtterance` is: nothing is scripted into a counterpart
+    or a media backend, because overlap *behaviour* belongs to a later
+    effort. What is under test here is only what the record does when the
+    two speakers' audio crosses — which the shipped counterparts can never
+    show, since both of them wait for the persona to stop before speaking.
+
+    It says one thing, beginning on the slice named by ``after_slices`` of
+    persona speech, and then optionally goes — which is how a test can
+    reach the far end finishing its turn while the persona is still
+    talking without the exchange running on afterwards.
+    """
+
+    def __init__(
+        self,
+        *,
+        band_hz: int,
+        after_slices: int,
+        saying: str,
+        leaves_when_done: bool = False,
+    ) -> None:
+        self._band_hz = band_hz
+        self._after = after_slices
+        self._saying = saying
+        self._leaves = leaves_when_done
+        self._heard_speaking = 0
+        self._to_say = bytearray()
+        self._said_it_all = False
+        self._left = False
+
+    @property
+    def provider_reference(self) -> str | None:
+        return None
+
+    @property
+    def sample_rate_hz(self) -> int:
+        return self._band_hz
+
+    @property
+    def far_end_left(self) -> bool:
+        return self._left
+
+    async def open(self) -> None:
+        return None
+
+    async def exchange(self, outgoing: bytes) -> bytes:
+        if carries_speech(outgoing):
+            self._heard_speaking += 1
+            if self._heard_speaking == self._after:
+                self._to_say = bytearray(
+                    encode_speech(self._saying, self._band_hz)
+                )
+        elif self._said_it_all and self._leaves:
+            # Said its piece and heard the persona stop: on a phone that is
+            # the hang-up, and here it is the same thing.
+            self._left = True
+        if not self._to_say:
+            return bytes(len(outgoing))
+        spoken = bytes(self._to_say[: len(outgoing)])
+        del self._to_say[: len(outgoing)]
+        self._said_it_all = not self._to_say
+        return spoken.ljust(len(outgoing), b"\x00")
+
+    async def close(self) -> None:
+        return None
+
+
+async def talked_over(
+    tmp_path: Path, *, parameters: ConductParameters, **line: object
+) -> Observed:
+    """One simulation whose two speakers' audio really crosses."""
+    spec = spec_for(scenario="First point.")
+    conductor = VoiceConductor(
+        line=_TalksOverThePersona(band_hz=16000, **line),
+        voice=voice_from_traits(spec.persona_traits),
+        blobs=FilesystemBlobStore(tmp_path),
+        recording_key=f"{spec.simulation_id}/dual-channel.wav",
+        parameters=parameters,
+    )
+    return await observe(
+        conductor, Assembled(conductor=conductor), spec, controls=WalkControls()
+    )
+
+
+def crossing(observed: Observed) -> tuple[tuple, tuple]:
+    """The persona's spoken turn and the agent's, which have to cross."""
+    persona = next(
+        span for span in observed.spans if span[0] == "human" and span[1] != GOODBYE
+    )
+    agent = next(span for span in observed.spans if span[0] == "agent")
+    return persona, agent
+
+
+VOIDED = ("time_to_first_word", "first_response_latency", "turn_response_latency")
+"""The three measures an overlap leaves nothing to measure.
+
+Each is a stretch of quiet before the agent's first word, and there was no
+quiet: somebody was speaking through all of it. A span whose duration *is*
+the number cannot say "not measured here" — so it is not emitted, which is
+the grading precedent for a sample the conversation voided.
+"""
+
+
+async def test_an_agent_that_talks_over_the_persona_voids_the_latencies(
+    tmp_path: Path,
+):
+    """The persona finishes; the agent had already begun over the top of it.
+
+    The agent's first word lands *before* the persona's last, so the quiet
+    between them is negative. Clamping that to zero would put a perfect
+    latency on the record for an answer nobody waited for, and a p90
+    threshold would be improved by every barge-in it saw.
+    """
+    observed = await talked_over(
+        tmp_path,
+        parameters=ConductParameters(agent_opening_seconds=0.2),
+        after_slices=3,
+        saying="Right, go on.",
+    )
+
+    persona, agent = crossing(observed)
+    assert agent[2] < persona[3], "the two speakers did not actually overlap"
+
+    for measure in VOIDED:
+        assert observed.named.count(measure) == 0, measure
+    # What was measured is still measured: both durations, and both turns
+    # with the two ends the audio really ran between.
+    assert observed.named.count("agent_speech_duration") == 1
+    assert observed.named.count("persona_speech_duration") == 1
+    assert observed.turns == [
+        ("human", "First point."),
+        ("agent", "Right, go on."),
+        ("human", GOODBYE),
+    ]
+    assert observed.conducted.ending == "persona_concluded"
+
+
+async def test_an_agent_turn_that_closes_mid_utterance_voids_the_latencies(
+    tmp_path: Path,
+):
+    """The other way round: the agent's turn is over and the persona is
+    still speaking, so the persona has never yet stopped for anything to
+    be measured from.
+
+    Anchoring to "the persona has said nothing" used to fall back to the
+    moment the line opened, which invents a quiet out of the whole opening
+    of the simulation. There is no quiet to name here at all.
+    """
+    observed = await talked_over(
+        tmp_path,
+        parameters=ConductParameters(
+            agent_opening_seconds=0.2,
+            # The persona is patient, so the turn it is handed while still
+            # speaking is never begun before the far end goes. Only the
+            # waiting changes; what is given up on is unchanged.
+            persona_pause_seconds=4.0,
+        ),
+        after_slices=3,
+        saying="Yes.",
+        leaves_when_done=True,
+    )
+
+    persona, agent = crossing(observed)
+    assert agent[2] < persona[3], "the two speakers did not actually overlap"
+    # The agent's turn closed first, which is what makes this the other case.
+    assert observed.turns[0] == ("agent", "Yes.")
+
+    for measure in VOIDED:
+        assert observed.named.count(measure) == 0, measure
+    assert observed.named.count("agent_speech_duration") == 1
+    assert observed.named.count("persona_speech_duration") == 1
+    assert observed.conducted.ending == "agent_ended"
+
+
+async def test_a_turn_made_of_several_stretches_is_anchored_across_all_of_them(
+    tmp_path: Path,
+):
+    """A speaker who pauses mid-thought is still taking one turn.
+
+    The turn model keeps a turn open across a pause it judges incomplete —
+    which is the whole reason a turn model exists rather than a silence
+    timer — so one turn can hold several stretches of speech. Anchored to
+    the first stretch alone, the span would carry the whole turn's words
+    and end somewhere in the middle of them, and the speech duration would
+    measure only the opening clause.
+
+    Driven through the conductor's own bookkeeping because the scripted
+    codec cannot produce it: every scripted stretch is read as a complete
+    turn, so only a real voice on a live leg reaches this.
+    """
+    conductor = VoiceConductor(
+        line=LoopbackCounterpart(modality="voice", config={}, credentials=None),
+        voice=voice_from_traits({}),
+        blobs=FilesystemBlobStore(tmp_path),
+        recording_key="sim-stretches/dual-channel.wav",
+    )
+    conductor._clock = AudioClock(sample_rate_hz=16000, opened_unix_nano=0)
+    conductor._ear = SimpleNamespace(utterances=[(2400, 4800), (7200, 12000)])
+
+    spans: list[tuple[str, str, int, int]] = []
+    measures: list[tuple[str, int, int]] = []
+
+    async def on_utterance(speaker, text, began, ended):
+        spans.append((speaker, text, began, ended))
+
+    async def on_measured(measure, began, ended):
+        measures.append((measure, began, ended))
+
+    conductor._on_utterance = on_utterance
+    conductor._on_measured = on_measured
+    conductor._max_turns = 60
+
+    await conductor.the_agent_finished("Thursday — sorry, Friday.", True)
+    await conductor.close()
+
+    def samples(instant: int) -> int:
+        return round(instant * 16000 / 1_000_000_000)
+
+    # One turn, from its first word to its last, whatever it did between.
+    assert len(spans) == 1
+    _speaker, _text, began, ended = spans[0]
+    assert (samples(began), samples(ended)) == (2400, 12000)
+
+    spoken = next(
+        (b, e) for measure, b, e in measures if measure == "agent_speech_duration"
+    )
+    assert (samples(spoken[0]), samples(spoken[1])) == (2400, 12000)
+    # And the quiet before its first word is measured to that first word.
+    quiet = next(
+        (b, e) for measure, b, e in measures if measure == "time_to_first_word"
+    )
+    assert (samples(quiet[0]), samples(quiet[1])) == (0, 2400)
+
+
+async def test_a_measure_is_never_taken_over_a_backwards_interval(
+    tmp_path: Path,
+):
+    """The floor under the two above, said once where it cannot be missed.
+
+    A clamp would turn every one of these into a zero — a perfect score —
+    so an interval that runs backwards is refused instead. Nothing may be
+    measured from a moment it did not happen after.
+    """
+    conductor = VoiceConductor(
+        line=LoopbackCounterpart(
+            modality="voice", config={}, credentials=None
+        ),
+        voice=voice_from_traits({}),
+        blobs=FilesystemBlobStore(tmp_path),
+        recording_key="sim-backwards/dual-channel.wav",
+    )
+    conductor._clock = AudioClock(sample_rate_hz=16000, opened_unix_nano=0)
+    with pytest.raises(ValueError, match="backwards"):
+        await conductor._measure("time_to_first_word", 4800, 2400)
 
 
 # -- What the legs are, and whose voice --------------------------------------
@@ -973,13 +1261,6 @@ async def test_a_brain_that_refuses_a_turn_fails_in_its_own_words(
     swallows what a processor raises into a log line. A model refusing a
     key is exactly the diagnosis a reader of the record needs, so it
     travels back out whole rather than becoming a duration limit."""
-
-    class RefusingModel:
-        async def complete(self, *_args: object, **_kwargs: object) -> str:
-            raise RuntimeError("model refused: unknown api key")
-
-        async def close(self) -> None:
-            return None
 
     def refusing_persona(*_args: object, **_kwargs: object):
         raise RuntimeError("model refused: unknown api key")
