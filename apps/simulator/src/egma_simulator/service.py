@@ -2,8 +2,9 @@
 
 One long-poll claim loop asks the control plane for exactly as much work as
 the executor has room for. Each claimed spec becomes one running simulation
-— a task walking the pipe, and a task beating every few seconds — and a
-cancel directive arriving on a beat's answer stops the walk at that beat.
+— a task conducting the exchange, and a task beating every few seconds —
+and a cancel directive arriving on a beat's answer stops the conducting at
+that beat.
 Every arrow points out: the simulator is never dialled into.
 
 A running simulation writes two records of itself and this is where they
@@ -210,7 +211,7 @@ class RunningSimulation:
         self._spans.opened()
         try:
             # The model first, because the pipeline below holds things that
-            # have to be given back and only the walk gives them back.
+            # have to be given back and only conducting gives them back.
             model = build_model_client(self._config, self._spec)
             # One pipeline per simulation, built from its own spec: the
             # plug that knows the platform, and — for voice — the speech
@@ -355,11 +356,11 @@ class RunningSimulation:
         Finer would be a request per span; coarser would be a transcript
         that only exists once it is over.
 
-        The walk says when an answer is whole rather than this file
-        inferring it from a turn arriving, because an answer that made a
-        tool call and said nothing produces no turn — and it is precisely
-        that answer whose evidence must not sit in a buffer waiting for
-        the agent to speak again.
+        Whichever conductor ran says when an answer is whole rather than
+        this file inferring it from a turn arriving, because an answer that
+        made a tool call and said nothing produces no turn — and it is
+        precisely that answer whose evidence must not sit in a buffer
+        waiting for the agent to speak again.
         """
         self._spans.flush()
 
@@ -384,8 +385,9 @@ class RunningSimulation:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                # Ending this loop would leave the walk running with no way
-                # to ever hear a cancel directive. Nothing is worth that.
+                # Ending this loop would leave the simulation running with
+                # no way to ever hear a cancel directive. Nothing is worth
+                # that.
                 logger.exception(
                     "heartbeat for %s hit an unexpected fault", self.simulation_id
                 )

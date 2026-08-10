@@ -1,9 +1,9 @@
 """The conversation, authored as OpenTelemetry spans.
 
-One ``SpanEmitter`` serves one simulation. Everything the walk observes —
-each turn with who said it and what was said, each tool call the platform
-reported, each measurement — becomes a span, stamped when it happened and
-handed to a flush as an ordinary OTLP export document. On the wire that
+One ``SpanEmitter`` serves one simulation. Everything a conductor
+observes — each turn with who said it and what was said, each tool call
+the platform reported, each measurement — becomes a span, stamped when it
+happened and handed to a flush as an ordinary OTLP export document. On the wire that
 document is what any exporter would send, which is the whole point of
 speaking OTLP: a simulation arrives at the same ingest door a customer's
 agent posts to, and is the same shape at rest.
@@ -37,7 +37,7 @@ the number, so it is opened one measurement before the moment it was
 taken. A turn is opened for as long as it was spoken — one instant on
 chat, where a message has no duration, and ear to ear on voice. Two turns
 may cross in time: that is how barge-in is represented now that the
-persona is a full-duplex caller, and the shape always permitted it rather
+persona is full-duplex, and the shape always permitted it rather
 than being widened later.
 
 **Where a turn's two ends come from depends on who conducted it.** Chat's
@@ -219,7 +219,7 @@ class SpanEmitter:
         self._pending.append(span)
         return span
 
-    # -- What the walk observes ----------------------------------------------
+    # -- What a conductor observes ---------------------------------------------
 
     def opened(self) -> None:
         """The conversation began. Stamps the root's start and nothing else."""

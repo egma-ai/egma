@@ -124,7 +124,7 @@ async def test_the_plug_dials_converses_and_hangs_up():
 
 async def test_a_line_that_answers_and_says_nothing_carries_quiet():
     """A phone answered in silence is ordinary, and it is not a fault. The
-    line carries the quiet, because that is what the caller would hear —
+    line carries the quiet, because that is what the persona would hear —
     and how the conductor learns nobody is going to speak first."""
     plug = phone({"replies": ["Go on."]})
     await plug.open()
@@ -213,7 +213,7 @@ async def test_the_quiet_before_the_first_word_is_carried_as_quiet():
 
 async def test_the_quiet_before_an_answer_is_spent_on_the_line():
     """And the same on an answer, where the wait is spent listening to the
-    caller stop rather than queued in front of the words."""
+    persona stop rather than queued in front of the words."""
     plug = phone({"replies": ["Yes."], "answer_delay_seconds": 0.5})
     await plug.open()
     await carry(plug, encode_speech("A question.", TELEPHONY_BAND_HZ))
@@ -229,27 +229,27 @@ async def test_the_quiet_before_an_answer_is_spent_on_the_line():
 async def test_far_end_speech_arriving_while_the_persona_speaks_is_heard():
     """The drop is gone, and this is the test that says so.
 
-    The far end starts talking while the caller is still mid-sentence.
-    The line used to wait out the caller's own audio and throw away
+    The far end starts talking while the persona is still mid-sentence.
+    The line used to wait out the persona's own audio and throw away
     everything that arrived meanwhile, so an agent talking over the
     persona vanished from the record entirely. Now both directions cross
-    in the same slices: the far end's words come back while the caller's
+    in the same slices: the far end's words come back while the persona's
     are still going out, and the call carries on afterwards.
     """
     plug = phone({"greeting": "Talking over you now.", "replies": ["And on we go."]})
     await plug.open()
 
-    # One long stretch of caller speech, driven slice by slice, with the
+    # One long stretch of persona speech, driven slice by slice, with the
     # far end's greeting already on its way.
     said = encode_speech(
-        "A long sentence the caller is still in the middle of saying.",
+        "A long sentence the persona is still in the middle of saying.",
         TELEPHONY_BAND_HZ,
     )
     heard = await carry(plug, said)
 
     assert len(heard) == len(said), "the two directions left the same clock"
     assert decode_speech(heard, TELEPHONY_BAND_HZ) == "Talking over you now."
-    # And the caller really was still speaking when it arrived.
+    # And the persona really was still speaking when it arrived.
     assert carries_speech(said[-LINE_SLICE_SAMPLES * 2 :])
 
     # Conducted on, rather than merely survived: the call goes to its next
@@ -258,7 +258,7 @@ async def test_far_end_speech_arriving_while_the_persona_speaks_is_heard():
     await plug.close()
 
 
-async def test_a_session_neither_waits_out_the_caller_nor_forgets_the_far_end():
+async def test_a_session_neither_waits_out_the_persona_nor_forgets_the_far_end():
     """The same claim one layer down, on the seam that did the dropping.
 
     ``send`` used to wait out the audio's own length and then empty

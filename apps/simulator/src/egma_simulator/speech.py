@@ -397,9 +397,10 @@ class SpeechFault(RuntimeError):
     """A speech leg could not be built, or could not be made able to hear.
 
     Deliberately not a ``PlugError``: that word names a platform refusing,
-    and this is the persona's own mouth or ears. Either way the walk
-    reports a failed simulation, and the reason on the record is what
-    tells a reader which of the two happened.
+    and this is the persona's own mouth or ears. Either way the simulation
+    is reported failed, and the reason on the record is what tells a
+    reader which of the two happened. Voice only, and raised out of the
+    voice conductor: the walk has no speech legs to hear one from.
     """
 
 

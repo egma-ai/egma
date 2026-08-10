@@ -99,11 +99,12 @@ async def test_a_scripted_persona_converses_with_the_scripted_counterpart(
         ("human", GOODBYE),
     ]
 
-    # Timestamped, and in order: a turn span closes at the moment the turn
-    # was observed, and those moments never run backwards. Read at the
-    # close rather than the open, because a voice turn opens backwards
-    # from it by however long the audio ran — which is what lets two turns
-    # cross, and is exactly the shape barge-in will need.
+    # Timestamped, and in order: turns are recorded as they close, and
+    # those moments never run backwards. Read at the close rather than the
+    # open, because a voice turn's two ends are read off the audio and one
+    # turn may therefore *begin* before the turn ahead of it ended —
+    # which is what lets two of them cross, and is exactly the shape
+    # barge-in needs.
     observed = [
         int(record["span"]["endTimeUnixNano"])
         for record in spans_for(records, "sim-chat-001")
@@ -906,9 +907,9 @@ async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
         ("agent", "Done: Thursday at half past two."),
         ("human", GOODBYE),
     ]
-    # Read at the close: a voice turn opens backwards from the moment it
-    # was observed by however long the audio ran, so two of them may cross
-    # in time while the order they were heard in never does.
+    # Read at the close: a voice turn's two ends are read off the audio,
+    # so two of them may cross in time while the order they closed in
+    # never does.
     observed = [
         int(record["span"]["endTimeUnixNano"])
         for record in spans_for(records, "sim-phone-001")

@@ -19,9 +19,9 @@ over immediately. A twelve-second wait for a far end that never speaks
 therefore costs a real call twelve seconds and costs CI nothing, with no
 second code path anywhere.
 
-**How it decides the caller has stopped.** The same way a real far end
-does: by listening. Every slice the caller sends is either speech or
-quiet, and once the caller has spoken and then been quiet long enough,
+**How it decides the persona has stopped.** The same way a real far end
+does: by listening. Every slice the persona sends is either speech or
+quiet, and once the persona has spoken and then been quiet long enough,
 the script says its next line. Nothing tells it where a turn ended,
 because nothing tells a real bridge either.
 
@@ -32,13 +32,13 @@ phone connection's ``scripted`` block:
   picks up. Absent: it answers and says nothing, and the persona speaks
   first, the way a silent line really behaves.
 - ``replies`` (list of strings, default empty) — the far end's answers,
-  in order, one per stretch of caller speech. A spent script answers with
+  in order, one per stretch of persona speech. A spent script answers with
   quiet.
 - ``answer_delay_seconds`` (number ≥ 0, default 0) — how long the far end
   is quiet before each answer. Rendered into the call's own audio, where
   a live call carries it and where time-to-first-word is read from. It is
   a floor rather than an addition: a backend told to wait less than it
-  takes to hear a caller stop still waits that long, and one told to wait
+  takes to hear a persona stop still waits that long, and one told to wait
   longer waits exactly as long as it was told.
 - ``hangs_up_after_replies`` (bool, default false) — when true the far
   end leaves the call once its last reply has been carried, which is what
@@ -70,8 +70,8 @@ FRAME_SECONDS = 0.02
 a real call's frames arrive in. Quiet and speech never share a frame, so
 what is measured off the boundary between them is exact."""
 
-CALLER_FINISHED_SECONDS = 0.2
-"""How much quiet this bridge hears before it takes the caller's turn to
+PERSONA_FINISHED_SECONDS = 0.2
+"""How much quiet this bridge hears before it takes the persona's turn to
 be over.
 
 Every far end has a number like this, because hearing somebody stop is the
@@ -123,12 +123,12 @@ class ScriptedSession:
         self._left = False
         self._hang_up_when_drained = False
         self._speaking = bytearray()
-        self._heard_the_caller = False
+        self._heard_the_persona = False
         self._quiet_samples = 0
         self.heard: list[bytes] = []
-        """Every stretch of caller speech this call carried, in order —
+        """Every stretch of persona speech this call carried, in order —
         what a test asks when it wants the far end's side of the story.
-        A stretch closes when the caller has been quiet long enough to
+        A stretch closes when the persona has been quiet long enough to
         have finished, which is the only moment a far end could know."""
 
     @property
@@ -142,7 +142,7 @@ class ScriptedSession:
     def greet(self, words: str, *, then_hang_up: bool = False) -> None:
         """The first thing on the line: the quiet before it, then the words.
 
-        Nobody has spoken yet, so there is no caller to hear stop and the
+        Nobody has spoken yet, so there is no persona to hear stop and the
         quiet the far end takes before its first word is queued here
         rather than waited out.
         """
@@ -153,7 +153,7 @@ class ScriptedSession:
         """Queue one answer, starting now.
 
         No quiet in front of it: an answer is only ever queued once the
-        caller has been heard to stop, and that listening is where the
+        persona has been heard to stop, and that listening is where the
         whole of the wait was spent — see :meth:`_quiet_before_answering`.
         """
         self._queue(encode_speech(words, self._band_hz))
@@ -168,7 +168,7 @@ class ScriptedSession:
         self._left = True
 
     async def send(self, pcm: bytes) -> None:
-        """One slice of the caller's own voice, onto the line.
+        """One slice of the persona's own voice, onto the line.
 
         Answering is decided on everything heard *before* this slice,
         because that is all a far end can have heard by the time this one
@@ -176,7 +176,7 @@ class ScriptedSession:
         the bridge spends exactly the quiet it was told to spend, to the
         sample.
         """
-        self._answer_if_the_caller_has_finished()
+        self._answer_if_the_persona_has_finished()
         self._hear(pcm)
 
     async def receive(self, seconds: float) -> bytes | None:
@@ -195,22 +195,22 @@ class ScriptedSession:
     # -- Listening -----------------------------------------------------------
 
     def _hear(self, pcm: bytes) -> None:
-        """What the far end makes of the slice the caller just sent."""
+        """What the far end makes of the slice the persona just sent."""
         if carries_speech(pcm):
-            self._heard_the_caller = True
+            self._heard_the_persona = True
             self._quiet_samples = 0
             self._speaking += pcm
             return
         self._quiet_samples += len(pcm) // SAMPLE_WIDTH_BYTES
 
-    def _answer_if_the_caller_has_finished(self) -> None:
-        if self._left or self._pending or not self._heard_the_caller:
+    def _answer_if_the_persona_has_finished(self) -> None:
+        if self._left or self._pending or not self._heard_the_persona:
             return
         if self._quiet_samples < self._quiet_before_answering():
             return
         self.heard.append(bytes(self._speaking))
         self._speaking.clear()
-        self._heard_the_caller = False
+        self._heard_the_persona = False
         if self._answered_by is not None:
             self._answered_by()
 
@@ -218,10 +218,10 @@ class ScriptedSession:
         """How many samples of quiet the far end waits out, in all.
 
         The configured delay, and never less than what it takes to hear a
-        caller stop — see :data:`CALLER_FINISHED_SECONDS`.
+        persona stop — see :data:`PERSONA_FINISHED_SECONDS`.
         """
         return round(
-            max(self._delay_seconds, CALLER_FINISHED_SECONDS) * self._band_hz
+            max(self._delay_seconds, PERSONA_FINISHED_SECONDS) * self._band_hz
         )
 
     def _queue(self, pcm: bytes) -> None:
@@ -344,7 +344,7 @@ class ScriptedBackend:
             self._session.hang_up()
 
     def _answer_to(self) -> None:
-        """Queue the answer to one stretch of caller speech.
+        """Queue the answer to one stretch of persona speech.
 
         A spent script answers with quiet rather than with a holding line:
         a phone call that has run out of things to say is a call where

@@ -216,7 +216,7 @@ async def room_walk(
 
     Each measurement comes back as its name, the milliseconds its own span
     holds, and the instant it closed — which is where a voice measure's
-    number lives now that both ends are read off the audio. A caller that
+    number lives now that both ends are read off the audio. A test that
     wants a turn's two instants as well passes ``spans`` to be filled.
     """
     monkeypatch.setattr(livekit_plug, "LiveKitRoomBackend", stub.driver)

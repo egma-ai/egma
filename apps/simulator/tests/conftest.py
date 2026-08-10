@@ -605,7 +605,7 @@ async def carry(line, outgoing: bytes = b"", *, slices: int = 1) -> bytes:
 
 
 async def hear(line, said: str = "", *, seconds: float = 3.0) -> str:
-    """What the far end says back over one caller turn and the quiet after
+    """What the far end says back over one persona turn and the quiet after
     it — read as words, which is all a lifecycle test cares about."""
     from egma_simulator.conductor import LINE_SLICE_SAMPLES
     from egma_simulator.speech import decode_speech, encode_speech

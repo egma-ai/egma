@@ -53,6 +53,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
+from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.frames.frames import (
     ControlFrame,
     EndFrame,
@@ -89,7 +90,16 @@ from .speech import (
     build_legs,
     build_vad,
 )
-from .walk import CANCEL_DIRECTIVE, Conducted, WalkControls
+from .walk import (
+    AGENT_ENDED,
+    CANCEL_DIRECTIVE,
+    PERSONA_CONCLUDED,
+    Conducted,
+    Ending,
+    WalkControls,
+    duration_limit_reached,
+    turn_limit_reached,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,13 +126,15 @@ class ConductParameters:
     so filling it reworks nothing here.
 
     Everything below is spent on the audio timeline rather than on a
-    clock, so a live call really waits and CI really does not.
+    clock, so a live call really waits and CI really does not — with one
+    named exception, :attr:`agent_turn_backstop_seconds`, which is spent
+    on both and says why.
     """
 
     agent_opening_seconds: float = 2.0
     """How long the persona listens before deciding the agent is not going
     to speak first. A greeting arrives well inside this; silence means the
-    caller opens, which is what a person does."""
+    persona opens, which is what a person does."""
 
     persona_pause_seconds: float = 0.4
     """The beat the persona leaves before answering. A person does not
@@ -137,9 +149,16 @@ class ConductParameters:
 
     agent_turn_backstop_seconds: float = 5.0
     """How long the turn model is given to call a turn finished once the
-    far end has stopped, before the pipeline calls it finished anyway.
-    Only ever reached when the ears found no words in a stretch of
-    speech, which is a real thing a phone line does."""
+    far end has stopped, before it is called finished anyway. Only ever
+    reached when the ears found no words in a stretch of speech, which is
+    a real thing a phone line does.
+
+    **The one number here spent on two clocks, and it has to be.** Inside
+    the pipeline it is Pipecat's own ``user_turn_stop_timeout``, which is
+    a wall-clock timer this file does not own; the conductor's own use of
+    it — how long it holds the line open for a far end's last words after
+    a hang-up — is spent in audio like everything else. Same budget, same
+    meaning, two clocks, because only one of them is ours."""
 
     yields_to_the_agent: bool = False
     """Whether the agent speaking cuts the persona's own utterance short.
@@ -442,9 +461,22 @@ class _Record:
 
     history: list[Turn] = field(default_factory=list)
     turns: int = 0
+
     persona_last_stopped_at: int | None = None
-    """Where the persona's last utterance ended, which is what the agent's
-    answer is measured from."""
+    """Where the persona's last utterance ended, or ``None`` where the
+    persona has said nothing the agent has yet answered. It is what makes
+    an agent turn an *answer* — and only an answer has a latency."""
+
+    quiet_since: int = 0
+    """Where the line last went quiet: the end of the most recent utterance
+    by either speaker, and zero because a line opens quiet.
+
+    It is the anchor for the quiet before the agent's next first word, and
+    it is deliberately not the same thing as the field above. That one is
+    cleared when an agent turn is recorded, because it answers "is anybody
+    waiting for a reply"; anchoring a measurement to it would put a far end
+    that speaks twice in a row back at the start of the simulation.
+    """
 
     first_answer_measured: bool = False
 
@@ -526,7 +558,7 @@ class VoiceConductor:
         return self._legs
 
     @property
-    def vad(self) -> object:
+    def vad(self) -> VADAnalyzer:
         """The leg that hears whether the agent is speaking."""
         return self._vad
 
@@ -588,17 +620,11 @@ class VoiceConductor:
                 provider_reference=self.provider_reference,
             )
         if controls.cause is not None:
-            return self._ended(
-                "limit_reached",
-                f"the duration limit ({max_duration_seconds}s) tripped",
-            )
-        ending, reason = self._ending or (
-            "limit_reached",
-            f"the turn limit ({max_turns} turns) tripped",
-        )
-        return self._ended(ending, reason)
+            return self._ended(duration_limit_reached(max_duration_seconds))
+        return self._ended(self._ending or turn_limit_reached(max_turns))
 
-    def _ended(self, ending: str, reason: str | None) -> Conducted:
+    def _ended(self, named: Ending) -> Conducted:
+        ending, reason = named
         return Conducted(
             status="completed",
             ending=ending,
@@ -777,9 +803,21 @@ class VoiceConductor:
         named in the parameters. Its words are *ready* when they are out
         of the speaking leg, which is how long the brain and the mouth
         took and is not conduct at all. So the utterance opens at
-        whichever of the two is later, and the line keeps flowing quiet
-        in the meantime rather than freezing while the persona thinks:
-        both directions stay open, which is the whole point.
+        whichever of the two is later.
+
+        **The line does not flow while the persona thinks, and that is a
+        known cost rather than a design.** The brain is awaited inside its
+        own ``process_frame``, behind the slice mark
+        :meth:`_ask_the_persona` waits for, so nothing crosses the line
+        for the length of a model call. Harmless in CI, where the scripted
+        model answers at once, and harmless for the record, where nothing
+        is ever stamped from a clock — but on a live leg it stops the far
+        end being read for as long as the model takes, and the far end's
+        own audio backs up in the transport while it does. One
+        consequence worth knowing downstream: ``MediaLine.carry`` paces
+        the line by waiting a slice's own length for a slice of audio, and
+        that pacing argument holds again only once the backlog has
+        drained.
         """
         assert self._mouth is not None
         if self._may_speak_from is None or self._position < self._may_speak_from:
@@ -818,12 +856,20 @@ class VoiceConductor:
 
         One instant, honestly — the scenario is concluded the moment the
         persona decides it is, and nothing was ever said into the line.
+
+        Whether the turn limit was *already* spent is read before the turn
+        is recorded, not after. The walk checks its budget before letting
+        the persona move at all, so a concluding turn it allowed can never
+        be the turn that trips the limit; reading afterwards here would
+        make the same scenario at the same limit end ``persona_concluded``
+        on chat and ``limit_reached`` on voice.
         """
+        already_ending = self._ending is not None
         await self._took_a_turn(
             "human", utterance.text, self._position, self._position
         )
-        if self._ending is None:
-            self._ending = ("persona_concluded", "the persona concluded the scenario")
+        if not already_ending:
+            self._ending = PERSONA_CONCLUDED
 
     async def _after_the_slice(self) -> None:
         """Read what this slice changed, and decide what happens next."""
@@ -836,6 +882,7 @@ class VoiceConductor:
             await self._measure("persona_speech_duration", spoken.began_at, ended_at)
             await self._took_a_turn("human", spoken.text, spoken.began_at, ended_at)
             self._record.persona_last_stopped_at = ended_at
+            self._record.quiet_since = max(self._record.quiet_since, ended_at)
             if self._ending is not None:
                 return
 
@@ -859,7 +906,7 @@ class VoiceConductor:
             # fixed the first time it is asked for, or it would be a
             # deadline that moves away every time it is approached.
             return
-        self._ending = ("agent_ended", "the agent ended the exchange")
+        self._ending = AGENT_ENDED
 
     def _hangup_grace(self) -> int:
         if self._hangup_grace_until is None:
@@ -925,21 +972,47 @@ class VoiceConductor:
         assert self._ear is not None
         stopped_at: int | None = None
         if heard_a_turn and self._heard_so_far < len(self._ear.utterances):
-            began, ended = self._ear.utterances[self._heard_so_far]
+            # One turn, however many stretches of speech it took. The turn
+            # model keeps a turn open across a pause it judges incomplete —
+            # which is the whole reason it exists — so a turn is the first
+            # stretch's first word to the last stretch's last word, and
+            # anchoring to the first stretch alone would end the span
+            # somewhere in the middle of what was said.
+            began = self._ear.utterances[self._heard_so_far][0]
+            ended = self._ear.utterances[-1][1]
             self._heard_so_far = len(self._ear.utterances)
             stopped_at = ended
-            quiet_from = self._record.persona_last_stopped_at or 0
-            # In the order the intervals close, so no measurement is ever
-            # stamped before the one taken ahead of it.
-            await self._measure("time_to_first_word", quiet_from, began)
-            if self._record.persona_last_stopped_at is not None:
-                if not self._record.first_answer_measured:
+            answering = self._record.persona_last_stopped_at is not None
+            if self._talked_over(began):
+                # The two speakers' audio crossed, so there was no quiet
+                # before this answer and nothing to measure. A sample
+                # voided by overlap is honestly absent — the grading
+                # precedent — and never a zero, which reads as a perfect
+                # score nobody earned and quietly improves every threshold
+                # a barge-in touches.
+                #
+                # The first answer is still *spent*, though: a later one
+                # must never be labelled the first, because "how long the
+                # agent took to say anything at all" is a question about
+                # this answer whatever the record could measure of it.
+                if answering:
                     self._record.first_answer_measured = True
-                    await self._measure("first_response_latency", quiet_from, began)
-                await self._measure("turn_response_latency", quiet_from, began)
+            else:
+                # In the order the intervals close, so no measurement is
+                # ever stamped before the one taken ahead of it.
+                quiet_from = self._record.quiet_since
+                await self._measure("time_to_first_word", quiet_from, began)
+                if answering:
+                    if not self._record.first_answer_measured:
+                        self._record.first_answer_measured = True
+                        await self._measure(
+                            "first_response_latency", quiet_from, began
+                        )
+                    await self._measure("turn_response_latency", quiet_from, began)
             await self._took_a_turn("agent", said, began, ended)
             await self._measure("agent_speech_duration", began, ended)
             self._record.persona_last_stopped_at = None
+            self._record.quiet_since = max(self._record.quiet_since, ended)
         if self._on_answered is not None:
             await self._on_answered()
         if self._ending is not None:
@@ -955,6 +1028,29 @@ class VoiceConductor:
                 self._parameters.persona_pause_seconds
             )
         return True
+
+    def _talked_over(self, began: int) -> bool:
+        """Whether somebody was still speaking when the agent started.
+
+        Two ways it happens, and both have to be caught or a number gets
+        invented. Either the persona's last utterance had already closed
+        past this point — the line was not quiet before the agent's first
+        word — or the persona is speaking right now and started first, so
+        the quiet the anchor implies never happened at all.
+
+        A persona utterance that began *after* the agent did is the other
+        overlap, and it voids nothing: the quiet before the agent's first
+        word was real quiet, and the persona talking over the answer
+        afterwards is a fact about the answer rather than about the wait.
+        """
+        if began < self._record.quiet_since:
+            return True
+        speaking = self._speaking
+        return (
+            speaking is not None
+            and speaking.began_at is not None
+            and speaking.began_at < began
+        )
 
     def the_brain_failed(self, fault: BaseException) -> None:
         """The persona's brain raised inside the pipeline. Keep it, whole.
@@ -982,16 +1078,28 @@ class VoiceConductor:
                 speaker, text, self._clock.at(began), self._clock.at(ended)
             )
         if self._record.turns >= self._max_turns and self._ending is None:
-            self._ending = (
-                "limit_reached",
-                f"the turn limit ({self._max_turns} turns) tripped",
-            )
+            self._ending = turn_limit_reached(self._max_turns)
 
     async def _measure(self, measure: str, began: int, ended: int) -> None:
+        """One measurement, as the interval it measured on the audio timeline.
+
+        An interval that runs backwards means the two positions came from
+        different stories — the commonest being a quiet that was never
+        quiet because the speakers overlapped. It is refused rather than
+        clamped: a clamp turns a wrong number into a zero, and a zero
+        latency is a perfect score nobody earned. Where overlap voids a
+        sample the sample is left out, upstream of here.
+        """
         assert self._clock is not None
+        if ended < began:
+            raise ValueError(
+                f"{measure} was measured over a backwards interval "
+                f"({began} to {ended} samples); nothing may be measured "
+                "from a moment it did not happen after"
+            )
         if self._on_measured is not None:
             await self._on_measured(
-                measure, self._clock.at(began), self._clock.at(max(ended, began))
+                measure, self._clock.at(began), self._clock.at(ended)
             )
 
     # -- Waiting, and being stopped -------------------------------------------

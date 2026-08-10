@@ -5,7 +5,7 @@ knows how to open a session with a bridge, ask that bridge to place a call
 over a trunk, learn whether anybody came on the line, carry audio both
 ways, and tear the call down. Everything above it is backend-blind: the
 phone plug drives this seam, the speech legs and the recorder see only
-audio, and the walk and the report never learn which bridge ran.
+audio, and the conductor and the report never learn which bridge ran.
 
 This docstring is the driver author's whole brief. If writing a new
 driver requires reading anything beyond this file, that is a bug in this
