@@ -32,7 +32,7 @@
 import { readConfig, folderPathsIn, type FolderConfig } from "../folder/egma-folder.ts";
 import { PlatformUnreachableError } from "../platform/device-flow.ts";
 import { startRun } from "../platform/runs.ts";
-import { PlatformRefusedError } from "../platform/tests.ts";
+import { PlatformRefusedError } from "../platform/refused.ts";
 import { notSignedInRefusal, signedInAt, type SignedIn } from "../platform/signed-in.ts";
 import { followRun, RunFollower } from "../run/follow.ts";
 import { changeLines, tallyLines } from "../run/lines.ts";

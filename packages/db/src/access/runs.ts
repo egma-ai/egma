@@ -38,6 +38,12 @@ import {
   type SimulationStatus,
   type Verdict,
 } from "../schema/runs.ts";
+import {
+  NO_MOCK_TOOLS,
+  type MockToolSnapshot,
+  type SnapshotDefault,
+  type SnapshotEntry,
+} from "../mock-tools/resolve.ts";
 import { stringRecordFromRow } from "./agents.ts";
 import { validClaimant } from "./claimants.ts";
 import { descriptorOf, noSimulatorAdapterMessage } from "./connection-registry.ts";
@@ -46,7 +52,12 @@ import { RunWriteRefusedError, type RunWriteRefusal } from "./errors.ts";
 import { enqueueGradingJob } from "./grading.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
-import { getTestVersion, type TestVersion } from "./tests.ts";
+import { mockToolsApplyingTo } from "./mock-tools.ts";
+import {
+  getTestVersion,
+  mockOverridesOfVersions,
+  type TestVersion,
+} from "./tests.ts";
 import { within } from "./within.ts";
 
 /**
@@ -147,6 +158,12 @@ export type Run = {
   /** The personas those versions named — provenance, never the pin. */
   readonly requestedPersonaIds: readonly string[];
   readonly connectionSnapshot: ConnectionSnapshot;
+  /**
+   * The mocked world this run executes in, frozen at creation: the project's
+   * mock tools that apply to its agent, and what each pinned version overrode.
+   * `resolveMockTools` turns it into what one simulation is served.
+   */
+  readonly mockToolSnapshot: MockToolSnapshot;
   readonly expectedSimulationCount: number;
   /** Null until the last simulation lands terminal; then written once. */
   readonly completedCount: number | null;
@@ -198,7 +215,29 @@ export type Simulation = {
   readonly turnCount: number | null;
   /** The platform's own identifier for the exchange — the one join to the agent's telemetry. */
   readonly providerReference: string | null;
+  /**
+   * Which of the agent's tools mock tools answered for. Null where the agent
+   * was never asked what tools it has, so nothing was learned and nothing is
+   * claimed — which is what every row written before the stamp existed says.
+   */
+  readonly mockToolCoverage: MockToolCoverage | null;
   readonly createdAt: Date;
+};
+
+/**
+ * The coverage stamp as the row holds it: three lists of the agent's own tool
+ * names.
+ *
+ * `covered` may name a tool absent from `discovered` — coverage is registered
+ * by name against the whole simulation, while discovery is only what the agent
+ * has said about itself — and `uncovered` is written out rather than left to be
+ * worked out, because a reader asking "was this simulation isolated" should not
+ * have to do set arithmetic to find out.
+ */
+export type MockToolCoverage = {
+  readonly discovered: readonly string[];
+  readonly covered: readonly string[];
+  readonly uncovered: readonly string[];
 };
 
 /**
@@ -243,6 +282,12 @@ export type SimulationSummaryFacts = {
   /** Measured, never declared; a chat simulation reports none. */
   readonly measuredAudioBandHertz?: number | undefined;
   readonly recordingReference?: string | undefined;
+  /**
+   * Which tools were answered by mock tools and which ran for real. Absent
+   * where the report carried no stamp, which is the honest reading of a
+   * conversation whose agent was never asked what tools it has.
+   */
+  readonly mockToolCoverage?: MockToolCoverage | undefined;
   readonly startedAt?: Date | undefined;
   readonly endedAt?: Date | undefined;
 };
@@ -290,6 +335,7 @@ const RUN_COLUMNS = {
   pinnedTestVersions: run.pinnedTestVersions,
   requestedPersonas: run.requestedPersonas,
   connectionSnapshot: run.connectionSnapshot,
+  mockToolSnapshot: run.mockToolSnapshot,
   expectedSimulationCount: run.expectedSimulationCount,
   completedCount: run.completedCount,
   failedCount: run.failedCount,
@@ -324,6 +370,7 @@ const SIMULATION_COLUMNS = {
   recordingReference: simulation.recordingReference,
   turnCount: simulation.turnCount,
   providerReference: simulation.providerReference,
+  mockToolCoverage: simulation.mockToolCoverage,
   createdAt: simulation.createdAt,
 } as const;
 
@@ -340,6 +387,7 @@ type RunRow = {
   readonly pinnedTestVersions: unknown;
   readonly requestedPersonas: unknown;
   readonly connectionSnapshot: unknown;
+  readonly mockToolSnapshot: unknown;
   readonly expectedSimulationCount: number;
   readonly completedCount: number | null;
   readonly failedCount: number | null;
@@ -423,6 +471,17 @@ function summaryFactsWrite(
   if (facts.recordingReference !== undefined) {
     write.recordingReference = facts.recordingReference.trim() || null;
   }
+  if (facts.mockToolCoverage !== undefined) {
+    // Stored in the shape it is read in, which is the shape the report
+    // carried — three lists of the agent's own names. Copied rather than
+    // referenced so a caller holding the object cannot edit what was landed.
+    const { discovered, covered, uncovered } = facts.mockToolCoverage;
+    write.mockToolCoverage = {
+      discovered: [...discovered],
+      covered: [...covered],
+      uncovered: [...uncovered],
+    };
+  }
   if (facts.startedAt !== undefined) write.startedAt = facts.startedAt;
   if (facts.endedAt !== undefined) write.endedAt = facts.endedAt;
 
@@ -505,11 +564,79 @@ function connectionSnapshotFromRow(
   };
 }
 
+/**
+ * The frozen mocked world, read back.
+ *
+ * An older row holds `{}` — the migration wrote it for every run that existed
+ * before a run could freeze a world at all — and it reads as a run that mocked
+ * nothing, which is exactly what those runs did. Everything else is checked to
+ * the shape this file writes, so a hand-edited row fails loudly here rather
+ * than reaching a simulator as a world nobody authored.
+ */
+function mockToolSnapshotFromRow(
+  value: unknown,
+  runId: string,
+): MockToolSnapshot {
+  const malformed = () =>
+    new Error(
+      `run ${runId} holds a mock tool snapshot in a shape egma never writes; the row needs repairing before anybody can read it`,
+    );
+
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw malformed();
+  }
+  const { defaults, overrides } = value as Record<string, unknown>;
+  if (defaults === undefined && overrides === undefined) return NO_MOCK_TOOLS;
+  if (!Array.isArray(defaults)) throw malformed();
+  if (
+    typeof overrides !== "object" ||
+    overrides === null ||
+    Array.isArray(overrides)
+  ) {
+    throw malformed();
+  }
+
+  const entryFromRow = (entry: unknown): SnapshotEntry => {
+    if (typeof entry !== "object" || entry === null) throw malformed();
+    const { toolName, answer, delayMilliseconds } = entry as Record<
+      string,
+      unknown
+    >;
+    if (typeof toolName !== "string" || toolName === "") throw malformed();
+    if (typeof delayMilliseconds !== "number") throw malformed();
+    if (typeof answer !== "object" || answer === null) throw malformed();
+    const held = answer as Record<string, unknown>;
+    if ("error" in held) {
+      if (typeof held.error !== "string" || held.error === "") throw malformed();
+      return { toolName, delayMilliseconds, answer: { error: held.error } };
+    }
+    if (!("answer" in held)) throw malformed();
+    return { toolName, delayMilliseconds, answer: { answer: held.answer } };
+  };
+
+  return {
+    defaults: defaults.map((entry): SnapshotDefault => {
+      const { mockToolId } = (entry ?? {}) as Record<string, unknown>;
+      if (typeof mockToolId !== "string" || mockToolId === "") throw malformed();
+      return { ...entryFromRow(entry), mockToolId };
+    }),
+    overrides: Object.fromEntries(
+      Object.entries(overrides as Record<string, unknown>).map(
+        ([versionId, entries]) => {
+          if (!Array.isArray(entries)) throw malformed();
+          return [versionId, entries.map(entryFromRow)] as const;
+        },
+      ),
+    ),
+  };
+}
+
 function runFromRow(row: RunRow): Run {
   const {
     pinnedTestVersions,
     requestedPersonas,
     connectionSnapshot,
+    mockToolSnapshot,
     status,
     triggeredVia,
     ...rest
@@ -524,6 +651,7 @@ function runFromRow(row: RunRow): Run {
     ),
     requestedPersonaIds: requestedPersonaIdsFromRow(requestedPersonas, row.id),
     connectionSnapshot: connectionSnapshotFromRow(connectionSnapshot, row.id),
+    mockToolSnapshot: mockToolSnapshotFromRow(mockToolSnapshot, row.id),
   };
 }
 
@@ -532,11 +660,12 @@ function runFromRow(row: RunRow): Run {
  * inside the vocabulary, so reading one back is a narrowing, not a guess. */
 type SimulationRow = Omit<
   Simulation,
-  "status" | "endingReason" | "modality"
+  "status" | "endingReason" | "modality" | "mockToolCoverage"
 > & {
   readonly status: string;
   readonly endingReason: string | null;
   readonly modality: string;
+  readonly mockToolCoverage: unknown;
 };
 
 function simulationFromRow(row: SimulationRow): Simulation {
@@ -545,6 +674,49 @@ function simulationFromRow(row: SimulationRow): Simulation {
     status: row.status as SimulationStatus,
     endingReason: row.endingReason as SimulationEndingReason | null,
     modality: row.modality as Modality,
+    mockToolCoverage: mockToolCoverageFromRow(row.mockToolCoverage, row.id),
+  };
+}
+
+/**
+ * The shape guard the coverage stamp gets on every read, for the reason the
+ * jsonb columns beside it get one: stored jsonb comes back `unknown`, and a row
+ * somebody hand-edited must fail here, loudly and naming itself, rather than
+ * leak into a caller wearing a type it does not have.
+ *
+ * Null is not a malformed stamp — it is the honest "nobody ever asked", which
+ * every row written before the column existed carries. `undefined` is not that
+ * and is not tolerated: it means the column was never selected, and answering
+ * a read that did not ask with the sentence for a simulation nobody asked is
+ * how a query bug becomes a claim about somebody's agent.
+ */
+function mockToolCoverageFromRow(
+  value: unknown,
+  simulationId: string,
+): MockToolCoverage | null {
+  if (value === null) return null;
+
+  const malformed = (): Error =>
+    new Error(
+      `simulation ${simulationId} holds a mock tool coverage stamp in a shape egma never writes; the row needs repairing before anybody can read it`,
+    );
+
+  if (typeof value !== "object" || Array.isArray(value)) throw malformed();
+  const held = value as Record<string, unknown>;
+
+  const names = (key: keyof MockToolCoverage): readonly string[] => {
+    const list = held[key];
+    if (!Array.isArray(list)) throw malformed();
+    for (const name of list) {
+      if (typeof name !== "string") throw malformed();
+    }
+    return list as string[];
+  };
+
+  return {
+    discovered: names("discovered"),
+    covered: names("covered"),
+    uncovered: names("uncovered"),
   };
 }
 
@@ -907,10 +1079,60 @@ async function resolvePersonaVersions(
 }
 
 /**
+ * The mocked world this run will execute in, worked out once and frozen.
+ *
+ * **Resolution happens here and nowhere later.** Mock tools are the one
+ * authored thing with no version chain, so an edit landing halfway through a
+ * run would answer the first simulations one way and the rest another — and
+ * nothing on the record would say the world had moved. Freezing at creation is
+ * what makes "every simulation in one run sees one world" a property of the
+ * row rather than of how fast somebody types.
+ *
+ * Two halves, kept apart in the stored shape for the reason the schema file
+ * gives: the project's mock tools that apply to this run's agent — scoping
+ * already applied, so nothing downstream needs to know which agent this was —
+ * and what each pinned version overrides, by version. `resolveMockTools` merges
+ * them for one simulation, and is the only thing that does.
+ */
+async function freezeMockTools(
+  on: Queryable,
+  auth: AuthContext,
+  projectId: string,
+  agentId: string,
+  versionIds: readonly string[],
+): Promise<MockToolSnapshot> {
+  const applying = await mockToolsApplyingTo(on, auth, projectId, agentId);
+  const overriding = await mockOverridesOfVersions(on, versionIds);
+
+  const overrides: Record<string, readonly SnapshotEntry[]> = {};
+  for (const [versionId, entries] of overriding) {
+    // A version that overrides nothing is left out rather than written as an
+    // empty list: the two mean the same thing, and one of them costs nothing.
+    if (entries.length === 0) continue;
+    overrides[versionId] = entries.map((entry) => ({
+      toolName: entry.toolName,
+      answer: entry.answer,
+      delayMilliseconds: entry.delayMilliseconds,
+    }));
+  }
+
+  return {
+    defaults: applying.map((one) => ({
+      toolName: one.toolName,
+      answer: one.answer,
+      delayMilliseconds: one.delayMilliseconds,
+      mockToolId: one.id,
+    })),
+    overrides,
+  };
+}
+
+/**
  * The run, its simulations born `queued`, and the facts stamped at start — the
  * versions it pinned, the personas they named as provenance, the connection's
- * non-secret shape as snapshot, and every simulation's own two pins — in one
- * transaction, so nothing a team triggers can half-exist.
+ * non-secret shape as snapshot, the mocked world it will run in, and every
+ * simulation's own two pins — in one transaction, so nothing a team triggers
+ * can half-exist.
  *
  * **One simulation per test per persona, counted before anything is written.**
  * Two tests naming three people between them is not two conversations; it is
@@ -1099,6 +1321,18 @@ export async function startRun(
       return pinned;
     };
 
+    // Frozen inside the same transaction that writes the header, so an edit
+    // landing between the read and the write cannot reach the row: it either
+    // committed before this read and is in the snapshot, or waits behind it and
+    // changes only the runs started afterwards.
+    const mockToolSnapshot = await freezeMockTools(
+      tx,
+      auth,
+      projectId,
+      reached.agentId,
+      versions.map((one) => one.versionId),
+    );
+
     const [header] = await tx
       .insert(run)
       .values({
@@ -1120,6 +1354,7 @@ export async function startRun(
           environment: reached.environment,
           config: reached.config,
         },
+        mockToolSnapshot,
         expectedSimulationCount: wanted.length,
         retryOfRunId,
         createdAt: now,

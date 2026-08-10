@@ -1002,6 +1002,100 @@ describe("the summary facts a terminal landing carries", () => {
     expect(landed?.turnCount).toBe(22);
   });
 
+  /**
+   * The coverage stamp is what makes two runs' numbers comparable or not, so
+   * it is held to the same standard as the measured audio band: landed off the
+   * report, kept verbatim, and read back off the one simulation.
+   */
+  it("lands the coverage stamp, and reads it back off the simulation alone", async () => {
+    const { simulationId } = await runningOne();
+
+    const landed = await completeSimulation(actingAsAcme(), simulationId, simulator, {
+      endingReason: "persona_concluded",
+      turnCount: 8,
+      mockToolCoverage: {
+        discovered: ["check_calendar", "send_confirmation"],
+        covered: ["check_calendar"],
+        uncovered: ["send_confirmation"],
+      },
+    });
+
+    expect(landed?.mockToolCoverage).toEqual({
+      discovered: ["check_calendar", "send_confirmation"],
+      covered: ["check_calendar"],
+      uncovered: ["send_confirmation"],
+    });
+
+    const kept = await getSimulation(actingAsAcme(), simulationId);
+    expect(kept?.mockToolCoverage).toEqual({
+      discovered: ["check_calendar", "send_confirmation"],
+      covered: ["check_calendar"],
+      uncovered: ["send_confirmation"],
+    });
+  });
+
+  /**
+   * The two absences, which are two different facts. Null is "the agent was
+   * never asked what tools it has"; three empty lists is "the asking happened
+   * and nothing came back". A landing that turned either into the other would
+   * be the record claiming something the simulator declined to claim.
+   */
+  it("keeps a report's silence about tools as silence, and its empty stamp as empty", async () => {
+    const { simulationId: silent } = await runningOne();
+    const landedSilent = await completeSimulation(
+      actingAsAcme(),
+      silent,
+      simulator,
+      { endingReason: "agent_ended" },
+    );
+    expect(landedSilent?.mockToolCoverage).toBeNull();
+
+    const { simulationId: asked } = await runningOne();
+    const landedAsked = await completeSimulation(
+      actingAsAcme(),
+      asked,
+      simulator,
+      {
+        endingReason: "agent_ended",
+        mockToolCoverage: { discovered: [], covered: [], uncovered: [] },
+      },
+    );
+    expect(landedAsked?.mockToolCoverage).toEqual({
+      discovered: [],
+      covered: [],
+      uncovered: [],
+    });
+  });
+
+  it("lands the stamp on a failed and on a canceled conversation too", async () => {
+    const { simulationId: broke } = await runningOne();
+    const failed = await failSimulation(actingAsAcme(), broke, simulator, {
+      reason: "simulator_error",
+      mockToolCoverage: {
+        discovered: ["check_calendar"],
+        covered: ["check_calendar"],
+        uncovered: [],
+      },
+    });
+    expect(failed?.mockToolCoverage?.covered).toEqual(["check_calendar"]);
+
+    const { started, simulationId: stopped } = await runningOne();
+    await cancelRun(actingAsAcme(), started.id);
+    const canceled = await markSimulationCanceled(
+      actingAsAcme(),
+      stopped,
+      simulator,
+      {
+        mockToolCoverage: {
+          discovered: ["check_calendar"],
+          covered: [],
+          uncovered: ["check_calendar"],
+        },
+      },
+    );
+    expect(canceled?.mockToolCoverage?.uncovered).toEqual(["check_calendar"]);
+  });
+
   it("refuses a turn count that is not a count", async () => {
     const { simulationId } = await runningOne();
 

@@ -9,6 +9,7 @@ import {
   resolvePersonaNames,
   TestMovedOnError,
   UnprocessableInputError,
+  type MockOverrideInput,
   type Test,
   type TestPersona,
   type TestVersion,
@@ -19,6 +20,7 @@ import type { FastifyInstance } from "fastify";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
+import { answerAsSent, describedMockTool } from "../http/mock-tools.ts";
 import {
   invalid,
   notFound,
@@ -38,6 +40,12 @@ import { given, text, textList } from "../http/reading.ts";
  * **Personas cross the wire by name** — as text, never as a structure, so one
  * shape carries them in both directions. `resolvePersonaNames` is where that
  * rule and its refusals live.
+ *
+ * **A test's mock-tool overrides are content, so they travel with it.** They
+ * ride in `mock_tools`, they version with the test exactly as an expected
+ * behavior does, and every gate a project mock tool passes they pass — from the
+ * same functions, so a rule enforced on one half of the mocked world is not a
+ * rule a test could walk around on the other.
  *
  * **An edit carries the version it was written against**, and it is required.
  * The platform compares it against what is current and refuses when the two have
@@ -93,6 +101,73 @@ function describedBehaviors(
   return behaviors.map((one) => one.behavior);
 }
 
+/** The keys one entry of `mock_tools` holds, and no others. */
+const OVERRIDE_KEYS = ["tool", "answer", "error", "delay_ms"] as const;
+
+/**
+ * The overrides a body carries, as the factory takes them.
+ *
+ * Almost nothing is judged here: how long a delay may be, how large an answer
+ * may be, what a tool name has to say, and whether the two answer keys add up
+ * to one branch are all the factory's rules, held in one place for a project's
+ * mock tools and a test's overrides alike — a second opinion here could come to
+ * disagree with the one that matters. What this owns is the shape of the
+ * envelope, and that a wrong shape is refused rather than dropped: a dropped
+ * override is a branch somebody believes their test forces and it does not.
+ */
+type WrittenOverrides =
+  | { readonly entries: readonly MockOverrideInput[] }
+  | { readonly refusal: string };
+
+function overrideEntries(value: unknown): WrittenOverrides {
+  if (!Array.isArray(value)) {
+    return {
+      refusal:
+        "mock_tools is the list of tools this test answers for itself. Send " +
+        'it as a list of objects, like [{"tool": "check_availability", ' +
+        '"answer": {"slots": []}}], or leave it out and the project\'s mock ' +
+        "tools are the whole world.",
+    };
+  }
+
+  const entries: MockOverrideInput[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      return {
+        refusal:
+          "each entry in mock_tools names one tool and what it answers with. " +
+          'Send objects, like {"tool": "check_availability", "error": "the ' +
+          'calendar is unreachable"}.',
+      };
+    }
+    const written = entry as Record<string, unknown>;
+    for (const key of Object.keys(written)) {
+      if ((OVERRIDE_KEYS as readonly string[]).includes(key)) continue;
+      return {
+        refusal:
+          `a mock tool a test overrides has no key "${key}"; it holds ` +
+          OVERRIDE_KEYS.join(", "),
+      };
+    }
+    if ("delay_ms" in written && typeof written.delay_ms !== "number") {
+      return {
+        refusal:
+          "delay_ms is how long egma holds an answer back, as a whole number " +
+          `of milliseconds, and one entry in mock_tools sent ${typeof written.delay_ms}.`,
+      };
+    }
+
+    entries.push({
+      toolName: written.tool,
+      answer: answerAsSent(written),
+      ...(typeof written.delay_ms === "number"
+        ? { delayMilliseconds: written.delay_ms }
+        : {}),
+    });
+  }
+  return { entries };
+}
+
 /** A test as it currently stands. One shape for the list and for both writes. */
 function described(test: Test): Record<string, unknown> {
   return {
@@ -103,6 +178,7 @@ function described(test: Test): Record<string, unknown> {
     scenario: test.scenario,
     expected_behaviors: describedBehaviors(test.expectedBehaviors),
     personas: test.personas.map(describedPersona),
+    mock_tools: test.mockOverrides.map(describedMockTool),
     created_at: test.createdAt.toISOString(),
     updated_at: test.updatedAt.toISOString(),
   };
@@ -119,6 +195,7 @@ function describedVersion(version: TestVersion): Record<string, unknown> {
     scenario: version.scenario,
     expected_behaviors: describedBehaviors(version.expectedBehaviors),
     personas: version.personas.map(describedPersona),
+    mock_tools: version.mockOverrides.map(describedMockTool),
     created_at: version.createdAt.toISOString(),
   };
 }
@@ -256,6 +333,10 @@ export async function testRoutes(
       "personas" in body ? personaEntries(body.personas) : { entries: [] };
     if ("refusal" in personas) return unprocessable(reply, personas.refusal);
 
+    const overrides =
+      "mock_tools" in body ? overrideEntries(body.mock_tools) : { entries: [] };
+    if ("refusal" in overrides) return unprocessable(reply, overrides.refusal);
+
     const acting = await actingIn(auth, given(text(body.project)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
@@ -266,6 +347,7 @@ export async function testRoutes(
       scenario: text(body.scenario),
       expectedBehaviors: textList(body.expected_behaviors),
       personaIds,
+      mockOverrides: overrides.entries,
     });
 
     return reply.code(201).send(described(created));
@@ -318,6 +400,12 @@ export async function testRoutes(
       return unprocessable(reply, personas.refusal);
     }
 
+    const overrides =
+      "mock_tools" in body ? overrideEntries(body.mock_tools) : undefined;
+    if (overrides !== undefined && "refusal" in overrides) {
+      return unprocessable(reply, overrides.refusal);
+    }
+
     const acting = await actingIn(auth, given(text(body.project)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
@@ -334,6 +422,7 @@ export async function testRoutes(
         ? { expectedBehaviors: textList(body.expected_behaviors) }
         : {}),
       ...(personaIds === undefined ? {} : { personaIds }),
+      ...(overrides === undefined ? {} : { mockOverrides: overrides.entries }),
     });
 
     // A test this credential cannot see reads exactly as a test that is not

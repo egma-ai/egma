@@ -147,7 +147,8 @@
           "description": "The measured audio band and the recording, for voice; null for chat, where there is no audio to measure.",
           "oneOf": [{ "$ref": "#/$defs/audio_band" }, { "type": "null" }]
         },
-        "provider_reference": { "$ref": "#/$defs/provider_reference" }
+        "provider_reference": { "$ref": "#/$defs/provider_reference" },
+        "mock_tool_coverage": { "$ref": "#/$defs/mock_tool_coverage" }
       }
     },
     "failed_facts": {
@@ -185,7 +186,8 @@
           "description": "The measured audio band and the recording, for voice; null for chat, where there is no audio to measure.",
           "oneOf": [{ "$ref": "#/$defs/audio_band" }, { "type": "null" }]
         },
-        "provider_reference": { "$ref": "#/$defs/provider_reference" }
+        "provider_reference": { "$ref": "#/$defs/provider_reference" },
+        "mock_tool_coverage": { "$ref": "#/$defs/mock_tool_coverage" }
       }
     },
     "canceled_facts": {
@@ -223,7 +225,39 @@
           "description": "The measured audio band and the recording, for voice; null for chat, where there is no audio to measure.",
           "oneOf": [{ "$ref": "#/$defs/audio_band" }, { "type": "null" }]
         },
-        "provider_reference": { "$ref": "#/$defs/provider_reference" }
+        "provider_reference": { "$ref": "#/$defs/provider_reference" },
+        "mock_tool_coverage": { "$ref": "#/$defs/mock_tool_coverage" }
+      }
+    },
+    "tool_name": {
+      "description": "One of the agent's tools, by the name the agent itself uses for it. Never parsed and never matched loosely: a mock tool answers for the name it was written against, exactly.",
+      "type": "string",
+      "minLength": 1
+    },
+    "mock_tool_coverage": {
+      "description": "Which of the agent's tools mock tools answered for during this simulation, and which reached their real implementations. The one terminal fact that may be omitted, and deliberately: absent means the agent was never asked what tools it has, so nothing was learned and nothing is claimed — which is the honest reading of every report written before this stamp existed, and of every connection egma stands outside the tool path of. Present with three empty lists means the asking happened and no tool came back, whether because nothing was listening or because there was nothing to list: a simulation no mock tool took any part in. A simulation whose tools were answered by mock tools and one whose tools ran for real are different units, exactly as two audio bands are, and comparing their numbers is invalid: this is where that is readable, on the simulation's own facts, with nothing else to consult and nothing editable to ask.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["discovered", "covered", "uncovered"],
+      "properties": {
+        "discovered": {
+          "description": "Every tool the agent reported having, as most recently reported. An agent announces itself once when its session starts, and an agent that announces itself again is saying what it has *now* — so a second census replaces the first rather than adding to it, and this is the last one given. A tool the agent gained without announcing it is not in here, which is why a covered name may be missing.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/tool_name" }
+        },
+        "covered": {
+          "description": "The tools a mock tool stood ready to answer for, so a call to any of them never reached a real backend. May name a tool that is not in `discovered`: coverage is registered by name against the whole simulation, while discovery is only what the agent has said about itself, and a call served for such a tool is flagged late-attached on its own record.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/tool_name" }
+        },
+        "uncovered": {
+          "description": "The discovered tools no mock tool answered for: they ran their real implementations, untouched and unobserved. Exactly the discovered names absent from `covered`, written out rather than left to be worked out — a simulation with any of these was not fully isolated, and this is the only place on the record that says so.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/tool_name" }
+        }
       }
     },
     "provider_reference": {

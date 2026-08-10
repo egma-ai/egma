@@ -4,8 +4,11 @@ import {
   claimSimulations,
   failSimulationDispatch,
   getPersonaVersion,
+  getRun,
   getSimulationTestVersion,
+  resolveMockTools,
   resolveSimulationConnection,
+  type Run,
   type SimulationClaim,
 } from "@egma/db";
 import { specComplaints } from "@egma/simulation-contract";
@@ -49,10 +52,10 @@ import { invalid, notTheService } from "../http/refusals.ts";
  * What goes back is the whole work order: for each claimed simulation, a
  * fully assembled spec — persona traits as the pinned version saved them,
  * the pinned test version's scenario, the connection's config with its
- * credentials unsealed, and the platform's limits — validated against the
- * contract schema before a byte of it is sent. This is the only place
- * credential material ever travels; the report direction structurally has
- * nowhere to put it.
+ * credentials unsealed, the answers this simulation's mock tools serve, and
+ * the platform's limits — validated against the contract schema before a
+ * byte of it is sent. This is the only place credential material ever
+ * travels; the report direction structurally has nowhere to put it.
  */
 
 export type ClaimRoutesOptions = {
@@ -180,6 +183,22 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
  */
 async function assembledSpec(
   claim: SimulationClaim,
+  /**
+   * The runs already read while answering this one claim request, by id.
+   *
+   * A claim takes up to fifty conversations at once and they are usually a
+   * run's — that is what a run *is* — so the run header would otherwise be
+   * read fifty times for fifty specs that all want the same frozen world. The
+   * cache lives for one request and no longer: the header is frozen from the
+   * moment the run was created, so re-reading it inside one response could
+   * only ever return the same rows, and a cache that outlived the request
+   * would be a second copy of a record somebody may since have deleted.
+   *
+   * Keyed by run id alone, which is safe because every claim in one batch was
+   * read through its own row's tenancy and a run id is unique across the
+   * deployment — two claims naming one run are two conversations of it.
+   */
+  runs: Map<string, Run | undefined>,
 ): Promise<Record<string, unknown> | { readonly unbuildable: string }> {
   const personaVersion = await getPersonaVersion(
     claim.auth,
@@ -201,6 +220,30 @@ async function assembledSpec(
     };
   }
 
+  if (!runs.has(claim.runId)) {
+    runs.set(claim.runId, await getRun(claim.auth, claim.runId));
+  }
+  const run = runs.get(claim.runId);
+  if (run === undefined) {
+    return { unbuildable: "its run could not be read" };
+  }
+
+  // Resolved here and nowhere else. `resolveMockTools` is the one place a
+  // project default and a test override are folded together, and the
+  // snapshot it folds was frozen when the run was created — so every
+  // simulation in one run is served one world, and a mock tool edited
+  // mid-run tears nothing. The simulator receives the answers already
+  // decided, exactly as it receives everything else: flattened, with
+  // nothing left to look up and nothing left to choose between.
+  const mockTools = resolveMockTools(
+    run.mockToolSnapshot,
+    claim.testVersionId,
+  ).map((mock) => ({
+    tool_name: mock.toolName,
+    answer: mock.answer,
+    delay_milliseconds: mock.delayMilliseconds,
+  }));
+
   const spec = {
     contract_version: CONTRACT_VERSION,
     simulation_id: claim.id,
@@ -213,7 +256,16 @@ async function assembledSpec(
     persona: { traits: personaVersion.traits },
     scenario: { instructions: testVersion.scenario },
     limits: SIMULATION_LIMITS[claim.modality],
+    // Left out entirely where the run mocks nothing, which is what most
+    // runs do: a simulation egma answers no tool for is byte for byte the
+    // work order it was before mock tools existed, and an empty list
+    // would be a claim about tools where there is nothing to claim.
+    ...(mockTools.length === 0 ? {} : { mock_tools: mockTools }),
   };
+  // `mockToolId` is deliberately not among the fields sent. The simulator
+  // records which mock tool answered by its tool name, which is the whole
+  // of how one is matched; an identifier it would carry and never read is
+  // a field two sides could come to disagree about.
 
   // Validated on the way out, against the same schema the simulator compiles
   // on the way in — so a document that does not speak the contract is this
@@ -283,6 +335,9 @@ export async function claimRoutes(
       }
 
       const specs: Record<string, unknown>[] = [];
+      // One read of each run, however many of its conversations this batch
+      // took. Lives exactly as long as this response.
+      const runs = new Map<string, Run | undefined>();
       for (const claim of claims) {
         // A row whose stored shapes will not open — a sealed envelope that no
         // longer decrypts, a column holding something egma never writes —
@@ -290,7 +345,7 @@ export async function claimRoutes(
         // because that too is one row's fault and never the batch's: an
         // escape would abort the whole response and withhold every valid
         // claim beside it from a simulator standing ready to conduct them.
-        const spec = await assembledSpec(claim).catch(
+        const spec = await assembledSpec(claim, runs).catch(
           (fault: unknown): { readonly unbuildable: string } => ({
             unbuildable: fault instanceof Error ? fault.message : String(fault),
           }),

@@ -3,4 +3,34 @@ name = "egma-livekit-dumb-agent"
 version = "0.1.0"
 description = "A deliberately boring LiveKit agent for egma to simulate against"
 requires-python = ">=3.11"
-dependencies = ["livekit-agents[openai,silero]==1.6.7"]
+# `egma` is the SDK a customer installs from PyPI. Here it is the copy in
+# this repository, so the fixture always exercises the seam as it stands
+# on this branch rather than whatever was last published — which is the
+# only way the live proof means anything.
+dependencies = ["egma", "livekit-agents[openai,silero]==1.6.7"]
+
+[tool.uv.sources]
+egma = { path = "../../sdks/python", editable = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
+    "pytest-timeout>=2.4.0",
+    "ruff>=0.14.5",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# Every test here is hermetic: no room, no server, no key. Anything
+# slower than this is something reaching for a network it should not
+# have.
+timeout = 60
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]

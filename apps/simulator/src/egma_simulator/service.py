@@ -41,7 +41,7 @@ from .config import SimulatorConfig
 from .contract import ContractViolation
 from .model import build_model_client
 from .persona import Persona
-from .pipeline import assemble
+from .pipeline import Assembled, assemble
 from .plugs import failed_ending, plug_for
 from .redaction import SecretRegistry
 from .reporting import Reporter
@@ -181,6 +181,7 @@ class RunningSimulation:
         self._controls = WalkControls()
         self._first_human_at: float | None = None
         self._first_latency_reported = False
+        self._assembled: Assembled | None = None
 
     async def run(self) -> None:
         """Conduct to a terminal report, whatever happens on the way."""
@@ -225,6 +226,7 @@ class RunningSimulation:
                 blobs=self._blobs,
                 speech=SpeechProviders.from_config(self._config),
             )
+            self._assembled = assembled
             persona = Persona(
                 traits=self._spec.persona_traits,
                 scenario_instructions=self._spec.scenario_instructions,
@@ -268,6 +270,14 @@ class RunningSimulation:
                 # Conducting closed the pipeline on its way out, whatever
                 # happened, so whatever was recorded is measured by now.
                 reporter.audio = assembled.audio
+                # The same moment for the same reason: the exchange is
+                # over, so what egma was asked about the agent's tools and
+                # what it answered are both settled. Drained before the
+                # stamp is read and before anything is sealed, so a call
+                # served in the last breath of a conversation is on the
+                # record rather than in a buffer nobody empties.
+                self._record_mock_tool_calls()
+                reporter.mock_tool_coverage = assembled.mock_tool_coverage
                 await model.close()
         except asyncio.CancelledError:
             # The service itself is being torn down mid-walk. Reporting a
@@ -362,7 +372,32 @@ class RunningSimulation:
         precisely that answer whose evidence must not sit in a buffer
         waiting for the agent to speak again.
         """
+        self._record_mock_tool_calls()
         self._spans.flush()
+
+    def _record_mock_tool_calls(self) -> None:
+        """Every mock-tool call egma has exchanged since this last asked.
+
+        Taken rather than pushed: the exchange happens in whatever task the
+        room hands it to, and a span authored from over there would be
+        minted between two the conversation was in the middle of. Drained
+        here instead, at the seams the conversation already has, so the
+        order of the record is the order the simulation observed things in.
+        """
+        assembled = self._assembled
+        if assembled is None:
+            return
+        for call in assembled.tool_calls():
+            self._spans.tool_exchange(
+                call.name,
+                arguments=call.arguments,
+                answer=call.answer,
+                mock_tool=call.mock_tool,
+                late_attached=call.late_attached,
+                refused=call.refused,
+                began_unix_nano=call.began_unix_nano,
+                ended_unix_nano=call.ended_unix_nano,
+            )
 
     async def _on_timing(self, measure: str, milliseconds: float) -> None:
         self._spans.measure(measure, milliseconds)
