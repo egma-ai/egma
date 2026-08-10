@@ -476,11 +476,17 @@ export const CONNECTION_REGISTRY: Readonly<
     // for this type and places the call over the deployment's own carrier
     // trunk, so a run over a phone connection is one egma can conduct.
     //
-    // **Whether this deployment can dial is a second question, and it is not
-    // asked here.** A platform whose carrier has never been set up will refuse
-    // a phone run at the API, where phone readiness is known — this registry
-    // says only what the shipped simulator holds an adapter for, which is a
-    // fact about the build rather than about one deployment's configuration.
+    // **What this says is a fact about the build, never about one deployment's
+    // carrier.** Whether *this* platform has been given a trunk is phone
+    // readiness, and it is a separate question that has to be asked where a
+    // deployment's configuration is known — this package cannot see it.
+    //
+    // **Nothing asks it today.** `phoneReadiness` and
+    // `phoneSetupRequiredMessage` exist in `apps/api` and no route calls
+    // either, so a platform whose phone half has never been set up accepts a
+    // phone run here and fails it later at the simulator. Closing that is
+    // ticket 04's second acceptance criterion: refuse at run creation, before
+    // any paid provider action, when phone readiness is not `ready`.
     simulatorAdapter: true,
   },
   livekit: {

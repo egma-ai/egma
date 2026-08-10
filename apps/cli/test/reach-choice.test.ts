@@ -377,6 +377,42 @@ describe("running it twice", () => {
     expect(platform.registered.connections).toHaveLength(2);
   });
 
+  /**
+   * The one case where neither signal answers, and the direction it goes.
+   *
+   * A phone-only agent names no vendor, so the numbers are the only way to tell
+   * whose it is — and here Retell will not list them. egma cannot identify the
+   * agent, and the two ways of being wrong are not equally bad: a merged
+   * results history cannot be unpicked, and a spare agent is one delete. So it
+   * takes the next name.
+   */
+  it("takes the next name when Retell will not say which numbers reach the agent", async () => {
+    retell = await startFakeRetell(ACCOUNT);
+    const phone = await run({ reach: "phone" });
+    await retell.close();
+
+    // The same account, with the number listing broken and nothing else.
+    retell = await startFakeRetell({
+      ...ACCOUNT,
+      refusing: [{ path: "/list-phone-numbers", status: 500 }],
+    });
+    const text = await run({ reach: "text" });
+
+    expect(text.connected?.registered.agent.name).toBe("front-desk-2");
+    expect(text.connected?.registration).toEqual({
+      agent: "created",
+      connection: "created",
+    });
+    // Two agents, and neither of them holds a connection it cannot account for.
+    expect(platform.registered.agents.map((one) => one.name)).toEqual([
+      "front-desk",
+      "front-desk-2",
+    ]);
+    expect(text.connected?.registered.agent.id).not.toBe(
+      phone.connected?.registered.agent.id,
+    );
+  });
+
   it("joins a phone-only agent when the number is one Retell routes to this agent", async () => {
     retell = await startFakeRetell(ACCOUNT);
 

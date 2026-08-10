@@ -368,11 +368,16 @@ async function main(): Promise<void> {
     /* the numbers, read the way the phone path reads them */
 
     // The other half of the flow, against the same real account: which numbers
-    // Retell routes to the agent egma just took. It is asked for here rather
-    // than walked through, because registering somebody's real telephone
-    // number against a fixture platform is not this check's business — what it
-    // proves is that the shapes the phone path reads are the shapes the real
-    // service answers with.
+    // Retell routes to the agent egma just took.
+    //
+    // What this proves is that the shapes the phone path reads are the shapes
+    // the real service answers with. Where it ends is the account's business
+    // rather than this check's: an agent with several numbers ends at "nobody
+    // said which", an agent with none ends there, and an agent with exactly one
+    // registers a phone connection for it. That last ending really does write
+    // somebody's telephone number down — on the fixture platform this check
+    // starts and throws away, which is nowhere and nobody's, and it is the only
+    // way the confirming read gets exercised at all.
     const numbered = await egma(
       ["connect", "--reach", "phone", "--retell-agent", result.retell_agent_id ?? ""],
       env,

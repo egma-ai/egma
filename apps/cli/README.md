@@ -135,7 +135,8 @@ then egma asks the one question that decides what it creates:
 ```
 ◇ How should egma reach this agent?
   › Text — egma exchanges messages with the agent. No phone call, nothing dialled.
-    Phone — egma dials one of the agent's numbers and talks to it, as a customer would.
+    Phone — egma dials one of the agent's numbers and talks to it over the
+    telephone network, the way the people who call it do.
 
   egma creates the one you choose, and only that one.
 ```

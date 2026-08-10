@@ -122,11 +122,14 @@ export interface WizardUI {
   setAgentChoices(agents: readonly RetellAgent[] | null): void;
 
   /**
-   * That the two ways of reaching the agent are on offer, or `null` when they
-   * are not.
+   * Whether the two ways of reaching the agent are on offer right now.
    *
    * A write and not a question, exactly as the agent choices are: the flow says
-   * the offer is open and the screen collects the word.
+   * the offer is open and the screen collects the word. It is a plain `true`
+   * and `false` rather than a value-or-`null` because there is nothing to
+   * carry — the two ways egma offers are the same two every time, and a screen
+   * that had to be told them could show a different pair from the one the flow
+   * would act on.
    */
   setReachOffer(open: boolean): void;
 

@@ -93,7 +93,9 @@ export const REACH_ASK_LINE = "How should egma reach this agent?";
 /** One line per way, said in what it tests rather than in what it is made of. */
 export const REACH_LINES: Readonly<Record<Reach, string>> = {
   text: "Text — egma exchanges messages with the agent. No phone call, nothing dialled.",
-  phone: "Phone — egma dials one of the agent's numbers and talks to it, as a customer would.",
+  phone:
+    "Phone — egma dials one of the agent's numbers and talks to it over the " +
+    "telephone network, the way the people who call it do.",
 };
 
 /** What the developer is asked when the phone was chosen. */
@@ -374,6 +376,24 @@ function selectionFor(
     reach,
     connection: {
       type: "retell",
+      // Chat, whichever kind of agent this is: the modality says which layer is
+      // under test, and text exercises the prompt, the reasoning and the tools
+      // rather than the speech stack. It is *not* read off `config.modality`,
+      // which is the agent's own channel — reaching a voice agent by text is
+      // exactly what this choice is for.
+      //
+      // **A row written here is not conductable today, and that is not this
+      // step's to fix.** `spec.md` says text uses Retell's Agent Playground
+      // Completion — `POST /agent-playground-completion/{agent_id}`, which
+      // takes the whole message history per turn and works against an agent of
+      // either channel. The shipped plug
+      // (`apps/simulator/src/egma_simulator/plugs/retell.py`) speaks Retell's
+      // *chat-agent* API instead — `create-chat`, `create-chat-completion`,
+      // `end-chat` — and whether that accepts a voice agent's id is untested.
+      // Nothing in this ticket runs a text simulation, so nothing here can find
+      // out. Whoever ships the text path replaces that plug rather than
+      // pointing it somewhere else; the identity written down is already the
+      // right one.
       modality: "chat",
       config: { retellAgentId: config.agentId },
       credentials: key,
@@ -446,9 +466,17 @@ type Written = {
  * retell connection carries the vendor's own agent id and answers outright. A
  * phone connection carries a number, and Retell knows which numbers it routes to
  * the agent under test — so a number it routes here says "this is it", and a
- * number it does not says "this is somebody else" just as clearly. Only an agent
- * with no living connection at all leaves nothing to read, and that is taken as
- * this one: there is no history to split and nothing to be wrong about.
+ * number it does not says "this is somebody else" just as clearly.
+ *
+ * **Where neither signal answers, the next name is taken.** An agent reached
+ * only by phone, with Retell unable to say which numbers it routes, is an agent
+ * egma cannot identify — and the two ways of being wrong about it are not
+ * equally bad. Guess "this is it" and two voice agents share one egma agent and
+ * one results history, which nothing can unpick afterwards. Guess "somebody
+ * else" and there is a spare agent in the project, which a developer can delete
+ * in one command. So ambiguity goes to the next name, every time. An agent with
+ * no living connection at all is the one case with nothing to be wrong about —
+ * there is no history to split — and the chosen connection joins it.
  */
 async function register(
   options: KeyedOptions,
@@ -456,9 +484,14 @@ async function register(
   selected: Selected,
   /**
    * The numbers Retell routes to the agent under test, read at most once and
-   * only when a name clash actually needs them. `null` when Retell would not
-   * say — which is not a reason to refuse a registration, so it reads as
-   * "nothing to go on" and the connection joins the agent that holds the name.
+   * only when a name clash actually needs them.
+   *
+   * `null` when Retell would not say. That is not a reason to refuse the
+   * registration, and it is not a reason to guess either: it means this agent
+   * cannot be identified, so the next name is taken and the developer gets a
+   * spare agent rather than a merged history. Read once and no more, because a
+   * listing that failed on the first ask is not going to answer differently on
+   * the twentieth.
    */
   numbersOfTheAgent: () => Promise<readonly string[] | null>,
 ): Promise<Written | ConnectOutcome> {
@@ -526,15 +559,16 @@ async function register(
 
     // Nothing here names a vendor, so the numbers do. An agent reached only by
     // phone is this one exactly when Retell routes one of its numbers to the
-    // agent under test — and when it routes none of them, this is a different
-    // voice agent wearing the same name.
+    // agent under test. When it routes none of them — and when Retell would not
+    // say at all — this is somebody else's agent under the same name, and the
+    // next name is tried. Ambiguity goes that way on purpose: see above.
     const dialled = held.connections
       .filter((one) => one.type === "phone")
       .map((one) => one.config["phoneNumber"] ?? "");
     if (reaches.length === 0 && dialled.length > 0) {
       const routed = await numbersOfTheAgent();
       if (options.signal.aborted) return { kind: "interrupted" };
-      if (routed !== null && !dialled.some((number) => routed.includes(number))) continue;
+      if (routed === null || !dialled.some((number) => routed.includes(number))) continue;
     }
 
     // The same reach, already attached. Nothing is written and both halves

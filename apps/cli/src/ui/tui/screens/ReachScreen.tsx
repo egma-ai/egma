@@ -6,9 +6,12 @@
  * never both** — a second connection nobody asked for is a second thing in
  * somebody's project that they would find later and have to work out.
  *
- * There is no default and there is no highlighted safe option, because one of
- * the two dials a real telephone and costs real money. A developer who closes
- * the wizard here has answered too, and nothing is created.
+ * **The highlight starts on text, and the keystroke is still required.** One of
+ * the two dials a real telephone and costs real money, so the row the cursor
+ * rests on before anybody has touched it is the one that does not — but resting
+ * there is not choosing, and nothing at all is created until enter is pressed.
+ * A developer who closes the wizard here has answered too, and nothing is
+ * created then either.
  */
 
 import { useState } from "react";

@@ -83,6 +83,19 @@ export type FakeRetellScript = {
   readonly pageSize?: number;
   /** Answer every request with this status and body instead. */
   readonly refuseWith?: { readonly status: number; readonly body: unknown };
+  /**
+   * Answer these paths with this status instead, and everything else normally.
+   *
+   * For the half-broken account, which is a real thing and not a contrived one:
+   * a listing that works and a second one that does not. What egma does when
+   * one read fails is a different question from what it does when the whole
+   * service is down, and a fake that could only do the second could not ask it.
+   */
+  readonly refusing?: readonly {
+    readonly path: string;
+    readonly status: number;
+    readonly body?: unknown;
+  }[];
 };
 
 /** One request, as the fake saw it. */
@@ -186,6 +199,14 @@ export async function startFakeRetell(script: FakeRetellScript): Promise<FakeRet
 
         if (script.refuseWith !== undefined) {
           send(script.refuseWith.status, script.refuseWith.body);
+          return;
+        }
+
+        const refused = (script.refusing ?? []).find(
+          (one) => one.path === at.pathname,
+        );
+        if (refused !== undefined) {
+          send(refused.status, refused.body ?? { error_message: "not today" });
           return;
         }
 
