@@ -85,7 +85,14 @@ services:
       EGMA_SMTP_URL: ${EGMA_SMTP_URL:-}
       EGMA_MAIL_FROM: ${EGMA_MAIL_FROM:-}
     ports:
-      - "3100:3100"
+      # Published on the host, so that a self-hoster who already runs
+      # something on these can move egma rather than move the other thing —
+      # and so that two egma platforms can stand side by side on one machine,
+      # each with its own instance identity, which is how the boundary between
+      # a platform and an agent repository is proved at all. The port inside
+      # the container never moves: it is the compose network's, and the two
+      # halves of a published port are not the same decision.
+      - "${EGMA_API_PORT:-3100}:3100"
     depends_on:
       postgres:
         condition: service_healthy
@@ -115,7 +122,7 @@ services:
       HOSTNAME: 0.0.0.0
       PORT: "3101"
     ports:
-      - "3101:3101"
+      - "${EGMA_WEB_PORT:-3101}:3101"
     depends_on:
       api:
         condition: service_healthy

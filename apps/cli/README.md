@@ -573,17 +573,39 @@ paste into whichever one you do use, and stops.
 
 ## Trying it on an instance of your own
 
-egma is open source and runs on your machine. Clone the repository, then, from
-your checkout of it:
+egma is open source and runs on your machine. That checkout is a **platform
+workspace** — the deployment's own directory, and deliberately not your agent
+repository. The platform's carrier and provider credentials belong to whoever
+runs the platform; an agent repository holds only tests and the address of the
+platform that owns their identifiers. On one laptop both are often yours, and
+they stay two directories, because one platform serves many repositories.
+
+Clone the repository, then, from your checkout of it:
 
 ```
 pnpm install
-docker compose up -d --wait
+npx egma self-host up
 ```
 
-That starts a whole egma — Postgres, ClickHouse, the API, the pages and the
-simulator. Open <http://localhost:3101> and sign up: you become the admin of
-your own instance.
+That starts a whole egma — Postgres, ClickHouse, the API, the pages, the
+simulator, the grader, and the LiveKit server, SIP gateway and Redis a phone
+call needs — and prints the address to point an agent repository at. Open it and
+sign up: you become the admin of your own instance.
+
+It also prints the platform's **phone** state, separately from being ready,
+because a platform with no carrier runs text simulations perfectly well. To make
+it able to place calls, one more command in the same directory:
+
+```
+npx egma self-host phone setup
+```
+
+It asks for a Twilio account, a voice number that account **already owns**, and
+one OpenAI key — the persona's words, its voice, its ears and the judge. It
+shows a plan before it writes anything to your carrier, and it never buys, ports
+or registers a number. The Twilio Auth Token is used once and kept nowhere: what
+runs afterwards holds a SIP credential for one trunk and nothing else on that
+account.
 
 The command itself is not on npm yet, so build it from the same checkout:
 

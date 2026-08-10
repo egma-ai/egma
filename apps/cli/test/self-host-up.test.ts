@@ -28,12 +28,16 @@ import { CLI_ENTRY } from "./support/workspace.ts";
 
 type FakePlatform = {
   readonly url: string;
+  /** Every path asked for, so a test can prove what `up` did *not* do. */
+  readonly asked: readonly string[];
   close(): Promise<void>;
 };
 
 /** A platform that reports whichever origin it was told to report. */
 async function startPlatform(reports: (own: string) => string): Promise<FakePlatform> {
-  const server: Server = createServer((_request, answer) => {
+  const asked: string[] = [];
+  const server: Server = createServer((request, answer) => {
+    asked.push(`${request.method} ${request.url ?? ""}`);
     answer.writeHead(200, { "content-type": "application/json" });
     answer.end(
       JSON.stringify({
@@ -48,6 +52,7 @@ async function startPlatform(reports: (own: string) => string): Promise<FakePlat
   const url = `http://127.0.0.1:${port}`;
   return {
     url,
+    asked,
     close: () =>
       new Promise<void>((closed) => {
         server.close(() => closed());
@@ -112,6 +117,12 @@ describe("egma self-host up", () => {
       expect(calls).toContain("ARGS compose up -d --wait --wait-timeout 300\n");
       // And the address it printed is the address the containers were given.
       expect(calls).toContain(`EGMA_BASE_URL=${platform.url}`);
+
+      // Starting a platform creates nothing on it. No agent, no connection, no
+      // test, no run — and nothing that could reach a paid provider. Bringing
+      // a deployment up is not an act on anybody's account, and the only thing
+      // this command asks the platform is who it is.
+      expect(new Set(platform.asked)).toEqual(new Set(["GET /api/platform"]));
     } finally {
       await platform.close();
     }
