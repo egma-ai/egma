@@ -9,6 +9,18 @@ import { PlatformUnreachableError, type Fetch } from "./device-flow.ts";
 
 const PLATFORM_INSTANCE_ID = /^pf_[0-9A-HJKMNP-TV-Z]{26}$/u;
 
+/**
+ * The one path this contract lives at, on every platform.
+ *
+ * It is a constant rather than a literal because three places have to agree on
+ * it: the API that serves it, the web process that forwards it at the origin a
+ * self-hoster was actually given, and this reader. A rewrite that missed it
+ * would leave a self-hosted platform unable to prove its own identity, and the
+ * agreement test names the constant so that disagreement fails a check instead
+ * of a developer's first command.
+ */
+export const PLATFORM_IDENTITY_PATH = "/api/platform";
+
 export type PlatformIdentity = {
   readonly instanceId: string;
   readonly origin: string;
@@ -62,7 +74,7 @@ export async function readPlatformIdentity(
   const selectedOrigin = normalizePlatformOrigin(selected);
   let response: Response;
   try {
-    response = await fetchImpl(`${selectedOrigin}/api/platform`, {
+    response = await fetchImpl(`${selectedOrigin}${PLATFORM_IDENTITY_PATH}`, {
       method: "GET",
       headers: { accept: "application/json" },
     });

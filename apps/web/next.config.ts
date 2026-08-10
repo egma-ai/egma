@@ -25,6 +25,11 @@ const config: NextConfig = {
       // Ahead of this app's own files, so the API owns these paths outright.
       // `/api/health` is this process's own and is deliberately not among them.
       beforeFiles: [
+        // The platform's public identity, forwarded because the CLI reads it at
+        // the origin a self-hoster was given — which is this process, not the
+        // API's own port. Without this rule a bound repository could never
+        // verify the platform it is bound to.
+        { source: "/api/platform", destination: `${api}/api/platform` },
         { source: "/api/auth/:path*", destination: `${api}/api/auth/:path*` },
         { source: "/api/signup", destination: `${api}/api/signup` },
         {

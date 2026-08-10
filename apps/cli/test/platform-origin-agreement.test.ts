@@ -5,10 +5,19 @@
  * This agreement test makes that deliberate separation safe.
  */
 
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { loadConfig } from "../../api/src/config.ts";
-import { normalizePlatformOrigin } from "../src/platform/identity.ts";
+import { PLATFORM_IDENTITY_PATH as API_PLATFORM_IDENTITY_PATH } from "../../api/src/routes/platform.ts";
+import {
+  normalizePlatformOrigin,
+  PLATFORM_IDENTITY_PATH,
+} from "../src/platform/identity.ts";
+
+const WEB = path.join(import.meta.dirname, "../../web");
 
 const startableApi = {
   DATABASE_URL: "postgres://x/y",
@@ -27,6 +36,21 @@ describe("the API and CLI platform-origin agreement", () => {
     expect(loadConfig({ ...startableApi, EGMA_BASE_URL: candidate }).baseUrl).toBe(
       expected,
     );
+  });
+
+  /**
+   * A self-hoster is given one origin, and in every deployment the pages answer
+   * there — so the identity read lands on the web process and is forwarded from
+   * it. A rewrite that did not carry this path would make the pages answer 404
+   * for it, and every command in a bound repository would refuse with "did not
+   * return a usable platform identity" on a platform that is running perfectly.
+   */
+  it("answers at the same path the API serves and the pages forward", async () => {
+    expect(PLATFORM_IDENTITY_PATH).toBe(API_PLATFORM_IDENTITY_PATH);
+
+    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
+    expect(rewrites).toContain(`source: "${PLATFORM_IDENTITY_PATH}"`);
+    expect(rewrites).toContain(`destination: \`\${api}${PLATFORM_IDENTITY_PATH}\``);
   });
 
   it.each([
