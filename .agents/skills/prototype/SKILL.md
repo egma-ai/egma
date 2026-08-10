@@ -3,6 +3,13 @@ name: prototype
 description: Build a throwaway prototype to answer a design question. Use when the user wants to sanity-check whether a state model or logic feels right, or explore what a UI should look like.
 ---
 
+<!-- path-routing:start -->
+Repository configuration overrides this skill's default planning paths.
+If a Planning root is defined, resolve `CONTEXT.md`, `docs/adr/`,
+`docs/agents/`, `.scratch/`, and `.out-of-scope/` from that root.
+Skill-local paths remain unchanged.
+<!-- path-routing:end -->
+
 # Prototype
 
 A prototype is **throwaway code that answers a question**. The question decides the shape.

@@ -5,6 +5,13 @@ disable-model-invocation: true
 argument-hint: "What would you like to learn about?"
 ---
 
+<!-- path-routing:start -->
+Repository configuration overrides this skill's default planning paths.
+If a Planning root is defined, resolve `CONTEXT.md`, `docs/adr/`,
+`docs/agents/`, `.scratch/`, and `.out-of-scope/` from that root.
+Skill-local paths remain unchanged.
+<!-- path-routing:end -->
+
 The user has asked you to teach them something. This is a stateful request - they intend to learn the topic over multiple sessions.
 
 ## Teaching Workspace

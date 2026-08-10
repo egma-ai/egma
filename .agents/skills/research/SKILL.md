@@ -3,6 +3,13 @@ name: research
 description: Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic researched, docs or API facts gathered, or reading legwork delegated to a background agent.
 ---
 
+<!-- path-routing:start -->
+Repository configuration overrides this skill's default planning paths.
+If a Planning root is defined, resolve `CONTEXT.md`, `docs/adr/`,
+`docs/agents/`, `.scratch/`, and `.out-of-scope/` from that root.
+Skill-local paths remain unchanged.
+<!-- path-routing:end -->
+
 Spin up a **background agent** to do the research, so you keep working while it reads.
 
 Its job:

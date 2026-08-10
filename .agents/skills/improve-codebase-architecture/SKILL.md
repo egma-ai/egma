@@ -4,6 +4,13 @@ description: Scan a codebase for deepening opportunities, present them as a visu
 disable-model-invocation: true
 ---
 
+<!-- path-routing:start -->
+Repository configuration overrides this skill's default planning paths.
+If a Planning root is defined, resolve `CONTEXT.md`, `docs/adr/`,
+`docs/agents/`, `.scratch/`, and `.out-of-scope/` from that root.
+Skill-local paths remain unchanged.
+<!-- path-routing:end -->
+
 # Improve Codebase Architecture
 
 Surface architectural friction and propose **deepening opportunities** — refactors that turn shallow modules into deep ones. The aim is testability and AI-navigability.

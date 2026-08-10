@@ -3,6 +3,13 @@ name: diagnosing-bugs
 description: Diagnosis loop for hard bugs and performance regressions. Use when the user says "diagnose"/"debug this", or reports something broken/throwing/failing/slow.
 ---
 
+<!-- path-routing:start -->
+Repository configuration overrides this skill's default planning paths.
+If a Planning root is defined, resolve `CONTEXT.md`, `docs/adr/`,
+`docs/agents/`, `.scratch/`, and `.out-of-scope/` from that root.
+Skill-local paths remain unchanged.
+<!-- path-routing:end -->
+
 # Diagnosing Bugs
 
 A discipline for hard bugs. Skip phases only when explicitly justified.
