@@ -4,7 +4,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -139,6 +139,23 @@ it("verifies an explicitly selected platform and commits its identity on first o
     });
     expect(config.agent?.id).toMatch(/^agt_/u);
     expect(config.connection?.id).toMatch(/^con_/u);
+
+    // The binding is committed, so what is written beside it is read by
+    // everybody who clones this repository. It carries identity and no key:
+    // not the key this machine signs in to egma with, and not the provider key
+    // the wizard was handed on the way through.
+    const committed = await readFile(paths.config, "utf8");
+    for (const secret of [PLATFORM_KEY, PROVIDER_KEY]) {
+      expect(committed).not.toContain(secret);
+      expect(stdout).not.toContain(secret);
+      expect(stderr).not.toContain(secret);
+    }
+
+    // And the run address the developer is handed is on the platform this
+    // repository just bound itself to, with no key in it.
+    const runId = platform.running.runs[0]?.id ?? "";
+    expect(runId).not.toBe("");
+    expect(stdout).toContain(`${platform.url}/runs/${runId}`);
   } finally {
     await Promise.all([platform.close(), retell.close(), workspace.remove()]);
   }

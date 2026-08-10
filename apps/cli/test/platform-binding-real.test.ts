@@ -23,6 +23,23 @@ async function identityOf(instance: Instance): Promise<PublicIdentity> {
   return (await response.json()) as PublicIdentity;
 }
 
+type Ended = { readonly code: number; readonly stdout: string; readonly stderr: string };
+
+/** The built CLI, run the way a developer runs it, never throwing on a refusal. */
+async function egma(
+  args: readonly string[],
+  where: { readonly cwd: string; readonly env: NodeJS.ProcessEnv },
+): Promise<Ended> {
+  return run(process.execPath, [CLI_ENTRY, ...args], where).then(
+    ({ stdout, stderr }) => ({ code: 0, stdout, stderr }),
+    (error: { code?: number; stdout?: string; stderr?: string }) => ({
+      code: error.code ?? 1,
+      stdout: error.stdout ?? "",
+      stderr: error.stderr ?? "",
+    }),
+  );
+}
+
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
 
 /**
@@ -150,17 +167,9 @@ it("refuses a repository bound to another real local platform before sending its
     // including one B rejects before parsing A's identifiers.
     await identityOf(second);
 
-    const result = await run(
-      process.execPath,
-      [CLI_ENTRY, "run", "--url", second.origin, "--cwd", workspace.dir, "--no-follow"],
+    const result = await egma(
+      ["run", "--url", second.origin, "--cwd", workspace.dir, "--no-follow"],
       { cwd: workspace.dir, env: workspace.env() },
-    ).then(
-      ({ stdout, stderr }) => ({ code: 0, stdout, stderr }),
-      (error: { code?: number; stdout?: string; stderr?: string }) => ({
-        code: error.code ?? 1,
-        stdout: error.stdout ?? "",
-        stderr: error.stderr ?? "",
-      }),
     );
 
     expect(result.code).toBe(4);
@@ -186,6 +195,144 @@ it("refuses a repository bound to another real local platform before sending its
   } finally {
     await first?.close();
     await second?.close();
+    await workspace.remove();
+  }
+});
+
+/**
+ * The other half of the safety rule, and the one a self-hoster meets by
+ * accident: the platform this repository is bound to is simply not running.
+ *
+ * The tempting behaviour is to carry on with Egma Cloud, and it is the one
+ * failure this ticket exists to make impossible — a repository full of
+ * local-platform identifiers would start posting them at a platform that has
+ * never seen them. So the command stops, names the platform it wanted, and says
+ * what to do. A second real platform is left running throughout, standing in
+ * for every platform this machine could have wandered to, and it must see
+ * nothing at all.
+ */
+it("refuses when the bound real platform is down, and reaches no other platform", async () => {
+  const workspace = await makeWorkspace();
+  let bound: Instance | undefined;
+  let stillRunning: Instance | undefined;
+
+  try {
+    bound = await startInstance("cli_bound_platform_down", { web: false });
+    const boundIdentity = await identityOf(bound);
+    const boundOrigin = bound.origin;
+    const customer = await signUp(bound.api, "down@acme.example", "Acme Down");
+
+    const registered = await bound.api.inject({
+      method: "POST",
+      url: "/api/agents",
+      headers: { authorization: `Bearer ${customer.secret}` },
+      payload: {
+        name: "Real receptionist",
+        connection: {
+          name: "real-retell-down",
+          type: "retell",
+          modality: "chat",
+          config: { retellAgentId: "synthetic-agent-on-the-bound-platform" },
+          credentials: { apiKey: "synthetic-key-used-only-by-this-test" },
+        },
+      },
+    });
+    expect(registered.statusCode, registered.body).toBe(201);
+    const resources = registered.json() as {
+      agent: { id: string; name: string };
+      connection: { id: string; name: string };
+    };
+
+    const createdTest = await bound.api.inject({
+      method: "POST",
+      url: "/api/tests",
+      headers: { authorization: `Bearer ${customer.secret}` },
+      payload: {
+        name: "Real unavailable-platform test",
+        scenario: "The persona asks to move an appointment.",
+        expected_behaviors: ["The agent confirms the new time."],
+        personas: [],
+      },
+    });
+    expect(createdTest.statusCode, createdTest.body).toBe(201);
+    const testResource = createdTest.json() as { id: string; version_id: string };
+
+    await createEgmaFolder({
+      repository: workspace.dir,
+      config: {
+        platform: { origin: boundOrigin, instance: boundIdentity.instance_id },
+        agent: { name: resources.agent.name, id: resources.agent.id },
+        connection: {
+          name: resources.connection.name,
+          id: resources.connection.id,
+        },
+        suite: { name: "down-suite", id: null },
+      },
+    });
+    await writeTestFile(path.join(workspace.dir, "egma", "tests", "unavailable.md"), {
+      name: "Real unavailable-platform test",
+      personas: [],
+      version: testResource.version_id,
+      scenario: "The persona asks to move an appointment.",
+      expectedBehaviors: ["The agent confirms the new time."],
+    });
+    const repositoryIds = [
+      resources.agent.id,
+      resources.connection.id,
+      testResource.id,
+      testResource.version_id,
+    ];
+
+    await bound.close();
+    bound = undefined;
+
+    const observed: ObservedInstanceRequest[] = [];
+    stillRunning = await startInstance("cli_bound_platform_down_other", {
+      web: false,
+      observeRequest: (request) => observed.push(request),
+    });
+    // A freed port can be handed out again. If that happened the bound origin
+    // would be answering after all, so say so here rather than let the run
+    // prove a different thing than it claims to.
+    expect(stillRunning.origin).not.toBe(boundOrigin);
+
+    // The machine holds a key for the platform that is up. It is still not this
+    // repository's platform, and a held key is not a target.
+    const otherCustomer = await signUp(
+      stillRunning.api,
+      "elsewhere@beta.example",
+      "Beta Elsewhere",
+    );
+    await workspace.signIn(stillRunning.origin, otherCustomer.secret);
+    observed.length = 0;
+
+    // No flag and no environment URL: this is the repository binding alone.
+    const env = workspace.env();
+    expect(env.EGMA_URL).toBeUndefined();
+    const result = await egma(["run", "--cwd", workspace.dir, "--no-follow"], {
+      cwd: workspace.dir,
+      env,
+    });
+
+    expect(result.code).toBe(4);
+    expect(result.stdout).toContain("status: unreachable");
+    expect(result.stderr).toContain(boundIdentity.instance_id);
+    expect(result.stderr).toContain(boundOrigin);
+    expect(result.stderr).toContain("Egma Cloud was not used");
+    expect(result.stderr).toContain("no repository identifiers were sent");
+
+    // The platform that is up saw nothing: not a request carrying an
+    // identifier, and not a request at all.
+    expect(observed).toEqual([]);
+    const shown = result.stdout + result.stderr;
+    for (const identifier of repositoryIds) expect(shown).not.toContain(identifier);
+    const stored = await stillRunning.database.sql<{ count: string }>(
+      "select count(*) from run",
+    );
+    expect(stored.rows).toEqual([{ count: "0" }]);
+  } finally {
+    await bound?.close();
+    await stillRunning?.close();
     await workspace.remove();
   }
 });

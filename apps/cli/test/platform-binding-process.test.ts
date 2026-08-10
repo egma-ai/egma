@@ -22,6 +22,8 @@ import {
 } from "./support/workspace.ts";
 
 const PROVIDER_KEY = "synthetic-retell-key-for-binding-process-test";
+const BOUND_KEY = "egma_sk_for-the-bound-platform";
+const OTHER_KEY = "egma_sk_for-the-other-platform";
 
 type CommandResult = {
   readonly stdout: string;
@@ -60,14 +62,12 @@ describe("commands after a repository is bound", () => {
       makeWorkspace(),
     ]);
 
-    const boundKey = "egma_sk_for-the-bound-platform";
-    const otherKey = "egma_sk_for-the-other-platform";
-    bound.signedInWith(boundKey);
-    other.signedInWith(otherKey);
-    await workspace.signIn(bound.url, boundKey);
+    bound.signedInWith(BOUND_KEY);
+    other.signedInWith(OTHER_KEY);
+    await workspace.signIn(bound.url, BOUND_KEY);
     // Written second on purpose. A machine login can hold this key, but it
     // cannot select this repository's platform.
-    await workspace.signIn(other.url, otherKey);
+    await workspace.signIn(other.url, OTHER_KEY);
 
     await createEgmaFolder({
       repository: workspace.dir,
@@ -163,6 +163,20 @@ describe("commands after a repository is bound", () => {
     expect(started.stdout).toContain("status: started");
     expect(bound.running.runs).toHaveLength(1);
     expect(other.running.runs).toHaveLength(0);
+
+    // The address a developer is handed to watch the run is on the platform
+    // that holds the run, and it carries no key. An address on the wrong
+    // platform would 404 for the developer; an address with a key in it would
+    // put that key in a terminal, a shell history, and whatever they paste it
+    // into.
+    const runId = bound.running.runs[0]?.id ?? "";
+    expect(runId).not.toBe("");
+    expect(started.stdout).toContain(`results: ${bound.url}/runs/${runId}`);
+    expect(started.stdout).not.toContain(other.url);
+    for (const secret of [BOUND_KEY, OTHER_KEY, PROVIDER_KEY]) {
+      expect(started.stdout).not.toContain(secret);
+      expect(started.stderr).not.toContain(secret);
+    }
 
     const script = await workspace.script({
       steps: [
