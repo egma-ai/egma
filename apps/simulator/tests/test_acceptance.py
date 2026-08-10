@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 
+import pytest
 from conftest import (
     HEARTBEAT_SECONDS,
     SCRIPTED_TRUNK_ENV,
@@ -1340,8 +1341,12 @@ async def test_a_voice_simulation_produces_the_same_shapes_plus_its_audio_facts(
     assert durations("persona_speech_duration") == durations("human_turn")[:-1]
 
 
+@pytest.mark.parametrize(
+    ("line", "built_by"),
+    [("a loopback line", loopback_spec), ("a phone call", phone_spec)],
+)
 async def test_a_voice_turn_span_is_anchored_to_the_audio_timeline(
-    workbench, start_simulator
+    workbench, start_simulator, line: str, built_by
 ):
     """The claim the voice conductor exists to make, checked at the wire.
 
@@ -1351,19 +1356,25 @@ async def test_a_voice_turn_span_is_anchored_to_the_audio_timeline(
     span, at the same distance from every other, to the sample — and
     whether two turns overlap is a fact about the audio rather than about
     when Python happened to run.
+
+    Both lines, because that is the whole of what moving a real transport
+    onto this conductor had to be worth: a call over the scripted bridge
+    records identically to a loopback exchange, at its own band, with no
+    carrier and no network in either.
     """
-    spec = loopback_spec(
-        "sim-anchored",
+    simulation_id = "sim-anchored"
+    spec = built_by(
+        simulation_id,
         scenario="First point. Second point.",
         greeting="Front desk, hello.",
         replies=["Certainly.", "Done."],
         answer_delay_seconds=0.3,
     )
     await workbench.offer(spec)
-    simulator = start_simulator(workbench)
+    simulator = start_simulator(workbench, extra_env=SCRIPTED_TRUNK_ENV)
 
-    records = await workbench.wait_for(has_terminal("sim-anchored"))
-    facts = terminal_event_for(records, "sim-anchored")["facts"]
+    records = await workbench.wait_for(has_terminal(simulation_id))
+    facts = terminal_event_for(records, simulation_id)["facts"]
     band = facts["audio"]["measured_sample_rate_hz"]
     heard = speech_in_the_recording(simulator.blob(facts["audio"]["recording"]))
 
@@ -1371,13 +1382,13 @@ async def test_a_voice_turn_span_is_anchored_to_the_audio_timeline(
     # spoken into the line and is honestly an instant.
     spoken = [
         span
-        for span in (record["span"] for record in spans_for(records, "sim-anchored"))
+        for span in (record["span"] for record in spans_for(records, simulation_id))
         if span["name"].endswith("_turn")
         and span["endTimeUnixNano"] != span["startTimeUnixNano"]
     ]
     assert [speaker for speaker, _began, _ended in heard] == [
         "human" if span["name"] == "human_turn" else "agent" for span in spoken
-    ]
+    ], line
 
     def since_the_first(positions: list[int]) -> list[int]:
         return [position - positions[0] for position in positions]
@@ -1390,10 +1401,10 @@ async def test_a_voice_turn_span_is_anchored_to_the_audio_timeline(
 
     assert since_the_first([began for _speaker, began, _ended in heard]) == (
         in_samples([int(span["startTimeUnixNano"]) for span in spoken])
-    )
+    ), line
     assert since_the_first([ended for _speaker, _began, ended in heard]) == (
         in_samples([int(span["endTimeUnixNano"]) for span in spoken])
-    )
+    ), line
 
 
 async def test_a_voice_simulation_ends_on_its_turn_limit_like_a_chat_one(

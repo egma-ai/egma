@@ -28,9 +28,9 @@ The script it is built with:
 
 - ``greeting`` — what the agent says the moment it is in the room.
   Absent: it joins and says nothing, and the persona speaks first.
-- ``replies`` — the agent's answers, in order, one per persona turn. A
-  spent script answers with quiet, the way a room with nobody talking in
-  it really sounds.
+- ``replies`` — the agent's answers, in order, one per stretch of persona
+  speech. A spent script answers with quiet, the way a room with nobody
+  talking in it really sounds.
 - ``answer_delay_seconds`` — how long the agent is quiet before each
   answer. Rendered into the room's own audio, where a live exchange
   carries it and where time-to-first-word is read from.
@@ -143,7 +143,7 @@ class StubRoom:
             return
         session.carrying_audio.set()
         if stub.greeting is not None:
-            session.say(
+            session.greet(
                 stub.greeting,
                 then_hang_up=stub.hangs_up_after_replies and not stub.replies,
             )
@@ -231,11 +231,11 @@ class RoomStubBackend(LiveKitRoomBackend):
     # -- The script ----------------------------------------------------------
 
     def answer_to(self) -> None:
-        """Queue the answer to one delivered persona turn.
+        """Queue the answer to one stretch of persona speech.
 
         A spent script answers with quiet rather than a holding line: a
         room where nobody has anything left to say is a room where nobody
-        is talking, and the plug reads exactly that.
+        is talking, and the conductor reads exactly that.
         """
         room = self._room
         session = room.session if isinstance(room, StubRoom) else None

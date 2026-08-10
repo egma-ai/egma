@@ -49,9 +49,12 @@ not would make a score mean something it does not.
 
 ## Where a turn begins and ends
 
-Out of the audio itself, because a phone line carries no end-of-turn
-signal in it — see :mod:`egma_simulator.plugs.audio_turns`, which every
-plug over a live line reads its turn boundaries through.
+Nowhere in here. A phone line carries no end-of-turn signal in it, so this
+plug declares none: it is a **duplex line**, driven one slice of audio at
+a time with both directions open at once, and where the turns fall is the
+conductor's reading of that audio. What every plug over a live line shares
+— turning a bridge's own frames into slices of the same width — is
+:mod:`egma_simulator.plugs.media_line`.
 """
 
 from __future__ import annotations
@@ -59,9 +62,9 @@ from __future__ import annotations
 from typing import Any
 
 from ..config import MediaSettings
-from ..media import BACKENDS, MediaBackendError, MediaSession, backend_for
-from . import AgentSpeech, PlugError, Utterance
-from .audio_turns import next_turn
+from ..media import BACKENDS, MediaBackendError, backend_for
+from . import PlugError
+from .media_line import MediaLine
 
 TELEPHONY_BAND_HZ = 8000
 """The band a phone call is carried at, and the only one. See the module
@@ -172,7 +175,7 @@ class PhoneCall:
             band_hz=self._band_hz,
             caller_id=caller_id,
         )
-        self._session: MediaSession | None = None
+        self._line: MediaLine | None = None
         self._reference: str | None = None
 
     @property
@@ -185,6 +188,12 @@ class PhoneCall:
         return self._band_hz
 
     @property
+    def far_end_left(self) -> bool:
+        """Whether the far end has hung up. On a call that is the whole of
+        what "the agent ended the exchange" means."""
+        return self._line is not None and self._line.far_end_left
+
+    @property
     def backend(self) -> object:
         """The media backend placing this call.
 
@@ -194,23 +203,29 @@ class PhoneCall:
         """
         return self._backend
 
-    async def open(self) -> AgentSpeech | None:
-        """Place the call, wait for somebody, and hear how they answer."""
+    async def open(self) -> None:
+        """Place the call and wait for somebody to pick it up.
+
+        Nothing is heard here. The line is open the moment somebody
+        answers, and every sample either side says after that crosses it
+        through :meth:`exchange` — including the greeting, which on a real
+        call is simply the first thing the far end happens to say.
+        """
         try:
-            self._session = await self._backend.create_session()
+            session = await self._backend.create_session()
             await self._backend.dial(self._number)
             self._reference = await self._backend.wait_answered(RINGING_SECONDS)
-            return await self._listen()
+            self._line = MediaLine(session, band_hz=self._band_hz)
         except MediaBackendError as refused:
             raise PlugError(str(refused), ending=refused.ending) from refused
 
-    async def deliver(self, speech: Utterance) -> AgentSpeech:
-        session = self._session
-        if session is None:
-            raise PlugError("a turn reached the phone plug before the call did")
+    async def exchange(self, outgoing: bytes) -> bytes:
+        """One slice of the call, both directions at once."""
+        line = self._line
+        if line is None:
+            raise PlugError("the phone line was driven before the call was answered")
         try:
-            await session.send(speech.pcm)
-            return await self._listen()
+            return await line.carry(outgoing)
         except MediaBackendError as failed:
             # A line that goes wrong mid-call is the backend's to name and
             # the plug's to carry: a fault, never a phone nobody answered,
@@ -219,15 +234,8 @@ class PhoneCall:
 
     async def close(self) -> None:
         """Hang up. Safe from every state, including never having dialled."""
-        self._session = None
+        self._line = None
         await self._backend.teardown()
-
-    async def _listen(self) -> AgentSpeech:
-        """One turn of the far end's speech, read out of the line itself."""
-        session = self._session
-        if session is None:
-            raise PlugError("the phone plug listened before the call was answered")
-        return await next_turn(session, self._band_hz)
 
 
 def _built(factory, **arguments) -> Any:

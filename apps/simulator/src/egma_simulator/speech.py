@@ -111,18 +111,6 @@ A streaming transcriber opens its connection in the background and
 first thing a voice exchange does is hand it the agent's greeting, so
 without this wait the first turn of a real call would vanish."""
 
-TRANSCRIBER_QUIET_SECONDS = 0.5
-"""The pause a streaming transcriber is given after a turn's last word.
-
-A transcriber decides an utterance is over by hearing the speaker stop,
-and a plug hands over a turn that ends on its last sample. Asking it to
-commit instead — which is what the end-of-turn mark does — is a race it
-loses often enough to matter: the whole turn arrives at once, the ask
-arrives a millisecond later, and what comes back is a *provisional*
-transcript and then nothing, forever. Half a second of quiet is what a
-real line would have carried anyway, and it is heard rather than waited
-for, so it costs the exchange no time at all."""
-
 
 @dataclass(frozen=True)
 class PersonaVoice:
@@ -468,11 +456,6 @@ class SpeechLegs:
     listening: Callable[[], Awaitable[None]] | None = None
     """Waits until the listening leg can hear, for a leg that connects."""
 
-    trailing_quiet_seconds: float = 0.0
-    """The pause this listening leg wants after a turn's last word, added
-    to what it is given to hear. Zero for a leg that reads a whole
-    utterance at once — see :data:`TRANSCRIBER_QUIET_SECONDS`."""
-
     closers: tuple[Callable[[], Awaitable[None]], ...] = ()
     """What a leg holds open beyond the pipeline's own teardown."""
 
@@ -509,13 +492,12 @@ def build_legs(
     pipeline stays the validation step it has always been.
     """
     speaking, spoken_with, closers = _mouth(providers, voice, sample_rate_hz)
-    listening_leg, listening, trailing_quiet = _ears(providers, sample_rate_hz)
+    listening_leg, listening = _ears(providers, sample_rate_hz)
     return SpeechLegs(
         stt=listening_leg,
         tts=speaking,
         voice=spoken_with,
         listening=listening,
-        trailing_quiet_seconds=trailing_quiet,
         closers=closers,
     )
 
@@ -589,9 +571,9 @@ def _mouth(
 
 def _ears(
     providers: SpeechProviders, sample_rate_hz: int
-) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None, float]:
+) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None]:
     if providers.stt != "deepgram":
-        return ScriptedSTT(sample_rate_hz=sample_rate_hz), None, 0.0
+        return ScriptedSTT(sample_rate_hz=sample_rate_hz), None
 
     from pipecat.services.deepgram.stt import DeepgramSTTService
 
@@ -617,7 +599,7 @@ def _ears(
             )
         await connection_ready.wait()
 
-    return leg, connected, TRANSCRIBER_QUIET_SECONDS
+    return leg, connected
 
 
 def _voice_from(voice: PersonaVoice, *, provider: str) -> PersonaVoice:

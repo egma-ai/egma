@@ -524,8 +524,8 @@ src/egma_simulator/
                   plug author's whole brief; scripted.py chats,
                   loopback.py speaks, retell.py is the first real
                   platform, phone.py dials a number, and livekit.py holds
-                  an exchange in the agent's own room. audio_turns.py is
-                  where a turn begins and ends on any live line.
+                  an exchange in the agent's own room. media_line.py is
+                  how any live line is carried a slice at a time.
   media/          The media-backend seam: how a voice exchange's audio
                   travels. Its __init__ docstring is the driver author's
                   whole brief; livekit.py places real calls over a SIP

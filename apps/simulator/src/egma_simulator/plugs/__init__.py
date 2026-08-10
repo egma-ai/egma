@@ -49,20 +49,23 @@ the plug, and the audio that comes back is transcribed before anyone else
 sees it. So a voice plug never handles text, the persona never handles
 audio, and neither of them learns about the other.
 
-The seams are :class:`PlatformPlug` (chat, and what the walk drives),
-:class:`DuplexLine` (voice) and :class:`VoicePlug` (voice, turn-shaped and
-on its way out). A plug implements the one for the modality it speaks and
-refuses the other at construction.
+There are two seams and no more: :class:`PlatformPlug` (chat, and what the
+walk drives) and :class:`DuplexLine` (voice, and what the voice conductor
+drives). A plug implements the one for the modality it speaks and refuses
+the other at construction.
 
 A voice plug's whole difference from a chat one is that both directions of
 the line are open at once. So a duplex line is not asked for a turn: it is
 driven one slice of audio at a time, the persona's speech out and the far
 end's speech in, and where the turns fall is the conductor's reading of
-that audio rather than anything the plug declares.
+that audio rather than anything the plug declares. That is true of the
+loopback counterpart, of a phone call and of a room alike — a live line
+carries no end-of-turn signal in it, and neither does a fake one, which is
+what makes CI's voice simulations representative of real ones.
 
 ## The lifecycle a conductor drives
 
-For one simulation, in order, always:
+A chat plug's is three steps, for one simulation, in order, always:
 
 1. ``await open()`` — reach the platform and start the exchange. Returns
    the agent's greeting when the platform opens with one, else ``None``
@@ -82,13 +85,12 @@ For one simulation, in order, always:
    cancel directive, and after a fault. Make it safe to call in every one
    of those states.
 
-A duplex line's lifecycle is three steps too: ``open`` reaches the
-platform, ``exchange`` is called once per slice for as long as the
-exchange lasts, and ``close`` tears it down. A turn-shaped voice plug's is
-the same three steps one utterance at a time: ``open`` answers with the
-agent's spoken greeting, ``deliver`` takes the persona's speech as an
-``Utterance`` and answers with an ``AgentSpeech``, ``close`` tears the
-exchange down.
+A duplex line's is three steps too, and none of them turn-shaped, because
+nothing on a real line is: ``open`` reaches the platform and answers with
+nothing at all, ``exchange`` is called once per slice for as long as the
+exchange lasts, and ``close`` tears it down. A greeting is not a step
+here — it is simply the first thing the far end happens to say, and it
+crosses the line like every other sample.
 
 Either way the plug declares ``sample_rate_hz`` — **the band it actually
 carries**, after whatever negotiation the platform does, not the band the
@@ -193,31 +195,6 @@ class AgentReply:
     cannot see them reports none rather than guessing."""
 
 
-@dataclass(frozen=True)
-class Utterance:
-    """One stretch of speech, as it flows: 16-bit signed little-endian mono
-    PCM, and the band it is carried at."""
-
-    pcm: bytes
-    sample_rate_hz: int
-
-
-@dataclass(frozen=True)
-class AgentSpeech:
-    """The agent's spoken answer to one delivered persona utterance."""
-
-    audio: Utterance | None
-    """What the agent said, or ``None`` for an answer that carried no audio."""
-
-    ended: bool = False
-    """True when this answer ended the exchange — the same meaning as on
-    :class:`AgentReply`, one modality over."""
-
-    tool_calls: tuple[ToolCall, ...] = ()
-    """The same meaning as on :class:`AgentReply`. A voice platform that
-    reports its agent's tool traffic beside the audio names it here."""
-
-
 class PlugError(Exception):
     """A plug refusing config it does not understand, a modality it cannot
     speak, or a platform interaction that failed in a way it can name.
@@ -259,40 +236,14 @@ class PlatformPlug(Protocol):
     async def close(self) -> None: ...
 
 
-class VoicePlug(Protocol):
-    """The seam a voice connection is reached through: audio in, audio out.
-
-    ``sample_rate_hz`` is the band actually carried, which the speech legs
-    are assembled at and the simulation's measured audio band is read from.
-
-    **Turn-shaped, and on its way out.** It hands over one whole utterance
-    and takes one whole answer back, which is a shape no live line has: on
-    a real call both directions are open at once and nobody announces the
-    end of a turn. :class:`DuplexLine` below is what replaces it, and the
-    phone plug is the last plug still wearing this one.
-    """
-
-    @property
-    def provider_reference(self) -> str | None: ...
-
-    @property
-    def sample_rate_hz(self) -> int: ...
-
-    async def open(self) -> AgentSpeech | None: ...
-
-    async def deliver(self, speech: Utterance) -> AgentSpeech: ...
-
-    async def close(self) -> None: ...
-
-
 @runtime_checkable
 class DuplexLine(Protocol):
     """The seam a full-duplex voice connection is reached through.
 
     **Checkable at runtime, and used that way.** Assembly asks a plug
-    whether it is one of these to decide which conductor a voice
-    simulation gets, so the four verbs below are the whole difference
-    between a line and the turn-shaped protocol beside it.
+    whether it is one of these before handing it to the voice conductor,
+    so the verbs below are what a voice connection has to grow rather
+    than a promise made in prose.
 
     Both directions are open at once, and the line is driven one slice at
     a time: :meth:`exchange` takes the slice the persona is saying right
@@ -330,7 +281,7 @@ class DuplexLine(Protocol):
     async def close(self) -> None: ...
 
 
-PlugFactory = Callable[..., PlatformPlug | VoicePlug]
+PlugFactory = Callable[..., PlatformPlug | DuplexLine]
 """What the registry hands back: called with ``modality=``, ``config=``,
 ``credentials=`` and ``simulation_id=`` keywords, it returns one plug for
 one simulation — in practice, the plug class itself."""
