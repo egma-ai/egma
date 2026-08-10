@@ -1,0 +1,6 @@
+interface:
+  display_name: "Coordinate Implementation"
+  short_description: "Drive a ticketed effort to one open PR"
+  default_prompt: "Use $coordinate-implementation to drive this ticketed effort to one reviewed open PR."
+policy:
+  allow_implicit_invocation: false
