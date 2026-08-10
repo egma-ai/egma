@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - packages/*
+  - sdks/*
 
 onlyBuiltDependencies:
   - node-pty

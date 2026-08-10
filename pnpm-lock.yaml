@@ -155,6 +155,8 @@ importers:
         specifier: ^3.0.1
         version: 3.0.1(ajv@8.20.0)
 
+  sdks/python: {}
+
 packages:
 
   '@agentclientprotocol/claude-agent-acp@0.65.0':
