@@ -49,5 +49,22 @@ export {
   type VerdictCounts,
   type VerdictSource,
 } from "./verdicts/fold.ts";
+/**
+ * The mocked world a simulation runs in, worked out from what its run froze.
+ * It is here beside the verdict fold and for the fold's reason: it reaches no
+ * store, takes no context, and is the one place a project default and a test
+ * override are merged.
+ */
+export {
+  isErrorAnswer,
+  resolveMockTools,
+  NO_MOCK_TOOLS,
+  type MockToolAnswer,
+  type MockToolSnapshot,
+  type ResolvedMockTool,
+  type SnapshotDefault,
+  type SnapshotEntry,
+} from "./mock-tools/resolve.ts";
+
 export * from "./access/index.ts";
 export * as schema from "./schema/index.ts";

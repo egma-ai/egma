@@ -113,6 +113,7 @@ export {
   AlreadyBelongsToAnOrganizationError,
   GraderNamedByTestsError,
   LastAdminError,
+  MockToolTakenError,
   NotPermittedError,
   PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
@@ -291,6 +292,34 @@ export {
   type VoiceProvider,
 } from "./personas.ts";
 
+/**
+ * Mock tools: what egma answers with when the agent calls one of its tools
+ * during a simulation. Project-owned, one answer per tool name, and the one
+ * authored thing with no version chain behind it — `editMockTool` overwrites,
+ * and the schema file argues the exemption out in full.
+ *
+ * `resolveMockToolAgents` is the scope's name-to-identity translation, the
+ * persona resolver's shape: a folder a team reads in pull requests names agents
+ * rather than identifiers.
+ */
+export {
+  createMockTool,
+  deleteMockTool,
+  editMockTool,
+  listMockTools,
+  resolveMockToolAgents,
+  type DeletedMockTool,
+  type MockTool,
+  type MockToolAgent,
+  type MockToolChanges,
+  type MockToolPage,
+  type NewMockTool,
+} from "./mock-tools.ts";
+export {
+  LARGEST_MOCK_TOOL_ANSWER_BYTES,
+  LONGEST_MOCK_TOOL_DELAY_MILLISECONDS,
+} from "../schema/mock-tools.ts";
+
 export {
   cloneTest,
   createTest,
@@ -302,6 +331,8 @@ export {
   type DeletedTest,
   type ExpectedBehavior,
   type ExpectedBehaviorInput,
+  type MockOverride,
+  type MockOverrideInput,
   type NewTest,
   type Test,
   type TestChanges,

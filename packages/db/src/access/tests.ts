@@ -11,6 +11,7 @@ import {
   testPersona,
   testVersion,
 } from "../schema/tests.ts";
+import type { MockToolAnswer } from "../mock-tools/resolve.ts";
 import type { AuthContext } from "./context.ts";
 import {
   ProjectOutsideOrganizationError,
@@ -19,6 +20,13 @@ import {
   type TestNamingGrader,
   type TestNamingPersona,
 } from "./errors.ts";
+import {
+  answerFromRow,
+  validAnswer,
+  validDelay,
+  validToolName,
+  type MockToolAnswerInput,
+} from "./mock-tools.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
@@ -65,18 +73,54 @@ export type ExpectedBehaviorInput =
     };
 
 /**
+ * One tool this test answers for itself, instead of however the project
+ * answers for it.
+ *
+ * **An override is test content and has no identity of its own.** It is not a
+ * mock tool sitting somewhere else that the test points at — it is a sentence
+ * in the test, versioned with the test exactly as an expected behavior is. That
+ * is what buys override history for nothing: project mock tools are
+ * deliberately unversioned, and this half of the mocked world versions anyway,
+ * because tests already version.
+ *
+ * Forcing a branch is what these are for. "The calendar has no free slots" is
+ * this test with one tool overridden, and the project's other agents go on
+ * seeing the calendar the project describes.
+ */
+export type MockOverride = {
+  /** The agent's own name for the tool, verbatim — matching is by this. */
+  readonly toolName: string;
+  readonly answer: MockToolAnswer;
+  readonly delayMilliseconds: number;
+};
+
+/**
+ * An override as it is written down. The delay is what a writer may leave out,
+ * and the answer arrives unjudged for the reason a project mock tool's does:
+ * whether the two keys add up to one branch is one rule, decided in one place,
+ * for both halves of the mocked world.
+ */
+export type MockOverrideInput = {
+  readonly toolName: unknown;
+  readonly answer: MockToolAnswerInput;
+  readonly delayMilliseconds?: number | undefined;
+};
+
+/**
  * What a version of a test says. The scenario is the situation as free text —
  * what the persona wants, and the circumstances. The expected behaviors are
  * statements about what should happen, in the order they were authored, and at
- * least one of them always exists.
+ * least one of them always exists. The mock overrides are the tools this
+ * scenario answers for itself, and there are usually none.
  *
- * Internal, because the exported API is flat: a caller hands the two fields to
+ * Internal, because the exported API is flat: a caller hands the fields to
  * `createTest` beside the name, and reads them back off a `Test` the same way.
  * The pairing matters only to the version row that stores them together.
  */
 type TestContent = {
   readonly scenario: string;
   readonly expectedBehaviors: readonly ExpectedBehavior[];
+  readonly mockOverrides: readonly MockOverride[];
 };
 
 export type NewTest = {
@@ -97,6 +141,13 @@ export type NewTest = {
    * expected behaviors are judged whatever else happens.
    */
   readonly graderIds?: readonly string[] | undefined;
+  /**
+   * The tools this scenario answers for itself, on top of however the project
+   * answers for them. Naming none is the ordinary case: the project's mock
+   * tools are the world, and a test overrides one only when the branch it is
+   * written for needs a different answer.
+   */
+  readonly mockOverrides?: readonly MockOverrideInput[] | undefined;
 };
 
 /**
@@ -139,6 +190,8 @@ export type Test = {
   readonly personas: readonly TestPersona[];
   /** In the order they were authored. */
   readonly graders: readonly TestGrader[];
+  /** The tools this scenario answers for itself; usually none. */
+  readonly mockOverrides: readonly MockOverride[];
   readonly createdAt: Date;
   readonly updatedAt: Date;
 };
@@ -173,6 +226,15 @@ export type TestChanges = {
    * the array, and leaving the field out keeps it.
    */
   readonly graderIds?: readonly string[];
+  /**
+   * The tools the next version should answer for itself.
+   *
+   * An empty list means here what it means on a create — override nothing —
+   * because overriding nothing is a state a test can be in and is the one most
+   * tests are in. So `[]` clears the overrides, and leaving the field out keeps
+   * them.
+   */
+  readonly mockOverrides?: readonly MockOverrideInput[];
   /**
    * The version this edit was written against, when the writer knows it.
    *
@@ -210,6 +272,8 @@ export type TestVersion = {
   readonly personas: readonly TestPersona[];
   /** By identity, in the order they were authored. */
   readonly graders: readonly TestGrader[];
+  /** The tools this version answers for itself, as it was frozen. */
+  readonly mockOverrides: readonly MockOverride[];
   readonly createdAt: Date;
 };
 
@@ -259,6 +323,7 @@ function validName(name: string): string {
 function validContent(input: {
   readonly scenario: string;
   readonly expectedBehaviors: readonly ExpectedBehaviorInput[];
+  readonly mockOverrides: readonly MockOverrideInput[];
 }): TestContent {
   const scenario = input.scenario.trim();
   if (scenario === "") {
@@ -296,7 +361,54 @@ function validContent(input: {
     );
   }
 
-  return { scenario, expectedBehaviors };
+  return {
+    scenario,
+    expectedBehaviors,
+    mockOverrides: validOverrides(input.mockOverrides),
+  };
+}
+
+/**
+ * The overrides as they will be stored.
+ *
+ * Every gate a project mock tool passes is applied here from the same
+ * functions — a blank tool name, a delay past the budget, an answer past what
+ * the exchange carries — because an override is served the same way over the
+ * same exchange, and a rule enforced in one of the two places would be a rule
+ * a test could walk around.
+ *
+ * **One override per tool name**, for the reason a project holds one answer per
+ * tool: matching is by name alone, so two entries for one tool would be two
+ * answers with no rule to choose between them.
+ */
+function validOverrides(
+  written: readonly MockOverrideInput[],
+): readonly MockOverride[] {
+  const overrides: MockOverride[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of written) {
+    if (typeof entry !== "object" || entry === null) {
+      throw new UnprocessableInputError(
+        "each mock tool a test overrides is an object naming the tool and " +
+          "what it answers with",
+      );
+    }
+    const toolName = validToolName(entry.toolName);
+    if (seen.has(toolName)) {
+      throw new UnprocessableInputError(
+        `this test overrides "${toolName}" twice; override each tool once`,
+      );
+    }
+    seen.add(toolName);
+    overrides.push({
+      toolName,
+      answer: validAnswer(entry.answer),
+      delayMilliseconds: validDelay(entry.delayMilliseconds),
+    });
+  }
+
+  return overrides;
 }
 
 /**
@@ -359,13 +471,42 @@ function contentFromRow(value: unknown, versionId: string): TestContent {
     );
 
   if (typeof value !== "object" || value === null) throw malformed();
-  const { scenario, expectedBehaviors } = value as Record<string, unknown>;
+  const { scenario, expectedBehaviors, mockOverrides } = value as Record<
+    string,
+    unknown
+  >;
   if (typeof scenario !== "string" || scenario.trim() === "") throw malformed();
   if (!Array.isArray(expectedBehaviors) || expectedBehaviors.length === 0) {
     throw malformed();
   }
+  // Absent on every version written before a test could override a tool, and
+  // absent means what it meant then: this test overrides nothing. Reading it as
+  // an empty list is therefore not a default applied to old rows but the
+  // meaning they already had, which is what lets overrides arrive as an
+  // additive change with no rewrite.
+  if (mockOverrides !== undefined && !Array.isArray(mockOverrides)) {
+    throw malformed();
+  }
 
   return {
+    mockOverrides: (mockOverrides ?? []).map((entry: unknown): MockOverride => {
+      if (typeof entry !== "object" || entry === null) throw malformed();
+      const { toolName, answer, delayMilliseconds } = entry as Record<
+        string,
+        unknown
+      >;
+      if (typeof toolName !== "string" || toolName.trim() === "") {
+        throw malformed();
+      }
+      if (typeof delayMilliseconds !== "number") throw malformed();
+      return {
+        toolName,
+        // The mock-tool factory's own guard, so a hand-edited answer fails the
+        // same way on both halves of the mocked world.
+        answer: answerFromRow(answer, versionId),
+        delayMilliseconds,
+      };
+    }),
     scenario,
     expectedBehaviors: expectedBehaviors.map((entry): ExpectedBehavior => {
       if (typeof entry === "string") {
@@ -437,7 +578,38 @@ const sameContentField: {
   scenario: (a, b) => a.scenario === b.scenario,
   expectedBehaviors: (a, b) =>
     sameBehaviors(a.expectedBehaviors, b.expectedBehaviors),
+  mockOverrides: (a, b) => sameOverrides(a.mockOverrides, b.mockOverrides),
 };
+
+/**
+ * The overrides, compared as written: the same tools, in the same order, each
+ * answering the same way after the same delay.
+ *
+ * The answer is compared by its serialization rather than field by field,
+ * because a tool's answer is whatever shape that tool's own contract has and
+ * there is no fixed set of fields to hold a comparator exhaustive over. The
+ * value went through `JSON.parse` on its way in, so key order is the order it
+ * arrived in and two answers that differ only in key order compare as
+ * different — which mints one extra version and loses nothing, where the
+ * opposite mistake would lose an edit.
+ */
+function sameOverrides(
+  a: readonly MockOverride[],
+  b: readonly MockOverride[],
+): boolean {
+  return (
+    a.length === b.length &&
+    a.every((entry, index) => {
+      const other = b[index];
+      return (
+        other !== undefined &&
+        entry.toolName === other.toolName &&
+        entry.delayMilliseconds === other.delayMilliseconds &&
+        JSON.stringify(entry.answer) === JSON.stringify(other.answer)
+      );
+    })
+  );
+}
 
 function sameContent(a: TestContent, b: TestContent): boolean {
   return Object.values(sameContentField).every((same) => same(a, b));
@@ -736,7 +908,10 @@ export async function createTest(
   // Everything answerable without the database is answered first; only an input
   // worth writing costs the reads below.
   const name = validName(input.name);
-  const content = validContent(input);
+  const content = validContent({
+    ...input,
+    mockOverrides: input.mockOverrides ?? [],
+  });
   const named = input.personaIds ?? [];
   validatePersonaIds(named);
   const namedGraders = input.graderIds ?? [];
@@ -1032,6 +1207,7 @@ export async function editTest(
       scenario: changes.scenario ?? storedContent.scenario,
       expectedBehaviors:
         changes.expectedBehaviors ?? storedContent.expectedBehaviors,
+      mockOverrides: changes.mockOverrides ?? storedContent.mockOverrides,
     });
     const personaIds = await personaIdsFor(
       tx,
@@ -1269,7 +1445,41 @@ export async function cloneTest(
     expectedBehaviors: source.expectedBehaviors,
     personaIds: source.personas.map((named) => named.id),
     graderIds: source.graders.map((named) => named.id),
+    mockOverrides: source.mockOverrides,
   });
+}
+
+/**
+ * What each of several versions overrides, keyed by version — the read a run
+ * takes before it freezes the world it will execute in.
+ *
+ * The content column is parsed by this file's own guard rather than by the run
+ * factory, because what a version says is this file's business and a second
+ * reader of the same jsonb is a second opinion about its shape.
+ *
+ * The `where` starts from a bare `inArray`: the caller hands it version ids
+ * that have already come off tenancy-checked rows, so the predicate cannot
+ * reach further than that check already did.
+ *
+ * Exported to the module, not from the package, exactly as the two
+ * "which tests name this" reads beside it are.
+ */
+export async function mockOverridesOfVersions(
+  on: Queryable,
+  versionIds: readonly string[],
+): Promise<Map<string, readonly MockOverride[]>> {
+  const byVersion = new Map<string, readonly MockOverride[]>();
+  if (versionIds.length === 0) return byVersion;
+
+  const rows = await on
+    .select({ id: testVersion.id, content: testVersion.content })
+    .from(testVersion)
+    .where(inArray(testVersion.id, [...versionIds]));
+
+  for (const row of rows) {
+    byVersion.set(row.id, contentFromRow(row.content, row.id).mockOverrides);
+  }
+  return byVersion;
 }
 
 export type DeletedTest = {

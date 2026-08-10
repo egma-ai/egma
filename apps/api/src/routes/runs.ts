@@ -10,14 +10,17 @@ import {
   startRun,
   type AuthContext,
   type ConductedSimulation,
+  type MockToolSnapshot,
   type Run,
   type RunEvent,
+  type SnapshotEntry,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
+import { answerAsWritten } from "../http/mock-tools.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
 import {
@@ -153,6 +156,43 @@ function describedSimulation(one: ConductedSimulation): Record<string, unknown> 
   };
 }
 
+/**
+ * The mocked world a run froze, as every read of the run describes it.
+ *
+ * Two halves rather than one resolved list per test version, because that is
+ * how it is stored and for the same reason: an override replaces a default by
+ * tool name, and answering the merge per version would repeat every default
+ * once per test for nothing. A reader who wants the merge asks for the run's
+ * simulations and applies the overrides of the version each one names — which
+ * is what the simulator is handed when it claims one.
+ */
+function describedMockToolEntry(one: SnapshotEntry): Record<string, unknown> {
+  return {
+    tool: one.toolName,
+    ...answerAsWritten(one.answer),
+    delay_ms: one.delayMilliseconds,
+  };
+}
+
+function describedMockTools(
+  snapshot: MockToolSnapshot,
+): Record<string, unknown> {
+  return {
+    // A default is one of those with the row it came from named beside it, so a
+    // reader can go and look at the mock tool the run froze.
+    defaults: snapshot.defaults.map((one) => ({
+      ...describedMockToolEntry(one),
+      mock_tool_id: one.mockToolId,
+    })),
+    overrides: Object.fromEntries(
+      Object.entries(snapshot.overrides).map(([versionId, entries]) => [
+        versionId,
+        entries.map(describedMockToolEntry),
+      ]),
+    ),
+  };
+}
+
 /** The run and its conversations — one shape for starting, reading and stopping. */
 function describedRun(
   one: Run,
@@ -168,6 +208,10 @@ function describedRun(
     modality: one.connectionSnapshot.modality,
     label: one.label,
     test_versions: [...one.pinnedTestVersionIds],
+    // The world this run was frozen into. It never changes after creation,
+    // whatever anybody edits, which is what a reader comparing two runs' numbers
+    // has to be able to check for themselves.
+    mock_tools: describedMockTools(one.mockToolSnapshot),
     expected_simulation_count: one.expectedSimulationCount,
     // Null until all three land together at the finish. A count that appeared
     // one at a time would let a reader do arithmetic on a half-settled run.
