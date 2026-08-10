@@ -442,13 +442,13 @@ type Written = {
  *   account does produce. Then the name is taken and the next one is tried,
  *   exactly as before.
  *
- * **Two signals tell them apart, and a phone-only agent needs the second one.**
- * A retell connection carries the vendor's own agent id, so it answers outright.
- * A phone connection carries a number — and Retell knows which numbers it routes
- * to the agent under test, so a number it routes here says "this is it" and a
+ * **Two signals tell those apart, and a phone-only agent needs the second.** A
+ * retell connection carries the vendor's own agent id and answers outright. A
+ * phone connection carries a number, and Retell knows which numbers it routes to
+ * the agent under test — so a number it routes here says "this is it", and a
  * number it does not says "this is somebody else" just as clearly. Only an agent
- * with no connections at all leaves nothing to read, and that is treated as this
- * one: there is no history to split and nothing to be wrong about.
+ * with no living connection at all leaves nothing to read, and that is taken as
+ * this one: there is no history to split and nothing to be wrong about.
  */
 async function register(
   options: KeyedOptions,
@@ -564,11 +564,21 @@ async function register(
         };
       case "not-authenticated":
         return notSignedIn;
-      // The agent went away, or the connection name did, between the read and
-      // the write. Both are answered by going round again.
+      // The agent went away between the read and the write. Going round again
+      // is the whole answer: the next pass finds whatever is there now.
       case "not-found":
-      case "name-taken":
         continue;
+      // Nothing here names a connection, so the platform picks the first free
+      // `<type>-<n>` itself and cannot hand back a name already held. Reaching
+      // this means the platform's naming and this build's disagree, and going
+      // round again would register a *second agent* rather than fix it.
+      case "name-taken":
+        return {
+          kind: "failed",
+          reason:
+            `egma would not name the new connection on ${held.agent.name}, ` +
+            "and nothing else was changed. Check that this egma is up to date.",
+        };
       case "refused":
       case "unreachable":
         return { kind: "failed", reason: added.reason };

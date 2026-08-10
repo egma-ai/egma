@@ -222,7 +222,11 @@ async function main(): Promise<void> {
     // First run with nothing said about which agent. One agent on the account
     // connects straight away; several are listed and refused, which is the
     // promptless surface behaving exactly as it should.
-    const first = await egma(["connect"], env, workdir);
+    //
+    // The reach is said, because egma will not choose between text and phone
+    // on anybody's behalf. Text here: this check has no platform to dial from
+    // and no business registering somebody's telephone number.
+    const first = await egma(["connect", "--reach", "text"], env, workdir);
     const listed = agentIdsIn(first.stdout);
 
     let connected = first;
@@ -236,7 +240,11 @@ async function main(): Promise<void> {
       // prompt to keep.
       for (const id of listed.slice(0, MOST_AGENTS_TRIED)) {
         chosen += 1;
-        connected = await egma(["connect", "--retell-agent", id], env, workdir);
+        connected = await egma(
+          ["connect", "--reach", "text", "--retell-agent", id],
+          env,
+          workdir,
+        );
         if (connected.code === 0 && Number(facts(connected.stdout).prompt_characters ?? 0) > 0) {
           break;
         }
@@ -308,13 +316,15 @@ async function main(): Promise<void> {
       "nothing egma stored holds a copy of what the provider is running",
     );
 
-    // Retell keeps voice agents and chat agents at two addresses, so the one
-    // this agent is at is the one that has to have answered.
-    const agentAddress =
-      result.connection_modality === "chat"
-        ? `/get-chat-agent/${result.retell_agent_id ?? ""}`
-        : `/get-agent/${result.retell_agent_id ?? ""}`;
-    const answeredWith = gate.answered(agentAddress) ?? "";
+    // Retell keeps voice agents and chat agents at two addresses, and one of
+    // them is where this agent is. Which one is a fact about the *agent* and
+    // not about the connection egma made for it: reaching a voice agent by
+    // text is an ordinary choice, so the connection's modality says which way
+    // egma will talk to it and never which door Retell keeps it behind.
+    const answeredWith =
+      gate.answered(`/get-agent/${result.retell_agent_id ?? ""}`) ??
+      gate.answered(`/get-chat-agent/${result.retell_agent_id ?? ""}`) ??
+      "";
     check(
       answeredWith.length > 0,
       `Retell answered for the agent egma took (${answeredWith.length} bytes)`,
@@ -354,6 +364,56 @@ async function main(): Promise<void> {
       connection?.credentialsHint === key.trim().slice(-4),
       "the key was sealed, and only its last characters came back",
     );
+
+    /* the numbers, read the way the phone path reads them */
+
+    // The other half of the flow, against the same real account: which numbers
+    // Retell routes to the agent egma just took. It is asked for here rather
+    // than walked through, because registering somebody's real telephone
+    // number against a fixture platform is not this check's business — what it
+    // proves is that the shapes the phone path reads are the shapes the real
+    // service answers with.
+    const numbered = await egma(
+      ["connect", "--reach", "phone", "--retell-agent", result.retell_agent_id ?? ""],
+      env,
+      workdir,
+    );
+    const dialling = facts(numbered.stdout);
+    const offered = numbered.stdout
+      .split("\n")
+      .filter((line) => line.startsWith("retell_number: "))
+      .map((line) => line.slice("retell_number: ".length).split(" ")[0] ?? "");
+    for (const number of offered) named.push(number);
+
+    say("");
+    say("── what the phone path read ──────────────────────────────");
+    say(`  status:  ${dialling.status ?? "none"}`);
+    say(`  numbers: ${offered.length}`);
+
+    // Three endings are all correct answers about a real account, and each says
+    // something different: one number was taken, several were offered and none
+    // named, or Retell routes none to this agent at all. What would not be
+    // correct is a fourth.
+    const dialled = dialling.phone_number ?? "";
+    check(
+      ["connected", "unchosen-number", "no-numbers"].includes(dialling.status ?? ""),
+      `the phone path ended in a way it has a word for (${dialling.status ?? "none"})`,
+    );
+    if (dialling.status === "connected") {
+      check(
+        /^\+[1-9]\d{1,14}$/u.test(dialled),
+        "the number egma took is E.164, read from the account",
+      );
+      check(
+        gate.forwarded.some((one) => one.includes("/get-phone-number")),
+        "the number egma took was confirmed at its own address before it was written",
+      );
+    }
+    check(
+      gate.forwarded.includes("GET /list-phone-numbers"),
+      "the account's numbers were listed, and only listed",
+    );
+    check(gate.refused.length === 0, "and nothing but reads was asked for them");
 
     // And the key is nowhere it should not be.
     const printed = `${connected.stdout}${connected.stderr}${first.stdout}${first.stderr}`;

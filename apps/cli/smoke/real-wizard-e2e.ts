@@ -81,6 +81,7 @@ import { fileURLToPath } from "node:url";
 
 import { startInstance, type Instance } from "../../api/test/support/instance.ts";
 import { DEFAULT_DRIVEN_AGENT_ID, launchForId } from "../src/acp/registry.ts";
+import { folderPathsIn, readConfig } from "../src/folder/egma-folder.ts";
 import { parseTestFile } from "../src/folder/test-file.ts";
 import { skillPlacesFor } from "../src/skills/install.ts";
 import { runInTerminal, type TerminalRun } from "../test/support/pty.ts";
@@ -165,6 +166,47 @@ function nothingWasVerified(strict: boolean, missing: readonly string[]): void {
   say(RULE);
 }
 
+/** How far down a list this check will walk before giving up on a row. */
+const MOST_ROWS_WALKED = 200;
+
+/** How long a picker is given to catch up with one keystroke. */
+const SETTLES_IN = 600;
+
+/**
+ * Moves the highlight down a list until it is on the row this run wants.
+ *
+ * **One keystroke at a time, and each is waited out.** A terminal UI coalesces
+ * renders: press down twice before the first frame is drawn and the selection
+ * moves twice while the screen is painted once — so a loop reading the screen
+ * between presses walks straight past the row it was looking for without ever
+ * seeing it. That is not a hypothetical; it is what this did on a real account
+ * of 37 agents before the wait was put in. Waiting after every press is what
+ * makes one press worth one row on the screen as well as in the program.
+ *
+ * Answers whether it had to move at all, which is worth knowing: a run that
+ * walked to a row is a run whose first row was not the one it wanted.
+ */
+async function walkTo(
+  terminal: TerminalRun,
+  wanted: RegExp,
+  rows: number,
+  what: string,
+): Promise<boolean> {
+  let moved = false;
+  for (let step = 0; step <= Math.max(rows, 1); step += 1) {
+    // Waited for rather than looked at once: a frame can arrive half-drawn, and
+    // `waitFor` re-reads the screen on every chunk the terminal parses.
+    if (wanted.test(terminal.screen())) return moved;
+    if (await terminal.waitFor(() => wanted.test(terminal.screen()), SETTLES_IN)) {
+      return moved;
+    }
+    moved = true;
+    terminal.write("\u001B[B");
+  }
+  if (wanted.test(terminal.screen())) return moved;
+  throw new Error(`the list never showed ${what}\n\nlast screen:\n${redact(terminal.screen())}`);
+}
+
 /** A string with nothing in it a regular expression would read as syntax. */
 function escaped(text: string): string {
   return text.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&");
@@ -232,8 +274,25 @@ async function approve(apiOrigin: string, cookie: string, userCode: string): Pro
 
 /* ── the repository the walk runs in ─────────────────────────────────── */
 
-/** What is never worth copying, and would make the copy enormous. */
-const NOT_COPIED = new Set([".git", "node_modules", "dist", ".next", ".turbo", "target"]);
+/**
+ * What is never worth copying, and would make the copy enormous.
+ *
+ * `egma` is in the list for a different reason: this check walks a repository
+ * *from nothing*, and a repository that has been walked before carries a
+ * committed binding to whichever platform walked it. egma refuses to move a
+ * committed binding — correctly — so a copy carrying one could never be walked
+ * against the instance this check just started. Leaving it out is what makes
+ * every walk here a first walk.
+ */
+const NOT_COPIED = new Set([
+  ".git",
+  "node_modules",
+  "dist",
+  ".next",
+  ".turbo",
+  "target",
+  "egma",
+]);
 
 /**
  * A copy of the developer's repository, so the walk writes into a copy.
@@ -435,17 +494,12 @@ async function walkOnce(options: {
       // walk walks past the rows until that name is the highlighted one; unnamed,
       // the first is taken and any of them proves the same thing about the walk.
       if (wantedAgent !== "") {
-        for (let moved = 0; moved < chosenFrom; moved += 1) {
-          if (new RegExp(`\u203a[^\n]*${escaped(wantedAgent)}`, "u").test(terminal.screen())) {
-            break;
-          }
-          agentCorrected = true;
-          terminal.write("\u001B[B");
-          await terminal.waitFor(() => true, 200);
-        }
-        if (!new RegExp(`\u203a[^\n]*${escaped(wantedAgent)}`, "u").test(terminal.screen())) {
-          throw new Error(`no agent on the account is called ${wantedAgent}`);
-        }
+        agentCorrected = await walkTo(
+          terminal,
+          new RegExp(`\u203a[^\n]*${escaped(wantedAgent)}`, "u"),
+          chosenFrom,
+          `an agent called ${wantedAgent}`,
+        );
       }
       terminal.write("\r");
     }
@@ -473,14 +527,12 @@ async function walkOnce(options: {
       }
       if (terminal.screen().includes("Which number should egma dial?")) {
         if (wantedNumber === "") throw new Error("several numbers reach that agent; name one");
-        for (let moved = 0; moved < 20; moved += 1) {
-          if (new RegExp(`\u203a\\s*${escaped(wantedNumber)}`, "u").test(terminal.screen())) break;
-          terminal.write("\u001B[B");
-          await terminal.waitFor(() => true, 200);
-        }
-        if (!new RegExp(`\u203a\\s*${escaped(wantedNumber)}`, "u").test(terminal.screen())) {
-          throw new Error(`Retell routes no ${wantedNumber} to that agent`);
-        }
+        await walkTo(
+          terminal,
+          new RegExp(`\u203a\\s*${escaped(wantedNumber)}`, "u"),
+          MOST_ROWS_WALKED,
+          `the number ${wantedNumber}`,
+        );
         terminal.write("\r");
       }
     }
@@ -585,6 +637,13 @@ async function walkOnce(options: {
   }
 }
 
+/** The instance's own identity, read the way the CLI reads it. */
+async function platformInstanceOf(origin: string): Promise<string> {
+  const answered = await fetch(`${origin}/api/platform`);
+  const body = (await answered.json().catch(() => ({}))) as { instance_id?: unknown };
+  return typeof body.instance_id === "string" ? body.instance_id : "";
+}
+
 /* ── what landed ─────────────────────────────────────────────────────── */
 
 async function assertWhatLanded(options: {
@@ -680,6 +739,27 @@ async function assertWhatLanded(options: {
       "the key was sealed on the platform, and only its last characters came back",
     );
   }
+
+  /* the committed file, which is the whole of what this repository points at */
+
+  const written = await readConfig(folderPathsIn(outcome.repository).config);
+  check(
+    written.platform?.origin === origin,
+    `the repository is bound to the platform it walked against (${String(written.platform?.origin)})`,
+  );
+  check(
+    written.platform?.instance === (await platformInstanceOf(origin)),
+    "and to that platform's own instance identity",
+  );
+  check(
+    written.agent?.id === agentId && written.connection?.id === String(connection?.id),
+    "the agent and the connection egma made are the ones the file names",
+  );
+  check(written.suite?.name !== undefined, `the file names a test suite (${String(written.suite?.name)})`);
+  check(
+    !JSON.stringify(written).includes(options.key),
+    "and no supplied secret is anywhere in it",
+  );
 
   const tests = await ask(origin, held.key, "/api/tests");
   const landed = Array.isArray(tests.body.items)
