@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Mono, Instrument_Sans } from "next/font/google";
 import { notFound } from "next/navigation";
 
-import { DesignSystemPrototype } from "./prototype.tsx";
+import { ShellPrototype } from "./shells.tsx";
 
 export const metadata: Metadata = {
   title: "Egma UI prototype",
@@ -21,14 +21,15 @@ const mono = IBM_Plex_Mono({
 });
 
 /**
- * PROTOTYPE ONLY: three design directions, each applied to sign-in,
- * transcripts, and transcript detail. This route never renders in production.
+ * PROTOTYPE ONLY: three application shells around the same real page shapes.
+ * Variant C is already the brand direction. This route now answers the open
+ * product-shell question and never renders in production.
  */
 export default function DesignSystemPrototypePage() {
   if (process.env.NODE_ENV === "production") notFound();
   return (
     <div className={`${sans.variable} ${mono.variable}`}>
-      <DesignSystemPrototype />
+      <ShellPrototype />
     </div>
   );
 }

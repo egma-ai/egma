@@ -19,7 +19,7 @@ import {
   type Listed,
   type ListPage,
 } from "../../lib/transcripts.ts";
-import { Card, Screen, styles } from "../ui.tsx";
+import { AppShell, Notice, PageHeader, ProductPage, StatePage, styles } from "../ui.tsx";
 
 /**
  * Everything this project recorded, newest first.
@@ -194,12 +194,12 @@ export default function TranscriptsPage() {
 
   if (state.status === "signed-out") {
     return (
-      <Card title={LIST.signedOut} lead={LIST.signedOutLead}>
-        <p style={styles.aside}>
+      <StatePage title={LIST.signedOut} lead={LIST.signedOutLead}>
+        <p className={styles.linkLine}>
           <a href="/sign-in">{LIST.signIn}</a> ·{" "}
           <a href="/signup">{LIST.setUp}</a>
         </p>
-      </Card>
+      </StatePage>
     );
   }
 
@@ -208,13 +208,12 @@ export default function TranscriptsPage() {
   const more = state.status === "loaded" ? state.more : null;
 
   const chooser = (
-    <span style={{ fontSize: "0.875rem" }}>
-      <label style={{ color: "#666", marginRight: "0.5rem" }} htmlFor="window">
+    <span className={styles.listToolbar}>
+      <label htmlFor="window">
         {LIST.window}
       </label>
       <select
         id="window"
-        style={{ fontFamily: "inherit" }}
         value={choice ?? DEFAULT_WINDOW}
         onChange={(event) => {
           choose(windowChoiceOf(event.target.value));
@@ -230,75 +229,47 @@ export default function TranscriptsPage() {
   );
 
   return (
-    <Screen title={LIST.title} lead={LIST.lead} aside={chooser}>
-      {state.status === "failed" ? (
-        <p style={styles.problem}>{state.why}</p>
-      ) : null}
+    <AppShell active="transcripts">
+      <ProductPage wide>
+        <PageHeader eyebrow="Current project" title={LIST.title} lead={LIST.lead} action={chooser} />
+        {state.status === "failed" ? <Notice tone="error">{state.why}</Notice> : null}
+        {state.status === "loading" ? <Notice>{LIST.loading}</Notice> : null}
 
-      {state.status === "loading" ? <p style={styles.lead}>{LIST.loading}</p> : null}
-
-      {state.status === "loaded" ? (
-        state.rows.length === 0 ? (
-          <p style={styles.lead}>{LIST.empty}</p>
-        ) : (
-          <>
-            <div style={styles.scroller}>
-              <table style={styles.table}>
-                <thead>
-                  <tr>
-                    {COLUMN_ORDER.map(([heading]) => (
-                      <th key={heading} scope="col" style={styles.columnHeading}>
-                        {heading}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {state.rows.map((row) => (
-                    <tr key={row.trace_id}>
-                      {COLUMN_ORDER.map(([heading, fill]) => (
-                        <td key={heading} style={styles.cell}>
-                          {fill(row)}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <p style={styles.aside}>
-              {LIST.counted(state.rows.length)}
-              {more === null ? null : (
-                <>
-                  {" · "}
-                  <button
-                    type="button"
-                    disabled={busy}
-                    style={{ fontFamily: "inherit" }}
-                    onClick={() => {
-                      void showMore(more);
-                    }}
-                  >
-                    {busy ? LIST.loadingMore : LIST.showMore}
-                  </button>
-                </>
-              )}
-            </p>
-          </>
-        )
-      ) : null}
-
-      <p style={styles.aside}>
-        <a href="/">{LIST.back}</a>
-      </p>
-    </Screen>
+        {state.status === "loaded" ? (
+          state.rows.length === 0 ? <Notice>{LIST.empty}</Notice> : (
+            <>
+              <div className={styles.listMeta}><span>{LIST.counted(state.rows.length)}</span><span>Newest first</span></div>
+              <div className={styles.tableWrap}>
+                <table className={styles.dataTable}>
+                  <thead><tr>{COLUMN_ORDER.map(([heading]) => <th key={heading} scope="col">{heading}</th>)}</tr></thead>
+                  <tbody>{state.rows.map((row) => <tr key={row.trace_id}>{COLUMN_ORDER.map(([heading, fill]) => <td key={heading}>{fill(row)}</td>)}</tr>)}</tbody>
+                </table>
+              </div>
+              <div className={styles.mobileRows}>
+                {state.rows.map((row) => (
+                  <a className={styles.mobileRow} href={transcriptPath(row)} key={row.trace_id}>
+                    <span><span>{whenItWas(row.started_at)}</span><span className={row.errored_span_count > 0 ? styles.wrong : styles.muted}>{row.errored_span_count > 0 ? `${row.errored_span_count} errors` : "No errors"}</span></span>
+                    <strong>{row.preview === "" ? LIST.nothing : row.preview}</strong>
+                    <p>{row.turn_counts.human} {LIST.human} · {row.turn_counts.agent} {LIST.agent} · {row.tool_span_count} tools</p>
+                    <small>{howLong(row.duration_ns)} · {row.source} · {row.connection_type}</small>
+                  </a>
+                ))}
+              </div>
+              <div className={styles.moreLine}>
+                <span>{LIST.counted(state.rows.length)}</span>
+                {more === null ? null : <button className={styles.inlineButton} type="button" disabled={busy} onClick={() => void showMore(more)}>{busy ? LIST.loadingMore : LIST.showMore}</button>}
+              </div>
+            </>
+          )
+        ) : null}
+      </ProductPage>
+    </AppShell>
   );
 }
 
 /** Nothing recorded for this column, which is a different thing from a zero. */
 function Nothing() {
-  return <span style={styles.muted}>{LIST.nothing}</span>;
+  return <span className={styles.muted}>{LIST.nothing}</span>;
 }
 
 /**
@@ -342,7 +313,7 @@ const COLUMN_ORDER: readonly (readonly [
       row.preview === "" ? (
         <Nothing />
       ) : (
-        <span style={{ whiteSpace: "normal" }}>{row.preview}</span>
+        <span>{row.preview}</span>
       ),
   ],
   [COLUMNS.steps, (row) => row.span_count],
@@ -356,7 +327,7 @@ const COLUMN_ORDER: readonly (readonly [
       row.errored_span_count === 0 ? (
         <Nothing />
       ) : (
-        <strong style={styles.wrong}>{row.errored_span_count}</strong>
+        <strong className={styles.wrong}>{row.errored_span_count}</strong>
       ),
   ],
   [COLUMNS.source, (row) => row.source],

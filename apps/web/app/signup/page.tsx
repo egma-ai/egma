@@ -7,7 +7,7 @@ import {
   DEFAULT_PROJECT_NAME,
   organizationNameFromEmail,
 } from "../../lib/signup-defaults.ts";
-import { Card, styles } from "../ui.tsx";
+import { AuthShell, Field, Notice, StatePage, styles } from "../ui.tsx";
 
 /**
  * Signing up: one page, one submit, and an organization and a project at the
@@ -95,19 +95,19 @@ export default function SignUpPage() {
   }
 
   if (availability === null) {
-    return <Card title="egma">Loading…</Card>;
+    return <StatePage title="Loading egma" lead="Checking whether this instance is ready for setup." />;
   }
 
   if (!availability.open) {
     return (
-      <Card
+      <StatePage
         title="This egma has been claimed"
         lead={
           availability.message ??
           "Somebody has already set this instance up. Ask them for an invitation."
         }
       >
-        <p style={styles.aside}>
+        <p className={styles.linkLine}>
           Already have an account?{" "}
           <a
             href={
@@ -118,24 +118,22 @@ export default function SignUpPage() {
           </a>
           .
         </p>
-      </Card>
+      </StatePage>
     );
   }
 
   return (
-    <Card
+    <AuthShell
+      eyebrow="First setup"
       title="Set up egma"
       lead="One step. Your organization and your first project are created together."
     >
-      <form onSubmit={submit}>
-        {problem === null ? null : <p style={styles.problem}>{problem}</p>}
+      <form className={styles.form} onSubmit={submit}>
+        {problem === null ? null : <Notice tone="error">{problem}</Notice>}
 
-        <div style={styles.field}>
-          <label style={styles.label} htmlFor="email">
-            Email
-          </label>
+        <Field label="Email" htmlFor="email">
           <input
-            style={styles.input}
+            className={styles.input}
             id="email"
             name="email"
             type="email"
@@ -144,14 +142,11 @@ export default function SignUpPage() {
             value={email}
             onChange={(event) => onEmailChange(event.target.value)}
           />
-        </div>
+        </Field>
 
-        <div style={styles.field}>
-          <label style={styles.label} htmlFor="password">
-            Password
-          </label>
+        <Field label="Password" htmlFor="password">
           <input
-            style={styles.input}
+            className={styles.input}
             id="password"
             name="password"
             type="password"
@@ -161,15 +156,11 @@ export default function SignUpPage() {
             value={password}
             onChange={(event) => setPassword(event.target.value)}
           />
-        </div>
+        </Field>
 
-        <div style={styles.field}>
-          <label style={styles.label} htmlFor="organizationName">
-            Organization
-            <span style={styles.hint}>Filled in from your email. Change it if you like.</span>
-          </label>
+        <Field label="Organization" hint="Filled in from your email. Change it if you like." htmlFor="organizationName">
           <input
-            style={styles.input}
+            className={styles.input}
             id="organizationName"
             name="organizationName"
             required
@@ -179,28 +170,25 @@ export default function SignUpPage() {
               setOrganizationName(event.target.value);
             }}
           />
-        </div>
+        </Field>
 
-        <div style={styles.field}>
-          <label style={styles.label} htmlFor="projectName">
-            First project
-          </label>
+        <Field label="First project" htmlFor="projectName">
           <input
-            style={styles.input}
+            className={styles.input}
             id="projectName"
             name="projectName"
             required
             value={projectName}
             onChange={(event) => setProjectName(event.target.value)}
           />
-        </div>
+        </Field>
 
-        <button style={styles.button} type="submit" disabled={submitting}>
+        <button className={styles.button} type="submit" disabled={submitting}>
           {submitting ? "Setting up…" : "Create my egma"}
         </button>
       </form>
 
-      <p style={styles.aside}>
+      <p className={styles.linkLine}>
         Already have an account?{" "}
         <a
           href={returnTo === null ? "/sign-in" : withReturnTo("/sign-in", returnTo)}
@@ -209,6 +197,6 @@ export default function SignUpPage() {
         </a>
         .
       </p>
-    </Card>
+    </AuthShell>
   );
 }

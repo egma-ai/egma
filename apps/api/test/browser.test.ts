@@ -1,4 +1,4 @@
-import type { Browser, Page } from "playwright-core";
+import type { Browser, Page, Request } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { openBrowser } from "./support/browser.ts";
@@ -233,6 +233,80 @@ describe("adding a colleague, with no mail configured", () => {
       ]);
 
       await his.close();
+    },
+    SETTLE,
+  );
+
+  it(
+    "does nothing until an admin confirms a destructive member action",
+    async () => {
+      await page.goto(`${origin}/members`);
+      const bob = page.locator("article", { hasText: "bob@acme.example" });
+      await bob.waitFor();
+
+      const memberActions: string[] = [];
+      const recordMemberAction = (request: Request) => {
+        const path = new URL(request.url()).pathname;
+        if (request.method() === "POST" && /\/api\/members\/[^/]+\/(?:deactivate|remove)$/u.test(path)) {
+          memberActions.push(path);
+        }
+      };
+      page.on("request", recordMemberAction);
+
+      try {
+        // The dialog itself is not an action. Every ordinary way out is safe.
+        await bob.getByRole("button", { name: "Deactivate" }).click();
+        expect(memberActions).toEqual([]);
+        await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+
+        await bob.getByRole("button", { name: "Deactivate" }).click();
+        await page.keyboard.press("Escape");
+        expect(memberActions).toEqual([]);
+
+        await bob.getByRole("button", { name: "Deactivate" }).click();
+        await page.mouse.click(4, 4);
+        expect(memberActions).toEqual([]);
+
+        // Only the destructive button sends the request, and it sends the
+        // endpoint named by the choice once.
+        await bob.getByRole("button", { name: "Deactivate" }).click();
+        const deactivated = page.waitForResponse((response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname.endsWith("/deactivate"),
+        );
+        await page.getByRole("dialog").getByRole("button", { name: "Deactivate" }).click();
+        expect((await deactivated).status()).toBe(200);
+        await expect.poll(() => bob.innerText()).toContain("deactivated");
+        expect(memberActions).toHaveLength(1);
+        expect(memberActions[0]).toMatch(/\/deactivate$/u);
+
+        // Removal has its own confirmation and endpoint. Closing it is safe;
+        // confirming it removes the row and sends one more request.
+        await bob.getByRole("button", { name: "Remove" }).click();
+        expect(memberActions).toHaveLength(1);
+        await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+
+        await bob.getByRole("button", { name: "Remove" }).click();
+        await page.keyboard.press("Escape");
+        expect(memberActions).toHaveLength(1);
+
+        await bob.getByRole("button", { name: "Remove" }).click();
+        await page.mouse.click(4, 4);
+        expect(memberActions).toHaveLength(1);
+
+        await bob.getByRole("button", { name: "Remove" }).click();
+        const removed = page.waitForResponse((response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname.endsWith("/remove"),
+        );
+        await page.getByRole("dialog").getByRole("button", { name: "Remove" }).click();
+        expect((await removed).status()).toBe(200);
+        await expect.poll(() => bob.count()).toBe(0);
+        expect(memberActions).toHaveLength(2);
+        expect(memberActions[1]).toMatch(/\/remove$/u);
+      } finally {
+        page.off("request", recordMemberAction);
+      }
     },
     SETTLE,
   );
@@ -876,6 +950,57 @@ describe("more exchanges than one page holds", () => {
       ).toBe(0);
 
       await them.context().close();
+    },
+    SETTLE,
+  );
+});
+
+describe("the saved theme", () => {
+  it(
+    "starts light, keeps both controls synchronized, and survives a reload",
+    async () => {
+      await page.goto(`${origin}/`);
+      await page.evaluate(() => localStorage.removeItem("egma-theme"));
+      await page.reload();
+
+      expect(await page.locator("html").getAttribute("data-theme")).toBe("light");
+      const controls = page.locator('button[aria-label="Use dark theme"]');
+      expect(await controls.count()).toBe(2);
+      await controls.first().click();
+
+      expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");
+      expect(await page.evaluate(() => localStorage.getItem("egma-theme"))).toBe("dark");
+      expect(await page.locator('button[aria-label="Use light theme"]').count()).toBe(2);
+
+      await page.reload();
+      expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");
+      await expect
+        .poll(() => page.locator('button[aria-label="Use light theme"]').count())
+        .toBe(2);
+    },
+    SETTLE,
+  );
+});
+
+describe("recovering when a page cannot load", () => {
+  it(
+    "shows a retry for People and for an invitation lookup",
+    async () => {
+      await page.route("**/api/members", (route) => route.abort());
+      await page.goto(`${origin}/members`);
+      await page.waitForSelector("text=People could not be loaded");
+      await page.unroute("**/api/members");
+      await page.getByRole("button", { name: "Try again" }).click();
+      await page.waitForSelector("text=Everybody in your organization");
+
+      await page.route("**/api/invitations/lookup", (route) =>
+        route.fulfill({ status: 503, contentType: "application/json", body: '{"message":"unavailable"}' }),
+      );
+      await page.goto(`${origin}/invite?token=unreachable`);
+      await page.waitForSelector("text=The invitation could not be checked");
+      await page.unroute("**/api/invitations/lookup");
+      await page.getByRole("button", { name: "Try again" }).click();
+      await page.waitForSelector("text=That invitation does not name anything");
     },
     SETTLE,
   );

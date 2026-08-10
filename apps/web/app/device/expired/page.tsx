@@ -1,4 +1,4 @@
-import { Card, styles } from "../../ui.tsx";
+import { StatePage, styles } from "../../ui.tsx";
 
 /**
  * The code timed out, and saying so specifically is the whole job of this page.
@@ -9,14 +9,14 @@ import { Card, styles } from "../../ui.tsx";
  */
 export default function DeviceExpiredPage() {
   return (
-    <Card
+    <StatePage
       title="That code expired"
       lead="Codes are short-lived, so one left sitting for a while stops working. Nothing went wrong and nothing was granted."
     >
-      <p style={styles.aside}>
+      <p className={styles.linkLine}>
         Run <code>egma login</code> in your terminal again for a fresh code, or{" "}
         <a href="/device">enter a code</a> if you already have a new one.
       </p>
-    </Card>
+    </StatePage>
   );
 }

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { returnPathIn, withReturnTo } from "../../lib/return-to.ts";
-import { Card, styles } from "../ui.tsx";
+import { AuthShell, Field, Notice, styles } from "../ui.tsx";
 
 /**
  * Signing in, for the second machine and everybody who arrived by invitation.
@@ -49,16 +49,18 @@ export default function SignInPage() {
   }
 
   return (
-    <Card title="Sign in to egma">
-      <form onSubmit={submit}>
-        {problem === null ? null : <p style={styles.problem}>{problem}</p>}
+    <AuthShell
+      animated
+      eyebrow="Welcome back"
+      title="Trust starts with what happened."
+      lead="Sign in to continue to your organization."
+    >
+      <form className={styles.form} onSubmit={submit}>
+        {problem === null ? null : <Notice tone="error">{problem}</Notice>}
 
-        <div style={styles.field}>
-          <label style={styles.label} htmlFor="email">
-            Email
-          </label>
+        <Field label="Email" htmlFor="email">
           <input
-            style={styles.input}
+            className={styles.input}
             id="email"
             name="email"
             type="email"
@@ -67,14 +69,11 @@ export default function SignInPage() {
             value={email}
             onChange={(event) => setEmail(event.target.value)}
           />
-        </div>
+        </Field>
 
-        <div style={styles.field}>
-          <label style={styles.label} htmlFor="password">
-            Password
-          </label>
+        <Field label="Password" htmlFor="password">
           <input
-            style={styles.input}
+            className={styles.input}
             id="password"
             name="password"
             type="password"
@@ -83,20 +82,20 @@ export default function SignInPage() {
             value={password}
             onChange={(event) => setPassword(event.target.value)}
           />
-        </div>
+        </Field>
 
-        <button style={styles.button} type="submit" disabled={submitting}>
+        <button className={styles.button} type="submit" disabled={submitting}>
           {submitting ? "Signing in…" : "Sign in"}
         </button>
       </form>
 
-      <p style={styles.aside}>
+      <p className={styles.linkLine}>
         No account yet?{" "}
         <a href={returnTo === null ? "/signup" : withReturnTo("/signup", returnTo)}>
           Set up egma
         </a>
         .
       </p>
-    </Card>
+    </AuthShell>
   );
 }

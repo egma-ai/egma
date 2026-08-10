@@ -1,186 +1,266 @@
-import type { CSSProperties, ReactNode } from "react";
+"use client";
 
-/**
- * The whole of the interface these pages need: a card, a field, a button and a
- * line of red text — and, since the transcript pages arrived, a wider screen to
- * put a table on.
- *
- * There is deliberately no design system, no client state library and no data
- * layer here. The forms on the way into the product asked for none, and the
- * first two pages of the dashboard asked for none either: they wanted a second
- * width and six more entries in the same object, which is what they got. A
- * component library imported for two pages is a dependency every page after
- * them inherits, and the point at which one is worth taking on is a point
- * something will have to actually reach.
- */
+import Image from "next/image";
+import { useEffect, useState, type ReactNode } from "react";
 
-export const styles = {
-  page: {
-    display: "flex",
-    justifyContent: "center",
-    padding: "4rem 1.5rem",
-  } satisfies CSSProperties,
-  card: {
-    width: "100%",
-    maxWidth: "26rem",
-  } satisfies CSSProperties,
-  title: {
-    fontSize: "1.375rem",
-    margin: "0 0 0.25rem",
-  } satisfies CSSProperties,
-  lead: {
-    color: "#555",
-    margin: "0 0 1.75rem",
-    lineHeight: 1.5,
-  } satisfies CSSProperties,
-  label: {
-    display: "block",
-    fontSize: "0.8125rem",
-    fontWeight: 600,
-    margin: "0 0 0.375rem",
-  } satisfies CSSProperties,
-  hint: {
-    display: "block",
-    fontWeight: 400,
-    color: "#666",
-    marginTop: "0.125rem",
-  } satisfies CSSProperties,
-  input: {
-    width: "100%",
-    boxSizing: "border-box",
-    padding: "0.5rem 0.625rem",
-    fontSize: "0.9375rem",
-    border: "1px solid #ccc",
-    borderRadius: "0.375rem",
-    fontFamily: "inherit",
-  } satisfies CSSProperties,
-  field: { marginBottom: "1rem" } satisfies CSSProperties,
-  button: {
-    width: "100%",
-    padding: "0.625rem",
-    fontSize: "0.9375rem",
-    fontWeight: 600,
-    color: "#fff",
-    background: "#111",
-    border: 0,
-    borderRadius: "0.375rem",
-    cursor: "pointer",
-    fontFamily: "inherit",
-  } satisfies CSSProperties,
-  problem: {
-    color: "#b00020",
-    fontSize: "0.875rem",
-    margin: "0 0 1rem",
-    lineHeight: 1.45,
-  } satisfies CSSProperties,
-  aside: {
-    color: "#555",
-    fontSize: "0.875rem",
-    marginTop: "1.5rem",
-  } satisfies CSSProperties,
-  definition: {
-    display: "flex",
-    justifyContent: "space-between",
-    padding: "0.5rem 0",
-    borderTop: "1px solid #eee",
-    fontSize: "0.9375rem",
-  } satisfies CSSProperties,
+import type { Me } from "../lib/me.ts";
+import {
+  nextTheme,
+  PRODUCT_NAVIGATION,
+  THEME_STORAGE_KEY,
+  themeFromStored,
+  type ProductSection,
+  type Theme,
+} from "../lib/presentation.ts";
+import { TrustGate } from "./trust-gate.tsx";
+import styles from "./ui.module.css";
 
-  /* The wider half, for the pages that show what happened rather than ask. */
+export { styles };
 
-  screen: {
-    width: "100%",
-    maxWidth: "64rem",
-  } satisfies CSSProperties,
-  /** A table wider than the window scrolls itself rather than the page. */
-  scroller: {
-    overflowX: "auto",
-    border: "1px solid #eee",
-    borderRadius: "0.375rem",
-  } satisfies CSSProperties,
-  table: {
-    borderCollapse: "collapse",
-    width: "100%",
-    fontSize: "0.875rem",
-  } satisfies CSSProperties,
-  columnHeading: {
-    textAlign: "left",
-    fontWeight: 600,
-    color: "#555",
-    whiteSpace: "nowrap",
-    padding: "0.5rem 0.75rem",
-    borderBottom: "1px solid #eee",
-  } satisfies CSSProperties,
-  cell: {
-    padding: "0.5rem 0.75rem",
-    borderBottom: "1px solid #f2f2f2",
-    whiteSpace: "nowrap",
-    verticalAlign: "top",
-  } satisfies CSSProperties,
-  /** What went wrong, wherever a number or a step has to carry it. */
-  wrong: { color: "#b00020", fontWeight: 600 } satisfies CSSProperties,
-  muted: { color: "#777" } satisfies CSSProperties,
-  monospace: {
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-    fontSize: "0.8125rem",
-  } satisfies CSSProperties,
-} as const;
+export type AppSection = ProductSection;
 
-export function Card({
+const THEME_CHANGE_EVENT = "egma:theme-change";
+
+export function Brand() {
+  return (
+    <Image
+      className={styles.brand}
+      src="/prototype/egma-logo.png"
+      alt="egma"
+      width={146}
+      height={31}
+      priority
+    />
+  );
+}
+
+export function ThemeToggle() {
+  const [theme, setTheme] = useState<Theme>("light");
+
+  useEffect(() => {
+    const readTheme = () => {
+      setTheme(themeFromStored(document.documentElement.dataset.theme ?? null));
+    };
+    readTheme();
+    window.addEventListener(THEME_CHANGE_EVENT, readTheme);
+    return () => window.removeEventListener(THEME_CHANGE_EVENT, readTheme);
+  }, []);
+
+  function toggle(): void {
+    const next = nextTheme(theme);
+    document.documentElement.dataset.theme = next;
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      // Theme still changes for this page when storage is unavailable.
+    }
+    window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
+  }
+
+  return (
+    <button
+      className={styles.themeToggle}
+      type="button"
+      aria-label={`Use ${theme === "light" ? "dark" : "light"} theme`}
+      onClick={toggle}
+    >
+      <span aria-hidden="true">{theme === "light" ? "◐" : "◑"}</span>
+    </button>
+  );
+}
+
+export function AuthShell({
+  eyebrow,
   title,
   lead,
+  animated = false,
   children,
 }: {
+  eyebrow?: string;
   title: string;
   lead?: ReactNode;
+  animated?: boolean;
   children: ReactNode;
 }) {
   return (
-    <main style={styles.page}>
-      <div style={styles.card}>
-        <h1 style={styles.title}>{title}</h1>
-        {lead === undefined ? null : <p style={styles.lead}>{lead}</p>}
-        {children}
-      </div>
+    <main className={`${styles.authShell} ${animated ? styles.authAnimated : styles.authStatic}`}>
+      <aside className={styles.authBrandPanel}>
+        {animated ? <TrustGate /> : null}
+        <div className={styles.authBrandOverlay}>
+          <Brand />
+          <div className={styles.authStatement}>
+            <p className={styles.eyebrow}>{animated ? "Trust gate" : "Voice agent reliability"}</p>
+            <p>{animated ? "Raw behavior passes checks before it earns trust." : "Trust the voice agent you ship to production."}</p>
+          </div>
+        </div>
+      </aside>
+      <section className={styles.authContent}>
+        <div className={styles.authTheme}><ThemeToggle /></div>
+        <div className={styles.authCard}>
+          {eyebrow === undefined ? null : <p className={styles.eyebrow}>{eyebrow}</p>}
+          <h1>{title}</h1>
+          {lead === undefined ? null : <div className={styles.authLead}>{lead}</div>}
+          {children}
+        </div>
+      </section>
     </main>
   );
 }
 
-/**
- * The same page, at the width a table needs. `Card` with a wider box would have
- * done, and it is a separate component because a form at sixty-four rems is a
- * worse form — the two widths are for two different jobs.
- */
-export function Screen({
+export function StatePage({
   title,
   lead,
-  aside,
   children,
 }: {
   title: string;
   lead?: ReactNode;
-  /** What sits beside the heading: a control, a link back. */
-  aside?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <AuthShell title={title} lead={lead}>
+      {children}
+    </AuthShell>
+  );
+}
+
+export function AppShell({
+  active,
+  initialMe,
+  children,
+}: {
+  active: AppSection;
+  initialMe?: Me;
+  children: ReactNode;
+}) {
+  const [me, setMe] = useState<Me | null>(initialMe ?? null);
+  const [contextState, setContextState] = useState<"loading" | "ready" | "unavailable">(initialMe === undefined ? "loading" : "ready");
+
+  useEffect(() => {
+    if (initialMe !== undefined) return undefined;
+    let current = true;
+    void fetch("/api/me")
+      .then(async (response) => {
+        if (!current) return;
+        if (!response.ok) {
+          setContextState("unavailable");
+          return;
+        }
+        setMe((await response.json()) as Me);
+        setContextState("ready");
+      })
+      .catch(() => {
+        if (current) setContextState("unavailable");
+      });
+    return () => {
+      current = false;
+    };
+  }, [initialMe]);
+
+  const organization = me?.organizations[0];
+  const project = me?.projects[0];
+  const initial = me?.user.email.trim().slice(0, 1).toUpperCase() || "E";
+  const projectLabel = contextState === "loading"
+    ? "Loading project"
+    : contextState === "unavailable"
+      ? "Project unavailable"
+      : project?.name === undefined
+        ? "No project"
+        : `${project.name} project`;
+
+  return (
+    <div className={styles.appShell}>
+      <aside className={styles.sidebar}>
+        <a href="/" aria-label="Egma home"><Brand /></a>
+        <div className={styles.sidebarContext}>
+          <span>Organization</span>
+          <strong>{organization?.name ?? (contextState === "unavailable" ? "Organization unavailable" : "Egma")}</strong>
+          <small>{projectLabel}</small>
+        </div>
+        <nav className={styles.navigation} aria-label="Main navigation">
+          {PRODUCT_NAVIGATION.map((item) => <a key={item.id} className={active === item.id ? styles.navigationActive : undefined} aria-current={active === item.id ? "page" : undefined} href={item.href}>{item.label}</a>)}
+        </nav>
+        <div className={styles.sidebarFooter}>
+          <div className={styles.accountLine}>
+            <span className={styles.avatar}>{initial}</span>
+            <span className={styles.accountEmail}>{me?.user.email ?? (contextState === "unavailable" ? "Account unavailable" : "Loading…")}</span>
+            <ThemeToggle />
+          </div>
+        </div>
+      </aside>
+      <div className={styles.appBody}>
+        <header className={styles.mobileHeader}>
+          <a href="/" aria-label="Egma home"><Brand /></a>
+          <ThemeToggle />
+        </header>
+        <nav className={styles.mobileNavigation} aria-label="Main navigation">
+          {PRODUCT_NAVIGATION.map((item) => <a key={item.id} className={active === item.id ? styles.navigationActive : undefined} aria-current={active === item.id ? "page" : undefined} href={item.href}>{item.label}</a>)}
+        </nav>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export function ProductPage({
+  children,
+  wide = false,
+}: {
+  children: ReactNode;
+  wide?: boolean;
+}) {
+  return <main className={`${styles.productPage} ${wide ? styles.productPageWide : ""}`}>{children}</main>;
+}
+
+export function PageHeader({
+  eyebrow,
+  title,
+  lead,
+  action,
+}: {
+  eyebrow?: string;
+  title: string;
+  lead?: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <header className={styles.pageHeader}>
+      <div>
+        {eyebrow === undefined ? null : <p className={styles.eyebrow}>{eyebrow}</p>}
+        <h1>{title}</h1>
+        {lead === undefined ? null : <div className={styles.pageLead}>{lead}</div>}
+      </div>
+      {action === undefined ? null : <div className={styles.pageAction}>{action}</div>}
+    </header>
+  );
+}
+
+export function Field({
+  label,
+  hint,
+  htmlFor,
+  children,
+}: {
+  label: string;
+  hint?: ReactNode;
+  htmlFor: string;
   children: ReactNode;
 }) {
   return (
-    <main style={styles.page}>
-      <div style={styles.screen}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "baseline",
-            flexWrap: "wrap",
-            gap: "1rem",
-          }}
-        >
-          <h1 style={styles.title}>{title}</h1>
-          {aside}
-        </div>
-        {lead === undefined ? null : <p style={styles.lead}>{lead}</p>}
-        {children}
-      </div>
-    </main>
+    <div className={styles.field}>
+      <label htmlFor={htmlFor}>{label}{hint === undefined ? null : <span>{hint}</span>}</label>
+      {children}
+    </div>
   );
+}
+
+export function Notice({
+  tone = "neutral",
+  children,
+}: {
+  tone?: "neutral" | "error" | "success";
+  children: ReactNode;
+}) {
+  const toneClass = tone === "neutral" ? "" : styles[`notice-${tone}`];
+  const role = tone === "error" ? "alert" : tone === "success" ? "status" : undefined;
+  return <div className={`${styles.notice} ${toneClass}`} role={role}>{children}</div>;
 }

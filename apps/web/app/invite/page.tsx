@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { withReturnTo } from "../../lib/return-to.ts";
-import { Card, styles } from "../ui.tsx";
+import { AuthShell, Field, Notice, StatePage, styles } from "../ui.tsx";
 
 /**
  * The page a colleague lands on.
@@ -31,6 +31,7 @@ type Lookup = {
 
 type State =
   | { status: "loading" }
+  | { status: "failed" }
   | { status: "no-token" }
   | { status: "unknown" }
   | { status: "ready"; invitation: Lookup; signedInAs: string | null };
@@ -41,6 +42,7 @@ export default function InvitePage() {
   const [password, setPassword] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const given = new URLSearchParams(window.location.search).get("token") ?? "";
@@ -52,27 +54,40 @@ export default function InvitePage() {
 
     let current = true;
     void (async () => {
-      const [looked, me] = await Promise.all([
-        fetch("/api/invitations/lookup", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ token: given }),
-        }),
-        fetch("/api/me"),
-      ]);
+      const looked = await fetch("/api/invitations/lookup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: given }),
+      });
       if (!current) return;
 
       if (!looked.ok) {
-        setState({ status: "unknown" });
+        setState({ status: looked.status === 404 ? "unknown" : "failed" });
         return;
       }
 
       // Somebody already signed in is offered the button rather than the form.
       // Somebody signed in as a different person is told so by the refusal, and
       // that is better than this page guessing what they meant.
-      const signedInAs = me.ok
-        ? ((await me.json()) as { user: { email: string } }).user.email
-        : null;
+      const me = await fetch("/api/me").catch(() => null);
+      if (!current) return;
+      if (me === null || (me.status !== 401 && !me.ok)) {
+        setState({ status: "failed" });
+        return;
+      }
+      let signedInAs: string | null = null;
+      if (me.ok) {
+        signedInAs = await me
+          .json()
+          .then((body: { user?: { email?: unknown } }) =>
+            typeof body.user?.email === "string" ? body.user.email : null,
+          )
+          .catch(() => null);
+        if (signedInAs === null) {
+          setState({ status: "failed" });
+          return;
+        }
+      }
 
       setState({
         status: "ready",
@@ -80,13 +95,13 @@ export default function InvitePage() {
         signedInAs,
       });
     })().catch(() => {
-      if (current) setProblem("egma could not be reached. Is the API running?");
+      if (current) setState({ status: "failed" });
     });
 
     return () => {
       current = false;
     };
-  }, []);
+  }, [attempt]);
 
   async function post(
     path: string,
@@ -115,31 +130,48 @@ export default function InvitePage() {
     }
   }
 
-  if (state.status === "loading") return <Card title="egma">Loading…</Card>;
+  if (state.status === "loading") return <StatePage title="Loading invitation" lead="Checking the invitation link." />;
+
+  if (state.status === "failed") {
+    return (
+      <StatePage title="The invitation could not be checked" lead="Egma could not reach the invitation service right now.">
+        <button
+          className={styles.button}
+          type="button"
+          onClick={() => {
+            setState({ status: "loading" });
+            setAttempt((value) => value + 1);
+          }}
+        >
+          Try again
+        </button>
+      </StatePage>
+    );
+  }
 
   if (state.status === "no-token") {
     return (
-      <Card
+      <StatePage
         title="That link is missing something"
         lead="An invitation link carries a token. Check it was copied whole, or ask whoever sent it for another."
       >
-        <p style={styles.aside}>
+        <p className={styles.linkLine}>
           <a href="/sign-in">Sign in</a> if you already have an account.
         </p>
-      </Card>
+      </StatePage>
     );
   }
 
   if (state.status === "unknown") {
     return (
-      <Card
+      <StatePage
         title="That invitation does not name anything"
         lead="Check the link was copied whole, or ask whoever sent it for another."
       >
-        <p style={styles.aside}>
+        <p className={styles.linkLine}>
           <a href="/sign-in">Sign in</a> if you already have an account.
         </p>
-      </Card>
+      </StatePage>
     );
   }
 
@@ -147,27 +179,27 @@ export default function InvitePage() {
 
   if (invitation.state === "expired") {
     return (
-      <Card
+      <StatePage
         title="That invitation has expired"
         lead={`Ask an admin of ${invitation.organization.name} to send another one.`}
       >
-        <p style={styles.aside}>
+        <p className={styles.linkLine}>
           <a href="/sign-in">Sign in</a> if you already have an account.
         </p>
-      </Card>
+      </StatePage>
     );
   }
 
   if (invitation.state === "accepted") {
     return (
-      <Card
+      <StatePage
         title="That invitation has already been accepted"
         lead="If it was you, you are already in — sign in instead."
       >
-        <p style={styles.aside}>
+        <p className={styles.linkLine}>
           <a href="/sign-in">Sign in</a>
         </p>
-      </Card>
+      </StatePage>
     );
   }
 
@@ -175,13 +207,14 @@ export default function InvitePage() {
 
   if (signedInAs !== null) {
     return (
-      <Card
+      <AuthShell
+        eyebrow="Organization invitation"
         title={joining}
         lead={`You are signed in as ${signedInAs}, and this invitation is for ${invitation.email}.`}
       >
-        {problem === null ? null : <p style={styles.problem}>{problem}</p>}
+        {problem === null ? null : <Notice tone="error">{problem}</Notice>}
         <button
-          style={styles.button}
+          className={styles.button}
           type="button"
           disabled={submitting}
           onClick={() => {
@@ -190,18 +223,20 @@ export default function InvitePage() {
         >
           {submitting ? "Joining…" : `Join ${invitation.organization.name}`}
         </button>
-      </Card>
+      </AuthShell>
     );
   }
 
   return (
-    <Card
+    <AuthShell
+      eyebrow="Organization invitation"
       title={joining}
       lead={`You have been invited as ${invitation.email}, and you will be ${
         invitation.role === "admin" ? "an" : "a"
       } ${invitation.role}.`}
     >
       <form
+        className={styles.form}
         onSubmit={(event) => {
           event.preventDefault();
           void post("/api/signup", {
@@ -211,31 +246,22 @@ export default function InvitePage() {
           });
         }}
       >
-        {problem === null ? null : <p style={styles.problem}>{problem}</p>}
+        {problem === null ? null : <Notice tone="error">{problem}</Notice>}
 
-        <div style={styles.field}>
-          <label style={styles.label} htmlFor="email">
-            Email
-            <span style={styles.hint}>
-              The address this invitation was sent to.
-            </span>
-          </label>
+        <Field label="Email" hint="The address this invitation was sent to." htmlFor="email">
           <input
-            style={{ ...styles.input, background: "#f6f6f6" }}
+            className={styles.input}
             id="email"
             name="email"
             type="email"
             readOnly
             value={invitation.email}
           />
-        </div>
+        </Field>
 
-        <div style={styles.field}>
-          <label style={styles.label} htmlFor="password">
-            Choose a password
-          </label>
+        <Field label="Choose a password" htmlFor="password">
           <input
-            style={styles.input}
+            className={styles.input}
             id="password"
             name="password"
             type="password"
@@ -245,14 +271,14 @@ export default function InvitePage() {
             value={password}
             onChange={(event) => setPassword(event.target.value)}
           />
-        </div>
+        </Field>
 
-        <button style={styles.button} type="submit" disabled={submitting}>
+        <button className={styles.button} type="submit" disabled={submitting}>
           {submitting ? "Joining…" : `Join ${invitation.organization.name}`}
         </button>
       </form>
 
-      <p style={styles.aside}>
+      <p className={styles.linkLine}>
         Already have an egma account?{" "}
         <a
           href={withReturnTo(
@@ -264,6 +290,6 @@ export default function InvitePage() {
         </a>{" "}
         and this page will let you join.
       </p>
-    </Card>
+    </AuthShell>
   );
 }

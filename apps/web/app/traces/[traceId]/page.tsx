@@ -21,7 +21,7 @@ import {
   type Facts as TraceFacts,
   type Step,
 } from "../../../lib/transcripts.ts";
-import { Card, Screen, styles } from "../../ui.tsx";
+import { AppShell, Notice, ProductPage, StatePage, styles } from "../../ui.tsx";
 
 /**
  * One exchange, read the way somebody actually reads one: **the transcript
@@ -113,48 +113,48 @@ export default function TranscriptPage({
   }, [traceId]);
 
   if (state.status === "loading") {
-    return <Card title={DETAIL.title}>{DETAIL.loading}</Card>;
+    return <StatePage title={DETAIL.title} lead={DETAIL.loading} />;
   }
 
   if (state.status === "signed-out") {
     return (
-      <Card title={LIST.signedOut} lead={LIST.signedOutLead}>
-        <p style={styles.aside}>
+      <StatePage title={LIST.signedOut} lead={LIST.signedOutLead}>
+        <p className={styles.linkLine}>
           <a href="/sign-in">{LIST.signIn}</a> ·{" "}
           <a href="/signup">{LIST.setUp}</a>
         </p>
-      </Card>
+      </StatePage>
     );
   }
 
   if (state.status === "no-window") {
     return (
-      <Card title={DETAIL.needsWindow} lead={DETAIL.needsWindowLead}>
-        <p style={styles.aside}>
+      <StatePage title={DETAIL.needsWindow} lead={DETAIL.needsWindowLead}>
+        <p className={styles.linkLine}>
           <a href="/traces">{DETAIL.back}</a>
         </p>
-      </Card>
+      </StatePage>
     );
   }
 
   if (state.status === "missing") {
     return (
-      <Card title={DETAIL.missing} lead={DETAIL.missingLead}>
-        <p style={styles.aside}>
+      <StatePage title={DETAIL.missing} lead={DETAIL.missingLead}>
+        <p className={styles.linkLine}>
           <a href="/traces">{DETAIL.back}</a>
         </p>
-      </Card>
+      </StatePage>
     );
   }
 
   if (state.status === "failed") {
     return (
-      <Card title={DETAIL.title}>
-        <p style={styles.problem}>{state.why}</p>
-        <p style={styles.aside}>
+      <StatePage title={DETAIL.title}>
+        <Notice tone="error">{state.why}</Notice>
+        <p className={styles.linkLine}>
           <a href="/traces">{DETAIL.back}</a>
         </p>
-      </Card>
+      </StatePage>
     );
   }
 
@@ -162,81 +162,68 @@ export default function TranscriptPage({
   const openedAt = detail.trace.started_at;
 
   return (
-    <Screen
-      title={DETAIL.title}
-      lead={whenItWas(openedAt)}
-      aside={<a href="/traces">{DETAIL.back}</a>}
-    >
-      <Summary facts={detail.trace} />
+    <AppShell active="transcripts">
+      <ProductPage>
+        <a className={styles.backLink} href="/traces">← {DETAIL.back}</a>
+        <header className={styles.detailHeader}>
+          <div>
+            <p className={styles.eyebrow}>{detail.trace.source} / {detail.trace.environment}</p>
+            <h1>{DETAIL.title}</h1>
+            <p>{whenItWas(openedAt)} · {howLong(detail.trace.duration_ns)}</p>
+            {detail.trace.provider_call_id === "" ? null : <p className={styles.detailReference}>{FACTS.reference}: <span className={styles.mono}>{detail.trace.provider_call_id}</span></p>}
+          </div>
+          <span className={`${styles.status} ${detail.trace.errored_span_count > 0 ? styles.statusBad : ""}`}>{detail.trace.errored_span_count === 0 ? "Recorded" : `${detail.trace.errored_span_count} errors`}</span>
+        </header>
+        <Summary facts={detail.trace} />
 
-      <h2 style={{ ...styles.title, fontSize: "1rem", marginTop: "2rem" }}>
-        {DETAIL.transcript}
-      </h2>
-
-      {detail.spans_truncated ? (
-        <p style={styles.problem}>{DETAIL.truncated}</p>
-      ) : null}
-
-      {detail.turns.length === 0 ? (
-        <p style={styles.lead}>{DETAIL.noTurns}</p>
-      ) : (
-        detail.turns.map((turn) => (
-          <Turn key={turn.span_id} turn={turn} openedAt={openedAt} />
-        ))
-      )}
-
-      {detail.spans.length === 0 ? null : (
-        <details style={{ marginTop: "2rem" }}>
-          <summary style={{ cursor: "pointer", fontWeight: 600 }}>
-            {DETAIL.otherSteps}
-          </summary>
-          <p style={{ ...styles.aside, marginTop: "0.5rem" }}>
-            {DETAIL.otherStepsLead}
-          </p>
-          {detail.spans.map((step) => (
-            <Timed key={step.span_id} step={step} openedAt={openedAt} />
-          ))}
-        </details>
-      )}
-    </Screen>
+        <div className={styles.transcript}>
+          <h2 className={styles.sectionTitle}>{DETAIL.transcript}</h2>
+          {detail.spans_truncated ? <Notice tone="error">{DETAIL.truncated}</Notice> : null}
+          {detail.turns.length === 0 ? <Notice>{DETAIL.noTurns}</Notice> : detail.turns.map((turn) => <Turn key={turn.span_id} turn={turn} openedAt={openedAt} />)}
+          {detail.spans.length === 0 ? null : (
+            <details className={styles.otherSteps}>
+              <summary>{DETAIL.otherSteps}</summary><p className={styles.muted}>{DETAIL.otherStepsLead}</p>
+              {detail.spans.map((step) => <Timed key={step.span_id} step={step} openedAt={openedAt} />)}
+            </details>
+          )}
+        </div>
+      </ProductPage>
+    </AppShell>
   );
 }
 
 /** What the list already said about this exchange, said again in full. */
 function Summary({ facts }: { facts: TraceFacts }) {
-  const shown: readonly (readonly [string, string, boolean])[] = [
-    [FACTS.started, whenItWas(facts.started_at), false],
-    [FACTS.ended, whenItWas(facts.ended_at), false],
+  const primary: readonly (readonly [string, string, boolean])[] = [
     [FACTS.duration, howLong(facts.duration_ns), false],
     [
       FACTS.turns,
       `${facts.turn_counts.human} ${LIST.human} · ${facts.turn_counts.agent} ${LIST.agent}`,
       false,
     ],
-    [FACTS.steps, String(facts.span_count), false],
     [FACTS.tools, String(facts.tool_span_count), false],
     [
       FACTS.errors,
       String(facts.errored_span_count),
       facts.errored_span_count > 0,
     ],
-    [FACTS.source, facts.source, false],
-    [FACTS.environment, facts.environment, false],
-    [FACTS.connection, facts.connection_type, false],
+  ];
+
+  const more: readonly (readonly [string, string, boolean])[] = [
+    [FACTS.started, whenItWas(facts.started_at), false], [FACTS.ended, whenItWas(facts.ended_at), false],
+    [FACTS.steps, String(facts.span_count), false], [FACTS.source, facts.source, false],
+    [FACTS.environment, facts.environment, false], [FACTS.connection, facts.connection_type, false],
     [FACTS.reference, facts.provider_call_id, false],
   ];
 
   return (
-    <div>
-      {shown
-        .filter(([, value]) => value !== "")
-        .map(([label, value, wrong]) => (
-          <div key={label} style={styles.definition}>
-            <span style={styles.muted}>{label}</span>
-            <strong style={wrong ? styles.wrong : undefined}>{value}</strong>
-          </div>
-        ))}
-    </div>
+    <>
+      <section className={styles.detailFacts}>{primary.map(([label, value, wrong]) => <div className={styles.contextFact} key={label}><span>{label}</span><strong className={wrong ? styles.wrong : undefined}>{value}</strong></div>)}</section>
+      <details className={styles.otherSteps}>
+        <summary>Technical details</summary>
+        <dl className={styles.definitionList}>{more.filter(([, value]) => value !== "").map(([label, value, wrong]) => <div className={styles.definitionRow} key={label}><dt>{label}</dt><dd className={wrong ? styles.wrong : undefined}>{value}</dd></div>)}</dl>
+      </details>
+    </>
   );
 }
 
@@ -258,51 +245,21 @@ function Turn({ turn, openedAt }: { turn: Step; openedAt: string }) {
   const human = isHuman(turn);
 
   return (
-    <details
-      style={{
-        borderTop: "1px solid #eee",
-        padding: "0.75rem 0",
-      }}
-    >
-      <summary style={{ cursor: "pointer" }}>
-        <span
-          style={{
-            display: "inline-block",
-            minWidth: "4.5rem",
-            fontWeight: 600,
-            color: human ? "#444" : "#0b5",
-          }}
-        >
+    <details className={styles.turn}>
+      <summary>
+        <span className={styles.turnSpeaker}>
           {human ? SPEAKERS.human : SPEAKERS.agent}
         </span>
-        {turn.text === "" ? (
-          <span style={styles.muted}>{DETAIL.nothingSaid}</span>
-        ) : (
-          turn.text
-        )}
-        <span
-          style={{
-            ...styles.aside,
-            display: "block",
-            marginTop: "0.25rem",
-            marginLeft: "4.5rem",
-            fontSize: "0.8125rem",
-          }}
-        >
-          {howFarIn(turn.started_at, openedAt)} · {howLong(turn.duration_ns)} ·{" "}
-          {DETAIL.steps(inside)}
-          {failed ? (
-            <>
-              {" · "}
-              <span style={styles.wrong}>{DETAIL.failedInside}</span>
-            </>
-          ) : null}
+        <span className={styles.turnText}>
+          {turn.text === "" ? <span className={styles.muted}>{DETAIL.nothingSaid}</span> : turn.text}
+          <small className={styles.turnMeta}>{howFarIn(turn.started_at, openedAt)} · {howLong(turn.duration_ns)} · {DETAIL.steps(inside)}{failed ? <> · <span className={styles.wrong}>{DETAIL.failedInside}</span></> : null}</small>
         </span>
+        <span className={styles.turnMarker}>+</span>
       </summary>
 
-      <div style={{ marginLeft: "4.5rem", marginTop: "0.5rem" }}>
+      <div className={styles.turnBody}>
         {turn.spans.length === 0 ? (
-          <p style={styles.aside}>{DETAIL.noSteps}</p>
+          <p className={styles.muted}>{DETAIL.noSteps}</p>
         ) : (
           turn.spans.map((step) => (
             <Timed key={step.span_id} step={step} openedAt={openedAt} />
@@ -332,24 +289,17 @@ function Timed({ step, openedAt }: { step: Step; openedAt: string }) {
   const marked = failed || everyStep(step.spans).some((one) => one.status === "error");
 
   return (
-    <details
-      style={{
-        borderLeft: `2px solid ${marked ? "#b00020" : "#eee"}`,
-        paddingLeft: "0.75rem",
-        margin: "0.25rem 0",
-      }}
-    >
-      <summary style={{ cursor: "pointer", fontSize: "0.875rem" }}>
+    <details className={`${styles.step} ${marked ? styles.stepFailed : ""}`}>
+      <summary>
         <strong>{stepLabel(step.kind)}</strong>
-        <span style={styles.muted}>
-          {" "}
-          · <span style={styles.monospace}>{step.name}</span> ·{" "}
+        <span className={styles.muted}>
+          {" "}· <span className={styles.mono}>{step.name}</span> ·{" "}
           {howLong(step.duration_ns)}
         </span>
         {failed ? (
           <>
             {" · "}
-            <span style={styles.wrong}>{DETAIL.failed}</span>
+            <span className={styles.wrong}>{DETAIL.failed}</span>
           </>
         ) : null}
       </summary>
@@ -381,27 +331,13 @@ function Recorded({ step, openedAt }: { step: Step; openedAt: string }) {
   ];
 
   return (
-    <dl
-      style={{
-        margin: "0.5rem 0",
-        fontSize: "0.8125rem",
-        display: "grid",
-        gridTemplateColumns: "minmax(6rem, max-content) 1fr",
-        gap: "0.125rem 0.75rem",
-      }}
-    >
+    <dl className={styles.recorded}>
       {shown
         .filter(([, value]) => value !== "")
         .map(([label, value]) => (
-          <div key={label} style={{ display: "contents" }}>
-            <dt style={styles.muted}>{label}</dt>
-            <dd
-              style={{
-                ...styles.monospace,
-                margin: 0,
-                overflowWrap: "anywhere",
-              }}
-            >
+          <div key={label}>
+            <dt className={styles.muted}>{label}</dt>
+            <dd className={styles.mono}>
               {value}
             </dd>
           </div>
