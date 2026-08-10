@@ -86,20 +86,6 @@ async def test_the_census_sets_both_knobs_explicitly(session):
     assert room.asked[0].max_round_trip_latency == seam.MAX_ROUND_TRIP_SECONDS
 
 
-def test_the_wait_is_the_arithmetic_it_claims():
-    """30 s of legal delay, 5 s of serving, 10 s of round trip.
-
-    Written as a sum rather than a number so a delay cap that moves
-    cannot quietly leave the timeout behind it.
-    """
-    largest_declared_delay = 30.0
-    serving_margin = 5.0
-    assert (
-        largest_declared_delay + serving_margin + seam.MAX_ROUND_TRIP_SECONDS
-        == seam.RESPONSE_TIMEOUT_SECONDS
-    )
-
-
 # -- Which tools get a courier ------------------------------------------------
 
 

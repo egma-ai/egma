@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   getRun,
+  LARGEST_MOCK_TOOL_ANSWER_BYTES,
   LONGEST_MOCK_TOOL_DELAY_MILLISECONDS,
   resolveMockTools,
 } from "@egma/db";
@@ -573,6 +574,49 @@ describe("the longest delay, said in two places", () => {
     };
 
     expect(schema.$defs.mock_tool.properties.delay_milliseconds.maximum).toBe(
+      LONGEST_MOCK_TOOL_DELAY_MILLISECONDS,
+    );
+  });
+});
+
+/**
+ * The same agreement, one seam further out.
+ *
+ * An answer's size and a delay's length are each one number said in four
+ * places written in two languages: this side's authoring gate, egma's own
+ * simulator, and the SDK a customer installs in their agent — with the
+ * contract's seam fixture as the one document all of them read. None of the
+ * four can import another, so nothing but a fixture and the tests either side
+ * of it keeps them saying the same number.
+ *
+ * The failure this prevents is the one the size cap actually had: an answer
+ * admitted by authoring and refused mid-simulation, where the only person who
+ * could fix it was not reading. Each side pins itself against this file, so a
+ * cap that moves anywhere fails a hermetic test wherever it moved.
+ */
+describe("the caps, said in four places and read from one", () => {
+  it("admits at authoring exactly what the exchange carries", async () => {
+    const seam = JSON.parse(
+      await readFile(
+        fileURLToPath(
+          new URL(
+            "../../../packages/simulation-contract/fixtures/seam/mock-tool-exchange.v1.json",
+            import.meta.url,
+          ),
+        ),
+        "utf8",
+      ),
+    ) as {
+      limits: {
+        largest_payload_bytes: number;
+        longest_delay_milliseconds: number;
+      };
+    };
+
+    expect(seam.limits.largest_payload_bytes).toBe(
+      LARGEST_MOCK_TOOL_ANSWER_BYTES,
+    );
+    expect(seam.limits.longest_delay_milliseconds).toBe(
       LONGEST_MOCK_TOOL_DELAY_MILLISECONDS,
     );
   });

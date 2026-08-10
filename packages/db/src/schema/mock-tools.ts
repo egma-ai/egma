@@ -51,6 +51,13 @@ import { createdAt, idText, moment, prefixCheck, updatedAt } from "./columns.ts"
  * round trip and 5 for egma's own serving margin. 30 seconds is what is left,
  * so a delay this side admits can never collide with the transport that has to
  * carry it.
+ *
+ * **The arithmetic runs the other way in the SDK a customer installs**, which
+ * derives its 45-second response timeout from this number: raise this and that
+ * wait has to rise with it, or a delay egma admits becomes a call the SDK gives
+ * up on. Neither side can import the other, so the agreement is kept by the
+ * contract's seam fixture — `fixtures/seam/mock-tool-exchange.v1.json` — and by
+ * the test each side holds itself to it with.
  */
 export const LONGEST_MOCK_TOOL_DELAY_MILLISECONDS = 30_000;
 
@@ -61,6 +68,11 @@ export const LONGEST_MOCK_TOOL_DELAY_MILLISECONDS = 30_000;
  * written down where an author meets it rather than discovered at call time by
  * a simulation that fails halfway through. An answer that needs more than this
  * is a document rather than a tool answer.
+ *
+ * Counted against the **tagged** message the wire carries — `{"answer":…}` or
+ * `{"error":…}` — because that is what the simulator measures, and a cap
+ * measured two ways is two caps. The same seam fixture holds the three copies
+ * of this number to one value.
  */
 export const LARGEST_MOCK_TOOL_ANSWER_BYTES = 15 * 1024;
 

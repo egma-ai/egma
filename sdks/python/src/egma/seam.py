@@ -34,6 +34,14 @@ the version egma deploys. The exchange is a **contract**, so the two
 halves are held together by tests against the bytes rather than by an
 import — which is also the only thing that would still work the day one
 half is written in another language.
+
+Those bytes are
+``packages/simulation-contract/fixtures/seam/mock-tool-exchange.v1.json``:
+the version, both method names, the four refusal codes, both caps, and a
+canonical message for every shape either side sends. This package's suite
+and egma's own each read that one file, so a constant or a shape that
+moves here fails a test here, and one that moves over there fails a test
+over there — with the file naming what it was supposed to be.
 """
 
 from __future__ import annotations
@@ -66,25 +74,44 @@ the number because a census of a hundred tools is the one message *this*
 side could grow past it.
 """
 
-RESPONSE_TIMEOUT_SECONDS = 45.0
-"""How long a call to egma may take before this side stops waiting.
+LONGEST_DECLARED_DELAY_SECONDS = 30.0
+"""The longest delay a mock tool may declare, in seconds.
 
-Added up rather than picked, and set explicitly on every call rather than
-left to the transport's own default: a mock tool may declare a delay of
-up to 30 seconds, egma wants about 5 more to serve the answer, and the
-round trip is allowed 10. 30 + 5 + 10 = 45. The arithmetic is the reason
-the number is safe — a legal delay can never collide with a timeout, so
-neither the transport nor the handling ever competes with a delay
-somebody authored on purpose.
+egma's authoring door refuses a larger one, and the claimed spec's own
+schema refuses it again — this is that same ceiling, restated here
+because the timeout below is derived from it and a derivation from a
+number nobody wrote down is a number nobody can check. The seam fixture
+is where the three are held to one value.
+"""
+
+SERVING_MARGIN_SECONDS = 5.0
+"""What egma is allowed for serving the answer around the delay.
+
+Reading the call, waiting the declared delay out, writing the exchange
+down and answering. Small, and named rather than folded into the sum,
+because a margin nobody can point at is a margin nobody can revise.
 """
 
 MAX_ROUND_TRIP_SECONDS = 10.0
 """How long the request and its acknowledgement may take on the wire.
 
-The 10 of the 45 above, and the reason it is written here rather than
-left alone: the transport's own default is shorter, so a mock tool's
-declared delay could push a perfectly legal answer past it and arrive as
-a call that mysteriously failed.
+Written here rather than left alone because the transport's own default
+is shorter, so a mock tool's declared delay could push a perfectly legal
+answer past it and arrive as a call that mysteriously failed.
+"""
+
+RESPONSE_TIMEOUT_SECONDS = (
+    LONGEST_DECLARED_DELAY_SECONDS + SERVING_MARGIN_SECONDS + MAX_ROUND_TRIP_SECONDS
+)
+"""How long a call to egma may take before this side stops waiting.
+
+Added up rather than picked, and set explicitly on every call rather than
+left to the transport's own default. 30 + 5 + 10 = 45. The arithmetic is
+the reason the number is safe — a legal delay can never collide with a
+timeout, so neither the transport nor the handling ever competes with a
+delay somebody authored on purpose — and it is written as the sum rather
+than as its answer so that raising the delay cap moves this with it
+instead of silently leaving it behind.
 """
 
 MALFORMED_REQUEST = 901
