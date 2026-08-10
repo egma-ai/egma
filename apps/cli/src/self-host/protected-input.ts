@@ -108,26 +108,39 @@ export async function askPlainly(
 /**
  * Read a line with the terminal's echo off.
  *
- * `readline` has no such mode, so the echo is taken off around the question and
- * put back afterwards — including when the answer is interrupted, which is the
- * case worth writing the `finally` for: a terminal left with echo off is a
- * terminal the next command types into blind.
+ * **Deliberately without `readline`.** Raw mode stops the *terminal driver*
+ * echoing, which is most of the job — but a readline interface built on the
+ * same stream runs its own line editor and echoes what it reads itself, so a
+ * secret typed into one is on the screen and in the scrollback whatever the
+ * driver was told. That is not a theory: it is what the first version of this
+ * function did, and the terminal check next door read the token straight off
+ * the screen. So this reads the bytes directly and prints none of them.
+ *
+ * The echo is put back in a `finally`, including when the answer is
+ * interrupted, because a terminal left in raw mode is a terminal the next
+ * command types into blind.
  */
 async function askWithoutEcho(prompt: string, options: AskOptions): Promise<string> {
   const terminal = options.input as NodeJS.ReadStream;
   const wasRaw = terminal.isRaw === true;
-  const asked = createInterface({
-    input: options.input,
-    output: options.output,
-    terminal: true,
-  });
   options.output.write(prompt);
   if (terminal.setRawMode !== undefined) terminal.setRawMode(true);
+  terminal.resume();
   try {
     const answer = await new Promise<string>((resolve, reject) => {
       let typed = "";
+      const done = (): void => {
+        terminal.off("data", onData);
+        options.signal?.removeEventListener("abort", onAbort);
+      };
+      const onAbort = (): void => {
+        done();
+        reject(new Error("interrupted"));
+      };
       const onData = (chunk: Buffer): void => {
         for (const byte of chunk) {
+          // Ctrl-C, which in raw mode is a byte rather than a signal: nothing
+          // else is going to turn it into one.
           if (byte === 0x03) {
             done();
             reject(new Error("interrupted"));
@@ -145,19 +158,16 @@ async function askWithoutEcho(prompt: string, options: AskOptions): Promise<stri
           typed += String.fromCharCode(byte);
         }
       };
-      const done = (): void => {
-        terminal.off("data", onData);
-      };
       terminal.on("data", onData);
+      options.signal?.addEventListener("abort", onAbort, { once: true });
     });
     return answer.trim();
   } finally {
     if (terminal.setRawMode !== undefined) terminal.setRawMode(wasRaw);
-    asked.close();
+    terminal.pause();
     // One newline of egma's own, because nothing the person typed was echoed
     // and the prompt would otherwise stay on the same line as whatever comes
-    // next. In the `finally` with the echo, so an interrupted answer leaves
-    // the terminal exactly as it was found.
+    // next.
     options.output.write("\n");
   }
 }
