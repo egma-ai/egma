@@ -291,8 +291,12 @@ def _serialized(value: object) -> str:
     not be described would be this SDK breaking a simulation over a thing
     it was only trying to write down. The framework itself takes the same
     way out when it canonicalises a call's arguments.
+
+    Non-ASCII characters are written as themselves, not escaped: the cap
+    above is counted in bytes of UTF-8, which is what the transport
+    carries, and the other half of this exchange counts the same bytes.
     """
-    return json.dumps(value, separators=(",", ":"), default=str)
+    return json.dumps(value, separators=(",", ":"), default=str, ensure_ascii=False)
 
 
 def _kind_of(value: object) -> str:

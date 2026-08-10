@@ -143,14 +143,16 @@ export function toolNameProblem(name: unknown): string | undefined {
 
 function tooLarge(key: "answer" | "error", bytes: number): string {
   return (
-    `${key} is ${bytes} bytes once serialized, and the exchange that carries ` +
-    `it holds at most ${LARGEST_MOCK_TOOL_ANSWER_BYTES}. An answer that ` +
-    `needs more than that is a document rather than a tool answer.`
+    `${key} is ${bytes} bytes once serialized and tagged for the wire, and ` +
+    `the exchange that carries it holds at most ` +
+    `${LARGEST_MOCK_TOOL_ANSWER_BYTES}. An answer that needs more than that ` +
+    `is a document rather than a tool answer.`
   );
 }
 
-function serializedBytes(value: unknown): number {
-  return Buffer.byteLength(JSON.stringify(value) ?? "", "utf8");
+/** The tagged envelope, which is what the exchange carries and counts. */
+function servedBytes(value: unknown, key: "answer" | "error"): number {
+  return Buffer.byteLength(`{"${key}":${JSON.stringify(value) ?? ""}}`, "utf8");
 }
 
 /** The answer as it will be stored: exactly one branch, within the size. */
@@ -191,14 +193,14 @@ export function answerOf(
           "Say what the agent's backend would have said.",
       };
     }
-    const bytes = serializedBytes(message);
+    const bytes = servedBytes(message, "error");
     if (bytes > LARGEST_MOCK_TOOL_ANSWER_BYTES) {
       return { refusal: tooLarge("error", bytes) };
     }
     return { answer: { error: message } };
   }
 
-  const bytes = serializedBytes(body.answer);
+  const bytes = servedBytes(body.answer, "answer");
   if (bytes > LARGEST_MOCK_TOOL_ANSWER_BYTES) {
     return { refusal: tooLarge("answer", bytes) };
   }

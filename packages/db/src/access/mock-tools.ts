@@ -175,8 +175,25 @@ export function validDelay(milliseconds: number | undefined): number {
   return milliseconds;
 }
 
-/** How many bytes something takes once serialized, as the exchange counts it. */
-function serializedBytes(value: unknown, key: AnswerKey): number {
+/**
+ * How many bytes this answer takes once it is on the wire, as the exchange
+ * counts it.
+ *
+ * **The tagged envelope, never the bare value.** What the exchange carries is
+ * `{"answer":…}` or `{"error":…}` — the shape the answer is authored in, kept
+ * all the way through the run's snapshot and the claimed spec onto the wire —
+ * and the tag is not free. Counting the value alone made this a second cap,
+ * eleven bytes looser than the one the simulator applies, so an answer a few
+ * bytes under the limit here was a few bytes over it mid-simulation, refused
+ * where nobody who could fix it was reading. One measurement is the whole
+ * point: what is admitted here can always be served.
+ *
+ * The value is serialized on its own first because `JSON.stringify` says
+ * `undefined` for something it cannot describe and quietly drops the same
+ * thing inside an object — so measuring the envelope alone would take an
+ * answer egma could never hand to an agent and call it two bytes long.
+ */
+function servedBytes(value: unknown, key: AnswerKey): number {
   let written: string | undefined;
   try {
     written = JSON.stringify(value);
@@ -189,7 +206,10 @@ function serializedBytes(value: unknown, key: AnswerKey): number {
         `and this one is not.`,
     );
   }
-  return Buffer.byteLength(written, "utf8");
+  // The envelope written out rather than stringified a second time: this is
+  // byte for byte what `JSON.stringify({ [key]: value })` produces, and the
+  // customer's value is not serialized twice to count it once.
+  return Buffer.byteLength(`{"${key}":${written}}`, "utf8");
 }
 
 /**
@@ -237,9 +257,10 @@ export function validAnswer(answer: MockToolAnswerInput): MockToolAnswer {
           "Say what the agent's backend would have said.",
       );
     }
-    // Counted the way the value branch is counted — serialized, because that
-    // is what the exchange carries and a cap measured two ways is two caps.
-    const bytes = serializedBytes(message, "error");
+    // Counted the way the value branch is counted — the tagged envelope,
+    // because that is what the exchange carries and a cap measured two ways is
+    // two caps.
+    const bytes = servedBytes(message, "error");
     if (bytes > LARGEST_MOCK_TOOL_ANSWER_BYTES) {
       throw new UnprocessableInputError(tooLarge("error", bytes));
     }
@@ -247,19 +268,26 @@ export function validAnswer(answer: MockToolAnswerInput): MockToolAnswer {
   }
 
   const value = answer.answer;
-  const bytes = serializedBytes(value, "answer");
+  const bytes = servedBytes(value, "answer");
   if (bytes > LARGEST_MOCK_TOOL_ANSWER_BYTES) {
     throw new UnprocessableInputError(tooLarge("answer", bytes));
   }
   return { answer: value };
 }
 
-/** The one sentence both branches are refused with, written once. */
+/**
+ * The one sentence both branches are refused with, written once.
+ *
+ * The number names the whole message, tag included, because that is the number
+ * the exchange measures — an author told the size of their bare value would
+ * count to the cap themselves and still be refused.
+ */
 function tooLarge(key: AnswerKey, bytes: number): string {
   return (
-    `${key} is ${bytes} bytes once serialized, and the exchange that carries ` +
-    `it holds at most ${LARGEST_MOCK_TOOL_ANSWER_BYTES}. An answer that ` +
-    `needs more than that is a document rather than a tool answer.`
+    `${key} is ${bytes} bytes once serialized and tagged for the wire, and ` +
+    `the exchange that carries it holds at most ` +
+    `${LARGEST_MOCK_TOOL_ANSWER_BYTES}. An answer that needs more than that ` +
+    `is a document rather than a tool answer.`
   );
 }
 

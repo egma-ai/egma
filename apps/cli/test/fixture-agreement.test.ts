@@ -378,8 +378,11 @@ describe("a mock tool the folder authors", () => {
     expect(refused.body).toEqual({
       error: "unprocessable",
       message:
-        `answer is ${enormous.length + 11} bytes once serialized, and the ` +
-        `exchange that carries it holds at most ` +
+        // `{"answer":{"body":"…"}}` — the value's own eleven bytes of shape
+        // plus the eleven the tag adds, which is what the wire carries and so
+        // what the cap is counted against.
+        `answer is ${enormous.length + 22} bytes once serialized and tagged ` +
+        `for the wire, and the exchange that carries it holds at most ` +
         `${LARGEST_MOCK_TOOL_ANSWER_BYTES}. An answer that needs more than ` +
         `that is a document rather than a tool answer.`,
     });

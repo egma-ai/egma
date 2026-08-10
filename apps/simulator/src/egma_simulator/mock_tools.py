@@ -100,9 +100,14 @@ The transport's own limit, written down here because egma has to refuse
 an answer it cannot send *as an answer about that answer* — a refusal
 naming the size and the cap is something an author can act on, where the
 transport's own complaint arrives at the far end as a call that mysteriously
-failed. Authoring already refuses an answer this large, so reaching it here
-means a cap moved somewhere; it is checked anyway, because the alternative
-is finding out during somebody's simulation.
+failed.
+
+Authoring refuses an answer this large, counting the same bytes this does:
+the tagged message, ``{"answer": …}`` or ``{"error": …}``, serialized the
+way :func:`_serialized` serializes it. So a mock tool that was accepted can
+always be served, and reaching the refusal below means a cap moved
+somewhere. It is checked anyway, because the alternative is finding out
+during somebody's simulation.
 """
 
 MALFORMED_REQUEST = 901
@@ -483,8 +488,16 @@ def _speaks_this_version(asked: dict) -> None:
 
 
 def _serialized(value: object) -> str:
-    """One JSON document, in the compact shape everything else here uses."""
-    return json.dumps(value, separators=(",", ":"))
+    """One JSON document, in the compact shape everything else here uses.
+
+    Non-ASCII characters are written as themselves rather than escaped,
+    because the cap this is measured against is counted in bytes of UTF-8
+    on both sides of the seam. Python's default would spend six bytes on a
+    character the wire carries in two, and an answer sized against the cap
+    where it was authored would be refused here for text nobody else
+    counts that way.
+    """
+    return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
 
 
 def _fits_on_the_wire(what: str, message: str) -> None:

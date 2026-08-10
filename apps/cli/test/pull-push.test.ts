@@ -861,9 +861,13 @@ describe("the folder carries mock tools", () => {
       `delay_ms is ${tooLong}, and a mock tool may delay its answer by at most ` +
         `${LONGEST_MOCK_TOOL_DELAY_MILLISECONDS} milliseconds — the budget the exchange ` +
         `carrying it is given. Send a smaller delay_ms.`,
-      `answer is ${tooBig.length + 2} bytes once serialized, and the exchange that carries ` +
-        `it holds at most ${LARGEST_MOCK_TOOL_ANSWER_BYTES}. An answer that needs more ` +
-        `than that is a document rather than a tool answer.`,
+      // The bare string is two bytes of quotes; the wire adds `{"answer":` and
+      // the closing brace, which is eleven more and the whole point of the
+      // number being counted this way.
+      `answer is ${tooBig.length + 13} bytes once serialized and tagged for the wire, ` +
+        `and the exchange that carries it holds at most ` +
+        `${LARGEST_MOCK_TOOL_ANSWER_BYTES}. An answer that needs more than that is a ` +
+        `document rather than a tool answer.`,
     ]);
 
     // The one egma could take, landed; the two it could not, left in the file

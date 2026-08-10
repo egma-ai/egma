@@ -1,4 +1,8 @@
-import { createProject, type Role } from "@egma/db";
+import {
+  createProject,
+  LARGEST_MOCK_TOOL_ANSWER_BYTES,
+  type Role,
+} from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
@@ -224,11 +228,48 @@ describe("the gates at the door", () => {
     expect(refused.body).toEqual({
       error: "unprocessable",
       message:
-        `answer is ${16 * 1024 + 11} bytes once serialized, and the exchange ` +
-        `that carries it holds at most 15360. An answer that needs more than ` +
+        `answer is ${16 * 1024 + 22} bytes once serialized and tagged for the ` +
+        `wire, and the exchange that carries it holds at most ` +
+        `${LARGEST_MOCK_TOOL_ANSWER_BYTES}. An answer that needs more than ` +
         `that is a document rather than a tool answer.`,
     });
     expect(await rowCount()).toBe(0);
+  });
+
+  /**
+   * The cap counted the way the exchange counts it, at the one byte where the
+   * two ways of counting disagree.
+   *
+   * The wire carries `{"answer":…}`, so an answer whose bare value fits and
+   * whose tagged message does not was admitted here and then refused
+   * mid-simulation, by a simulator whose author was not reading. The pair
+   * below is that boundary from both sides: the largest message that fits, and
+   * the one byte past it.
+   */
+  it("counts the tag against the cap, so nothing it admits can be refused on the wire", async () => {
+    api = await createApi("mock_tools_answer_size_boundary");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+
+    // `{"answer":"…"}` is the value's own two quotes plus eleven of tag.
+    const TAGGED_OVERHEAD = 13;
+    const largest = "x".repeat(LARGEST_MOCK_TOOL_ANSWER_BYTES - TAGGED_OVERHEAD);
+
+    const admitted = await createMockToolThrough(key, {
+      tool: "read_document",
+      answer: largest,
+    });
+    expect(admitted.statusCode, JSON.stringify(admitted.body)).toBe(201);
+
+    const refused = await createMockToolThrough(key, {
+      tool: "read_other_document",
+      answer: `${largest}x`,
+    });
+    expect(refused.statusCode).toBe(422);
+    expect(String(refused.body.message)).toContain(
+      `answer is ${LARGEST_MOCK_TOOL_ANSWER_BYTES + 1} bytes`,
+    );
+    expect(await rowCount()).toBe(1);
   });
 
   it("refuses a key it has no place for, naming the key", async () => {
