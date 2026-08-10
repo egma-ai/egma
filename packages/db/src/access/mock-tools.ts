@@ -182,8 +182,13 @@ function serializedBytes(value: unknown, key: AnswerKey): number {
  * discovered it mid-conversation.
  */
 export function validAnswer(answer: MockToolAnswer): MockToolAnswer {
-  const gives = answer.answer !== undefined || "answer" in answer;
-  const fails = answer.error !== undefined;
+  // A key that is there *and* says something. `answer: null` is an answer a
+  // tool can perfectly well give and counts; `answer: undefined` is a key
+  // carrying nothing and does not, which is what lets the union's own
+  // `error: string; answer?: undefined` shape reach the failure branch instead
+  // of being refused for saying two things.
+  const gives = "answer" in answer && answer.answer !== undefined;
+  const fails = "error" in answer && answer.error !== undefined;
 
   if (gives && fails) {
     throw new UnprocessableInputError(
@@ -348,6 +353,14 @@ async function agentsOf(
  * whole. An agent of another customer or another project is not found and is
  * refused in the same words as one that never existed, because confirming that
  * somebody else's row exists is itself a leak.
+ *
+ * **No shared lock, unlike the same check for a test's personas**, and the
+ * difference is the invariant rather than the care taken. A live test may never
+ * name a deleted persona, so a persona's delete is refused while one does and
+ * the two writes have to be made to wait for each other. Nothing refuses an
+ * agent's delete, because a mock tool scoped to a deleted agent loses nothing:
+ * it simply never applies, since no run is conducted against a deleted agent.
+ * A lock here would hold an invariant that does not exist.
  */
 async function validateNamedAgents(
   on: Queryable,

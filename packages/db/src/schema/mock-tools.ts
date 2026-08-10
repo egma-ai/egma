@@ -155,9 +155,16 @@ export const mockToolAgent = pgTable(
       .references(() => mockTool.id, { onDelete: "cascade" }),
     /**
      * No `on delete` clause on purpose, exactly as the test junctions have
-     * none. Removing the agent outright is refused rather than quietly
-     * widening a mock tool to every agent in the project, which is the one
-     * change to a mocked world nobody would see happen.
+     * none: a row removed outright would quietly widen the mock tool to every
+     * agent in the project, which is the one change to a mocked world nobody
+     * would see happen, so the database refuses the removal instead.
+     *
+     * **The product's own delete is a soft one, and is not what this guards.**
+     * A mock tool scoped to a deleted agent goes on naming them and simply
+     * never applies, because no run is conducted against a deleted agent — so
+     * unlike a persona's delete, an agent's is not refused while something
+     * names them. Losing a persona costs a test a simulation it says it runs;
+     * losing a scoped agent costs a mocked world nothing.
      */
     agentId: idText("agent_id")
       .notNull()

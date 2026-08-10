@@ -52,9 +52,11 @@ ALTER TABLE "mock_tool" ADD CONSTRAINT "mock_tool_organization_id_organization_i
 ALTER TABLE "mock_tool" ADD CONSTRAINT "mock_tool_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "mock_tool" ADD CONSTRAINT "mock_tool_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "mock_tool_agent" ADD CONSTRAINT "mock_tool_agent_mock_tool_id_mock_tool_id_fk" FOREIGN KEY ("mock_tool_id") REFERENCES "public"."mock_tool"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
--- No `on delete` clause, exactly as the test junctions have none: removing the
--- agent outright is refused rather than quietly widening a mock tool to every
--- agent in the project.
+-- No `on delete` clause, exactly as the test junctions have none: a row removed
+-- outright would quietly widen a mock tool to every agent in the project, so the
+-- database refuses the removal instead. The product's own delete is a soft one
+-- and is not what this guards — a mock tool scoped to a deleted agent simply
+-- never applies, because no run is conducted against a deleted agent.
 ALTER TABLE "mock_tool_agent" ADD CONSTRAINT "mock_tool_agent_agent_id_agent_id_fk" FOREIGN KEY ("agent_id") REFERENCES "public"."agent"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 -- Both edges of the triangle, so a scope reaching another project's agent — or
 -- another customer's — is unrepresentable rather than merely unwritten.
