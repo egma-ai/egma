@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 
 import type { Me } from "../lib/me.ts";
@@ -134,6 +135,7 @@ export function AppShell({
 }) {
   const [me, setMe] = useState<Me | null>(initialMe ?? null);
   const [contextState, setContextState] = useState<"loading" | "ready" | "unavailable">(initialMe === undefined ? "loading" : "ready");
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     if (initialMe !== undefined) return undefined;
@@ -167,33 +169,59 @@ export function AppShell({
         ? "No project"
         : `${project.name} project`;
 
+  async function signOut(): Promise<void> {
+    setSigningOut(true);
+    try {
+      await fetch("/api/sign-out", { method: "POST" });
+    } catch {
+      // Reload either way so this shell never keeps showing a stale session.
+    }
+    window.location.assign("/");
+  }
+
+  const signOutButton = (
+    <button
+      className={styles.accountSignOut}
+      type="button"
+      disabled={signingOut}
+      onClick={() => {
+        void signOut();
+      }}
+    >
+      {signingOut ? "Signing out…" : "Sign out"}
+    </button>
+  );
+
   return (
     <div className={styles.appShell}>
       <aside className={styles.sidebar}>
-        <a href="/" aria-label="Egma home"><Brand /></a>
+        <Link href="/" aria-label="Egma home"><Brand /></Link>
         <div className={styles.sidebarContext}>
           <span>Organization</span>
           <strong>{organization?.name ?? (contextState === "unavailable" ? "Organization unavailable" : "Egma")}</strong>
           <small>{projectLabel}</small>
         </div>
         <nav className={styles.navigation} aria-label="Main navigation">
-          {PRODUCT_NAVIGATION.map((item) => <a key={item.id} className={active === item.id ? styles.navigationActive : undefined} aria-current={active === item.id ? "page" : undefined} href={item.href}>{item.label}</a>)}
+          {PRODUCT_NAVIGATION.map((item) => <Link key={item.id} className={active === item.id ? styles.navigationActive : undefined} aria-current={active === item.id ? "page" : undefined} href={item.href}>{item.label}</Link>)}
         </nav>
         <div className={styles.sidebarFooter}>
           <div className={styles.accountLine}>
             <span className={styles.avatar}>{initial}</span>
-            <span className={styles.accountEmail}>{me?.user.email ?? (contextState === "unavailable" ? "Account unavailable" : "Loading…")}</span>
+            <span className={styles.accountDetails}>
+              <span className={styles.accountEmail}>{me?.user.email ?? (contextState === "unavailable" ? "Account unavailable" : "Loading…")}</span>
+              {signOutButton}
+            </span>
             <ThemeToggle />
           </div>
         </div>
       </aside>
       <div className={styles.appBody}>
         <header className={styles.mobileHeader}>
-          <a href="/" aria-label="Egma home"><Brand /></a>
-          <ThemeToggle />
+          <Link href="/" aria-label="Egma home"><Brand /></Link>
+          <span className={styles.mobileActions}>{signOutButton}<ThemeToggle /></span>
         </header>
         <nav className={styles.mobileNavigation} aria-label="Main navigation">
-          {PRODUCT_NAVIGATION.map((item) => <a key={item.id} className={active === item.id ? styles.navigationActive : undefined} aria-current={active === item.id ? "page" : undefined} href={item.href}>{item.label}</a>)}
+          {PRODUCT_NAVIGATION.map((item) => <Link key={item.id} className={active === item.id ? styles.navigationActive : undefined} aria-current={active === item.id ? "page" : undefined} href={item.href}>{item.label}</Link>)}
         </nav>
         {children}
       </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import {
@@ -212,19 +213,22 @@ export default function TranscriptsPage() {
       <label htmlFor="window">
         {LIST.window}
       </label>
-      <select
-        id="window"
-        value={choice ?? DEFAULT_WINDOW}
-        onChange={(event) => {
-          choose(windowChoiceOf(event.target.value));
-        }}
-      >
-        {WINDOWS.map((one) => (
-          <option key={one.id} value={one.id}>
-            {one.label}
-          </option>
-        ))}
-      </select>
+      <span className={styles.compactSelectControl}>
+        <select
+          className={styles.compactSelect}
+          id="window"
+          value={choice ?? DEFAULT_WINDOW}
+          onChange={(event) => {
+            choose(windowChoiceOf(event.target.value));
+          }}
+        >
+          {WINDOWS.map((one) => (
+            <option key={one.id} value={one.id}>
+              {one.label}
+            </option>
+          ))}
+        </select>
+      </span>
     </span>
   );
 
@@ -247,12 +251,12 @@ export default function TranscriptsPage() {
               </div>
               <div className={styles.mobileRows}>
                 {state.rows.map((row) => (
-                  <a className={styles.mobileRow} href={transcriptPath(row)} key={row.trace_id}>
+                  <Link className={styles.mobileRow} href={transcriptPath(row)} key={row.trace_id}>
                     <span><span>{whenItWas(row.started_at)}</span><span className={row.errored_span_count > 0 ? styles.wrong : styles.muted}>{row.errored_span_count > 0 ? `${row.errored_span_count} errors` : "No errors"}</span></span>
                     <strong>{row.preview === "" ? LIST.nothing : row.preview}</strong>
                     <p>{row.turn_counts.human} {LIST.human} · {row.turn_counts.agent} {LIST.agent} · {row.tool_span_count} tools</p>
                     <small>{howLong(row.duration_ns)} · {row.source} · {row.connection_type}</small>
-                  </a>
+                  </Link>
                 ))}
               </div>
               <div className={styles.moreLine}>
@@ -295,7 +299,7 @@ const COLUMN_ORDER: readonly (readonly [
 ])[] = [
   [
     COLUMNS.started,
-    (row) => <a href={transcriptPath(row)}>{whenItWas(row.started_at)}</a>,
+    (row) => <Link href={transcriptPath(row)}>{whenItWas(row.started_at)}</Link>,
   ],
   [COLUMNS.duration, (row) => howLong(row.duration_ns)],
   [

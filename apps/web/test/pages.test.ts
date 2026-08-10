@@ -266,10 +266,13 @@ describe("the pages", () => {
   it("give a signed-in person somewhere to sign out, at a path this instance rewrites", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
     const home = await readFile(path.join(WEB, "app/page.tsx"), "utf8");
+    const shell = await readFile(path.join(WEB, "app/ui.tsx"), "utf8");
 
     expect(rewrites).toContain("/api/sign-out");
-    expect(home).toContain('fetch("/api/sign-out"');
-    expect(home).toContain("Sign out");
+    expect(shell).toContain('fetch("/api/sign-out"');
+    expect(shell).toContain("Sign out");
+    expect(home).not.toContain('fetch("/api/sign-out"');
+    expect(home).not.toContain("Sign out");
   });
 
   it("reach the API for the device flow at paths this instance rewrites", async () => {

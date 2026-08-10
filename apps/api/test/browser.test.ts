@@ -578,6 +578,42 @@ describe("the list of what an organization recorded", () => {
   }, SETTLE);
 
   it(
+    "moves between product pages without reloading the shell",
+    async () => {
+      await page.goto(`${origin}/`);
+
+      const sidebar = page.locator("aside");
+      await sidebar
+        .getByRole("button", { name: "Sign out" })
+        .waitFor({ state: "visible" });
+      expect(
+        await sidebar.getByRole("button", { name: "Sign out" }).count(),
+      ).toBe(1);
+      expect(
+        await page.locator("main").getByRole("button", { name: "Sign out" }).count(),
+      ).toBe(0);
+
+      await page.evaluate(() => {
+        Reflect.set(window, "__egma_same_document_navigation", true);
+      });
+      await page.getByRole("link", { name: "Transcripts" }).click();
+      await page.waitForURL(/\/traces$/);
+
+      expect(
+        await page.evaluate(() =>
+          Reflect.get(window, "__egma_same_document_navigation"),
+        ),
+      ).toBe(true);
+      expect(
+        await page.locator("#window").evaluate((element) =>
+          getComputedStyle(element).appearance,
+        ),
+      ).toBe("none");
+    },
+    SETTLE,
+  );
+
+  it(
     "opens on the last day, and shows the exchange the agent just had",
     async () => {
       // Reached from the front page rather than by typing an address, because
@@ -965,7 +1001,7 @@ describe("the saved theme", () => {
 
       expect(await page.locator("html").getAttribute("data-theme")).toBe("light");
       const controls = page.locator('button[aria-label="Use dark theme"]');
-      expect(await controls.count()).toBe(2);
+      await expect.poll(() => controls.count()).toBe(2);
       await controls.first().click();
 
       expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { use, useEffect, useState } from "react";
 
 import {
@@ -131,7 +132,7 @@ export default function TranscriptPage({
     return (
       <StatePage title={DETAIL.needsWindow} lead={DETAIL.needsWindowLead}>
         <p className={styles.linkLine}>
-          <a href="/traces">{DETAIL.back}</a>
+          <Link href="/traces">{DETAIL.back}</Link>
         </p>
       </StatePage>
     );
@@ -141,7 +142,7 @@ export default function TranscriptPage({
     return (
       <StatePage title={DETAIL.missing} lead={DETAIL.missingLead}>
         <p className={styles.linkLine}>
-          <a href="/traces">{DETAIL.back}</a>
+          <Link href="/traces">{DETAIL.back}</Link>
         </p>
       </StatePage>
     );
@@ -152,7 +153,7 @@ export default function TranscriptPage({
       <StatePage title={DETAIL.title}>
         <Notice tone="error">{state.why}</Notice>
         <p className={styles.linkLine}>
-          <a href="/traces">{DETAIL.back}</a>
+          <Link href="/traces">{DETAIL.back}</Link>
         </p>
       </StatePage>
     );
@@ -164,7 +165,7 @@ export default function TranscriptPage({
   return (
     <AppShell active="transcripts">
       <ProductPage>
-        <a className={styles.backLink} href="/traces">← {DETAIL.back}</a>
+        <Link className={styles.backLink} href="/traces">← {DETAIL.back}</Link>
         <header className={styles.detailHeader}>
           <div>
             <p className={styles.eyebrow}>{detail.trace.source} / {detail.trace.environment}</p>

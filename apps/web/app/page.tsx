@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { pickers, type Me } from "../lib/me.ts";
@@ -36,29 +37,13 @@ export default function Home() {
     };
   }, []);
 
-  /**
-   * The one control a signed-in person needs that is not a link. The API ends
-   * the session where it is kept; reloading is what makes this page stop showing
-   * somebody as signed in, and it happens whether or not the call was answered
-   * — a person who clicked sign out is not left looking at their own email
-   * address because the API was unreachable.
-   */
-  async function signOut(): Promise<void> {
-    try {
-      await fetch("/api/sign-out", { method: "POST" });
-    } catch {
-      // Nothing to say. The reload below is the whole of what this page can do.
-    }
-    window.location.assign("/");
-  }
-
   if (state.status === "loading") return <StatePage title="Loading egma" lead="Finding your organization and project." />;
 
   if (state.status === "signed-out") {
     return (
       <StatePage title="Trust the voice agent you ship to production." lead="Read what happened. Test what matters. Ship what you trust.">
         <p className={styles.linkLine}>
-          <a href="/signup">Set up egma</a> · <a href="/sign-in">Sign in</a>
+          <Link href="/signup">Set up egma</Link> · <Link href="/sign-in">Sign in</Link>
         </p>
       </StatePage>
     );
@@ -79,14 +64,14 @@ export default function Home() {
         </section>
 
         <section className={styles.homeLinks}>
-          <a aria-label="Open exchange history" className={styles.homeLink} href="/traces">
+          <Link aria-label="Open exchange history" className={styles.homeLink} href="/traces">
             <small>01 / PRIMARY</small><strong>{LIST.navigation}</strong>
             <p>Inspect each exchange, its tools, timing, and errors.</p><i>→</i>
-          </a>
-          <a className={styles.homeLink} href="/members">
+          </Link>
+          <Link className={styles.homeLink} href="/members">
             <small>02 / ORGANIZATION</small><strong>Manage your people</strong>
             <p>Invite a teammate or review who can change this organization.</p><i>→</i>
-          </a>
+          </Link>
         </section>
 
         <section className={styles.contextFacts} aria-label="Current context">
@@ -94,19 +79,6 @@ export default function Home() {
           {visible.project ? <Choice label="Project" of={me.projects} /> : <Fact label="Project" value={project?.name ?? "—"} />}
           <Fact label="Your role" value={organization?.role ?? "—"} />
         </section>
-
-        <p className={styles.linkLine}>
-          Signed in as {me.user.email}.{" "}
-        <button
-          type="button"
-          className={styles.inlineButton}
-          onClick={() => {
-            void signOut();
-          }}
-        >
-          Sign out
-        </button>
-        </p>
       </ProductPage>
     </AppShell>
   );
