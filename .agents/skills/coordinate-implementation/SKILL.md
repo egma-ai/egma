@@ -219,12 +219,16 @@ Dispatch newly unblocked tickets while the next completed ticket moves through t
 
 After all selected tickets are resolved:
 
-1. Update the integration branch against the latest base branch.
-2. Resolve conflicts on the integration branch.
-3. Run the full suite.
-4. Push the integration branch.
-5. Open one pull request into the base branch.
-6. Leave it open.
+1. Record the latest base commit.
+2. Update the integration branch against that exact base commit.
+3. Resolve conflicts on the integration branch.
+4. Run the full suite.
+5. Run independent `/code-review` against that base commit, using the effort specification and resolved tickets as the specification source.
+6. Resolve findings, then repeat the full suite and independent review until the result is clean.
+7. Confirm the base commit has not moved. If it moved, repeat the final refresh, full suite, and independent review.
+8. Push the integration branch.
+9. Open one pull request into the base branch.
+10. Leave it open.
 
 Report the final pull request, integration branch, Planning commits, ticket results, and any unresolved risk.
 
