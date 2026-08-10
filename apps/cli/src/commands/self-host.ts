@@ -185,7 +185,17 @@ export function parseSelfHostArgs(argv: readonly string[]): SelfHostInvocation {
     if ((VALUED_OPTIONS as readonly string[]).includes(name)) {
       // `--cwd=X` carries its value; `--cwd X` takes the next word, and that
       // word is consumed here so it can never be read as part of the verb.
-      cwd = attached ?? argv[(index += 1)] ?? null;
+      const value = attached ?? argv[(index += 1)] ?? null;
+      // An option that eats the next option is the quiet kind of wrong:
+      // `--plan --cwd --json` would swallow `--json` and print plain output to
+      // a script that asked for a document. Nothing here takes a value that
+      // begins with a dash, and a missing one is refused by name like every
+      // other bad option rather than falling back to this directory.
+      if (value === null || value.startsWith("-")) {
+        unknown.push(name);
+        continue;
+      }
+      cwd = value;
       continue;
     }
     if ((FLAGS as readonly string[]).includes(name)) {

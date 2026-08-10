@@ -22,14 +22,24 @@ That starts the whole platform and prints the address an agent repository
 points at. Nobody runs a migration step, because there isn't one — the API
 applies its migrations while it boots.
 
-`docker compose up` starts the same containers, and is not quite the same
-thing. `egma self-host up` also waits for the platform to answer for itself,
-tells you what to type next, and tries once more if the first attempt fails —
-which on a workspace that has never been started it can, because ClickHouse's
-first boot creates its database and restarts itself, and its health check
-answers during the server that is on its way down. Nothing restarts the API
-when that happens, so the bare compose path needs the second `up` typed by
-hand.
+`docker compose up` starts the same containers, and is not the same thing.
+
+**Once you have run `egma self-host phone setup`, use `egma self-host up` to
+start this platform.** What that command wrote is in `.egma-platform/`, and
+nothing points compose at it — the self-host commands read it back and hand it
+to the containers themselves. A bare `docker compose up` therefore brings the
+platform back with its carrier, speech and judge configuration empty: the
+containers are recreated, phone readiness goes back to `setup required`, and
+the simulator has no trunk to dial through. Nothing is lost and nothing has to
+be set up again; `egma self-host up` restores it.
+
+There is a second, smaller difference. `egma self-host up` waits for the
+platform to answer for itself, tells you what to type next, and tries once more
+if the first attempt fails — which on a workspace that has never been started
+it can, because ClickHouse's first boot creates its database and restarts
+itself, and its health check answers during the server that is on its way down.
+Nothing restarts the API when that happens, so the bare compose path needs the
+second `up` typed by hand.
 
 | Service | URL |
 | --- | --- |

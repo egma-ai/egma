@@ -276,6 +276,27 @@ describe("egma self-host phone setup", () => {
     }
   });
 
+  it.each([
+    {
+      what: "a value that is really the next option",
+      args: ["--plan", "--cwd", "--json"],
+      // The quiet kind of wrong: `--json` is swallowed, and a script that
+      // asked for one document gets plain lines with no complaint.
+    },
+    { what: "no value at all", args: ["--plan", "--cwd"] },
+  ])("refuses --cwd given $what", async ({ args }) => {
+    twilio = await startFakeTwilio({ numbers: { [SOURCE_NUMBER]: NUMBER_SID } });
+
+    const run = await runSetup(workspace, twilio, platform, ["phone", "setup", ...args]);
+
+    expect(run.code).not.toBe(0);
+    expect(run.stderr).toContain("does not know the option --cwd");
+    // Refused by name, like every other bad option — not quietly resolved
+    // against whichever directory the command happened to be run in.
+    expect(run.stdout).not.toContain("status: planned");
+    expect(twilio.requests).toEqual([]);
+  });
+
   it("names an option it does not know, and never its value", async () => {
     twilio = await startFakeTwilio({ numbers: { [SOURCE_NUMBER]: NUMBER_SID } });
 
