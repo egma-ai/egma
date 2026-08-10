@@ -2,8 +2,10 @@ import { newId } from "@egma/ids";
 import { eq } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
+import { judgeConfiguration } from "../schema/graders.ts";
 import { persona, personaVersion } from "../schema/personas.ts";
 import { organization, project } from "../schema/tenancy.ts";
+import { platformJudgeRow } from "./judges.ts";
 import type { PersonaTraits } from "./personas.ts";
 import type { Membership } from "./memberships.ts";
 import { insertMembership } from "./memberships.ts";
@@ -93,6 +95,28 @@ export type NewOrganization = {
   readonly organizationSlug: string;
   readonly projectName: string;
   readonly projectSlug: string;
+  /**
+   * The judge this deployment gives a project that has configured none, if it
+   * has one. Applied here, in the transaction that creates the project, so a
+   * project is *born* gradable.
+   *
+   * It used to be applied only by a backfill at API startup, and the gap that
+   * left is exactly the shape of the ordinary first run: start a platform with
+   * no projects, then sign up — which creates the first project while the API
+   * is already running. That project had no judge until somebody restarted the
+   * API, and until then every model-based verdict came back `errored`. Nobody
+   * would have read that as "the platform is missing configuration", because a
+   * grading failure is an operational failure rather than anything the agent
+   * under test did.
+   */
+  readonly defaultJudge?: NewPlatformJudge | undefined;
+};
+
+/** A judge a deployment hands to projects that have configured none. */
+export type NewPlatformJudge = {
+  readonly provider: string;
+  readonly model: string;
+  readonly key: string;
 };
 
 export type ProvisionedOrganization = {
@@ -138,6 +162,28 @@ export async function provisionOrganization(
       .update(project)
       .set({ defaultPersonaId: starterId })
       .where(eq(project.id, projectId));
+
+    // The platform's own judge, where it has one, in the same transaction as
+    // everything else this project needs to be usable. `onConflictDoNothing`
+    // for the same reason the backfill has it: a project that has a judge has
+    // chosen it, and nothing here may spend from a different account than the
+    // one somebody picked.
+    if (input.defaultJudge !== undefined) {
+      await tx
+        .insert(judgeConfiguration)
+        .values(
+          platformJudgeRow({
+            projectId,
+            organizationId,
+            createdBy: input.ownerUserId,
+            provider: input.defaultJudge.provider,
+            model: input.defaultJudge.model,
+            key: input.defaultJudge.key,
+            now: new Date(),
+          }),
+        )
+        .onConflictDoNothing({ target: judgeConfiguration.projectId });
+    }
 
     // Everyone is an admin in v1 and roles are invisible, but the permission
     // map is real from the first commit. The creator of an organization is its

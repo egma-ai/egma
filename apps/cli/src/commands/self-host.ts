@@ -189,9 +189,10 @@ export function parseSelfHostArgs(argv: readonly string[]): SelfHostInvocation {
       // An option that eats the next option is the quiet kind of wrong:
       // `--plan --cwd --json` would swallow `--json` and print plain output to
       // a script that asked for a document. Nothing here takes a value that
-      // begins with a dash, and a missing one is refused by name like every
-      // other bad option rather than falling back to this directory.
-      if (value === null || value.startsWith("-")) {
+      // begins with a dash; a missing one, and an empty `--cwd=`, are refused
+      // by name like every other bad option rather than quietly falling back
+      // to whichever directory the command happened to be run in.
+      if (value === null || value === "" || value.startsWith("-")) {
         unknown.push(name);
         continue;
       }

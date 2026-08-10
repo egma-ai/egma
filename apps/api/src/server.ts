@@ -114,7 +114,7 @@ export function buildApi(options: ServerOptions): Api {
     },
     hooks: {
       admitIdentity: admitIdentity(config.singleOrganization),
-      onIdentityCreated: onIdentityCreated(),
+      onIdentityCreated: onIdentityCreated(config.defaultJudge),
     },
   });
 

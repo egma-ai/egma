@@ -50,6 +50,12 @@ export type TestApi = {
 
 export type TestApiOptions = {
   readonly singleOrganization?: boolean;
+  /**
+   * The judge this deployment gives a project that has configured none, as
+   * `egma self-host phone setup` supplies one. Absent by default, because most
+   * tests are not about grading configuration at all.
+   */
+  readonly defaultJudge?: Config["defaultJudge"];
   readonly trustProxy?: boolean;
   /** Whether the transport claims a message actually reaches anybody. */
   readonly emailDelivers?: boolean;
@@ -117,6 +123,9 @@ export async function createApi(
     ...(traceStore === undefined ? {} : { clickhouseUrl: traceStore.url }),
     singleOrganization: options.singleOrganization ?? false,
     trustProxy: options.trustProxy ?? false,
+    ...(options.defaultJudge === undefined
+      ? {}
+      : { defaultJudge: options.defaultJudge }),
   });
 
   const { app, identity } = buildApi({

@@ -284,6 +284,7 @@ describe("egma self-host phone setup", () => {
       // asked for one document gets plain lines with no complaint.
     },
     { what: "no value at all", args: ["--plan", "--cwd"] },
+    { what: "an empty value", args: ["--plan", "--cwd="] },
   ])("refuses --cwd given $what", async ({ args }) => {
     twilio = await startFakeTwilio({ numbers: { [SOURCE_NUMBER]: NUMBER_SID } });
 

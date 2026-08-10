@@ -160,6 +160,7 @@ export {
 } from "./invitations.ts";
 export {
   provisionOrganization,
+  type NewPlatformJudge,
   type NewOrganization,
   type ProvisionedOrganization,
 } from "./provisioning.ts";

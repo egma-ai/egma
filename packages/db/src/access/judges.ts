@@ -314,6 +314,40 @@ export async function resolveJudgeKey(
 }
 
 /**
+ * One judge row, validated and sealed, ready to insert.
+ *
+ * Shared by the two places the platform's own judge is written — the boot-time
+ * backfill below and the provisioning transaction that gives a brand-new
+ * project one — so that a key is validated and sealed identically on both, and
+ * a rule added here cannot apply to only one of them.
+ */
+export function platformJudgeRow(input: {
+  readonly projectId: string;
+  readonly organizationId: string;
+  /** Nullable, because a project can be created by nobody — a seeded one. */
+  readonly createdBy: string | null;
+  readonly provider: string;
+  readonly model: string;
+  readonly key: string;
+  readonly now: Date;
+}) {
+  const key = validKey(input.key);
+  return {
+    projectId: input.projectId,
+    organizationId: input.organizationId,
+    provider: validProvider(input.provider),
+    model: validModel(input.model),
+    // Sealed per row rather than once for many: the envelope carries its own
+    // initialisation vector, and reusing one across rows is the mistake this
+    // repeats a cheap operation to avoid.
+    credentials: sealCredentials({ key }),
+    credentialsHint: key.slice(-4),
+    createdBy: input.createdBy,
+    updatedAt: input.now,
+  };
+}
+
+/**
  * Give every project that has configured no judge the platform's own.
  *
  * **Why this exists, and why it is not a container-wide key.** A self-hoster
@@ -332,8 +366,16 @@ export async function resolveJudgeKey(
  *
  * **It never overwrites.** A project that has chosen a judge has chosen it, and
  * a platform restart is not an occasion to change somebody's model or spend
- * from a different account. So this is safe to run on every boot, and running it
- * on every boot is what makes a project created later get one too.
+ * from a different account. So this is safe to run on every boot.
+ *
+ * **This is the backfill, not the whole mechanism.** It catches the projects
+ * that existed before the platform was given a judge — a self-hoster who runs
+ * `egma self-host phone setup` on a deployment they had already signed up on.
+ * A project created *while* the platform is running is given its judge in the
+ * transaction that creates it (see `provisionOrganization`), because a project
+ * that had to wait for the next restart to become gradable would produce
+ * errored verdicts in between, and a grading failure is an operational failure
+ * rather than anything the agent under test did.
  *
  * Not authorized against an `AuthContext` on purpose: there is no user here.
  * This is the deployment acting on its own configuration, in the same breath as
@@ -344,10 +386,6 @@ export async function seedDefaultJudge(input: {
   readonly model: string;
   readonly key: string;
 }): Promise<readonly string[]> {
-  const provider = validProvider(input.provider);
-  const model = validModel(input.model);
-  const key = validKey(input.key);
-
   const unjudged = await db()
     .select({
       id: project.id,
@@ -361,23 +399,20 @@ export async function seedDefaultJudge(input: {
   if (unjudged.length === 0) return [];
 
   const now = new Date();
-  const hint = key.slice(-4);
   await db()
     .insert(judgeConfiguration)
     .values(
-      unjudged.map((row) => ({
-        projectId: row.id,
-        organizationId: row.organizationId,
-        provider,
-        model,
-        // Sealed once per row rather than once for all of them: the envelope
-        // carries its own initialisation vector, and reusing one across rows
-        // is the mistake this repeats a cheap operation to avoid.
-        credentials: sealCredentials({ key }),
-        credentialsHint: hint,
-        createdBy: row.createdBy,
-        updatedAt: now,
-      })),
+      unjudged.map((row) =>
+        platformJudgeRow({
+          projectId: row.id,
+          organizationId: row.organizationId,
+          createdBy: row.createdBy,
+          provider: input.provider,
+          model: input.model,
+          key: input.key,
+          now,
+        }),
+      ),
     )
     // A project that gained a judge between the read above and this write kept
     // it. Nothing here is a race worth locking for; the losing side is the
