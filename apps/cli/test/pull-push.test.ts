@@ -14,9 +14,16 @@ import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
 
+import {
+  LARGEST_MOCK_TOOL_ANSWER_BYTES,
+  LONGEST_MOCK_TOOL_DELAY_MILLISECONDS,
+} from "@egma/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createEgmaFolder } from "../src/folder/egma-folder.ts";
+import {
+  createEgmaFolder,
+  parseMockToolsFile,
+} from "../src/folder/egma-folder.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { CLI_ENTRY, makeWorkspace, type Workspace } from "./support/workspace.ts";
 
@@ -100,6 +107,42 @@ async function readTest(name: string): Promise<string> {
   return readFile(path.join(testsFolder(), name), "utf8");
 }
 
+const mockToolsFile = (): string => path.join(workspace.dir, "egma", "mock-tools.md");
+
+async function readMockTools(): Promise<string> {
+  return readFile(mockToolsFile(), "utf8");
+}
+
+/** The section as somebody types it, above whatever prose the file opens with. */
+function mockToolSection(
+  entries: readonly (readonly [string, Record<string, unknown>])[],
+): string {
+  return [
+    "## Mock tools",
+    ...entries.flatMap(([tool, says]) => [
+      `### ${tool}`,
+      "```json",
+      JSON.stringify(says),
+      "```",
+    ]),
+    "",
+  ].join("\n");
+}
+
+async function writeMockTools(
+  entries: readonly (readonly [string, Record<string, unknown>])[],
+): Promise<void> {
+  await writeFile(mockToolsFile(), mockToolSection(entries), "utf8");
+}
+
+/** The mock tools one file holds, as `push` and `pull` leave them. */
+function mockToolsIn(document: string): readonly { tool: string; says: unknown }[] {
+  return parseMockToolsFile(document, "egma/mock-tools.md").map((entry) => ({
+    tool: entry.tool,
+    says: entry.says,
+  }));
+}
+
 /** Every test file in the folder, as bytes, for comparing before and after. */
 async function folderBytes(): Promise<Record<string, string>> {
   const held: Record<string, string> = {};
@@ -148,7 +191,14 @@ describe("egma init", () => {
     expect(factOf(result.stdout, "committable")).toBe("yes");
     // The memory directory is named as reserved and is not made.
     expect(factOf(result.stdout, "reserved")).toBe("memory");
-    expect(await readdir(path.join(workspace.dir, "egma"))).toEqual(["config.yaml", "tests"]);
+    expect(factOf(result.stdout, "mock-tools")).toContain(
+      path.join("egma", "mock-tools.md"),
+    );
+    expect(await readdir(path.join(workspace.dir, "egma"))).toEqual([
+      "config.yaml",
+      "mock-tools.md",
+      "tests",
+    ]);
 
     // git itself is the judge of "committable": every file goes in, and not one
     // of them is ignored.
@@ -159,7 +209,7 @@ describe("egma init", () => {
     await git("config", "user.name", "check");
     await git("add", "egma");
     const staged = (await git("status", "--porcelain", "--", "egma")).trim().split("\n").sort();
-    expect(staged).toEqual(["A  egma/config.yaml"]);
+    expect(staged).toEqual(["A  egma/config.yaml", "A  egma/mock-tools.md"]);
 
     // Nothing anywhere says to keep any of it out.
     await expect(
@@ -586,6 +636,336 @@ describe("egma push", () => {
   });
 });
 
+/**
+ * The mocked world, between the folder and egma.
+ *
+ * A mock tool answers for one of the agent's tools while a simulation runs, and
+ * it is authored where every other authored thing is: in the folder, synced
+ * with the two verbs already here. Two halves, and they behave differently on
+ * purpose — the project's own mock tools are the one authored thing egma does
+ * not version, so an edit overwrites; a test's overrides are test content, so
+ * an edit to one mints the test's next version exactly as an edit to an
+ * expected behavior does.
+ */
+describe("the folder carries mock tools", () => {
+  it("pulls what egma answers with into the folder, and a fresh push changes nothing", async () => {
+    platform.mocking.add({ tool: "check_availability", answer: { slots: [] } });
+    platform.mocking.add({
+      tool: "book_appointment",
+      error: "the booking service is unreachable",
+      delayMilliseconds: 800,
+    });
+    platform.tests.add({
+      name: "calendar-is-full",
+      scenario: "Nothing is free next week.",
+      expectedBehaviors: ["The agent offers to take a message."],
+      mockTools: [{ tool: "check_availability", answer: { slots: [], full: true } }],
+    });
+
+    await makeFolder();
+    const pulled = await egma(["pull"]);
+
+    expect(pulled.code).toBe(0);
+    // Named one per line, under a key of their own — a mock tool is not a test.
+    expect(valuesOf(pulled.stdout, "mock-tool")).toEqual([
+      "book_appointment",
+      "check_availability",
+    ]);
+    expect(factOf(pulled.stdout, "mock-tools")).toBe("2");
+
+    // The project's own live in a file of their own, the tool named in the
+    // heading and the answer in the block below it.
+    const file = await readMockTools();
+    expect(file).toContain("### check_availability");
+    expect(mockToolsIn(file)).toEqual([
+      {
+        tool: "book_appointment",
+        says: { error: "the booking service is unreachable", delay_ms: 800 },
+      },
+      { tool: "check_availability", says: { answer: { slots: [] } } },
+    ]);
+
+    // A test's own overrides live inside that test, under the same heading,
+    // because an override is the test's content.
+    expect(await readTest("calendar-is-full.md")).toContain(
+      [
+        "## Mock tools",
+        "### check_availability",
+        "```json",
+        "{",
+        '  "answer": {',
+        '    "slots": [],',
+        '    "full": true',
+        "  }",
+        "}",
+        "```",
+      ].join("\n"),
+    );
+
+    // And the folder as it now stands is a folder egma has nothing to do about.
+    const before = { ...(await folderBytes()), "mock-tools.md": file };
+    const pushed = await egma(["push"]);
+
+    expect(pushed.code).toBe(0);
+    expect(factOf(pushed.stdout, "status")).toBe("pushed");
+    expect(valuesOf(pushed.stdout, "mock-tool-unchanged")).toEqual([
+      "book_appointment",
+      "check_availability",
+    ]);
+    expect(valuesOf(pushed.stdout, "unchanged")).toEqual(["calendar-is-full"]);
+    expect({ ...(await folderBytes()), "mock-tools.md": await readMockTools() }).toEqual(before);
+    expect(platform.tests.versionsOf("calendar-is-full")).toBe(1);
+  });
+
+  it("lands a mock tool authored in the folder, and overwrites one edited there", async () => {
+    await makeFolder();
+    await writeMockTools([["check_availability", { answer: { slots: ["09:00"] } }]]);
+
+    const created = await egma(["push"]);
+
+    expect(created.code).toBe(0);
+    expect(valuesOf(created.stdout, "mock-tool-created")).toEqual(["check_availability"]);
+    expect(platform.mocking.mockTools).toEqual([
+      {
+        id: expect.stringMatching(/^mck_/u),
+        tool: "check_availability",
+        answer: { answer: { slots: ["09:00"] } },
+        delayMilliseconds: 0,
+        agents: [],
+      },
+    ]);
+    const [first] = platform.mocking.mockTools;
+
+    // Edited in the folder and pushed again: the same mock tool, written over.
+    // There is no version chain here and no second row — the one authored thing
+    // egma does not version.
+    await writeMockTools([["check_availability", { answer: { slots: [] }, delay_ms: 250 }]]);
+    const edited = await egma(["push"]);
+
+    expect(edited.code).toBe(0);
+    expect(valuesOf(edited.stdout, "mock-tool-updated")).toEqual(["check_availability"]);
+    expect(platform.mocking.mockTools).toEqual([
+      {
+        id: first?.id,
+        tool: "check_availability",
+        answer: { answer: { slots: [] } },
+        delayMilliseconds: 250,
+        agents: [],
+      },
+    ]);
+
+    // And the file egma wrote back is the file a pull would have written.
+    const after = await readMockTools();
+    expect(await egma(["pull"])).toMatchObject({ code: 0 });
+    expect(await readMockTools()).toBe(after);
+  });
+
+  it("pushes an override authored inside a test as that test's next version", async () => {
+    platform.tests.add({
+      name: "calendar-is-full",
+      scenario: "Nothing is free next week.",
+      expectedBehaviors: ["The agent offers to take a message."],
+    });
+    await makeFolder();
+    await egma(["pull"]);
+
+    // The developer writes the override into the test's own markdown.
+    const held = await readTest("calendar-is-full.md");
+    await writeTest(
+      "calendar-is-full.md",
+      `${held.trimEnd()}\n${mockToolSection([["check_availability", { answer: { slots: [] } }]])}`,
+    );
+
+    const result = await egma(["push"]);
+
+    expect(result.code).toBe(0);
+    // A new version of the test, because a test versions — and no free-standing
+    // mock tool anywhere, because an override is content and not an entity.
+    expect(valuesOf(result.stdout, "updated")).toEqual(["calendar-is-full"]);
+    expect(platform.tests.versionsOf("calendar-is-full")).toBe(2);
+    expect(platform.mocking.mockTools).toEqual([]);
+    expect(factOf(result.stdout, "mock-tools")).toBe("0");
+
+    // The version the test now stands on carries it, and reads it back.
+    const version = factOf(result.stdout, "version") as string;
+    const read = await fetch(`${platform.url}/api/test-versions/${version}`, {
+      headers: { authorization: `Bearer ${KEY}` },
+    });
+    expect((await read.json()) as { mock_tools: unknown }).toMatchObject({
+      mock_tools: [{ tool: "check_availability", answer: { slots: [] }, delay_ms: 0 }],
+    });
+
+    // Pushed again with nothing changed, it mints nothing.
+    expect(await egma(["push"])).toMatchObject({ code: 0 });
+    expect(platform.tests.versionsOf("calendar-is-full")).toBe(2);
+  });
+
+  it("refuses on drift when a teammate moved a test's mock tools, and uploads nothing", async () => {
+    platform.tests.add({
+      name: "calendar-is-full",
+      scenario: "Nothing is free next week.",
+      expectedBehaviors: ["The agent offers to take a message."],
+      mockTools: [{ tool: "check_availability", answer: { slots: [] } }],
+    });
+    await makeFolder();
+    await egma(["pull"]);
+
+    // A teammate changes the mocked world of that test in the dashboard.
+    platform.tests.editInDashboard("calendar-is-full", {
+      mockTools: [{ tool: "check_availability", error: "the calendar is unreachable" }],
+    });
+
+    // The developer, meanwhile, has changed the same test and authored a new
+    // project mock tool beside it.
+    const held = await readTest("calendar-is-full.md");
+    await writeTest("calendar-is-full.md", held.replace('"slots": []', '"slots": ["09:00"]'));
+    await writeMockTools([["send_sms", { answer: { sent: true } }]]);
+
+    const refused = await egma(["push"]);
+
+    expect(refused.code).toBe(5);
+    expect(factOf(refused.stdout, "status")).toBe("refused");
+    expect(valuesOf(refused.stdout, "conflict")).toEqual(["calendar-is-full"]);
+    expect(factOf(refused.stdout, "uploaded")).toBe("nothing");
+    expect(refused.stderr).toContain("egma pull");
+
+    // Nothing at all was uploaded — not the test, and not the mocked world it
+    // was pushed beside. "Nothing was uploaded" has to be true of the whole
+    // folder or it is not worth saying.
+    expect(platform.tests.versionsOf("calendar-is-full")).toBe(2);
+    expect(platform.mocking.mockTools).toEqual([]);
+  });
+
+  it("relays egma's own refusal for an answer or a delay egma cannot carry", async () => {
+    await makeFolder();
+    const tooLong = LONGEST_MOCK_TOOL_DELAY_MILLISECONDS + 1;
+    const tooBig = "x".repeat(LARGEST_MOCK_TOOL_ANSWER_BYTES);
+    await writeMockTools([
+      ["book_appointment", { answer: { booked: true }, delay_ms: tooLong }],
+      ["read_notes", { answer: tooBig }],
+      ["send_sms", { answer: { sent: true } }],
+    ]);
+
+    const result = await egma(["push"]);
+
+    expect(result.code).toBe(6);
+    expect(factOf(result.stdout, "status")).toBe("turned-away");
+    expect(valuesOf(result.stdout, "turned-away")).toEqual(["book_appointment", "read_notes"]);
+    expect(valuesOf(result.stdout, "file")).toContain("egma/mock-tools.md");
+
+    // egma's own sentences, word for word, arithmetic included. Nothing out
+    // here holds a second copy of either ceiling — the numbers in these
+    // sentences are the platform's own, which is why they can be trusted to
+    // still be right the day the budget moves.
+    expect(valuesOf(result.stdout, "reason")).toEqual([
+      `delay_ms is ${tooLong}, and a mock tool may delay its answer by at most ` +
+        `${LONGEST_MOCK_TOOL_DELAY_MILLISECONDS} milliseconds — the budget the exchange ` +
+        `carrying it is given. Send a smaller delay_ms.`,
+      `answer is ${tooBig.length + 2} bytes once serialized, and the exchange that carries ` +
+        `it holds at most ${LARGEST_MOCK_TOOL_ANSWER_BYTES}. An answer that needs more ` +
+        `than that is a document rather than a tool answer.`,
+    ]);
+
+    // The one egma could take, landed; the two it could not, left in the file
+    // exactly as they were written, so the author is looking at what the
+    // refusal is about.
+    expect(platform.mocking.mockTools.map((one) => one.tool)).toEqual(["send_sms"]);
+    const file = await readMockTools();
+    expect(file).toContain(String(tooLong));
+    expect(mockToolsIn(file)).toHaveLength(3);
+  });
+
+  it("takes a delay and a scope out when the file stops saying them", async () => {
+    // Registered through the door a developer's connect uses, because that is
+    // the only way an agent exists for a mock tool to be scoped to.
+    await fetch(`${platform.url}/api/agents`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({ name: "front-desk" }),
+    });
+    platform.mocking.add({
+      tool: "check_availability",
+      answer: { slots: [] },
+      delayMilliseconds: 800,
+      agents: ["front-desk"],
+    });
+    await makeFolder();
+    await egma(["pull"]);
+
+    // The pulled file says both, and the developer takes both out.
+    expect(mockToolsIn(await readMockTools())).toEqual([
+      {
+        tool: "check_availability",
+        says: { answer: { slots: [] }, delay_ms: 800, agents: ["front-desk"] },
+      },
+    ]);
+    await writeMockTools([["check_availability", { answer: { slots: [] } }]]);
+
+    const result = await egma(["push"]);
+
+    expect(result.code).toBe(0);
+    expect(valuesOf(result.stdout, "mock-tool-updated")).toEqual(["check_availability"]);
+    // What the file stopped saying, egma stopped answering. A field left out of
+    // an edit is one egma keeps, so a folder that only sent what it still said
+    // would never be able to take anything back.
+    expect(platform.mocking.mockTools).toEqual([
+      {
+        id: expect.stringMatching(/^mck_/u),
+        tool: "check_availability",
+        answer: { answer: { slots: [] } },
+        delayMilliseconds: 0,
+        agents: [],
+      },
+    ]);
+
+    // And it settles: the next push has nothing left to do.
+    const again = await egma(["push"]);
+    expect(valuesOf(again.stdout, "mock-tool-unchanged")).toEqual(["check_availability"]);
+  });
+
+  it("keeps a mock tool nobody has pushed, and never writes over it", async () => {
+    platform.mocking.add({ tool: "check_availability", answer: { slots: [] } });
+    await makeFolder();
+    await writeMockTools([["send_sms", { answer: { sent: true } }]]);
+
+    const pulled = await egma(["pull"]);
+
+    expect(pulled.code).toBe(0);
+    expect(valuesOf(pulled.stdout, "mock-tool")).toEqual(["check_availability", "send_sms"]);
+    expect(mockToolsIn(await readMockTools())).toEqual([
+      { tool: "check_availability", says: { answer: { slots: [] } } },
+      { tool: "send_sms", says: { answer: { sent: true } } },
+    ]);
+  });
+
+  it("names a mock tools file it cannot read, and uploads the tests it can", async () => {
+    await makeFolder();
+    await writeTest(
+      "good.md",
+      freshFile({ name: "good", scenario: "Something happens.", behaviors: ["It is handled."] }),
+    );
+    const broken = [
+      "## Mock tools",
+      "### check_availability",
+      "```json",
+      "{slots: []",
+      "```",
+      "",
+    ].join("\n");
+    await writeFile(mockToolsFile(), broken, "utf8");
+
+    const result = await egma(["push"]);
+
+    expect(result.code).toBe(6);
+    expect(valuesOf(result.stdout, "turned-away")).toEqual(["mock-tools"]);
+    expect(factOf(result.stdout, "reason")).toContain("check_availability");
+    // The tests are not forfeit over it, and the file is untouched byte for
+    // byte so the developer can see what they wrote.
+    expect(platform.tests.tests.map((test) => test.name)).toEqual(["good"]);
+    expect(await readMockTools()).toBe(broken);
+  });
+});
+
 describe("both verbs, run with nobody watching", () => {
   it("finish with no standard input at all, which is what promptless means", async () => {
     platform.tests.add({ name: "one", scenario: "s", expectedBehaviors: ["b"] });
@@ -671,7 +1051,7 @@ describe("both verbs, run with nobody watching", () => {
     expect(help.stdout).toContain("egma pull");
     expect(help.stdout).toContain("egma push");
     expect(help.stdout).toContain("5 push refused: egma has moved on, pull first");
-    expect(help.stdout).toContain("6 egma turned a test away at its door");
+    expect(help.stdout).toContain("6 egma turned a test or a mock tool away at its door");
   });
 
   /**

@@ -20,7 +20,10 @@
  * nothing further up can do anything sensible with it.
  */
 
+import type { MockToolEntry } from "../folder/mock-tools.ts";
 import { PlatformUnreachableError, type Fetch } from "./device-flow.ts";
+import { overrideFrom } from "./mock-tools.ts";
+import { PlatformRefusedError } from "./refused.ts";
 import type { SignedIn } from "./signed-in.ts";
 
 /** A test as the platform currently has it. */
@@ -34,6 +37,15 @@ export type PlatformTest = {
   readonly expectedBehaviors: readonly string[];
   /** By name, in the order they were authored. */
   readonly personas: readonly string[];
+  /**
+   * The tools this test answers for itself.
+   *
+   * Content, like the expected behaviors beside them: an override versions with
+   * the test, so editing one mints the next version exactly as editing a
+   * behavior does. That is why they ride this shape rather than the mock tool
+   * group's, which versions nothing.
+   */
+  readonly mockTools: readonly MockToolEntry[];
 };
 
 /** One frozen version, and whether the test has since moved past it. */
@@ -57,17 +69,6 @@ export type WriteAnswer =
     }
   /** The platform turned the test away at its door, in its own words. */
   | { readonly kind: "turned-away"; readonly reason: string };
-
-/** An answer egma asked for and did not get. */
-export class PlatformRefusedError extends Error {
-  readonly status: number;
-
-  constructor(status: number, said: string) {
-    super(said);
-    this.name = "PlatformRefusedError";
-    this.status = status;
-  }
-}
 
 /**
  * A string off the wire, with nothing in it a terminal would obey.
@@ -116,7 +117,23 @@ function testFrom(body: Record<string, unknown>): PlatformTest {
     scenario: text(body.scenario),
     expectedBehaviors: textList(body.expected_behaviors),
     personas: personaNames(body.personas),
+    mockTools: mockToolsIn(body.mock_tools),
   };
+}
+
+/**
+ * The overrides a test carries, in the order they were authored.
+ *
+ * Order is content: it is what the platform stores and what it compares an edit
+ * against, so a folder that reordered them would mint a version saying nothing.
+ */
+function mockToolsIn(value: unknown): readonly MockToolEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) =>
+    typeof entry === "object" && entry !== null
+      ? [overrideFrom(entry as Record<string, unknown>)]
+      : [],
+  );
 }
 
 async function bodyOf(response: Response): Promise<Record<string, unknown>> {
@@ -229,6 +246,12 @@ export type TestInput = {
   readonly expectedBehaviors: readonly string[];
   /** By name. Empty takes the default persona. */
   readonly personas: readonly string[];
+  /**
+   * The tools this test answers for itself. Empty clears them and leaves the
+   * project's mock tools the whole world, which is why it is always sent: a
+   * write that left the field out would keep overrides the file no longer has.
+   */
+  readonly mockTools: readonly MockToolEntry[];
 };
 
 function writeBody(input: TestInput): Record<string, unknown> {
@@ -237,6 +260,10 @@ function writeBody(input: TestInput): Record<string, unknown> {
     scenario: input.scenario,
     expected_behaviors: [...input.expectedBehaviors],
     personas: [...input.personas],
+    // The heading names the tool and the block says the rest, so what goes up
+    // is the block with the heading's name put back on it. Nothing here judges
+    // what the block said; egma's door does, in egma's own words.
+    mock_tools: input.mockTools.map((entry) => ({ ...entry.says, tool: entry.tool })),
   };
 }
 

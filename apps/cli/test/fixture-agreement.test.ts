@@ -24,6 +24,10 @@
  * nobody should be writing.
  */
 
+import {
+  LARGEST_MOCK_TOOL_ANSWER_BYTES,
+  LONGEST_MOCK_TOOL_DELAY_MILLISECONDS,
+} from "@egma/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
@@ -264,6 +268,315 @@ describe("creating a test", () => {
       error: "unprocessable",
       message: "an expected behavior needs to say something",
     });
+  });
+});
+
+/**
+ * The mock tool group, held against the shipped API's own words.
+ *
+ * These are the refusals a developer meets by authoring a file, so they are the
+ * ones the folder's verbs relay to a terminal — which makes their wording
+ * contract, and makes a fixture that softened any of them a fixture that would
+ * let the client ship against sentences the real thing never says.
+ *
+ * The two ceilings are read from the platform's own constants here as they are
+ * in the fixture: a number written down twice is a number that goes on being
+ * enforced in one place after it moved in the other.
+ */
+describe("a mock tool the folder authors", () => {
+  const CALENDAR = { tool: "check_availability", answer: { slots: [] } } as const;
+
+  it("answers the whole mock tool, with no version anywhere on it", async () => {
+    const created = await ask("POST", "/api/mock-tools", { ...CALENDAR });
+
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    expect(created.body).toMatchObject({
+      tool: "check_availability",
+      answer: { slots: [] },
+      delay_ms: 0,
+      agents: [],
+    });
+    expect(String(created.body.id)).toMatch(/^mck_/u);
+    // The one authored thing egma does not version: there is no version to
+    // read, so a client cannot grow a pin it would then have to keep in step.
+    expect(created.body).not.toHaveProperty("version");
+    expect(created.body).not.toHaveProperty("version_id");
+    expect(created.body).not.toHaveProperty("project_id");
+  });
+
+  it("keeps an answer of null tellable from no answer at all", async () => {
+    const created = await ask("POST", "/api/mock-tools", {
+      tool: "last_visit",
+      answer: null,
+    });
+
+    expect(created.status).toBe(201);
+    expect(created.body).toHaveProperty("answer", null);
+    expect(created.body).not.toHaveProperty("error");
+  });
+
+  it("relays the factory's own sentence for an answer it cannot serve", async () => {
+    const blank = await ask("POST", "/api/mock-tools", { ...CALENDAR, tool: "   " });
+    expect(blank.status).toBe(422);
+    expect(blank.body).toEqual({
+      error: "unprocessable",
+      message:
+        "tool is the name of the agent's tool this mock tool answers for, " +
+        "and this one is blank. Send the tool's name exactly as the agent " +
+        "registers it.",
+    });
+
+    const both = await ask("POST", "/api/mock-tools", {
+      ...CALENDAR,
+      error: "unavailable",
+    });
+    expect(both.status).toBe(422);
+    expect(both.body).toEqual({
+      error: "unprocessable",
+      message:
+        "a mock tool answers with one thing: this one sent both answer and " +
+        "error. Send whichever branch the test needs.",
+    });
+
+    const neither = await ask("POST", "/api/mock-tools", { tool: "check_availability" });
+    expect(neither.status).toBe(422);
+    expect(neither.body).toEqual({
+      error: "unprocessable",
+      message:
+        "a mock tool answers with something: send answer with what the tool " +
+        "returns, or error with the failure it raises. This one sent neither.",
+    });
+  });
+
+  it("names the ceiling a delay went past, with the arithmetic the fix needs", async () => {
+    const tooLong = LONGEST_MOCK_TOOL_DELAY_MILLISECONDS + 1;
+
+    const refused = await ask("POST", "/api/mock-tools", {
+      ...CALENDAR,
+      delay_ms: tooLong,
+    });
+
+    expect(refused.status).toBe(422);
+    expect(refused.body).toEqual({
+      error: "unprocessable",
+      message:
+        `delay_ms is ${tooLong}, and a mock tool may delay its answer by at ` +
+        `most ${LONGEST_MOCK_TOOL_DELAY_MILLISECONDS} milliseconds — the ` +
+        `budget the exchange carrying it is given. Send a smaller delay_ms.`,
+    });
+  });
+
+  it("names the size an answer went past, counted the way the exchange counts", async () => {
+    const enormous = "x".repeat(LARGEST_MOCK_TOOL_ANSWER_BYTES);
+
+    const refused = await ask("POST", "/api/mock-tools", {
+      tool: "read_document",
+      answer: { body: enormous },
+    });
+
+    expect(refused.status).toBe(422);
+    expect(refused.body).toEqual({
+      error: "unprocessable",
+      message:
+        `answer is ${enormous.length + 11} bytes once serialized, and the ` +
+        `exchange that carries it holds at most ` +
+        `${LARGEST_MOCK_TOOL_ANSWER_BYTES}. An answer that needs more than ` +
+        `that is a document rather than a tool answer.`,
+    });
+  });
+
+  it("refuses a key it has no place for, by name", async () => {
+    const refused = await ask("POST", "/api/mock-tools", {
+      ...CALENDAR,
+      matches: { city: "Berlin" },
+    });
+
+    expect(refused.status).toBe(400);
+    expect(refused.body).toEqual({
+      error: "invalid_request",
+      message:
+        'a mock tool has no key "matches"; it holds tool, answer, error, ' +
+        "delay_ms, agents, project",
+    });
+  });
+
+  it("refuses a second answer for a tool this project already answers for", async () => {
+    const first = await ask("POST", "/api/mock-tools", { ...CALENDAR });
+    expect(first.status).toBe(201);
+
+    const refused = await ask("POST", "/api/mock-tools", {
+      tool: CALENDAR.tool,
+      error: "the calendar is unreachable",
+    });
+
+    expect(refused.status).toBe(409);
+    expect(refused.body).toEqual({
+      error: "conflict",
+      message:
+        `this project already answers for "${CALENDAR.tool}", with mock tool ` +
+        `${String(first.body.id)}. One answer per tool: edit that one, or ` +
+        `override it on the test that needs a different branch.`,
+    });
+  });
+
+  it("overwrites on an edit, minting nothing and asking for no version", async () => {
+    const created = await ask("POST", "/api/mock-tools", { ...CALENDAR });
+    const id = String(created.body.id);
+
+    const edited = await ask("PATCH", `/api/mock-tools/${id}`, {
+      error: "the calendar is unreachable",
+      delay_ms: 250,
+    });
+
+    expect(edited.status).toBe(200);
+    expect(edited.body).toMatchObject({
+      id,
+      tool: "check_availability",
+      error: "the calendar is unreachable",
+      delay_ms: 250,
+    });
+    // The branch it left behind is gone rather than kept beside the new one.
+    expect(edited.body).not.toHaveProperty("answer");
+  });
+
+  it("says the same thing about a mock tool that is not there and one that is not yours", async () => {
+    const theirs = "mck_01JZZZZZZZZZZZZZZZZZZZZZZZ";
+
+    const refused = await ask("PATCH", `/api/mock-tools/${theirs}`, { answer: 1 });
+
+    expect(refused.status).toBe(404);
+    expect(refused.body).toEqual({
+      error: "not_found",
+      message:
+        `there is no mock tool ${theirs} on this egma. List the mock tools to ` +
+        `see what this project answers for.`,
+    });
+  });
+
+  it("answers one envelope, and refuses a cursor it never issued", async () => {
+    await ask("POST", "/api/mock-tools", { ...CALENDAR });
+
+    const listed = await ask("GET", "/api/mock-tools");
+    expect(listed.status).toBe(200);
+    expect(Object.keys(listed.body).sort()).toEqual(["items", "next_cursor"]);
+    expect(listed.body.next_cursor).toBeNull();
+
+    const refused = await ask("GET", "/api/mock-tools?cursor=not-a-cursor");
+    expect(refused.status).toBe(400);
+    expect(refused.body).toEqual({
+      error: "invalid_request",
+      message:
+        '"not-a-cursor" is not a cursor this list issued. Send the next_cursor ' +
+        "an earlier page answered with, or leave it out to start at the newest " +
+        "mock tool.",
+    });
+  });
+});
+
+/**
+ * A test's own overrides, which are content and travel with the test.
+ *
+ * Every gate a project's mock tool passes, an override passes — from the same
+ * functions on the real side, so a fixture that checked one half and waved the
+ * other through would let a client ship a folder egma refuses.
+ */
+describe("the mock tools a test overrides", () => {
+  it("rides the test, comes back on it, and versions with it", async () => {
+    const created = await ask("POST", "/api/tests", {
+      ...RESCHEDULING,
+      mock_tools: [{ tool: "check_availability", answer: { slots: [] }, delay_ms: 250 }],
+    });
+
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    expect(created.body.mock_tools).toEqual([
+      { tool: "check_availability", answer: { slots: [] }, delay_ms: 250 },
+    ]);
+
+    // Editing one is editing the test, so it mints the next version.
+    const edited = await ask("PATCH", `/api/tests/${String(created.body.id)}`, {
+      expected_version_id: String(created.body.version_id),
+      mock_tools: [{ tool: "check_availability", error: "the calendar is unreachable" }],
+    });
+    expect(edited.status).toBe(200);
+    expect(edited.body.version).toBe(2);
+    expect(edited.body.mock_tools).toEqual([
+      { tool: "check_availability", error: "the calendar is unreachable", delay_ms: 0 },
+    ]);
+
+    // And the version it left behind still says what it said.
+    const before = await ask("GET", `/api/test-versions/${String(created.body.version_id)}`);
+    expect(before.body.mock_tools).toEqual([
+      { tool: "check_availability", answer: { slots: [] }, delay_ms: 250 },
+    ]);
+
+    // An empty list clears them; leaving the field out keeps them.
+    const cleared = await ask("PATCH", `/api/tests/${String(created.body.id)}`, {
+      expected_version_id: String(edited.body.version_id),
+      mock_tools: [],
+    });
+    expect(cleared.body.mock_tools).toEqual([]);
+  });
+
+  it("refuses an override that scopes agents, because an override scopes nothing", async () => {
+    const refused = await ask("POST", "/api/tests", {
+      ...RESCHEDULING,
+      mock_tools: [{ tool: "check_availability", answer: 1, agents: ["front-desk"] }],
+    });
+
+    expect(refused.status).toBe(422);
+    expect(refused.body).toEqual({
+      error: "unprocessable",
+      message:
+        'a mock tool a test overrides has no key "agents"; it holds tool, ' +
+        "answer, error, delay_ms",
+    });
+    expect(platform.tests.tests).toEqual([]);
+  });
+
+  it("holds an override to every gate a project's own mock tool passes", async () => {
+    const tooLong = LONGEST_MOCK_TOOL_DELAY_MILLISECONDS + 1;
+    const refused = await ask("POST", "/api/tests", {
+      ...RESCHEDULING,
+      mock_tools: [{ tool: "check_availability", answer: 1, delay_ms: tooLong }],
+    });
+
+    expect(refused.status).toBe(422);
+    expect(refused.body).toEqual({
+      error: "unprocessable",
+      message:
+        `delay_ms is ${tooLong}, and a mock tool may delay its answer by at ` +
+        `most ${LONGEST_MOCK_TOOL_DELAY_MILLISECONDS} milliseconds — the ` +
+        `budget the exchange carrying it is given. Send a smaller delay_ms.`,
+    });
+
+    const twice = await ask("POST", "/api/tests", {
+      ...RESCHEDULING,
+      mock_tools: [
+        { tool: "check_availability", answer: 1 },
+        { tool: "check_availability", answer: 2 },
+      ],
+    });
+    expect(twice.status).toBe(422);
+    expect(twice.body).toEqual({
+      error: "unprocessable",
+      message: 'this test overrides "check_availability" twice; override each tool once',
+    });
+
+    const notAList = await ask("POST", "/api/tests", {
+      ...RESCHEDULING,
+      mock_tools: { tool: "check_availability" },
+    });
+    expect(notAList.status).toBe(422);
+    expect(notAList.body).toEqual({
+      error: "unprocessable",
+      message:
+        "mock_tools is the list of tools this test answers for itself. Send " +
+        'it as a list of objects, like [{"tool": "check_availability", ' +
+        '"answer": {"slots": []}}], or leave it out and the project\'s mock ' +
+        "tools are the whole world.",
+    });
+
+    expect(platform.tests.tests).toEqual([]);
   });
 });
 

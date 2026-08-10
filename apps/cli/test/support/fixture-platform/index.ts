@@ -10,12 +10,14 @@ import { newId } from "../../../../../packages/ids/src/index.ts";
 import { agentRoutes, type AgentControls } from "./agents.ts";
 import { controlRoutes } from "./controls.ts";
 import { deviceRoutes, type DeviceControls } from "./device.ts";
+import { mockToolRoutes, type MockToolControls } from "./mock-tools.ts";
 import { runControlRoutes, runRoutes, type RunControls } from "./runs.ts";
 import { startFixturePlatform, type FixturePlatform } from "./server.ts";
 import { testRoutes, type TestControls } from "./tests.ts";
 
 export type { AgentControls } from "./agents.ts";
 export type { DeviceControls } from "./device.ts";
+export type { MockToolControls, SeedMockTool, SeededMockTool } from "./mock-tools.ts";
 export type {
   AdvanceStep,
   RunControls,
@@ -35,6 +37,8 @@ export type Platform = FixturePlatform & {
   readonly registered: AgentControls;
   /** What somebody authoring in the dashboard would do, done directly. */
   readonly tests: TestControls;
+  /** The mock tools this project answers with, authored directly. */
+  readonly mocking: MockToolControls;
   /** What the simulator would do to a run, done directly and in any order. */
   readonly running: RunControls;
   /**
@@ -48,6 +52,7 @@ export async function startPlatform(): Promise<Platform> {
   let device!: DeviceControls;
   let registered!: AgentControls;
   let tests!: TestControls;
+  let mocking!: MockToolControls;
   let running!: RunControls;
 
   const platform = await startFixturePlatform((origin) => {
@@ -67,6 +72,16 @@ export async function startPlatform(): Promise<Platform> {
     const testGroup = testRoutes({ holdsKey, projectId });
     tests = testGroup.controls;
 
+    // The scope a mock tool may name is read out of the agent group rather
+    // than copied, so an agent registered after this is wired is one a mock
+    // tool can still be scoped to.
+    const mockToolGroup = mockToolRoutes({
+      holdsKey,
+      projectId,
+      agentsHere: () => agentGroup.controls.agents,
+    });
+    mocking = mockToolGroup.controls;
+
     // A run reads the other two groups rather than holding copies of what they
     // hold: a version it pins is the version the test group issued, and the
     // connection it executes over is the one the agent group registered.
@@ -82,6 +97,7 @@ export async function startPlatform(): Promise<Platform> {
       deviceGroup.group,
       agentGroup.group,
       testGroup.group,
+      mockToolGroup.group,
       runGroup.group,
       controlRoutes(() => device),
       runControlRoutes(() => running),
@@ -93,6 +109,7 @@ export async function startPlatform(): Promise<Platform> {
     device,
     registered,
     tests,
+    mocking,
     running,
     signedInWith(key) {
       device.accept(key);

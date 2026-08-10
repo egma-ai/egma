@@ -16,7 +16,13 @@ import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
-import { SKILL_NAMES, instructionsWith, skill, skillFile } from "../src/skills/index.ts";
+import {
+  SKILL_NAMES,
+  installableSkill,
+  instructionsWith,
+  skill,
+  skillFile,
+} from "../src/skills/index.ts";
 import { FACTS } from "../src/wizard/facts.ts";
 import { pasteFallbackMessage } from "../src/wizard/no-coding-agent.ts";
 import { BANNED, SCENARIO_HEADING } from "./support/glossary.ts";
@@ -86,6 +92,42 @@ describe("egma's skills", () => {
       expect(readme, fact.name).toContain(fact.phrase);
       expect(pasted, fact.name).toContain(fact.phrase);
     }
+  });
+
+  /**
+   * The folder's layout is written down in three places — the module that makes
+   * it, the skill a coding agent reads, and the README a person reads — and a
+   * layout that says three different things is two of them being wrong. This
+   * holds the two shipped ones to the same line, so a part of the folder added
+   * without a home in the documentation fails here.
+   */
+  it("say what is in the folder, and agree with the README about it", () => {
+    const layout = [
+      "egma/",
+      "  config.yaml     what this folder points at — names and ids",
+      "  mock-tools.md   what egma answers for the agent's tools with",
+      "  tests/          one markdown file per test",
+    ].join("\n");
+
+    expect(installableSkill()).toContain(layout);
+    expect(readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8")).toContain(layout);
+  });
+
+  it("say where a mock tool goes, and which half of it versions", () => {
+    const driving = installableSkill();
+    expect(driving).toContain("egma/mock-tools.md");
+    expect(driving).toContain("## Mock tools");
+    // The two halves behave differently, and a coding agent that did not know
+    // which was which would author the wrong one.
+    const unwrapped = driving.replace(/\s+/g, " ");
+    expect(unwrapped).toContain("the one authored thing egma does not version");
+    expect(unwrapped).toContain("That override belongs to the test and is versioned with it");
+
+    // The skill that writes tests points at the test's own file and nowhere
+    // else, because it must never author the project's mocked world.
+    const writing = skill("writing-tests").replace(/\s+/g, " ");
+    expect(writing).toContain("## Mock tools");
+    expect(writing).toContain("not `egma/mock-tools.md`");
   });
 
   it("say what a Retell voice agent looks like, both ways round", () => {

@@ -1,5 +1,5 @@
 /**
- * `egma pull`: write the platform's current versions into the folder.
+ * `egma pull`: write what the platform holds into the folder.
  *
  * Nothing here reads standard input and nothing here draws, so a coding agent
  * can run it, read what it prints, and act on it. One fact per line, in the same
@@ -7,7 +7,8 @@
  */
 
 import { PlatformUnreachableError } from "../platform/device-flow.ts";
-import { PlatformRefusedError } from "../platform/tests.ts";
+import { PlatformRefusedError } from "../platform/refused.ts";
+import { pullMockTools } from "../sync/mock-tools.ts";
 import { pullTests } from "../sync/pull.ts";
 import { FOLDER_EXIT, readyToSync, type FolderCommandOptions } from "./folder-verbs.ts";
 
@@ -19,8 +20,10 @@ export async function runPullCommand(options: FolderCommandOptions): Promise<num
   options.out(`folder: ${ready.paths.root}`);
 
   let report;
+  let mocked;
   try {
     report = await pullTests({ signedIn: ready.signedIn, paths: ready.paths });
+    mocked = await pullMockTools({ signedIn: ready.signedIn, paths: ready.paths });
   } catch (cause) {
     if (cause instanceof PlatformUnreachableError || cause instanceof PlatformRefusedError) {
       options.out("status: unreachable");
@@ -40,7 +43,13 @@ export async function runPullCommand(options: FolderCommandOptions): Promise<num
   }
   for (const name of report.kept) options.out(`kept: ${name}`);
 
+  // Under a key of their own, never under the tests': a mock tool and a test
+  // are two things, and something reading these lines has to be able to tell
+  // one from the other without knowing which order they came in.
+  for (const tool of mocked.tools) options.out(`mock-tool: ${tool}`);
+
   options.out(`tests: ${report.tests.length}`);
+  options.out(`mock-tools: ${mocked.tools.length}`);
   options.out(`status: pulled`);
   return FOLDER_EXIT.done;
 }

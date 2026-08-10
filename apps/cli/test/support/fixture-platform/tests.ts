@@ -34,6 +34,13 @@
  */
 
 import {
+  answerOf,
+  delayOf,
+  toolNameProblem,
+  unknownKeyIn,
+  type MockAnswer,
+} from "./mock-tools.ts";
+import {
   given,
   isId,
   newId,
@@ -52,7 +59,22 @@ type Version = {
   readonly expectedBehaviors: readonly string[];
   /** By identity, in the order they were authored. */
   readonly personaIds: readonly string[];
+  /**
+   * The tools this test answers for itself, in the order they were authored.
+   *
+   * Held on the version rather than beside the test, because an override is
+   * test content: editing one mints the next version exactly as editing an
+   * expected behavior does. It is the half of the mocked world that versions.
+   */
+  readonly mockOverrides: readonly StoredOverride[];
   readonly createdAt: Date;
+};
+
+/** One override as this fixture holds it. No scope: it is the test's own. */
+type StoredOverride = {
+  readonly toolName: string;
+  readonly answer: MockAnswer;
+  readonly delayMilliseconds: number;
 };
 
 type StoredTest = {
@@ -72,6 +94,8 @@ export type SeedTest = {
   readonly scenario: string;
   readonly expectedBehaviors: readonly string[];
   readonly personas?: readonly string[];
+  /** As the wire carries them: `{ tool, answer | error, delay_ms }`. */
+  readonly mockTools?: readonly Record<string, unknown>[];
 };
 
 export type SeededTest = {
@@ -129,7 +153,7 @@ const NO_EXPECTED_VERSION =
  * and the empty list is the worse half: it reads as "you have no tests there"
  * rather than as "that is not yours to ask about".
  */
-function cannotActIn(projectId: string): string {
+export function cannotActIn(projectId: string): string {
   return (
     `this credential may not act in project ${projectId}. A credential ` +
     `authorized for one project acts in that one, and a key for the whole ` +
@@ -138,7 +162,7 @@ function cannotActIn(projectId: string): string {
   );
 }
 
-function refuse(status: number, error: string, message: string): FixtureAnswer {
+export function refuse(status: number, error: string, message: string): FixtureAnswer {
   return { status, body: { error, message } };
 }
 
@@ -163,6 +187,113 @@ function personaEntries(value: unknown): NamedPersonas {
     entries.push(named);
   }
   return { entries };
+}
+
+/** The wire's own refusals for a test's overrides, word for word. */
+const MOCK_TOOLS_NOT_A_LIST =
+  "mock_tools is the list of tools this test answers for itself. Send " +
+  'it as a list of objects, like [{"tool": "check_availability", ' +
+  '"answer": {"slots": []}}], or leave it out and the project\'s mock ' +
+  "tools are the whole world.";
+
+const AN_OVERRIDE_IS_AN_OBJECT =
+  "each entry in mock_tools names one tool and what it answers with. " +
+  'Send objects, like {"tool": "check_availability", "error": "the ' +
+  'calendar is unreachable"}.';
+
+/** The keys one entry of `mock_tools` holds, and no others. */
+const OVERRIDE_KEYS = ["tool", "answer", "error", "delay_ms"] as const;
+
+/**
+ * The overrides a body carries, read in the order the shipped route reads
+ * them: the envelope's shape here, and everything about the content in the
+ * factory below — the same functions a project's own mock tools pass, so a rule
+ * enforced on one half of the mocked world is not one a test can walk around.
+ */
+type WrittenOverrides =
+  | { readonly entries: readonly Record<string, unknown>[] }
+  | { readonly refusal: string };
+
+function overrideEntries(value: unknown): WrittenOverrides {
+  if (!Array.isArray(value)) return { refusal: MOCK_TOOLS_NOT_A_LIST };
+
+  const entries: Record<string, unknown>[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      return { refusal: AN_OVERRIDE_IS_AN_OBJECT };
+    }
+    const written = entry as Record<string, unknown>;
+    const unknown = unknownKeyIn(written, OVERRIDE_KEYS, "a mock tool a test overrides");
+    if (unknown !== undefined) return { refusal: unknown };
+    if ("delay_ms" in written && typeof written.delay_ms !== "number") {
+      return {
+        refusal:
+          "delay_ms is how long egma holds an answer back, as a whole number " +
+          `of milliseconds, and one entry in mock_tools sent ${typeof written.delay_ms}.`,
+      };
+    }
+    entries.push(written);
+  }
+  return { entries };
+}
+
+/** The overrides as they will be stored, or the factory's own refusal. */
+function validOverrides(
+  written: readonly Record<string, unknown>[],
+): { readonly overrides: readonly StoredOverride[] } | { readonly refusal: string } {
+  const overrides: StoredOverride[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of written) {
+    const problem = toolNameProblem(entry.tool);
+    if (problem !== undefined) return { refusal: problem };
+    const toolName = (entry.tool as string).trim();
+
+    if (seen.has(toolName)) {
+      return { refusal: `this test overrides "${toolName}" twice; override each tool once` };
+    }
+    seen.add(toolName);
+
+    const answer = answerOf(entry);
+    if ("refusal" in answer) return { refusal: answer.refusal };
+    const delay = delayOf(entry.delay_ms);
+    if ("refusal" in delay) return { refusal: delay.refusal };
+
+    overrides.push({
+      toolName,
+      answer: answer.answer,
+      delayMilliseconds: delay.delay,
+    });
+  }
+  return { overrides };
+}
+
+/** One override as the wire carries it, in both directions. */
+function describedOverride(one: StoredOverride): Record<string, unknown> {
+  return { tool: one.toolName, ...one.answer, delay_ms: one.delayMilliseconds };
+}
+
+/**
+ * Whether two lists of overrides say the same thing. Order is content and so is
+ * the answer's own key order, because the answer is compared by its
+ * serialization: there is no fixed set of fields a tool's answer has.
+ */
+function sameOverrides(
+  a: readonly StoredOverride[],
+  b: readonly StoredOverride[],
+): boolean {
+  return (
+    a.length === b.length &&
+    a.every((entry, index) => {
+      const other = b[index];
+      return (
+        other !== undefined &&
+        entry.toolName === other.toolName &&
+        entry.delayMilliseconds === other.delayMilliseconds &&
+        JSON.stringify(entry.answer) === JSON.stringify(other.answer)
+      );
+    })
+  );
 }
 
 /**
@@ -289,13 +420,15 @@ export function testRoutes(options: {
       readonly scenario: string;
       readonly expectedBehaviors: readonly string[];
       readonly personaIds: readonly string[];
+      readonly mockOverrides: readonly StoredOverride[];
     },
   ): Version => {
     const current = currentOf(test);
     const same =
       current.scenario === content.scenario &&
       sameList(current.expectedBehaviors, content.expectedBehaviors) &&
-      sameList(current.personaIds, content.personaIds);
+      sameList(current.personaIds, content.personaIds) &&
+      sameOverrides(current.mockOverrides, content.mockOverrides);
     if (same) return current;
 
     const version: Version = {
@@ -304,6 +437,7 @@ export function testRoutes(options: {
       scenario: content.scenario,
       expectedBehaviors: content.expectedBehaviors,
       personaIds: content.personaIds,
+      mockOverrides: content.mockOverrides,
       createdAt: new Date(),
     };
     test.versions.push(version);
@@ -317,6 +451,7 @@ export function testRoutes(options: {
     readonly scenario: string;
     readonly expectedBehaviors: readonly string[];
     readonly personaIds: readonly string[];
+    readonly mockOverrides: readonly StoredOverride[];
   }): StoredTest => {
     const version: Version = {
       id: newId("tstv"),
@@ -324,6 +459,7 @@ export function testRoutes(options: {
       scenario: input.scenario.trim(),
       expectedBehaviors: input.expectedBehaviors.map((behavior) => behavior.trim()),
       personaIds: input.personaIds,
+      mockOverrides: input.mockOverrides,
       createdAt: new Date(),
     };
     const test: StoredTest = {
@@ -351,6 +487,7 @@ export function testRoutes(options: {
         id: persona.id,
         name: persona.name,
       })),
+      mock_tools: current.mockOverrides.map(describedOverride),
       created_at: test.createdAt.toISOString(),
       updated_at: test.updatedAt.toISOString(),
     };
@@ -397,22 +534,36 @@ export function testRoutes(options: {
    */
   const personasFor = (
     said: Record<string, unknown>,
-  ): { readonly ids: readonly string[] | undefined } | { readonly answer: FixtureAnswer } => {
+  ):
+    | {
+        readonly ids: readonly string[] | undefined;
+        readonly overrides: readonly Record<string, unknown>[] | undefined;
+      }
+    | { readonly answer: FixtureAnswer } => {
     const named = "personas" in said ? personaEntries(said.personas) : undefined;
     if (named !== undefined && "refusal" in named) {
       return { answer: refuse(422, "unprocessable", named.refusal) };
     }
 
+    // The shape of the overrides is read straight after the shape of the
+    // personas and still before the project, because both are answerable
+    // without knowing anything about what this project holds.
+    const written = "mock_tools" in said ? overrideEntries(said.mock_tools) : undefined;
+    if (written !== undefined && "refusal" in written) {
+      return { answer: refuse(422, "unprocessable", written.refusal) };
+    }
+
     const outsider = projectNamed(given(text(said.project)));
     if (outsider !== null) return { answer: outsider };
 
-    if (named === undefined) return { ids: undefined };
+    const overrides = written === undefined ? undefined : written.entries;
+    if (named === undefined) return { ids: undefined, overrides };
 
     const resolved = resolvePersonas(named.entries);
     if ("refusal" in resolved) {
       return { answer: refuse(422, "unprocessable", resolved.refusal) };
     }
-    return { ids: resolved.ids };
+    return { ids: resolved.ids, overrides };
   };
 
   const writeFrom = (
@@ -424,6 +575,7 @@ export function testRoutes(options: {
           readonly scenario: string;
           readonly expectedBehaviors: readonly string[];
           readonly personaIds: readonly string[];
+          readonly mockOverrides: readonly StoredOverride[];
         };
       }
     | { readonly answer: FixtureAnswer } => {
@@ -439,6 +591,14 @@ export function testRoutes(options: {
     const problem = validate({ name, scenario, expectedBehaviors });
     if (problem !== null) return { answer: refuse(422, "unprocessable", problem.refusal) };
 
+    // Last of the content, exactly as the factory reads it: the scenario and
+    // the behaviors are what a test is, and the mocked world it runs in comes
+    // after they hold up.
+    const overrides = validOverrides(who.overrides ?? []);
+    if ("refusal" in overrides) {
+      return { answer: refuse(422, "unprocessable", overrides.refusal) };
+    }
+
     return {
       input: {
         name,
@@ -447,6 +607,7 @@ export function testRoutes(options: {
         // Absent means the project's default persona, exactly as an empty list
         // does: a first test costs nobody a persona to author.
         personaIds: who.ids ?? [defaultPersonaId],
+        mockOverrides: overrides.overrides,
       },
     };
   };
@@ -539,6 +700,7 @@ export function testRoutes(options: {
                   id: persona.id,
                   name: persona.name,
                 })),
+                mock_tools: version.mockOverrides.map(describedOverride),
                 created_at: version.createdAt.toISOString(),
               },
             };
@@ -641,10 +803,21 @@ export function testRoutes(options: {
             const problem = validate({ name: name ?? test.name, ...content });
             if (problem !== null) return refuse(422, "unprocessable", problem.refusal);
 
+            // An empty list is not the same as leaving the field out: it clears
+            // the overrides and leaves the project's mock tools the whole world.
+            const overrides =
+              who.overrides === undefined
+                ? { overrides: current.mockOverrides }
+                : validOverrides(who.overrides);
+            if ("refusal" in overrides) {
+              return refuse(422, "unprocessable", overrides.refusal);
+            }
+
             write(test, {
               scenario: content.scenario,
               expectedBehaviors: [...content.expectedBehaviors],
               personaIds: who.ids ?? current.personaIds,
+              mockOverrides: overrides.overrides,
             });
             // A name is identity: it writes in place and versions nothing.
             if (name !== undefined) test.name = name;
@@ -665,12 +838,15 @@ export function testRoutes(options: {
   const controls: TestControls = {
     add(seed) {
       const ids = (seed.personas ?? []).map((name) => addPersona(name));
+      const overrides = validOverrides(seed.mockTools ?? []);
+      if ("refusal" in overrides) throw new Error(overrides.refusal);
       return seededFrom(
         create({
           name: seed.name,
           scenario: seed.scenario,
           expectedBehaviors: seed.expectedBehaviors,
           personaIds: ids.length === 0 ? [defaultPersonaId] : ids,
+          mockOverrides: overrides.overrides,
         }),
       );
     },
@@ -682,12 +858,18 @@ export function testRoutes(options: {
         changes.personas === undefined
           ? current.personaIds
           : changes.personas.map((personaName) => addPersona(personaName));
+      const overrides =
+        changes.mockTools === undefined
+          ? { overrides: current.mockOverrides }
+          : validOverrides(changes.mockTools);
+      if ("refusal" in overrides) throw new Error(overrides.refusal);
       write(test, {
         scenario: (changes.scenario ?? current.scenario).trim(),
         expectedBehaviors: (changes.expectedBehaviors ?? current.expectedBehaviors).map(
           (behavior) => behavior.trim(),
         ),
         personaIds,
+        mockOverrides: overrides.overrides,
       });
       if (changes.name !== undefined) test.name = changes.name;
       return seededFrom(test);

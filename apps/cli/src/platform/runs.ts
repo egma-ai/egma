@@ -23,7 +23,7 @@
  */
 
 import { PlatformUnreachableError, type Fetch } from "./device-flow.ts";
-import { PlatformRefusedError } from "./tests.ts";
+import { PlatformRefusedError } from "./refused.ts";
 import type { SignedIn } from "./signed-in.ts";
 
 /**
