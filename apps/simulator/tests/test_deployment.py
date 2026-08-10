@@ -196,7 +196,8 @@ def test_the_default_stack_dials_nothing_until_phone_setup_has_run():
     never seen a carrier, which is every machine on its first run.
     """
     default = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    assert "EGMA_SIMULATOR_MEDIA_BACKEND: ${EGMA_SIMULATOR_MEDIA_BACKEND:-}" in default, (
+    named = "EGMA_SIMULATOR_MEDIA_BACKEND: ${EGMA_SIMULATOR_MEDIA_BACKEND:-}"
+    assert named in default, (
         "docker-compose.yml gives the simulator a media backend by default; a "
         "simulator told to dial with no trunk refuses to start, so a first "
         "`up` on a machine with no carrier would fail"

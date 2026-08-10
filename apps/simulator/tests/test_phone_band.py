@@ -53,13 +53,6 @@ def seconds_of(pcm: bytes, band_hz: int) -> float:
     return len(pcm) / SAMPLE_WIDTH_BYTES / band_hz
 
 
-class _Downstream:
-    """Whatever the correction pushed, kept in order."""
-
-    def __init__(self) -> None:
-        self.frames: list[object] = []
-
-
 async def carried(correction: _BandCorrection, frames: list[TTSAudioRawFrame]) -> bytes:
     """Everything the correction let through, as one stretch of audio."""
     got = bytearray()
@@ -91,7 +84,14 @@ async def test_a_provider_second_stays_a_second_at_the_phone_band():
     spoken = a_tone(440.0, 1.0, OPENAI_TTS_BAND_HZ)
     assert seconds_of(spoken, OPENAI_TTS_BAND_HZ) == pytest.approx(1.0, abs=0.001)
 
-    out = await carried(correction, [TTSAudioRawFrame(audio=spoken, sample_rate=OPENAI_TTS_BAND_HZ, num_channels=1)])
+    out = await carried(
+        correction,
+        [
+            TTSAudioRawFrame(
+                audio=spoken, sample_rate=OPENAI_TTS_BAND_HZ, num_channels=1
+            )
+        ],
+    )
 
     # The tolerance is for the streaming resampler's own tail — it holds back
     # the last few milliseconds until the next chunk arrives, which is what
@@ -122,7 +122,9 @@ async def test_a_stream_cut_on_an_odd_byte_is_still_carried_whole():
     out = await carried(
         correction,
         [
-            TTSAudioRawFrame(audio=piece, sample_rate=OPENAI_TTS_BAND_HZ, num_channels=1)
+            TTSAudioRawFrame(
+                audio=piece, sample_rate=OPENAI_TTS_BAND_HZ, num_channels=1
+            )
             for piece in pieces
         ],
     )
@@ -140,7 +142,11 @@ async def test_a_line_already_at_the_provider_band_is_left_alone():
 
     out = await carried(
         correction,
-        [TTSAudioRawFrame(audio=spoken, sample_rate=OPENAI_TTS_BAND_HZ, num_channels=1)],
+        [
+            TTSAudioRawFrame(
+                audio=spoken, sample_rate=OPENAI_TTS_BAND_HZ, num_channels=1
+            )
+        ],
     )
 
     assert out == spoken
@@ -235,12 +241,14 @@ class _LineThatCarriesAnotherBand:
         return None
 
 
-async def _stamped_band(tmp_path, *, driven_at_hz: int, arrived_at_hz: int | None) -> int:
+async def _stamped_band(
+    tmp_path, *, driven_at_hz: int, arrived_at_hz: int | None
+) -> int:
+    from test_voice import Assembled, observe, spec_for
+
     from egma_simulator.blob import FilesystemBlobStore
     from egma_simulator.conductor import VoiceConductor
     from egma_simulator.walk import WalkControls
-
-    from test_voice import Assembled, observe, spec_for
 
     spec = spec_for(scenario="First point.")
     conductor = VoiceConductor(
@@ -251,7 +259,9 @@ async def _stamped_band(tmp_path, *, driven_at_hz: int, arrived_at_hz: int | Non
         blobs=FilesystemBlobStore(tmp_path),
         recording_key=f"{spec.simulation_id}/dual-channel.wav",
     )
-    await observe(conductor, Assembled(conductor=conductor), spec, controls=WalkControls())
+    await observe(
+        conductor, Assembled(conductor=conductor), spec, controls=WalkControls()
+    )
     assert conductor.audio is not None
     return conductor.audio.measured_sample_rate_hz
 
