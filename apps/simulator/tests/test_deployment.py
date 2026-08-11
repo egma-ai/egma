@@ -277,18 +277,26 @@ def test_the_gateway_listens_on_the_port_it_is_published_on():
 
 
 def test_the_object_store_under_test_is_the_one_the_deployment_runs():
-    """The image the suite proves against and the image a self-hoster gets
-    are one release, named in two files.
+    """The image the suite proves against and the images a self-hoster gets
+    are one release, named in three places.
 
     Drift here is quiet and expensive: the object-storage tests would keep
     passing against whatever they happened to pull while the deployment ran
     something else, which is exactly the assurance those tests exist to
     give up front.
+
+    Three places, because the store and the one-shot job that makes its
+    bucket both name it, and they are the same image on purpose — the job
+    is `mc` out of the server's own release. Counting rather than merely
+    finding it, so the two compose entries cannot drift apart while a test
+    that only asked "is it in there anywhere" keeps passing.
     """
     from conftest import MINIO_IMAGE
 
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    assert f"image: {MINIO_IMAGE}" in compose, (
-        f"the tests start {MINIO_IMAGE} and docker-compose.yml runs some "
-        "other release of the object store"
+    named = compose.count(f"image: {MINIO_IMAGE}")
+    assert named == 2, (
+        f"docker-compose.yml names {MINIO_IMAGE} {named} time(s); the object "
+        "store and the job that creates its bucket are both it, and the tests "
+        "prove the object-storage path against that same release"
     )

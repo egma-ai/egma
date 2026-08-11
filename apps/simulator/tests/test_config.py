@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from egma_simulator.config import SimulatorConfig
+from egma_simulator.config import ObjectStoreSettings, SimulatorConfig
 
 A_URL = "http://control-plane.internal:3100"
 
@@ -722,3 +722,50 @@ def test_the_object_storage_credential_is_registered_for_redaction(env):
     assert AN_OBJECT_STORE["EGMA_SIMULATOR_S3_ACCESS_KEY_ID"] not in scrubbed
     assert AN_OBJECT_STORE["EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY"] not in scrubbed
     assert scrubbed.count("[redacted]") == 2
+
+
+def test_a_config_with_nowhere_to_put_recordings_is_refused(tmp_path):
+    """The pairing is checked, not promised.
+
+    `blob_dir` and `object_store` are one decision written as two fields,
+    and the store is chosen by asking which of them is there. Neither set
+    would reach the filesystem store with `None` for its directory, which
+    fails inside a write the conductor then swallows — a simulation that
+    reports no audio and no reason why.
+    """
+    with pytest.raises(ValueError, match="exactly one place"):
+        SimulatorConfig(
+            control_plane_url=A_URL,
+            claimant="test",
+            capacity=1,
+            heartbeat_seconds=1.0,
+            claim_wait_seconds=1.0,
+            report_deadline_seconds=1.0,
+            wal_dir=tmp_path,
+            blob_dir=None,
+            log_level="INFO",
+        )
+
+
+def test_a_config_with_two_places_to_put_recordings_is_refused(tmp_path):
+    """And both set is the other way to break it: a deployment writing to
+    a bucket while a directory nobody reads fills up beside it."""
+    with pytest.raises(ValueError, match="exactly one place"):
+        SimulatorConfig(
+            control_plane_url=A_URL,
+            claimant="test",
+            capacity=1,
+            heartbeat_seconds=1.0,
+            claim_wait_seconds=1.0,
+            report_deadline_seconds=1.0,
+            wal_dir=tmp_path,
+            blob_dir=tmp_path / "blobs",
+            log_level="INFO",
+            object_store=ObjectStoreSettings(
+                endpoint="http://minio:9000",
+                bucket="egma-recordings",
+                region="us-east-1",
+                access_key_id="key",
+                secret_access_key="secret",
+            ),
+        )

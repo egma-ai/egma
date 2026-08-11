@@ -18,7 +18,10 @@ from __future__ import annotations
 import pytest
 from conftest import (
     OBJECT_STORAGE_ACCESS_KEY_ID,
+    OBJECT_STORAGE_READY_SECONDS,
     OBJECT_STORAGE_SECRET_ACCESS_KEY,
+    OBJECT_STORAGE_START_SECONDS,
+    WRONG_OBJECT_STORAGE_SECRET_ACCESS_KEY,
     ObjectStorage,
     assert_kept_secret,
     assert_one_speaker_to_a_channel,
@@ -32,6 +35,25 @@ from conftest import (
 
 from egma_simulator.blob import S3BlobStore, confined_key
 from egma_simulator.config import DEFAULT_S3_REGION
+
+OBJECT_STORAGE_TIMEOUT_SECONDS = (
+    OBJECT_STORAGE_START_SECONDS + OBJECT_STORAGE_READY_SECONDS + 120
+)
+"""How long one test here may take, fixture included.
+
+pytest's own timeout — 120 seconds, in `pyproject.toml` — covers a
+fixture's setup as well as a test's body, and this file's fixture is
+allowed longer than that on purpose: the first run on a machine fetches a
+175 MB image. Left alone, a contributor with docker and no cached image
+would get `Failed: Timeout >120.0s` where this suite promises a skip,
+which is the one outcome it is written never to produce.
+
+So the marker below is the fixture's whole budget with room for the
+conversation a test then conducts. What runs out first is the fixture's
+own budget, which skips and says why.
+"""
+
+pytestmark = pytest.mark.timeout(OBJECT_STORAGE_TIMEOUT_SECONDS)
 
 
 def store_for(storage: ObjectStorage) -> S3BlobStore:
@@ -224,4 +246,68 @@ async def test_neither_half_of_the_write_credential_leaves_the_process(
 
     simulator.stop()
     for half in (OBJECT_STORAGE_ACCESS_KEY_ID, OBJECT_STORAGE_SECRET_ACCESS_KEY):
+        assert_kept_secret(half, records=records, simulator=simulator)
+
+
+async def test_a_refused_credential_leaves_nothing_behind_either(
+    workbench, start_simulator, object_storage
+):
+    """The other half of the scan: the credential that does not work.
+
+    A credential that works is never mentioned by anybody. A credential
+    that does not is what a client complains about, out loud, with the
+    request it signed — and the complaint travels as an exception, which
+    is a different path through logging than an ordinary line. So the
+    simulator is given a secret the store will refuse, at DEBUG, and every
+    byte it wrote is read afterwards.
+
+    What it also documents is what a refused upload does to a simulation:
+    nothing. The conversation is conducted, the transcript is reported,
+    and the terminal record simply carries no audio. That is today's
+    behaviour on purpose and it is not a good one — see the spec's Further
+    Notes, where the gap is written down.
+
+    **What makes this pass is narrower than it looks, and the difference
+    is worth knowing.** The redacting filter rewrites a record's message
+    and not its traceback: an exception rendered from ``exc_info`` goes
+    out unscrubbed, which was measured rather than assumed. So what keeps
+    the credential out of the log here is partly the store's own
+    discretion — MinIO's ``SignatureDoesNotMatch`` names neither half —
+    and a store that quoted the key id back would land it in this
+    traceback. That hole is `redaction.py`'s and predates object storage;
+    this test is where it will be noticed if a store ever exercises it.
+    """
+    spec = loopback_spec(
+        "sim-object-storage-refused",
+        greeting="Front desk, hello.",
+        replies=["Certainly.", "Done."],
+    )
+    await workbench.offer(spec)
+    simulator = start_simulator(
+        workbench,
+        log_level="DEBUG",
+        extra_env=object_storage.env
+        | {
+            "EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY": (
+                WRONG_OBJECT_STORAGE_SECRET_ACCESS_KEY
+            )
+        },
+    )
+
+    records = await workbench.wait_for(has_terminal("sim-object-storage-refused"))
+    terminal = terminal_event_for(records, "sim-object-storage-refused")
+    assert terminal["status"] == "completed", terminal["reason"]
+    assert terminal["facts"]["audio"] is None, (
+        "the store refused the write, so there is no recording to point at"
+    )
+
+    simulator.stop()
+    assert "SignatureDoesNotMatch" in simulator.output(), (
+        "expected the store's refusal in the log; without it this test is "
+        "scanning output that never held the credential at all"
+    )
+    for half in (
+        OBJECT_STORAGE_ACCESS_KEY_ID,
+        WRONG_OBJECT_STORAGE_SECRET_ACCESS_KEY,
+    ):
         assert_kept_secret(half, records=records, simulator=simulator)

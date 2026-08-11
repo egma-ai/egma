@@ -464,13 +464,13 @@ class SimulatorConfig:
     so a first voice simulation needs no container running. A report
     carries only the reference.
 
-    ``None`` exactly when :attr:`object_store` is set: the two are one
-    decision, and the pairing is what lets the store be chosen by asking
-    which of them is there. It is ``None`` rather than an unused path
-    because proving this directory is *writing* to it, and a deployment
-    whose recordings go to a bucket must not be refused over a filesystem
-    it was never going to touch — a read-only root is an ordinary way to
-    harden a container."""
+    ``None`` exactly when :attr:`object_store` is set, and that pairing is
+    checked in ``__post_init__`` rather than trusted: it is what lets the
+    store be chosen by asking which of them is there. It is ``None``
+    rather than an unused path because proving this directory is *writing*
+    to it, and a deployment whose recordings go to a bucket must not be
+    refused over a filesystem it was never going to touch — a read-only
+    root is an ordinary way to harden a container."""
 
     log_level: str
 
@@ -543,6 +543,26 @@ class SimulatorConfig:
     """Where recordings go for a deployment that runs object storage.
     ``None`` where it names no endpoint, and then :attr:`blob_dir` is
     where they go instead."""
+
+    def __post_init__(self) -> None:
+        """One place for recordings to go, and exactly one.
+
+        :attr:`blob_dir` and :attr:`object_store` are one decision written
+        as two fields, and the whole reason a store can be chosen by
+        asking which of them is there. Held here rather than promised in
+        a docstring, because the two ways of breaking it both fail a long
+        way from the cause: neither set is a ``TypeError`` from inside a
+        write that the conductor then swallows, leaving a simulation that
+        reports no audio and no reason; both set is a deployment writing
+        to a bucket while a directory nobody reads fills up beside it.
+        """
+        if (self.blob_dir is None) == (self.object_store is None):
+            raise ValueError(
+                "a simulator needs exactly one place to put recordings: "
+                "either an object store, named by "
+                "EGMA_SIMULATOR_S3_ENDPOINT, or a directory in "
+                "EGMA_SIMULATOR_BLOB_DIR — never both and never neither"
+            )
 
     @property
     def speech_secrets(self) -> tuple[str, ...]:

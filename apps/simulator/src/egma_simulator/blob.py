@@ -42,6 +42,44 @@ PLAIN_SEGMENT = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 _UNSAFE_IN_A_SEGMENT = re.compile(r"[^A-Za-z0-9._-]")
 _READABLE_PREFIX_CHARS = 64
 
+S3_CONNECT_SECONDS = 5.0
+"""How long opening a connection to the store may take before that attempt
+is over.
+
+The store is a container on the deployment's own network and answers in
+milliseconds; this is the allowance for one that is up and busy, not for
+one that is not there. An endpoint that is *black-holed* — a firewall that
+drops rather than refuses, which is the ordinary way a store goes missing
+— never answers at all, and this number is the whole of what stops that
+from becoming a wait.
+"""
+
+S3_READ_SECONDS = 30.0
+"""How long one socket operation may stall before that attempt is over.
+
+Not how long an upload may take: it is a per-operation timeout, so an
+upload that is slow but *moving* resets it with every chunk and is never
+cut off. What it catches is a store that accepted the connection and then
+stopped talking. Wide enough for a full-length wideband recording — around
+sixty megabytes — over a link that is genuinely slow rather than stuck.
+"""
+
+S3_ATTEMPTS = 3
+"""How many times one recording is offered to the store, in total.
+
+The arithmetic, because a recording is written from inside
+``Conductor.close()`` and holds a capacity slot until it returns. Three
+attempts at five seconds to connect is fifteen seconds against an endpoint
+that answers nothing, plus botocore's standard mode waiting a growing
+random moment between attempts — under a minute in all, and a slot back.
+
+The defaults this replaces are sixty seconds each way and five attempts,
+which is several minutes of one simulation's slot spent on a store that
+was never going to answer. The filesystem store this seam grew out of
+could not stall at all, so bounding the network one is what keeps the
+seam's promise the same in both.
+"""
+
 
 class BlobStore(Protocol):
     """Somewhere to put bytes and get back a reference to them.
@@ -132,6 +170,11 @@ class S3BlobStore:
     writing a key twice leaves one object exactly as writing a path twice
     leaves one file. There is no read here, and no delete: this seam is
     what a simulator does, and a simulator only ever adds.
+
+    Every wait it can do is bounded and named — see the three constants
+    at the top of this file. A store that cannot be reached must cost one
+    recording and a bounded moment, never the several minutes botocore's
+    own defaults would spend holding a simulation's capacity slot open.
     """
 
     def __init__(
@@ -167,7 +210,15 @@ class S3BlobStore:
             aws_secret_access_key=secret_access_key,
             region_name=region,
             config=BotoConfig(
-                signature_version="s3v4", s3={"addressing_style": "path"}
+                signature_version="s3v4",
+                s3={"addressing_style": "path"},
+                # Named rather than defaulted, and the reason is above
+                # each one: a write happens inside `Conductor.close()`,
+                # so whatever this waits for, one simulation's capacity
+                # slot waits for too.
+                connect_timeout=S3_CONNECT_SECONDS,
+                read_timeout=S3_READ_SECONDS,
+                retries={"max_attempts": S3_ATTEMPTS, "mode": "standard"},
             ),
         )
 

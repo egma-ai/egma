@@ -208,6 +208,22 @@ def start_simulator(
             "EGMA_SIMULATOR_CLAIM_WAIT_SECONDS": "2",
             "EGMA_SIMULATOR_WAL_DIR": str(wal_dir),
             "EGMA_SIMULATOR_BLOB_DIR": str(blob_dir),
+            # Blanked rather than left alone, for the same reason the two
+            # directories above are pinned: this suite inherits the
+            # environment it was run in, and a developer who did
+            # `set -a; source .env` to drive compose has a real endpoint
+            # and a real write credential exported. Left through, every
+            # voice test here would need their container running and
+            # would write its recordings into their store. Blank counts
+            # as unset in `config.py`, so this is the filesystem store,
+            # which is what a suite that costs no infrastructure means.
+            # A test that wants a real store puts it back through
+            # `extra_env` below.
+            "EGMA_SIMULATOR_S3_ENDPOINT": "",
+            "EGMA_SIMULATOR_S3_BUCKET": "",
+            "EGMA_SIMULATOR_S3_REGION": "",
+            "EGMA_SIMULATOR_S3_ACCESS_KEY_ID": "",
+            "EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY": "",
             "EGMA_SIMULATOR_LOG_LEVEL": log_level,
         } | (extra_env or {})
         with open(stdout_path, "wb") as stdout, open(stderr_path, "wb") as stderr:
@@ -269,6 +285,32 @@ because the simulator treats a key id as half of one credential and keeps
 it out of its logs too — a claim that is worth exactly as much as the scan
 behind it. MinIO refuses a root password under eight characters, so the
 second is also the shortest thing that would work.
+"""
+
+WRONG_OBJECT_STORAGE_SECRET_ACCESS_KEY = "SENTINEL-object-storage-wrong-91ae7c30"
+"""A write credential the store will refuse, and a sentinel like the real
+one.
+
+What it buys is the other half of the scan: a credential that works is
+never mentioned by anybody, and a credential that does not is what a
+client complains about — with the request it signed, at the level somebody
+turns on when recordings are not arriving."""
+
+OBJECT_STORAGE_START_SECONDS = 300.0
+OBJECT_STORAGE_READY_SECONDS = 60.0
+"""How long the store is given to arrive, and then to answer.
+
+The first is generous because the first run on a machine fetches the
+image, which is 175 MB and is not this suite's to be fast at. The second
+is the container itself, which takes about a second.
+
+These two are a budget rather than a limit, and what makes them safe is
+`OBJECT_STORAGE_TIMEOUT_SECONDS` in `test_object_storage.py`: pytest's own
+timeout covers a fixture as well as a test, so a suite whose fixture
+budget outran it would turn a slow image pull into a red failure instead
+of the visible skip this fixture promises. The module's marker is set
+above the sum of these, which is what keeps the fixture's own refusal the
+one that fires.
 """
 
 OBJECT_STORAGE_BUCKET = DEFAULT_S3_BUCKET
@@ -366,6 +408,13 @@ def object_storage() -> Iterator[ObjectStorage]:
     `docker-compose.yml` does with a one-shot job: a fresh volume arrives
     empty, and a store with no bucket in it refuses every write with an
     error about a bucket nobody was told to create.
+
+    Every way this can fail ends in a skip that says what happened —
+    docker missing, docker refusing, an image that would not come, a
+    container that never answered. Never a failure: a contributor was
+    promised the suite costs them no infrastructure, and a red line here
+    would be this suite breaking that promise rather than the code
+    breaking anything. See the two budgets above.
     """
     port = _free_port()
     name = f"egma-test-minio-{os.getpid()}-{port}"
@@ -390,7 +439,7 @@ def object_storage() -> Iterator[ObjectStorage]:
             ],
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=OBJECT_STORAGE_START_SECONDS,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as unavailable:
         pytest.skip(
@@ -407,7 +456,10 @@ def object_storage() -> Iterator[ObjectStorage]:
 
     endpoint = f"http://127.0.0.1:{port}"
     try:
-        if not _answering(f"{endpoint}/minio/health/live", within_seconds=60):
+        if not _answering(
+            f"{endpoint}/minio/health/live",
+            within_seconds=OBJECT_STORAGE_READY_SECONDS,
+        ):
             pytest.skip(
                 f"{MINIO_IMAGE} started but never answered its health probe "
                 f"at {endpoint}, so the object-storage path is not proved here"
