@@ -1,6 +1,7 @@
 import {
   authorize,
   cancelRun,
+  connectionTypeOf,
   getRun,
   listRunEvents,
   listSimulations,
@@ -26,8 +27,13 @@ import {
   noAdapter,
   notFound,
   notPermitted,
+  phoneSetupRequired,
   unprocessable,
 } from "../http/refusals.ts";
+import {
+  phoneSetupRequiredMessage,
+  type PhoneReadiness,
+} from "../phone-readiness.ts";
 
 /**
  * Starting a run, reading it whole, following it while it happens, and
@@ -46,6 +52,15 @@ import {
  * own sentence and the code `no_adapter`. A run left queued for a conductor
  * that does not exist is a promise egma cannot keep, and it would be
  * discovered by a person waiting for a terminal that never moves.
+ *
+ * **A phone run is refused before it is written when this deployment has no
+ * carrier**, with the code `phone_setup_required`. Two refusals in two layers,
+ * on purpose: `no_adapter` is a fact about the build and lives in `@egma/db`
+ * beside the registry that knows it, and this one is a fact about *this
+ * installation's* configuration, which that package cannot see and should
+ * never learn to. The order matters more than the split — the point of
+ * refusing here is that no paid provider action has happened yet, and none
+ * will.
  *
  * **The feed is a numbered cursor, and the split is written down.** This side
  * is stateless: it remembers nothing about who has read what, and the same
@@ -69,7 +84,29 @@ export type RunRoutesOptions = {
   readonly rateLimit: RateLimit;
   /** Where this instance is, for the address a person opens results at. */
   readonly baseUrl: string;
+  /**
+   * Whether this deployment has been set up to place phone calls.
+   *
+   * Read here rather than in `@egma/db` because it is not a fact about the
+   * product at all — it is a fact about one installation's carrier, and it
+   * arrives as this process's configuration. The data-access package cannot
+   * see it and must not learn to: it would mean a package every test and every
+   * worker imports carrying a deployment's environment around.
+   */
+  readonly phone: PhoneReadiness;
 };
+
+/**
+ * The connection types this deployment cannot dial over until its phone half
+ * has been set up.
+ *
+ * One entry, and it is a list rather than an `=== "phone"` so that the next
+ * carrier-backed type is a line here instead of a condition somebody has to
+ * find. What makes a type belong is not that it is telephony-shaped: it is that
+ * conducting it spends the platform's *own* carrier, which is the thing
+ * `egma self-host phone setup` provides.
+ */
+const NEEDS_THE_PLATFORMS_CARRIER: readonly string[] = ["phone"];
 
 export const RUNS_PATH = "/api/runs";
 export const RUN_PATH = "/api/runs/:runId";
@@ -264,6 +301,29 @@ export async function runRoutes(
 
     const acting = await actingIn(auth, given(text(body.project)));
     if ("refusal" in acting) return refuseActing(reply, acting);
+
+    /**
+     * Nothing is dialled from a platform that has no carrier, and the refusal
+     * lands before the run exists.
+     *
+     * **Only asked on a platform that is not ready**, so the ordinary case —
+     * a set-up deployment, which is every deployment that has ever placed a
+     * call — costs nothing at all. A read here would otherwise sit in front of
+     * every run creation to answer a question that has one answer.
+     *
+     * A connection this caller cannot see reads as `undefined` and falls
+     * through untouched: `startRun` owns that sentence, and answering it here
+     * would confirm somebody else's connection exists by refusing about it.
+     */
+    if (options.phone.state !== "ready") {
+      const type = await connectionTypeOf(acting.auth, text(body.connection));
+      if (type !== undefined && NEEDS_THE_PLATFORMS_CARRIER.includes(type)) {
+        return phoneSetupRequired(
+          reply,
+          phoneSetupRequiredMessage(options.phone),
+        );
+      }
+    }
 
     const onAgent = given(text(body.agent));
     const label = given(text(body.label));

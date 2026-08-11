@@ -310,6 +310,16 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     ],
     // The simulator dials: the phone plug is in the shipped build. Whether one
     // deployment's carrier is set up is a separate fact, answered elsewhere.
+    //
+    // **This fixture stands for a platform whose carrier is set up**, which is
+    // why it starts a phone run rather than refusing one. The real API asks a
+    // second question this fixture has no answer to — `phone_setup_required`,
+    // refused at `POST /api/runs` before a row is written when that
+    // deployment's phone half was never configured — because the answer is a
+    // deployment's own environment and a fixture has no deployment. A client
+    // reading a refusal from a real platform therefore meets a code this
+    // fixture never sends; `startRun` in `platform/runs.ts` relays any 422 by
+    // its sentence rather than by its code, so there is nothing here to teach.
     simulatorAdapter: true,
   },
   livekit: {

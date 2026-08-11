@@ -242,6 +242,7 @@ export {
 
 export {
   addConnection,
+  connectionTypeOf,
   createAgent,
   deleteAgent,
   getAgent,

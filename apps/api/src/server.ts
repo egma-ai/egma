@@ -152,12 +152,15 @@ export function buildApi(options: ServerOptions): Api {
       .send({ status: healthy ? "ok" : "unavailable", postgres, clickhouse });
   });
 
+  // Whether this deployment can dial, worked out once and handed to both the
+  // door that reports it and the door that enforces it. One value rather than
+  // two calls, so what `GET /api/platform` tells a developer and what run
+  // creation does to them can never be two different answers.
+  const phone = phoneReadiness(config.phone);
+
   // Read before login and before any repository identifier is sent. It is
   // public because the CLI uses it to decide whether login is safe to start.
-  void app.register(platformRoutes, {
-    origin: config.baseUrl,
-    phone: phoneReadiness(config.phone),
-  });
+  void app.register(platformRoutes, { origin: config.baseUrl, phone });
 
   // Registered without `fastify-plugin` on purpose: the adapter replaces every
   // body parser inside its own scope so the provider sees the bytes that were
@@ -219,6 +222,7 @@ export function buildApi(options: ServerOptions): Api {
     provider: identity.provider,
     rateLimit,
     baseUrl: config.baseUrl,
+    phone,
   });
 
   // The simulator's claim door. Outside the credentialed scope and the

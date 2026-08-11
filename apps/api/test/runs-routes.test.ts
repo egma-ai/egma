@@ -114,8 +114,25 @@ const PHONE = {
   config: { phoneNumber: "+15551234567" },
 } as const;
 
+/**
+ * A deployment `egma self-host phone setup` has finished with: a carrier
+ * trunk, a number its calls come from, and a voice to speak with.
+ *
+ * Non-secret, all three of it — see `phone-readiness.ts`. What it stands for
+ * here is the difference between an egma that can dial and one that has never
+ * been given a carrier, which is the only thing the run door asks about.
+ */
+const PHONE_IS_SET_UP = {
+  trunkAddress: "egma-simulator-106e37f8.pstn.twilio.com",
+  sourceNumber: "+18885550123",
+  speechProvider: "openai",
+} as const;
+
 /** Somebody with a key, an agent to check, and a test to check it against. */
-async function aCustomerReadyToRun(label: string): Promise<{
+async function aCustomerReadyToRun(
+  label: string,
+  options: { readonly phoneIsSetUp?: boolean } = {},
+): Promise<{
   ada: Customer;
   key: string;
   agentId: string;
@@ -123,7 +140,10 @@ async function aCustomerReadyToRun(label: string): Promise<{
   oneCaller: string;
   twoCallers: string;
 }> {
-  api = await createApi(label);
+  api = await createApi(
+    label,
+    options.phoneIsSetUp === true ? { phone: PHONE_IS_SET_UP } : {},
+  );
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
 
@@ -492,8 +512,10 @@ describe("starting a run", () => {
     });
   });
 
-  it("accepts a run over a phone connection, because the phone adapter has shipped", async () => {
-    const { key, oneCaller } = await aCustomerReadyToRun("runs_over_phone");
+  it("accepts a run over a phone connection, because the phone adapter has shipped and this platform can dial", async () => {
+    const { key, oneCaller } = await aCustomerReadyToRun("runs_over_phone", {
+      phoneIsSetUp: true,
+    });
     const dialled = await registerAgentThrough(key, "Front desk line", PHONE);
 
     const started = await request("POST", "/api/runs", key, {
@@ -514,6 +536,116 @@ describe("starting a run", () => {
 
     const { rows } = await api.database.sql("select id from run");
     expect(rows).toEqual([{ id: String(started.body.id) }]);
+  });
+
+  /**
+   * The money fence.
+   *
+   * A phone simulation is the one kind that spends somebody's money at a
+   * carrier, and the platform that spends it is the deployment rather than the
+   * repository. So a deployment nobody has given a trunk to must say so at the
+   * door — not queue the conversation, hand it to a simulator, and let it die
+   * at the dialling. What lands on the record then is a failed simulation
+   * against an agent that was never called, which is exactly the confusion
+   * between an operational failure and a verdict this product exists to
+   * prevent.
+   */
+  it("refuses a phone run before writing anything when this platform has no carrier", async () => {
+    const { key, oneCaller } = await aCustomerReadyToRun("runs_phone_unset");
+    const dialled = await registerAgentThrough(key, "Front desk line", PHONE);
+
+    const refused = await request("POST", "/api/runs", key, {
+      connection: dialled.connectionId,
+      test_versions: [oneCaller],
+    });
+
+    expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
+    expect(refused.body).toEqual({
+      error: "phone_setup_required",
+      message:
+        "this egma has not been set up to place phone calls, so nothing was " +
+        "dialled and nothing was charged. It is missing the carrier trunk " +
+        "and the source number and the speech provider. Whoever runs this " +
+        "platform makes it ready with one command in the platform workspace: " +
+        "egma self-host phone setup.",
+    });
+
+    // Nothing was written: no run, and so nothing for a simulator to claim.
+    const { rows } = await api.database.sql("select id from run");
+    expect(rows).toEqual([]);
+    const { rows: simulations } = await api.database.sql(
+      "select id from simulation",
+    );
+    expect(simulations).toEqual([]);
+  });
+
+  it("says which half of phone setup is missing, so a partly-configured platform is not told to start again", async () => {
+    api = await createApi("runs_phone_half_set", {
+      phone: { ...PHONE_IS_SET_UP, sourceNumber: null },
+    });
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    await createPersona(contextFor(ada, "member"), {
+      name: "Impatient Rita",
+      traits: NEUTRAL_TRAITS,
+    });
+    const { versionId } = await pushTest(key, "Reschedules", ["Impatient Rita"]);
+    const dialled = await registerAgentThrough(key, "Front desk line", PHONE);
+
+    const refused = await request("POST", "/api/runs", key, {
+      connection: dialled.connectionId,
+      test_versions: [versionId],
+    });
+
+    expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
+    expect(String(refused.body.message)).toContain(
+      "It is missing the source number.",
+    );
+  });
+
+  it("lets a run over a connection that does not use the platform's carrier through a platform with none", async () => {
+    // The whole point of two readiness facts rather than one: an egma nobody
+    // has given a carrier is a working egma for everything that is not a
+    // phone call, and a gate that refused chat work would make the first-run
+    // story impossible to tell.
+    const { key, connectionId, oneCaller } = await aCustomerReadyToRun(
+      "runs_unset_phone_lets_chat_through",
+    );
+
+    const started = await request("POST", "/api/runs", key, {
+      connection: connectionId,
+      test_versions: [oneCaller],
+    });
+
+    expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
+    expect(started.body).toMatchObject({ connection_type: "retell" });
+  });
+
+  it("answers a phone connection belonging to somebody else the way a missing one is answered, rather than refusing about it", async () => {
+    // The gate reads a connection to decide, and a gate that answered about a
+    // row the caller cannot see would confirm another customer's connection
+    // exists — through a refusal, which is the quietest possible leak.
+    const { key, oneCaller } = await aCustomerReadyToRun(
+      "runs_phone_other_customer",
+    );
+    const bruno = await signUp(api.app, "bruno@other.example", "Other");
+    const brunosKey = await projectKeyFor(api.app, bruno);
+    const theirs = await registerAgentThrough(
+      brunosKey,
+      "Their front desk line",
+      PHONE,
+    );
+
+    const refused = await request("POST", "/api/runs", key, {
+      connection: theirs.connectionId,
+      test_versions: [oneCaller],
+    });
+
+    expect(refused.statusCode).toBe(404);
+    expect(refused.body).toMatchObject({ error: "not_found" });
+    expect(String(refused.body.message)).toContain(
+      `there is no connection ${theirs.connectionId} in this project`,
+    );
   });
 
   it("is refused to a viewer, because a run spends money and creates data", async () => {

@@ -56,6 +56,14 @@ export type TestApiOptions = {
    * tests are not about grading configuration at all.
    */
   readonly defaultJudge?: Config["defaultJudge"];
+  /**
+   * What `egma self-host phone setup` left behind, for a test about a platform
+   * that can dial. Absent by default, and absent is the honest default: a
+   * deployment nobody has given a carrier is what every egma is on its first
+   * morning, and a suite that quietly started every instance phone-ready would
+   * never have noticed the run door letting a phone run through.
+   */
+  readonly phone?: Config["phone"];
   readonly trustProxy?: boolean;
   /** Whether the transport claims a message actually reaches anybody. */
   readonly emailDelivers?: boolean;
@@ -123,6 +131,7 @@ export async function createApi(
     ...(traceStore === undefined ? {} : { clickhouseUrl: traceStore.url }),
     singleOrganization: options.singleOrganization ?? false,
     trustProxy: options.trustProxy ?? false,
+    ...(options.phone === undefined ? {} : { phone: options.phone }),
     ...(options.defaultJudge === undefined
       ? {}
       : { defaultJudge: options.defaultJudge }),

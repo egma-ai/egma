@@ -481,14 +481,14 @@ export const CONNECTION_REGISTRY: Readonly<
     // readiness, and it is a separate question that has to be asked where a
     // deployment's configuration is known — this package cannot see it.
     //
-    // **Nothing on the way to a run asks it today.** `phoneReadiness` is read
-    // once at API startup and served by `GET /api/platform`, so a developer can
-    // *see* that a platform's phone half is unset — but no run-creation path
-    // consults it, and `phoneSetupRequiredMessage` is called from nowhere at
-    // all. So a platform that has never been given a carrier accepts a phone
-    // run here and fails it later at the simulator. Closing that is ticket 04's
-    // second acceptance criterion: refuse at run creation, before any paid
-    // provider action, when phone readiness is not `ready`.
+    // That second question is asked, and it is asked in front of this one.
+    // `POST /api/runs` reads `phoneReadiness` off its own configuration and
+    // refuses a run over a phone connection with `phone_setup_required` before
+    // a row is written, so a platform nobody has given a carrier says so
+    // instead of queueing a call it cannot place. The two refusals sit in two
+    // layers because they are two different facts: this line is about what the
+    // simulator ships with, and that one is about what one installation has
+    // been configured with.
     simulatorAdapter: true,
   },
   livekit: {
