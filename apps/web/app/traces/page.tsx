@@ -246,7 +246,7 @@ export default function TranscriptsPage() {
               <div className={styles.tableWrap}>
                 <table className={styles.dataTable}>
                   <thead><tr>{COLUMN_ORDER.map(([heading]) => <th key={heading} scope="col">{heading}</th>)}</tr></thead>
-                  <tbody>{state.rows.map((row) => <tr key={row.trace_id}>{COLUMN_ORDER.map(([heading, fill]) => <td key={heading}>{fill(row)}</td>)}</tr>)}</tbody>
+                  <tbody>{state.rows.map((row) => <tr key={row.trace_id}>{COLUMN_ORDER.map(([heading, fill]) => <td key={heading}><span className={styles.tableCell}>{fill(row)}</span></td>)}</tr>)}</tbody>
                 </table>
               </div>
               <div className={styles.mobileRows}>

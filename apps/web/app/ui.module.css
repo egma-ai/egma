@@ -98,10 +98,21 @@
 .compactSelect:hover { background: var(--surface-soft); }
 .listMeta { display: flex; justify-content: space-between; padding: 24px 2px 13px; color: var(--muted); font-family: var(--mono); font-size: 11px; }
 .tableWrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
-.dataTable { width: 100%; border-collapse: collapse; }
+.dataTable { width: 100%; min-width: 1170px; border-collapse: collapse; table-layout: fixed; }
 .dataTable th { padding: 13px 15px; color: var(--faint); font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: .1em; text-align: left; white-space: nowrap; }
-.dataTable td { padding: 16px 15px; border-top: 1px solid var(--border); color: var(--muted); vertical-align: top; }
+.dataTable th:nth-child(1) { width: 194px; }
+.dataTable th:nth-child(2) { width: 82px; }
+.dataTable th:nth-child(3) { width: 130px; }
+.dataTable th:nth-child(4) { width: 260px; }
+.dataTable th:nth-child(5), .dataTable th:nth-child(6), .dataTable th:nth-child(7) { width: 64px; }
+.dataTable th:nth-child(8) { width: 100px; }
+.dataTable th:nth-child(9) { width: 112px; }
+.dataTable th:nth-child(10) { width: 100px; }
+.dataTable tbody tr { height: 88px; }
+.dataTable td { height: 88px; padding: 16px 15px; border-top: 1px solid var(--border); color: var(--muted); vertical-align: middle; }
+.tableCell { display: -webkit-box; overflow: hidden; overflow-wrap: anywhere; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .dataTable td:first-child { color: var(--foreground); font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+.dataTable td:first-child .tableCell { display: block; text-overflow: ellipsis; }
 .dataTable a { color: var(--foreground); text-underline-offset: 3px; }
 .mobileRows { display: none; }
 .moreLine { display: flex; align-items: center; justify-content: space-between; margin: 16px 0 0; color: var(--muted); font-family: var(--mono); font-size: 11px; }
