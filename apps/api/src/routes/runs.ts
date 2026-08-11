@@ -7,12 +7,15 @@ import {
   listSimulations,
   NotPermittedError,
   ProjectOutsideOrganizationError,
+  readRunVerdicts,
   RunWriteRefusedError,
   startRun,
   type AuthContext,
   type ConductedSimulation,
   type Run,
   type RunEvent,
+  type RunVerdicts,
+  type SimulationVerdicts,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
@@ -169,13 +172,21 @@ const NO_SUCH_RUN =
  * The two pins are both here on purpose: `test_version_id` is what actually
  * executed and never moves, and `test_id` is what to go and edit.
  *
- * `verdict` is what the graders make of the conversation. Nothing judges
- * anything yet, so it is null here and null everywhere — the field is in the
- * shape from the first day so that nothing a client reads changes when the
- * graders arrive. The events record already has a place to carry one; this row
- * gains its own the day something writes one down.
+ * `verdict` is what the graders make of the conversation, folded over every
+ * dimension judged against it. It is `null` for a conversation nobody has
+ * judged **yet** — which is not the same as one judged and found wanting, and
+ * the two must never read alike. `grading` carries that distinction: a
+ * conversation with no rows says `pending`, and one with rows says `graded`
+ * beside whatever the fold came to.
+ *
+ * Execution and grading are separate facts and are reported separately. A
+ * conversation can be `completed` and ungraded, and a reader that collapsed the
+ * two would call a run finished while its judgment was still being written.
  */
-function describedSimulation(one: ConductedSimulation): Record<string, unknown> {
+function describedSimulation(
+  one: ConductedSimulation,
+  judged: SimulationVerdicts | undefined,
+): Record<string, unknown> {
   return {
     id: one.id,
     position: one.position,
@@ -185,17 +196,36 @@ function describedSimulation(one: ConductedSimulation): Record<string, unknown> 
     persona_id: one.personaId,
     persona_name: one.personaName,
     status: one.status,
-    verdict: null,
+    grading: judged === undefined ? "pending" : "graded",
+    verdict: judged?.outcome.verdict ?? null,
+    score: judged?.outcome.score ?? null,
+    // Skipped and errored are carried out whole rather than folded into the
+    // other two: missing judgment is not a pass and a broken judge is not a
+    // failing agent, and a summary that hid either would say the opposite of
+    // what happened.
+    counts: judged === undefined ? null : judged.outcome.counts,
     reason: one.endingReason,
   };
 }
 
-/** The run and its conversations — one shape for starting, reading and stopping. */
+/**
+ * The run and its conversations — one shape for starting, reading and stopping.
+ *
+ * `judged` is absent wherever the caller could not or need not pay for a
+ * verdict read: starting a run judges nothing, so that path passes nothing and
+ * every conversation reads `pending`, which is exactly true a millisecond after
+ * a run begins.
+ */
 function describedRun(
   one: Run,
   simulations: readonly ConductedSimulation[],
   baseUrl: string,
+  judged?: RunVerdicts,
 ): Record<string, unknown> {
+  const bySimulation = new Map(
+    (judged?.simulations ?? []).map((its) => [its.simulationId, its] as const),
+  );
+  const gradedCount = simulations.filter((one) => bySimulation.has(one.id)).length;
   return {
     id: one.id,
     status: one.status,
@@ -217,7 +247,23 @@ function describedRun(
     results_url: `${baseUrl.replace(/\/+$/u, "")}/runs/${one.id}`,
     created_at: one.createdAt.toISOString(),
     finished_at: one.finishedAt?.toISOString() ?? null,
-    simulations: simulations.map(describedSimulation),
+    // Grading progress, reported apart from execution progress. A run whose
+    // conversations have all finished is not a run whose judgment is in: these
+    // two counts settle at different moments and a reader has to be able to see
+    // which one it is waiting on.
+    graded_count: gradedCount,
+    verdict: judged?.outcome.verdict ?? null,
+    score: judged?.outcome.score ?? null,
+    counts: judged?.outcome.counts ?? null,
+    by_grader: (judged?.byGrader ?? []).map((its) => ({
+      grader_id: its.graderId,
+      verdict: its.outcome.verdict,
+      score: its.outcome.score ?? null,
+      counts: its.outcome.counts,
+    })),
+    simulations: simulations.map((its) =>
+      describedSimulation(its, bySimulation.get(its.id)),
+    ),
   };
 }
 
@@ -260,7 +306,13 @@ async function runAsItStands(
   if (header === undefined) return undefined;
 
   const simulations = (await listSimulations(auth, runId)) ?? [];
-  return describedRun(header, simulations, baseUrl);
+  // The verdict store is a separate store and can be down while the run itself
+  // reads perfectly well. A run that answered 500 because nothing had judged it
+  // yet would be a grading outage presented as a missing run, so an unreachable
+  // verdict store degrades to "pending" — which is the same shape a genuinely
+  // ungraded run has, and which the next read corrects on its own.
+  const judged = await readRunVerdicts(auth, runId).catch(() => undefined);
+  return describedRun(header, simulations, baseUrl, judged);
 }
 
 export async function runRoutes(
