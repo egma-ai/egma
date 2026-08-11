@@ -94,7 +94,7 @@
 
 .listToolbar { display: flex; align-items: center; gap: 10px; color: var(--muted); font-family: var(--mono); font-size: 11px; }
 .compactSelectControl { position: relative; display: inline-flex; }
-.compactSelect { min-width: 148px; height: var(--control-height); padding: 0 13px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--foreground); cursor: pointer; font-family: var(--mono); font-size: 11px; }
+.compactSelect { min-width: 148px; height: var(--control-height); align-items: center; padding: 0 13px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--foreground); cursor: pointer; font-family: var(--mono); font-size: 11px; }
 .compactSelect:hover { background: var(--surface-soft); }
 .listMeta { display: flex; justify-content: space-between; padding: 24px 2px 13px; color: var(--muted); font-family: var(--mono); font-size: 11px; }
 .tableWrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
