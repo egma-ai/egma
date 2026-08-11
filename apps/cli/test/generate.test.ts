@@ -153,6 +153,9 @@ async function runWalk(options: {
     write: (line) => lines.push(line),
     answers: {
       "retell-key": KEY,
+      // Text. These checks are about writing and pushing tests, and a walk
+      // that stops at "text or phone?" never reaches either.
+      reach: "text",
       ...(options.existingTests === undefined
         ? {}
         : { "existing-tests": options.existingTests }),
@@ -171,7 +174,11 @@ async function runWalk(options: {
       launch: workspace.launch(options.script),
       cwd: workspace.dir,
       signal: new AbortController().signal,
-      platform: { url: platform.url, credentialsFile: workspace.credentialsFile },
+      platform: {
+        url: platform.url,
+        instanceId: platform.instanceId,
+        credentialsFile: workspace.credentialsFile,
+      },
       retell: { url: retell.url },
       home: path.join(workspace.dir, "pretend-home"),
       runPollMs: 20,
@@ -603,6 +610,7 @@ async function withNobodyWatching(
             EGMA_URL: platform.url,
             EGMA_RETELL_URL: retell.url,
             EGMA_RETELL_API_KEY: KEY,
+            EGMA_REACH: "text",
             // Nowhere near the home of whoever is running this.
             HOME: path.join(workspace.dir, "pretend-home"),
           }),

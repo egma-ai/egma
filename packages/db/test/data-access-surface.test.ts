@@ -63,10 +63,11 @@ const CONTEXT_ESTABLISHING = [
 
 /**
  * What answers a question about the deployment rather than about a customer.
- * It takes nothing and returns a boolean, which is what makes it safe without a
- * context; a build rule refuses it the moment it grows an argument.
+ * Neither takes an argument. One returns whether signup is claimed; the other
+ * returns the platform's own public, non-secret id. The build rule pins both
+ * exact return types and refuses either function if it grows an argument.
  */
-const INSTANCE_SCOPED = ["instanceIsClaimed"];
+const INSTANCE_SCOPED = ["instanceIsClaimed", "platformInstanceId"];
 
 /**
  * What hands egma's own services their work, and what keeps a dispatch honest
@@ -142,6 +143,13 @@ const CONTEXT_REQUIRING = [
   "clonePersona",
   "cloneTest",
   "completeSimulation",
+  // The type of one connection, by its id alone — the only connection read
+  // that does not name an agent. It exists for the deployment gate in front of
+  // run creation, which is handed a connection id and no agent id and has to
+  // know whether a phone call is what this run would place. It answers a type
+  // and nothing else, so what this widening lets out is a word from a closed
+  // set and never a config or a credential.
+  "connectionTypeOf",
   "correctVerdict",
   "createAgent",
   "createApiKey",
@@ -234,6 +242,7 @@ const CONTEXT_REQUIRING = [
   // connection's credentials at this seam.
   "resolveSimulationConnection",
   "revokeApiKey",
+  "seedDefaultJudge",
   "setJudgeConfiguration",
   "startRun",
   "startSimulation",

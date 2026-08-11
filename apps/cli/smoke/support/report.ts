@@ -31,12 +31,26 @@ export const secrets: string[] = [];
 /** Every check that did not hold, in the order they were found. */
 export const problems: string[] = [];
 
-/** The text with everything in `secrets` taken out of it. */
+/**
+ * The text with everything in `secrets` taken out of it.
+ *
+ * **Neither side is trusted to be a string, and that is not defensive tidying.**
+ * This runs while a check is printing why it failed. A secret that arrived as
+ * `undefined` — a field that moved, an answer that was not the shape it used to
+ * be — used to crash the reduce; text that arrived as `undefined` crashes the
+ * same reduce from the other side. Either way the crash lands *inside* the
+ * error report and takes the real reason down with it, which is the one failure
+ * that costs a whole run of a check that takes twenty minutes.
+ *
+ * A value that is not text is described rather than dropped, because "the thing
+ * being printed was not a string" is itself the news at that moment.
+ */
 export function redact(text: string): string {
+  const held = typeof text === "string" ? text : String(text);
   return [...new Set(secrets)]
-    .filter((one) => one.length > 3)
+    .filter((one) => typeof one === "string" && one.length > 3)
     .sort((left, right) => right.length - left.length)
-    .reduce((held, one) => held.split(one).join("<redacted>"), text);
+    .reduce((carried, one) => carried.split(one).join("<redacted>"), held);
 }
 
 export function say(message: string): void {

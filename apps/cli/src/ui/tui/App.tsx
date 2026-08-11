@@ -15,7 +15,9 @@ import { GateScreen } from "./screens/GateScreen.tsx";
 import { GeneratingScreen } from "./screens/GeneratingScreen.tsx";
 import { IntroScreen } from "./screens/IntroScreen.tsx";
 import { LoginScreen } from "./screens/LoginScreen.tsx";
+import { PhoneNumberScreen } from "./screens/PhoneNumberScreen.tsx";
 import { PromptsPointerScreen } from "./screens/PromptsPointerScreen.tsx";
+import { ReachScreen } from "./screens/ReachScreen.tsx";
 import { RetellAgentScreen } from "./screens/RetellAgentScreen.tsx";
 import { RetellKeyScreen } from "./screens/RetellKeyScreen.tsx";
 import { RunScreen } from "./screens/RunScreen.tsx";
@@ -78,6 +80,17 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
   if (screen === "retell-agent") {
     return (
       <RetellAgentScreen state={state} onAnswer={(id) => store.answer("retell-agent", id)} />
+    );
+  }
+  if (screen === "reach") {
+    return <ReachScreen onAnswer={(reach) => store.answer("reach", reach)} />;
+  }
+  if (screen === "phone-number") {
+    return (
+      <PhoneNumberScreen
+        state={state}
+        onAnswer={(number) => store.answer("phone-number", number)}
+      />
     );
   }
   if (screen === "existing-tests") {

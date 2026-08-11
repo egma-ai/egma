@@ -86,6 +86,18 @@ export type InstanceOptions = {
    * answers.
    */
   readonly web?: boolean;
+  /**
+   * Every raw HTTP request, before Fastify or authentication can refuse it.
+   * Test evidence only: this listener changes no production server.
+   */
+  readonly observeRequest?: (request: ObservedInstanceRequest) => void;
+};
+
+export type ObservedInstanceRequest = {
+  readonly method: string;
+  readonly url: string;
+  /** The bytes seen so far. The getter holds the complete body after `end`. */
+  readonly rawBody: string;
 };
 
 /** A port nothing is listening on, so two test files never collide. */
@@ -161,6 +173,24 @@ export async function startInstance(
       EGMA_SINGLE_ORGANIZATION: "false",
     }),
   });
+  if (options.observeRequest !== undefined) {
+    // `prependListener` puts this before Fastify's own request listener. A
+    // Fastify hook added here would come after the route's `onRequest` auth
+    // hook and would miss the exact 401 that this boundary evidence must see.
+    app.server.prependListener("request", (request) => {
+      let rawBody = "";
+      request.on("data", (chunk: Buffer) => {
+        rawBody += chunk.toString("utf8");
+      });
+      options.observeRequest?.({
+        method: request.method ?? "GET",
+        url: request.url ?? "/",
+        get rawBody() {
+          return rawBody;
+        },
+      });
+    });
+  }
   await app.listen({ host: "127.0.0.1", port: apiPort });
 
   const web: ChildProcess | undefined = withPages

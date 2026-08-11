@@ -12,7 +12,7 @@
  */
 
 import { openInBrowser } from "../platform/browser.ts";
-import type { PlatformAccess as ResolvedPlatform } from "../platform/credentials.ts";
+import type { VerifiedPlatformAccess as ResolvedPlatform } from "../platform/credentials.ts";
 import { logIn, type LogInOptions } from "../platform/login.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
 import type { ExitReport } from "./exit-line.ts";

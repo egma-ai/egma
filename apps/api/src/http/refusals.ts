@@ -26,6 +26,7 @@ export const CODES = {
   name_taken: 409,
   unprocessable: 422,
   no_adapter: 422,
+  phone_setup_required: 422,
   too_many_requests: 429,
 } as const;
 
@@ -88,6 +89,32 @@ export function unprocessable(
  */
 export function noAdapter(reply: FastifyReply, message: string): FastifyReply {
   return refuse(reply, "no_adapter", message);
+}
+
+/**
+ * A phone run asked of a platform whose phone half has never been set up.
+ *
+ * **Its own code, and the distinction is the whole reason it exists.**
+ * `no_adapter` is about the build — this egma cannot conduct that kind of
+ * conversation at all, and no configuration will change it. This one is about
+ * *this deployment*: the software dials fine, and the person who runs the
+ * platform has not given it a carrier yet. The two have different readers and
+ * different next moves — one waits for a release, the other runs one command —
+ * and a client that could not tell them apart would tell a developer to wait
+ * for something that already shipped.
+ *
+ * **It is refused before the run row exists, which is the point.** A phone run
+ * that were accepted here would be queued, claimed, and only then discovered to
+ * have nowhere to dial from — a failed simulation on the record that says
+ * nothing about the agent under test, which is exactly the confusion between an
+ * operational failure and an agent's verdict that this product exists to keep
+ * apart.
+ */
+export function phoneSetupRequired(
+  reply: FastifyReply,
+  message: string,
+): FastifyReply {
+  return refuse(reply, "phone_setup_required", message);
 }
 
 /**

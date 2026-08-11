@@ -9,12 +9,39 @@ gain trust in the agent they ship to production.
 
 You need Docker with Compose. Nothing else.
 
+This is the **platform workspace** — the directory your deployment lives in. It
+is deliberately not your agent repository: the platform's carrier and provider
+credentials belong to whoever runs the platform, and an agent repository holds
+only tests and the address of the platform that owns their identifiers. On one
+laptop that is often the same person, and the two directories are still
+separate, because one platform serves many repositories.
+
 ```bash
-docker compose up
+npx egma-cli self-host up
 ```
 
-That starts six services and applies both schemas. Nobody runs a migration
-step, because there isn't one — the API applies its migrations while it boots.
+That starts the whole platform and prints the address an agent repository
+points at. Nobody runs a migration step, because there isn't one — the API
+applies its migrations while it boots.
+
+`docker compose up` starts the same containers, and is not the same thing.
+
+**Once you have run `egma self-host phone setup`, use `egma self-host up` to
+start this platform.** What that command wrote is in `.egma-platform/`, and
+nothing points compose at it — the self-host commands read it back and hand it
+to the containers themselves. A bare `docker compose up` therefore brings the
+platform back with its carrier, speech and judge configuration empty: the
+containers are recreated, phone readiness goes back to `setup required`, and
+the simulator has no trunk to dial through. Nothing is lost and nothing has to
+be set up again; `egma self-host up` restores it.
+
+There is a second, smaller difference. `egma self-host up` waits for the
+platform to answer for itself, tells you what to type next, and tries once more
+if the first attempt fails — which on a workspace that has never been started
+it can, because ClickHouse's first boot creates its database and restarts
+itself, and its health check answers during the server that is on its way down.
+Nothing restarts the API when that happens, so the bare compose path needs the
+second `up` typed by hand.
 
 | Service | URL |
 | --- | --- |
@@ -24,6 +51,29 @@ step, because there isn't one — the API applies its migrations while it boots.
 | ClickHouse | `http://egma:egma@localhost:8124/egma` |
 | Simulator | none — it only dials out |
 | Grader | none — it only dials out |
+| LiveKit server | 127.0.0.1:7880, for this machine only |
+| LiveKit SIP gateway | its SIP port and RTP range, for your carrier |
+| LiveKit Redis | none |
+
+**Phone readiness is reported separately from platform readiness, and that is
+honest rather than fussy.** A platform with no carrier runs text simulations
+perfectly well, so `self-host up` brings one up *ready* and says phone is `setup
+required`. One more command in this directory makes it able to place calls:
+
+```bash
+npx egma-cli self-host phone setup
+```
+
+It asks for a Twilio account, a voice number that account **already owns**, and
+one OpenAI key; shows you a plan before it writes anything to your carrier; and
+on approval does the paperwork, writes a private configuration file here, and
+waits for the platform to report phone readiness. It never buys, ports or
+registers a number. `--plan` shows the plan and stops. `--apply --yes --json` is
+the same work with nobody watching, for a coding agent driving it.
+
+**The Twilio Auth Token is used by that command and never kept.** What a running
+egma holds is a SIP credential that can authenticate one trunk and do nothing
+else on the account.
 
 Open http://localhost:3101 and sign up. Your organization and your first project
 are created together, and you become their admin. On a fresh instance the first
@@ -39,6 +89,21 @@ environment; see `.env.example` for the names and their defaults.
 **`EGMA_AUTH_SECRET` signs session cookies and the API refuses to start without
 one.** Compose supplies a development default so that `docker compose up` works
 out of the box. Change it before anybody else can reach your instance.
+
+**`EGMA_BASE_URL` is the whole address people reach this instance at, and
+nothing more than that** — scheme, host and port. It is what the pages, the
+login flow and an agent repository all use, and an agent repository will not
+follow an instance to an address the developer did not type: if others reach
+yours at `http://192.168.1.10:3101` while this says `http://localhost:3101`,
+their first command stops and names both addresses instead of quietly talking
+to their own machine.
+
+*Upgrading:* a value carrying a path, query, fragment or credentials is now
+refused when the API starts, where it used to have its trailing slashes trimmed
+and the rest kept. Serving egma under a subpath such as
+`https://egma.example/egma` never worked — the API answers at the root of this
+address — so the fix is to drop everything after the port. The startup message
+names the part to remove.
 
 **`EGMA_SIMULATOR_SERVICE_TOKEN` is what the simulator shows the API to claim
 work, and the API refuses to start without one.** The answers to a claim carry
@@ -63,8 +128,14 @@ at all.
 
 ## Your first run, from a terminal
 
-With an instance up and an account on it, the walk is one command. That command
-is not on npm yet, so it comes from this checkout:
+With an instance up and an account on it, the walk is one command:
+
+```bash
+cd ~/your-voice-agent
+EGMA_URL=http://localhost:3101 npx egma-cli
+```
+
+To run it from this checkout instead — for development, or ahead of a release:
 
 ```bash
 pnpm install                    # once
@@ -79,7 +150,7 @@ cd ~/your-voice-agent
 EGMA_URL=http://localhost:3101 node ~/egma/apps/cli/dist/bin.js
 ```
 
-`~/egma` is this checkout; when the package ships, that line becomes `npx egma`.
+`~/egma` is this checkout. The published package is `egma-cli`; the command it installs is `egma`.
 
 It signs that machine in — a short code, approved in the browser you signed up
 in — registers your voice agent together with the way egma reaches it, writes a
@@ -89,12 +160,14 @@ a verb (`egma login`, `egma connect`, `egma push`, `egma run`) that prints one
 fact per line and answers with a number, for a coding agent driving it with
 nobody watching. `apps/cli/README.md` is the whole of it.
 
-**Where it stops today, said plainly.** The run is created and followed live,
-and no verdict arrives: nothing claims a simulation yet, so the run stays
-pending and every simulation stays queued. Both services below are real — the
-simulator conducts a conversation and the grader judges one — and what is
-missing between them and your run is the seam a simulator claims its work
-through. Everything before that is real, and the run you started is yours — at
+**What happens, said plainly.** The run is created and followed live, the
+simulator claims it and conducts the conversation, and the grader judges what
+it did. Verdicts arrive after the conversation ends — one per expected
+behaviour, each carrying its own rationale, the turns it cites and the judge
+that wrote it. Execution and grading are reported separately, because a run
+whose calls have all finished is not yet a run whose judgment is in.
+
+Everything before that is real, and the run you started is yours — at
 the address the terminal printed, with no token on it.
 
 The same walk runs as a check. On a checkout that has had `pnpm install`, and on
@@ -187,8 +260,9 @@ customer's choice, not egma's. `apps/grader/README.md` is the whole table.
 
 ### Watching a simulator without a control plane
 
-The endpoints the simulator dials are still being built, so there is nothing to
-trigger a run with yet. To see the machinery work anyway, start it against the
+A real run needs a platform to claim work from. To watch the simulator's own
+machinery in isolation instead — no database, no control plane — start it
+against the
 **workbench** — a fake control plane that speaks the same contract from spec
 fixtures, with no database anywhere:
 
@@ -218,23 +292,17 @@ Two things have to be true for that. The simulator needs a **media bridge**
 that turns a phone call into a room it can join, and it needs a **SIP trunk**
 that carries the call to the phone network. The trunk is yours, from whatever
 carrier you already pay; egma is never in that relationship. The bridge is
-LiveKit, and you have two ways to get one.
+LiveKit, and it is already running: the LiveKit server, its SIP gateway and the
+Redis they find each other through are part of the default deployment. There is
+no overlay to ask for by name.
 
-**LiveKit Cloud is one variable.** Point `EGMA_SIMULATOR_LIVEKIT_URL` at it
-with its key and secret, set your trunk, and stop reading this section — there
-is nothing to host and nothing to open.
+`egma self-host phone setup` is what turns your carrier account into the trunk.
+The rest of this section is what is happening underneath it, and what to do when
+the machine you are on cannot host the gateway.
 
-**Hosting it yourself is an overlay you ask for by name:**
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.phone.yml up
-```
-
-That adds three containers — the LiveKit server, its SIP gateway, and the
-Redis they find each other through — and points the simulator at them. A plain
-`docker compose up` starts none of it, and nothing about the default first-run
-story changes. Every setting is an environment variable; there is no
-configuration file to write.
+**LiveKit Cloud is one variable.** Point `EGMA_SIMULATOR_LIVEKIT_URL` at it with
+its key and secret and stop reading — there is nothing to host and nothing to
+open.
 
 ### What has to be reachable, and what never is
 
@@ -255,25 +323,25 @@ there.
 that is routine.** Set `EGMA_LIVEKIT_SIP_EXTERNAL_IP` to the address and open
 UDP 5060 plus the RTP range to your carrier's published ranges.
 
-**On a laptop behind an ordinary router it does not work, and "required" is
-measured rather than assumed.** The gateway discovers its public address by
-asking a STUN server, which answers with the address only — and pairs it with
-its own *local* RTP port. On a consumer router that pairing names nothing. Here
-is the measurement, from a MacBook behind a home router: a UDP socket bound to
-port 10019 is seen by the outside world as port 41110, another on 10105 as
-39306, another on 10106 as 64104 — a different arbitrary port every time, and
-no inbound mapping for any of them. So audio addressed to the advertised
-`public-address:10019` arrives nowhere. Signalling is only luckier, not
-reliable: of four INVITEs sent through that router, two brought the carrier's
-own answer back and two timed out having heard nothing.
+**On a laptop behind an ordinary router it depends on your carrier, and we have
+now measured both answers.** The gateway discovers its public address by asking
+a STUN server, which answers with the address only — and pairs it with its own
+*local* RTP port. On some consumer routers that pairing names nothing: measured
+from a MacBook behind one home router, a UDP socket bound to port 10019 was
+seen outside as 41110, another on 10105 as 39306, another on 10106 as 64104 — a
+different arbitrary port every time, and no inbound mapping for any of them.
 
-The one thing that could rescue a NATed gateway is the carrier ignoring the
-address in the SDP and replying to wherever our audio came from — symmetric
-RTP latching, which many carriers do. We could not settle whether ours does,
-because the account we tested with refused every call before it was answered
-and latching only happens after. So: **a public IP or a 1:1 NAT is required.**
-If your carrier latches you may get away with less, but do not plan a
-deployment on it. Use LiveKit Cloud instead — same API, same trunk, same code,
+What rescues a NATed gateway is the carrier ignoring the address in the SDP and
+replying to wherever our audio came from — **symmetric RTP latching**, which
+many carriers do. **Twilio does.** A real outbound call from a MacBook behind an
+ordinary home router, with no port forwarding, carried two minutes of two-way
+audio and reached the agent under test. A second home router measured
+port-preserving and endpoint-independent across three STUN servers, which is
+why that call worked.
+
+So: **on a server with a public IP this is routine, and on a laptop it depends
+on your carrier latching.** Try it — a failed call costs a few cents and tells
+you in under a minute. If yours does not latch, use LiveKit Cloud — same API, same trunk, same code,
 one URL.
 
 The RTP range is 21 ports by default, not LiveKit's own 10000-20000: that is
@@ -284,24 +352,38 @@ amount.
 
 ### Turning a carrier account into a trunk
 
-You should not have to hand-build SIP paperwork in somebody's console. One
-command takes a Twilio account and one of its numbers and makes the trunk:
+You should not have to hand-build SIP paperwork in somebody's console, and you
+do not:
 
 ```bash
-TWILIO_ACCOUNT_SID=AC... TWILIO_AUTH_TOKEN=... \
-  uv run --directory apps/simulator egma-trunk-setup --number +15551234567
+npx egma-cli self-host phone setup
 ```
 
-It creates the trunk, its termination URI, a credential list and the
-credential, attaches the credential list and the number to the trunk, and
-prints the five variables the simulator reads. It names what it made with each identifier, and it is safe to
-run again — a second run finds what the first made and rotates only the
-password, because Twilio hands a password out once and never again.
+It reads your account first and shows you a plan — what it would create and what
+is already there — and writes nothing to your carrier until you approve it. Then
+it creates the trunk, its termination URI, a credential list and the credential,
+attaches the credential list and the number to the trunk, writes the
+configuration into `.egma-platform/platform.env`, restarts what needs it, and
+waits for the platform to report phone readiness. It names everything it made
+with that thing's own identifier, in the terminal and in a receipt filed beside
+the configuration, so a year from now you can find all of it in the Twilio
+console or delete it.
+
+It is safe to run again, and safe to run again after a run that stopped half
+way: every step looks for what it would create before creating it, so a second
+run finds what the first made and adds only what is missing. The one thing it
+cannot reuse is the password — Twilio hands one out once and never again — so a
+re-run mints another and tells Twilio, which is what makes the configuration it
+writes always usable rather than usable only the first time.
+
+**The number must already be on your account.** egma never searches the
+catalogue, buys, ports or registers one; if the number you name is not there, it
+says so and stops before creating anything at all.
 
 **The account token is used by that command and by nothing else.** What a
 running deployment keeps is a SIP credential that can do exactly one thing:
-authenticate a call over one trunk. Keep the printed lines wherever the rest of
-your secrets live, and in no repository.
+authenticate a call over one trunk. It is written into a file that is created
+readable by you and nobody else, and it belongs in no repository.
 
 ### The whole thing, end to end
 
@@ -310,13 +392,11 @@ One command, with your own number and your own credentials in the environment:
 ```bash
 EGMA_WORKBENCH_PHONE_NUMBER=+15551234567 \
 docker compose -f docker-compose.yml -f docker-compose.workbench.yml \
-  -f docker-compose.phone.yml up --build simulator workbench
+  up --build simulator workbench
 ```
 
-The overlays go in that order — the phone one last, because it adds to what
-the workbench one replaces. Naming the two services is what keeps the API and
-the two databases out of it; the phone stack comes along because the simulator
-depends on it. What starts is a workbench holding one spec, pointed at your
+Naming the two services is what keeps the API and the two databases out of it;
+the phone stack comes along because the simulator depends on it. What starts is a workbench holding one spec, pointed at your
 number instead of the fixture's placeholder, and a simulator that can dial it.
 Then watch the workbench's log: the claim, the call, each turn of the
 conversation as it is spoken, the timings measured off the audio, and the
@@ -326,11 +406,28 @@ persona on one channel and the agent on the other —
 brings it out to listen to.
 
 The persona speaks in a deterministic test tone unless you name real speech
-providers, and a real agent hears that as noise. Set
-`EGMA_SIMULATOR_TTS_PROVIDER`, `EGMA_SIMULATOR_STT_PROVIDER` and their keys
-before you expect a conversation, and `EGMA_SIMULATOR_VAD_PROVIDER=silero`
-with them: that is what hears a real agent start and stop speaking, and it
-needs no key.
+providers, and a real agent hears that as noise. `egma self-host phone setup`
+sets all of this from the one OpenAI key it asks for — the persona's words, its
+voice, its ears, and `silero` for hearing a real agent start and stop speaking.
+To do it by hand, set `EGMA_SIMULATOR_TTS_PROVIDER`,
+`EGMA_SIMULATOR_STT_PROVIDER`, their key and `EGMA_SIMULATOR_VAD_PROVIDER=silero`
+before you expect a conversation.
+
+**A phone line is 8 kHz and OpenAI returns 24 kHz whatever is asked of it**, so
+egma converts what it receives down to the band the line really carries. That
+conversion is not decoration: audio relabelled instead of converted is a voice
+three times too deep and three times too slow, and every measurement taken off
+it is wrong by the same factor.
+
+What a simulation's record stamps as its band is read off the frames that
+arrived rather than copied from a constant in egma — but be clear about what
+that does and does not prove. The bridge resamples what the carrier sends down
+to the band the pipeline was assembled at *before* egma sees a frame, so on a
+phone call the measured band is 8 kHz whether the carrier negotiated narrowband
+or G.722. The measurement catches egma's own path going wrong; it cannot report
+what the carrier chose. That is the safe direction — a wideband leg is
+understated rather than a narrowband one overstated — and it is the reason a
+band is never compared across connection types.
 
 Every variable this section mentions is in `.env.example` with its default and
 whether it is required. Anything set to something unusable stops the simulator

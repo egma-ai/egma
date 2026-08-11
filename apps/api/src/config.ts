@@ -1,5 +1,13 @@
 import { SERVICE_TOKEN_PREFIX } from "./auth/service-token.ts";
 import type { SmtpSettings } from "./auth/email.ts";
+import type { PhoneSettings } from "./phone-readiness.ts";
+
+/** A judge the platform hands to projects that have configured none. */
+export type DefaultJudge = {
+  readonly provider: string;
+  readonly model: string;
+  readonly key: string;
+};
 
 export type Config = {
   readonly databaseUrl: string;
@@ -69,6 +77,28 @@ export type Config = {
    * pattern, so `docker compose up` still works with zero setup.
    */
   readonly simulatorServiceToken: string;
+  /**
+   * The non-secret facts `egma self-host phone setup` leaves behind, and the
+   * whole of what this process knows about the carrier. It never holds the
+   * Twilio Auth Token, the SIP password or the OpenAI key that the simulator
+   * dials and speaks with — the platform's phone authority lives in the
+   * container that uses it, and this side only says whether it exists.
+   */
+  readonly phone: PhoneSettings;
+  /**
+   * The judge a project is given when it has configured none, from the one
+   * OpenAI key a self-hoster supplied at phone setup.
+   *
+   * A judge still belongs to a project — this is written into each project's
+   * own sealed configuration, exactly as a project that configured its own
+   * would be, rather than handed to the grader as a container-wide key. What
+   * changes is only who filled the form in: on a self-host the person running
+   * the platform and the person owning the project are the same person, and
+   * asking them for the same key twice buys nothing. `undefined` where none
+   * was configured, and then a project with no judge of its own errors its
+   * verdicts and says so, exactly as before.
+   */
+  readonly defaultJudge: DefaultJudge | undefined;
   /**
    * Where to post mail, if anywhere. **Absent is the ordinary case and is never
    * an error**: with no transport configured, signup asks for no verification
@@ -221,12 +251,48 @@ export function loadConfig(
     );
   }
 
-  const baseUrl = environment.EGMA_BASE_URL?.trim() || "http://localhost:3101";
+  const givenBaseUrl = environment.EGMA_BASE_URL?.trim() || "http://localhost:3101";
+  // Keep this check at the service boundary. The CLI is a public package that
+  // is compiled, not bundled, so shared runtime code would also have to be
+  // published. The platform-origin agreement test keeps both checks aligned.
+  let parsedBaseUrl: URL;
   try {
-    new URL(baseUrl);
+    parsedBaseUrl = new URL(givenBaseUrl);
   } catch {
-    throw new Error(`EGMA_BASE_URL is not a URL: ${baseUrl}`);
+    throw new Error("EGMA_BASE_URL is not a URL");
   }
+  if (!["http:", "https:"].includes(parsedBaseUrl.protocol)) {
+    throw new Error("EGMA_BASE_URL is not an HTTP origin");
+  }
+  if (
+    parsedBaseUrl.username !== "" ||
+    parsedBaseUrl.password !== "" ||
+    (parsedBaseUrl.pathname !== "" && parsedBaseUrl.pathname !== "/") ||
+    parsedBaseUrl.search !== "" ||
+    parsedBaseUrl.hash !== ""
+  ) {
+    // Named part by part, and with the value it should be, because this is a
+    // narrowing: a deployment that has run happily on a base URL with a path
+    // meets it for the first time on an upgrade, and "must be only the origin"
+    // is not something to have to work out at three in the morning. The
+    // password is never repeated back; only the fact that one is there is.
+    const wrong = [
+      parsedBaseUrl.username !== "" || parsedBaseUrl.password !== ""
+        ? "a username or password"
+        : "",
+      parsedBaseUrl.pathname !== "" && parsedBaseUrl.pathname !== "/"
+        ? `the path ${parsedBaseUrl.pathname}`
+        : "",
+      parsedBaseUrl.search !== "" ? "a query" : "",
+      parsedBaseUrl.hash !== "" ? "a fragment" : "",
+    ].filter((part) => part !== "");
+    throw new Error(
+      `EGMA_BASE_URL must be only the address egma is reached at — scheme, host and port, nothing else — and this one carries ${wrong.join(
+        " and ",
+      )}. Set it to ${parsedBaseUrl.origin} and start egma again. Egma serves its whole public surface, including the platform identity the CLI reads, at the root of this address; anything after the port cannot be honoured and is a sign that a proxy is putting egma under a subpath, which is not supported.`,
+    );
+  }
+  const baseUrl = parsedBaseUrl.origin;
 
   return {
     smtp: smtpSettings(environment, baseUrl),
@@ -234,12 +300,46 @@ export function loadConfig(
     clickhouseUrl,
     host: environment.HOST?.trim() || "0.0.0.0",
     port,
-    baseUrl: baseUrl.replace(/\/+$/, ""),
+    baseUrl,
     authSecret,
     encryptionKey,
     singleOrganization: flag(environment, "EGMA_SINGLE_ORGANIZATION", true),
     trustProxy: flag(environment, "EGMA_TRUST_PROXY", false),
     rateLimitPerMinute,
     simulatorServiceToken,
+    phone: {
+      trunkAddress: environment.EGMA_PHONE_TRUNK_ADDRESS?.trim() || null,
+      sourceNumber: environment.EGMA_PHONE_SOURCE_NUMBER?.trim() || null,
+      speechProvider: environment.EGMA_PHONE_SPEECH_PROVIDER?.trim() || null,
+    },
+    defaultJudge: defaultJudge(environment),
   };
+}
+
+/**
+ * The platform's default judge, or `undefined` where it has none.
+ *
+ * All three or nothing: a key with no model names nothing to ask, and a model
+ * with no key is a judge that errors every verdict it is given. Half a judge is
+ * refused at startup rather than discovered one failed run later.
+ */
+function defaultJudge(environment: NodeJS.ProcessEnv): DefaultJudge | undefined {
+  const provider = environment.EGMA_JUDGE_PROVIDER?.trim() || "";
+  const model = environment.EGMA_JUDGE_MODEL?.trim() || "";
+  const key = environment.EGMA_JUDGE_API_KEY?.trim() || "";
+  if (provider === "" && model === "" && key === "") return undefined;
+
+  const missing = [
+    provider === "" ? "EGMA_JUDGE_PROVIDER" : "",
+    model === "" ? "EGMA_JUDGE_MODEL" : "",
+    key === "" ? "EGMA_JUDGE_API_KEY" : "",
+  ].filter((name) => name !== "");
+  if (missing.length > 0) {
+    throw new Error(
+      `a default judge needs a provider, a model and a key, and this ` +
+        `deployment is missing ${missing.join(" and ")}. Set all three or ` +
+        "none: half a judge is a judge that errors every verdict it is given.",
+    );
+  }
+  return { provider, model, key };
 }

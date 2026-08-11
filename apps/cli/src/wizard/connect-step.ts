@@ -11,6 +11,7 @@
  * provider, once for a body to egma. Nothing here writes it anywhere.
  */
 
+import { bindRepositoryPlatform } from "../folder/egma-folder.ts";
 import type { Registered } from "../platform/agents.ts";
 import { readCredentials } from "../platform/credentials.ts";
 import type { RetellConfig } from "../retell/client.ts";
@@ -19,9 +20,12 @@ import {
   connect,
   CUSTODY_LINE,
   KEY_ASK_LINE,
+  NO_NUMBERS_LINE,
   registrationLine,
   type ConnectOptions,
   type ConnectOutcome,
+  type Reach,
+  type Registration,
 } from "../retell/connect.ts";
 import { DRIFT_LINE } from "../retell/prompt-drift.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
@@ -43,6 +47,11 @@ export type ConnectStepOptions = {
   readonly fetchImpl?: ConnectOptions["fetchImpl"];
 };
 
+/** The two words a reach screen may answer with, and nothing else. */
+function reachFrom(answer: string | null): Reach | null {
+  return answer === "text" || answer === "phone" ? answer : null;
+}
+
 /** The line the wizard closes on, for every way this step can end. */
 function reportFor(outcome: ConnectOutcome, signal: AbortSignal): ExitReport {
   switch (outcome.kind) {
@@ -60,6 +69,17 @@ function reportFor(outcome: ConnectOutcome, signal: AbortSignal): ExitReport {
       return { kind: "failed", reason: "there are no agents on that Retell account." };
     case "unchosen":
       return { kind: "failed", reason: "nobody said which Retell agent to test." };
+    case "unchosen-reach":
+      return {
+        kind: "failed",
+        reason:
+          "nobody said whether egma should reach this agent by text or by phone, " +
+          "so nothing was created.",
+      };
+    case "no-numbers":
+      return { kind: "failed", reason: NO_NUMBERS_LINE };
+    case "unchosen-number":
+      return { kind: "failed", reason: "nobody said which number egma should dial." };
     case "interrupted":
       return stopReport(signal, null);
     case "failed":
@@ -80,6 +100,12 @@ export type Connected = {
   readonly connected: {
     readonly registered: Registered;
     readonly config: RetellConfig;
+    /** Which way the developer chose, and the only one egma created. */
+    readonly reach: Reach;
+    /** The number egma will dial, or `null` for a text connection. */
+    readonly number: string | null;
+    /** Whether the agent and the connection were written or found. */
+    readonly registration: Registration;
   } | null;
 };
 
@@ -92,7 +118,10 @@ export type Connected = {
 export async function connectStep(options: ConnectStepOptions): Promise<Connected> {
   const { ui, signal } = options;
 
-  const held = await readCredentials(options.platform.credentialsFile);
+  const held = await readCredentials(
+    options.platform.credentialsFile,
+    options.platform.url,
+  );
   if (held === null) {
     return {
       report: {
@@ -106,6 +135,10 @@ export async function connectStep(options: ConnectStepOptions): Promise<Connecte
   // What went wrong last time, so the screen that asks again can say it above
   // the box rather than leaving the developer to guess what changed.
   let problem: string | null = null;
+
+  // A repository this platform may not write into, carried out of the hook
+  // below because the flow has no ending of its own for it.
+  const binding: { refused: Error | null } = { refused: null };
 
   const outcome = await connect({
     platform: { url: held.url, key: held.key },
@@ -135,6 +168,45 @@ export async function connectStep(options: ConnectStepOptions): Promise<Connecte
       ui.setAgentChoices(null);
       return chosen ?? null;
     },
+    chooseReach: async () => {
+      ui.setReachOffer(true);
+      const chosen = await untilAborted(ui.waitForAnswer("reach"), signal);
+      ui.setReachOffer(false);
+      return reachFrom(chosen ?? null);
+    },
+    chooseNumber: async (numbers) => {
+      ui.setNumberChoices(numbers);
+      const chosen = await untilAborted(ui.waitForAnswer("phone-number"), signal);
+      ui.setNumberChoices(null);
+      return chosen ?? null;
+    },
+    // The last moment before this repository owns anything that only one
+    // platform can resolve, and the reason this hook exists at all: every
+    // ending above it — no key, a key Retell will not take, an empty account,
+    // an unanswered choice of agent, reach or number — must leave the
+    // repository exactly as the walk found it. Bound any earlier and a wizard
+    // closed at the key box would leave an egma folder behind holding nothing
+    // but a binding.
+    beforeRegistering: async () => {
+      try {
+        await bindRepositoryPlatform(options.cwd, {
+          origin: options.platform.url,
+          instance: options.platform.instanceId,
+        });
+      } catch (cause) {
+        // Carried out rather than answered from in here: the flow has no
+        // ending for this, and an agent must not be registered on a platform
+        // this repository has already refused.
+        binding.refused = cause instanceof Error ? cause : new Error(String(cause));
+        throw cause;
+      }
+      ui.pushStatus(
+        `${ACTION_MARK} Bound this repository to Egma platform ${options.platform.instanceId}.`,
+      );
+    },
+  }).catch((cause: unknown) => {
+    if (binding.refused === null) throw cause;
+    return { kind: "failed", reason: binding.refused.message } as const;
   });
 
   if (outcome.kind !== "connected") {
@@ -148,8 +220,16 @@ export async function connectStep(options: ConnectStepOptions): Promise<Connecte
     // answer.
     ui.pushStatus(`${ACTION_MARK} Retell agent ${config.name}`);
     ui.pushStatus(`${DETAIL_MARK} ${config.agentId}`);
+    // The number, said on its own line and before the connection line, because
+    // it is the one fact on this screen that will cost somebody money.
+    if (outcome.number !== null) {
+      ui.pushStatus(`${ACTION_MARK} egma will dial ${outcome.number}.`);
+    }
     ui.pushStatus(
-      `${ACTION_MARK} ${registered.agent.name} is on egma, reachable over ${registered.connection.name} (retell ${registered.connection.modality}).`,
+      `${ACTION_MARK} ${registered.agent.name} is on egma, reachable over ${registered.connection.name} (${registered.connection.type} ${registered.connection.modality}).`,
+    );
+    ui.pushStatus(
+      `${DETAIL_MARK} agent ${outcome.registration.agent}, connection ${outcome.registration.connection}`,
     );
     // A second walk over the same Retell agent finds what the first one wrote.
     // egma says so rather than drawing a line that reads like a fresh
@@ -161,7 +241,13 @@ export async function connectStep(options: ConnectStepOptions): Promise<Connecte
 
     return {
       report: reportFor(outcome, signal),
-      connected: { registered, config },
+      connected: {
+        registered,
+        config,
+        reach: outcome.reach,
+        number: outcome.number,
+        registration: outcome.registration,
+      },
     };
   }
 }

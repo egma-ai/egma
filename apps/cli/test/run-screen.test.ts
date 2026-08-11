@@ -173,6 +173,11 @@ async function toTheRun(cols = 100): Promise<TerminalRun> {
   await showing(run, "Paste your Retell API key");
   run.write(`${KEY}\r`);
 
+  // Text or phone. Not this check's subject, and not skippable
+  // either: egma never picks one of the two for a developer.
+  await showing(run, "How should egma reach this agent?");
+  run.write("\r");
+
   await showing(run, "Do you already have test cases", "[n] none");
   run.write("n");
 

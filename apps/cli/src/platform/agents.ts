@@ -15,6 +15,13 @@
  * out of a stored copy that rots from the moment it is written. So this sends
  * no verbatim vendor payload, and a body that carried one would be refused by
  * name rather than quietly ignored.
+ *
+ * **Reads live here too, and they are here for one job.** Registering answers
+ * `name-taken` when a living agent in the project already holds the name, and
+ * what that means depends on which agent it is — the same voice agent being
+ * reached a second way, or a different one that happens to be called the same
+ * thing. Telling those apart takes a read, so the read is beside the write it
+ * belongs to rather than in a module of its own.
  */
 
 import type { RetellKey } from "../retell/key.ts";
@@ -23,7 +30,15 @@ import type { Fetch } from "./device-flow.ts";
 export type NewConnection = {
   /** Omit and the platform names it: `retell-1`, then `retell-2`. */
   readonly name?: string | undefined;
-  readonly type: "retell";
+  /**
+   * What kind of reach this is.
+   *
+   * `phone` carries no credential at all, and the platform refuses one on it by
+   * name: a destination number is public, and egma dials it with the telephony
+   * configuration its own deployment holds. That is what makes a phone
+   * connection provider-blind — nothing in it says who answers.
+   */
+  readonly type: "retell" | "phone";
   readonly modality: "voice" | "chat";
   readonly environment?: string | undefined;
   readonly config: Readonly<Record<string, string>>;
@@ -51,6 +66,14 @@ export type RegisteredConnection = {
   readonly modality: string;
   /** The last characters of the sealed secret, which is all that comes back. */
   readonly credentialsHint: string | null;
+  /**
+   * What to reach, as the platform stores it — the number for a phone
+   * connection, the vendor's agent id for a retell one. Never a secret: the
+   * config is the half of a connection that is public by construction, and it
+   * is what says whether a connection already on the platform is the one being
+   * asked for.
+   */
+  readonly config: Readonly<Record<string, string>>;
 };
 
 /**
@@ -108,10 +131,22 @@ function agentIn(body: Record<string, unknown>): RegisteredAgent | null {
   return id === "" ? null : { id, name: plain(agent["name"]) };
 }
 
-function connectionIn(body: Record<string, unknown>): RegisteredConnection | null {
-  const held = body["connection"];
-  if (typeof held !== "object" || held === null) return null;
-  const connection = held as Record<string, unknown>;
+/** The config a read answers with, as text values and nothing else. */
+function configIn(value: unknown): Record<string, string> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {};
+  }
+  const held: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry === "string") held[key] = entry;
+  }
+  return held;
+}
+
+/** One connection out of whatever object holds it, or `null` when it is not one. */
+function connectionFrom(value: unknown): RegisteredConnection | null {
+  if (typeof value !== "object" || value === null) return null;
+  const connection = value as Record<string, unknown>;
   const id = plain(connection["id"]);
   if (id === "") return null;
   const hint = plain(connection["credentials_hint"]);
@@ -121,7 +156,12 @@ function connectionIn(body: Record<string, unknown>): RegisteredConnection | nul
     type: plain(connection["type"]),
     modality: plain(connection["modality"]),
     credentialsHint: hint === "" ? null : hint,
+    config: configIn(connection["config"]),
   };
+}
+
+function connectionIn(body: Record<string, unknown>): RegisteredConnection | null {
+  return connectionFrom(body["connection"]);
 }
 
 /**
@@ -145,6 +185,243 @@ function outcomeIn(body: Record<string, unknown>): RegisterOutcome | null {
   return OUTCOMES.includes(said) ? (said as RegisterOutcome) : null;
 }
 
+/** The body a connection travels in, on both doors that take one. */
+function connectionBody(connection: NewConnection): Record<string, unknown> {
+  return {
+    ...(connection.name === undefined ? {} : { name: connection.name }),
+    type: connection.type,
+    modality: connection.modality,
+    ...(connection.environment === undefined
+      ? {}
+      : { environment: connection.environment }),
+    config: connection.config,
+    // The one place the key is read on the way to egma. It is sealed there
+    // and never answered back — what comes back is its last characters.
+    ...(connection.credentials === undefined
+      ? {}
+      : { credentials: { apiKey: connection.credentials.reveal() } }),
+  };
+}
+
+/**
+ * One request to egma, with this machine's key on it, answered as a value.
+ *
+ * Every door here answers the same three ways when it is not the door's own
+ * business — the machine is not signed in, egma refused, egma never answered —
+ * so the shape is written once and each door reads its own success out of it.
+ */
+type Answered =
+  | { readonly kind: "ok"; readonly status: number; readonly body: Record<string, unknown> }
+  | { readonly kind: "not-authenticated" }
+  | { readonly kind: "refused"; readonly reason: string; readonly status: number; readonly body: Record<string, unknown> }
+  | { readonly kind: "unreachable"; readonly reason: string };
+
+async function askPlatform(
+  options: RegisterOptions,
+  request: {
+    readonly method: "GET" | "POST";
+    readonly path: string;
+    readonly body?: unknown;
+  },
+): Promise<Answered> {
+  const url = `${options.url.replace(/\/+$/u, "")}${request.path}`;
+  const fetchImpl = options.fetchImpl ?? fetch;
+
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      method: request.method,
+      headers: {
+        authorization: `Bearer ${options.key}`,
+        ...(request.body === undefined ? {} : { "content-type": "application/json" }),
+      },
+      ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    });
+  } catch {
+    return {
+      kind: "unreachable",
+      reason: `egma at ${options.url} did not answer. Check the address, and that the instance is running.`,
+    };
+  }
+
+  const held = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  if (response.status === 401) return { kind: "not-authenticated" };
+  if (response.status < 200 || response.status >= 300) {
+    return {
+      kind: "refused",
+      reason: refusalIn(response.status, held),
+      status: response.status,
+      body: held,
+    };
+  }
+  return { kind: "ok", status: response.status, body: held };
+}
+
+/** An agent on the platform, as a listing or a read names it. */
+export type PlatformAgent = {
+  readonly id: string;
+  readonly name: string;
+};
+
+export type FoundAgent =
+  | { readonly kind: "found"; readonly agent: PlatformAgent }
+  /** No living agent of this credential's holds that name. */
+  | { readonly kind: "not-found" }
+  | { readonly kind: "not-authenticated" }
+  | { readonly kind: "refused"; readonly reason: string }
+  | { readonly kind: "unreachable"; readonly reason: string };
+
+/** How many pages of agents are walked before giving up on finding a name. */
+const MOST_PAGES = 20;
+
+/**
+ * The living agent holding one name, or the word that there is none.
+ *
+ * This exists for exactly one moment: egma asked the platform to register an
+ * agent, and the platform said a living agent already holds the name. What
+ * happens next depends on *which* agent that is — the same vendor agent being
+ * connected a second way, or a different one that happens to be called the same
+ * thing — and the only way to tell is to read it.
+ *
+ * Names are unique among a project's living agents, so at most one row can
+ * match and the walk stops at the first.
+ */
+export async function agentNamed(
+  name: string,
+  options: RegisterOptions,
+): Promise<FoundAgent> {
+  const wanted = name.trim();
+  let cursor: string | undefined;
+
+  for (let page = 0; page < MOST_PAGES; page += 1) {
+    const answer = await askPlatform(options, {
+      method: "GET",
+      path:
+        cursor === undefined
+          ? "/api/agents"
+          : `/api/agents?cursor=${encodeURIComponent(cursor)}`,
+    });
+    if (answer.kind !== "ok") return answer;
+
+    const items = Array.isArray(answer.body["items"])
+      ? (answer.body["items"] as unknown[])
+      : [];
+    for (const row of items) {
+      if (typeof row !== "object" || row === null) continue;
+      const held = row as Record<string, unknown>;
+      const id = plain(held["id"]);
+      if (id !== "" && plain(held["name"]) === wanted) {
+        return { kind: "found", agent: { id, name: wanted } };
+      }
+    }
+
+    const next = plain(answer.body["next_cursor"]);
+    if (next === "") break;
+    cursor = next;
+  }
+
+  return { kind: "not-found" };
+}
+
+export type ReadAgent =
+  | {
+      readonly kind: "agent";
+      readonly agent: PlatformAgent;
+      /** Every living way of reaching it, oldest first. */
+      readonly connections: readonly RegisteredConnection[];
+    }
+  | { readonly kind: "not-found" }
+  | { readonly kind: "not-authenticated" }
+  | { readonly kind: "refused"; readonly reason: string }
+  | { readonly kind: "unreachable"; readonly reason: string };
+
+/** One agent and every living way of reaching it. */
+export async function readAgent(
+  agentId: string,
+  options: RegisterOptions,
+): Promise<ReadAgent> {
+  const answer = await askPlatform(options, {
+    method: "GET",
+    path: `/api/agents/${encodeURIComponent(agentId)}`,
+  });
+  if (answer.kind === "refused" && answer.status === 404) return { kind: "not-found" };
+  if (answer.kind !== "ok") return answer;
+
+  const held = answer.body["agent"];
+  if (typeof held !== "object" || held === null) {
+    return {
+      kind: "refused",
+      reason: "egma answered without saying what it holds. Check that this egma is up to date.",
+    };
+  }
+  const agent = held as Record<string, unknown>;
+  const id = plain(agent["id"]);
+  if (id === "") return { kind: "not-found" };
+
+  const rows = Array.isArray(answer.body["connections"])
+    ? (answer.body["connections"] as unknown[])
+    : [];
+  const connections: RegisteredConnection[] = [];
+  for (const row of rows) {
+    const connection = connectionFrom(row);
+    if (connection !== null) connections.push(connection);
+  }
+
+  return {
+    kind: "agent",
+    agent: { id, name: plain(agent["name"]) },
+    connections,
+  };
+}
+
+export type AddedConnection =
+  | { readonly kind: "added"; readonly connection: RegisteredConnection }
+  /** A living connection on this agent already holds the name. */
+  | { readonly kind: "name-taken"; readonly name: string }
+  | { readonly kind: "not-found" }
+  | { readonly kind: "not-authenticated" }
+  | { readonly kind: "refused"; readonly reason: string }
+  | { readonly kind: "unreachable"; readonly reason: string };
+
+/**
+ * Another way of reaching an agent that already exists.
+ *
+ * The same body an inline connection travels in, at the platform's own second
+ * door. It is what a developer who connected over text and came back for the
+ * phone goes through: one voice agent, two ways to reach it, and one results
+ * history.
+ */
+export async function addConnection(
+  agentId: string,
+  connection: NewConnection,
+  options: RegisterOptions,
+): Promise<AddedConnection> {
+  const answer = await askPlatform(options, {
+    method: "POST",
+    path: `/api/agents/${encodeURIComponent(agentId)}/connections`,
+    body: connectionBody(connection),
+  });
+
+  if (answer.kind === "refused") {
+    if (answer.status === 404) return { kind: "not-found" };
+    if (answer.status === 409 && plain(answer.body["error"]) === "name_taken") {
+      return { kind: "name-taken", name: connection.name ?? "" };
+    }
+    return { kind: "refused", reason: answer.reason };
+  }
+  if (answer.kind !== "ok") return answer;
+
+  const written = connectionFrom(answer.body["connection"]);
+  if (written === null) {
+    return {
+      kind: "refused",
+      reason: "egma answered without saying what it wrote. Check that this egma is up to date.",
+    };
+  }
+  return { kind: "added", connection: written };
+}
+
 /**
  * Writes the agent and its first connection, and answers what happened.
  *
@@ -157,56 +434,27 @@ export async function registerAgent(
   registration: Registration,
   options: RegisterOptions,
 ): Promise<RegisterResult> {
-  const url = `${options.url.replace(/\/+$/u, "")}/api/agents`;
-  const fetchImpl = options.fetchImpl ?? fetch;
-
-  const body = {
-    name: registration.name,
-    ...(registration.description === undefined ? {} : { description: registration.description }),
-    ...(registration.project === undefined ? {} : { project: registration.project }),
-    connection: {
-      ...(registration.connection.name === undefined ? {} : { name: registration.connection.name }),
-      type: registration.connection.type,
-      modality: registration.connection.modality,
-      ...(registration.connection.environment === undefined
+  const answer = await askPlatform(options, {
+    method: "POST",
+    path: "/api/agents",
+    body: {
+      name: registration.name,
+      ...(registration.description === undefined
         ? {}
-        : { environment: registration.connection.environment }),
-      config: registration.connection.config,
-      // The one place the key is read on the way to egma. It is sealed there
-      // and never answered back — what comes back is its last characters.
-      ...(registration.connection.credentials === undefined
-        ? {}
-        : { credentials: { apiKey: registration.connection.credentials.reveal() } }),
+        : { description: registration.description }),
+      ...(registration.project === undefined ? {} : { project: registration.project }),
+      connection: connectionBody(registration.connection),
     },
-  };
+  });
 
-  let response: Response;
-  try {
-    response = await fetchImpl(url, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${options.key}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-    });
-  } catch {
-    return {
-      kind: "unreachable",
-      reason: `egma at ${options.url} did not answer. Check the address, and that the instance is running.`,
-    };
+  if (answer.kind === "refused") {
+    if (answer.status === 409 && plain(answer.body["error"]) === "name_taken") {
+      return { kind: "name-taken", name: registration.name };
+    }
+    return { kind: "refused", reason: answer.reason };
   }
-
-  const held = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-
-  if (response.status === 401) return { kind: "not-authenticated" };
-  if (response.status === 409 && plain(held["error"]) === "name_taken") {
-    return { kind: "name-taken", name: registration.name };
-  }
-  if (response.status < 200 || response.status >= 300) {
-    return { kind: "refused", reason: refusalIn(response.status, held) };
-  }
+  if (answer.kind !== "ok") return answer;
+  const held = answer.body;
 
   const agent = agentIn(held);
   const connection = connectionIn(held);

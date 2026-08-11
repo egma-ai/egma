@@ -32,6 +32,7 @@ export const ID_PREFIXES = [
   "acc",
   "vrf",
   "dvc",
+  "pf",
   "org",
   "prj",
   "mbr",

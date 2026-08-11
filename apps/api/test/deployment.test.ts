@@ -1,0 +1,143 @@
+/**
+ * The API's deployment story, checked against the code that reads it.
+ *
+ * **This file exists because the gap it closes really happened.** Phone
+ * readiness was written, documented in `.env.example`, and covered by tests —
+ * and then a real `egma self-host phone setup` against a real Twilio account
+ * finished every carrier step correctly and reported `setup required` anyway,
+ * because the compose entry for the API never passed the three variables
+ * through. A variable absent from a service's `environment:` is not merely
+ * undocumented: it does not reach the container at all, whatever the operator
+ * sets in their shell or their `.env`. Nothing fails, nothing warns, and the
+ * feature is quietly off.
+ *
+ * The simulator has had this check for its own variables since before the
+ * phone work; the API had none. So this is that check, one app over, and it is
+ * deliberately about *names and shapes* rather than about Docker: it parses no
+ * YAML and starts no container. What it asserts is true of the text, which is
+ * what somebody reads.
+ */
+
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { describe, expect, it } from "vitest";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const API = path.resolve(HERE, "..");
+const ROOT = path.resolve(API, "../..");
+
+/**
+ * What an `EGMA_*` variable looks like where the API reads one.
+ *
+ * The API reads its environment through one function, `loadConfig`, and always
+ * as `environment.NAME` or `environment["NAME"]` — so the reads are findable
+ * without running anything.
+ */
+const READ = /environment(?:\.|\[")(EGMA_[A-Z0-9_]+)/gu;
+
+/**
+ * Variables the API reads that no compose entry has to pass.
+ *
+ * `EGMA_API_ORIGIN` is the web application's build argument rather than a
+ * runtime variable of this process, and lives in that service's `build.args`.
+ */
+const NOT_A_RUNTIME_VARIABLE = new Set<string>([]);
+
+function everyFileUnder(directory: string): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(directory)) {
+    const here = path.join(directory, entry);
+    if (statSync(here).isDirectory()) found.push(...everyFileUnder(here));
+    else if (here.endsWith(".ts")) found.push(here);
+  }
+  return found;
+}
+
+function variablesReadByTheCode(): Set<string> {
+  const found = new Set<string>();
+  for (const file of everyFileUnder(path.join(API, "src"))) {
+    for (const match of readFileSync(file, "utf8").matchAll(READ)) {
+      found.add(match[1] as string);
+    }
+  }
+  return found;
+}
+
+/**
+ * One service's own lines out of the compose file.
+ *
+ * Services sit at one indent under `services:` and everything of theirs is
+ * indented further, so the block runs to the next line at the same depth.
+ * Enough for a file written by hand, which this one is.
+ */
+function serviceBlock(service: string): string {
+  const text = readFileSync(path.join(ROOT, "docker-compose.yml"), "utf8");
+  const opening = new RegExp(`^  ${service}:$`, "mu").exec(text);
+  expect(opening, `docker-compose.yml has no ${service} service`).not.toBeNull();
+  const rest = text.slice((opening as RegExpExecArray).index + (opening as RegExpExecArray)[0].length);
+  const closing = /^\S|^ {2}\S/mu.exec(rest);
+  return closing === null ? rest : rest.slice(0, closing.index);
+}
+
+describe("the API's deployment story", () => {
+  it("passes every variable the API reads to the api container", () => {
+    const block = serviceBlock("api");
+    const missing = [...variablesReadByTheCode()]
+      .filter((name) => !NOT_A_RUNTIME_VARIABLE.has(name))
+      .filter((name) => !block.includes(`${name}:`))
+      .sort();
+
+    expect(
+      missing,
+      `the api service in docker-compose.yml does not pass ${missing.join(", ")}, ` +
+        "so the container never sees it however it is set — the feature behind " +
+        "it is quietly off and nothing says so",
+    ).toEqual([]);
+  });
+
+  it("documents every variable the API reads in .env.example", () => {
+    const documented = readFileSync(path.join(ROOT, ".env.example"), "utf8");
+    const missing = [...variablesReadByTheCode()]
+      .filter((name) => !documented.includes(name))
+      .sort();
+
+    expect(
+      missing,
+      `.env.example does not name ${missing.join(", ")}, which the API reads — ` +
+        "a self-hoster cannot set a variable nobody told them about",
+    ).toEqual([]);
+  });
+
+  it("keeps the judge's key off the grader, and the carrier's secrets off the API", () => {
+    // The two halves of one decision, held here because each is one line away
+    // from being undone and neither would fail anything else.
+    //
+    // A judge configured per container is a judge no project chose, spent on
+    // conversations belonging to customers who agreed to neither — so the key
+    // reaches the API, which writes it into each project's own sealed row, and
+    // never the grader, which opens that row.
+    expect(serviceBlock("grader")).not.toContain("EGMA_JUDGE_API_KEY");
+
+    // And the API holds nothing it would dial or speak with. Its whole
+    // knowledge of the carrier is three non-secret facts.
+    const api = serviceBlock("api");
+    for (const secret of [
+      "TWILIO_AUTH_TOKEN",
+      "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD",
+      "EGMA_SIMULATOR_OPENAI_API_KEY",
+    ]) {
+      expect(api).not.toContain(secret);
+    }
+  });
+
+  it("never passes the Twilio Auth Token to any container", () => {
+    // The one credential in this whole effort that no running container may
+    // hold. It opens the entire account — every number, every recording, every
+    // log, the billing — and it is a setup-time input used once and kept
+    // nowhere. A compose entry for it would undo that silently.
+    const compose = readFileSync(path.join(ROOT, "docker-compose.yml"), "utf8");
+    expect(compose).not.toContain("TWILIO_AUTH_TOKEN");
+  });
+});

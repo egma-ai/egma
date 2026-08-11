@@ -596,6 +596,10 @@ class _StopsMidUtterance:
         return self._line.sample_rate_hz
 
     @property
+    def measured_band_hz(self) -> int | None:
+        return self._line.measured_band_hz
+
+    @property
     def far_end_left(self) -> bool:
         return self._line.far_end_left
 
@@ -719,6 +723,10 @@ class _NeverAnswers:
 
     @property
     def sample_rate_hz(self) -> int:
+        return 16000
+
+    @property
+    def measured_band_hz(self) -> int | None:
         return 16000
 
     @property
@@ -906,6 +914,10 @@ class _TalksOverThePersona:
 
     @property
     def sample_rate_hz(self) -> int:
+        return self._band_hz
+
+    @property
+    def measured_band_hz(self) -> int | None:
         return self._band_hz
 
     @property

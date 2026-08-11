@@ -112,6 +112,7 @@ describe("the provider's footprint on the schema", () => {
     "organization_settings",
     "persona",
     "persona_version",
+    "platform_instance",
     "project",
     "run",
     "run_event",

@@ -2,8 +2,10 @@ import { AgentWriteRefusedError } from "@egma/db";
 import { describe, expect, it } from "vitest";
 
 import {
+  conductableConnectionTypes,
   descriptorOf,
   gatedConfig,
+  noSimulatorAdapterMessage,
   optional,
   shapeChosen,
   shapeOf,
@@ -532,5 +534,34 @@ describe("a livekit connection that is half of each shape", () => {
     expect(() =>
       validCredentials("livekit", { url: A_URL }, { ...KEYS, apiToken: "x" }),
     ).toThrow(/have no key "apiToken"/);
+  });
+});
+
+/**
+ * Which types egma can conduct a run over, which is the whole of what the
+ * capability registry publishes about the simulator.
+ *
+ * It is a fact about the shipped build and never about one deployment: a
+ * platform whose carrier has never been configured still holds the phone
+ * adapter, and what it does about that is phone readiness' business, asked at
+ * the API where a deployment's configuration is known.
+ */
+describe("what the shipped simulator can conduct", () => {
+  it("counts phone among them, because the phone plug ships", () => {
+    expect(descriptorOf("phone").simulatorAdapter).toBe(true);
+    expect(conductableConnectionTypes()).toContain("phone");
+  });
+
+  it("names every shipped type in the refusal, and takes the list from the registry", () => {
+    // The sentence exists for a type egma has not shipped an adapter for.
+    // Every type in `CONNECTION_TYPES` has one today, so the rule is exercised
+    // on a name the registry does not hold — which is exactly the case the
+    // refusal is kept for.
+    expect(noSimulatorAdapterMessage("vapi")).toBe(
+      "egma has no simulator adapter for a vapi connection yet, so it will " +
+        "not start a run it cannot conduct. Run these tests over a " +
+        `connection egma conducts today: ${conductableConnectionTypes().join(", ")}.`,
+    );
+    expect(conductableConnectionTypes()).toEqual(["retell", "phone", "livekit"]);
   });
 });

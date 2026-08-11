@@ -61,9 +61,49 @@ export type TestGate = {
   /** What the tests would run against, for the sentence above the keys. */
   readonly agentName: string;
   readonly connectionName: string;
+  /**
+   * What kind of reach this is — `phone`, `retell`, whichever the platform
+   * registered. On the screen because the name does not say it: a connection
+   * called `retell-1` and a connection called `retell-2` can be a text one and
+   * a phone one, and the key being pressed here is the last one before either
+   * of them is used.
+   */
+  readonly connectionType: string;
   readonly modality: string;
+  /**
+   * The number every simulation will dial, or `null` when nothing is dialled.
+   *
+   * This is the one fact on the screen that costs money. Enter over twelve
+   * tests on a phone connection is twelve outbound calls to a real number on a
+   * real carrier, and a developer who is about to authorise that should be
+   * reading the number rather than inferring it from a connection's name. It is
+   * not a secret and never was: a destination number is the public half of a
+   * phone connection, which is what lets it be shown at all.
+   */
+  readonly destination: string | null;
   readonly suite: string;
 };
+
+/** The connection's public config, as the platform answered it. */
+export type GateConnection = {
+  readonly name: string;
+  readonly type: string;
+  readonly modality: string;
+  readonly config: Readonly<Record<string, string>>;
+};
+
+/**
+ * Where a connection dials, when it dials anywhere.
+ *
+ * Read off the connection's own config rather than from the type, because the
+ * config is what the platform stored and the type is only what it is called.
+ * A connection that reaches an agent some other way answers nothing here and
+ * the screen says nothing about dialling, which is the truth about it.
+ */
+export function destinationOf(connection: GateConnection): string | null {
+  const number = (connection.config["phoneNumber"] ?? "").trim();
+  return number === "" ? null : number;
+}
 
 import { NO_BEHAVIORS_REASON } from "../sync/push.ts";
 
@@ -90,7 +130,9 @@ export function gateFrom(
   about: {
     readonly agentName: string;
     readonly connectionName: string;
+    readonly connectionType: string;
     readonly modality: string;
+    readonly destination: string | null;
     readonly suite: string;
   },
   /**

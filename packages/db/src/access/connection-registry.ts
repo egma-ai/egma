@@ -472,9 +472,24 @@ export const CONNECTION_REGISTRY: Readonly<
         },
       },
     ],
-    // Nothing dials yet: a customer may register the number they want called,
-    // and a run over it is refused at creation until the adapter lands.
-    simulatorAdapter: false,
+    // The simulator dials. `egma_simulator.plugs.phone.PhoneCall` is registered
+    // for this type and places the call over the deployment's own carrier
+    // trunk, so a run over a phone connection is one egma can conduct.
+    //
+    // **What this says is a fact about the build, never about one deployment's
+    // carrier.** Whether *this* platform has been given a trunk is phone
+    // readiness, and it is a separate question that has to be asked where a
+    // deployment's configuration is known — this package cannot see it.
+    //
+    // That second question is asked, and it is asked in front of this one.
+    // `POST /api/runs` reads `phoneReadiness` off its own configuration and
+    // refuses a run over a phone connection with `phone_setup_required` before
+    // a row is written, so a platform nobody has given a carrier says so
+    // instead of queueing a call it cannot place. The two refusals sit in two
+    // layers because they are two different facts: this line is about what the
+    // simulator ships with, and that one is about what one installation has
+    // been configured with.
+    simulatorAdapter: true,
   },
   livekit: {
     // Voice only, and only because voice is the lane that exists. The registry

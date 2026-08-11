@@ -146,10 +146,24 @@ class RoomSession:
         self._heard: asyncio.Queue[bytes] = asyncio.Queue()
         self._left = asyncio.Event()
         self._carrying = asyncio.Event()
+        self._observed_band_hz: int | None = None
 
     @property
     def sample_rate_hz(self) -> int:
         return self._band_hz
+
+    @property
+    def observed_band_hz(self) -> int | None:
+        """The band the far end's audio really arrived at, or ``None``.
+
+        Read off the frames the transport handed over rather than taken
+        from :attr:`sample_rate_hz`, which is only what this session was
+        *asked* for. They agree while the transport resamples to the band
+        the pipeline was assembled at, and the whole value of this
+        property is the day one of them stops being true: a record that
+        copied the request would say 8 kHz about audio that was not.
+        """
+        return self._observed_band_hz
 
     @property
     def far_end_left(self) -> bool:
@@ -165,9 +179,11 @@ class RoomSession:
         """
         return self._carrying
 
-    def note_arrival(self, pcm: bytes) -> None:
+    def note_arrival(self, pcm: bytes, band_hz: int | None = None) -> None:
         self._heard.put_nowait(pcm)
         self._carrying.set()
+        if band_hz:
+            self._observed_band_hz = band_hz
 
     def note_departure(self) -> None:
         """The far end is off the line — its participant left the room.
@@ -294,7 +310,10 @@ class JoinedRoom:
             ) -> None:
                 await super().process_frame(frame, direction)
                 if isinstance(frame, InputAudioRawFrame):
-                    session.note_arrival(frame.audio)
+                    # The frame's own band, not the one asked for: this is
+                    # the one place in the whole path where what the audio
+                    # really is can be read rather than assumed.
+                    session.note_arrival(frame.audio, frame.sample_rate)
                 await self.push_frame(frame, direction)
 
         worker = PipelineWorker(

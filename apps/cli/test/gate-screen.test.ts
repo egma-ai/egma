@@ -71,6 +71,9 @@ const TESTS = [
  */
 const IN_ORDER = [...TESTS].sort();
 
+/** The number the agent under test answers, for the walk that ends in phone. */
+const DIALLED = "+14155550111";
+
 let platform: Platform;
 let workspace: Workspace;
 let retell: FakeRetell | undefined;
@@ -123,6 +126,12 @@ async function toTheGate(
     ...TESTS.flatMap((name) => writes(name)),
     { kind: "stop", reason: "end_turn" },
   ],
+  /**
+   * Whether to walk to a phone connection rather than a text one. The choosing
+   * itself is `connect-screen.test.ts`'s subject; here it is only the ground
+   * the gate stands on, so it is one extra keystroke and nothing more.
+   */
+  overThePhone = false,
 ): Promise<TerminalRun> {
   const script = await workspace.script({
     steps: [
@@ -155,6 +164,15 @@ async function toTheGate(
 
   await showing(run, "Paste your Retell API key");
   run.write(`${KEY}\r`);
+
+  // Text or phone. Not this check's subject, and not skippable
+  // either: egma never picks one of the two for a developer.
+  await showing(run, "How should egma reach this agent?");
+  if (overThePhone) {
+    run.write("\u001B[B");
+    await showing(run, "\u203a Phone");
+  }
+  run.write("\r");
 
   await showing(run, "Do you already have test cases", "[n] none");
   run.write("n");
@@ -272,6 +290,11 @@ describe("the files arriving", () => {
     run.write("\r");
     await showing(run, "Paste your Retell API key");
     run.write(`${KEY}\r`);
+
+    // Text or phone. Not this check's subject, and not skippable
+    // either: egma never picks one of the two for a developer.
+    await showing(run, "How should egma reach this agent?");
+    run.write("\r");
     await showing(run, "Do you already have test cases", "[n] none");
 
     run.write("");
@@ -351,7 +374,7 @@ describe("the gate", () => {
       IN_ORDER[0] as string,
       "default persona",
       "more (↑↓ browse · e opens in $EDITOR)",
-      "Run these against order-line over retell-1 (voice)?",
+      "Run these against order-line over retell-1 (retell, chat)?",
       ...GATE_HINTS,
     );
 
@@ -363,6 +386,59 @@ describe("the gate", () => {
     // The keys are offered in the order the transcript settled on.
     expect(list.indexOf("[enter] run")).toBeLessThan(list.indexOf("[e] edit first"));
     expect(list.indexOf("[e] edit first")).toBeLessThan(list.indexOf("[q] quit"));
+  });
+
+  /**
+   * The keystroke over a phone connection is the expensive one in this product,
+   * and the screen has to say so before it is pressed rather than after.
+   *
+   * A connection's name does not say what it is: `retell-1` and `phone-1` are
+   * both names the platform picks, and one of them dials a real telephone
+   * twelve times. So the kind is on the screen beside the name, and the number
+   * every simulation will ring is on the line under it — public by
+   * construction, because a destination number is the half of a phone
+   * connection that carries no credential at all.
+   */
+  it("names the kind of connection, and the number every simulation will dial", async () => {
+    await retell?.close();
+    retell = await startFakeRetell({
+      ...ONE_AGENT,
+      numbers: [
+        {
+          phone_number: DIALLED,
+          nickname: "order line",
+          inbound_agents: [{ agent_id: "agent_0001", weight: 1 }],
+        },
+      ],
+    });
+
+    const run = await toTheGate({}, undefined, true);
+
+    await showing(
+      run,
+      "5 tests generated",
+      "Run these against order-line over phone-1 (phone, voice)?",
+      `Every simulation dials ${DIALLED}.`,
+      ...GATE_HINTS,
+    );
+    run.write("q");
+    expect(await run.exited).toBe(0);
+  });
+
+  /**
+   * And the line is about the connection rather than decoration on every gate:
+   * a connection that dials nowhere says nothing about dialling, so a developer
+   * never reads a number that no simulation is going to ring.
+   */
+  it("says nothing about dialling when the connection dials nowhere", async () => {
+    const run = await toTheGate();
+
+    const list = await showing(run, "5 tests generated", ...GATE_HINTS);
+
+    expect(list).toContain("Run these against order-line over retell-1 (retell, chat)?");
+    expect(list).not.toContain("Every simulation dials");
+    run.write("q");
+    expect(await run.exited).toBe(0);
   });
 
   it("uploads exactly what was on the list when enter is pressed", async () => {
@@ -445,8 +521,8 @@ describe("the gate", () => {
     await showing(run, "5 tests generated", ...GATE_HINTS);
 
     // Down twice, so the file that opens is the third one and not the first.
-    run.write("[B");
-    run.write("[B");
+    run.write("\u001B[B");
+    run.write("\u001B[B");
     await showing(run, `› ${IN_ORDER[2] as string}`);
 
     run.write("e");
@@ -534,7 +610,7 @@ describe("the gate", () => {
       "5 tests generated",
       'suite "first-suite"',
       IN_ORDER[0] as string,
-      "Run these against order-line over retell-1 (voice)?",
+      "Run these against order-line over retell-1 (retell, chat)?",
       ...GATE_HINTS,
     );
     expect(back).not.toContain("STAND-IN EDITOR HAS THE SCREEN");
@@ -679,7 +755,7 @@ describe("the gate", () => {
     );
 
     // Down onto the file that is holding things up, and `e` opens that one.
-    run.write("[B");
+    run.write("\u001B[B");
     run.write("e");
     expect(await run.waitFor(() => existsSync(editor.opened))).toBe(true);
     expect((await readFile(editor.opened, "utf8")).trim().split("\n")).toEqual([refused]);

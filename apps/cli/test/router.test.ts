@@ -28,7 +28,9 @@ describe("which screen is on", () => {
       heldBack: [],
       agentName: "order-line",
       connectionName: "retell-1",
+      connectionType: "retell",
       modality: "voice",
+      destination: null,
       suite: "first-suite",
     });
     // The list is the thing to deal with, even while the pane is still set.
@@ -73,7 +75,9 @@ describe("which screen is on", () => {
       heldBack: [],
       agentName: "order-line",
       connectionName: "retell-1",
+      connectionType: "retell",
       modality: "voice",
+      destination: null,
       suite: "first-suite",
     });
 
@@ -110,7 +114,9 @@ describe("which screen is on", () => {
       heldBack: [],
       agentName: "order-line",
       connectionName: "retell-1",
+      connectionType: "retell",
       modality: "voice",
+      destination: null,
       suite: "first-suite",
     });
 

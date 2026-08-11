@@ -190,6 +190,7 @@ class LoopbackCounterpart:
         self._echoed_back = bytearray()
         self._ends_when_said = False
         self._left = False
+        self._carried = False
 
     @property
     def provider_reference(self) -> str | None:
@@ -198,6 +199,16 @@ class LoopbackCounterpart:
     @property
     def sample_rate_hz(self) -> int:
         return self._band_hz
+
+    @property
+    def measured_band_hz(self) -> int | None:
+        """The band this line really carried, once it has carried anything.
+
+        A loopback makes its own samples, so this is the band it was built
+        at — but it is still only answered once audio has crossed, so a
+        record can never stamp a band off a line that never opened.
+        """
+        return self._band_hz if self._carried else None
 
     @property
     def far_end_left(self) -> bool:
@@ -221,6 +232,7 @@ class LoopbackCounterpart:
         the quiet the counterpart spends exactly the quiet it was told to
         spend, to the sample.
         """
+        self._carried = True
         if self._due_to_speak():
             self._say_the_next_thing()
         spoken = self._next_slice(len(outgoing))

@@ -104,6 +104,7 @@ async function makeFolder(registered: Registered | null): Promise<void> {
   // never rewrites a config that is already there — and a check that changes
   // what the folder points at is exactly the thing that rule protects against.
   await writeConfig(made.paths.config, {
+    platform: null,
     agent: registered === null ? null : { name: "order-line", id: registered.agentId },
     connection: registered === null ? null : { name: "retell-1", id: registered.connectionId },
     suite: { name: "first-suite", id: null },

@@ -16,6 +16,13 @@
  * are the ones with something wrong with them, so a screen that named them and
  * then would not open them would be pointing at a problem while holding the door
  * shut.
+ *
+ * The sentence above the keys says what enter costs, and it says it in the
+ * plainest terms the screen has: which agent, which connection, what kind of
+ * connection that is, and — when the connection dials — the number every
+ * simulation will ring. On a phone connection a keystroke here is a dozen real
+ * outbound calls to somebody's real line, and a developer approving that should
+ * be reading the number rather than working it out from a connection's name.
  */
 
 import { Box, Text, useInput } from "ink";
@@ -127,8 +134,11 @@ export function GateScreen({
       )}
       <Box height={1} />
       <Text>
-        {`Run these against ${gate.agentName} over ${gate.connectionName} (${gate.modality})?`}
+        {`Run these against ${gate.agentName} over ${gate.connectionName} (${gate.connectionType}, ${gate.modality})?`}
       </Text>
+      {gate.destination === null ? null : (
+        <Text>{`Every simulation dials ${gate.destination}.`}</Text>
+      )}
       <Box height={1} />
       <Text dimColor>{hintBar(bindings)}</Text>
     </Box>

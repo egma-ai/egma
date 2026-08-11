@@ -3,6 +3,10 @@ import { randomBytes } from "node:crypto";
 import { createClient, type ClickHouseClient } from "@clickhouse/client";
 
 import { runClickHouseMigrations } from "../../src/clickhouse/migrate.ts";
+import {
+  MAINTENANCE_CLICKHOUSE_URL as MAINTENANCE_URL,
+  TEST_DATABASE_PREFIX,
+} from "./store-urls.ts";
 
 /**
  * Every guarantee under test is a ClickHouse-specific behaviour — the sort key,
@@ -16,8 +20,7 @@ import { runClickHouseMigrations } from "../../src/clickhouse/migrate.ts";
  * is the Postgres support file's arrangement, on the store beside it.
  */
 
-export const MAINTENANCE_CLICKHOUSE_URL =
-  process.env.TEST_CLICKHOUSE_URL ?? "http://egma:egma@localhost:8124/egma";
+export const MAINTENANCE_CLICKHOUSE_URL = MAINTENANCE_URL;
 
 function urlFor(databaseName: string): string {
   const url = new URL(MAINTENANCE_CLICKHOUSE_URL);
@@ -45,7 +48,7 @@ export type EmptyTraceStore = {
 export async function createEmptyTraceStore(
   label: string,
 ): Promise<EmptyTraceStore> {
-  const name = `egma_test_${label}_${randomBytes(4).toString("hex")}`;
+  const name = `${TEST_DATABASE_PREFIX}${label}_${randomBytes(4).toString("hex")}`;
   await onMaintenanceConnection((client) =>
     client.command({ query: `create database "${name}"` }),
   );

@@ -35,12 +35,17 @@ its own.
 
 ## The band a call is carried at
 
-Always :data:`TELEPHONY_BAND_HZ`, and there is no way to ask for another.
-That is the band a call over the public telephone network really is, and
-the bridge resamples what it receives down to it — which can only remove
-what was never there rather than invent detail. So the band the recorder
-measures off what flowed is a band the audio genuinely carried, and a
-narrowband call can never be stamped as a wideband one.
+The line is *driven* at :data:`TELEPHONY_BAND_HZ`, and there is no way to
+ask for another. That is the band a call over the public telephone network
+really is, and the bridge resamples what it receives down to it — which
+can only remove what was never there rather than invent detail.
+
+**What a record stamps is read back off the audio, never off that
+constant.** ``measured_band_hz`` answers with the band the far end's
+frames really arrived at, and it is ``None`` until some have. The two
+agree in every configuration that works; a configuration where they do not
+is one where a score would mean something it does not, and the record has
+to be able to say so.
 
 A trunk that negotiates wideband is understated by this rather than
 overstated, which is the safe direction: reading 8 kHz off a call that
@@ -188,6 +193,17 @@ class PhoneCall:
     @property
     def sample_rate_hz(self) -> int:
         return self._band_hz
+
+    @property
+    def measured_band_hz(self) -> int | None:
+        """The band this call really carried, read off the audio itself.
+
+        ``None`` until audio has flowed, and never a copy of
+        :attr:`sample_rate_hz`: a record that stamped the band it asked
+        for would say the same thing whether the path was right or wrong,
+        which is the one thing a measurement must not do.
+        """
+        return None if self._line is None else self._line.measured_band_hz
 
     @property
     def far_end_left(self) -> bool:

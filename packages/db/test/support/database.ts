@@ -4,6 +4,10 @@ import pg from "pg";
 
 import { connect, disconnect } from "../../src/client.ts";
 import { runMigrations } from "../../src/migrate.ts";
+import {
+  MAINTENANCE_DATABASE_URL as MAINTENANCE_URL,
+  TEST_DATABASE_PREFIX,
+} from "./store-urls.ts";
 
 /**
  * Every guarantee under test is a Postgres-specific behaviour — `COLLATE "C"`,
@@ -14,8 +18,7 @@ import { runMigrations } from "../../src/migrate.ts";
  * afterwards, so a file can migrate from empty without disturbing another.
  */
 
-export const MAINTENANCE_DATABASE_URL =
-  process.env.TEST_DATABASE_URL ?? "postgres://egma:egma@localhost:5433/egma";
+export const MAINTENANCE_DATABASE_URL = MAINTENANCE_URL;
 
 function urlFor(databaseName: string): string {
   const url = new URL(MAINTENANCE_DATABASE_URL);
@@ -42,7 +45,7 @@ export type EmptyDatabase = {
 };
 
 export async function createEmptyDatabase(label: string): Promise<EmptyDatabase> {
-  const name = `egma_test_${label}_${randomBytes(4).toString("hex")}`;
+  const name = `${TEST_DATABASE_PREFIX}${label}_${randomBytes(4).toString("hex")}`;
   await onMaintenanceConnection((client) =>
     client.query(`create database "${name}"`),
   );

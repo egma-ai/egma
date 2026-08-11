@@ -35,6 +35,7 @@ function named(name: string | null): NamedThing | null {
 
 export async function runInitCommand(options: InitCommandOptions): Promise<number> {
   const config: FolderConfig = {
+    platform: null,
     agent: named(options.names.agent),
     connection: named(options.names.connection),
     suite: named(options.names.suite),

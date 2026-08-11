@@ -1,11 +1,14 @@
 import {
   authorize,
   cancelRun,
+  connectionTypeOf,
   getRun,
   listRunEvents,
   listSimulations,
   NotPermittedError,
   ProjectOutsideOrganizationError,
+  readRunVerdicts,
+  readVerdicts,
   RunWriteRefusedError,
   startRun,
   type AuthContext,
@@ -13,7 +16,10 @@ import {
   type MockToolCoverage,
   type MockToolSnapshot,
   type Run,
+  type RecordedVerdict,
   type RunEvent,
+  type RunVerdicts,
+  type SimulationVerdicts,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
@@ -29,8 +35,13 @@ import {
   noAdapter,
   notFound,
   notPermitted,
+  phoneSetupRequired,
   unprocessable,
 } from "../http/refusals.ts";
+import {
+  phoneSetupRequiredMessage,
+  type PhoneReadiness,
+} from "../phone-readiness.ts";
 
 /**
  * Starting a run, reading it whole, following it while it happens, and
@@ -49,6 +60,15 @@ import {
  * own sentence and the code `no_adapter`. A run left queued for a conductor
  * that does not exist is a promise egma cannot keep, and it would be
  * discovered by a person waiting for a terminal that never moves.
+ *
+ * **A phone run is refused before it is written when this deployment has no
+ * carrier**, with the code `phone_setup_required`. Two refusals in two layers,
+ * on purpose: `no_adapter` is a fact about the build and lives in `@egma/db`
+ * beside the registry that knows it, and this one is a fact about *this
+ * installation's* configuration, which that package cannot see and should
+ * never learn to. The order matters more than the split — the point of
+ * refusing here is that no paid provider action has happened yet, and none
+ * will.
  *
  * **The feed is a numbered cursor, and the split is written down.** This side
  * is stateless: it remembers nothing about who has read what, and the same
@@ -72,7 +92,29 @@ export type RunRoutesOptions = {
   readonly rateLimit: RateLimit;
   /** Where this instance is, for the address a person opens results at. */
   readonly baseUrl: string;
+  /**
+   * Whether this deployment has been set up to place phone calls.
+   *
+   * Read here rather than in `@egma/db` because it is not a fact about the
+   * product at all — it is a fact about one installation's carrier, and it
+   * arrives as this process's configuration. The data-access package cannot
+   * see it and must not learn to: it would mean a package every test and every
+   * worker imports carrying a deployment's environment around.
+   */
+  readonly phone: PhoneReadiness;
 };
+
+/**
+ * The connection types this deployment cannot dial over until its phone half
+ * has been set up.
+ *
+ * One entry, and it is a list rather than an `=== "phone"` so that the next
+ * carrier-backed type is a line here instead of a condition somebody has to
+ * find. What makes a type belong is not that it is telephony-shaped: it is that
+ * conducting it spends the platform's *own* carrier, which is the thing
+ * `egma self-host phone setup` provides.
+ */
+const NEEDS_THE_PLATFORMS_CARRIER: readonly string[] = ["phone"];
 
 export const RUNS_PATH = "/api/runs";
 export const RUN_PATH = "/api/runs/:runId";
@@ -135,11 +177,16 @@ const NO_SUCH_RUN =
  * The two pins are both here on purpose: `test_version_id` is what actually
  * executed and never moves, and `test_id` is what to go and edit.
  *
- * `verdict` is what the graders make of the conversation. Nothing judges
- * anything yet, so it is null here and null everywhere — the field is in the
- * shape from the first day so that nothing a client reads changes when the
- * graders arrive. The events record already has a place to carry one; this row
- * gains its own the day something writes one down.
+ * `verdict` is what the graders make of the conversation, folded over every
+ * dimension judged against it. It is `null` for a conversation nobody has
+ * judged **yet** — which is not the same as one judged and found wanting, and
+ * the two must never read alike. `grading` carries that distinction: a
+ * conversation with no rows says `pending`, and one with rows says `graded`
+ * beside whatever the fold came to.
+ *
+ * Execution and grading are separate facts and are reported separately. A
+ * conversation can be `completed` and ungraded, and a reader that collapsed the
+ * two would call a run finished while its judgment was still being written.
  *
  * `mock_tool_coverage` is here because comparing two of these numbers is only
  * valid when both conversations were conducted in the same world. A simulation
@@ -149,7 +196,11 @@ const NO_SUCH_RUN =
  * nothing editable to ask. Null says the agent was never asked what tools it
  * has, so nothing was learned and nothing is claimed.
  */
-function describedSimulation(one: ConductedSimulation): Record<string, unknown> {
+function describedSimulation(
+  one: ConductedSimulation,
+  judged: SimulationVerdicts | undefined,
+  rows: readonly RecordedVerdict[],
+): Record<string, unknown> {
   return {
     id: one.id,
     position: one.position,
@@ -159,7 +210,30 @@ function describedSimulation(one: ConductedSimulation): Record<string, unknown> 
     persona_id: one.personaId,
     persona_name: one.personaName,
     status: one.status,
-    verdict: null,
+    grading: judged === undefined ? "pending" : "graded",
+    verdict: judged?.outcome.verdict ?? null,
+    score: judged?.outcome.score ?? null,
+    // Skipped and errored are carried out whole rather than folded into the
+    // other two: missing judgment is not a pass and a broken judge is not a
+    // failing agent, and a summary that hid either would say the opposite of
+    // what happened.
+    counts: judged === undefined ? null : judged.outcome.counts,
+    // Every judged behaviour, whole. The fold above says how many passed; this
+    // says which ones and why, because "2 of 3 passed" without the rationale
+    // sends somebody to read a transcript to work out what egma already knew.
+    // The judge is named on every row: a verdict nobody can attribute is a
+    // verdict nobody can argue with.
+    verdicts: rows.map((its) => ({
+      grader_id: its.graderId,
+      dimension: its.dimension,
+      verdict: its.verdict,
+      score: its.score,
+      priority: its.priority,
+      rationale: its.rationale,
+      cited_turns: [...its.citedSpanIds],
+      judged_by: its.judgedBy,
+      judged_at: its.judgedAt,
+    })),
     reason: one.endingReason,
     mock_tool_coverage: describedMockToolCoverage(one.mockToolCoverage),
   };
@@ -215,12 +289,25 @@ function describedMockTools(
   };
 }
 
-/** The run and its conversations — one shape for starting, reading and stopping. */
+/**
+ * The run and its conversations — one shape for starting, reading and stopping.
+ *
+ * `judged` is absent wherever the caller could not or need not pay for a
+ * verdict read: starting a run judges nothing, so that path passes nothing and
+ * every conversation reads `pending`, which is exactly true a millisecond after
+ * a run begins.
+ */
 function describedRun(
   one: Run,
   simulations: readonly ConductedSimulation[],
   baseUrl: string,
+  judged?: RunVerdicts,
+  rowsBySimulation?: ReadonlyMap<string, readonly RecordedVerdict[]>,
 ): Record<string, unknown> {
+  const bySimulation = new Map(
+    (judged?.simulations ?? []).map((its) => [its.simulationId, its] as const),
+  );
+  const gradedCount = simulations.filter((one) => bySimulation.has(one.id)).length;
   return {
     id: one.id,
     status: one.status,
@@ -246,7 +333,27 @@ function describedRun(
     results_url: `${baseUrl.replace(/\/+$/u, "")}/runs/${one.id}`,
     created_at: one.createdAt.toISOString(),
     finished_at: one.finishedAt?.toISOString() ?? null,
-    simulations: simulations.map(describedSimulation),
+    // Grading progress, reported apart from execution progress. A run whose
+    // conversations have all finished is not a run whose judgment is in: these
+    // two counts settle at different moments and a reader has to be able to see
+    // which one it is waiting on.
+    graded_count: gradedCount,
+    verdict: judged?.outcome.verdict ?? null,
+    score: judged?.outcome.score ?? null,
+    counts: judged?.outcome.counts ?? null,
+    by_grader: (judged?.byGrader ?? []).map((its) => ({
+      grader_id: its.graderId,
+      verdict: its.outcome.verdict,
+      score: its.outcome.score ?? null,
+      counts: its.outcome.counts,
+    })),
+    simulations: simulations.map((its) =>
+      describedSimulation(
+        its,
+        bySimulation.get(its.id),
+        rowsBySimulation?.get(its.id) ?? [],
+      ),
+    ),
   };
 }
 
@@ -289,7 +396,26 @@ async function runAsItStands(
   if (header === undefined) return undefined;
 
   const simulations = (await listSimulations(auth, runId)) ?? [];
-  return describedRun(header, simulations, baseUrl);
+  // The verdict store is a separate store and can be down while the run itself
+  // reads perfectly well. A run that answered 500 because nothing had judged it
+  // yet would be a grading outage presented as a missing run, so an unreachable
+  // verdict store degrades to "pending" — which is the same shape a genuinely
+  // ungraded run has, and which the next read corrects on its own.
+  const judged = await readRunVerdicts(auth, runId).catch(() => undefined);
+
+  // The rows themselves, one conversation at a time. The run fold deliberately
+  // does not carry them — a run of two hundred conversations would be a page
+  // nobody asked for — so they are gathered only for the conversations this run
+  // actually has, and only for the ones something has judged.
+  const rowsBySimulation = new Map<string, readonly RecordedVerdict[]>();
+  await Promise.all(
+    (judged?.simulations ?? []).map(async (its) => {
+      const read = await readVerdicts(auth, its.simulationId).catch(() => undefined);
+      if (read !== undefined) rowsBySimulation.set(its.simulationId, read.verdicts);
+    }),
+  );
+
+  return describedRun(header, simulations, baseUrl, judged, rowsBySimulation);
 }
 
 export async function runRoutes(
@@ -330,6 +456,29 @@ export async function runRoutes(
 
     const acting = await actingIn(auth, given(text(body.project)));
     if ("refusal" in acting) return refuseActing(reply, acting);
+
+    /**
+     * Nothing is dialled from a platform that has no carrier, and the refusal
+     * lands before the run exists.
+     *
+     * **Only asked on a platform that is not ready**, so the ordinary case —
+     * a set-up deployment, which is every deployment that has ever placed a
+     * call — costs nothing at all. A read here would otherwise sit in front of
+     * every run creation to answer a question that has one answer.
+     *
+     * A connection this caller cannot see reads as `undefined` and falls
+     * through untouched: `startRun` owns that sentence, and answering it here
+     * would confirm somebody else's connection exists by refusing about it.
+     */
+    if (options.phone.state !== "ready") {
+      const type = await connectionTypeOf(acting.auth, text(body.connection));
+      if (type !== undefined && NEEDS_THE_PLATFORMS_CARRIER.includes(type)) {
+        return phoneSetupRequired(
+          reply,
+          phoneSetupRequiredMessage(options.phone),
+        );
+      }
+    }
 
     const onAgent = given(text(body.agent));
     const label = given(text(body.label));
