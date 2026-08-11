@@ -186,6 +186,8 @@ describe("adding a colleague, with no mail configured", () => {
     "hands the link to the inviter, and following it lands the colleague inside",
     async () => {
       await page.goto(`${origin}/members`);
+      expect(await page.getByText("Invite somebody").count()).toBe(0);
+      await page.getByRole("tab", { name: "Invitations" }).click();
       await page.waitForSelector("text=Invite somebody");
 
       await page.fill("#invite-email", "bob@acme.example");
@@ -243,6 +245,11 @@ describe("adding a colleague, with no mail configured", () => {
       await page.goto(`${origin}/members`);
       const bob = page.locator("article", { hasText: "bob@acme.example" });
       await bob.waitFor();
+      expect(
+        await bob.locator("select, button").evaluateAll((controls) =>
+          controls.map((control) => control.getBoundingClientRect().height),
+        ),
+      ).toEqual([44, 44, 44]);
 
       const memberActions: string[] = [];
       const recordMemberAction = (request: Request) => {
@@ -583,15 +590,27 @@ describe("the list of what an organization recorded", () => {
       await page.goto(`${origin}/`);
 
       const sidebar = page.locator("aside");
-      await sidebar
-        .getByRole("button", { name: "Sign out" })
-        .waitFor({ state: "visible" });
+      const settings = sidebar.locator('summary[aria-label="Open settings menu"]');
+      await settings.waitFor({ state: "visible" });
+      expect(await sidebar.innerText()).not.toContain("ada@acme.example");
+      expect(await sidebar.innerText()).not.toContain("Admin account");
+      expect(await sidebar.innerText()).toContain("Settings");
+      expect(await sidebar.getByRole("link", { name: "Organization" }).count()).toBe(0);
+
+      await settings.click();
       expect(
         await sidebar.getByRole("button", { name: "Sign out" }).count(),
       ).toBe(1);
       expect(
         await page.locator("main").getByRole("button", { name: "Sign out" }).count(),
       ).toBe(0);
+      await sidebar.getByRole("link", { name: "Organization settings" }).click();
+      await page.waitForURL(/\/members$/);
+      await page.getByRole("tab", { name: "People" }).waitFor({ state: "visible" });
+      expect(await page.getByRole("tab", { name: "People" }).count()).toBe(1);
+      expect(await page.getByRole("tab", { name: "Invitations" }).count()).toBe(1);
+      await page.getByRole("link", { name: "Home", exact: true }).click();
+      await page.waitForURL(new RegExp(`${origin}/$`));
 
       await page.evaluate(() => {
         Reflect.set(window, "__egma_same_document_navigation", true);
@@ -1002,6 +1021,7 @@ describe("the saved theme", () => {
       expect(await page.locator("html").getAttribute("data-theme")).toBe("light");
       const controls = page.locator('button[aria-label="Use dark theme"]');
       await expect.poll(() => controls.count()).toBe(2);
+      await page.locator('aside summary[aria-label="Open settings menu"]').click();
       await controls.first().click();
 
       expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");
@@ -1024,7 +1044,7 @@ describe("recovering when a page cannot load", () => {
     async () => {
       await page.route("**/api/members", (route) => route.abort());
       await page.goto(`${origin}/members`);
-      await page.waitForSelector("text=People could not be loaded");
+      await page.waitForSelector("text=Organization settings could not be loaded");
       await page.unroute("**/api/members");
       await page.getByRole("button", { name: "Try again" }).click();
       await page.waitForSelector("text=Everybody in your organization");

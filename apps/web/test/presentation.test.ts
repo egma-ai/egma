@@ -24,7 +24,6 @@ describe("the product navigation", () => {
     expect(PRODUCT_NAVIGATION).toEqual([
       { id: "home", label: "Home", href: "/" },
       { id: "transcripts", label: "Transcripts", href: "/traces" },
-      { id: "people", label: "People", href: "/members" },
     ]);
   });
 });

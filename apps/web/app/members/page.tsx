@@ -14,6 +14,7 @@ type Member = {
 type Invitation = { id: string; email: string; role: string; expires_at: string };
 
 type Roster = { members: Member[]; may_manage_members: boolean };
+type SettingsTab = "people" | "invitations";
 
 const ROLES = ["admin", "member", "viewer"] as const;
 
@@ -24,6 +25,7 @@ function isRoster(value: unknown): value is Roster {
 }
 
 export default function MembersPage() {
+  const [tab, setTab] = useState<SettingsTab>("people");
   const [roster, setRoster] = useState<Roster | null>(null);
   const [signedOut, setSignedOut] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -78,6 +80,16 @@ export default function MembersPage() {
   }, [refresh]);
 
   useEffect(() => {
+    const readTab = () => {
+      const selected = new URLSearchParams(globalThis.location.search).get("tab");
+      setTab(selected === "invitations" ? "invitations" : "people");
+    };
+    readTab();
+    globalThis.addEventListener("popstate", readTab);
+    return () => globalThis.removeEventListener("popstate", readTab);
+  }, []);
+
+  useEffect(() => {
     if (confirmation === null) return;
     const dialog = confirmationDialog.current;
     dialog?.showModal();
@@ -95,6 +107,14 @@ export default function MembersPage() {
   ): void {
     confirmationOpener.current = opener;
     setConfirmation({ action, member });
+  }
+
+  function showTab(next: SettingsTab): void {
+    const address = new URL(globalThis.location.href);
+    if (next === "people") address.searchParams.delete("tab");
+    else address.searchParams.set("tab", next);
+    globalThis.history.pushState(null, "", `${address.pathname}${address.search}`);
+    setTab(next);
   }
 
   async function send(
@@ -156,7 +176,7 @@ export default function MembersPage() {
 
   if (loadFailed && roster === null) {
     return (
-      <StatePage title="People could not be loaded" lead="Egma could not reach the organization right now.">
+      <StatePage title="Organization settings could not be loaded" lead="Egma could not reach the organization right now.">
         <button
           className={styles.button}
           type="button"
@@ -172,46 +192,61 @@ export default function MembersPage() {
     );
   }
 
-  if (roster === null) return <StatePage title="Loading people" lead="Reading this organization’s members and invitations." />;
+  if (roster === null) return <StatePage title="Loading organization settings" lead="Reading this organization’s members and invitations." />;
+
+  const shownTab = roster.may_manage_members ? tab : "people";
 
   return (
-    <AppShell active="people">
+    <AppShell>
       <ProductPage>
-        <PageHeader eyebrow="Organization" title="People" lead="Everybody in your organization." />
+        <PageHeader eyebrow="Organization" title="Organization settings" lead="Manage people and invitations for this organization." />
         {problem === null ? null : <Notice tone="error">{problem}</Notice>}
 
-        <section className={styles.peopleList} aria-label="Members">
-          {roster.members.map((member) => (
-            <article className={styles.personRow} key={member.user_id}>
-              <div className={styles.personIdentity}>
-                <strong>{member.email}</strong>
-                <span>{member.deactivated_at === null ? member.role : `${member.role} · deactivated`}</span>
-              </div>
-              {roster.may_manage_members ? (
-                <div className={styles.personActions}>
-                  <select
-                    aria-label={`${member.email} role`}
-                    value={member.role}
-                    disabled={busy}
-                    onChange={(event) => {
-                      void send(`/api/members/${member.user_id}/role`, { role: event.target.value }).then(refresh);
-                    }}
-                  >
-                    {ROLES.map((one) => <option key={one} value={one}>{one}</option>)}
-                  </select>
-                  <button type="button" disabled={busy} onClick={(event) => askForConfirmation("deactivate", member, event.currentTarget)}>Deactivate</button>
-                  <button className={styles.destructive} type="button" disabled={busy} onClick={(event) => askForConfirmation("remove", member, event.currentTarget)}>Remove</button>
-                </div>
-              ) : <strong>{member.role}</strong>}
-            </article>
-          ))}
-        </section>
+        <div className={styles.settingsTabs} role="tablist" aria-label="Organization settings">
+          <button className={shownTab === "people" ? styles.settingsTabActive : undefined} type="button" role="tab" aria-selected={shownTab === "people"} onClick={() => showTab("people")}>People</button>
+          {roster.may_manage_members ? <button className={shownTab === "invitations" ? styles.settingsTabActive : undefined} type="button" role="tab" aria-selected={shownTab === "invitations"} onClick={() => showTab("invitations")}>Invitations</button> : null}
+        </div>
 
-        {roster.may_manage_members ? (
-          <section className={styles.managementGrid}>
+        {shownTab === "people" ? (
+          <section className={styles.settingsPanel} aria-labelledby="people-title">
+            <div className={styles.settingsPanelHeader}>
+              <h2 id="people-title">People</h2>
+              <p>Everybody in your organization.</p>
+            </div>
+            <div className={styles.peopleList} aria-label="Members">
+              {roster.members.map((member) => (
+                <article className={styles.personRow} key={member.user_id}>
+                  <div className={styles.personIdentity}>
+                    <strong>{member.email}</strong>
+                    <span>{member.deactivated_at === null ? member.role : `${member.role} · deactivated`}</span>
+                  </div>
+                  {roster.may_manage_members ? (
+                    <div className={styles.personActions}>
+                      <select
+                        aria-label={`${member.email} role`}
+                        value={member.role}
+                        disabled={busy}
+                        onChange={(event) => {
+                          void send(`/api/members/${member.user_id}/role`, { role: event.target.value }).then(refresh);
+                        }}
+                      >
+                        {ROLES.map((one) => <option key={one} value={one}>{one}</option>)}
+                      </select>
+                      <button type="button" disabled={busy} onClick={(event) => askForConfirmation("deactivate", member, event.currentTarget)}>Deactivate</button>
+                      <button className={styles.destructive} type="button" disabled={busy} onClick={(event) => askForConfirmation("remove", member, event.currentTarget)}>Remove</button>
+                    </div>
+                  ) : <strong>{member.role}</strong>}
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {roster.may_manage_members && shownTab === "invitations" ? (
+          <section className={`${styles.settingsPanel} ${styles.managementGrid}`} aria-labelledby="invite-title">
             <div className={styles.managementIntro}>
-              <p className={styles.eyebrow}>Invite</p>
-              <h2>Invite somebody</h2>
+              <p className={styles.eyebrow}>Invitations</p>
+              <h2 id="invite-title">Invite somebody</h2>
               <p>If no mail transport is configured, Egma gives you a one-time link to send yourself.</p>
 
               {note === null ? null : <Notice tone="success">{note}</Notice>}

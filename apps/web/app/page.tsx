@@ -68,10 +68,6 @@ export default function Home() {
             <small>01 / PRIMARY</small><strong>{LIST.navigation}</strong>
             <p>Inspect each exchange, its tools, timing, and errors.</p><i>→</i>
           </Link>
-          <Link className={styles.homeLink} href="/members">
-            <small>02 / ORGANIZATION</small><strong>Manage your people</strong>
-            <p>Invite a teammate or review who can change this organization.</p><i>→</i>
-          </Link>
         </section>
 
         <section className={styles.contextFacts} aria-label="Current context">

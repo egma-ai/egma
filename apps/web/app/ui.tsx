@@ -129,7 +129,7 @@ export function AppShell({
   initialMe,
   children,
 }: {
-  active: AppSection;
+  active?: AppSection;
   initialMe?: Me;
   children: ReactNode;
 }) {
@@ -179,19 +179,6 @@ export function AppShell({
     window.location.assign("/");
   }
 
-  const signOutButton = (
-    <button
-      className={styles.accountSignOut}
-      type="button"
-      disabled={signingOut}
-      onClick={() => {
-        void signOut();
-      }}
-    >
-      {signingOut ? "Signing out…" : "Sign out"}
-    </button>
-  );
-
   return (
     <div className={styles.appShell}>
       <aside className={styles.sidebar}>
@@ -205,20 +192,13 @@ export function AppShell({
           {PRODUCT_NAVIGATION.map((item) => <Link key={item.id} className={active === item.id ? styles.navigationActive : undefined} aria-current={active === item.id ? "page" : undefined} href={item.href}>{item.label}</Link>)}
         </nav>
         <div className={styles.sidebarFooter}>
-          <div className={styles.accountLine}>
-            <span className={styles.avatar}>{initial}</span>
-            <span className={styles.accountDetails}>
-              <span className={styles.accountEmail}>{me?.user.email ?? (contextState === "unavailable" ? "Account unavailable" : "Loading…")}</span>
-              {signOutButton}
-            </span>
-            <ThemeToggle />
-          </div>
+          <AccountMenu initial={initial} signingOut={signingOut} onSignOut={() => void signOut()} />
         </div>
       </aside>
       <div className={styles.appBody}>
         <header className={styles.mobileHeader}>
           <Link href="/" aria-label="Egma home"><Brand /></Link>
-          <span className={styles.mobileActions}>{signOutButton}<ThemeToggle /></span>
+          <span className={styles.mobileActions}><AccountMenu initial={initial} signingOut={signingOut} onSignOut={() => void signOut()} /></span>
         </header>
         <nav className={styles.mobileNavigation} aria-label="Main navigation">
           {PRODUCT_NAVIGATION.map((item) => <Link key={item.id} className={active === item.id ? styles.navigationActive : undefined} aria-current={active === item.id ? "page" : undefined} href={item.href}>{item.label}</Link>)}
@@ -226,6 +206,33 @@ export function AppShell({
         {children}
       </div>
     </div>
+  );
+}
+
+function AccountMenu({
+  initial,
+  signingOut,
+  onSignOut,
+}: {
+  initial: string;
+  signingOut: boolean;
+  onSignOut: () => void;
+}) {
+  return (
+    <details className={styles.accountMenu}>
+      <summary className={styles.accountCard} aria-label="Open settings menu">
+        <span className={styles.avatar}>{initial}</span>
+        <span className={styles.accountCardLabel}>Settings</span>
+        <span className={styles.accountChevron} aria-hidden="true">⌃</span>
+      </summary>
+      <div className={styles.accountMenuPanel}>
+        <Link className={styles.accountMenuItem} href="/members">Organization settings</Link>
+        <span className={styles.accountThemeRow}><span>Theme</span><ThemeToggle /></span>
+        <button className={styles.accountMenuItem} type="button" disabled={signingOut} onClick={onSignOut}>
+          {signingOut ? "Signing out…" : "Sign out"}
+        </button>
+      </div>
+    </details>
   );
 }
 

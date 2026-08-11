@@ -13,7 +13,6 @@ export function nextTheme(theme: Theme): Theme {
 export const PRODUCT_NAVIGATION = [
   { id: "home", label: "Home", href: "/" },
   { id: "transcripts", label: "Transcripts", href: "/traces" },
-  { id: "people", label: "People", href: "/members" },
 ] as const;
 
 export type ProductSection = (typeof PRODUCT_NAVIGATION)[number]["id"];

@@ -21,11 +21,12 @@
 .field { display: flex; flex-direction: column; gap: 7px; }
 .field label { display: flex; flex-direction: column; font-family: var(--mono); font-size: 12px; font-weight: 500; }
 .field label span { margin-top: 2px; color: var(--muted); font-family: var(--sans); font-size: 13px; font-weight: 400; }
-.input, .select, .textarea { width: 100%; padding: 13px 14px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); font-size: 16px; }
+.input, .select { width: 100%; height: var(--control-height); padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); font-size: 16px; }
+.textarea { width: 100%; padding: 13px 14px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); font-size: 16px; }
 .input:disabled, .input[readonly], .select:disabled { background: var(--surface-soft); color: var(--muted); }
 .textarea { min-height: 120px; resize: vertical; }
 .codeInput { font-family: var(--mono); font-size: 22px; letter-spacing: .18em; text-align: center; text-transform: uppercase; }
-.button, .buttonSecondary, .buttonDanger { display: inline-flex; min-height: 46px; align-items: center; justify-content: center; padding: 11px 16px; border-radius: 8px; cursor: pointer; font-family: var(--mono); font-size: 12px; font-weight: 500; }
+.button, .buttonSecondary, .buttonDanger { display: inline-flex; height: var(--control-height); align-items: center; justify-content: center; padding: 0 16px; border-radius: 8px; cursor: pointer; font-family: var(--mono); font-size: 12px; font-weight: 500; }
 .button { border: 1px solid var(--inverse); background: var(--inverse); color: var(--inverse-text); }
 .buttonSecondary { border: 1px solid var(--border-strong); background: var(--surface); color: var(--foreground); }
 .buttonDanger { border: 1px solid var(--bad); background: transparent; color: var(--bad); }
@@ -51,15 +52,21 @@
 .navigation { display: flex; flex-direction: column; gap: 4px; }
 .navigation a, .mobileNavigation a { padding: 10px 12px; border-radius: 7px; color: var(--muted); text-decoration: none; }
 .navigation a:hover, .navigation a.navigationActive, .mobileNavigation a.navigationActive { background: var(--surface-soft); color: var(--foreground); }
-.sidebarFooter { display: flex; margin-top: auto; flex-direction: column; gap: 18px; }
-.accountLine { display: grid; min-width: 0; align-items: center; grid-template-columns: 34px minmax(0, 1fr) 38px; gap: 9px; margin: 0 -10px -10px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.sidebarFooter { position: relative; display: flex; margin-top: auto; flex-direction: column; gap: 18px; }
+.accountMenu { position: relative; width: 100%; }
+.accountCard { display: grid; min-width: 0; align-items: center; grid-template-columns: 34px minmax(0, 1fr) 18px; gap: 10px; margin: 0 -10px -10px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); cursor: pointer; list-style: none; }
+.accountCard::-webkit-details-marker { display: none; }
+.accountMenu[open] .accountCard { border-color: var(--border-strong); background: var(--surface-soft); }
 .avatar { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border: 1px solid var(--border); border-radius: 50%; font-family: var(--mono); font-size: 12px; }
-.accountDetails { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: 3px; }
-.accountEmail { overflow: hidden; flex: 1; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.accountSignOut { min-height: 20px; padding: 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-family: var(--mono); font-size: 10px; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; }
-.accountSignOut:hover:not(:disabled) { color: var(--foreground); text-decoration-color: currentColor; }
-.accountSignOut:disabled { cursor: wait; opacity: .6; }
-.accountLine .themeToggle { width: 38px; height: 38px; }
+.accountCardLabel { overflow: hidden; font-size: 13px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.accountChevron { color: var(--muted); font-family: var(--mono); font-size: 12px; transition: transform 120ms ease; }
+.accountMenu[open] .accountChevron { transform: rotate(180deg); }
+.accountMenuPanel { position: absolute; z-index: 10; right: -10px; bottom: calc(100% + 18px); left: -10px; padding: 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: 0 16px 45px rgb(0 0 0 / .14); }
+.accountMenuItem, .accountThemeRow { display: flex; width: 100%; min-height: var(--control-height); align-items: center; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--foreground); font-family: var(--mono); font-size: 11px; text-align: left; text-decoration: none; }
+.accountMenuItem { cursor: pointer; }
+.accountMenuItem:hover:not(:disabled) { background: var(--surface-soft); }
+.accountMenuItem:disabled { cursor: wait; opacity: .6; }
+.accountThemeRow { justify-content: space-between; color: var(--muted); }
 .mobileActions { display: flex; align-items: center; gap: 14px; }
 .appBody { min-width: 0; }
 .mobileHeader, .mobileNavigation { display: none; }
@@ -76,7 +83,7 @@
 .definitionRow { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 15px 0; border-bottom: 1px solid var(--border); }
 .definitionRow dt { color: var(--muted); font-family: var(--mono); font-size: 11px; }
 .definitionRow dd { margin: 0; font-weight: 550; text-align: right; }
-.definitionRow select { min-width: 160px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }
+.definitionRow select { min-width: 160px; height: var(--control-height); padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }
 .mono { font-family: var(--mono); }
 .muted { color: var(--muted); }
 .wrong { color: var(--bad); }
@@ -84,7 +91,7 @@
 .homeHero { max-width: 780px; padding-bottom: 62px; border-bottom: 1px solid var(--border); }
 .homeHero h1 { margin: 0; font-size: clamp(46px, 5.4vw, 72px); font-weight: 500; line-height: .98; letter-spacing: -.055em; }
 .homeHero > p:last-child { max-width: 650px; margin: 22px 0 0; color: var(--muted); font-size: 19px; }
-.homeLinks { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border); }
+.homeLinks { display: grid; grid-template-columns: 1fr; border-bottom: 1px solid var(--border); }
 .homeLink { position: relative; min-height: 220px; padding: 32px 34px; border-right: 1px solid var(--border); color: inherit; text-decoration: none; }
 .homeLink:last-child { border-right: 0; }
 .homeLink:hover { background: var(--surface-soft); }
@@ -100,7 +107,7 @@
 .listToolbar { display: flex; align-items: center; gap: 10px; color: var(--muted); font-family: var(--mono); font-size: 11px; }
 .compactSelectControl { position: relative; display: inline-flex; }
 .compactSelectControl::after { position: absolute; top: 50%; right: 14px; width: 6px; height: 6px; border-right: 1px solid var(--muted); border-bottom: 1px solid var(--muted); content: ""; pointer-events: none; transform: translateY(-70%) rotate(45deg); }
-.compactSelect { min-width: 148px; min-height: 42px; appearance: none; padding: 9px 38px 9px 13px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--foreground); cursor: pointer; font-family: var(--mono); font-size: 11px; }
+.compactSelect { min-width: 148px; height: var(--control-height); appearance: none; padding: 0 38px 0 13px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--foreground); cursor: pointer; font-family: var(--mono); font-size: 11px; }
 .compactSelect:hover { background: var(--surface-soft); }
 .listMeta { display: flex; justify-content: space-between; padding: 24px 2px 13px; color: var(--muted); font-family: var(--mono); font-size: 11px; }
 .tableWrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
@@ -148,18 +155,27 @@
 .otherSteps { margin-top: 36px; padding: 18px 0; border-top: 1px solid var(--border); }
 .otherSteps > summary { cursor: pointer; font-weight: 550; }
 
+.settingsTabs { display: flex; gap: 26px; border-bottom: 1px solid var(--border); }
+.settingsTabs button { min-height: 48px; margin-bottom: -1px; padding: 0 1px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); cursor: pointer; font-family: var(--mono); font-size: 11px; }
+.settingsTabs button:hover { color: var(--foreground); }
+.settingsTabs button.settingsTabActive { border-bottom-color: var(--foreground); color: var(--foreground); }
+.settingsPanel { padding-top: 38px; }
+.settingsPanelHeader { display: flex; align-items: baseline; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
+.settingsPanelHeader h2 { margin: 0; font-size: 24px; font-weight: 520; letter-spacing: -.025em; }
+.settingsPanelHeader p { margin: 0; color: var(--muted); }
 .peopleList { border-bottom: 1px solid var(--border); }
 .personRow { display: grid; align-items: center; grid-template-columns: minmax(180px, 1fr) auto; gap: 18px; padding: 18px 0; border-top: 1px solid var(--border); }
 .personIdentity { min-width: 0; }
 .personIdentity strong { display: block; overflow-wrap: anywhere; font-weight: 550; }
 .personIdentity span { color: var(--muted); font-family: var(--mono); font-size: 10px; }
-.personActions { display: flex; align-items: center; gap: 8px; }
-.personActions select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }
-.personActions button { padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); cursor: pointer; font-family: var(--mono); font-size: 10px; }
+.personActions { display: grid; align-items: center; grid-template-columns: 112px 104px 104px; gap: 8px; }
+.personActions select, .personActions button { width: 100%; height: var(--control-height); padding: 0 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); font-family: var(--mono); font-size: 11px; }
+.personActions select { cursor: pointer; }
+.personActions button { cursor: pointer; }
 .personActions button:hover:not(:disabled) { border-color: var(--border-strong); background: var(--surface-soft); }
 .personActions .destructive { color: var(--bad); }
 .personActions .destructive:hover:not(:disabled) { background: color-mix(in srgb, var(--bad) 9%, transparent); }
-.managementGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; padding-top: 62px; }
+.managementGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; }
 .managementIntro h2 { max-width: 400px; margin: 0; font-size: 27px; font-weight: 520; line-height: 1.15; }
 .managementIntro > p:last-child { color: var(--muted); }
 .invitationLink { overflow-wrap: anywhere; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft); font-family: var(--mono); font-size: 11px; }
@@ -180,6 +196,9 @@
   .appShell { display: block; }
   .sidebar { display: none; }
   .mobileHeader { display: flex; height: 68px; align-items: center; justify-content: space-between; padding: 0 22px; border-bottom: 1px solid var(--border); }
+  .mobileActions .accountMenu { width: 144px; }
+  .mobileActions .accountCard { margin: 0; padding: 6px 8px; }
+  .mobileActions .accountMenuPanel { top: calc(100% + 8px); right: 0; bottom: auto; left: auto; width: 220px; }
   .mobileNavigation { display: flex; padding: 7px 14px; border-bottom: 1px solid var(--border); }
   .mobileNavigation a { padding: 9px 12px; }
   .productPage, .productPageWide { width: min(100% - 40px, 720px); padding-top: 58px; }
@@ -213,7 +232,7 @@
   .turnText { font-size: 16px; }
   .turnBody { margin-left: 72px; }
   .personRow { grid-template-columns: 1fr; }
-  .personActions { align-items: stretch; flex-direction: column; }
+  .personActions { align-items: stretch; grid-template-columns: 1fr; }
   .personActions select, .personActions button { width: 100%; min-height: 44px; }
   .buttonRow { flex-direction: column-reverse; }
 }
