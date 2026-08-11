@@ -592,7 +592,22 @@ async function runPhoneSetup(
     EGMA_JUDGE_API_KEY: openaiKey,
   };
 
-  const configFile = writePlatformConfig(workspace, configuration, {
+  // **The one window this command cannot make atomic, made legible instead.**
+  //
+  // Twilio has already accepted a new SIP password by the time this runs, and
+  // it accepts only that one — the old password stopped working the moment the
+  // rotation landed. If this write fails, the carrier and this machine disagree
+  // about the credential, and the symptom is every outbound call failing
+  // authentication with nothing on screen to explain it.
+  //
+  // There is no transaction across a carrier's API and a local file, and
+  // reordering does not help: writing first would leave a password here that
+  // Twilio never accepted. So the failure is caught and named, and the recovery
+  // is stated — running setup again mints another password and writes both ends
+  // together, which is the whole repair.
+  let configFile: string;
+  try {
+    configFile = writePlatformConfig(workspace, configuration, {
     header: [
       "egma platform configuration — written by `egma self-host phone setup`.",
       "",
@@ -603,8 +618,13 @@ async function runPhoneSetup(
       "The Twilio Auth Token is deliberately not here. It was used once, to do",
       "the carrier paperwork, and never kept: what a running egma holds is the",
       "SIP credential below, which can authenticate one trunk and nothing else.",
-    ],
-  });
+      ],
+    });
+  } catch (cause) {
+    throw new CarrierError(
+      `Twilio accepted a new SIP password for ${applied.sipUsername}, and this machine could not write it down: ${(cause as Error).message}. The carrier now accepts only a password that is not saved here, so calls would fail to authenticate. Run \`egma self-host phone setup\` again — it mints another password and writes both ends together. Nothing was charged and no call was placed.`,
+    );
+  }
 
   const composeOptions: ComposeOptions = {
     workspace,

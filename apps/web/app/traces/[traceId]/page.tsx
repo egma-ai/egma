@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { Fragment, use, useEffect, useState } from "react";
 
 import {
   DETAIL,
@@ -182,8 +182,11 @@ export default function TranscriptPage({
       {detail.turns.length === 0 ? (
         <p style={styles.lead}>{DETAIL.noTurns}</p>
       ) : (
+        // A Fragment, not an element: the turns are direct children of the
+        // screen, and a wrapper here would add a level to the DOM that the
+        // browser test reads through — and did break once.
         detail.turns.map((turn, at) => (
-          <div key={turn.span_id}>
+          <Fragment key={turn.span_id}>
             <Turn turn={turn} openedAt={openedAt} />
             {/* The judgments that read this turn, against the turn itself.
                 A verdict citing turn 9 belongs beside turn 9 — reading it on
@@ -193,7 +196,7 @@ export default function TranscriptPage({
               .map((its) => (
                 <Judged key={`${its.grader_id}:${its.dimension}:${its.judged_at}`} judgment={its} />
               ))}
-          </div>
+          </Fragment>
         ))
       )}
 

@@ -115,7 +115,26 @@ export function buildApi(options: ServerOptions): Api {
     },
     hooks: {
       admitIdentity: admitIdentity(config.singleOrganization),
-      onIdentityCreated: onIdentityCreated(config.defaultJudge),
+      // **The platform's own judge is only ever given away on a
+      // single-organization deployment**, and the guard is here rather than
+      // deeper because this is the only place that knows both facts.
+      //
+      // That judge is the operator's own model credential. On a deployment
+      // holding one customer — a self-hoster, which is what this default is
+      // for — handing it to the project is the whole point: a first run has to
+      // be gradable before anybody has configured anything. On a deployment
+      // with open signup it is the opposite. Every stranger who signs up gets
+      // their own organization, and giving each one the operator's key means
+      // untrusted people's grading is billed to the operator, on a credential
+      // they never chose to share.
+      //
+      // So a multi-tenant deployment provisions no default judge, and a
+      // project there is ungraded until it configures its own. That is the
+      // honest failure: `errored` verdicts naming a missing judge, rather than
+      // a quiet invoice.
+      onIdentityCreated: onIdentityCreated(
+        config.singleOrganization ? config.defaultJudge : undefined,
+      ),
     },
   });
 
