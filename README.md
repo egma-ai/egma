@@ -106,6 +106,27 @@ and the rest kept. Serving egma under a subpath such as
 address — so the fix is to drop everything after the port. The startup message
 names the part to remove.
 
+**`EGMA_BLOB_PUBLIC_URL` is the address *a browser* reaches the recording store
+at, and it is set at the same moment as the one above.** A voice simulation's
+recording is played by the browser fetching it from the object store directly,
+using a short-lived link the API signs; the audio never travels through egma,
+which is what makes dragging the scrubber cost nothing. A signature covers the
+host it was made for — so if this names the address the API uses
+(`http://minio:9000`, inside the compose network) rather than the one a browser
+uses, every recording comes back `SignatureDoesNotMatch` and the error names
+neither address. The default assumes a browser on this machine; an instance
+others reach at `http://192.168.1.10:3101` has to say `http://192.168.1.10:9000`
+here, exactly as it has to say the first address in `EGMA_BASE_URL`.
+
+Leaving it unset is allowed and breaks nothing else: the platform runs, runs run,
+and asking for a recording answers with the name of this variable rather than
+with a player that does nothing.
+
+**The API's store credential is read-only**, created by the deployment on first
+start and separate from the one the simulator writes with. A leaked read
+credential must not be usable to overwrite a call recording, so it can fetch one
+object at a time and cannot write, delete or list.
+
 **`EGMA_SIMULATOR_SERVICE_TOKEN` is what the simulator shows the API to claim
 work, and the API refuses to start without one.** The answers to a claim carry
 your live provider credentials, and port 3100 is published on the host, so the
@@ -401,10 +422,16 @@ the phone stack comes along because the simulator depends on it. What starts is 
 number instead of the fixture's placeholder, and a simulator that can dial it.
 Then watch the workbench's log: the claim, the call, each turn of the
 conversation as it is spoken, the timings measured off the audio, and the
-recording's reference. The `.wav` is on the `simulator-data` volume with the
-persona on one channel and the agent on the other —
-`docker compose cp simulator:/var/lib/egma-simulator/blobs/<reference> ./call.wav`
-brings it out to listen to.
+recording's reference. The `.wav` is in the object store, with the persona on one
+channel and the agent on the other. From a full deployment you press play on the
+run's results and hear it; the workbench overlay starts no API and no pages, so
+this brings it out to listen to instead:
+
+```bash
+docker compose exec minio sh -c \
+  'mc alias set egma http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
+   mc cat "egma/egma-recordings/<reference>"' > call.wav
+```
 
 The persona speaks in a deterministic test tone unless you name real speech
 providers, and a real agent hears that as noise. `egma self-host phone setup`
@@ -491,7 +518,10 @@ storage at all.
 One test drives a real browser: `apps/api/test/browser.test.ts` starts the API
 and the web application on ports of their own and clicks through the paths a
 person actually walks — logging in from a terminal, inviting a colleague on an
-instance with no mail configured, and reading what an agent did. It uses the
+instance with no mail configured, reading what an agent did, and playing a voice
+simulation's recording off a real object store. That last one is here rather than
+against the API because the failure it catches *is* a browser using a different
+address than the platform, which nothing inside one process can see. It uses the
 Chrome already on your machine, and failing that any Chromium under
 `PLAYWRIGHT_BROWSERS_PATH`; this repository depends on `playwright-core` and
 downloads no browser of its own, so **install Google Chrome or point that

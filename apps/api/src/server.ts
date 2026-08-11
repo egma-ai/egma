@@ -19,6 +19,7 @@ import { memberRoutes } from "./routes/members.ts";
 import { mockToolRoutes } from "./routes/mock-tools.ts";
 import { phoneReadiness } from "./phone-readiness.ts";
 import { platformRoutes } from "./routes/platform.ts";
+import { recordingRoutes } from "./routes/recordings.ts";
 import { reportRoutes } from "./routes/reports.ts";
 import { runRoutes } from "./routes/runs.ts";
 import { signOutRoutes } from "./routes/sign-out.ts";
@@ -250,6 +251,18 @@ export function buildApi(options: ServerOptions): Api {
     rateLimit,
     baseUrl: config.baseUrl,
     phone,
+  });
+
+  // Where a recording's reference becomes something a browser can play. Its own
+  // scope beside the run group rather than inside it, because one route serves
+  // two surfaces — a run's results and a transcript — and neither owns it. The
+  // store is handed in and may be absent: naming where a browser reaches it is
+  // what turns this on, and a deployment that named none says so in a sentence
+  // rather than answering an empty player.
+  void app.register(recordingRoutes, {
+    provider: identity.provider,
+    rateLimit,
+    blob: config.blob,
   });
 
   // The simulator's claim door. Outside the credentialed scope and the

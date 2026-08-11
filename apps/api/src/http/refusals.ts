@@ -28,6 +28,7 @@ export const CODES = {
   no_adapter: 422,
   phone_setup_required: 422,
   too_many_requests: 429,
+  no_object_store: 503,
 } as const;
 
 export type RefusalCode = keyof typeof CODES;
@@ -164,6 +165,29 @@ export function wrongServiceToken(reply: FastifyReply): FastifyReply {
       "the same value — restart whichever holds a stale one. A customer key " +
       "starts egma_sk_ and files under its own account instead.",
   );
+}
+
+/**
+ * The reader may have this, and this deployment has nowhere to get it from.
+ *
+ * The only 5xx in this vocabulary, and it earns that: every other refusal here
+ * is about the request, and this one is about the installation. A recording
+ * exists, the person asking is entitled to it, and the control plane has not
+ * been told where a browser reaches the store — so the honest answer is that
+ * egma is not able to serve this right now, with the variable to set. Answering
+ * 404 would tell a reader their recording is gone, which is the one thing that
+ * is not true.
+ *
+ * It is deliberately the **last** refusal a route makes, after every question
+ * about who is asking and what they asked for. A configuration answer that
+ * arrived first would let a stranger learn whether a simulation exists by
+ * watching which sentence comes back.
+ */
+export function noObjectStore(
+  reply: FastifyReply,
+  message: string,
+): FastifyReply {
+  return refuse(reply, "no_object_store", message);
 }
 
 /** The organization's request budget is spent; the header says when to retry. */

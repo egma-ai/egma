@@ -10,7 +10,7 @@ import {
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
-import { loadConfig } from "../../src/config.ts";
+import { loadConfig, type Config } from "../../src/config.ts";
 import { buildApi } from "../../src/server.ts";
 import {
   createMigratedDatabase,
@@ -86,6 +86,17 @@ export type InstanceOptions = {
    * answers.
    */
   readonly web?: boolean;
+  /**
+   * The object store recordings are resolved against, where the caller has one
+   * running. Absent by default, because most of what a browser does here has
+   * nothing to do with audio — and because the one flow that does must skip
+   * visibly rather than fail on a machine that cannot start a container.
+   *
+   * It is a whole store rather than a URL because the address the API signs
+   * for is the address the browser will use, and handing both halves in from
+   * one place is what keeps this arrangement from proving the wrong thing.
+   */
+  readonly blob?: Config["blob"];
   /**
    * Every raw HTTP request, before Fastify or authentication can refuse it.
    * Test evidence only: this listener changes no production server.
@@ -163,15 +174,18 @@ export async function startInstance(
   const origin = `http://127.0.0.1:${webPort}`;
 
   const { app } = buildApi({
-    config: loadConfig({
-      DATABASE_URL: database.url,
-      CLICKHOUSE_URL: traceStore.url,
-      EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
-      EGMA_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
-      EGMA_SIMULATOR_SERVICE_TOKEN: "egma_st_held-by-this-test-suite-alone",
-      EGMA_BASE_URL: origin,
-      EGMA_SINGLE_ORGANIZATION: "false",
-    }),
+    config: {
+      ...loadConfig({
+        DATABASE_URL: database.url,
+        CLICKHOUSE_URL: traceStore.url,
+        EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
+        EGMA_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
+        EGMA_SIMULATOR_SERVICE_TOKEN: "egma_st_held-by-this-test-suite-alone",
+        EGMA_BASE_URL: origin,
+        EGMA_SINGLE_ORGANIZATION: "false",
+      }),
+      ...(options.blob === undefined ? {} : { blob: options.blob }),
+    },
   });
   if (options.observeRequest !== undefined) {
     // `prependListener` puts this before Fastify's own request listener. A

@@ -24,6 +24,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { BUCKET, READ_ONLY_POLICY } from "./support/object-storage.ts";
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const API = path.resolve(HERE, "..");
 const ROOT = path.resolve(API, "../..");
@@ -130,6 +132,40 @@ describe("the API's deployment story", () => {
     ]) {
       expect(api).not.toContain(secret);
     }
+  });
+
+  it("gives the API a store credential that can only read, and never the simulator's", () => {
+    const compose = readFileSync(path.join(ROOT, "docker-compose.yml"), "utf8");
+    const api = serviceBlock("api");
+
+    // The whole reason there are two credentials. A leaked read credential must
+    // not be usable to overwrite a customer's call recording, and the one line
+    // that would undo that is the API being handed the write pair — which is
+    // exactly what an interpolation default would do if somebody "simplified"
+    // it. Neither write variable may appear on this service at all.
+    for (const write of [
+      "EGMA_S3_ACCESS_KEY_ID",
+      "EGMA_S3_SECRET_ACCESS_KEY",
+      "EGMA_SIMULATOR_S3_ACCESS_KEY_ID",
+      "EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY",
+    ]) {
+      // The read pair's own names contain `EGMA_S3_READ_…`, so the write names
+      // are looked for as whole words followed by `:-` or `}` — how compose
+      // writes an interpolation — rather than as substrings.
+      expect(
+        new RegExp(`\\$\\{${write}[:}]`, "u").test(api),
+        `the api service reads ${write}, which is a credential that can write`,
+      ).toBe(false);
+    }
+
+    // And what that read-only credential is allowed to do, held against the
+    // policy the object-storage suite proves against a real MinIO. The two are
+    // the same sentence in two files, and a drift between them would mean the
+    // suite proving a policy nobody deploys.
+    const written =
+      /printf '([^']+)'\s*\n?\s*"\$\$EGMA_S3_BUCKET"/u.exec(compose)?.[1] ?? "";
+    expect(written, "the bucket job writes a policy document").not.toBe("");
+    expect(JSON.parse(written.replace("%s", BUCKET))).toEqual(READ_ONLY_POLICY);
   });
 
   it("never passes the Twilio Auth Token to any container", () => {

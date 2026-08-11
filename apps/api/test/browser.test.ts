@@ -9,6 +9,12 @@ import {
   FIXTURE_TRACE,
 } from "./support/fixture.ts";
 import { SETTLE, startInstance, type Instance } from "./support/instance.ts";
+import {
+  aRecording,
+  startObjectStorage,
+  type ObjectStorage,
+} from "./support/object-storage.ts";
+import { aConductedRun, standingOf } from "./support/recordings.ts";
 
 /**
  * Everything a person actually clicks through, once each, in a real browser:
@@ -52,8 +58,27 @@ let browser: Browser;
 let page: Page;
 let origin: string;
 
+/**
+ * A real object store, for the one thing below that needs one.
+ *
+ * Started at collection rather than in `beforeAll`, because the flow that uses
+ * it has to **skip visibly** where no container can be started and a `describe`
+ * decides that before any hook runs. Everything else in this file is unaffected
+ * either way: an instance with no store configured is exactly the egma every
+ * other test here is about.
+ */
+const storage: ObjectStorage = await startObjectStorage("browser");
+if (!storage.available) {
+  process.stderr.write(
+    `\nskipping the recording playback flow — ${storage.why}\n\n`,
+  );
+}
+
 beforeAll(async () => {
-  instance = await startInstance("browser", { traces: true });
+  instance = await startInstance("browser", {
+    traces: true,
+    ...(storage.available ? { blob: storage.store } : {}),
+  });
   origin = instance.origin;
 
   browser = await openBrowser();
@@ -79,6 +104,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await browser?.close();
   await instance?.close();
+  if (storage.available) storage.stop();
 });
 
 describe("entering the app", () => {
@@ -1096,6 +1122,114 @@ describe("the saved theme", () => {
       await expect
         .poll(() => page.locator("aside").getByRole("switch", { name: "Dark theme" }).getAttribute("aria-checked"))
         .toBe("true");
+    },
+    SETTLE,
+  );
+});
+
+/**
+ * Hearing a recording from a run's results.
+ *
+ * **This file resists growing, and this is the one thing that had to grow it.**
+ * Every refusal, every sentence and the shape of the link are proved at the
+ * route seam beside it, where each costs milliseconds. What cannot be proved
+ * there — cannot be proved *anywhere* else — is the address binding, because the
+ * bug **is** the browser using a different address than the platform. A test
+ * that signed a link and fetched it from inside this process would fetch it from
+ * the address it was signed for by construction, and would pass on exactly the
+ * deployment where nobody can hear anything. So: a real Chrome, a real page, a
+ * real signed link, a real MinIO on an address that is not the API's, and a
+ * recording that really decodes.
+ *
+ * One test, and it is the whole story: a player where there is audio, nothing at
+ * all where there is not, and seeking that works.
+ */
+describe.skipIf(!storage.available)("hearing a recording from a run", () => {
+  it(
+    "plays the audio from the store's own address, and offers nothing where there is none",
+    async () => {
+      const running = storage as Extract<ObjectStorage, { available: true }>;
+      const reference = "sim_01JQ0A2B3C4D5E6F7G8H9J0K/dual-channel.wav";
+      await running.put(reference, aRecording());
+
+      // Ada's own run — the same Ada who has been signed in since the top of
+      // this file, because a run somebody else owns is a run this browser
+      // cannot open, which is a different test and it lives at the route seam.
+      const hers = (await page.context().cookies(origin))
+        .map((cookie) => `${cookie.name}=${cookie.value}`)
+        .join("; ");
+      const who = await standingOf(instance.api, hers, "her recordings");
+      const run = await aConductedRun(instance.api, who, { reference });
+
+      await page.goto(`${origin}/runs/${run.runId}`);
+
+      const heard = page.locator(`details[data-simulation="${run.heard}"]`);
+      const silent = page.locator(`details[data-simulation="${run.silent}"]`);
+      await heard.waitFor({ timeout: 30_000 });
+
+      // Opening the conversation is what asks for the link. Nothing is fetched
+      // before that: a run of two hundred conversations must not mint two
+      // hundred links to serve the one somebody wanted.
+      expect(await heard.locator("audio").count()).toBe(0);
+      await heard.locator("summary").first().click();
+
+      const player = heard.locator("audio[data-recording]");
+      await player.waitFor({ timeout: 30_000 });
+
+      // The link points at the **store**, and never at egma. The bytes do not
+      // pass through the control plane; only the decision did.
+      const source = await player.getAttribute("src");
+      expect(new URL(source ?? "").origin).toBe(running.store.publicUrl);
+      expect(new URL(source ?? "").origin).not.toBe(origin);
+      expect(source).toContain("X-Amz-Signature=");
+
+      // And it really loaded. This assertion is the whole reason a browser is
+      // here: a link signed for the wrong host comes back 403 from a real
+      // Chrome, `duration` stays `NaN`, and nothing else in the suite notices.
+      await expect
+        .poll(
+          () =>
+            player.evaluate((element) => {
+              const audio = element as unknown as {
+                readyState: number;
+                duration: number;
+              };
+              return audio.readyState >= 1 && audio.duration > 0.5;
+            }),
+          { timeout: 30_000 },
+        )
+        .toBe(true);
+
+      // Seeking, which is a byte range served by the store — the one thing that
+      // would quietly not work if the audio were proxied or the link were bound
+      // to a whole-object fetch.
+      await player.evaluate((element) => {
+        (element as unknown as { currentTime: number }).currentTime = 0.5;
+      });
+      await expect
+        .poll(() =>
+          player.evaluate((element) =>
+            Math.round(
+              (element as unknown as { currentTime: number }).currentTime * 10,
+            ),
+          ),
+        )
+        .toBe(5);
+
+      // The other conversation of the same run never connected, so it wrote no
+      // recording — and it is offered no control at all. A disabled player
+      // there would read as a broken feature rather than an honest absence.
+      await silent.locator("summary").first().click();
+      await expect
+        .poll(() =>
+          silent.evaluate(
+            (element) => (element as unknown as { open: boolean }).open,
+          ),
+        )
+        .toBe(true);
+      await silent.locator("p").first().waitFor();
+      expect(await silent.locator("audio").count()).toBe(0);
+      expect(await page.locator("audio").count()).toBe(1);
     },
     SETTLE,
   );

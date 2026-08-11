@@ -36,6 +36,16 @@ type Simulation = {
   readonly counts: Counts | null;
   readonly verdicts: readonly Judgment[];
   readonly reason: string | null;
+  /** Voice or chat, as the row itself says rather than as the run does. */
+  readonly modality: string | null;
+  /**
+   * Whether there is a recording to hear. Not where it is: the reference is
+   * resolved on its own, when somebody opens this conversation, so that the
+   * address of this page carries no link and stays something you can send to a
+   * colleague.
+   */
+  readonly has_recording: boolean;
+  readonly measured_audio_band_hertz: number | null;
 };
 
 type Run = {
@@ -280,9 +290,23 @@ function RunFact({
 
 function SimulationResult({ simulation }: { simulation: Simulation }) {
   const operationalFailure = simulation.status === "failed";
+  // Nothing is asked for until somebody opens this conversation. A run can hold
+  // two hundred of them, and resolving a link for every one on arrival would be
+  // two hundred requests for audio nobody has asked to hear.
+  const [opened, setOpened] = useState(false);
 
   return (
-    <details className={styles.runSimulation} data-verdict={simulation.verdict ?? undefined}>
+    <details
+      className={styles.runSimulation}
+      data-verdict={simulation.verdict ?? undefined}
+      // Named on the element so a person reading a run in a browser test can
+      // point at one conversation rather than at whichever row happened to be
+      // drawn first. Two conversations of one run differ only by who called.
+      data-simulation={simulation.id}
+      onToggle={(event) => {
+        if (event.currentTarget.open) setOpened(true);
+      }}
+    >
       <summary>
         <span className={styles.runPosition}>{String(simulation.position).padStart(2, "0")}</span>
         <span className={styles.runSimulationIdentity}>
@@ -300,6 +324,18 @@ function SimulationResult({ simulation }: { simulation: Simulation }) {
         {simulation.reason === null ? null : (
           <Notice tone="error">{simulation.reason}</Notice>
         )}
+
+        {/*
+          Only where there is something to play, and nothing at all where there
+          is not. A chat carries no audio and never will; a voice conversation
+          whose call never connected wrote none. Neither gets a control that
+          does nothing — a disabled player reads as a broken feature rather than
+          as an honest absence, and sends somebody looking for the fault.
+        */}
+        {opened && simulation.modality === "voice" && simulation.has_recording ? (
+          <RecordingPlayer simulation={simulation} />
+        ) : null}
+
         <p className={styles.runTally}>{tally(simulation.counts)}</p>
 
         {simulation.verdicts.length === 0 ? (
@@ -317,6 +353,116 @@ function SimulationResult({ simulation }: { simulation: Simulation }) {
         )}
       </div>
     </details>
+  );
+}
+
+/**
+ * What a recording resolves to, or why it did not.
+ *
+ * Three states and no fourth. There is no "idle": this component is only
+ * mounted once somebody has opened the conversation, which is the moment they
+ * asked.
+ */
+type Playable =
+  | { readonly status: "resolving" }
+  | { readonly status: "ready"; readonly url: string; readonly band: number | null }
+  | { readonly status: "failed"; readonly why: string };
+
+/**
+ * The recording of one voice conversation, fetched when somebody opens it.
+ *
+ * **The page fetches its own link rather than carrying one**, and that is what
+ * keeps the address of these results shareable. A link to a recording is signed,
+ * short-lived and bound to one object; baking one into the run's own answer
+ * would put a credential in the address bar, make the page stale a quarter of an
+ * hour after it loaded, and mean that a run of two hundred conversations minted
+ * two hundred links to serve the one somebody wanted.
+ *
+ * The audio itself goes from the store straight to this element and never
+ * through egma, which is what makes seeking cost nothing: dragging the scrubber
+ * is a byte range the store serves.
+ */
+function RecordingPlayer({ simulation }: { simulation: Simulation }) {
+  const [playable, setPlayable] = useState<Playable>({ status: "resolving" });
+
+  useEffect(() => {
+    let stopped = false;
+
+    const resolve = async (): Promise<void> => {
+      try {
+        const answer = await fetch(
+          `/api/simulations/${encodeURIComponent(simulation.id)}/recording`,
+          { headers: { accept: "application/json" }, cache: "no-store" },
+        );
+        if (stopped) return;
+        if (!answer.ok) {
+          const said = (await answer.json().catch(() => ({}))) as {
+            message?: string;
+          };
+          return setPlayable({
+            status: "failed",
+            why:
+              said.message ??
+              `Egma answered ${String(answer.status)} for this recording.`,
+          });
+        }
+        const resolved = (await answer.json()) as {
+          url: string;
+          measured_audio_band_hertz: number | null;
+        };
+        if (stopped) return;
+        setPlayable({
+          status: "ready",
+          url: resolved.url,
+          band: resolved.measured_audio_band_hertz,
+        });
+      } catch {
+        if (!stopped) {
+          setPlayable({
+            status: "failed",
+            why: "Egma could not be reached for this recording.",
+          });
+        }
+      }
+    };
+
+    void resolve();
+    return () => {
+      stopped = true;
+    };
+  }, [simulation.id]);
+
+  if (playable.status === "resolving") {
+    return <p className={styles.runTally}>Finding the recording…</p>;
+  }
+  if (playable.status === "failed") {
+    return <Notice tone="error">{playable.why}</Notice>;
+  }
+
+  return (
+    <section className={styles.runRecording} aria-label="Recording">
+      {/*
+        `preload="metadata"` rather than `none`: the browser fetches enough to
+        know how long the recording is, which is what makes the scrubber a
+        scrubber rather than a line nobody can aim at. It is also why the link
+        lives a quarter of an hour — every seek is a fresh request against it.
+      */}
+      <audio
+        className={styles.runRecordingPlayer}
+        controls
+        preload="metadata"
+        src={playable.url}
+        data-recording="true"
+      >
+        Your browser cannot play audio.
+      </audio>
+      <p>
+        Left channel is the person who called; right channel is the agent.
+        {playable.band === null
+          ? ""
+          : ` Heard at ${String(playable.band)} Hz.`}
+      </p>
+    </section>
   );
 }
 

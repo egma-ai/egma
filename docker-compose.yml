@@ -79,12 +79,37 @@ services:
       MINIO_ROOT_PASSWORD: ${EGMA_S3_SECRET_ACCESS_KEY:-egma-development-only-object-storage-secret-change-it}
     volumes:
       - minio-data:/data
-    # No `ports:` here. Nothing outside this network reads a recording yet —
-    # the simulator writes over the compose network, by service name, exactly
-    # as it claims from the API. Publishing this is the day a browser is handed
-    # a link to an object, and that day brings its own setting with it: a
-    # signed link is bound to the address it was signed for, and the address a
-    # browser uses is not the one the platform uses.
+    ports:
+      # This is that day, and this port is what a signed link costs.
+      #
+      # Until recordings could be heard, nothing outside this network read one:
+      # the simulator wrote over the compose network, by service name, exactly
+      # as it claims from the API, and there was no `ports:` here at all. Then
+      # the control plane started handing a browser a link to an object — and a
+      # link is only useful if the browser can reach what it points at. The
+      # bytes go from this container straight to the browser and never through
+      # the API, which is the whole design: seeking inside a recording is a byte
+      # range this store serves, not megabytes of audio re-proxied by a control
+      # plane whose job was the permission decision.
+      #
+      # So this is published, and what protects it is not the network. It is
+      # that every object in it is reachable only with a signature the control
+      # plane mints, for one object, for fifteen minutes, after checking that
+      # the person asking is in the organization the simulation belongs to. The
+      # credential that mints those signatures is read-only — see the bucket job
+      # below — so the worst a leaked one can do is read a recording, never
+      # replace one.
+      #
+      # **EGMA_BLOB_PUBLIC_URL on the api service must name this address**, and
+      # naming the wrong one is the single most common way a self-hosted object
+      # store breaks. A signature covers the host it was made for: sign for
+      # `minio:9000`, fetch from `localhost:9000`, and every recording fails
+      # with `SignatureDoesNotMatch`, which names neither address and sends
+      # whoever meets it looking at their credentials for an afternoon. The
+      # default below assumes a browser on this machine. An egma other people
+      # reach — at 192.168.1.10, at egma.example — must say so there, the same
+      # way it already has to say so in EGMA_BASE_URL.
+      - "${EGMA_S3_PORT:-9000}:9000"
     healthcheck:
       # `mc` ships inside this image, so the probe needs no second one. `local`
       # is the alias the server answers to from inside its own container.
@@ -93,7 +118,7 @@ services:
       timeout: 5s
       retries: 30
 
-  # The bucket, made once and then never again.
+  # The bucket and the read-only user, made once and then never again.
   #
   # A fresh volume arrives empty, and an empty object store has no bucket in
   # it — so without this the first recording of every new deployment fails
@@ -103,15 +128,42 @@ services:
   # makes "the deployment creates its bucket on first start" true rather than
   # nearly true.
   #
-  # `mc mb --ignore-existing` is what makes it safe to run on every `up`: the
-  # second time, and every time after, it finds the bucket and says nothing.
+  # Every step of it is safe to run again, which is what makes it safe to run
+  # on every `up`: `mc mb --ignore-existing` finds the bucket and says nothing,
+  # and `mc admin policy create`, `mc admin user add` and `mc admin policy
+  # attach` each write what is already there and exit zero. That matters more
+  # than it looks — the simulator waits on this job *completing*, so a step that
+  # failed the second time would take the whole deployment down on its first
+  # restart.
+  #
+  # ## Two credentials, and the reason they are two
+  #
+  # The simulator holds one that can write, because writing a recording is what
+  # a simulator does. The control plane holds one that can do nothing but read
+  # one object at a time, because reading is all it ever does: it is handed a
+  # reference by a row it has already checked the reader against, and it signs.
+  # A leaked read credential must not be usable to overwrite a customer's call
+  # recording — a recording is evidence, and evidence somebody else can replace
+  # is not evidence.
+  #
+  # The policy is `s3:GetObject` on this bucket and nothing else. Not `s3:*`,
+  # not a `s3:PutObject` "for later", and deliberately not `s3:ListBucket`: a
+  # credential that can list is a credential that can enumerate every recording
+  # a deployment holds, and nothing in egma ever asks this store a question it
+  # does not already know the answer to.
   minio-bucket:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     environment:
       EGMA_S3_ACCESS_KEY_ID: ${EGMA_S3_ACCESS_KEY_ID:-egma}
       EGMA_S3_SECRET_ACCESS_KEY: ${EGMA_S3_SECRET_ACCESS_KEY:-egma-development-only-object-storage-secret-change-it}
       EGMA_S3_BUCKET: ${EGMA_S3_BUCKET:-egma-recordings}
-    # All three reach `mc` through the environment rather than as arguments,
+      # The read-only half, interpolated into the api service below from the
+      # same pair so the two can never disagree. A development default like
+      # every other in this file: change it, once, in .env, before anybody else
+      # can reach the machine.
+      EGMA_S3_READ_ACCESS_KEY_ID: ${EGMA_S3_READ_ACCESS_KEY_ID:-egma-read}
+      EGMA_S3_READ_SECRET_ACCESS_KEY: ${EGMA_S3_READ_SECRET_ACCESS_KEY:-egma-development-only-read-only-secret-change-it}
+    # Everything reaches `mc` through the environment rather than as arguments,
     # and `$$` is an escaped `$`: compose leaves it alone and the shell inside
     # the container reads it.
     #
@@ -123,13 +175,25 @@ services:
     # a bucket name no store would take, at startup, by name — this job
     # trying something else instead of failing the same way is the asymmetry
     # worth closing, not the privilege, which whoever writes .env already has.
+    #
+    # The policy document is written by `printf` with the bucket as its one
+    # argument, for that same reason: the name goes in as data rather than as
+    # something the shell reads, and `mc` gets a file rather than a here-string
+    # a quote could end early.
     entrypoint:
       - sh
       - -c
       - >
         mc alias set egma http://minio:9000
         "$$EGMA_S3_ACCESS_KEY_ID" "$$EGMA_S3_SECRET_ACCESS_KEY" &&
-        mc mb --ignore-existing "egma/$$EGMA_S3_BUCKET"
+        mc mb --ignore-existing "egma/$$EGMA_S3_BUCKET" &&
+        printf '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetObject"],"Resource":["arn:aws:s3:::%s/*"]}]}'
+        "$$EGMA_S3_BUCKET" > /tmp/read-recordings.json &&
+        mc admin policy create egma egma-read-recordings /tmp/read-recordings.json &&
+        mc admin user add egma
+        "$$EGMA_S3_READ_ACCESS_KEY_ID" "$$EGMA_S3_READ_SECRET_ACCESS_KEY" &&
+        mc admin policy attach egma egma-read-recordings
+        --user "$$EGMA_S3_READ_ACCESS_KEY_ID"
     depends_on:
       minio:
         condition: service_healthy
@@ -161,6 +225,33 @@ services:
       # Where a browser reaches this instance. The pages and the API answer on
       # one origin, and that origin is the self-hoster's own.
       EGMA_BASE_URL: ${EGMA_BASE_URL:-http://localhost:3101}
+      # Where **a browser** reaches the recording store, which is not where this
+      # container reaches it. Beside EGMA_BASE_URL because it is the same kind
+      # of fact and gets set at the same moment: an egma other people reach at
+      # 192.168.1.10 or at egma.example has to say so in both.
+      #
+      # A signature covers the host it was made for, so this is the one setting
+      # in the whole deployment that fails silently and expensively when it is
+      # wrong: sign for `minio:9000`, fetch from a browser, and every recording
+      # comes back `SignatureDoesNotMatch` — an error naming neither address.
+      # Which is why the API holds no internal address for the store at all. It
+      # never opens a connection to it; signing is arithmetic, and the bytes go
+      # from the store to the browser.
+      #
+      # Leaving it unset is allowed and is not a failure: the platform runs, the
+      # runs run, and a request for a recording answers with the name of this
+      # variable rather than with an empty player.
+      EGMA_BLOB_PUBLIC_URL: ${EGMA_BLOB_PUBLIC_URL:-http://localhost:${EGMA_S3_PORT:-9000}}
+      EGMA_BLOB_BUCKET: ${EGMA_BLOB_BUCKET:-${EGMA_S3_BUCKET:-egma-recordings}}
+      EGMA_BLOB_REGION: ${EGMA_BLOB_REGION:-}
+      # The read-only half of the store's credentials, interpolated from the
+      # same pair the bucket job creates the user with so the two always match.
+      # It can fetch one object at a time and nothing else — it cannot write,
+      # cannot delete and cannot list, so a leak of it reads a recording rather
+      # than replacing one. A deployment pointed at somebody else's S3 sets
+      # these two directly and gives that credential the same shape.
+      EGMA_BLOB_ACCESS_KEY_ID: ${EGMA_BLOB_ACCESS_KEY_ID:-${EGMA_S3_READ_ACCESS_KEY_ID:-egma-read}}
+      EGMA_BLOB_SECRET_ACCESS_KEY: ${EGMA_BLOB_SECRET_ACCESS_KEY:-${EGMA_S3_READ_SECRET_ACCESS_KEY:-egma-development-only-read-only-secret-change-it}}
       EGMA_SINGLE_ORGANIZATION: ${EGMA_SINGLE_ORGANIZATION:-true}
       EGMA_TRUST_PROXY: ${EGMA_TRUST_PROXY:-false}
       # The budget belongs to the organization rather than to a key, so

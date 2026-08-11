@@ -1,6 +1,7 @@
 import { SERVICE_TOKEN_PREFIX } from "./auth/service-token.ts";
 import type { SmtpSettings } from "./auth/email.ts";
 import type { PhoneSettings } from "./phone-readiness.ts";
+import type { BlobStore } from "./recordings/signed-link.ts";
 
 /** A judge the platform hands to projects that have configured none. */
 export type DefaultJudge = {
@@ -99,6 +100,23 @@ export type Config = {
    * verdicts and says so, exactly as before.
    */
   readonly defaultJudge: DefaultJudge | undefined;
+  /**
+   * The object store voice simulations' recordings live in, or `undefined` on a
+   * deployment that has named none.
+   *
+   * **Naming the browser's address is what selects it**, the way naming an
+   * endpoint is what sends the simulator's recordings to object storage in the
+   * first place. Absent, the control plane can still read and report every
+   * simulation it could before; it simply cannot hand anybody a link to the
+   * audio, and it says so in a sentence naming the variable rather than
+   * answering an empty player.
+   *
+   * The address here is **the browser's**, and this process holds no other one.
+   * It never opens a connection to the store — signing is arithmetic — so there
+   * is no internal endpoint in this configuration for a future reader to sign
+   * against by mistake. See `recordings/signed-link.ts`.
+   */
+  readonly blob: BlobStore | undefined;
   /**
    * Where to post mail, if anywhere. **Absent is the ordinary case and is never
    * an error**: with no transport configured, signup asks for no verification
@@ -313,8 +331,100 @@ export function loadConfig(
       speechProvider: environment.EGMA_PHONE_SPEECH_PROVIDER?.trim() || null,
     },
     defaultJudge: defaultJudge(environment),
+    blob: blobStore(environment),
   };
 }
+
+/**
+ * The bucket that holds recordings and the read-only credential that reaches
+ * it, or `undefined` where nobody named one.
+ *
+ * **The address is the browser's, and that is this whole setting's reason for
+ * existing.** A signed link is bound by signature to the host it was signed for.
+ * The API reaches MinIO at `minio:9000` inside the compose network and a browser
+ * reaches it at whatever the deployment publishes — sign for one, fetch from the
+ * other, and the store answers `SignatureDoesNotMatch`, which names neither
+ * address and costs whoever meets it a day. So the browser's address is its own
+ * variable from the first commit rather than after the first report, and it is
+ * the only address this process holds.
+ *
+ * **The credential is read-only**, separate from the write credential the
+ * simulator holds. A leaked read credential must not be usable to overwrite a
+ * customer's call recording — the compose file's bucket job creates a MinIO user
+ * that can do nothing but `s3:GetObject`.
+ *
+ * All of it or none of it, refused at startup by name, on the simulator's
+ * discipline: half a credential resolves no recording at all and would be
+ * discovered by somebody pressing play, one simulation at a time, with the
+ * store's own refusal in a log they cannot see.
+ */
+function blobStore(environment: NodeJS.ProcessEnv): BlobStore | undefined {
+  const publicUrl = environment.EGMA_BLOB_PUBLIC_URL?.trim() || "";
+  if (publicUrl === "") return undefined;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(publicUrl);
+  } catch {
+    throw new Error(
+      `EGMA_BLOB_PUBLIC_URL is not a URL: ${publicUrl}. It is the address a ` +
+        "browser reaches the recording store at, and it looks like " +
+        "http://localhost:9000 — never the address this container reaches it " +
+        "at, because a signed link only works from the host it was signed for.",
+    );
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error(
+      `EGMA_BLOB_PUBLIC_URL speaks ${parsed.protocol} and a browser fetches a ` +
+        "recording over http: or https:",
+    );
+  }
+
+  const accessKeyId = environment.EGMA_BLOB_ACCESS_KEY_ID?.trim() || "";
+  const secretAccessKey = environment.EGMA_BLOB_SECRET_ACCESS_KEY?.trim() || "";
+  const missing = [
+    accessKeyId === "" ? "EGMA_BLOB_ACCESS_KEY_ID" : "",
+    secretAccessKey === "" ? "EGMA_BLOB_SECRET_ACCESS_KEY" : "",
+  ].filter((name) => name !== "");
+  if (missing.length > 0) {
+    throw new Error(
+      `EGMA_BLOB_PUBLIC_URL names a recording store and this deployment is ` +
+        `missing ${missing.join(" and ")}. Both halves are one credential, ` +
+        "and it should be the read-only one — the control plane never writes " +
+        "to the store, and a leaked read credential must not be usable to " +
+        "overwrite a customer's recording.",
+    );
+  }
+
+  // The bucket name is checked here for the reason the simulator checks its
+  // own: a name carrying a separator would put a prefix nobody configured in
+  // front of every key, so a reference that resolves for the simulator would
+  // resolve to nothing here, and the store's answer would name the object.
+  const bucket = environment.EGMA_BLOB_BUCKET?.trim() || DEFAULT_BLOB_BUCKET;
+  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u.test(bucket)) {
+    throw new Error(
+      `EGMA_BLOB_BUCKET must be a bucket name — lower case, 3 to 63 ` +
+        `characters, letters, digits, dots and hyphens, and no separator; ` +
+        `got ${bucket}`,
+    );
+  }
+
+  return {
+    publicUrl: publicUrl.replace(/\/+$/u, ""),
+    bucket,
+    // What to sign for when nobody said. MinIO ignores the region entirely and
+    // every signature must still carry one, so this is the value that lets a
+    // deployment with no region at all work — and the one a deployment on real
+    // S3 will nearly always be replacing. The same default the simulator uses,
+    // because the two halves sign against one store.
+    region: environment.EGMA_BLOB_REGION?.trim() || "us-east-1",
+    accessKeyId,
+    secretAccessKey,
+  };
+}
+
+/** The bucket the deployment creates on first start; nobody running the compose file names it. */
+const DEFAULT_BLOB_BUCKET = "egma-recordings";
 
 /**
  * The platform's default judge, or `undefined` where it has none.
