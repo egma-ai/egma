@@ -1,12 +1,14 @@
 "use client";
 
-import { Fragment, use, useEffect, useState } from "react";
+import Link from "next/link";
+import { Fragment, use, useEffect, useState, type CSSProperties } from "react";
 
 import {
   DETAIL,
   FACTS,
   LIST,
   SPEAKERS,
+  UNKNOWN_STEP_LABEL,
   stepLabel,
 } from "../../../lib/transcript-copy.ts";
 import {
@@ -14,42 +16,25 @@ import {
   howFarIn,
   howLong,
   isHuman,
+  milliseconds,
   somethingFailed,
   stepsInside,
   whenItWas,
   turnsCited,
   type Detail,
   type Facts as TraceFacts,
-  type Judgment,
+  type Outcome,
   type Step,
 } from "../../../lib/transcripts.ts";
-import { Card, Screen, styles } from "../../ui.tsx";
-
-/**
- * One exchange, read the way somebody actually reads one: **the transcript
- * first**, and the machinery underneath it only when asked.
- *
- * The order of the page is the argument it makes. A person opening this has a
- * question about an exchange their agent had — what was said, in what order,
- * and where the time went — and the timed steps inside a turn are the answer to
- * the third question, not the first. So turns are the page, each one opens onto
- * the steps that happened inside it, and each of those opens again onto exactly
- * what was recorded. Nothing is hidden and nothing is in the way.
- *
- * **The window travels in the address.** The endpoint under this page requires
- * one — a name is not a prefix of the store's filing order, so a lookup naming
- * only a name would have nothing to prune with and would read every partition
- * there is — and the row that linked here already knew when the exchange
- * happened. That is what makes this page a link somebody can send, and why
- * arriving without the two parameters is answered with an explanation rather
- * than an error.
- *
- * **Sparse coverage renders.** Providers differ in what they report: some send
- * no steps inside a turn at all, and LiveKit sends no recognition step because
- * what was heard rides the turn itself. Every one of those is a real answer
- * here and says so, because a page that quietly showed nothing would be
- * indistinguishable from one that had nothing to show.
- */
+import { JudgmentCard } from "../../judgment-card.tsx";
+import {
+  AppShell,
+  Notice,
+  ProductPage,
+  ProductStatePage,
+  StatePage,
+  styles,
+} from "../../ui.tsx";
 
 type State =
   | { status: "loading" }
@@ -59,6 +44,15 @@ type State =
   | { status: "failed"; why: string }
   | { status: "read"; detail: Detail };
 
+type View = "transcript" | "timeline" | "execution";
+type PositionedStep = { readonly step: Step; readonly depth: number };
+
+const VIEWS: readonly { readonly id: View; readonly label: string }[] = [
+  { id: "transcript", label: DETAIL.views.transcript },
+  { id: "timeline", label: DETAIL.views.timeline },
+  { id: "execution", label: DETAIL.views.execution },
+];
+
 export default function TranscriptPage({
   params,
 }: {
@@ -66,13 +60,11 @@ export default function TranscriptPage({
 }) {
   const { traceId } = use(params);
   const [state, setState] = useState<State>({ status: "loading" });
+  const [view, setView] = useState<View>("transcript");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     let current = true;
-
-    // Read from the address rather than from a router hook, because this is the
-    // whole of what makes the page deep-linkable and the address is where a
-    // link somebody was sent carries it.
     const asked = new URLSearchParams(globalThis.location.search);
     const from = asked.get("from");
     const to = asked.get("to");
@@ -115,270 +107,536 @@ export default function TranscriptPage({
   }, [traceId]);
 
   if (state.status === "loading") {
-    return <Card title={DETAIL.title}>{DETAIL.loading}</Card>;
+    return <ProductStatePage active="transcripts" title={DETAIL.title} lead={DETAIL.loading} />;
   }
 
   if (state.status === "signed-out") {
     return (
-      <Card title={LIST.signedOut} lead={LIST.signedOutLead}>
-        <p style={styles.aside}>
+      <StatePage title={LIST.signedOut} lead={LIST.signedOutLead}>
+        <p className={styles.linkLine}>
           <a href="/sign-in">{LIST.signIn}</a> ·{" "}
           <a href="/signup">{LIST.setUp}</a>
         </p>
-      </Card>
+      </StatePage>
     );
   }
 
   if (state.status === "no-window") {
     return (
-      <Card title={DETAIL.needsWindow} lead={DETAIL.needsWindowLead}>
-        <p style={styles.aside}>
-          <a href="/traces">{DETAIL.back}</a>
+      <ProductStatePage active="transcripts" title={DETAIL.needsWindow} lead={DETAIL.needsWindowLead}>
+        <p className={styles.linkLine}>
+          <Link href="/traces">{DETAIL.back}</Link>
         </p>
-      </Card>
+      </ProductStatePage>
     );
   }
 
   if (state.status === "missing") {
     return (
-      <Card title={DETAIL.missing} lead={DETAIL.missingLead}>
-        <p style={styles.aside}>
-          <a href="/traces">{DETAIL.back}</a>
+      <ProductStatePage active="transcripts" title={DETAIL.missing} lead={DETAIL.missingLead}>
+        <p className={styles.linkLine}>
+          <Link href="/traces">{DETAIL.back}</Link>
         </p>
-      </Card>
+      </ProductStatePage>
     );
   }
 
   if (state.status === "failed") {
     return (
-      <Card title={DETAIL.title}>
-        <p style={styles.problem}>{state.why}</p>
-        <p style={styles.aside}>
-          <a href="/traces">{DETAIL.back}</a>
+      <ProductStatePage active="transcripts" title={DETAIL.title}>
+        <Notice tone="error">{state.why}</Notice>
+        <p className={styles.linkLine}>
+          <Link href="/traces">{DETAIL.back}</Link>
         </p>
-      </Card>
+      </ProductStatePage>
     );
   }
 
   const { detail } = state;
   const openedAt = detail.trace.started_at;
+  const positioned = positionedSteps(detail);
+  const selected = positioned.find(({ step }) => step.span_id === selectedId)?.step
+    ?? detail.turns[0]
+    ?? detail.spans[0]
+    ?? null;
+  const failures = positioned
+    .map(({ step }) => step)
+    .filter((step) => step.status === "error");
+
+  function select(step: Step): void {
+    setSelectedId(step.span_id);
+  }
+
+  function moveBetweenFailures(direction: -1 | 1): void {
+    if (failures.length === 0) return;
+    const selectedFailure = failures.findIndex((step) => step.span_id === selected?.span_id);
+    const from = selectedFailure < 0 ? (direction > 0 ? -1 : 0) : selectedFailure;
+    const next = (from + direction + failures.length) % failures.length;
+    setSelectedId(failures[next]?.span_id ?? null);
+    setView("execution");
+  }
 
   return (
-    <Screen
-      title={DETAIL.title}
-      lead={whenItWas(openedAt)}
-      aside={<a href="/traces">{DETAIL.back}</a>}
-    >
-      <Summary facts={detail.trace} />
+    <AppShell active="transcripts">
+      <ProductPage wide>
+        <Link className={styles.backLink} href="/traces">← {DETAIL.back}</Link>
+        <header className={styles.detailHeader}>
+          <div>
+            <p className={styles.eyebrow}>{detail.trace.source} / {detail.trace.environment}</p>
+            <h1>{DETAIL.title}</h1>
+            <p className={styles.detailLead}>{whenItWas(openedAt)} · {howLong(detail.trace.duration_ns)}</p>
+          </div>
+          <span className={`${styles.status} ${detail.trace.errored_span_count > 0 ? styles.statusBad : ""}`}>
+            {detail.trace.errored_span_count === 0 ? DETAIL.recorded : DETAIL.errors(detail.trace.errored_span_count)}
+          </span>
+        </header>
 
-      <h2 style={{ ...styles.title, fontSize: "1rem", marginTop: "2rem" }}>
-        {DETAIL.transcript}
-      </h2>
+        <Summary facts={detail.trace} />
+        {detail.outcome ? <OutcomeSummary outcome={detail.outcome} /> : null}
 
-      {detail.spans_truncated ? (
-        <p style={styles.problem}>{DETAIL.truncated}</p>
-      ) : null}
+        <div className={styles.traceToolbar}>
+          <div className={styles.traceViewTabs} role="tablist" aria-label={DETAIL.viewLabel}>
+            {VIEWS.map((item) => (
+              <button
+                key={item.id}
+                className={view === item.id ? styles.traceViewTabActive : undefined}
+                type="button"
+                role="tab"
+                aria-selected={view === item.id}
+                onClick={() => setView(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          {failures.length === 0 ? null : (
+            <div className={styles.issueNavigator}>
+              <span>{DETAIL.problems(failures.length)}</span>
+              <button type="button" aria-label={DETAIL.previousProblem} onClick={() => moveBetweenFailures(-1)}>←</button>
+              <button type="button" aria-label={DETAIL.nextProblem} onClick={() => moveBetweenFailures(1)}>→</button>
+            </div>
+          )}
+        </div>
 
+        {detail.spans_truncated ? <Notice tone="error">{DETAIL.truncated}</Notice> : null}
+
+        <div className={styles.traceLayout}>
+          <section className={styles.traceViews}>
+            <div role="tabpanel" hidden={view !== "transcript"}>
+              <TranscriptView detail={detail} selectedId={selected?.span_id ?? null} onSelect={select} />
+            </div>
+            <div role="tabpanel" hidden={view !== "timeline"}>
+              <TimelineView detail={detail} steps={positioned} selectedId={selected?.span_id ?? null} onSelect={select} />
+            </div>
+            <div role="tabpanel" hidden={view !== "execution"}>
+              <ExecutionView detail={detail} selectedId={selected?.span_id ?? null} onSelect={select} />
+            </div>
+          </section>
+          <Inspector selected={selected} facts={detail.trace} openedAt={openedAt} />
+        </div>
+      </ProductPage>
+    </AppShell>
+  );
+}
+
+function Summary({ facts }: { facts: TraceFacts }) {
+  const primary: readonly (readonly [string, string, boolean])[] = [
+    [FACTS.duration, howLong(facts.duration_ns), false],
+    [FACTS.turns, `${facts.turn_counts.human} ${LIST.human} · ${facts.turn_counts.agent} ${LIST.agent}`, false],
+    [FACTS.steps, String(facts.span_count), false],
+    [FACTS.tools, String(facts.tool_span_count), false],
+    [FACTS.errors, String(facts.errored_span_count), facts.errored_span_count > 0],
+  ];
+
+  return (
+    <section className={styles.detailFacts} aria-label={DETAIL.summary}>
+      {primary.map(([label, value, wrong]) => (
+        <div className={styles.contextFact} key={label}>
+          <span>{label}</span>
+          <strong className={wrong ? styles.wrong : undefined}>{value}</strong>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function OutcomeSummary({ outcome }: { outcome: Outcome }) {
+  const checks = [`${outcome.counts.passed}/${outcome.counts.total} passed`];
+  if (outcome.counts.failed > 0) checks.push(`${outcome.counts.failed} failed`);
+  if (outcome.counts.skipped > 0) checks.push(`${outcome.counts.skipped} skipped`);
+  if (outcome.counts.errored > 0) checks.push(`${outcome.counts.errored} errored`);
+
+  return (
+    <section className={`${styles.runFacts} ${styles.traceOutcome}`} aria-label="Grading outcome">
+      <div className={styles.contextFact} data-verdict={outcome.verdict}>
+        <span>Verdict</span>
+        <strong>{outcome.verdict}</strong>
+      </div>
+      <div className={styles.contextFact}>
+        <span>Score</span>
+        <strong>{outcome.score === null ? "—" : String(Math.round(outcome.score * 1000) / 1000)}</strong>
+      </div>
+      <div className={styles.contextFact}>
+        <span>Checks</span>
+        <strong>{checks.join(" · ")}</strong>
+      </div>
+    </section>
+  );
+}
+
+function TranscriptView({
+  detail,
+  selectedId,
+  onSelect,
+}: {
+  detail: Detail;
+  selectedId: string | null;
+  onSelect: (step: Step) => void;
+}) {
+  const openedAt = detail.trace.started_at;
+
+  return (
+    <div className={styles.transcript}>
+      <div className={styles.traceViewHeading}>
+        <h2>{DETAIL.transcript}</h2>
+        <p>{DETAIL.transcriptLead}</p>
+      </div>
       {detail.turns.length === 0 ? (
-        <p style={styles.lead}>{DETAIL.noTurns}</p>
+        <Notice>{DETAIL.noTurns}</Notice>
       ) : (
-        // A Fragment, not an element: the turns are direct children of the
-        // screen, and a wrapper here would add a level to the DOM that the
-        // browser test reads through — and did break once.
-        detail.turns.map((turn, at) => (
+        detail.turns.map((turn, position) => (
           <Fragment key={turn.span_id}>
-            <Turn turn={turn} openedAt={openedAt} />
-            {/* The judgments that read this turn, against the turn itself.
-                A verdict citing turn 9 belongs beside turn 9 — reading it on
-                another page means holding a transcript in your head. */}
+            <Turn
+              turn={turn}
+              openedAt={openedAt}
+              selectedId={selectedId}
+              onSelect={onSelect}
+            />
             {(detail.verdicts ?? [])
-              .filter((its) => turnsCited(its).includes(at + 1))
-              .map((its) => (
-                <Judged key={`${its.grader_id}:${its.dimension}:${its.judged_at}`} judgment={its} />
+              .filter((judgment) => turnsCited(judgment).includes(position + 1))
+              .map((judgment) => (
+                <JudgmentCard
+                  key={`${judgment.grader_id}:${judgment.dimension}:${judgment.judged_at}`}
+                  judgment={judgment}
+                />
               ))}
           </Fragment>
         ))
       )}
-
       {detail.spans.length === 0 ? null : (
-        <details style={{ marginTop: "2rem" }}>
-          <summary style={{ cursor: "pointer", fontWeight: 600 }}>
-            {DETAIL.otherSteps}
-          </summary>
-          <p style={{ ...styles.aside, marginTop: "0.5rem" }}>
-            {DETAIL.otherStepsLead}
-          </p>
-          {detail.spans.map((step) => (
-            <Timed key={step.span_id} step={step} openedAt={openedAt} />
-          ))}
+        <details className={styles.otherSteps}>
+          <summary>{DETAIL.otherSteps}</summary>
+          <p className={styles.muted}>{DETAIL.otherStepsLead}</p>
+          <div className={styles.stepStack}>
+            {detail.spans.map((step) => (
+              <Timed key={step.span_id} step={step} openedAt={openedAt} selectedId={selectedId} onSelect={onSelect} />
+            ))}
+          </div>
         </details>
       )}
-    </Screen>
-  );
-}
-
-/** What the list already said about this exchange, said again in full. */
-function Summary({ facts }: { facts: TraceFacts }) {
-  const shown: readonly (readonly [string, string, boolean])[] = [
-    [FACTS.started, whenItWas(facts.started_at), false],
-    [FACTS.ended, whenItWas(facts.ended_at), false],
-    [FACTS.duration, howLong(facts.duration_ns), false],
-    [
-      FACTS.turns,
-      `${facts.turn_counts.human} ${LIST.human} · ${facts.turn_counts.agent} ${LIST.agent}`,
-      false,
-    ],
-    [FACTS.steps, String(facts.span_count), false],
-    [FACTS.tools, String(facts.tool_span_count), false],
-    [
-      FACTS.errors,
-      String(facts.errored_span_count),
-      facts.errored_span_count > 0,
-    ],
-    [FACTS.source, facts.source, false],
-    [FACTS.environment, facts.environment, false],
-    [FACTS.connection, facts.connection_type, false],
-    [FACTS.reference, facts.provider_call_id, false],
-  ];
-
-  return (
-    <div>
-      {shown
-        .filter(([, value]) => value !== "")
-        .map(([label, value, wrong]) => (
-          <div key={label} style={styles.definition}>
-            <span style={styles.muted}>{label}</span>
-            <strong style={wrong ? styles.wrong : undefined}>{value}</strong>
-          </div>
-        ))}
     </div>
   );
 }
 
-/**
- * One turn: who spoke, what they said, when, and what happened inside it.
- *
- * A `<details>` rather than a click handler, because that is what the element
- * is for — it opens with a keyboard, it is announced as expandable without an
- * aria attribute anybody has to remember to keep in step, and it works before
- * a line of this page's script has run.
- *
- * The failure marker is on the **summary**, not inside. A turn that failed four
- * adapters down is still the turn that failed, and somebody scanning a
- * transcript for what went wrong must not have to open all thirteen to find it.
- */
-function Turn({ turn, openedAt }: { turn: Step; openedAt: string }) {
+function Turn({
+  turn,
+  openedAt,
+  selectedId,
+  onSelect,
+}: {
+  turn: Step;
+  openedAt: string;
+  selectedId: string | null;
+  onSelect: (step: Step) => void;
+}) {
   const inside = stepsInside(turn);
-  const failed = somethingFailed(turn);
+  const failed = turn.status === "error" || somethingFailed(turn);
   const human = isHuman(turn);
+  const selected = turn.span_id === selectedId;
 
   return (
     <details
-      style={{
-        borderTop: "1px solid #eee",
-        padding: "0.75rem 0",
+      className={`${styles.turn} ${human ? styles.turnHuman : styles.turnAgent} ${selected ? styles.turnSelected : ""}`}
+      data-turn="true"
+      onToggle={(event) => {
+        if (event.currentTarget.open) onSelect(turn);
       }}
     >
-      <summary style={{ cursor: "pointer" }}>
-        <span
-          style={{
-            display: "inline-block",
-            minWidth: "4.5rem",
-            fontWeight: 600,
-            color: human ? "#444" : "#0b5",
-          }}
-        >
-          {human ? SPEAKERS.human : SPEAKERS.agent}
+      <summary>
+        <span className={styles.turnRail}>
+          <span>{howFarIn(turn.started_at, openedAt)}</span>
+          <span aria-hidden="true" />
         </span>
-        {turn.text === "" ? (
-          <span style={styles.muted}>{DETAIL.nothingSaid}</span>
-        ) : (
-          turn.text
-        )}
-        <span
-          style={{
-            ...styles.aside,
-            display: "block",
-            marginTop: "0.25rem",
-            marginLeft: "4.5rem",
-            fontSize: "0.8125rem",
-          }}
-        >
-          {howFarIn(turn.started_at, openedAt)} · {howLong(turn.duration_ns)} ·{" "}
-          {DETAIL.steps(inside)}
-          {failed ? (
-            <>
-              {" · "}
-              <span style={styles.wrong}>{DETAIL.failedInside}</span>
-            </>
-          ) : null}
+        <span className={styles.turnText}>
+          <span className={styles.turnHeading}>
+            <strong>{human ? SPEAKERS.human : SPEAKERS.agent}</strong>
+            <small>{howLong(turn.duration_ns)} · {DETAIL.steps(inside)}</small>
+          </span>
+          <span className={styles.turnWords}>
+            {turn.text === "" ? <span className={styles.muted}>{DETAIL.nothingSaid}</span> : turn.text}
+          </span>
+          {failed ? <small className={styles.turnProblem}>{DETAIL.failedInside}</small> : null}
         </span>
+        <span className={styles.turnMarker} aria-hidden="true">+</span>
       </summary>
-
-      <div style={{ marginLeft: "4.5rem", marginTop: "0.5rem" }}>
+      <div className={styles.turnBody}>
         {turn.spans.length === 0 ? (
-          <p style={styles.aside}>{DETAIL.noSteps}</p>
+          <p className={styles.muted}>{DETAIL.noSteps}</p>
         ) : (
-          turn.spans.map((step) => (
-            <Timed key={step.span_id} step={step} openedAt={openedAt} />
-          ))
+          <div className={styles.stepStack}>
+            {turn.spans.map((step) => (
+              <Timed key={step.span_id} step={step} openedAt={openedAt} selectedId={selectedId} onSelect={onSelect} />
+            ))}
+          </div>
         )}
       </div>
     </details>
   );
 }
 
-/**
- * One timed step, and everything under it.
- *
- * The provider's own name for the step is shown beside egma's word for it,
- * because the two carry different information and neither replaces the other:
- * egma's says what kind of thing this is, and the provider's says which one —
- * LiveKit nests a model request four adapters deep and only the innermost names
- * the model that actually answered.
- *
- * Opening a step reaches exactly what was recorded about it. That is the
- * ticket's line: raw facts are **reachable from the expanded view, and not the
- * default presentation** — a transcript stops being one the moment it is a
- * table of columns.
- */
-function Timed({ step, openedAt }: { step: Step; openedAt: string }) {
+function Timed({
+  step,
+  openedAt,
+  selectedId,
+  onSelect,
+}: {
+  step: Step;
+  openedAt: string;
+  selectedId: string | null;
+  onSelect: (step: Step) => void;
+}) {
   const failed = step.status === "error";
   const marked = failed || everyStep(step.spans).some((one) => one.status === "error");
 
   return (
     <details
-      style={{
-        borderLeft: `2px solid ${marked ? "#b00020" : "#eee"}`,
-        paddingLeft: "0.75rem",
-        margin: "0.25rem 0",
+      className={`${styles.step} ${marked ? styles.stepFailed : ""} ${selectedId === step.span_id ? styles.stepSelected : ""}`}
+      onToggle={(event) => {
+        if (event.currentTarget.open) onSelect(step);
       }}
     >
-      <summary style={{ cursor: "pointer", fontSize: "0.875rem" }}>
-        <strong>{stepLabel(step.kind)}</strong>
-        <span style={styles.muted}>
-          {" "}
-          · <span style={styles.monospace}>{step.name}</span> ·{" "}
-          {howLong(step.duration_ns)}
+      <summary>
+        <span className={styles.stepIdentity}>
+          <strong>{presentedStepLabel(step)}</strong>
+          <span className={styles.mono}>{step.name}</span>
         </span>
-        {failed ? (
-          <>
-            {" · "}
-            <span style={styles.wrong}>{DETAIL.failed}</span>
-          </>
-        ) : null}
+        <span className={styles.stepTiming}>
+          {howFarIn(step.started_at, openedAt)} · {howLong(step.duration_ns)}
+          {failed ? <span className={styles.wrong}> · {DETAIL.failed}</span> : null}
+        </span>
       </summary>
-
-      <Recorded step={step} openedAt={openedAt} />
-
-      {step.spans.map((child) => (
-        <Timed key={child.span_id} step={child} openedAt={openedAt} />
-      ))}
+      <div className={styles.stepBody}>
+        <Recorded step={step} openedAt={openedAt} />
+        {step.spans.length === 0 ? null : (
+          <div className={styles.stepStack}>
+            {step.spans.map((child) => (
+              <Timed key={child.span_id} step={child} openedAt={openedAt} selectedId={selectedId} onSelect={onSelect} />
+            ))}
+          </div>
+        )}
+      </div>
     </details>
   );
 }
 
-/** Everything the store holds about one step, once somebody has asked for it. */
+function TimelineView({
+  detail,
+  steps,
+  selectedId,
+  onSelect,
+}: {
+  detail: Detail;
+  steps: readonly PositionedStep[];
+  selectedId: string | null;
+  onSelect: (step: Step) => void;
+}) {
+  const total = Math.max(milliseconds(detail.trace.duration_ns), 1);
+  const openedAt = Date.parse(detail.trace.started_at);
+
+  return (
+    <div>
+      <div className={styles.traceViewHeading}>
+        <h2>{DETAIL.views.timeline}</h2>
+        <p>{DETAIL.timelineLead}</p>
+      </div>
+      {steps.length === 0 ? <Notice>{DETAIL.noStepsAtAll}</Notice> : (
+        <div className={styles.timelineList}>
+          {steps.map(({ step, depth }) => {
+            const offset = Math.max(Date.parse(step.started_at) - openedAt, 0);
+            const duration = Math.max(milliseconds(step.duration_ns), 0);
+            const left = Math.min((offset / total) * 100, 100);
+            const width = Math.max(Math.min((duration / total) * 100, 100 - left), .8);
+            const style = {
+              "--timeline-indent": `${Math.min(depth, 6) * 12}px`,
+              "--timeline-left": `${left}%`,
+              "--timeline-width": `${width}%`,
+            } as CSSProperties;
+
+            return (
+              <button
+                key={step.span_id}
+                className={`${styles.timelineRow} ${selectedId === step.span_id ? styles.timelineRowSelected : ""}`}
+                type="button"
+                style={style}
+                onClick={() => onSelect(step)}
+              >
+                <span className={styles.timelineName}>
+                  <strong>{presentedStepLabel(step)}</strong>
+                  <span>{step.name}</span>
+                </span>
+                <span className={styles.timelineTrack} aria-hidden="true">
+                  <span className={step.status === "error" ? styles.timelineBarBad : undefined} />
+                </span>
+                <span className={styles.timelineDuration}>{howLong(step.duration_ns)}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ExecutionView({
+  detail,
+  selectedId,
+  onSelect,
+}: {
+  detail: Detail;
+  selectedId: string | null;
+  onSelect: (step: Step) => void;
+}) {
+  const groups = [
+    ...detail.turns.map((turn) => ({
+      id: turn.span_id,
+      label: `${isHuman(turn) ? SPEAKERS.human : SPEAKERS.agent} ${howFarIn(turn.started_at, detail.trace.started_at)}`,
+      steps: flatten(turn.spans),
+    })),
+    ...(detail.spans.length === 0 ? [] : [{ id: "outside", label: DETAIL.otherSteps, steps: flatten(detail.spans) }]),
+  ].filter((group) => group.steps.length > 0);
+
+  return (
+    <div>
+      <div className={styles.traceViewHeading}>
+        <h2>{DETAIL.views.execution}</h2>
+        <p>{DETAIL.executionLead}</p>
+      </div>
+      {groups.length === 0 ? <Notice>{DETAIL.noStepsAtAll}</Notice> : (
+        <div className={styles.executionGroups}>
+          {groups.map((group) => (
+            <section className={styles.executionGroup} key={group.id}>
+              <h3>{group.label}</h3>
+              {group.steps.map(({ step, depth }) => (
+                <button
+                  key={step.span_id}
+                  className={`${styles.executionRow} ${selectedId === step.span_id ? styles.executionRowSelected : ""}`}
+                  type="button"
+                  style={{ "--execution-indent": `${Math.min(depth, 6) * 14}px` } as CSSProperties}
+                  onClick={() => onSelect(step)}
+                >
+                  <span>
+                    <strong>{presentedStepLabel(step)}</strong>
+                    <small className={styles.mono}>{step.name}</small>
+                  </span>
+                  <span className={step.status === "error" ? styles.wrong : styles.muted}>
+                    {step.status === "error" ? DETAIL.failed : howLong(step.duration_ns)}
+                  </span>
+                </button>
+              ))}
+            </section>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Inspector({
+  selected,
+  facts,
+  openedAt,
+}: {
+  selected: Step | null;
+  facts: TraceFacts;
+  openedAt: string;
+}) {
+  return (
+    <aside className={styles.traceInspector} aria-label={DETAIL.inspector}>
+      {selected === null ? (
+        <p className={styles.muted}>{DETAIL.nothingSelected}</p>
+      ) : (
+        <>
+          <div className={styles.inspectorHeader}>
+            <p className={styles.eyebrow}>{presentedStepLabel(selected)}</p>
+            <h2>{selected.text || selected.tool_name || selected.name}</h2>
+            <p>{howFarIn(selected.started_at, openedAt)} · {howLong(selected.duration_ns)}</p>
+          </div>
+
+          <dl className={styles.inspectorFacts}>
+            <div><dt>{FACTS.status}</dt><dd className={selected.status === "error" ? styles.wrong : undefined}>{readableStatus(selected.status)}</dd></div>
+            <div><dt>{FACTS.started}</dt><dd>{whenItWas(selected.started_at)}</dd></div>
+            <div><dt>{FACTS.duration}</dt><dd>{howLong(selected.duration_ns)}</dd></div>
+          </dl>
+
+          {selected.tool_name === "" ? null : (
+            <section className={styles.inspectorSection}>
+              <h3>{DETAIL.toolWork}</h3>
+              <p className={styles.mono}>{selected.tool_name}</p>
+              {selected.tool_arguments === "" ? null : <Payload label={FACTS.toolArguments} value={selected.tool_arguments} />}
+              {selected.tool_result === "" ? null : <Payload label={FACTS.toolResult} value={selected.tool_result} />}
+            </section>
+          )}
+
+          {selected.audio_url === "" ? null : (
+            <p className={styles.inspectorLink}><a href={selected.audio_url}>{DETAIL.openAudio}</a></p>
+          )}
+
+          <details className={styles.inspectorDetails}>
+            <summary>{DETAIL.technicalDetails}</summary>
+            <Recorded step={selected} openedAt={openedAt} />
+          </details>
+        </>
+      )}
+
+      <details className={styles.inspectorDetails}>
+        <summary>{DETAIL.recordingDetails}</summary>
+        <RecordingDetails facts={facts} />
+      </details>
+    </aside>
+  );
+}
+
+function Payload({ label, value }: { label: string; value: string }) {
+  return (
+    <div className={styles.payload}>
+      <span>{label}</span>
+      <pre>{value}</pre>
+    </div>
+  );
+}
+
+function RecordingDetails({ facts }: { facts: TraceFacts }) {
+  const shown: readonly (readonly [string, string])[] = [
+    [FACTS.started, whenItWas(facts.started_at)],
+    [FACTS.ended, whenItWas(facts.ended_at)],
+    [FACTS.source, facts.source],
+    [FACTS.environment, facts.environment],
+    [FACTS.connection, facts.connection_type],
+    [FACTS.reference, facts.provider_call_id],
+  ];
+
+  return (
+    <dl className={styles.recorded}>
+      {shown.filter(([, value]) => value !== "").map(([label, value]) => (
+        <div key={label}>
+          <dt className={styles.muted}>{label}</dt>
+          <dd className={styles.mono}>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 function Recorded({ step, openedAt }: { step: Step; openedAt: string }) {
   const shown: readonly (readonly [string, string])[] = [
     [FACTS.kind, stepLabel(step.kind)],
@@ -396,79 +654,40 @@ function Recorded({ step, openedAt }: { step: Step; openedAt: string }) {
   ];
 
   return (
-    <dl
-      style={{
-        margin: "0.5rem 0",
-        fontSize: "0.8125rem",
-        display: "grid",
-        gridTemplateColumns: "minmax(6rem, max-content) 1fr",
-        gap: "0.125rem 0.75rem",
-      }}
-    >
-      {shown
-        .filter(([, value]) => value !== "")
-        .map(([label, value]) => (
-          <div key={label} style={{ display: "contents" }}>
-            <dt style={styles.muted}>{label}</dt>
-            <dd
-              style={{
-                ...styles.monospace,
-                margin: 0,
-                overflowWrap: "anywhere",
-              }}
-            >
-              {value}
-            </dd>
-          </div>
-        ))}
+    <dl className={styles.recorded}>
+      {shown.filter(([, value]) => value !== "").map(([label, value]) => (
+        <div key={label}>
+          <dt className={styles.muted}>{label}</dt>
+          <dd className={styles.mono}>{value}</dd>
+        </div>
+      ))}
     </dl>
   );
 }
 
-const VERDICT_COLOR: Record<string, string> = {
-  passed: "#1f7a3f",
-  failed: "#b00020",
-  skipped: "#8a6d00",
-  errored: "#b00020",
-};
+function flatten(steps: readonly Step[], depth = 0): PositionedStep[] {
+  return steps.flatMap((step) => [
+    { step, depth },
+    ...flatten(step.spans, depth + 1),
+  ]);
+}
 
-/**
- * One judgment, against the turn it cites.
- *
- * The judge is named on every one. A verdict nobody can attribute is a verdict
- * nobody can argue with, and arguing with them is how a suite gets better.
- */
-function Judged({ judgment }: { judgment: Judgment }) {
-  return (
-    <div
-      style={{
-        margin: "0 0 0.5rem 1.25rem",
-        padding: "0.5rem 0.75rem",
-        borderLeft: `3px solid ${VERDICT_COLOR[judgment.verdict] ?? "#999"}`,
-        background: "#fafafa",
-      }}
-    >
-      <div style={{ display: "flex", gap: "0.5rem", alignItems: "baseline" }}>
-        <span
-          style={{
-            color: VERDICT_COLOR[judgment.verdict] ?? "#111",
-            fontWeight: 600,
-            fontSize: "0.875rem",
-          }}
-        >
-          {judgment.verdict}
-        </span>
-        <span style={styles.monospace}>{judgment.dimension}</span>
-        <span style={{ ...styles.muted, fontSize: "0.8125rem" }}>
-          {judgment.priority}
-        </span>
-      </div>
-      <p style={{ margin: "0.25rem 0 0.25rem", fontSize: "0.9375rem", lineHeight: 1.5 }}>
-        {judgment.rationale}
-      </p>
-      <p style={{ ...styles.muted, margin: 0, fontSize: "0.8125rem" }}>
-        judged by <span style={styles.monospace}>{judgment.judged_by}</span>
-      </p>
-    </div>
-  );
+function positionedSteps(detail: Detail): PositionedStep[] {
+  const seen = new Set<string>();
+  return [...flatten(detail.turns), ...flatten(detail.spans)].filter(({ step }) => {
+    if (seen.has(step.span_id)) return false;
+    seen.add(step.span_id);
+    return true;
+  });
+}
+
+function readableStatus(status: string): string {
+  return status === "" || status === "unset" ? DETAIL.notReported : status;
+}
+
+function presentedStepLabel(step: Step): string {
+  const known = stepLabel(step.kind);
+  if (known !== UNKNOWN_STEP_LABEL || step.name === "") return known;
+  const words = step.name.replaceAll(/[_-]+/g, " ").trim();
+  return words === "" ? known : `${words.slice(0, 1).toUpperCase()}${words.slice(1)}`;
 }

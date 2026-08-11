@@ -1,4 +1,4 @@
-import type { Browser, Page } from "playwright-core";
+import type { Browser, Page, Request } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { PLATFORM_IDENTITY_PATH } from "../src/routes/platform.ts";
@@ -79,6 +79,17 @@ beforeAll(async () => {
 afterAll(async () => {
   await browser?.close();
   await instance?.close();
+});
+
+describe("entering the app", () => {
+  it(
+    "sends a signed-out person from the root address to sign in",
+    async () => {
+      await page.goto(`${origin}/`);
+      await page.waitForURL(`${origin}/sign-in`);
+    },
+    SETTLE,
+  );
 });
 
 describe("what a self-hoster's origin answers before anybody logs in", () => {
@@ -220,6 +231,8 @@ describe("adding a colleague, with no mail configured", () => {
     "hands the link to the inviter, and following it lands the colleague inside",
     async () => {
       await page.goto(`${origin}/members`);
+      expect(await page.getByText("Invite somebody").count()).toBe(0);
+      await page.getByRole("tab", { name: "Invitations" }).click();
       await page.waitForSelector("text=Invite somebody");
 
       await page.fill("#invite-email", "bob@acme.example");
@@ -252,9 +265,8 @@ describe("adding a colleague, with no mail configured", () => {
 
       // And he is in Acme, at the role he was invited at, without ever having
       // been asked to name an organization.
-      await bob.waitForURL(new RegExp(`^${origin}/$`));
-      await expect.poll(() => bob.innerText("main")).toContain("viewer");
-      expect(await bob.innerText("main")).toContain("Acme");
+      await bob.waitForURL(new RegExp(`^${origin}/traces$`));
+      await expect.poll(() => bob.getByRole("heading", { name: "Transcripts" }).count()).toBe(1);
 
       const { rows } = await instance.database.sql<{ email: string; role: string }>(
         `select u.email, m.role from membership m
@@ -267,6 +279,85 @@ describe("adding a colleague, with no mail configured", () => {
       ]);
 
       await his.close();
+    },
+    SETTLE,
+  );
+
+  it(
+    "does nothing until an admin confirms a destructive member action",
+    async () => {
+      await page.goto(`${origin}/members`);
+      const bob = page.locator("article", { hasText: "bob@acme.example" });
+      await bob.waitFor();
+      expect(
+        await bob.locator("select, button").evaluateAll((controls) =>
+          controls.map((control) => control.getBoundingClientRect().height),
+        ),
+      ).toEqual([44, 44, 44]);
+
+      const memberActions: string[] = [];
+      const recordMemberAction = (request: Request) => {
+        const path = new URL(request.url()).pathname;
+        if (request.method() === "POST" && /\/api\/members\/[^/]+\/(?:deactivate|remove)$/u.test(path)) {
+          memberActions.push(path);
+        }
+      };
+      page.on("request", recordMemberAction);
+
+      try {
+        // The dialog itself is not an action. Every ordinary way out is safe.
+        await bob.getByRole("button", { name: "Deactivate" }).click();
+        expect(memberActions).toEqual([]);
+        await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+
+        await bob.getByRole("button", { name: "Deactivate" }).click();
+        await page.keyboard.press("Escape");
+        expect(memberActions).toEqual([]);
+
+        await bob.getByRole("button", { name: "Deactivate" }).click();
+        await page.mouse.click(4, 4);
+        expect(memberActions).toEqual([]);
+
+        // Only the destructive button sends the request, and it sends the
+        // endpoint named by the choice once.
+        await bob.getByRole("button", { name: "Deactivate" }).click();
+        const deactivated = page.waitForResponse((response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname.endsWith("/deactivate"),
+        );
+        await page.getByRole("dialog").getByRole("button", { name: "Deactivate" }).click();
+        expect((await deactivated).status()).toBe(200);
+        await expect.poll(() => bob.innerText()).toContain("deactivated");
+        expect(memberActions).toHaveLength(1);
+        expect(memberActions[0]).toMatch(/\/deactivate$/u);
+
+        // Removal has its own confirmation and endpoint. Closing it is safe;
+        // confirming it removes the row and sends one more request.
+        await bob.getByRole("button", { name: "Remove" }).click();
+        expect(memberActions).toHaveLength(1);
+        await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+
+        await bob.getByRole("button", { name: "Remove" }).click();
+        await page.keyboard.press("Escape");
+        expect(memberActions).toHaveLength(1);
+
+        await bob.getByRole("button", { name: "Remove" }).click();
+        await page.mouse.click(4, 4);
+        expect(memberActions).toHaveLength(1);
+
+        await bob.getByRole("button", { name: "Remove" }).click();
+        const removed = page.waitForResponse((response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname.endsWith("/remove"),
+        );
+        await page.getByRole("dialog").getByRole("button", { name: "Remove" }).click();
+        expect((await removed).status()).toBe(200);
+        await expect.poll(() => bob.count()).toBe(0);
+        expect(memberActions).toHaveLength(2);
+        expect(memberActions[1]).toMatch(/\/remove$/u);
+      } finally {
+        page.off("request", recordMemberAction);
+      }
     },
     SETTLE,
   );
@@ -395,7 +486,7 @@ async function signedInBrowser(email: string): Promise<Page> {
   await theirs.fill("#email", email);
   await theirs.fill("#password", PASSWORD);
   await theirs.getByRole("button", { name: "Sign in" }).click();
-  await theirs.waitForURL(new RegExp(`^${origin}/$`));
+  await theirs.waitForURL(new RegExp(`^${origin}/traces$`));
   return theirs;
 }
 
@@ -538,12 +629,67 @@ describe("the list of what an organization recorded", () => {
   }, SETTLE);
 
   it(
+    "moves between product pages without reloading the shell",
+    async () => {
+      await page.goto(`${origin}/traces`);
+
+      const sidebar = page.locator("aside");
+      const settings = sidebar.locator('summary[aria-label="Open settings menu"]');
+      await settings.waitFor({ state: "visible" });
+      expect(await sidebar.innerText()).not.toContain("ada@acme.example");
+      expect(await sidebar.innerText()).not.toContain("Admin account");
+      expect(await sidebar.innerText()).not.toContain("Acme");
+      expect(await sidebar.innerText()).not.toContain("Voice Reliability project");
+      expect(await sidebar.getByRole("link", { name: "Home" }).count()).toBe(0);
+      expect(await sidebar.innerText()).toContain("Settings");
+      expect(await sidebar.getByRole("link", { name: "Organization" }).count()).toBe(0);
+
+      await settings.click();
+      expect(
+        await sidebar.getByRole("button", { name: "Sign out" }).count(),
+      ).toBe(1);
+      expect(
+        await page.locator("main").getByRole("button", { name: "Sign out" }).count(),
+      ).toBe(0);
+      await sidebar.getByRole("link", { name: "Organization settings" }).click();
+      await page.waitForURL(/\/members$/);
+      await page.getByRole("tab", { name: "People" }).waitFor({ state: "visible" });
+      expect(await page.getByRole("tab", { name: "People" }).count()).toBe(1);
+      expect(await page.getByRole("tab", { name: "Invitations" }).count()).toBe(1);
+      await page.evaluate(() => {
+        Reflect.set(globalThis, "__egma_same_document_navigation", true);
+      });
+      await page.getByRole("link", { name: "Transcripts", exact: true }).click();
+      await page.waitForURL(/\/traces$/);
+
+      expect(
+        await page.evaluate(() =>
+          Reflect.get(globalThis, "__egma_same_document_navigation"),
+        ),
+      ).toBe(true);
+      expect(
+        await page.locator("#window").evaluate((element) => {
+          const styleOf = Reflect.get(globalThis, "getComputedStyle") as
+            (target: unknown) => { readonly appearance: string };
+          return styleOf(element).appearance;
+        }),
+      ).toBe("base-select");
+      expect(
+        await page.locator("#window").evaluate((element) => {
+          const styleOf = Reflect.get(globalThis, "getComputedStyle") as
+            (target: unknown) => { readonly alignItems: string };
+          return styleOf(element).alignItems;
+        }),
+      ).toBe("center");
+    },
+    SETTLE,
+  );
+
+  it(
     "opens on the last day, and shows the exchange the agent just had",
     async () => {
-      // Reached from the front page rather than by typing an address, because
-      // an unreachable page is not a page.
+      // The root address has no separate home page. It opens transcripts.
       await page.goto(`${origin}/`);
-      await page.getByRole("link", { name: "Transcripts" }).click();
       await page.waitForURL(/\/traces$/);
 
       await page.waitForSelector("table");
@@ -637,8 +783,17 @@ describe("one exchange, read as a transcript", () => {
   async function openIt(): Promise<void> {
     await page.goto(`${origin}/traces`);
     await page.waitForSelector("table");
+    await page.evaluate(() => {
+      const pageDocument = Reflect.get(globalThis, "document") as {
+        readonly body: { readonly scrollHeight: number };
+      };
+      const scrollTo = Reflect.get(globalThis, "scrollTo") as
+        (x: number, y: number) => void;
+      Reflect.apply(scrollTo, globalThis, [0, pageDocument.body.scrollHeight]);
+    });
     await page.locator("tbody tr td a").first().click();
     await page.waitForSelector("text=The exchange");
+    await expect.poll(() => page.evaluate(() => Number(Reflect.get(globalThis, "scrollY")))).toBe(0);
   }
 
   it(
@@ -659,9 +814,10 @@ describe("one exchange, read as a transcript", () => {
 
       // And it deep-links: the same address, opened cold, is the same page.
       const address = page.url();
-      await page.goto(`${origin}/`);
+      await page.goto(`${origin}/sign-in`);
       await page.goto(address);
       await page.waitForSelector("text=The exchange");
+      await page.getByText("Recording details", { exact: true }).click();
       expect(await page.innerText("main")).toContain(FIXTURE_PROVIDER_CALL_ID);
     },
     SETTLE,
@@ -716,12 +872,12 @@ describe("one exchange, read as a transcript", () => {
       // nothing out loud, because all it did was reach for the weather. Six
       // timed things happened inside it — the tool, and a model request that
       // nests four adapters deep — and the count says so before it is opened.
-      const turns = page.locator("main > div > details");
+      const turns = page.locator('[data-turn="true"]');
       const weather = turns.nth(4);
       expect(await weather.innerText()).toContain("6 steps");
 
       await weather.locator("summary").first().click();
-      const steps = weather.locator("> div > details");
+      const steps = weather.locator(":scope > div > div > details");
       expect(await steps.count()).toBe(2);
       expect(await steps.nth(0).innerText()).toContain("Model");
       expect(await steps.nth(1).innerText()).toContain("Tool");
@@ -756,7 +912,7 @@ describe("one exchange, read as a transcript", () => {
       // One click in, it is there, under egma's word for it rather than the
       // provider's. `agent_session` is the name LiveKit gave it and it is shown
       // beside — the two carry different information.
-      const around = page.locator("main > div > details").last();
+      const around = page.locator("details", { hasText: "Everything else recorded" }).last();
       await around.locator("summary").first().click();
       const reached = await around.innerText();
       expect(reached).toContain("Overview");
@@ -910,6 +1066,60 @@ describe("more exchanges than one page holds", () => {
       ).toBe(0);
 
       await them.context().close();
+    },
+    SETTLE,
+  );
+});
+
+describe("the saved theme", () => {
+  it(
+    "starts light, toggles from settings, and survives a reload",
+    async () => {
+      await page.goto(`${origin}/traces`);
+      await page.evaluate(() => localStorage.removeItem("egma-theme"));
+      await page.reload();
+
+      expect(await page.locator("html").getAttribute("data-theme")).toBe("light");
+      const settings = page.locator('aside summary[aria-label="Open settings menu"]');
+      await settings.click();
+      const controls = page.getByRole("switch", { name: "Dark theme" });
+      await expect.poll(() => controls.count()).toBe(1);
+      await page.locator("aside").getByRole("switch", { name: "Dark theme" }).click();
+
+      expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");
+      expect(await page.evaluate(() => localStorage.getItem("egma-theme"))).toBe("dark");
+      expect(await controls.first().getAttribute("aria-checked")).toBe("true");
+
+      await page.reload();
+      expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");
+      await page.locator('aside summary[aria-label="Open settings menu"]').click();
+      await expect
+        .poll(() => page.locator("aside").getByRole("switch", { name: "Dark theme" }).getAttribute("aria-checked"))
+        .toBe("true");
+    },
+    SETTLE,
+  );
+});
+
+describe("recovering when a page cannot load", () => {
+  it(
+    "shows a retry for People and for an invitation lookup",
+    async () => {
+      await page.route("**/api/members", (route) => route.abort());
+      await page.goto(`${origin}/members`);
+      await page.waitForSelector("text=Organization settings could not be loaded");
+      await page.unroute("**/api/members");
+      await page.getByRole("button", { name: "Try again" }).click();
+      await page.waitForSelector("text=Everybody in your organization");
+
+      await page.route("**/api/invitations/lookup", (route) =>
+        route.fulfill({ status: 503, contentType: "application/json", body: '{"message":"unavailable"}' }),
+      );
+      await page.goto(`${origin}/invite?token=unreachable`);
+      await page.waitForSelector("text=The invitation could not be checked");
+      await page.unroute("**/api/invitations/lookup");
+      await page.getByRole("button", { name: "Try again" }).click();
+      await page.waitForSelector("text=That invitation does not name anything");
     },
     SETTLE,
   );

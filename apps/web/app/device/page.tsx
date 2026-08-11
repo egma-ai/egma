@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { Card, styles } from "../ui.tsx";
+import { AuthShell, Field, styles } from "../ui.tsx";
 
 /**
  * The code from your terminal.
@@ -37,7 +37,8 @@ export default function DeviceCodePage() {
   }
 
   return (
-    <Card
+    <AuthShell
+      eyebrow="Terminal access"
       title="Connect your terminal"
       lead={
         prefilled
@@ -45,19 +46,10 @@ export default function DeviceCodePage() {
           : "Type the code your terminal is showing."
       }
     >
-      <form onSubmit={submit}>
-        <div style={styles.field}>
-          <label style={styles.label} htmlFor="user_code">
-            Code
-          </label>
+      <form className={styles.form} onSubmit={submit}>
+        <Field label="Code" htmlFor="user_code">
           <input
-            style={{
-              ...styles.input,
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-              fontSize: "1.25rem",
-              letterSpacing: "0.15em",
-              textAlign: "center",
-            }}
+            className={`${styles.input} ${styles.codeInput}`}
             id="user_code"
             name="user_code"
             autoComplete="off"
@@ -67,12 +59,12 @@ export default function DeviceCodePage() {
             value={code}
             onChange={(event) => setCode(event.target.value)}
           />
-        </div>
+        </Field>
 
-        <button style={styles.button} type="submit">
+        <button className={styles.button} type="submit">
           Continue
         </button>
       </form>
-    </Card>
+    </AuthShell>
   );
 }

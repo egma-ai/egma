@@ -78,6 +78,20 @@ export type Judgment = {
   readonly judged_at: string;
 };
 
+export type VerdictCounts = {
+  readonly passed: number;
+  readonly failed: number;
+  readonly skipped: number;
+  readonly errored: number;
+  readonly total: number;
+};
+
+export type Outcome = {
+  readonly verdict: string;
+  readonly score: number | null;
+  readonly counts: VerdictCounts;
+};
+
 export type Detail = {
   readonly trace: Facts;
   readonly turns: readonly Step[];
@@ -85,6 +99,8 @@ export type Detail = {
   readonly spans_truncated: boolean;
   /** Absent on a trace nothing has judged, and on one whose store is down. */
   readonly verdicts?: readonly Judgment[];
+  /** The result folded over every judgment, or null before grading finishes. */
+  readonly outcome: Outcome | null;
 };
 
 /**
@@ -104,6 +120,12 @@ export function turnsCited(one: Judgment): readonly number[] {
     if (Number.isInteger(parsed) && parsed > 0) at.push(parsed);
   }
   return at;
+}
+
+/** Turn a machine-written dimension into a label without hiding its meaning. */
+export function humanizeIdentifier(value: string): string {
+  const words = value.replaceAll(/[_-]+/g, " ").trim();
+  return words === "" ? value : `${words.slice(0, 1).toUpperCase()}${words.slice(1)}`;
 }
 
 export type Window = { readonly from: string; readonly to: string };

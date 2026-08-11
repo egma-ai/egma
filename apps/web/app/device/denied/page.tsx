@@ -1,4 +1,4 @@
-import { Card, styles } from "../../ui.tsx";
+import { StatePage, styles } from "../../ui.tsx";
 
 /**
  * Nothing was authorized, and this page says what to do about it.
@@ -14,15 +14,15 @@ import { Card, styles } from "../../ui.tsx";
  */
 export default function DeviceDeniedPage() {
   return (
-    <Card
+    <StatePage
       title="That terminal was not authorized"
       lead="Nothing was granted and no key was created."
     >
-      <p style={styles.aside}>
+      <p className={styles.linkLine}>
         If you did not mean to deny it, check the code on your terminal and{" "}
         <a href="/device">enter it again</a>. If the code no longer matches, run{" "}
         <code>egma login</code> in your terminal for a fresh one.
       </p>
-    </Card>
+    </StatePage>
   );
 }

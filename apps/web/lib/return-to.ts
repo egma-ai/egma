@@ -33,3 +33,6 @@ export function withReturnTo(path: string, returnTo: string): string {
 export function returnPathIn(search: string): string | null {
   return safeReturnPath(new URLSearchParams(search).get("next"));
 }
+
+/** The first real product page after authentication. */
+export const DEFAULT_SIGNED_IN_PATH = "/traces";

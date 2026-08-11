@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { withReturnTo } from "../../../lib/return-to.ts";
-import { Card, styles } from "../../ui.tsx";
+import { AuthShell, Notice, StatePage, styles } from "../../ui.tsx";
 
 /**
  * Approving a terminal, and saying what it is being let into.
@@ -125,18 +125,18 @@ export default function ApproveDevicePage() {
     }
   }
 
-  if (state.at === "loading") return <Card title="egma">Loading…</Card>;
+  if (state.at === "loading") return <StatePage title="Loading authorization" lead="Checking the terminal code." />;
 
   if (state.at === "unreachable") {
     return (
-      <Card
+      <StatePage
         title="egma could not be reached"
         lead="Nothing was approved. Check that your instance is running and try the code again."
       >
-        <p style={styles.aside}>
+        <p className={styles.linkLine}>
           <a href="/device">Enter the code again</a>
         </p>
-      </Card>
+      </StatePage>
     );
   }
 
@@ -144,16 +144,14 @@ export default function ApproveDevicePage() {
   const projects = authorization.projects;
 
   return (
-    <Card
+    <AuthShell
+      eyebrow="Terminal access"
       title="Authorize this terminal?"
       lead={
         <>
           A terminal showing the code{" "}
           <strong
-            style={{
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-              letterSpacing: "0.1em",
-            }}
+            className={styles.mono}
           >
             {authorization.user_code}
           </strong>{" "}
@@ -162,21 +160,17 @@ export default function ApproveDevicePage() {
         </>
       }
     >
-      {problem === null ? null : <p style={styles.problem}>{problem}</p>}
+      {problem === null ? null : <Notice tone="error">{problem}</Notice>}
 
-      <div style={styles.definition}>
-        <span style={{ color: "#666" }}>Organization</span>
-        <strong>{authorization.organization.name}</strong>
-      </div>
+      <dl className={styles.definitionList}>
+        <div className={styles.definitionRow}><dt>Organization</dt><dd>{authorization.organization.name}</dd></div>
 
       {projects.length > 1 ? (
-        <div style={{ ...styles.definition, alignItems: "center" }}>
-          <label style={{ color: "#666" }} htmlFor="project">
-            Project
-          </label>
+        <div className={styles.definitionRow}>
+          <dt><label htmlFor="project">Project</label></dt>
+          <dd>
           <select
             id="project"
-            style={{ fontFamily: "inherit" }}
             value={projectId}
             onChange={(event) => setProjectId(event.target.value)}
           >
@@ -186,17 +180,16 @@ export default function ApproveDevicePage() {
               </option>
             ))}
           </select>
+          </dd>
         </div>
       ) : (
-        <div style={styles.definition}>
-          <span style={{ color: "#666" }}>Project</span>
-          <strong>{projects[0]?.name ?? "—"}</strong>
-        </div>
+        <div className={styles.definitionRow}><dt>Project</dt><dd>{projects[0]?.name ?? "—"}</dd></div>
       )}
+      </dl>
 
-      <div style={{ display: "flex", gap: "0.75rem", marginTop: "1.5rem" }}>
+      <div className={styles.buttonRow}>
         <button
-          style={{ ...styles.button, background: "#fff", color: "#111", border: "1px solid #ccc" }}
+          className={styles.buttonSecondary}
           type="button"
           disabled={busy}
           onClick={() => void answer("/api/device/deny")}
@@ -204,7 +197,7 @@ export default function ApproveDevicePage() {
           Deny
         </button>
         <button
-          style={styles.button}
+          className={styles.button}
           type="button"
           disabled={busy}
           onClick={() => void answer("/api/device/approve")}
@@ -212,6 +205,6 @@ export default function ApproveDevicePage() {
           {busy ? "Working…" : "Approve"}
         </button>
       </div>
-    </Card>
+    </AuthShell>
   );
 }
