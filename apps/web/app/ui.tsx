@@ -134,7 +134,6 @@ export function AppShell({
   children: ReactNode;
 }) {
   const [me, setMe] = useState<Me | null>(initialMe ?? null);
-  const [contextState, setContextState] = useState<"loading" | "ready" | "unavailable">(initialMe === undefined ? "loading" : "ready");
   const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
@@ -143,31 +142,16 @@ export function AppShell({
     void fetch("/api/me")
       .then(async (response) => {
         if (!current) return;
-        if (!response.ok) {
-          setContextState("unavailable");
-          return;
-        }
+        if (!response.ok) return;
         setMe((await response.json()) as Me);
-        setContextState("ready");
       })
-      .catch(() => {
-        if (current) setContextState("unavailable");
-      });
+      .catch(() => undefined);
     return () => {
       current = false;
     };
   }, [initialMe]);
 
-  const organization = me?.organizations[0];
-  const project = me?.projects[0];
   const initial = me?.user.email.trim().slice(0, 1).toUpperCase() || "E";
-  const projectLabel = contextState === "loading"
-    ? "Loading project"
-    : contextState === "unavailable"
-      ? "Project unavailable"
-      : project?.name === undefined
-        ? "No project"
-        : `${project.name} project`;
 
   async function signOut(): Promise<void> {
     setSigningOut(true);
@@ -176,17 +160,15 @@ export function AppShell({
     } catch {
       // Reload either way so this shell never keeps showing a stale session.
     }
-    window.location.assign("/");
+    window.location.assign("/sign-in");
   }
 
   return (
     <div className={styles.appShell}>
       <aside className={styles.sidebar}>
-        <Link href="/" aria-label="Egma home"><Brand /></Link>
-        <div className={styles.sidebarContext}>
-          <span>Organization</span>
-          <strong>{organization?.name ?? (contextState === "unavailable" ? "Organization unavailable" : "Egma")}</strong>
-          <small>{projectLabel}</small>
+        <div className={styles.sidebarTop}>
+          <Link href="/traces" aria-label="Egma transcripts"><Brand /></Link>
+          <ThemeToggle />
         </div>
         <nav className={styles.navigation} aria-label="Main navigation">
           {PRODUCT_NAVIGATION.map((item) => <Link key={item.id} className={active === item.id ? styles.navigationActive : undefined} aria-current={active === item.id ? "page" : undefined} href={item.href}>{item.label}</Link>)}
@@ -197,7 +179,10 @@ export function AppShell({
       </aside>
       <div className={styles.appBody}>
         <header className={styles.mobileHeader}>
-          <Link href="/" aria-label="Egma home"><Brand /></Link>
+          <span className={styles.mobileBrand}>
+            <Link href="/traces" aria-label="Egma transcripts"><Brand /></Link>
+            <ThemeToggle />
+          </span>
           <span className={styles.mobileActions}><AccountMenu initial={initial} signingOut={signingOut} onSignOut={() => void signOut()} /></span>
         </header>
         <nav className={styles.mobileNavigation} aria-label="Main navigation">
@@ -227,7 +212,6 @@ function AccountMenu({
       </summary>
       <div className={styles.accountMenuPanel}>
         <Link className={styles.accountMenuItem} href="/members">Organization settings</Link>
-        <span className={styles.accountThemeRow}><span>Theme</span><ThemeToggle /></span>
         <button className={styles.accountMenuItem} type="button" disabled={signingOut} onClick={onSignOut}>
           {signingOut ? "Signing out…" : "Sign out"}
         </button>

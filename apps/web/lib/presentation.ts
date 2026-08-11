@@ -11,7 +11,6 @@ export function nextTheme(theme: Theme): Theme {
 }
 
 export const PRODUCT_NAVIGATION = [
-  { id: "home", label: "Home", href: "/" },
   { id: "transcripts", label: "Transcripts", href: "/traces" },
 ] as const;
 

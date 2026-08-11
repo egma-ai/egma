@@ -22,7 +22,6 @@ describe("the visual theme", () => {
 describe("the product navigation", () => {
   it("names only pages that exist", () => {
     expect(PRODUCT_NAVIGATION).toEqual([
-      { id: "home", label: "Home", href: "/" },
       { id: "transcripts", label: "Transcripts", href: "/traces" },
     ]);
   });

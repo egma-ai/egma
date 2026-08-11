@@ -46,6 +46,21 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 ::selection { background: color-mix(in srgb, var(--focus) 25%, transparent); }
 
+@supports (appearance: base-select) {
+  select, ::picker(select) { appearance: base-select; }
+  ::picker(select) {
+    margin-block: 4px;
+    padding: 5px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: 0 16px 45px rgb(0 0 0 / .14);
+    color: var(--foreground);
+  }
+  select option { padding: 9px 11px; border-radius: 7px; }
+  select option:checked { background: var(--surface-soft); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }

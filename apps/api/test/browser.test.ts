@@ -220,9 +220,8 @@ describe("adding a colleague, with no mail configured", () => {
 
       // And he is in Acme, at the role he was invited at, without ever having
       // been asked to name an organization.
-      await bob.waitForURL(new RegExp(`^${origin}/$`));
-      await expect.poll(() => bob.innerText("main")).toContain("viewer");
-      expect(await bob.innerText("main")).toContain("Acme");
+      await bob.waitForURL(new RegExp(`^${origin}/traces$`));
+      await expect.poll(() => bob.getByRole("heading", { name: "Transcripts" }).count()).toBe(1);
 
       const { rows } = await instance.database.sql<{ email: string; role: string }>(
         `select u.email, m.role from membership m
@@ -442,7 +441,7 @@ async function signedInBrowser(email: string): Promise<Page> {
   await theirs.fill("#email", email);
   await theirs.fill("#password", PASSWORD);
   await theirs.getByRole("button", { name: "Sign in" }).click();
-  await theirs.waitForURL(new RegExp(`^${origin}/$`));
+  await theirs.waitForURL(new RegExp(`^${origin}/traces$`));
   return theirs;
 }
 
@@ -587,13 +586,16 @@ describe("the list of what an organization recorded", () => {
   it(
     "moves between product pages without reloading the shell",
     async () => {
-      await page.goto(`${origin}/`);
+      await page.goto(`${origin}/traces`);
 
       const sidebar = page.locator("aside");
       const settings = sidebar.locator('summary[aria-label="Open settings menu"]');
       await settings.waitFor({ state: "visible" });
       expect(await sidebar.innerText()).not.toContain("ada@acme.example");
       expect(await sidebar.innerText()).not.toContain("Admin account");
+      expect(await sidebar.innerText()).not.toContain("Acme");
+      expect(await sidebar.innerText()).not.toContain("Voice Reliability project");
+      expect(await sidebar.getByRole("link", { name: "Home" }).count()).toBe(0);
       expect(await sidebar.innerText()).toContain("Settings");
       expect(await sidebar.getByRole("link", { name: "Organization" }).count()).toBe(0);
 
@@ -609,13 +611,10 @@ describe("the list of what an organization recorded", () => {
       await page.getByRole("tab", { name: "People" }).waitFor({ state: "visible" });
       expect(await page.getByRole("tab", { name: "People" }).count()).toBe(1);
       expect(await page.getByRole("tab", { name: "Invitations" }).count()).toBe(1);
-      await page.getByRole("link", { name: "Home", exact: true }).click();
-      await page.waitForURL(new RegExp(`${origin}/$`));
-
       await page.evaluate(() => {
         Reflect.set(window, "__egma_same_document_navigation", true);
       });
-      await page.getByRole("link", { name: "Transcripts" }).click();
+      await page.getByRole("link", { name: "Transcripts", exact: true }).click();
       await page.waitForURL(/\/traces$/);
 
       expect(
@@ -627,7 +626,7 @@ describe("the list of what an organization recorded", () => {
         await page.locator("#window").evaluate((element) =>
           getComputedStyle(element).appearance,
         ),
-      ).toBe("none");
+      ).toBe("base-select");
     },
     SETTLE,
   );
@@ -635,10 +634,8 @@ describe("the list of what an organization recorded", () => {
   it(
     "opens on the last day, and shows the exchange the agent just had",
     async () => {
-      // Reached from the front page rather than by typing an address, because
-      // an unreachable page is not a page.
+      // The root address has no separate home page. It opens transcripts.
       await page.goto(`${origin}/`);
-      await page.getByRole("link", { name: "Transcripts" }).click();
       await page.waitForURL(/\/traces$/);
 
       await page.waitForSelector("table");
@@ -1021,7 +1018,6 @@ describe("the saved theme", () => {
       expect(await page.locator("html").getAttribute("data-theme")).toBe("light");
       const controls = page.locator('button[aria-label="Use dark theme"]');
       await expect.poll(() => controls.count()).toBe(2);
-      await page.locator('aside summary[aria-label="Open settings menu"]').click();
       await controls.first().click();
 
       expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");

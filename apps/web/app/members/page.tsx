@@ -233,7 +233,9 @@ export default function MembersPage() {
                         {ROLES.map((one) => <option key={one} value={one}>{one}</option>)}
                       </select>
                       <button type="button" disabled={busy} onClick={(event) => askForConfirmation("deactivate", member, event.currentTarget)}>Deactivate</button>
-                      <button className={styles.destructive} type="button" disabled={busy} onClick={(event) => askForConfirmation("remove", member, event.currentTarget)}>Remove</button>
+                      <button className={styles.destructive} type="button" aria-label="Remove" title="Remove member" disabled={busy} onClick={(event) => askForConfirmation("remove", member, event.currentTarget)}>
+                        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" /></svg>
+                      </button>
                     </div>
                   ) : <strong>{member.role}</strong>}
                 </article>
@@ -245,32 +247,29 @@ export default function MembersPage() {
         {roster.may_manage_members && shownTab === "invitations" ? (
           <section className={`${styles.settingsPanel} ${styles.managementGrid}`} aria-labelledby="invite-title">
             <div className={styles.managementIntro}>
-              <p className={styles.eyebrow}>Invitations</p>
               <h2 id="invite-title">Invite somebody</h2>
               <p>If no mail transport is configured, Egma gives you a one-time link to send yourself.</p>
 
               {note === null ? null : <Notice tone="success">{note}</Notice>}
               {link === null ? null : <div className={styles.invitationLink}><strong>Here is the link.</strong><br />It works once, for the person named above.<br />{link}</div>}
 
-              {invitations.length === 0 ? null : (
-                <div className={styles.pendingList}>
-                  <h3>Waiting to be accepted</h3>
-                  {invitations.map((invitation) => <div className={styles.pendingRow} key={invitation.id}><span>{invitation.email}</span><strong>{invitation.role}</strong></div>)}
-                </div>
-              )}
+              <form className={styles.form} onSubmit={invite}>
+                <Field label="Email" htmlFor="invite-email">
+                  <input className={styles.input} id="invite-email" name="email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
+                </Field>
+                <Field label="Role" htmlFor="invite-role">
+                  <select className={styles.select} id="invite-role" value={role} onChange={(event) => setRole(event.target.value)}>
+                    {ROLES.map((one) => <option key={one} value={one}>{one}</option>)}
+                  </select>
+                </Field>
+                <button className={styles.button} type="submit" disabled={busy}>{busy ? "Inviting…" : "Send invitation"}</button>
+              </form>
             </div>
 
-            <form className={styles.form} onSubmit={invite}>
-              <Field label="Email" htmlFor="invite-email">
-                <input className={styles.input} id="invite-email" name="email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} />
-              </Field>
-              <Field label="Role" htmlFor="invite-role">
-                <select className={styles.select} id="invite-role" value={role} onChange={(event) => setRole(event.target.value)}>
-                  {ROLES.map((one) => <option key={one} value={one}>{one}</option>)}
-                </select>
-              </Field>
-              <button className={styles.button} type="submit" disabled={busy}>{busy ? "Inviting…" : "Send invitation"}</button>
-            </form>
+            <div className={styles.pendingList}>
+              <h3>Waiting to be accepted</h3>
+              {invitations.length === 0 ? <p className={styles.muted}>No invitations are waiting.</p> : invitations.map((invitation) => <div className={styles.pendingRow} key={invitation.id}><span>{invitation.email}</span><strong>{invitation.role}</strong></div>)}
+            </div>
           </section>
         ) : null}
       </ProductPage>
