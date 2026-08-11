@@ -46,7 +46,7 @@
 
 .appShell { display: grid; min-height: 100svh; grid-template-columns: 252px minmax(0, 1fr); }
 .sidebar { position: sticky; top: 0; display: flex; height: 100svh; flex-direction: column; padding: 38px 28px 28px; border-right: 1px solid var(--border); background: var(--background); }
-.sidebarTop { display: flex; align-items: center; gap: 12px; }
+.sidebarTop { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .sidebarTop .themeToggle, .mobileBrand .themeToggle { width: 34px; height: 34px; border-radius: 7px; }
 .navigation { display: flex; margin-top: 68px; flex-direction: column; gap: 4px; }
 .navigation a, .mobileNavigation a { padding: 10px 12px; border-radius: 7px; color: var(--muted); text-decoration: none; }
