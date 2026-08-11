@@ -78,6 +78,13 @@ which is several minutes of one simulation's slot spent on a store that
 was never going to answer. The filesystem store this seam grew out of
 could not stall at all, so bounding the network one is what keeps the
 seam's promise the same in both.
+
+It is spent through botocore's ``total_max_attempts`` and deliberately not
+through ``max_attempts``, which is the same number meaning something else:
+``max_attempts`` counts the retries *after* the first request, so the
+obvious spelling buys four attempts where this docstring promises three.
+A budget whose code and prose disagree by one is the kind that is believed
+rather than checked, and this one is a wait a self-hoster pays for.
 """
 
 
@@ -218,7 +225,7 @@ class S3BlobStore:
                 # slot waits for too.
                 connect_timeout=S3_CONNECT_SECONDS,
                 read_timeout=S3_READ_SECONDS,
-                retries={"max_attempts": S3_ATTEMPTS, "mode": "standard"},
+                retries={"total_max_attempts": S3_ATTEMPTS, "mode": "standard"},
             ),
         )
 
