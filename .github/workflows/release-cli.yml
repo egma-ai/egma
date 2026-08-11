@@ -1,0 +1,98 @@
+name: Release CLI
+
+# Releasing is one deliberate act: push a tag that names the version.
+#
+#   pnpm --filter @egma/cli exec npm version minor   # bumps apps/cli/package.json
+#   git commit -am "cli: 0.2.0" && git push
+#   git tag cli-v0.2.0 && git push origin cli-v0.2.0
+#
+# Nothing else publishes. Merging to main does not publish.
+#
+# There is no npm token in this repository. npm is told, once, on the package
+# settings page, that this workflow in this repository may publish @egma/cli.
+# GitHub proves that per run with a short-lived OIDC token, which is what
+# `id-token: write` below allows. Provenance is attached automatically.
+
+on:
+  push:
+    tags:
+      - "cli-v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # Actions are pinned to a commit, not a tag. A tag can be moved; this job
+      # holds npm publishing authority, so what it runs must not change under
+      # it. The trailing comment is the human-readable version each SHA is.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        # Version comes from "packageManager" in the root package.json.
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Report toolchain
+        # Trusted publishing needs npm >= 11.5.1. Printed so a failure here is
+        # readable rather than a bare 404 from the registry.
+        run: node --version && npm --version && pnpm --version
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check the tag matches the version
+        # Catches the classic slip: tagged cli-v0.2.0, shipped 0.1.0.
+        run: |
+          tagged="${GITHUB_REF_NAME#cli-v}"
+          packaged="$(node -p "require('./apps/cli/package.json').version")"
+          if [ "$tagged" != "$packaged" ]; then
+            echo "Tag says $tagged, apps/cli/package.json says $packaged." >&2
+            exit 1
+          fi
+          echo "Releasing @egma/cli $packaged."
+
+      - name: Build
+        # Root build is lint + tsc -b over every project the CLI is built from.
+        run: pnpm build
+
+      - name: Prove the tarball runs
+        # The same check a person would do by hand: pack it, install it
+        # somewhere clean, and run the command. Catches a missing runtime
+        # dependency or a broken bin entry before it reaches anyone.
+        run: |
+          set -e
+          dir="$(mktemp -d)"
+          (cd apps/cli && npm pack --pack-destination "$dir")
+          tarball="$(ls "$dir"/*.tgz)"
+          cd "$dir"
+          npm init -y > /dev/null
+          npm install "$tarball" --no-audit --no-fund
+          ./node_modules/.bin/egma --version
+
+      - name: Refuse a manifest npm would silently rewrite
+        # npm quietly "corrects" a manifest on publish and ships the corrected
+        # one. A bin path written "./dist/bin.js" gets dropped entirely, so the
+        # package installs with no command — and the tarball check above still
+        # passes, because a local tarball reads bin from its own package.json.
+        # The dry run is the only place this shows up. Treat it as fatal.
+        run: |
+          set -e
+          out="$(npm publish --dry-run 2>&1)"
+          echo "$out"
+          if echo "$out" | grep -qi "auto-corrected some errors"; then
+            echo "::error::npm would rewrite apps/cli/package.json before publishing. Fix it rather than shipping the rewrite." >&2
+            exit 1
+          fi
+        working-directory: apps/cli
+
+      - name: Publish to npm
+        # npm, not pnpm: OIDC trusted publishing lives in the npm CLI.
+        # No NODE_AUTH_TOKEN — the OIDC exchange is the credential.
+        run: npm publish
+        working-directory: apps/cli
