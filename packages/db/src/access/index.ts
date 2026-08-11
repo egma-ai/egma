@@ -30,10 +30,9 @@
  * this category is a deliberate act: a test names them all and fails when an
  * eighth appears.
  *
- * **Instance-scoped.** `instanceIsClaimed`, and only it. It takes nothing and
- * returns a boolean, so it can neither name a customer nor carry a row out. It
- * is asked by the one caller with no credential at all — somebody looking at a
- * signup form — and the same test names it.
+ * **Instance-scoped.** `instanceIsClaimed` and `platformInstanceId`. Both take
+ * nothing, so neither can name a customer. They return only one platform fact:
+ * whether signup has been claimed, or the platform's own non-secret identity.
  *
  * **Work-dispatching.** `claimGradingJobs`, `watchGradingWork`,
  * `claimSimulations`, `recordSimulationHeartbeat`, `sweepOrphanedSimulations`
@@ -162,10 +161,11 @@ export {
 } from "./invitations.ts";
 export {
   provisionOrganization,
+  type NewPlatformJudge,
   type NewOrganization,
   type ProvisionedOrganization,
 } from "./provisioning.ts";
-export { instanceIsClaimed } from "./instance.ts";
+export { instanceIsClaimed, platformInstanceId } from "./instance.ts";
 
 export {
   readOrganization,
@@ -243,6 +243,7 @@ export {
 
 export {
   addConnection,
+  connectionTypeOf,
   createAgent,
   deleteAgent,
   getAgent,
@@ -392,6 +393,7 @@ export type {
 export {
   getJudgeConfiguration,
   resolveJudgeKey,
+  seedDefaultJudge,
   setJudgeConfiguration,
   type JudgeConfiguration,
   type NewJudgeConfiguration,

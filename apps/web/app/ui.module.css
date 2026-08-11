@@ -173,6 +173,71 @@
 .turn[open] .turnMarker { transform: rotate(45deg); }
 .turnBody { padding: 0 18px 18px 105px; color: var(--muted); }
 .turnBody > p { margin: 0; font-size: 13px; }
+.judgmentCard { margin: -3px 18px 12px 96px; padding: 14px 16px; border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 8px; background: var(--surface-soft); }
+.judgmentCard[data-verdict="passed"] { border-left-color: var(--good); }
+.judgmentCard[data-verdict="failed"], .judgmentCard[data-verdict="errored"] { border-left-color: var(--bad); }
+.judgmentHeading { display: flex; min-width: 0; align-items: center; gap: 9px; }
+.judgmentHeading strong { min-width: 0; overflow-wrap: anywhere; font-size: 12px; font-weight: 600; }
+.judgmentHeading > span:last-child { margin-left: auto; color: var(--faint); font-family: var(--mono); font-size: 9px; text-transform: uppercase; }
+.verdictChip { display: inline-flex; flex: 0 0 auto; padding: 4px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-family: var(--mono); font-size: 9px; text-transform: uppercase; }
+.judgmentCard[data-verdict="passed"] .verdictChip { border-color: color-mix(in srgb, var(--good) 40%, var(--border)); color: var(--good); }
+.judgmentCard[data-verdict="failed"] .verdictChip, .judgmentCard[data-verdict="errored"] .verdictChip { border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); color: var(--bad); }
+.judgmentCard > p { margin: 10px 0 8px; overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }
+.judgmentCard > small { color: var(--faint); font-family: var(--mono); font-size: 9px; }
+
+.runFacts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--border); }
+.runFacts .contextFact { min-width: 0; padding: 19px 18px; border-right: 1px solid var(--border); }
+.runFacts .contextFact:first-child { padding-left: 0; }
+.runFacts .contextFact:last-child { padding-right: 0; border-right: 0; }
+.runFacts .contextFact strong { overflow-wrap: anywhere; font-size: 15px; }
+.runFacts .contextFact[data-verdict="passed"] strong { color: var(--good); }
+.runFacts .contextFact[data-verdict="failed"] strong, .runFacts .contextFact[data-verdict="errored"] strong { color: var(--bad); }
+.runFacts + .notice { margin-top: 22px; }
+.runSection { padding: 38px 0; border-bottom: 1px solid var(--border); }
+.runSectionHeading { display: flex; min-width: 0; align-items: flex-end; justify-content: space-between; gap: 28px; margin-bottom: 22px; }
+.runSectionHeading h2 { margin: 0; font-size: 27px; font-weight: 520; letter-spacing: -.03em; }
+.runSectionHeading > p { margin: 0; color: var(--muted); font-family: var(--mono); font-size: 11px; text-align: right; }
+.graderGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.graderCard { min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.graderCard > div { display: flex; min-width: 0; align-items: center; gap: 9px; }
+.graderCard strong { min-width: 0; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.graderCard p { margin: 18px 0 5px; overflow-wrap: anywhere; font-size: 13px; }
+.graderCard small { color: var(--faint); font-family: var(--mono); font-size: 9px; }
+.graderCard[data-verdict="passed"] { border-color: color-mix(in srgb, var(--good) 32%, var(--border)); }
+.graderCard[data-verdict="failed"], .graderCard[data-verdict="errored"] { border-color: color-mix(in srgb, var(--bad) 36%, var(--border)); }
+.graderCard[data-verdict="passed"] .verdictChip { border-color: color-mix(in srgb, var(--good) 40%, var(--border)); color: var(--good); }
+.graderCard[data-verdict="failed"] .verdictChip, .graderCard[data-verdict="errored"] .verdictChip { border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); color: var(--bad); }
+.runSimulations { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow: clip; }
+.runSimulation { border-top: 1px solid var(--border); }
+.runSimulation:first-child { border-top: 0; }
+.runSimulation > summary { display: grid; min-width: 0; min-height: 82px; align-items: center; grid-template-columns: 34px minmax(180px, 1.4fr) repeat(4, minmax(74px, .65fr)) 28px; gap: 16px; padding: 14px 16px; cursor: pointer; list-style: none; }
+.runSimulation > summary::-webkit-details-marker { display: none; }
+.runSimulation > summary:hover { background: var(--surface-soft); }
+.runPosition { color: var(--faint); font-family: var(--mono); font-size: 10px; }
+.runSimulationIdentity { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.runSimulationIdentity strong, .runSimulationIdentity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runSimulationIdentity strong { font-size: 13px; font-weight: 560; }
+.runSimulationIdentity small { color: var(--muted); font-size: 11px; }
+.runResultValue { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.runResultValue small { color: var(--faint); font-family: var(--mono); font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
+.runResultValue strong { overflow: hidden; font-family: var(--mono); font-size: 10px; font-weight: 550; text-overflow: ellipsis; text-transform: capitalize; white-space: nowrap; }
+.runResultValue[data-verdict="passed"] strong { color: var(--good); }
+.runResultValue[data-verdict="failed"] strong, .runResultValue[data-verdict="errored"] strong { color: var(--bad); }
+.runDisclosure { display: grid; width: 26px; height: 26px; place-items: center; border: 1px solid var(--border); border-radius: 50%; transition: transform 120ms ease; }
+.runSimulation[open] .runDisclosure { transform: rotate(45deg); }
+.runSimulationBody { padding: 4px 16px 20px 66px; border-top: 1px solid var(--border); }
+.runSimulationBody > .notice { margin: 18px 0 0; }
+.runTally { margin: 18px 0; color: var(--muted); font-family: var(--mono); font-size: 11px; }
+.runJudgments { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.runJudgment { min-width: 0; padding: 15px; border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 8px; background: var(--surface-soft); }
+.runJudgment[data-verdict="passed"] { border-left-color: var(--good); }
+.runJudgment[data-verdict="failed"], .runJudgment[data-verdict="errored"] { border-left-color: var(--bad); }
+.runJudgment[data-verdict="passed"] .verdictChip { border-color: color-mix(in srgb, var(--good) 40%, var(--border)); color: var(--good); }
+.runJudgment[data-verdict="failed"] .verdictChip, .runJudgment[data-verdict="errored"] .verdictChip { border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); color: var(--bad); }
+.runJudgment > p { margin: 11px 0 9px; overflow-wrap: anywhere; font-size: 14px; line-height: 1.5; }
+.runJudgment > small { color: var(--faint); font-family: var(--mono); font-size: 9px; overflow-wrap: anywhere; }
+.runTechnical { margin-top: 28px; }
+.runTechnical > summary { cursor: pointer; color: var(--muted); font-family: var(--mono); font-size: 11px; }
 .stepStack { display: flex; min-width: 0; flex-direction: column; gap: 8px; }
 .step { min-width: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); overflow: clip; }
 .stepFailed { border-color: color-mix(in srgb, var(--bad) 45%, var(--border)); }
@@ -271,6 +336,9 @@
 @media (max-width: 1100px) {
   .traceLayout { grid-template-columns: 1fr; }
   .traceInspector { position: static; max-height: none; }
+  .graderGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .runSimulation > summary { grid-template-columns: 30px minmax(160px, 1fr) repeat(3, minmax(70px, .6fr)) 28px; }
+  .runSimulation > summary > .runResultValue:nth-child(6) { display: none; }
 }
 
 @media (max-width: 900px) {
@@ -288,6 +356,15 @@
   .mobileNavigation { display: flex; padding: 7px 14px; border-bottom: 1px solid var(--border); }
   .mobileNavigation a { padding: 9px 12px; }
   .productPage, .productPageWide { width: min(100% - 40px, 720px); padding-top: 58px; }
+  .runFacts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .runFacts .contextFact { padding: 15px 12px; border-top: 1px solid var(--border); }
+  .runFacts .contextFact:nth-child(odd) { padding-left: 0; }
+  .runFacts .contextFact:nth-child(even) { padding-right: 0; border-right: 0; }
+  .runFacts .contextFact:nth-child(-n + 2) { border-top: 0; }
+  .runSimulation > summary { grid-template-columns: 28px minmax(160px, 1fr) minmax(72px, .55fr) 28px; }
+  .runSimulation > summary > .runResultValue { display: none; }
+  .runSimulation > summary > .runResultValue:nth-child(5) { display: flex; }
+  .runJudgments { grid-template-columns: 1fr; }
   .managementGrid { grid-template-columns: 1fr; }
   .tableWrap { display: none; }
   .mobileRows { display: flex; flex-direction: column; border-top: 1px solid var(--border); }
@@ -324,6 +401,12 @@
   .turnHeading { align-items: flex-start; flex-direction: column; gap: 5px; }
   .turnWords { font-size: 16px; }
   .turnBody { padding: 0 14px 14px 76px; }
+  .judgmentCard { margin-right: 0; margin-left: 0; }
+  .runSectionHeading { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .runSectionHeading > p { text-align: left; }
+  .graderGrid { grid-template-columns: 1fr; }
+  .runSimulation > summary { min-height: 76px; grid-template-columns: 26px minmax(0, 1fr) 70px 26px; gap: 10px; padding: 12px; }
+  .runSimulationBody { padding: 2px 12px 16px; }
   .step summary { align-items: flex-start; grid-template-columns: 1fr; gap: 6px; }
   .stepTiming { white-space: normal; }
   .timelineRow { grid-template-columns: minmax(0, 1fr) 56px; padding-left: calc(10px + var(--timeline-indent)); }

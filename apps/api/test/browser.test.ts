@@ -1,6 +1,7 @@
 import type { Browser, Page, Request } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { PLATFORM_IDENTITY_PATH } from "../src/routes/platform.ts";
 import { openBrowser } from "./support/browser.ts";
 import {
   capturedRequests,
@@ -89,6 +90,39 @@ describe("entering the app", () => {
     },
     SETTLE,
   );
+});
+
+describe("what a self-hoster's origin answers before anybody logs in", () => {
+  /**
+   * The address a self-hoster is handed is this one — the pages — and it is the
+   * address they paste into `npx egma --url`. The CLI reads the platform's
+   * identity there before it sends a single repository identifier, so the read
+   * has to survive the trip through this process. Proved here rather than
+   * against the API's own port, because a rewrite that forgot this path would
+   * pass every test that talks straight to the API and would still make a
+   * running platform unusable from an agent repository.
+   */
+  it("serves the platform identity through the pages, at the origin the CLI is given", async () => {
+    const read = await fetch(`${origin}${PLATFORM_IDENTITY_PATH}`, {
+      headers: { accept: "application/json" },
+    });
+    expect(read.status).toBe(200);
+
+    const identity = (await read.json()) as {
+      instance_id: string;
+      origin: string;
+    };
+    expect(identity.instance_id).toMatch(/^pf_[0-9A-HJKMNP-TV-Z]{26}$/u);
+    expect(identity.origin).toBe(origin);
+
+    // The API's own port answers the same thing. One platform, one identity,
+    // whichever door it is read through.
+    const direct = await instance.api.inject({
+      method: "GET",
+      url: PLATFORM_IDENTITY_PATH,
+    });
+    expect(direct.json()).toEqual(identity);
+  });
 });
 
 describe("logging in from a terminal", () => {

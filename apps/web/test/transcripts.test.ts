@@ -283,6 +283,12 @@ describe("what a stored kind is called where somebody reads it", () => {
   it("labels the two speakers the way a transcript does", () => {
     expect(copy.SPEAKERS).toEqual({ human: "human:", agent: "agent:" });
   });
+
+  it("makes a grader dimension readable without changing its words", () => {
+    expect(copy.humanizeIdentifier("appointment_change_policy")).toBe(
+      "Appointment change policy",
+    );
+  });
 });
 
 /**

@@ -21,7 +21,7 @@ export type SignedIn = {
  * key for a different address is no key at all here.
  */
 export async function signedInAt(access: PlatformAccess): Promise<SignedIn | null> {
-  const held = await readCredentials(access.credentialsFile);
+  const held = await readCredentials(access.credentialsFile, access.url);
   if (held === null || held.url !== access.url) return null;
   return { url: access.url, key: held.key };
 }

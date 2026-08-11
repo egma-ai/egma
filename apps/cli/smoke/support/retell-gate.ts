@@ -22,6 +22,12 @@ export const ALLOWED: readonly { method: string; path: RegExp }[] = [
   { method: "GET", path: /^\/get-chat-agent\/[^/]+$/u },
   { method: "GET", path: /^\/get-retell-llm\/[^/]+$/u },
   { method: "GET", path: /^\/get-conversation-flow\/[^/]+$/u },
+  // The account's telephone numbers, and one number's own document. Both are
+  // reads, and both are what the phone path is built on: which numbers Retell
+  // routes to the agent under test, confirmed at the number's own address
+  // immediately before egma writes a connection it will really dial.
+  { method: "GET", path: /^\/list-phone-numbers$/u },
+  { method: "GET", path: /^\/get-phone-number\/[^/]+$/u },
 ];
 
 export type Gate = {

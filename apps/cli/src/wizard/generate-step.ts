@@ -37,6 +37,7 @@ import { readdir } from "node:fs/promises";
 
 import {
   createEgmaFolder,
+  DEFAULT_SUITE_NAME,
   readConfig,
   readFolder,
   updateConfig,
@@ -54,7 +55,7 @@ import type { DrivenAgentLog } from "./driven-agent-log.ts";
 import type { ExitReport } from "./exit-line.ts";
 import type { Facts } from "./discovery.ts";
 import { readExistingTests } from "./existing-tests.ts";
-import { gateFrom, type HeldBack } from "./gate.ts";
+import { destinationOf, gateFrom, type HeldBack } from "./gate.ts";
 import { MarkerStream, type ParsedLine } from "./markers.ts";
 import { ACTION_MARK, DETAIL_MARK, FAILURE_MARK } from "./status.ts";
 import { stopReasonOf, stopReport, untilAborted } from "./stop.ts";
@@ -65,9 +66,6 @@ import {
   GenerationTally,
   type GenerationContext,
 } from "./test-generation.ts";
-
-/** What this folder's first test suite is called when nobody has named one. */
-export const DEFAULT_SUITE_NAME = "first-suite";
 
 /**
  * How the step ended, and what it left behind for the step after it.
@@ -325,9 +323,22 @@ async function folderFor(options: GenerateStepOptions): Promise<FolderPaths> {
 
   const folder = await createEgmaFolder({
     repository: options.cwd,
-    config: { agent, connection, suite: { name: DEFAULT_SUITE_NAME, id: null } },
+    config: {
+      platform: null,
+      agent,
+      connection,
+      suite: { name: DEFAULT_SUITE_NAME, id: null },
+    },
   });
-  if (!folder.created) await updateConfig(folder.paths.config, { agent, connection });
+  if (!folder.created) {
+    await updateConfig(folder.paths.config, {
+      agent,
+      connection,
+      ...(folder.config.suite === null
+        ? { suite: { name: DEFAULT_SUITE_NAME, id: null } }
+        : {}),
+    });
+  }
   return folder.paths;
 }
 
@@ -465,7 +476,9 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
   const about = {
     agentName: options.registered.agent.name,
     connectionName: options.registered.connection.name,
+    connectionType: options.registered.connection.type,
     modality: options.registered.connection.modality,
+    destination: destinationOf(options.registered.connection),
     suite,
   };
 

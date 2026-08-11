@@ -243,23 +243,18 @@ give it a SIP trunk. The trunk is yours, from any carrier — either one
 already stored in LiveKit or the inline fields below — and the same three
 LiveKit variables serve a self-hosted server and LiveKit Cloud.
 
-If your carrier is Twilio, one command makes the trunk rather than making
-you build it in a console:
+If your carrier is Twilio, none of this is yours to build by hand.
+`egma self-host phone setup`, in the platform workspace, reads your
+account, shows a plan, and on approval creates the Elastic SIP Trunk, the
+credential list and its credential, attaches both and the number to the
+trunk, and writes every variable below into that workspace's own private
+configuration. It is safe to run again and safe to run again after a run
+that stopped half way. **The account token is used by that command and
+nothing else** — what a deployment keeps afterwards is a SIP credential
+that can do nothing but place calls over one trunk. See the root README.
 
-```bash
-TWILIO_ACCOUNT_SID=AC... TWILIO_AUTH_TOKEN=... \
-uv run egma-trunk-setup --number +15551234567
-```
-
-It creates an Elastic SIP Trunk, a credential list and its credential,
-attaches both and the number to the trunk, and prints the five variables
-below on stdout — the story of what it made, with each identifier, goes
-to stderr, so `> phone.env` captures exactly the configuration and
-nothing else. It is safe to run again: a second run finds what the first
-made and rotates only the password, which Twilio hands out once and never
-again. **The account token is used by that command and nothing else** —
-what a deployment keeps afterwards is a SIP credential that can do
-nothing but place calls over one trunk.
+The variables below are what that produces, for a deployment that
+configures its own environment instead.
 
 Real speech providers belong with all this: a call spoken in the test
 tone reaches a real agent as noise.
@@ -291,10 +286,10 @@ before, and refuses a spec that names a phone number with a sentence
 naming the variable to set.
 
 Where the LiveKit server itself comes from is the root README's story:
-`docker-compose.phone.yml` is an opt-in overlay that stands one up beside
-the simulator, with the honest account of what its SIP gateway needs from
-your network. `egma-workbench --phone-number +1...` is the other half of
-that demo — it points the phone fixture at a real agent instead of the
+it, its SIP gateway and their Redis are part of the default deployment,
+told there with the honest account of what that gateway needs from your
+network. `egma-workbench --phone-number +1...` is the other half of the
+local demo — it points the phone fixture at a real agent instead of the
 placeholder it carries, and queues nothing else.
 
 A phone call is carried at 8 kHz, always, and no connection can ask for
@@ -321,10 +316,14 @@ Everything arrives as environment variables.
 | `EGMA_SIMULATOR_MODEL_BASE_URL` | `https://api.openai.com/v1` | The provider, for `openai` — any OpenAI-compatible endpoint. |
 | `EGMA_SIMULATOR_MODEL_NAME` | (required for `openai`) | Which model to ask for. |
 | `EGMA_SIMULATOR_MODEL_API_KEY` | (required for `openai`) | The provider key. Never logged. |
-| `EGMA_SIMULATOR_STT_PROVIDER` | `scripted` | What the persona hears with, in a voice simulation: `scripted` or `deepgram`. |
+| `EGMA_SIMULATOR_STT_PROVIDER` | `scripted` | What the persona hears with, in a voice simulation: `scripted`, `deepgram` or `openai`. |
 | `EGMA_SIMULATOR_DEEPGRAM_API_KEY` | (required for `deepgram`) | The provider key. Never logged. |
-| `EGMA_SIMULATOR_TTS_PROVIDER` | `scripted` | What the persona speaks with: `scripted` or `elevenlabs`. |
+| `EGMA_SIMULATOR_TTS_PROVIDER` | `scripted` | What the persona speaks with: `scripted`, `elevenlabs` or `openai`. |
 | `EGMA_SIMULATOR_ELEVENLABS_API_KEY` | (required for `elevenlabs`) | The provider key. Never logged. |
+| `EGMA_SIMULATOR_OPENAI_API_KEY` | (required for `openai` ears or mouth) | One key for both legs, because one account speaks and listens. Never logged. |
+| `EGMA_SIMULATOR_STT_MODEL` | `gpt-4o-transcribe` | Which model the `openai` listening leg asks for. |
+| `EGMA_SIMULATOR_TTS_MODEL` | `gpt-4o-mini-tts` | Which model the `openai` speaking leg asks for. |
+| `EGMA_SIMULATOR_TTS_VOICE` | `alloy` | Which OpenAI voice a persona speaks with when its own traits name none. |
 | `EGMA_SIMULATOR_VAD_PROVIDER` | `scripted` | What hears the agent start and stop speaking: `scripted`, which reads the test tone exactly, or `silero`. Needs no key either way — Silero ships inside the pinned pipecat wheel and downloads nothing. |
 | `EGMA_SIMULATOR_MEDIA_BACKEND` | (none) | Which bridge places a phone call: `livekit`, or `scripted` for the local stand-in that places none. Unset, the simulator places no calls and says so when a simulation names a number. |
 | `EGMA_SIMULATOR_LIVEKIT_URL` | (required for `livekit`) | The LiveKit server — self-hosted or Cloud, only the URL differs. |
@@ -371,12 +370,11 @@ docker compose -f docker-compose.yml -f docker-compose.workbench.yml \
 That is the same story as the two terminals above, in containers, with
 the fixtures already inside the image.
 
-`docker-compose.phone.yml` is the third overlay: a LiveKit server, its
-SIP gateway and their Redis, for a deployment that places real calls.
-`docker compose up` starts none of it, and the simulator publishes
-nothing whichever overlays are on — the gateway is the one container in
-egma a carrier talks to, and what that costs a self-hoster is the root
-README's story to tell.
+The LiveKit server, its SIP gateway and their Redis are not an overlay:
+they are in the default compose file, so `docker compose up` starts them
+with everything else. The simulator publishes nothing whichever overlays
+are on — the gateway is the one container in egma a carrier talks to, and
+what that costs a self-hoster is the root README's story to tell.
 
 ## Tests
 
@@ -470,13 +468,9 @@ offline sentinel tests do. `TEST_DEEPGRAM_API_KEY` and
 `TEST_ELEVENLABS_API_KEY` are read first, for a machine that keeps its
 test credentials apart from its working ones.
 
-`egma-trunk-setup` converses with `tests/twilio_stub.py`, a local server
-shaped like the two Twilio APIs the step drives — trunks and attachments
-on one, credential lists and numbers on the other — so proving it makes
-the right artifacts in the right order needs no account and no network.
-Its refusals are proved too: a number the account does not hold, a wrong
-token, a carrier that refuses outright, and a termination URI a stranger
-already holds.
+Carrier provisioning is no longer this app's: `egma self-host phone
+setup` owns it, and its tests live with the CLI, against a local server
+shaped like the two Twilio APIs it drives.
 
 `tests/test_deployment.py` compares the deployment story against the code
 that reads it: every variable the simulator looks up is in
@@ -532,8 +526,6 @@ src/egma_simulator/
                   trunk, livekit_room.py dispatches an agent into a room,
                   room.py is the joining the two of them share, and
                   scripted.py is the one CI converses through.
-  trunk.py        `egma-trunk-setup`: a carrier account and a number
-                  become a SIP trunk, once, through the carrier's own API.
   pipeline.py     One pipeline per simulation, built from its spec: which
                   legs the modality selects, which of the two conductors
                   it gets, and what the audio measured.

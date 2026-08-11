@@ -42,6 +42,17 @@ export const TESTS_FOLDER_NAME = "tests";
 /** Reserved for per-agent memory files. Nothing creates it. */
 export const MEMORY_FOLDER_NAME = "memory";
 
+/**
+ * What this folder's first test suite is called when nobody has named one.
+ *
+ * Here rather than in the wizard, because both surfaces that fill this file in
+ * write it and they have to write the same word: a repository connected by the
+ * verb and a repository connected by the wizard are the same repository, and a
+ * suite name that differed between them would be a difference a developer would
+ * find later in a run label they did not choose.
+ */
+export const DEFAULT_SUITE_NAME = "first-suite";
+
 /** Where each part of the folder is, once a repository root is known. */
 export type FolderPaths = {
   readonly root: string;
@@ -72,18 +83,32 @@ export type NamedThing = {
   readonly id: string | null;
 };
 
+/** The non-secret identity of the one Egma platform that owns this folder. */
+export type PlatformBinding = {
+  /** The platform's canonical, normalized web origin. */
+  readonly origin: string;
+  /** The stable platform-instance identifier read from that origin. */
+  readonly instance: string;
+};
+
 /**
  * What the folder points at. Each may be unset — the folder can exist before
  * the thing it names does, which is what lets `egma init` run in a repository
  * that has not been connected to anything yet.
  */
 export type FolderConfig = {
+  readonly platform: PlatformBinding | null;
   readonly agent: NamedThing | null;
   readonly connection: NamedThing | null;
   readonly suite: NamedThing | null;
 };
 
-export const EMPTY_CONFIG: FolderConfig = { agent: null, connection: null, suite: null };
+export const EMPTY_CONFIG: FolderConfig = {
+  platform: null,
+  agent: null,
+  connection: null,
+  suite: null,
+};
 
 /** The three keys, in the order they are written and read. */
 const CONFIG_KEYS = ["agent", "connection", "suite"] as const;
@@ -97,6 +122,13 @@ const CONFIG_HEADER = [
 
 export function serializeConfig(config: FolderConfig): string {
   const lines = [...CONFIG_HEADER];
+  if (config.platform == null) {
+    lines.push("platform:");
+  } else {
+    lines.push("platform:");
+    lines.push(`  origin: ${yamlScalar(config.platform.origin)}`);
+    lines.push(`  instance: ${yamlScalar(config.platform.instance)}`);
+  }
   for (const key of CONFIG_KEYS) {
     const named = config[key];
     if (named === null) {
@@ -114,6 +146,28 @@ export function serializeConfig(config: FolderConfig): string {
 
 export function parseConfig(document: string, where: string): FolderConfig {
   const mapping = readYaml(document, where);
+  const platformMapping = mappingAtKey(mapping, "platform");
+  const platformScalar = textAt(mapping, "platform");
+  const platform =
+    platformMapping === null
+      ? (() => {
+          if (platformScalar !== null) {
+            throw new Error(
+              `${where} has a platform value without an origin and instance. Run the Egma wizard to repair the repository binding.`,
+            );
+          }
+          return null;
+        })()
+      : (() => {
+          const origin = textAt(platformMapping, "origin");
+          const instance = textAt(platformMapping, "instance");
+          if (origin === null || instance === null) {
+            throw new Error(
+              `${where} has an incomplete platform binding. Run the Egma wizard to repair it.`,
+            );
+          }
+          return { origin, instance };
+        })();
   const read = (key: (typeof CONFIG_KEYS)[number]): NamedThing | null => {
     const under = mappingAtKey(mapping, key);
     if (under === null) {
@@ -126,7 +180,12 @@ export function parseConfig(document: string, where: string): FolderConfig {
     return name === null ? null : { name, id: textAt(under, "id") };
   };
 
-  return { agent: read("agent"), connection: read("connection"), suite: read("suite") };
+  return {
+    platform,
+    agent: read("agent"),
+    connection: read("connection"),
+    suite: read("suite"),
+  };
 }
 
 export async function readConfig(file: string): Promise<FolderConfig> {
@@ -148,12 +207,58 @@ export async function updateConfig(
 ): Promise<FolderConfig> {
   const held = await readConfig(file);
   const updated: FolderConfig = {
+    platform: changes.platform === undefined ? held.platform : changes.platform,
     agent: changes.agent === undefined ? held.agent : changes.agent,
     connection: changes.connection === undefined ? held.connection : changes.connection,
     suite: changes.suite === undefined ? held.suite : changes.suite,
   };
   await writeConfig(file, updated);
   return updated;
+}
+
+/**
+ * Commit the verified platform before anything creates platform-owned resource
+ * identifiers.
+ *
+ * A retry is byte-stable. **A binding that is already here is never rewritten,
+ * not in either field.** The instance is the identity boundary, and the origin
+ * is the address every clone of this repository will use — so a run that
+ * quietly changed either would be moving other people's repository for them.
+ * Both differences are refused and say what to do about it, and the address one
+ * is normally caught earlier still, before any address is asked anything.
+ */
+export async function bindRepositoryPlatform(
+  repository: string,
+  binding: PlatformBinding,
+): Promise<FolderConfig> {
+  const paths = folderPathsIn(repository);
+  let held: FolderConfig;
+  try {
+    held = await readConfig(paths.config);
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+    return (
+      await createEgmaFolder({
+        repository,
+        config: { ...EMPTY_CONFIG, platform: binding },
+      })
+    ).config;
+  }
+
+  if (held.platform !== null) {
+    if (held.platform.instance !== binding.instance) {
+      throw new Error(
+        `This repository is already bound to Egma platform ${held.platform.instance} at ${held.platform.origin}. Rebinding is not supported yet.`,
+      );
+    }
+    if (held.platform.origin !== binding.origin) {
+      throw new Error(
+        `This repository records Egma platform ${held.platform.instance} at ${held.platform.origin}, and this run reached it at ${binding.origin}. egma will not move a committed platform address for you. Use ${held.platform.origin}, or edit egma/config.yaml on purpose.`,
+      );
+    }
+    return held;
+  }
+  return updateConfig(paths.config, { platform: binding });
 }
 
 /**

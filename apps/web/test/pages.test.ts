@@ -291,16 +291,39 @@ describe("the pages", () => {
       path.join(WEB, "app/traces/[traceId]/page.tsx"),
       "utf8",
     );
+    const run = await readFile(
+      path.join(WEB, "app/runs/[runId]/page.tsx"),
+      "utf8",
+    );
 
     expect(shell).toContain("export function ProductStatePage");
     expect(members).toContain("<ProductStatePage");
     expect(transcript).toContain('<ProductStatePage active="transcripts"');
+    expect(run).toContain('<ProductStatePage active="transcripts"');
     expect(members).not.toContain(
       'return <StatePage title="Loading organization settings"',
     );
     expect(transcript).not.toMatch(
       /state\.status === "loading"[\s\S]*?return <StatePage/,
     );
+    expect(run).not.toMatch(
+      /state\.status === "loading"[\s\S]*?return <StatePage/,
+    );
+  });
+
+  it("show real run verdicts without folding execution failures into grader failures", async () => {
+    const run = await readFile(
+      path.join(WEB, "app/runs/[runId]/page.tsx"),
+      "utf8",
+    );
+
+    expect(run).toContain("/api/runs/");
+    expect(run).toContain("run.failed_count");
+    expect(run).toContain("run.graded_count");
+    expect(run).toContain("simulation.verdicts.map");
+    expect(run).toContain("This is an execution problem, not a failed grader verdict.");
+    expect(run).toContain("judgment.rationale");
+    expect(run).toContain("judgment.cited_turns");
   });
 
   it("reach the API for the device flow at paths this instance rewrites", async () => {

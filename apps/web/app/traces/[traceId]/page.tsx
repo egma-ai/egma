@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { use, useEffect, useState, type CSSProperties } from "react";
+import { Fragment, use, useEffect, useState, type CSSProperties } from "react";
 
 import {
   DETAIL,
@@ -9,6 +9,7 @@ import {
   LIST,
   SPEAKERS,
   UNKNOWN_STEP_LABEL,
+  humanizeIdentifier,
   stepLabel,
 } from "../../../lib/transcript-copy.ts";
 import {
@@ -20,8 +21,10 @@ import {
   somethingFailed,
   stepsInside,
   whenItWas,
+  turnsCited,
   type Detail,
   type Facts as TraceFacts,
+  type Judgment,
   type Step,
 } from "../../../lib/transcripts.ts";
 import {
@@ -276,14 +279,23 @@ function TranscriptView({
       {detail.turns.length === 0 ? (
         <Notice>{DETAIL.noTurns}</Notice>
       ) : (
-        detail.turns.map((turn) => (
-          <Turn
-            key={turn.span_id}
-            turn={turn}
-            openedAt={openedAt}
-            selectedId={selectedId}
-            onSelect={onSelect}
-          />
+        detail.turns.map((turn, position) => (
+          <Fragment key={turn.span_id}>
+            <Turn
+              turn={turn}
+              openedAt={openedAt}
+              selectedId={selectedId}
+              onSelect={onSelect}
+            />
+            {(detail.verdicts ?? [])
+              .filter((judgment) => turnsCited(judgment).includes(position + 1))
+              .map((judgment) => (
+                <JudgmentCard
+                  key={`${judgment.grader_id}:${judgment.dimension}:${judgment.judged_at}`}
+                  judgment={judgment}
+                />
+              ))}
+          </Fragment>
         ))
       )}
       {detail.spans.length === 0 ? null : (
@@ -653,4 +665,20 @@ function presentedStepLabel(step: Step): string {
   if (known !== UNKNOWN_STEP_LABEL || step.name === "") return known;
   const words = step.name.replaceAll(/[_-]+/g, " ").trim();
   return words === "" ? known : `${words.slice(0, 1).toUpperCase()}${words.slice(1)}`;
+}
+
+function JudgmentCard({ judgment }: { judgment: Judgment }) {
+  return (
+    <article className={styles.judgmentCard} data-verdict={judgment.verdict}>
+      <div className={styles.judgmentHeading}>
+        <span className={styles.verdictChip}>{judgment.verdict}</span>
+        <strong>{humanizeIdentifier(judgment.dimension)}</strong>
+        <span>{judgment.priority}</span>
+      </div>
+      <p>{judgment.rationale}</p>
+      <small>
+        {DETAIL.judgedBy} <span className={styles.mono}>{judgment.judged_by}</span>
+      </small>
+    </article>
+  );
 }

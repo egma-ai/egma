@@ -933,6 +933,66 @@ export async function addConnection(
   return insertConnection(db(), auth, home, admitted);
 }
 
+/**
+ * What type one connection is, by its id alone — or `undefined` where this
+ * caller has no such connection.
+ *
+ * **The one connection read that does not name an agent, and it exists for one
+ * caller: the deployment gate in front of run creation.** A run's body names a
+ * connection and need not name the agent it is on, and the API has to know
+ * whether that connection is a phone before it will let a run over it be
+ * written on a platform whose phone half was never set up. Asking through
+ * `getConnection` would mean the caller first guessing an agent id it was never
+ * given.
+ *
+ * It answers a type and nothing else, deliberately. A gate needs to know what
+ * kind of thing this is; it has no business with the config, and a shape that
+ * cannot carry a credential cannot leak one.
+ *
+ * Scoped exactly as `startRun` scopes the same row — alive, in the acting
+ * project, under a living agent, inside the caller's tenancy — so a gate can
+ * never refuse over a connection the run itself would have said it could not
+ * see. Whichever way that disagreement fell it would be wrong: a refusal
+ * naming somebody else's connection is a leak, and a gate that skipped
+ * because it looked in the wrong project is no gate.
+ */
+export async function connectionTypeOf(
+  auth: AuthContext,
+  connectionId: string,
+): Promise<ConnectionType | undefined> {
+  authorize(auth, "read", here(auth));
+
+  // A run happens inside a project, so a credential acting in none is one
+  // `startRun` will refuse for that reason and in those words. Answering
+  // nothing here leaves it to say so.
+  const { projectId } = auth;
+  if (projectId === undefined) return undefined;
+  if (!isId("con", connectionId)) return undefined;
+
+  const [row] = await db()
+    .select({ type: connection.type })
+    .from(connection)
+    .innerJoin(agent, eq(connection.agentId, agent.id))
+    .where(
+      within(
+        auth,
+        connection,
+        and(
+          eq(connection.id, connectionId),
+          eq(connection.projectId, projectId),
+          connectionNotDeleted,
+          isNull(agent.deletedAt),
+        ),
+      ),
+    )
+    .limit(1);
+
+  // The column is text, as every enum-shaped column in this schema is, and the
+  // registry is what decides which strings are types. The cast is the same one
+  // `connectionFromRow` makes for the same reason, in the same file.
+  return row === undefined ? undefined : (row.type as ConnectionType);
+}
+
 export async function getConnection(
   auth: AuthContext,
   agentId: string,

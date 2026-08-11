@@ -57,6 +57,17 @@
  *                         what proves a second walk over the same provider
  *                         agent finds the registration the first one made
  *                         rather than minting a second identity for it.
+ *   --reach <text|phone>  Which way to take at the choice the wizard offers.
+ *                         Default: text. `phone` selects a destination number
+ *                         Retell routes to the chosen agent and asserts that
+ *                         the connection egma made holds that number and
+ *                         nothing else — no provider identifier, no credential.
+ *   --retell-agent-name <text>
+ *                         Take the agent whose name contains this, rather than
+ *                         the first on the account. What pins a walk to one
+ *                         agent on an account that holds several.
+ *   --phone-number <e164> With --reach phone: which number to dial, when Retell
+ *                         routes more than one to the chosen agent.
  *   --require-target      Turn a skip into a failure, for a machine that is
  *                         supposed to have all of this. `EGMA_SMOKE_REQUIRE_TARGET=1`
  *                         does the same.
@@ -70,7 +81,9 @@ import { fileURLToPath } from "node:url";
 
 import { startInstance, type Instance } from "../../api/test/support/instance.ts";
 import { DEFAULT_DRIVEN_AGENT_ID, launchForId } from "../src/acp/registry.ts";
+import { folderPathsIn, readConfig } from "../src/folder/egma-folder.ts";
 import { parseTestFile } from "../src/folder/test-file.ts";
+import { readCredentials } from "../src/platform/credentials.ts";
 import { skillPlacesFor } from "../src/skills/install.ts";
 import { runInTerminal, type TerminalRun } from "../test/support/pty.ts";
 import { NO_BROWSER, PASSWORD } from "./support/approving-person.ts";
@@ -108,11 +121,17 @@ const BUDGET = {
   login: 3 * 60_000,
   key: 15 * 60_000,
   agent: 2 * 60_000,
+  reach: 2 * 60_000,
   existing: 2 * 60_000,
   gate: 25 * 60_000,
   run: 5 * 60_000,
   exit: 5 * 60_000,
 };
+
+/** Which way this run takes at the choice the wizard offers. */
+function reachWanted(): "text" | "phone" {
+  return (argumentAfter("--reach") ?? "text").trim() === "phone" ? "phone" : "text";
+}
 
 function requiresTarget(): boolean {
   if (process.argv.includes(STRICT_FLAG)) return true;
@@ -146,6 +165,52 @@ function nothingWasVerified(strict: boolean, missing: readonly string[]): void {
     say("  with a failure instead.");
   }
   say(RULE);
+}
+
+/** How far down a list this check will walk before giving up on a row. */
+const MOST_ROWS_WALKED = 200;
+
+/** How long a picker is given to catch up with one keystroke. */
+const SETTLES_IN = 600;
+
+/**
+ * Moves the highlight down a list until it is on the row this run wants.
+ *
+ * **One keystroke at a time, and each is waited out.** A terminal UI coalesces
+ * renders: press down twice before the first frame is drawn and the selection
+ * moves twice while the screen is painted once — so a loop reading the screen
+ * between presses walks straight past the row it was looking for without ever
+ * seeing it. That is not a hypothetical; it is what this did on a real account
+ * of 37 agents before the wait was put in. Waiting after every press is what
+ * makes one press worth one row on the screen as well as in the program.
+ *
+ * Answers whether it had to move at all, which is worth knowing: a run that
+ * walked to a row is a run whose first row was not the one it wanted.
+ */
+async function walkTo(
+  terminal: TerminalRun,
+  wanted: RegExp,
+  rows: number,
+  what: string,
+): Promise<boolean> {
+  let moved = false;
+  for (let step = 0; step <= Math.max(rows, 1); step += 1) {
+    // Waited for rather than looked at once: a frame can arrive half-drawn, and
+    // `waitFor` re-reads the screen on every chunk the terminal parses.
+    if (wanted.test(terminal.screen())) return moved;
+    if (await terminal.waitFor(() => wanted.test(terminal.screen()), SETTLES_IN)) {
+      return moved;
+    }
+    moved = true;
+    terminal.write("\u001B[B");
+  }
+  if (wanted.test(terminal.screen())) return moved;
+  throw new Error(`the list never showed ${what}\n\nlast screen:\n${redact(terminal.screen())}`);
+}
+
+/** A string with nothing in it a regular expression would read as syntax. */
+function escaped(text: string): string {
+  return text.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 /** The value after a flag, or `null` when it was not given. */
@@ -210,8 +275,25 @@ async function approve(apiOrigin: string, cookie: string, userCode: string): Pro
 
 /* ── the repository the walk runs in ─────────────────────────────────── */
 
-/** What is never worth copying, and would make the copy enormous. */
-const NOT_COPIED = new Set([".git", "node_modules", "dist", ".next", ".turbo", "target"]);
+/**
+ * What is never worth copying, and would make the copy enormous.
+ *
+ * `egma` is in the list for a different reason: this check walks a repository
+ * *from nothing*, and a repository that has been walked before carries a
+ * committed binding to whichever platform walked it. egma refuses to move a
+ * committed binding — correctly — so a copy carrying one could never be walked
+ * against the instance this check just started. Leaving it out is what makes
+ * every walk here a first walk.
+ */
+const NOT_COPIED = new Set([
+  ".git",
+  "node_modules",
+  "dist",
+  ".next",
+  ".turbo",
+  "target",
+  "egma",
+]);
 
 /**
  * A copy of the developer's repository, so the walk writes into a copy.
@@ -244,6 +326,16 @@ type WalkOutcome = {
   readonly repository: string;
   /** Whether the account offered a choice of agents, and how many. */
   readonly chosenFrom: number;
+  /** Which way this walk took, and what it took it with. */
+  readonly reach: "text" | "phone";
+  /**
+   * Whether the wizard's coding-agent discovery pointed at the prompts this run
+   * was aimed at, or had to be corrected at the picker. Real information about
+   * the wizard, so it is recorded rather than smoothed over.
+   */
+  readonly promptsFound: string | null;
+  /** Whether the agent had to be picked out of several by name. */
+  readonly agentCorrected: boolean;
   /** The run the wizard started, as the run screen named it. */
   readonly runId: string;
 };
@@ -280,10 +372,12 @@ async function showing(
  */
 async function rememberNames(origin: string, home: string): Promise<void> {
   try {
-    const held = JSON.parse(await readFile(path.join(home, "credentials"), "utf8")) as {
-      key?: unknown;
-    };
-    if (typeof held.key !== "string") return;
+    // Read through egma's own reader rather than by parsing the file here:
+    // keys are stored per platform origin, and a check that knew the file's
+    // shape for itself would go quietly wrong the day the shape moved — which
+    // is exactly what happened to this once.
+    const held = await readCredentials(path.join(home, "credentials"), origin);
+    if (held === null) return;
     const agents = await ask(origin, held.key, "/api/agents");
     const items = Array.isArray(agents.body.items)
       ? (agents.body.items as Record<string, unknown>[])
@@ -353,6 +447,11 @@ async function walkOnce(options: {
   });
 
   let chosenFrom = 1;
+  let promptsFound: string | null = null;
+  let agentCorrected = false;
+  const reach = reachWanted();
+  const wantedAgent = (argumentAfter("--retell-agent-name") ?? "").trim();
+  const wantedNumber = (argumentAfter("--phone-number") ?? "").trim();
 
   try {
     /* [human 1] the keystroke at the intro */
@@ -369,6 +468,17 @@ async function walkOnce(options: {
 
     /* [human 3] the provider key */
     await showing(terminal, "the key box", BUDGET.key, "Paste your Retell API key");
+    // What the coding agent said it found, before the key box covers it.
+    //
+    // Recorded rather than acted on: whether discovery pointed at the right
+    // prompts is real information about the wizard, and correcting the agent at
+    // the picker is what a developer does. It is read off the card the wizard
+    // draws, so a card that has already scrolled reads as "nothing reported" —
+    // which is a gap in this reading and never a claim about what was found.
+    // The whole of what the agent said is in the log the wizard names.
+    promptsFound =
+      /Prompts\s{2,}(.+?)\s*$/mu.exec(`${terminal.scrollback()}\n${terminal.screen()}`)?.[1]?.trim() ??
+      null;
     took("login and finding the agent");
     terminal.write(`${options.key}\r`);
 
@@ -387,9 +497,51 @@ async function walkOnce(options: {
     if (terminal.screen().includes("Which one do you want tested?")) {
       const listed = /reaches (\d+) agents/u.exec(terminal.screen())?.[1] ?? "0";
       chosenFrom = Number(listed);
-      // The first of them. Which agent is the developer's choice on a real
-      // account, and any of them proves the same thing about the walk.
+      // Which agent is the developer's choice on a real account. Named, this
+      // walk walks past the rows until that name is the highlighted one; unnamed,
+      // the first is taken and any of them proves the same thing about the walk.
+      if (wantedAgent !== "") {
+        agentCorrected = await walkTo(
+          terminal,
+          new RegExp(`\u203a[^\n]*${escaped(wantedAgent)}`, "u"),
+          chosenFrom,
+          `an agent called ${wantedAgent}`,
+        );
+      }
       terminal.write("\r");
+    }
+
+    /* [human 3c] text or phone, and for the phone the number to dial */
+    await showing(terminal, "the choice of reach", BUDGET.reach, "How should egma reach this agent?");
+    if (reach === "phone") {
+      terminal.write("\u001B[B");
+      await showing(terminal, "the phone row", BUDGET.reach, "\u203a Phone");
+    }
+    terminal.write("\r");
+
+    if (reach === "phone") {
+      // The number screen appears only when Retell routes several to the agent.
+      const picked = await terminal.waitFor(
+        () =>
+          terminal.screen().includes("Which number should egma dial?") ||
+          terminal.screen().includes("Do you already have test cases"),
+        BUDGET.reach,
+      );
+      if (!picked) {
+        throw new Error(
+          `the wizard never got past the choice of reach\n\nlast screen:\n${redact(terminal.screen())}`,
+        );
+      }
+      if (terminal.screen().includes("Which number should egma dial?")) {
+        if (wantedNumber === "") throw new Error("several numbers reach that agent; name one");
+        await walkTo(
+          terminal,
+          new RegExp(`\u203a\\s*${escaped(wantedNumber)}`, "u"),
+          MOST_ROWS_WALKED,
+          `the number ${wantedNumber}`,
+        );
+        terminal.write("\r");
+      }
     }
     took("connecting");
 
@@ -434,10 +586,11 @@ async function walkOnce(options: {
     const runId = /\brun_[0-9A-HJKMNP-TV-Z]{26}/u.exec(runScreen)?.[0] ?? "";
     if (runId === "") throw new Error("the run screen named no run");
 
-    const held = JSON.parse(await readFile(path.join(home, "credentials"), "utf8")) as {
-      url: string;
-      key: string;
-    };
+    const held = await readCredentials(
+      path.join(home, "credentials"),
+      options.instance.origin,
+    );
+    if (held === null) throw new Error("the walk stored no key for the platform it signed in to");
     secrets.push(held.key);
 
     // What arrives in place of a verdict, asked while the wizard is still
@@ -481,12 +634,22 @@ async function walkOnce(options: {
       credentials: held,
       repository,
       chosenFrom,
+      reach,
+      promptsFound,
+      agentCorrected,
       runId,
     };
   } finally {
     await terminal.kill();
     await rm(home, { recursive: true, force: true });
   }
+}
+
+/** The instance's own identity, read the way the CLI reads it. */
+async function platformInstanceOf(origin: string): Promise<string> {
+  const answered = await fetch(`${origin}/api/platform`);
+  const body = (await answered.json().catch(() => ({}))) as { instance_id?: unknown };
+  return typeof body.instance_id === "string" ? body.instance_id : "";
 }
 
 /* ── what landed ─────────────────────────────────────────────────────── */
@@ -505,6 +668,9 @@ async function assertWhatLanded(options: {
   say(`── what walk ${options.walk} left on the platform ─────────────────`);
 
   check(outcome.exitCode === 0, `the wizard exited 0 (it exited ${outcome.exitCode})`);
+  // Read back for this origin and no other, which is the whole of what "stored
+  // per platform" means: a key filed under a different platform would not have
+  // come back at all.
   check(held.url === origin, "the key is stored against the egma it signed in to");
   check(held.key.startsWith("egma_sk_"), "the key is one the instance really minted");
 
@@ -532,14 +698,78 @@ async function assertWhatLanded(options: {
     : [];
   const connection = connections.at(-1);
   check(connections.length >= 1, `a connection is attached to it (${connections.length})`);
-  check(connection?.type === "retell", `the connection is a retell one (${String(connection?.type)})`);
+
+  if (outcome.reach === "phone") {
+    // **Only the connection that was chosen.** Creating both is the bug the
+    // choice exists to kill, so the count is asserted rather than the last row.
+    check(
+      connections.length === 1 && connection?.type === "phone",
+      `the walk created exactly one connection and it is the phone one (${connections
+        .map((one) => String(one.type))
+        .join(", ")})`,
+    );
+    check(
+      connection?.modality === "voice",
+      `the phone connection is a voice one (${String(connection?.modality)})`,
+    );
+
+    // The number, and nothing else at all. No Retell, Twilio, LiveKit, SIP or
+    // OpenAI credential, and no provider identifier — a phone connection is
+    // provider-blind, which is what makes it the same connection whoever
+    // answers.
+    const config = (connection?.config ?? {}) as Record<string, unknown>;
+    check(
+      Object.keys(config).length === 1 && typeof config.phoneNumber === "string",
+      `the phone connection holds only a number (${Object.keys(config).join(", ")})`,
+    );
+    check(
+      /^\+[1-9]\d{1,14}$/u.test(String(config.phoneNumber)),
+      `the number is E.164 (${String(config.phoneNumber)})`,
+    );
+    check(
+      connection?.credentials_hint === null || connection?.credentials_hint === undefined,
+      "no credential was sealed against the phone connection",
+    );
+    check(
+      !JSON.stringify(one.body).includes(options.key),
+      "the provider key is nowhere in what the platform holds for this agent",
+    );
+  } else {
+    check(
+      connections.length === 1 && connection?.type === "retell",
+      `the walk created exactly one connection and it is the retell one (${connections
+        .map((one) => String(one.type))
+        .join(", ")})`,
+    );
+    check(
+      connection?.modality === "chat",
+      `the text connection is a chat one (${String(connection?.modality)})`,
+    );
+    check(
+      connection?.credentials_hint === options.key.slice(-4),
+      "the key was sealed on the platform, and only its last characters came back",
+    );
+  }
+
+  /* the committed file, which is the whole of what this repository points at */
+
+  const written = await readConfig(folderPathsIn(outcome.repository).config);
   check(
-    connection?.modality === "voice" || connection?.modality === "chat",
-    `the connection names a modality (${String(connection?.modality)})`,
+    written.platform?.origin === origin,
+    `the repository is bound to the platform it walked against (${String(written.platform?.origin)})`,
   );
   check(
-    connection?.credentials_hint === options.key.slice(-4),
-    "the key was sealed on the platform, and only its last characters came back",
+    written.platform?.instance === (await platformInstanceOf(origin)),
+    "and to that platform's own instance identity",
+  );
+  check(
+    written.agent?.id === agentId && written.connection?.id === String(connection?.id),
+    "the agent and the connection egma made are the ones the file names",
+  );
+  check(written.suite?.name !== undefined, `the file names a test suite (${String(written.suite?.name)})`);
+  check(
+    !JSON.stringify(written).includes(options.key),
+    "and no supplied secret is anywhere in it",
   );
 
   const tests = await ask(origin, held.key, "/api/tests");
@@ -699,6 +929,7 @@ async function main(): Promise<void> {
     `  its own env:   ${Object.keys(launch.env).length === 0 ? "nothing added" : Object.entries(launch.env).map(([name, value]) => `${name}=${value}`).join(", ")}`,
   );
   say(`  walks:         ${walks}`);
+  say(`  reach:         ${reachWanted()}`);
   say(`  Retell:        read-only, through a gate on this machine`);
   say("");
 
@@ -742,8 +973,19 @@ async function main(): Promise<void> {
         say(`  ${timing.phase.padEnd(28)} ${timing.seconds.padStart(7)}s`);
       }
       if (outcome.chosenFrom > 1) {
-        say(`  (the account listed ${outcome.chosenFrom} agents, and the first was taken)`);
+        say(
+          `  (the account listed ${outcome.chosenFrom} agents, and the one taken ${
+            outcome.agentCorrected ? "was picked out by name" : "was the first"
+          })`,
+        );
       }
+      say("");
+      say("── what the coding agent found, and which way was taken ──");
+      say(`  reach:    ${outcome.reach}`);
+      say(`  prompts:  ${redact(outcome.promptsFound ?? "nothing reported")}`);
+      say(
+        `  agent:    ${outcome.agentCorrected ? "corrected at the picker" : "taken as discovery left it"}`,
+      );
 
       registered.push(await assertWhatLanded({ instance, outcome, key, walk }));
     }

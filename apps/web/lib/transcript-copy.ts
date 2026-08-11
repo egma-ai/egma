@@ -116,6 +116,7 @@ export const DETAIL = {
   openAudio: "Open recorded audio",
   technicalDetails: "Technical details",
   recordingDetails: "Recording details",
+  judgedBy: "Judged by",
   missing: "That transcript is not here",
   missingLead:
     "Nothing by that name was recorded in this organization, inside the " +
@@ -228,4 +229,10 @@ export const UNKNOWN_STEP_LABEL = "Other";
 
 export function stepLabel(kind: string): string {
   return STEP_LABELS[kind] ?? UNKNOWN_STEP_LABEL;
+}
+
+/** Turn a machine-written dimension into a label without hiding its meaning. */
+export function humanizeIdentifier(value: string): string {
+  const words = value.replaceAll(/[_-]+/g, " ").trim();
+  return words === "" ? value : `${words.slice(0, 1).toUpperCase()}${words.slice(1)}`;
 }

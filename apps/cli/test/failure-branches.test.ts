@@ -100,9 +100,11 @@ afterEach(async () => {
 /** The walk, with whatever the developer would have answered written down. */
 async function walkWith(options: {
   readonly script: string;
-  readonly answers?: Partial<Record<"prompts-pointer" | "retell-key", string>>;
+  readonly answers?: Partial<Record<"prompts-pointer" | "retell-key" | "reach", string>>;
 }) {
-  const ui = new HeadlessUI({ answers: options.answers ?? {} });
+  // Text unless a check says otherwise: every branch here is about a way the
+  // walk can fail before or after the choice, not about the choice itself.
+  const ui = new HeadlessUI({ answers: { reach: "text", ...(options.answers ?? {}) } });
 
   // A walk that gets as far as a suite ends in a run, and a run ends when
   // verdicts arrive. Nothing here conducts a simulation, so the fixture is
@@ -116,7 +118,11 @@ async function walkWith(options: {
       launch: workspace.launch(options.script),
       cwd: workspace.dir,
       signal: new AbortController().signal,
-      platform: { url: platform.url, credentialsFile: workspace.credentialsFile },
+      platform: {
+        url: platform.url,
+        instanceId: platform.instanceId,
+        credentialsFile: workspace.credentialsFile,
+      },
       retell: { url: retell.url },
       howManyTests: 1,
       home: path.join(workspace.dir, "pretend-home"),
@@ -211,7 +217,10 @@ describe("no voice agent anywhere", () => {
     );
 
     // Nothing was registered and no folder was made, because egma never got as
-    // far as knowing what it would have been for.
+    // far as knowing what it would have been for. The platform binding is
+    // written at the last moment before this repository owns its first
+    // platform-issued identifier, and that moment never arrived — so a walk
+    // that found nothing leaves the repository exactly as it was.
     expect(platform.registered.agents).toHaveLength(0);
     await expect(readFile(path.join(workspace.dir, "egma", "config.yaml"), "utf8")).rejects.toThrow();
   });

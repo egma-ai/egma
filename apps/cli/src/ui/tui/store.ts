@@ -18,7 +18,7 @@
 import { WizardRouter, type ScreenName, type Sequence } from "./router.ts";
 import { emptyState, type WizardState } from "./state.ts";
 import type { LoginPrompt } from "../../platform/login.ts";
-import type { RetellAgent } from "../../retell/client.ts";
+import type { RetellAgent, RetellNumber } from "../../retell/client.ts";
 import type { KeyAsk } from "../../retell/connect.ts";
 import type { RunView } from "../../run/view.ts";
 import type { SkillPlaces } from "../../skills/install.ts";
@@ -42,6 +42,12 @@ export const WALK_SCREENS: Sequence = [
   // Never reached with one agent on the account, because the flow only opens
   // this question when there is a choice to make.
   { id: "retell-agent", show: (state) => state.asking === "retell-agent" },
+  // The one question that decides what egma creates. Never skipped and never
+  // answered for the developer.
+  { id: "reach", show: (state) => state.asking === "reach" },
+  // Never reached when Retell routes one number to the agent, because the flow
+  // only opens this question when there is a choice to make.
+  { id: "phone-number", show: (state) => state.asking === "phone-number" },
   { id: "existing-tests", show: (state) => state.asking === "existing-tests" },
   // The last question the wizard asks, over the run screen it interrupts: the
   // run keeps moving underneath while the developer decides.
@@ -188,6 +194,14 @@ export class WizardStore {
 
   setAgentChoices(agentChoices: readonly RetellAgent[] | null): void {
     this.change({ agentChoices });
+  }
+
+  setReachOffer(reachOffered: boolean): void {
+    this.change({ reachOffered });
+  }
+
+  setNumberChoices(numberChoices: readonly RetellNumber[] | null): void {
+    this.change({ numberChoices });
   }
 
   setGeneration(generation: GenerationProgress | null): void {

@@ -28,10 +28,10 @@ MODEL_PROVIDERS = ("scripted", "openai")
 DEFAULT_MODEL_BASE_URL = "https://api.openai.com/v1"
 LOG_LEVELS = ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG")
 
-STT_PROVIDERS = ("scripted", "deepgram")
+STT_PROVIDERS = ("scripted", "deepgram", "openai")
 """What the persona hears with. ``scripted`` needs no account and no network."""
 
-TTS_PROVIDERS = ("scripted", "elevenlabs")
+TTS_PROVIDERS = ("scripted", "elevenlabs", "openai")
 """What the persona speaks with. ``scripted`` needs no account and no network."""
 
 VAD_PROVIDERS = ("scripted", "silero")
@@ -42,9 +42,25 @@ and downloads nothing, and ``scripted`` reads the test codec exactly."""
 SPEECH_PROVIDER_KEYS = {
     "deepgram": "EGMA_SIMULATOR_DEEPGRAM_API_KEY",
     "elevenlabs": "EGMA_SIMULATOR_ELEVENLABS_API_KEY",
+    "openai": "EGMA_SIMULATOR_OPENAI_API_KEY",
 }
 """The variable each real speech provider's key arrives in. Naming a
-provider is what makes its key required, and the refusal names this."""
+provider is what makes its key required, and the refusal names this.
+
+``openai`` is one entry for both legs on purpose: one account speaks and
+listens, so a self-hoster who set up the phone path supplied one key and
+must not be asked for a second under another name."""
+
+DEFAULT_STT_MODEL = "gpt-4o-transcribe"
+"""What the openai listening leg asks for when a deployment names none."""
+
+DEFAULT_TTS_MODEL = "gpt-4o-mini-tts"
+DEFAULT_TTS_VOICE = "alloy"
+"""What the openai speaking leg asks for when a deployment names none.
+
+Models are configuration rather than a constant of the product: the
+provider retires and adds them on its own schedule, and a deployment must
+be able to move without waiting for a release."""
 
 MEDIA_BACKENDS = ("scripted", "livekit")
 """How a phone call's audio may travel. Naming one is what makes a
@@ -373,6 +389,18 @@ class SimulatorConfig:
     """The ElevenLabs key. Required when the ``elevenlabs`` mouth is chosen;
     kept out of the dataclass repr, and registered for redaction."""
 
+    openai_api_key: str | None = field(default=None, repr=False)
+    """The OpenAI key, for whichever of the two legs names ``openai``. The
+    same key the persona's brain uses when the model provider is ``openai``
+    too — one account, one key, which is the whole of what phone setup
+    asks a self-hoster for."""
+
+    stt_model: str = DEFAULT_STT_MODEL
+    tts_model: str = DEFAULT_TTS_MODEL
+    tts_voice: str = DEFAULT_TTS_VOICE
+    """Which models and which voice the openai legs ask for. Read at
+    pipeline assembly, ignored by every other pair."""
+
     media: MediaSettings | None = None
     """How a phone call's audio travels, for a deployment that dials at
     all. ``None`` where none was named, and a simulation that then names a
@@ -380,14 +408,21 @@ class SimulatorConfig:
 
     @property
     def speech_secrets(self) -> tuple[str, ...]:
-        """Every speech-provider key this configuration holds.
+        """Every provider key this configuration holds.
 
         One place to ask, so registering them for redaction cannot fall
-        behind the day a third provider arrives.
+        behind the day a third provider arrives. The persona brain's key is
+        in here beside the speech legs' because redaction is about what a
+        log line must never carry, not about which leg reads it.
         """
         return tuple(
             key
-            for key in (self.deepgram_api_key, self.elevenlabs_api_key)
+            for key in (
+                self.deepgram_api_key,
+                self.elevenlabs_api_key,
+                self.openai_api_key,
+                self.model_api_key,
+            )
             if key is not None
         )
 
@@ -484,5 +519,9 @@ class SimulatorConfig:
             vad_provider=vad_provider,
             deepgram_api_key=speech_keys.get("deepgram"),
             elevenlabs_api_key=speech_keys.get("elevenlabs"),
+            openai_api_key=speech_keys.get("openai"),
+            stt_model=_text("EGMA_SIMULATOR_STT_MODEL", DEFAULT_STT_MODEL),
+            tts_model=_text("EGMA_SIMULATOR_TTS_MODEL", DEFAULT_TTS_MODEL),
+            tts_voice=_text("EGMA_SIMULATOR_TTS_VOICE", DEFAULT_TTS_VOICE),
             media=MediaSettings.from_env(),
         )

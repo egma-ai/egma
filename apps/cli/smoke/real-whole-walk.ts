@@ -333,7 +333,14 @@ async function register(
   say("");
   say("── registering the voice agent ───────────────────────────");
 
-  let ran = await egma(["connect", "--cwd", repository], { env, stdin: `${vendor.key}\n` });
+  // Text, said in the command: egma creates the connection it is told to and
+  // never guesses between the two, so this walk says which one it means. The
+  // phone path is proven where a real number and a real carrier are, and this
+  // walk has neither.
+  let ran = await egma(["connect", "--cwd", repository, "--reach", "text"], {
+    env,
+    stdin: `${vendor.key}\n`,
+  });
 
   // A real account may hold several agents, and egma refuses to guess which
   // one. Any of them proves the same thing about the walk, so the first is
@@ -342,10 +349,10 @@ async function register(
     const listed = ran.said.get("retell_agent")?.[0]?.split(" ")[0] ?? "";
     secrets.push(listed);
     say(`  (the account holds several agents; the first was taken)`);
-    ran = await egma(["connect", "--cwd", repository, "--retell-agent", listed], {
-      env,
-      stdin: `${vendor.key}\n`,
-    });
+    ran = await egma(
+      ["connect", "--cwd", repository, "--reach", "text", "--retell-agent", listed],
+      { env, stdin: `${vendor.key}\n` },
+    );
   }
 
   // Everything that names the account, before a single line of this is printed.
@@ -358,8 +365,13 @@ async function register(
   check(first(ran.said, "registration") === "created", "the registration was a fresh one");
   check(first(ran.said, "connection_type") === "retell", "the connection is a retell one");
   check(
-    ["voice", "chat"].includes(first(ran.said, "connection_modality")),
-    `the connection names a modality (${first(ran.said, "connection_modality")})`,
+    first(ran.said, "connection_modality") === "chat",
+    `the text connection is a chat one (${first(ran.said, "connection_modality")})`,
+  );
+  check(first(ran.said, "reach") === "text", "egma made the connection it was told to");
+  check(
+    first(ran.said, "phone_number") === "none",
+    "a text connection dials nothing, and says so",
   );
 
   const agentId = first(ran.said, "agent_id");

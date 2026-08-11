@@ -3,9 +3,10 @@
  *
  * A pseudo-terminal runs the built command and a headless terminal emulator
  * reads its screen and everything it wrote. That is the only way to check the
- * two promises this step makes to a person rather than to a machine: that the
- * key is drawn as dots while it is typed, and that one agent on the account
- * costs no keystrokes while several get a list to choose from.
+ * promises this step makes to a person rather than to a machine: that the key
+ * is drawn as dots while it is typed, that one agent on the account costs no
+ * keystrokes while several get a list to choose from, and that the choice
+ * between text and phone is really put to the person at the keyboard.
  *
  * The key typed here is invented and reaches a fake Retell on this machine.
  */
@@ -33,6 +34,9 @@ vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 const KEY = "key_h4j7d2s9f5g8k1l3m6n0";
 
+const DIALLED = "+14155550111";
+const ALSO_DIALLED = "+14155550999";
+
 const ONE_AGENT: FakeRetellScript = {
   keys: [KEY],
   agents: [
@@ -43,6 +47,13 @@ const ONE_AGENT: FakeRetellScript = {
     },
   ],
   llms: [{ llm_id: "llm_0001", general_prompt: "You answer the order line.\n" }],
+  numbers: [
+    {
+      phone_number: DIALLED,
+      nickname: "order line",
+      inbound_agents: [{ agent_id: "agent_0001" }],
+    },
+  ],
 };
 
 const TWO_AGENTS: FakeRetellScript = {
@@ -160,6 +171,11 @@ describe("the key screen", () => {
 
     run.write("\r");
 
+    // Text or phone, put to the person at the keyboard. Text is taken here;
+    // the phone has a check of its own below.
+    await showing(run, "How should egma reach this agent?", "[enter] reach it this way");
+    run.write("\r");
+
     // The walk carries on to the one question the generate step asks. It is
     // answered here so the run reaches its own ending rather than the
     // teardown's.
@@ -248,6 +264,9 @@ describe("the picker", () => {
     await showing(run, "\u203a after-hours");
     run.write("\r");
 
+    await showing(run, "How should egma reach this agent?");
+    run.write("\r");
+
     // Past the one question the generate step asks, and past its gate.
     await showing(run, "Do you already have test cases", "[n] none");
     run.write("n");
@@ -263,5 +282,123 @@ describe("the picker", () => {
 
     // The one that was highlighted is the one that was registered.
     expect(platform.registered.connections[0]?.config).toEqual({ retellAgentId: "agent_0002" });
+  });
+});
+
+describe("the choice between text and phone", () => {
+  it("is a screen, and taking the phone creates the phone connection and no other", async () => {
+    retell = await startFakeRetell(ONE_AGENT);
+    const run = await wizard();
+
+    await showing(run, "Paste your Retell API key");
+    run.write(`${KEY}\n`);
+
+    const offered = await showing(
+      run,
+      "How should egma reach this agent?",
+      "Text — egma exchanges messages with the agent.",
+      "Phone — egma dials one of the agent's numbers",
+      "egma creates the one you choose, and only that one.",
+    );
+    // Nothing is chosen for the developer: the phone is the second row, and
+    // reaching it takes a keystroke.
+    expect(offered).toContain("\u203a Text");
+
+    run.write("\u001B[B");
+    await showing(run, "\u203a Phone");
+    run.write("\r");
+
+    await showing(run, "Do you already have test cases", "[n] none");
+    run.write("n");
+    await showing(run, "price-question", "[enter] run");
+    const grading = gradeEveryRun(platform);
+    run.write("\r");
+
+    const exited = await run.exited;
+    grading.stop();
+    expect(exited).toBe(0);
+
+    // One number reaches this agent, so there was nothing to choose between —
+    // and the number egma was about to dial was said all the same, because it
+    // is the one fact in the walk that costs somebody money.
+    expect(run.raw()).toContain(`egma will dial ${DIALLED}.`);
+
+    // The phone connection, and nothing else. No retell connection was made
+    // alongside it, and the key never reached egma at all.
+    expect(platform.registered.connections).toHaveLength(1);
+    expect(platform.registered.connections[0]?.type).toBe("phone");
+    expect(platform.registered.connections[0]?.config).toEqual({ phoneNumber: DIALLED });
+    expect(platform.registered.sealed).toEqual([]);
+    expect(run.raw()).not.toContain(KEY);
+  });
+
+  it("asks which number to dial when Retell routes the agent more than one", async () => {
+    retell = await startFakeRetell({
+      ...ONE_AGENT,
+      numbers: [
+        ...(ONE_AGENT.numbers ?? []),
+        {
+          phone_number: ALSO_DIALLED,
+          nickname: "overflow",
+          inbound_agents: [{ agent_id: "agent_0001" }],
+        },
+      ],
+    });
+    const run = await wizard();
+
+    await showing(run, "Paste your Retell API key");
+    run.write(`${KEY}\n`);
+    await showing(run, "How should egma reach this agent?");
+    run.write("\u001B[B");
+    await showing(run, "\u203a Phone");
+    run.write("\r");
+
+    // Two numbers reach this agent, so there is a real choice and the wizard
+    // makes it. Both are numbers Retell routes here; a number somebody else
+    // answers is never on this screen at all.
+    const listed = await showing(
+      run,
+      "Which number should egma dial?",
+      DIALLED,
+      ALSO_DIALLED,
+      "[enter] dial this one",
+    );
+    expect(listed).toContain("order line");
+
+    run.write("\u001B[B");
+    await showing(run, `\u203a ${ALSO_DIALLED}`);
+    run.write("\r");
+
+    await showing(run, "Do you already have test cases", "[n] none");
+    run.write("n");
+    await showing(run, "price-question", "[enter] run");
+    const grading = gradeEveryRun(platform);
+    run.write("\r");
+
+    const exited = await run.exited;
+    grading.stop();
+    expect(exited).toBe(0);
+
+    // The one that was highlighted is the one egma will dial, and it is the
+    // whole of what the connection holds.
+    expect(platform.registered.connections).toHaveLength(1);
+    expect(platform.registered.connections[0]?.config).toEqual({
+      phoneNumber: ALSO_DIALLED,
+    });
+  });
+
+  it("creates nothing when the developer takes neither way", async () => {
+    retell = await startFakeRetell(ONE_AGENT);
+    const run = await wizard();
+
+    await showing(run, "Paste your Retell API key");
+    run.write(`${KEY}\n`);
+    await showing(run, "How should egma reach this agent?", "[esc] neither");
+    run.write("\u001B");
+
+    expect(await run.exited).toBe(1);
+    expect(run.scrollback()).toContain("text or by phone");
+    expect(platform.registered.agents).toHaveLength(0);
+    expect(platform.registered.connections).toHaveLength(0);
   });
 });

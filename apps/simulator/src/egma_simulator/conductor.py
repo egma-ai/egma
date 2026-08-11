@@ -132,10 +132,28 @@ class ConductParameters:
     on both and says why.
     """
 
-    agent_opening_seconds: float = 2.0
+    agent_opening_seconds: float = 10.0
     """How long the persona listens before deciding the agent is not going
-    to speak first. A greeting arrives well inside this; silence means the
-    persona opens, which is what a person does."""
+    to speak first.
+
+    **A backstop for a far end that answered and said nothing, not a race
+    to speak.** Every simulation egma conducts is an outbound call, and on
+    an outbound call the far end always speaks first — so the persona
+    opening at all is the unusual path, and it costs nothing to be patient
+    about it.
+
+    This was 2.0, on the reasoning that "a greeting arrives well inside
+    this". On a phone call it does not. The clock counts audio from the
+    moment the *line* opens, and a SIP call spends several seconds after
+    that before the far end's first word: the carrier answers, the agent's
+    own stack starts, its model runs, its speech synthesis produces sound.
+    A real call measured about five seconds of that gap — so the persona
+    opened before the agent had said anything, and the two talked over
+    each other from the first syllable.
+
+    Ten seconds clears the observed gap with room to spare and still
+    reports a genuinely mute far end long before any duration limit. It
+    remains a wall the far end normally never reaches."""
 
     persona_pause_seconds: float = 0.4
     """The beat the persona leaves before answering. A person does not
@@ -161,10 +179,30 @@ class ConductParameters:
     a hang-up — is spent in audio like everything else. Same budget, same
     meaning, two clocks, because only one of them is ours."""
 
-    yields_to_the_agent: bool = False
+    yields_to_the_agent: bool = True
     """Whether the agent speaking cuts the persona's own utterance short.
-    Off for now: moving who conducts is one change, and being interrupted
-    is a behavior of its own, with a record of its own."""
+
+    **On, because off loses the agent's words.** While this is false the
+    pipeline does not merely keep the persona talking — far-end speech
+    that arrives during a persona utterance never starts a turn, so it is
+    never transcribed and never reaches the record. A real call proved
+    it: the agent said "I'll let the team know you need to move your
+    facial from Thursday afternoon and have them reach out", and the
+    transcript kept only "reach out to set a new time". A grader reading
+    that would fail an agent for omitting what it actually said, which is
+    the one failure this product exists to prevent.
+
+    It also ended the loop that caused it. The persona, hearing no reply,
+    asked again — three times, nineteen seconds — while the agent waited
+    for it to stop.
+
+    A person on a phone stops talking when the other person speaks, so
+    this is also the honest default. What is still open is *how much* a
+    given persona yields: patience and barge-in propensity are traits,
+    and the timing model that turns a trait into a number is the open
+    grilling ticket. This flag stays here for that work to replace, and a
+    persona that should talk over the agent will set it false on purpose
+    rather than inheriting it by accident."""
 
 
 DEFAULT_CONDUCT = ConductParameters()
@@ -739,21 +777,50 @@ class VoiceConductor:
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await self._running
 
+    def _measured_band_hz(self) -> int:
+        """The band this simulation's audio really came in at.
+
+        Read off the line, which reads it off the frames themselves —
+        never copied from the band the pipeline was assembled at. The two
+        agree in every configuration that works, and where they do not,
+        the record must carry what happened rather than what was asked
+        for: an 8 kHz stamp on wideband audio, or the reverse, makes every
+        latency and every audio verdict mean something it does not.
+
+        A line that carried nothing has nothing to measure, and then the
+        band it was driven at is the only honest thing left to say — there
+        is no recording to mis-stamp, because there is no audio.
+        """
+        measured = self._line.measured_band_hz
+        if measured is None:
+            return self._band_hz
+        if measured != self._band_hz:
+            logger.warning(
+                "the audio arrived at %d Hz on a line driven at %d Hz; the "
+                "record carries the measured band",
+                measured,
+                self._band_hz,
+            )
+        return measured
+
     async def _write_recording(self) -> None:
         if not self._persona_track and not self._agent_track:
             return
+        measured_band_hz = self._measured_band_hz()
         try:
             reference = await self._blobs.write(
                 self._recording_key,
                 dual_channel_wav(
-                    bytes(self._persona_track), bytes(self._agent_track), self._band_hz
+                    bytes(self._persona_track),
+                    bytes(self._agent_track),
+                    measured_band_hz,
                 ),
             )
         except Exception:
             logger.exception("the recording could not be written; reporting none")
             return
         self.audio = AudioFacts(
-            measured_sample_rate_hz=self._band_hz, recording=reference
+            measured_sample_rate_hz=measured_band_hz, recording=reference
         )
 
     # -- Driving the line -----------------------------------------------------

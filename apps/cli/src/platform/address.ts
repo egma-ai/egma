@@ -14,12 +14,6 @@
  * the one thing that cannot start anything.
  */
 
-/** True when this is a whole address egma can talk to: http or https, no more. */
-export function isWebAddress(candidate: string): boolean {
-  const parsed = parse(candidate);
-  return parsed !== null;
-}
-
 /**
  * Characters an address does not need and a command interpreter reads as
  * syntax. Whitespace and control characters are in here for the same reason:

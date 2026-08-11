@@ -7,18 +7,28 @@
  * screen, what landed on disk, and what the file it landed in is readable by.
  */
 
-import { chmod, lstat, mkdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
+import process from "node:process";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openInBrowser } from "../src/platform/browser.ts";
 import { codeFromPaste, startDeviceAuthorization } from "../src/platform/device-flow.ts";
 import {
+  CredentialsFileUnreadableError,
   readCredentials,
   resolvePlatformUrl,
   writeCredentials,
-  DEFAULT_PLATFORM_URL,
   UnusableUrlError,
 } from "../src/platform/credentials.ts";
 import { logIn, type LoginPrompt } from "../src/platform/login.ts";
@@ -114,7 +124,7 @@ describe("signing a machine in", () => {
     expect(watched.opened).toEqual([shown.url]);
 
     // The key landed, against the egma that minted it.
-    const held = await readCredentials(workspace.credentialsFile);
+    const held = await readCredentials(workspace.credentialsFile, platform.url);
     expect(held?.url).toBe(platform.url);
     expect(held?.key).toMatch(/^egma_sk_/u);
     expect(held?.key).toBe(platform.device.keys.at(-1));
@@ -131,7 +141,7 @@ describe("signing a machine in", () => {
       whenPrompted: (prompt) => void platform.device.approve(prompt.userCode),
     });
 
-    const held = await readCredentials(workspace.credentialsFile);
+    const held = await readCredentials(workspace.credentialsFile, platform.url);
     const used = await fetch(`${platform.url}/api/keys`, {
       headers: { authorization: `Bearer ${held?.key ?? ""}` },
     });
@@ -151,7 +161,9 @@ describe("signing a machine in", () => {
     });
 
     expect(result.kind).toBe("denied");
-    expect(await readCredentials(workspace.credentialsFile)).toBeNull();
+    expect(
+      await readCredentials(workspace.credentialsFile, platform.url),
+    ).toBeNull();
   });
 
   it("says the code ran out, which is not the same as being told no", async () => {
@@ -162,7 +174,9 @@ describe("signing a machine in", () => {
     });
 
     expect(result.kind).toBe("expired");
-    expect(await readCredentials(workspace.credentialsFile)).toBeNull();
+    expect(
+      await readCredentials(workspace.credentialsFile, platform.url),
+    ).toBeNull();
   });
 
   it("backs off by five seconds when told it is asking too fast, and stays there", async () => {
@@ -230,7 +244,9 @@ describe("signing a machine in", () => {
 
     expect(result.kind).toBe("unreachable");
     expect(result.kind === "unreachable" && result.reason).toContain("127.0.0.1:1");
-    expect(await readCredentials(workspace.credentialsFile)).toBeNull();
+    expect(
+      await readCredentials(workspace.credentialsFile, "http://127.0.0.1:1"),
+    ).toBeNull();
   });
 
   it("stops where it stands when the developer stops it", async () => {
@@ -244,7 +260,9 @@ describe("signing a machine in", () => {
     });
 
     expect(result.kind).toBe("interrupted");
-    expect(await readCredentials(workspace.credentialsFile)).toBeNull();
+    expect(
+      await readCredentials(workspace.credentialsFile, platform.url),
+    ).toBeNull();
   });
 });
 
@@ -272,7 +290,7 @@ describe("a machine that is already signed in", () => {
     });
 
     expect(result.kind).toBe("stored");
-    const held = await readCredentials(workspace.credentialsFile);
+    const held = await readCredentials(workspace.credentialsFile, platform.url);
     expect(held?.key).not.toBe("egma_sk_held-already");
     expect(held?.key).toBe(platform.device.keys.at(-1));
   });
@@ -287,7 +305,15 @@ describe("a machine that is already signed in", () => {
     });
 
     expect(result.kind).toBe("stored");
-    expect((await readCredentials(workspace.credentialsFile))?.url).toBe(platform.url);
+    expect((await readCredentials(workspace.credentialsFile, platform.url))?.url).toBe(
+      platform.url,
+    );
+    expect(
+      await readCredentials(workspace.credentialsFile, "https://somewhere.else.example"),
+    ).toEqual({
+      url: "https://somewhere.else.example",
+      key: "egma_sk_for-somewhere-else",
+    });
   });
 });
 
@@ -349,9 +375,9 @@ describe("coming back from a browser on another machine", () => {
 
       expect(result.kind).toBe("stored");
       expect(watched.said).toContain("Checking that one now.");
-      expect((await readCredentials(workspace.credentialsFile))?.key).toBe(
-        platform.device.keys.at(-1),
-      );
+      expect(
+        (await readCredentials(workspace.credentialsFile, platform.url))?.key,
+      ).toBe(platform.device.keys.at(-1));
     });
   }
 
@@ -394,26 +420,30 @@ describe("reading a code out of whatever was pasted", () => {
 });
 
 describe("which egma a command talks to", () => {
-  it("takes the flag first, then the environment, then what was stored", () => {
+  it("takes the flag first, then the environment, then the repository binding", () => {
     expect(
       resolvePlatformUrl({
         flag: "http://flag.example/",
         env: "http://env.example",
-        stored: "http://stored.example",
+        binding: "http://bound.example",
       }),
     ).toBe("http://flag.example");
 
     expect(
-      resolvePlatformUrl({ flag: null, env: "http://env.example", stored: "http://stored.example" }),
+      resolvePlatformUrl({ flag: null, env: "http://env.example", binding: "http://bound.example" }),
     ).toBe("http://env.example");
 
-    // Which is what "set it once" means: after the first login, nothing has to
-    // say the address again.
-    expect(resolvePlatformUrl({ flag: null, stored: "http://stored.example/" })).toBe(
-      "http://stored.example",
+    // The repository, not the latest login on the machine, is what makes the
+    // selection stable after onboarding.
+    expect(resolvePlatformUrl({ flag: null, binding: "http://bound.example/" })).toBe(
+      "http://bound.example",
     );
 
-    expect(resolvePlatformUrl({ flag: null, env: "", stored: null })).toBe(DEFAULT_PLATFORM_URL);
+    // Nothing names a platform, and egma has no hosted one to fall back to, so
+    // this refuses rather than inventing an address to go and probe.
+    expect(() => resolvePlatformUrl({ flag: null, env: "", binding: null })).toThrow(
+      "names no Egma platform",
+    );
   });
 
   it("refuses an address that is not one, and names where it came from", () => {
@@ -427,11 +457,10 @@ describe("which egma a command talks to", () => {
     expect(() => resolvePlatformUrl({ flag: "ftp://egma.example" })).toThrow(/--url/u);
     expect(() => resolvePlatformUrl({ flag: null, env: "ftp://egma.example" })).toThrow(/EGMA_URL/u);
 
-    // A credentials file somebody edited by hand is stepped over rather than
-    // made into a refusal on every command afterwards.
-    expect(resolvePlatformUrl({ flag: null, stored: "javascript:alert(1)" })).toBe(
-      DEFAULT_PLATFORM_URL,
-    );
+    // A committed binding is never stepped over in favour of Cloud.
+    expect(() =>
+      resolvePlatformUrl({ flag: null, binding: "javascript:alert(1)" }),
+    ).toThrow(/repository platform binding/u);
   });
 });
 
@@ -516,23 +545,138 @@ describe("writing the key down", () => {
     // The key landed in a file nobody else can read — which is only true
     // because a fresh file was renamed over this one rather than written into.
     expect(((await stat(workspace.credentialsFile)).mode & 0o777).toString(8)).toBe("600");
-    expect(await readCredentials(workspace.credentialsFile)).toEqual(held);
+    expect(await readCredentials(workspace.credentialsFile, held.url)).toEqual(held);
   });
 
   it("does not follow a link standing where the key goes", async () => {
+    // Somebody else's keys, in their own file, which this run must leave
+    // exactly as it found them. A write that went through the link rather than
+    // over it would put the fresh key in here.
+    const theirs = `${JSON.stringify(
+      { version: 1, platforms: { "https://theirs.example": { key: "egma_sk_theirs" } } },
+      null,
+      2,
+    )}\n`;
     const elsewhere = path.join(workspace.dir, "somebody-elses-file");
-    await writeFile(elsewhere, "not the key\n", "utf8");
+    await writeFile(elsewhere, theirs, "utf8");
     await mkdir(path.dirname(workspace.credentialsFile), { recursive: true });
     await symlink(elsewhere, workspace.credentialsFile);
 
     await writeCredentials(workspace.credentialsFile, held);
 
     // The link itself was replaced. Nothing was written through it, so the file
-    // it pointed at is exactly as it was.
-    expect(await readFile(elsewhere, "utf8")).toBe("not the key\n");
+    // it pointed at is exactly as it was, byte for byte.
+    expect(await readFile(elsewhere, "utf8")).toBe(theirs);
     expect((await lstat(workspace.credentialsFile)).isSymbolicLink()).toBe(false);
     expect(((await stat(workspace.credentialsFile)).mode & 0o777).toString(8)).toBe("600");
-    expect(await readCredentials(workspace.credentialsFile)).toEqual(held);
+    expect(await readCredentials(workspace.credentialsFile, held.url)).toEqual(held);
+  });
+
+  /**
+   * A file egma cannot make sense of is not an empty file.
+   *
+   * Reading a damaged file as "no keys at all" reads harmlessly and then does
+   * the worst thing in the package: the next login merges into nothing and
+   * renames itself over the file, and every other platform's key is gone. A
+   * truncated file can be repaired by whoever damaged it; one egma has already
+   * overwritten cannot.
+   */
+  it("refuses a damaged file rather than starting from empty and writing over it", async () => {
+    const damaged = '{"version": 1, "platforms": {"https://one.example": {"ke';
+    await mkdir(path.dirname(workspace.credentialsFile), { recursive: true });
+    await writeFile(workspace.credentialsFile, damaged, "utf8");
+
+    await expect(
+      readCredentials(workspace.credentialsFile, "https://one.example"),
+    ).rejects.toBeInstanceOf(CredentialsFileUnreadableError);
+    await expect(
+      writeCredentials(workspace.credentialsFile, held),
+    ).rejects.toBeInstanceOf(CredentialsFileUnreadableError);
+
+    // Still exactly what it was, so whoever can repair it still can.
+    expect(await readFile(workspace.credentialsFile, "utf8")).toBe(damaged);
+
+    // An empty file is a different thing and stays ordinary: a folder can be
+    // made before anything is written into it.
+    await writeFile(workspace.credentialsFile, "", "utf8");
+    await writeCredentials(workspace.credentialsFile, held);
+    expect(await readCredentials(workspace.credentialsFile, held.url)).toEqual(held);
+  });
+
+  /**
+   * A file egma cannot open is not a file that is not there.
+   *
+   * Only `ENOENT` means nobody has signed in yet. Everything else — a
+   * permission change, a directory standing where the file goes — means the
+   * keys exist and cannot be seen, and the write merges what it reads: treat
+   * that as an empty file and the rename replaces every platform's key with
+   * whichever one this run happened to be writing.
+   *
+   * A directory is used here because no user, root included, can read one as a
+   * file, so this half of the proof holds wherever it is run.
+   */
+  it("refuses a keys file it cannot open, rather than taking it for an absent one", async () => {
+    await mkdir(workspace.credentialsFile, { recursive: true });
+
+    await expect(
+      readCredentials(workspace.credentialsFile, held.url),
+    ).rejects.toBeInstanceOf(CredentialsFileUnreadableError);
+    await expect(
+      writeCredentials(workspace.credentialsFile, held),
+    ).rejects.toBeInstanceOf(CredentialsFileUnreadableError);
+
+    // Nothing was put anywhere: not into the path, and not beside it.
+    expect((await stat(workspace.credentialsFile)).isDirectory()).toBe(true);
+    expect(await readdir(workspace.credentialsFile)).toEqual([]);
+  });
+
+  /**
+   * The same rule, with the thing that would have been lost actually present.
+   *
+   * Skipped only for a user who can read anything, because there is no way to
+   * stage an unreadable file for one — and every other run proves it.
+   */
+  it.skipIf(process.getuid?.() === 0)(
+    "keeps another platform's key when the file is there and cannot be read",
+    async () => {
+      const theirs = {
+        url: "https://already-signed-in.example",
+        key: "egma_sk_must-survive-a-refused-write",
+      };
+      await writeCredentials(workspace.credentialsFile, theirs);
+      const asWritten = await readFile(workspace.credentialsFile, "utf8");
+      await chmod(workspace.credentialsFile, 0o000);
+
+      await expect(
+        writeCredentials(workspace.credentialsFile, held),
+      ).rejects.toBeInstanceOf(CredentialsFileUnreadableError);
+
+      await chmod(workspace.credentialsFile, 0o600);
+      expect(await readFile(workspace.credentialsFile, "utf8")).toBe(asWritten);
+      expect(await readCredentials(workspace.credentialsFile, theirs.url)).toEqual(theirs);
+      expect(await readCredentials(workspace.credentialsFile, held.url)).toBeNull();
+    },
+  );
+
+  /**
+   * Two terminals, two repositories, one machine, one file. The write is a
+   * read-modify-write over everybody's keys, so without a lock the second
+   * rename wins and the first platform's key is gone — and the developer finds
+   * out the next time a command says they are not signed in.
+   */
+  it("keeps every key when several logins land at once", async () => {
+    const many = Array.from({ length: 8 }, (_, index) => ({
+      url: `https://platform-${String(index)}.example`,
+      key: `egma_sk_written-at-the-same-moment-${String(index)}`,
+    }));
+
+    await Promise.all(
+      many.map((one) => writeCredentials(workspace.credentialsFile, one)),
+    );
+
+    for (const one of many) {
+      expect(await readCredentials(workspace.credentialsFile, one.url)).toEqual(one);
+    }
   });
 
   it("locks the folder down too, and says nothing when it could", async () => {
@@ -548,5 +692,63 @@ describe("writing the key down", () => {
     expect(said).toEqual([]);
     const folder = await stat(path.dirname(workspace.credentialsFile));
     expect((folder.mode & 0o777).toString(8)).toBe("700");
+  });
+
+  it("migrates the old single-platform file without losing or exposing its key", async () => {
+    const legacy = {
+      url: "https://OLD.example/",
+      key: "egma_sk_preserved-from-the-old-format",
+    };
+    const next = {
+      url: "https://second.example",
+      key: "egma_sk_added-after-the-upgrade",
+    };
+    await mkdir(path.dirname(workspace.credentialsFile), { recursive: true });
+    await writeFile(workspace.credentialsFile, `${JSON.stringify(legacy)}\n`, {
+      encoding: "utf8",
+      mode: 0o644,
+    });
+
+    expect(await readCredentials(workspace.credentialsFile, legacy.url)).toEqual({
+      url: "https://old.example",
+      key: legacy.key,
+    });
+    const said: string[] = [];
+    await writeCredentials(workspace.credentialsFile, next, {
+      warn: (line) => said.push(line),
+    });
+
+    expect(await readCredentials(workspace.credentialsFile, legacy.url)).toEqual({
+      url: "https://old.example",
+      key: legacy.key,
+    });
+    expect(await readCredentials(workspace.credentialsFile, next.url)).toEqual(next);
+    expect(((await stat(workspace.credentialsFile)).mode & 0o777).toString(8)).toBe("600");
+    expect(said.join("\n")).not.toContain(legacy.key);
+    expect(said.join("\n")).not.toContain(next.key);
+    expect(JSON.parse(await readFile(workspace.credentialsFile, "utf8"))).toEqual({
+      version: 1,
+      platforms: {
+        "https://old.example": { key: legacy.key },
+        "https://second.example": { key: next.key },
+      },
+    });
+  });
+
+  it("keeps one key per normalized platform origin", async () => {
+    const first = { url: "https://ONE.example/", key: "egma_sk_for-one" };
+    const second = { url: "http://localhost:4310", key: "egma_sk_for-two" };
+
+    await writeCredentials(workspace.credentialsFile, first);
+    await writeCredentials(workspace.credentialsFile, second);
+
+    expect(await readCredentials(workspace.credentialsFile, "https://one.example")).toEqual({
+      url: "https://one.example",
+      key: first.key,
+    });
+    expect(await readCredentials(workspace.credentialsFile, second.url)).toEqual(second);
+    expect(
+      await readCredentials(workspace.credentialsFile, "https://not-signed-in.example"),
+    ).toBeNull();
   });
 });

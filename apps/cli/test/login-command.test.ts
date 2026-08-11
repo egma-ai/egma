@@ -15,6 +15,7 @@ import { promisify } from "node:util";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { readCredentials } from "../src/platform/credentials.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { CLI_ENTRY, makeWorkspace, type Workspace } from "./support/workspace.ts";
 
@@ -84,10 +85,9 @@ describe("egma login", () => {
     expect((await readFile(browser.opened, "utf8")).trim()).toBe(said.approve_url);
 
     // The key is on disk, and nobody else on the machine can read it.
-    const held = JSON.parse(await readFile(workspace.credentialsFile, "utf8")) as {
-      url: string;
-      key: string;
-    };
+    const held = await readCredentials(workspace.credentialsFile, platform.url);
+    expect(held).not.toBeNull();
+    if (held === null) throw new Error("login did not store credentials");
     expect(held.url).toBe(platform.url);
     expect(held.key).toBe(platform.device.keys.at(-1));
     expect(((await stat(workspace.credentialsFile)).mode & 0o777).toString(8)).toBe("600");
@@ -125,15 +125,15 @@ describe("egma login", () => {
     expect(facts(stdout).status).toBe("stored");
   });
 
-  it("keeps the address it was given, so later commands never repeat it", async () => {
-    // A self-hoster sets it once, for one shell.
+  it("does not use the most recent login as the next command's target", async () => {
+    // A self-hoster selects the platform for this command.
     const first = await egma(["login"], { EGMA_URL: platform.url });
     expect(first.code).toBe(0);
     expect(facts(first.stdout).status).toBe("stored");
 
-    // And the next command finds it with nothing said at all: no flag, and the
-    // variable gone from the environment.
-    const second = await egma(["login"]);
+    // The held key does not choose a platform. Name the platform again because
+    // this repository is not bound by the standalone login command.
+    const second = await egma(["login", "--url", platform.url]);
     expect(second.code).toBe(0);
     const said = facts(second.stdout);
     expect(said.url).toBe(platform.url);
@@ -146,13 +146,15 @@ describe("egma login", () => {
 
   it("signs in again when told to, even though a key is already held", async () => {
     await egma(["login", "--url", platform.url]);
-    const again = await egma(["login", "--force"]);
+    const again = await egma(["login", "--url", platform.url, "--force"]);
 
     expect(again.code).toBe(0);
     expect(facts(again.stdout).status).toBe("stored");
     expect(platform.device.keys).toHaveLength(2);
 
-    const held = JSON.parse(await readFile(workspace.credentialsFile, "utf8")) as { key: string };
+    const held = await readCredentials(workspace.credentialsFile, platform.url);
+    expect(held).not.toBeNull();
+    if (held === null) throw new Error("login did not replace credentials");
     expect(held.key).toBe(platform.device.keys.at(-1));
   });
 
@@ -317,5 +319,19 @@ describe("egma login", () => {
     // Nothing was asked of anything: the address was turned away at the door.
     expect(platform.records).toHaveLength(0);
     expect((await readFile(browser.opened, "utf8").catch(() => ""))).toBe("");
+  });
+
+  it("never repeats a supplied password from an invalid platform URL", async () => {
+    const suppliedSecret = "supplied-password-must-stay-private";
+    const result = await egma([
+      "login",
+      "--url",
+      `https://person:${suppliedSecret}@egma.example`,
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout + result.stderr).not.toContain(suppliedSecret);
+    expect(result.stderr).toContain("--url");
+    expect(platform.records).toHaveLength(0);
   });
 });

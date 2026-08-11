@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import {
   CLI_ENTRY,
   FAKE_AGENT,
@@ -22,6 +23,7 @@ import {
 } from "./support/workspace.ts";
 
 const run = promisify(execFile);
+let platform: Platform;
 
 async function egma(
   args: readonly string[],
@@ -30,7 +32,7 @@ async function egma(
   try {
     const { stdout, stderr } = await run(process.execPath, [CLI_ENTRY, ...args], {
       cwd: workspace.dir,
-      env: workspace.env(),
+      env: workspace.env({ EGMA_URL: platform.url }),
     });
     return { stdout, stderr, code: 0 };
   } catch (error) {
@@ -43,14 +45,16 @@ describe("the egma command", () => {
   let workspace: Workspace;
 
   beforeEach(async () => {
+    platform = await startPlatform();
     workspace = await makeWorkspace({ "package.json": MANIFEST });
     // These checks are about driving a coding agent, so the machine they run on
     // is already signed in and login costs them nothing. Login itself is proved
     // in the checks that are about login.
-    await workspace.signIn("https://egma.invalid");
+    await workspace.signIn(platform.url);
   });
 
   afterEach(async () => {
+    await platform.close();
     await workspace.remove();
   });
 
@@ -59,7 +63,7 @@ describe("the egma command", () => {
       const child = spawn(
         process.execPath,
         ["--import", PRETEND_OLD_NODE, CLI_ENTRY, "--help"],
-        { cwd: workspace.dir, env: workspace.env() },
+        { cwd: workspace.dir, env: workspace.env({ EGMA_URL: platform.url }) },
       );
       let stderr = "";
       child.stderr.setEncoding("utf8");
@@ -229,7 +233,7 @@ describe("the egma command", () => {
     const child = spawn(
       process.execPath,
       [CLI_ENTRY, "--headless", "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
-      { cwd: workspace.dir, env: workspace.env() },
+      { cwd: workspace.dir, env: workspace.env({ EGMA_URL: platform.url }) },
     );
     let stdout = "";
     child.stdout.setEncoding("utf8");

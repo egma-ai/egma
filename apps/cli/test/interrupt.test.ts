@@ -244,6 +244,11 @@ describe("Ctrl-C at the gate, with the files already written", () => {
       await showing(terminal, "Paste your Retell API key");
       terminal.write(`${KEY}\r`);
 
+      // Text or phone. Not this check's subject, and not skippable
+      // either: egma never picks one of the two for a developer.
+      await showing(terminal, "How should egma reach this agent?");
+      terminal.write("\r");
+
       await showing(terminal, "Do you already have test cases");
       terminal.write("n");
 
@@ -318,6 +323,11 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
 
       await showing(terminal, "Paste your Retell API key");
       terminal.write(`${KEY}\r`);
+
+      // Text or phone. Not this check's subject, and not skippable
+      // either: egma never picks one of the two for a developer.
+      await showing(terminal, "How should egma reach this agent?");
+      terminal.write("\r");
 
       await showing(terminal, "Do you already have test cases");
       terminal.write("n");

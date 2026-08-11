@@ -3,6 +3,7 @@ import {
   MAXIMUM_LIST_LIMIT,
   NotPermittedError,
   readTrace,
+  readVerdicts,
   UnreadableTraceQueryError,
   type TimeWindow,
   type TraceDetail,
@@ -11,6 +12,8 @@ import {
   type TraceSummary,
 } from "@egma/db";
 import type { FastifyInstance, FastifyReply } from "fastify";
+
+import { simulationIdOfTrace } from "@egma/simulation-contract";
 
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
@@ -343,7 +346,45 @@ export async function traceReadRoutes(
       });
     }
 
-    return reply.send(describedDetail(detail));
+    // What egma made of this exchange, beside the exchange itself. A judgment
+    // cites a turn by its position, and the positions are right here — so this
+    // is the one place a verdict and the words it is about can be read
+    // together. The verdict store is a separate store: if it cannot be reached,
+    // the transcript is still the answer somebody came for, so an unreadable
+    // one degrades to no judgments rather than to no trace.
+    // A simulation's verdicts are filed under its own id, and its spans under
+    // the 128 bits that id carries written as hex. The two are the same number,
+    // so the reader that has one can always derive the other — which is what
+    // lets a transcript show what egma made of it with nothing having stored a
+    // mapping. A production trace derives to a simulation id nothing minted,
+    // and simply has no verdicts filed that way.
+    const filedUnder = simulationIdOfTrace(traceId) ?? traceId;
+    const judged = await readVerdicts(auth, filedUnder, { projectId }).catch(
+      () => undefined,
+    );
+
+    return reply.send({
+      ...describedDetail(detail),
+      verdicts: (judged?.verdicts ?? []).map((its) => ({
+        grader_id: its.graderId,
+        dimension: its.dimension,
+        verdict: its.verdict,
+        score: its.score,
+        priority: its.priority,
+        rationale: its.rationale,
+        cited_turns: [...its.citedSpanIds],
+        judged_by: its.judgedBy,
+        judged_at: its.judgedAt,
+      })),
+      outcome:
+        judged === undefined
+          ? null
+          : {
+              verdict: judged.outcome.verdict,
+              score: judged.outcome.score ?? null,
+              counts: judged.outcome.counts,
+            },
+    });
   });
 
   app.setErrorHandler(async (error, _request, reply) => {

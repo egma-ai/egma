@@ -132,7 +132,7 @@ describe("a whole run, swept afterwards", () => {
     const printed: string[] = [];
     const ui = new HeadlessUI({
       write: (line) => printed.push(line),
-      answers: { "retell-key": KEY },
+      answers: { "retell-key": KEY, reach: "text" },
     });
 
     // The walk ends in a run, and a run ends when verdicts arrive. The sweep
@@ -146,7 +146,11 @@ describe("a whole run, swept afterwards", () => {
         launch: workspace.launch(script),
         cwd: workspace.dir,
         signal: new AbortController().signal,
-        platform: { url: platform.url, credentialsFile: workspace.credentialsFile },
+        platform: {
+          url: platform.url,
+          instanceId: platform.instanceId,
+          credentialsFile: workspace.credentialsFile,
+        },
         retell: { url: retell.url },
         home: path.join(workspace.dir, "pretend-home"),
         runPollMs: 20,
@@ -225,6 +229,7 @@ describe("a whole run, swept afterwards", () => {
         EGMA_URL: platform.url,
         EGMA_RETELL_URL: retell.url,
         EGMA_RETELL_API_KEY: KEY,
+        EGMA_REACH: "text",
       }),
     });
     child.stdin.end("");

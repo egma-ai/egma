@@ -21,6 +21,8 @@ import {
   AGENT_VARIABLE,
   argumentRefusal,
   KEY_VARIABLES,
+  NUMBER_VARIABLE,
+  REACH_VARIABLE,
   refusedArgumentIn,
   runConnectCommand,
 } from "./commands/connect.ts";
@@ -30,11 +32,33 @@ import { runLoginCommand } from "./commands/login.ts";
 import { runPullCommand } from "./commands/pull.ts";
 import { runPushCommand } from "./commands/push.ts";
 import { runRunCommand } from "./commands/run.ts";
-import { resolvePlatformAccess, UnusableUrlError } from "./platform/credentials.ts";
+import {
+  isSelfHostInvocation,
+  runSelfHostCommand,
+} from "./commands/self-host.ts";
+import {
+  BoundPlatformAddressError,
+  BoundPlatformUnavailableError,
+  credentialsFileIn,
+  NoPlatformNamedError,
+  KEYS_UNUSABLE,
+  KeysUnusableError,
+  PlatformBindingMismatchError,
+  RepositoryPlatformConfigError,
+  resolvePlatformAccess,
+  UnusableUrlError,
+  type PlatformAccess,
+  type VerifiedPlatformAccess,
+} from "./platform/credentials.ts";
+import { PlatformUnreachableError } from "./platform/device-flow.ts";
+import {
+  PlatformIdentityError,
+  PlatformOriginMismatchError,
+} from "./platform/identity.ts";
 import { RETELL_API } from "./retell/client.ts";
 import { HeadlessUI } from "./ui/headless-ui.ts";
 import { buildExitNotice, exitLines, type ExitReport } from "./wizard/exit-line.ts";
-import type { PlatformAccess } from "./wizard/login-step.ts";
+import type { PlatformAccess as WizardPlatformAccess } from "./wizard/login-step.ts";
 import { pasteFallbackMessage } from "./wizard/no-coding-agent.ts";
 import type { StopReason } from "./wizard/stop.ts";
 
@@ -102,6 +126,10 @@ export type Invocation = {
   readonly noFollow: boolean;
   /** `--retell-agent`: which agent, when the account holds several. */
   readonly retellAgentId: string | null;
+  /** `--reach`: whether egma reaches the agent by text or by phone. */
+  readonly reach: string | null;
+  /** `--phone-number`: which number to dial, when several reach the agent. */
+  readonly phoneNumber: string | null;
   /** `--repo-prompt`: the repository's prompt, to compare the provider's with. */
   readonly repoPrompt: string | null;
   /** `--existing-tests`: the test cases the developer already had written down. */
@@ -134,6 +162,8 @@ export function parseArgs(argv: readonly string[]): Invocation {
   let force = false;
   let noFollow = false;
   let retellAgentId: string | null = null;
+  let reach: string | null = null;
+  let phoneNumber: string | null = null;
   let repoPrompt: string | null = null;
   let existingTests: string | null = null;
   let agentName: string | null = null;
@@ -163,6 +193,8 @@ export function parseArgs(argv: readonly string[]): Invocation {
     else if (argument === "--force") force = true;
     else if (argument === "--no-follow") noFollow = true;
     else if (argument === "--retell-agent") retellAgentId = argv[(index += 1)] ?? null;
+    else if (argument === "--reach") reach = argv[(index += 1)] ?? null;
+    else if (argument === "--phone-number") phoneNumber = argv[(index += 1)] ?? null;
     else if (argument === "--repo-prompt") repoPrompt = argv[(index += 1)] ?? null;
     else if (argument === "--existing-tests") existingTests = argv[(index += 1)] ?? null;
     else if (argument === "--agent") agentName = argv[(index += 1)] ?? null;
@@ -184,6 +216,8 @@ export function parseArgs(argv: readonly string[]): Invocation {
     force,
     noFollow,
     retellAgentId,
+    reach,
+    phoneNumber,
     repoPrompt,
     existingTests,
     agentName,
@@ -213,19 +247,43 @@ export function helpText(): string {
     "  egma run [options]       Run this folder's tests, pinning the version of",
     "                           each. Follows the run and prints every change.",
     "",
+    "In a platform workspace — the directory your egma deployment lives in,",
+    "which is never your agent repository:",
+    "",
+    "  egma self-host up               Start the whole platform: API, web,",
+    "                                  both stores, simulator, grader, LiveKit,",
+    "                                  its SIP gateway and their Redis. Prints",
+    "                                  the address an agent repository uses.",
+    "  egma self-host phone setup      Make that platform able to place phone",
+    "                                  calls. Asks for a Twilio account, a",
+    "                                  number it already owns and one OpenAI",
+    "                                  key; shows a plan before it writes",
+    "                                  anything to your carrier. It never buys",
+    "                                  a number. --plan shows the plan and",
+    "                                  stops; --apply --yes --json is the same",
+    "                                  work with nobody watching.",
+    "",
     "Options:",
     "  --coding-agent <id>  Which coding agent to drive, named as the agent",
     `                       registry names it. Default: ${DEFAULT_DRIVEN_AGENT_ID}`,
     "  --cwd <path>         The folder to work in. Default: this folder.",
-    "  --url <address>      The egma to talk to, for a self-hosted one. Kept",
-    "                       after the first login, so it is set once. EGMA_URL",
-    "                       does the same for a whole shell.",
+    "  --url <address>      The egma to talk to. The wizard records its verified",
+    "                       identity in egma/config.yaml. EGMA_URL selects one",
+    "                       for a whole shell.",
     "  --force              With login: sign in again even when this machine",
     "                       already holds a key.",
     "  --no-follow          With run: start the run and return at once, without",
     "                       waiting for a verdict. The run carries on on egma.",
     "  --retell-agent <id>  With connect: which agent, when the Retell account",
     "                       holds more than one.",
+    "  --reach <text|phone> With connect and a headless wizard: how egma should",
+    "                       reach the agent. text exchanges messages with it;",
+    "                       phone dials one of its numbers. egma creates the one",
+    "                       you choose and never both, and creates nothing when",
+    "                       neither is said.",
+    "  --phone-number <e164>",
+    "                       With --reach phone: which of the agent's numbers to",
+    "                       dial, when Retell routes more than one to it.",
     "  --repo-prompt <path> With connect: the prompt file in this repository, so",
     "                       egma can say whether it and Retell have drifted apart.",
     "  --existing-tests <path>",
@@ -243,15 +301,22 @@ export function helpText(): string {
     "",
     "Environment:",
     "  EGMA_URL             The egma to talk to, for a whole shell. Same as --url.",
-    "  EGMA_HOME            The folder egma keeps this machine's key in.",
+    "  EGMA_HOME            The folder egma keeps this machine's keys in, one",
+    "                       for each platform origin.",
     "                       Default: ~/.egma",
     `  ${KEY_VARIABLES[0]}  Your Retell key, for egma connect. ${KEY_VARIABLES[1]}`,
     "                       is read too, so an environment that already has one",
     "                       needs nothing new.",
     `  ${AGENT_VARIABLE} Which Retell agent, same as --retell-agent.`,
+    `  ${REACH_VARIABLE}            text or phone, same as --reach.`,
+    `  ${NUMBER_VARIABLE}     Which number to dial, same as --phone-number.`,
     `  ${RETELL_URL_VARIABLE}      The Retell to talk to. Default: ${RETELL_API}`,
     `  ${EXISTING_TESTS_VARIABLE}  Your existing test cases, same as --existing-tests.`,
     "  VISUAL, EDITOR       What e opens a generated test in, at the gate.",
+    "",
+    "When egma cannot use this machine's keys — the file is damaged, or another",
+    `egma is holding it — every command prints status: ${KEYS_UNUSABLE} with the`,
+    "reason, changes nothing, and answers 1.",
     "",
     "What egma login prints, one fact per line:",
     "  url, code, approve_url, browser, waiting, status, credentials",
@@ -262,19 +327,24 @@ export function helpText(): string {
     "",
     "What egma connect prints, one fact per line:",
     "  url, retell_agents, retell_agent, retell_agent_id, retell_response_engine,",
-    "  prompt_characters, tools, agent_id, agent_name, connection_id,",
-    "  connection_name, connection_type, connection_modality, registration,",
-    "  drift, grounded_in, status",
+    "  prompt_characters, tools, reach_option, retell_number, reach, phone_number,",
+    "  agent_id, agent_name, connection_id, connection_name, connection_type,",
+    "  connection_modality, registration, agent_registration,",
+    "  connection_registration, drift, grounded_in, status",
     "",
     "  registration says which of three things egma did: created, reused (this",
-    "  Retell agent was already registered, so nothing new was written), or",
-    "  connection_added (the same agent gained another way of being reached).",
-    "  The two that are not created also print a note: line saying so plainly.",
+    "  voice agent was already registered and already reached this way, so",
+    "  nothing was written), or connection_added (the same agent gained another",
+    "  way of being reached). The two that are not created also print a note:",
+    "  line saying so plainly. agent_registration and connection_registration",
+    "  say the same thing for each half, as created or reused.",
     "",
     "What egma connect answers with:",
     "  0 connected   2 the key was refused   3 no agents on that account",
-    "  4 Retell or egma did not answer, or refused   5 several agents, none named",
-    "  6 no key given   7 not signed in to egma   130 stopped part way",
+    "  4 Retell or egma did not answer, or refused",
+    "  5 a choice only you can make was not made: which agent, text or phone, or",
+    "    which number   6 no key given   7 not signed in to egma",
+    "  8 Retell routes no number to that agent   130 stopped part way",
     "",
     "What egma init, pull and push print, one fact per line:",
     "  url, folder, and then one line per test: what happened to it, the file,",
@@ -384,7 +454,7 @@ function retellReach(env: NodeJS.ProcessEnv): { readonly url: string } | undefin
  * not change where a secret comes from.
  */
 /** The answers a run with nobody watching can be given in advance. */
-type Held = "retell-key" | "retell-agent" | "existing-tests";
+type Held = "retell-key" | "retell-agent" | "reach" | "phone-number" | "existing-tests";
 
 function headlessAnswers(
   invocation: Invocation,
@@ -401,6 +471,15 @@ function headlessAnswers(
   const named = (invocation.retellAgentId ?? env[AGENT_VARIABLE] ?? "").trim();
   if (named !== "") answers["retell-agent"] = named;
 
+  // Which way to reach the agent is knowledge, not consent: a run with nobody
+  // watching says it in the command or egma creates nothing at all. Left out
+  // deliberately means left out — egma never picks one of the two, because
+  // only one of them dials a real telephone.
+  const way = (invocation.reach ?? env[REACH_VARIABLE] ?? "").trim();
+  if (way !== "") answers["reach"] = way;
+  const dialling = (invocation.phoneNumber ?? env[NUMBER_VARIABLE] ?? "").trim();
+  if (dialling !== "") answers["phone-number"] = dialling;
+
   // Prior work is knowledge and not consent, so a run with nobody watching is
   // pointed at it in the command or it has none — exactly as the pointer to a
   // repository's prompts is.
@@ -413,7 +492,7 @@ async function runHeadless(
   invocation: Invocation,
   launch: DrivenAgentLaunch,
   cwd: string,
-  platform: PlatformAccess,
+  platform: WizardPlatformAccess,
 ): Promise<number> {
   const controller = new AbortController();
   const stop = (reason: StopReason): void => controller.abort(reason);
@@ -448,7 +527,7 @@ async function runHeadless(
 async function runWizard(
   launch: DrivenAgentLaunch,
   cwd: string,
-  platform: PlatformAccess,
+  platform: WizardPlatformAccess,
 ): Promise<number> {
   const { startTui, walk } = await wizardMachinery();
   const controller = new AbortController();
@@ -553,7 +632,10 @@ async function runLogin(invocation: Invocation, access: PlatformAccess): Promise
 }
 
 /** The connect verb: a key from a pipe or the environment, and plain lines. */
-async function runConnect(invocation: Invocation, access: PlatformAccess): Promise<number> {
+async function runConnect(
+  invocation: Invocation,
+  access: VerifiedPlatformAccess,
+): Promise<number> {
   const controller = new AbortController();
   const onSignal = (): void => controller.abort("interrupt");
   process.on("SIGINT", onSignal);
@@ -564,6 +646,8 @@ async function runConnect(invocation: Invocation, access: PlatformAccess): Promi
       access,
       cwd: path.resolve(invocation.cwd ?? process.cwd()),
       agentId: invocation.retellAgentId,
+      reach: invocation.reach,
+      phoneNumber: invocation.phoneNumber,
       repoPrompt: invocation.repoPrompt,
       env: process.env,
       signal: controller.signal,
@@ -579,6 +663,40 @@ async function runConnect(invocation: Invocation, access: PlatformAccess): Promi
 }
 
 export async function main(argv: readonly string[]): Promise<void> {
+  // The platform operator's half of the CLI, and the one thing here that never
+  // reads a repository or resolves a platform binding: `self-host` operates a
+  // deployment, and a deployment is not something an agent repository points
+  // at.
+  //
+  // **It is settled before the repository's own secret-argument refusal**, and
+  // that ordering is not tidiness. Both halves refuse a secret in an argument,
+  // and the repository's refusal talks about a Retell key and `egma connect`.
+  // Answering a platform-workspace command with advice about a different
+  // product, at the exact moment somebody is holding a credential, sends them
+  // to the wrong place while the thing they typed is still in their history.
+  if (isSelfHostInvocation(argv)) {
+    const controller = new AbortController();
+    const onSignal = (): void => controller.abort("interrupt");
+    process.on("SIGINT", onSignal);
+    process.on("SIGTERM", onSignal);
+    try {
+      process.exitCode = await runSelfHostCommand({
+        argv,
+        cwd: process.cwd(),
+        env: process.env,
+        stdin: process.stdin,
+        stdout: process.stdout,
+        out: (line) => void process.stdout.write(`${line}\n`),
+        fail: (line) => void process.stderr.write(`${line}\n`),
+        signal: controller.signal,
+      });
+    } finally {
+      process.off("SIGINT", onSignal);
+      process.off("SIGTERM", onSignal);
+    }
+    return;
+  }
+
   // Before anything is parsed or printed: an argument that would have carried
   // a secret is refused by name, and its value is never repeated back.
   const leaked = refusedArgumentIn(argv);
@@ -609,68 +727,126 @@ export async function main(argv: readonly string[]): Promise<void> {
     return;
   }
 
+  const cwd = path.resolve(invocation.cwd ?? process.cwd());
+
+  // `init` is only a local folder write. It never verifies a platform, signs
+  // in, or sends an identifier anywhere.
+  if (invocation.verb === "init") {
+    process.exitCode = await runFolderVerb(invocation.verb, invocation, {
+      // `init` writes a folder and talks to nothing, so there is no platform to
+      // name. Empty rather than a placeholder address: a real-looking one here
+      // would be a lie the next reader has to disprove.
+      url: "",
+      credentialsFile: credentialsFileIn(process.env),
+    });
+    return;
+  }
+
+  // The wizard's remaining work, held as one closure rather than a launch the
+  // compiler cannot prove is there. Everything a bare command needs — the
+  // keystroke of consent, the coding agent it will drive — is settled here,
+  // before a single network read, and what comes out is either the rest of the
+  // walk or nothing at all.
+  let theWizard: ((access: VerifiedPlatformAccess) => Promise<number>) | null = null;
+  if (invocation.verb === null) {
+    // Consent is checked before a network read. A piped bare command cannot
+    // start either the wizard or platform selection.
+    const drawable = process.stdout.isTTY === true && process.stdin.isTTY === true;
+    if (!invocation.headless && !drawable) {
+      process.stderr.write(`${noTerminalRefusal()}\n`);
+      process.exitCode = 1;
+      return;
+    }
+
+    let launch: DrivenAgentLaunch;
+    try {
+      launch = launchFrom(invocation);
+    } catch (error) {
+      if (error instanceof UnlaunchableDrivenAgentError) {
+        process.stdout.write(`${error.message}\n\n${pasteFallbackMessage()}\n`);
+        return;
+      }
+      throw error;
+    }
+    theWizard = async (access) =>
+      invocation.headless
+        ? runHeadless(invocation, launch, cwd, access)
+        : runWizard(launch, cwd, access);
+  }
+
   // Which egma, resolved once for every path below, and refused here when the
   // address a developer named is not one. A bad address is turned away before
   // anything is started on it rather than after.
-  let access: PlatformAccess;
+  let access: VerifiedPlatformAccess;
   try {
-    access = await resolvePlatformAccess({ env: process.env, flag: invocation.url });
+    access = await resolvePlatformAccess({
+      env: process.env,
+      flag: invocation.url,
+      cwd,
+    });
   } catch (error) {
     if (error instanceof UnusableUrlError) {
       process.stderr.write(`${error.message}\n`);
       process.exitCode = 1;
       return;
     }
-    throw error;
-  }
-
-  // A verb needs no terminal and takes no keystroke: it drives no coding agent,
-  // so there is nothing for a keystroke to agree to.
-  if (invocation.verb === "login") {
-    process.exitCode = await runLogin(invocation, access);
-    return;
-  }
-  if (invocation.verb === "connect") {
-    process.exitCode = await runConnect(invocation, access);
-    return;
-  }
-  if (
-    invocation.verb === "init" ||
-    invocation.verb === "pull" ||
-    invocation.verb === "push" ||
-    invocation.verb === "run"
-  ) {
-    process.exitCode = await runFolderVerb(invocation.verb, invocation, access);
-    return;
-  }
-
-  // The wizard earns consent with one keystroke, and a terminal that cannot
-  // deliver one cannot give it. Falling back to a run nobody agreed to would
-  // drive the developer's coding agent because a pipe was on the end of the
-  // command, so egma refuses and names the flag that means "I agree".
-  const drawable = process.stdout.isTTY === true && process.stdin.isTTY === true;
-  if (!invocation.headless && !drawable) {
-    process.stderr.write(`${noTerminalRefusal()}\n`);
-    process.exitCode = 1;
-    return;
-  }
-
-  const cwd = path.resolve(invocation.cwd ?? process.cwd());
-
-  let launch: DrivenAgentLaunch;
-  try {
-    launch = launchFrom(invocation);
-  } catch (error) {
-    if (error instanceof UnlaunchableDrivenAgentError) {
-      // There is no coding agent here for egma to drive, so there is nothing to
-      // open a wizard for. The developer gets the words that work anyway.
-      process.stdout.write(`${error.message}\n\n${pasteFallbackMessage()}\n`);
+    // Two shapes, and the difference is whether anything is worth retrying.
+    // `unreachable` is nobody answering; `refused` is egma declining to send
+    // this repository's identifiers to the address on offer.
+    const refused =
+      error instanceof PlatformBindingMismatchError ||
+      error instanceof BoundPlatformAddressError ||
+      error instanceof PlatformOriginMismatchError ||
+      error instanceof RepositoryPlatformConfigError;
+    if (
+      refused ||
+      error instanceof PlatformUnreachableError ||
+      error instanceof PlatformIdentityError ||
+      error instanceof BoundPlatformUnavailableError ||
+      error instanceof NoPlatformNamedError
+    ) {
+      const status = refused ? "refused" : "unreachable";
+      const message = (error as Error).message;
+      process.stdout.write(`status: ${status}\nreason: ${message}\n`);
+      process.stderr.write(`${message}\n`);
+      process.exitCode = 4;
       return;
     }
     throw error;
   }
 
-  process.exitCode = invocation.headless
-    ? await runHeadless(invocation, launch, cwd, access)
-    : await runWizard(launch, cwd, access);
+  try {
+    // A verb needs no terminal and takes no keystroke: it drives no coding
+    // agent, so there is nothing for a keystroke to agree to.
+    if (invocation.verb === "login") {
+      process.exitCode = await runLogin(invocation, access);
+      return;
+    }
+    if (invocation.verb === "connect") {
+      process.exitCode = await runConnect(invocation, access);
+      return;
+    }
+    if (
+      invocation.verb === "pull" ||
+      invocation.verb === "push" ||
+      invocation.verb === "run"
+    ) {
+      process.exitCode = await runFolderVerb(invocation.verb, invocation, access);
+      return;
+    }
+
+    // Every verb has returned by now, so what is left is the bare command, and
+    // the walk it needs was built above.
+    if (theWizard !== null) process.exitCode = await theWizard(access);
+  } catch (error) {
+    if (!(error instanceof KeysUnusableError)) throw error;
+    // Whatever is wrong with this machine's keys file, egma decided not to
+    // write over it — and a decision is a sentence, not a stack trace. Every
+    // verb can hit this and none of them owns it, so it is caught in the one
+    // place they all pass through, and it answers the same way everywhere
+    // rather than borrowing a number that means something else per verb.
+    process.stdout.write(`status: ${KEYS_UNUSABLE}\nreason: ${error.message}\n`);
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+  }
 }

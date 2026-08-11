@@ -125,6 +125,7 @@ class ScriptedSession:
         self._speaking = bytearray()
         self._heard_the_persona = False
         self._quiet_samples = 0
+        self._carried = False
         self.heard: list[bytes] = []
         """Every stretch of persona speech this call carried, in order —
         what a test asks when it wants the far end's side of the story.
@@ -134,6 +135,16 @@ class ScriptedSession:
     @property
     def sample_rate_hz(self) -> int:
         return self._band_hz
+
+    @property
+    def observed_band_hz(self) -> int | None:
+        """The band this scripted line really carried, once it has.
+
+        A scripted call makes its own samples, so the band it produced is
+        the band it was built at — but a record still reads it off a call
+        that carried something rather than off a call that was configured.
+        """
+        return self._band_hz if self._carried else None
 
     @property
     def far_end_left(self) -> bool:
@@ -180,6 +191,7 @@ class ScriptedSession:
         self._hear(pcm)
 
     async def receive(self, seconds: float) -> bytes | None:
+        self._carried = True
         if self._pending:
             frame = self._pending.popleft()
             if not self._pending and self._hang_up_when_drained:

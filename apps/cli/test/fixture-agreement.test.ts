@@ -1637,26 +1637,24 @@ describe("starting a run", () => {
     }
   });
 
-  it("refuses a connection type no simulator adapter has shipped for, at the door", async () => {
+  it("starts a run over a phone connection, because the phone adapter has shipped", async () => {
     const { connectionId, oneCaller } = await readyToRun("phone");
 
-    const refused = await ask("POST", "/api/runs", {
+    const started = await ask("POST", "/api/runs", {
       connection: connectionId,
       test_versions: [oneCaller],
     });
 
-    // The platform's own sentence, relayed word for word by whatever prints it.
-    expect(refused.status).toBe(422);
-    expect(refused.body).toEqual({
-      error: "no_adapter",
-      message:
-        "egma has no simulator adapter for a phone connection yet, so it " +
-        "will not start a run it cannot conduct. Run these tests over a " +
-        "connection egma conducts today: retell, livekit.",
+    // This was the `no_adapter` refusal until the phone plug shipped. Both
+    // ends of the agreement had to move together: a fixture still refusing
+    // here would let a client pass its checks and fail on a real platform.
+    expect(started.status, JSON.stringify(started.body)).toBe(201);
+    expect(started.body).toMatchObject({
+      connection_id: connectionId,
+      connection_type: "phone",
+      modality: "voice",
     });
-
-    // And nothing is left queued for a conductor that does not exist.
-    expect(platform.running.runs).toEqual([]);
+    expect(platform.running.runs).toHaveLength(1);
   });
 
   /**

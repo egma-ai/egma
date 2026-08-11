@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 
 import { db } from "../client.ts";
 import {
@@ -6,6 +6,7 @@ import {
   JUDGE_PROVIDERS,
   type JudgeProvider,
 } from "../schema/graders.ts";
+import { project } from "../schema/tenancy.ts";
 import { openCredentials, sealCredentials } from "../sealing.ts";
 import type { AuthContext } from "./context.ts";
 import { authorize, here } from "./permissions.ts";
@@ -310,4 +311,113 @@ export async function resolveJudgeKey(
     );
   }
   return key;
+}
+
+/**
+ * One judge row, validated and sealed, ready to insert.
+ *
+ * Shared by the two places the platform's own judge is written — the boot-time
+ * backfill below and the provisioning transaction that gives a brand-new
+ * project one — so that a key is validated and sealed identically on both, and
+ * a rule added here cannot apply to only one of them.
+ */
+export function platformJudgeRow(input: {
+  readonly projectId: string;
+  readonly organizationId: string;
+  /** Nullable, because a project can be created by nobody — a seeded one. */
+  readonly createdBy: string | null;
+  readonly provider: string;
+  readonly model: string;
+  readonly key: string;
+  readonly now: Date;
+}) {
+  const key = validKey(input.key);
+  return {
+    projectId: input.projectId,
+    organizationId: input.organizationId,
+    provider: validProvider(input.provider),
+    model: validModel(input.model),
+    // Sealed per row rather than once for many: the envelope carries its own
+    // initialisation vector, and reusing one across rows is the mistake this
+    // repeats a cheap operation to avoid.
+    credentials: sealCredentials({ key }),
+    credentialsHint: key.slice(-4),
+    createdBy: input.createdBy,
+    updatedAt: input.now,
+  };
+}
+
+/**
+ * Give every project that has configured no judge the platform's own.
+ *
+ * **Why this exists, and why it is not a container-wide key.** A self-hoster
+ * supplies one OpenAI key when they set their platform up, and it is meant to
+ * cover the persona's brain, its voice, its ears and the default judge — asking
+ * the same person for the same key a second time, in a second place, on a
+ * laptop where they are also the only project's admin, buys nothing but a step
+ * to forget. What it must *not* become is a key on the grader: a judge
+ * configured per container is a judge no project chose, spent on conversations
+ * belonging to customers who agreed to neither.
+ *
+ * So this writes the ordinary row. Sealed with the deployment's own encryption
+ * key, opened by the grading engine through the one door that opens it, and
+ * indistinguishable afterwards from a judge the project set for itself. What is
+ * different is only who filled the form in.
+ *
+ * **It never overwrites.** A project that has chosen a judge has chosen it, and
+ * a platform restart is not an occasion to change somebody's model or spend
+ * from a different account. So this is safe to run on every boot.
+ *
+ * **This is the backfill, not the whole mechanism.** It catches the projects
+ * that existed before the platform was given a judge — a self-hoster who runs
+ * `egma self-host phone setup` on a deployment they had already signed up on.
+ * A project created *while* the platform is running is given its judge in the
+ * transaction that creates it (see `provisionOrganization`), because a project
+ * that had to wait for the next restart to become gradable would produce
+ * errored verdicts in between, and a grading failure is an operational failure
+ * rather than anything the agent under test did.
+ *
+ * Not authorized against an `AuthContext` on purpose: there is no user here.
+ * This is the deployment acting on its own configuration, in the same breath as
+ * applying its migrations, and there is no session it could be doing it under.
+ */
+export async function seedDefaultJudge(input: {
+  readonly provider: string;
+  readonly model: string;
+  readonly key: string;
+}): Promise<readonly string[]> {
+  const unjudged = await db()
+    .select({
+      id: project.id,
+      organizationId: project.organizationId,
+      createdBy: project.createdBy,
+    })
+    .from(project)
+    .leftJoin(judgeConfiguration, eq(judgeConfiguration.projectId, project.id))
+    .where(isNull(judgeConfiguration.projectId));
+
+  if (unjudged.length === 0) return [];
+
+  const now = new Date();
+  await db()
+    .insert(judgeConfiguration)
+    .values(
+      unjudged.map((row) =>
+        platformJudgeRow({
+          projectId: row.id,
+          organizationId: row.organizationId,
+          createdBy: row.createdBy,
+          provider: input.provider,
+          model: input.model,
+          key: input.key,
+          now,
+        }),
+      ),
+    )
+    // A project that gained a judge between the read above and this write kept
+    // it. Nothing here is a race worth locking for; the losing side is the
+    // deployment's default, which is exactly the side that should lose.
+    .onConflictDoNothing({ target: judgeConfiguration.projectId });
+
+  return unjudged.map((row) => row.id);
 }

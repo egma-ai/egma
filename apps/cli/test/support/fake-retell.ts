@@ -3,9 +3,15 @@
  *
  * The CLI talks to Retell over plain HTTP, so that is the seam a check stands
  * in at: a server on this machine answering `/v2/list-agents`, `/get-agent/…`,
- * `/get-chat-agent/…`, `/get-retell-llm/…` and `/get-conversation-flow/…` with
- * the fields the SDK's own types name. Nothing in CI ever reaches the real
- * Retell, and no real key exists anywhere near these checks.
+ * `/get-chat-agent/…`, `/get-retell-llm/…`, `/get-conversation-flow/…`,
+ * `/list-phone-numbers` and `/get-phone-number/…` with the fields the SDK's own
+ * types name. Nothing in CI ever reaches the real Retell, and no real key
+ * exists anywhere near these checks.
+ *
+ * **The number rows carry `inbound_agents` and nothing else about routing**,
+ * which is the shape the real service answers with — every number on the
+ * account this effort ran against reports its assignment there and carries no
+ * single-agent field at all.
  *
  * It is exactly as strict as Retell is, and never kinder. An agent is served
  * only at the address for its own kind, a required field is always sent, and a
@@ -45,6 +51,15 @@ export type FakeLlm = {
   readonly extra?: Record<string, unknown>;
 };
 
+/** One telephone number on the account, as Retell answers it. */
+export type FakeNumber = {
+  readonly phone_number: string;
+  readonly nickname?: string;
+  /** Every agent Retell routes an inbound call on it to, with its weight. */
+  readonly inbound_agents?: readonly { readonly agent_id: string; readonly weight?: number }[];
+  readonly extra?: Record<string, unknown>;
+};
+
 /** A conversation flow, the other engine Retell holds the words for. */
 export type FakeFlow = {
   readonly conversation_flow_id: string;
@@ -59,6 +74,8 @@ export type FakeRetellScript = {
   readonly agents: readonly FakeAgent[];
   readonly llms?: readonly FakeLlm[];
   readonly flows?: readonly FakeFlow[];
+  /** The account's telephone numbers. None when omitted. */
+  readonly numbers?: readonly FakeNumber[];
   /**
    * How many agents one listing answers with, so following pages can be
    * checked. The whole account in one answer when omitted.
@@ -66,6 +83,19 @@ export type FakeRetellScript = {
   readonly pageSize?: number;
   /** Answer every request with this status and body instead. */
   readonly refuseWith?: { readonly status: number; readonly body: unknown };
+  /**
+   * Answer these paths with this status instead, and everything else normally.
+   *
+   * For the half-broken account, which is a real thing and not a contrived one:
+   * a listing that works and a second one that does not. What egma does when
+   * one read fails is a different question from what it does when the whole
+   * service is down, and a fake that could only do the second could not ask it.
+   */
+  readonly refusing?: readonly {
+    readonly path: string;
+    readonly status: number;
+    readonly body?: unknown;
+  }[];
 };
 
 /** One request, as the fake saw it. */
@@ -123,6 +153,21 @@ function flowBody(flow: FakeFlow): Record<string, unknown> {
   };
 }
 
+function numberBody(number: FakeNumber): Record<string, unknown> {
+  return {
+    phone_number: number.phone_number,
+    phone_number_type: "retell-telnyx",
+    phone_number_pretty: number.phone_number,
+    ...(number.nickname === undefined ? {} : { nickname: number.nickname }),
+    inbound_agents: (number.inbound_agents ?? []).map((held) => ({
+      weight: held.weight ?? 1,
+      agent_id: held.agent_id,
+    })),
+    last_modification_timestamp: 1_700_000_000_000,
+    ...(number.extra ?? {}),
+  };
+}
+
 export async function startFakeRetell(script: FakeRetellScript): Promise<FakeRetell> {
   const requests: FakeRetellRequest[] = [];
   const answers = new Map<string, string>();
@@ -154,6 +199,14 @@ export async function startFakeRetell(script: FakeRetellScript): Promise<FakeRet
 
         if (script.refuseWith !== undefined) {
           send(script.refuseWith.status, script.refuseWith.body);
+          return;
+        }
+
+        const refused = (script.refusing ?? []).find(
+          (one) => one.path === at.pathname,
+        );
+        if (refused !== undefined) {
+          send(refused.status, refused.body ?? { error_message: "not today" });
           return;
         }
 
@@ -202,6 +255,26 @@ export async function startFakeRetell(script: FakeRetellScript): Promise<FakeRet
             return;
           }
           send(200, agentBody(agent));
+          return;
+        }
+
+        if (incoming.method === "GET" && at.pathname === "/list-phone-numbers") {
+          // A bare array, which is what Retell answers here — not the paged
+          // envelope the agent listing uses.
+          send(200, (script.numbers ?? []).map(numberBody));
+          return;
+        }
+
+        if (incoming.method === "GET" && at.pathname.startsWith("/get-phone-number/")) {
+          const wanted = decodeURIComponent(at.pathname.slice("/get-phone-number/".length));
+          const number = (script.numbers ?? []).find(
+            (held) => held.phone_number === wanted,
+          );
+          if (number === undefined) {
+            send(404, { error_message: "phone number not found" });
+            return;
+          }
+          send(200, numberBody(number));
           return;
         }
 

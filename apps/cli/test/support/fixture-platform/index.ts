@@ -10,6 +10,7 @@ import { newId } from "../../../../../packages/ids/src/index.ts";
 import { agentRoutes, type AgentControls } from "./agents.ts";
 import { controlRoutes } from "./controls.ts";
 import { deviceRoutes, type DeviceControls } from "./device.ts";
+import { platformRoutes, type PlatformIdentityControls } from "./platform.ts";
 import { mockToolRoutes, type MockToolControls } from "./mock-tools.ts";
 import { runControlRoutes, runRoutes, type RunControls } from "./runs.ts";
 import { startFixturePlatform, type FixturePlatform } from "./server.ts";
@@ -31,6 +32,8 @@ export type { FixturePlatform, Observation } from "./server.ts";
 export type { SeedTest, SeededTest, TestControls } from "./tests.ts";
 
 export type Platform = FixturePlatform & {
+  /** Stable identity returned before login. */
+  readonly instanceId: PlatformIdentityControls["instanceId"];
   /** What a person in a browser would do, done directly. */
   readonly device: DeviceControls;
   /** What was registered, and what the platform was handed to seal. */
@@ -48,14 +51,22 @@ export type Platform = FixturePlatform & {
   signedInWith(key: string): void;
 };
 
-export async function startPlatform(): Promise<Platform> {
+export type StartPlatformOptions = {
+  /** What the identity route names when this socket is only an alias. */
+  readonly canonicalOrigin?: string;
+};
+
+export async function startPlatform(options: StartPlatformOptions = {}): Promise<Platform> {
   let device!: DeviceControls;
   let registered!: AgentControls;
   let tests!: TestControls;
   let mocking!: MockToolControls;
   let running!: RunControls;
+  let identity!: PlatformIdentityControls;
 
   const platform = await startFixturePlatform((origin) => {
+    const platformGroup = platformRoutes(() => options.canonicalOrigin ?? origin());
+    identity = platformGroup.controls;
     const deviceGroup = deviceRoutes(origin);
     device = deviceGroup.controls;
 
@@ -94,6 +105,7 @@ export async function startPlatform(): Promise<Platform> {
     running = runGroup.controls;
 
     return [
+      platformGroup.group,
       deviceGroup.group,
       agentGroup.group,
       testGroup.group,
@@ -106,6 +118,7 @@ export async function startPlatform(): Promise<Platform> {
 
   return {
     ...platform,
+    instanceId: identity.instanceId,
     device,
     registered,
     tests,
