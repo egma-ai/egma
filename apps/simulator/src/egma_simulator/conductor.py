@@ -132,10 +132,28 @@ class ConductParameters:
     on both and says why.
     """
 
-    agent_opening_seconds: float = 2.0
+    agent_opening_seconds: float = 10.0
     """How long the persona listens before deciding the agent is not going
-    to speak first. A greeting arrives well inside this; silence means the
-    persona opens, which is what a person does."""
+    to speak first.
+
+    **A backstop for a far end that answered and said nothing, not a race
+    to speak.** Every simulation egma conducts is an outbound call, and on
+    an outbound call the far end always speaks first — so the persona
+    opening at all is the unusual path, and it costs nothing to be patient
+    about it.
+
+    This was 2.0, on the reasoning that "a greeting arrives well inside
+    this". On a phone call it does not. The clock counts audio from the
+    moment the *line* opens, and a SIP call spends several seconds after
+    that before the far end's first word: the carrier answers, the agent's
+    own stack starts, its model runs, its speech synthesis produces sound.
+    A real call measured about five seconds of that gap — so the persona
+    opened before the agent had said anything, and the two talked over
+    each other from the first syllable.
+
+    Ten seconds clears the observed gap with room to spare and still
+    reports a genuinely mute far end long before any duration limit. It
+    remains a wall the far end normally never reaches."""
 
     persona_pause_seconds: float = 0.4
     """The beat the persona leaves before answering. A person does not

@@ -515,6 +515,36 @@ def build_legs(
     )
 
 
+TELEPHONY_VAD = VADParams(
+    # Pipecat's own default is 0.2, and their documentation is explicit that
+    # 0.2 is the value to use **when a turn analyzer is doing the real work**
+    # and this is only its fallback. With nothing above it, 0.2 ends a turn at
+    # every pause between sentences — a real call proved it, chopping one
+    # three-sentence greeting into four turns and handing the floor back after
+    # each. Their recommendation for conversation without an analyzer is 0.8,
+    # and that is what this is.
+    stop_secs=0.8,
+    # Both of the remaining defaults — 0.7 and 0.6 — are tuned for a clean
+    # wideband microphone. This line is 8 kHz telephony: quieter, band-limited
+    # and compressed, so the same thresholds are strictly harsher here than
+    # they are where they were chosen. Lowered together, because raising the
+    # bar for what counts as speech on a phone line is how an agent's words
+    # stop being heard at all.
+    confidence=0.6,
+    min_volume=0.3,
+    # Left at Pipecat's default. This one says how much speech must arrive
+    # before the far end counts as speaking, and 200 ms of real words is a
+    # sound threshold on any channel.
+    start_secs=0.2,
+)
+"""How the persona hears a phone line, as against a microphone.
+
+Every number here is a departure from a Pipecat default, and each is a
+departure for the same reason: the defaults assume a headset in a quiet
+room and this is a compressed 8 kHz call to a business.
+"""
+
+
 def build_vad(
     providers: SpeechProviders, *, sample_rate_hz: int, window_samples: int
 ) -> VADAnalyzer:
@@ -537,7 +567,7 @@ def build_vad(
     # a model it will never run. The quarantine suite holds this.
     from pipecat.audio.vad.silero import SileroVADAnalyzer
 
-    return SileroVADAnalyzer(sample_rate=sample_rate_hz)
+    return SileroVADAnalyzer(sample_rate=sample_rate_hz, params=TELEPHONY_VAD)
 
 
 def _mouth(
