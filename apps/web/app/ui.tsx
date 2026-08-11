@@ -22,20 +22,7 @@ export type AppSection = ProductSection;
 
 const THEME_CHANGE_EVENT = "egma:theme-change";
 
-export function Brand() {
-  return (
-    <Image
-      className={styles.brand}
-      src="/brand/egma-logo.png"
-      alt="egma"
-      width={146}
-      height={31}
-      priority
-    />
-  );
-}
-
-export function ThemeToggle() {
+function useTheme() {
   const [theme, setTheme] = useState<Theme>("light");
 
   useEffect(() => {
@@ -57,6 +44,25 @@ export function ThemeToggle() {
     }
     window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
   }
+
+  return { theme, toggle };
+}
+
+export function Brand() {
+  return (
+    <Image
+      className={styles.brand}
+      src="/brand/egma-logo.png"
+      alt="egma"
+      width={146}
+      height={31}
+      priority
+    />
+  );
+}
+
+export function ThemeToggle() {
+  const { theme, toggle } = useTheme();
 
   return (
     <button
@@ -168,7 +174,6 @@ export function AppShell({
       <aside className={styles.sidebar}>
         <div className={styles.sidebarTop}>
           <Link href="/traces" aria-label="Egma transcripts"><Brand /></Link>
-          <ThemeToggle />
         </div>
         <nav className={styles.navigation} aria-label="Main navigation">
           {PRODUCT_NAVIGATION.map((item) => <Link key={item.id} className={active === item.id ? styles.navigationActive : undefined} aria-current={active === item.id ? "page" : undefined} href={item.href}>{item.label}</Link>)}
@@ -181,7 +186,6 @@ export function AppShell({
         <header className={styles.mobileHeader}>
           <span className={styles.mobileBrand}>
             <Link href="/traces" aria-label="Egma transcripts"><Brand /></Link>
-            <ThemeToggle />
           </span>
           <span className={styles.mobileActions}><AccountMenu initial={initial} signingOut={signingOut} onSignOut={() => void signOut()} /></span>
         </header>
@@ -208,15 +212,38 @@ function AccountMenu({
       <summary className={styles.accountCard} aria-label="Open settings menu">
         <span className={styles.avatar}>{initial}</span>
         <span className={styles.accountCardLabel}>Settings</span>
-        <span className={styles.accountChevron} aria-hidden="true">⌃</span>
+        <svg className={styles.accountChevron} aria-hidden="true" viewBox="0 0 12 12">
+          <path d="M3.25 7.25 6 4.5l2.75 2.75" />
+        </svg>
       </summary>
       <div className={styles.accountMenuPanel}>
         <Link className={styles.accountMenuItem} href="/members">Organization settings</Link>
+        <ThemeMenuToggle />
         <button className={styles.accountMenuItem} type="button" disabled={signingOut} onClick={onSignOut}>
           {signingOut ? "Signing out…" : "Sign out"}
         </button>
       </div>
     </details>
+  );
+}
+
+function ThemeMenuToggle() {
+  const { theme, toggle } = useTheme();
+  const dark = theme === "dark";
+
+  return (
+    <button
+      className={`${styles.accountMenuItem} ${styles.themeMenuItem}`}
+      type="button"
+      role="switch"
+      aria-checked={dark}
+      onClick={toggle}
+    >
+      <span>Dark theme</span>
+      <span className={styles.themeSwitch} aria-hidden="true">
+        <span className={styles.themeSwitchThumb} />
+      </span>
+    </button>
   );
 }
 

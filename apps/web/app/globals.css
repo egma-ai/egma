@@ -47,7 +47,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 ::selection { background: color-mix(in srgb, var(--focus) 25%, transparent); }
 
 @supports (appearance: base-select) {
-  select, ::picker(select) { appearance: base-select; }
+  select, ::picker(select) { appearance: base-select; align-items: center; }
   ::picker(select) {
     margin-block: 4px;
     padding: 5px;

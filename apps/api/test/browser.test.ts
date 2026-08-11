@@ -638,6 +638,11 @@ describe("the list of what an organization recorded", () => {
           getComputedStyle(element).appearance,
         ),
       ).toBe("base-select");
+      expect(
+        await page.locator("#window").evaluate((element) =>
+          getComputedStyle(element).alignItems,
+        ),
+      ).toBe("center");
     },
     SETTLE,
   );
@@ -1020,26 +1025,29 @@ describe("more exchanges than one page holds", () => {
 
 describe("the saved theme", () => {
   it(
-    "starts light, keeps both controls synchronized, and survives a reload",
+    "starts light, toggles from settings, and survives a reload",
     async () => {
-      await page.goto(`${origin}/`);
+      await page.goto(`${origin}/traces`);
       await page.evaluate(() => localStorage.removeItem("egma-theme"));
       await page.reload();
 
       expect(await page.locator("html").getAttribute("data-theme")).toBe("light");
-      const controls = page.locator('button[aria-label="Use dark theme"]');
-      await expect.poll(() => controls.count()).toBe(2);
-      await controls.first().click();
+      const settings = page.locator('aside summary[aria-label="Open settings menu"]');
+      await settings.click();
+      const controls = page.getByRole("switch", { name: "Dark theme" });
+      await expect.poll(() => controls.count()).toBe(1);
+      await page.locator("aside").getByRole("switch", { name: "Dark theme" }).click();
 
       expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");
       expect(await page.evaluate(() => localStorage.getItem("egma-theme"))).toBe("dark");
-      expect(await page.locator('button[aria-label="Use light theme"]').count()).toBe(2);
+      expect(await controls.first().getAttribute("aria-checked")).toBe("true");
 
       await page.reload();
       expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");
+      await page.locator('aside summary[aria-label="Open settings menu"]').click();
       await expect
-        .poll(() => page.locator('button[aria-label="Use light theme"]').count())
-        .toBe(2);
+        .poll(() => page.locator("aside").getByRole("switch", { name: "Dark theme" }).getAttribute("aria-checked"))
+        .toBe("true");
     },
     SETTLE,
   );

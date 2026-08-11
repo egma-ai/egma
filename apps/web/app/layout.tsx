@@ -7,6 +7,22 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "egma",
   description: "Trust the voice agent you ship to production.",
+  icons: {
+    icon: [
+      {
+        url: "/brand/egma-mark-light.png",
+        type: "image/png",
+        sizes: "512x512",
+        media: "(prefers-color-scheme: light)",
+      },
+      {
+        url: "/brand/egma-mark-dark.png",
+        type: "image/png",
+        sizes: "512x512",
+        media: "(prefers-color-scheme: dark)",
+      },
+    ],
+  },
 };
 
 export const viewport: Viewport = {

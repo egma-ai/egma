@@ -46,8 +46,7 @@
 
 .appShell { display: grid; min-height: 100svh; grid-template-columns: 252px minmax(0, 1fr); }
 .sidebar { position: sticky; top: 0; display: flex; height: 100svh; flex-direction: column; padding: 38px 28px 28px; border-right: 1px solid var(--border); background: var(--background); }
-.sidebarTop { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.sidebarTop .themeToggle, .mobileBrand .themeToggle { width: 34px; height: 34px; border-radius: 7px; }
+.sidebarTop { display: flex; align-items: center; gap: 12px; }
 .navigation { display: flex; margin-top: 68px; flex-direction: column; gap: 4px; }
 .navigation a, .mobileNavigation a { padding: 10px 12px; border-radius: 7px; color: var(--muted); text-decoration: none; }
 .navigation a:hover, .navigation a.navigationActive, .mobileNavigation a.navigationActive { background: var(--surface-soft); color: var(--foreground); }
@@ -58,13 +57,18 @@
 .accountMenu[open] .accountCard { border-color: var(--border-strong); background: var(--surface-soft); }
 .avatar { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border: 1px solid var(--border); border-radius: 50%; font-family: var(--mono); font-size: 12px; }
 .accountCardLabel { overflow: hidden; font-size: 13px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
-.accountChevron { color: var(--muted); font-family: var(--mono); font-size: 12px; transition: transform 120ms ease; }
+.accountChevron { display: block; width: 12px; height: 12px; justify-self: center; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.4; color: var(--muted); transition: transform 120ms ease; }
 .accountMenu[open] .accountChevron { transform: rotate(180deg); }
 .accountMenuPanel { position: absolute; z-index: 10; right: -10px; bottom: calc(100% + 18px); left: -10px; padding: 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: 0 16px 45px rgb(0 0 0 / .14); }
 .accountMenuItem { display: flex; width: 100%; min-height: var(--control-height); align-items: center; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--foreground); font-family: var(--mono); font-size: 11px; text-align: left; text-decoration: none; }
 .accountMenuItem { cursor: pointer; }
 .accountMenuItem:hover:not(:disabled) { background: var(--surface-soft); }
 .accountMenuItem:disabled { cursor: wait; opacity: .6; }
+.themeMenuItem { justify-content: space-between; }
+.themeSwitch { position: relative; display: block; width: 30px; height: 18px; flex: 0 0 auto; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface-soft); transition: border-color 120ms ease, background-color 120ms ease; }
+.themeSwitchThumb { position: absolute; top: 2px; left: 2px; display: block; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); transition: transform 120ms ease, background-color 120ms ease; }
+.themeMenuItem[aria-checked="true"] .themeSwitch { border-color: var(--foreground); background: var(--foreground); }
+.themeMenuItem[aria-checked="true"] .themeSwitchThumb { background: var(--background); transform: translateX(12px); }
 .mobileBrand { display: flex; align-items: center; gap: 12px; }
 .mobileActions { display: flex; align-items: center; gap: 14px; }
 .appBody { min-width: 0; }
@@ -94,7 +98,7 @@
 
 .listToolbar { display: flex; align-items: center; gap: 10px; color: var(--muted); font-family: var(--mono); font-size: 11px; }
 .compactSelectControl { position: relative; display: inline-flex; }
-.compactSelect { min-width: 148px; height: var(--control-height); align-items: center; padding: 0 13px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--foreground); cursor: pointer; font-family: var(--mono); font-size: 11px; }
+.compactSelect { min-width: 148px; height: var(--control-height); padding: 0 13px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--foreground); cursor: pointer; font-family: var(--mono); font-size: 11px; }
 .compactSelect:hover { background: var(--surface-soft); }
 .listMeta { display: flex; justify-content: space-between; padding: 24px 2px 13px; color: var(--muted); font-family: var(--mono); font-size: 11px; }
 .tableWrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
