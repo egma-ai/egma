@@ -260,6 +260,22 @@ services:
       # never opens a connection to it; signing is arithmetic, and the bytes go
       # from the store to the browser.
       #
+      # **This and EGMA_BASE_URL must agree about http: and https:.** They are
+      # one browser's two addresses. A page served over https: may not fetch
+      # audio over http: — the browser blocks it as mixed content before the
+      # request is even sent, so the store is never asked and the perfect
+      # signature never checked. The API refuses to start on that pair and names
+      # both variables, rather than let it be found one silent player at a time.
+      #
+      # **A plaintext address here has a price, and it is worth knowing before
+      # you type one.** `http://192.168.1.10:9000` works, and it also puts the
+      # recording — a customer's call audio — and the fifteen-minute link that
+      # replays it on the wire readable by anybody who can see that network.
+      # `http://localhost:9000` shows that to nobody. It is allowed rather than
+      # refused because an egma on http: is already handing the same network the
+      # session cookie that opens every recording; put the store behind the same
+      # certificate as egma on any network you do not trust.
+      #
       # Leaving it unset is allowed and is not a failure: the platform runs, the
       # runs run, and a request for a recording answers with the name of this
       # variable rather than with an empty player.

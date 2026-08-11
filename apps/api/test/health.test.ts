@@ -369,6 +369,117 @@ describe("configuration", () => {
       }).blob?.region,
     ).toBe("eu-west-1");
   });
+
+  /**
+   * The one pair of schemes no browser will honour, and the one this file exists
+   * to refuse by name.
+   *
+   * Both settings are addresses of the *same browser* — one to egma, one to the
+   * store. A page served over https: may not fetch audio over http:: the browser
+   * blocks it as mixed content before the request is sent, so the store is never
+   * asked and the signature is never checked. The player fails and the only
+   * sentence naming the reason is in a console the person pressing play is not
+   * looking at. Which is exactly the failure the address binding and the region
+   * were each refused at startup to prevent, arriving by a third route.
+   */
+  it("refuses an https egma pointed at an http store, and names both variables", () => {
+    const withCredential = {
+      ...enough,
+      EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
+      EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
+    };
+
+    expect(() =>
+      loadConfig({
+        ...withCredential,
+        EGMA_BASE_URL: "https://egma.acme.example",
+        EGMA_BLOB_PUBLIC_URL: "http://192.168.1.10:9000",
+      }),
+    ).toThrow(/EGMA_BASE_URL is https:\/\/egma\.acme\.example/);
+    expect(() =>
+      loadConfig({
+        ...withCredential,
+        EGMA_BASE_URL: "https://egma.acme.example",
+        EGMA_BLOB_PUBLIC_URL: "http://192.168.1.10:9000",
+      }),
+    ).toThrow(/EGMA_BLOB_PUBLIC_URL is http:\/\/192\.168\.1\.10:9000/);
+    // And it says what the browser does, because "mixed content" is the word to
+    // search for and egma is the only thing in a position to say it.
+    expect(() =>
+      loadConfig({
+        ...withCredential,
+        EGMA_BASE_URL: "https://egma.acme.example",
+        EGMA_BLOB_PUBLIC_URL: "http://192.168.1.10:9000",
+      }),
+    ).toThrow(/mixed content/);
+  });
+
+  /**
+   * The three coherent pairs, pinned together so that closing the incoherent one
+   * cannot quietly close a deployment that works. The `http` + `http` case is the
+   * whole of what `docker compose up` ships, and it is the one that would hurt.
+   */
+  it("starts on every pair of schemes a browser will actually honour", () => {
+    const withCredential = {
+      ...enough,
+      EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
+      EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
+    };
+
+    // The default deployment: egma and its store both on this machine, in the
+    // clear, which is what the compose file publishes.
+    expect(
+      loadConfig({
+        ...withCredential,
+        EGMA_BASE_URL: "http://localhost:3101",
+        EGMA_BLOB_PUBLIC_URL: "http://localhost:9000",
+      }).blob?.publicUrl,
+    ).toBe("http://localhost:9000");
+
+    // Both behind certificates, which is the deployment other people use.
+    expect(
+      loadConfig({
+        ...withCredential,
+        EGMA_BASE_URL: "https://egma.acme.example",
+        EGMA_BLOB_PUBLIC_URL: "https://recordings.acme.example",
+      }).blob?.publicUrl,
+    ).toBe("https://recordings.acme.example");
+
+    // The converse of the refusal above, and not a problem: a plaintext page
+    // may fetch encrypted bytes. Nothing blocks this and egma must not either.
+    expect(
+      loadConfig({
+        ...withCredential,
+        EGMA_BASE_URL: "http://localhost:3101",
+        EGMA_BLOB_PUBLIC_URL: "https://recordings.acme.example",
+      }).blob?.publicUrl,
+    ).toBe("https://recordings.acme.example");
+  });
+
+  /**
+   * The judgement call, pinned so it is a decision rather than an oversight.
+   *
+   * A plaintext store at a *remote* address means the recording and a link
+   * reusable for fifteen minutes are readable by anybody who can see the
+   * traffic. It is allowed, because it is only reachable from an egma that is
+   * itself plaintext — where the session cookie that opens every recording
+   * already crosses the same network in the clear. Refusing the audio while
+   * serving the cookie would apply a rule to one byte stream and not the other,
+   * and would lock out a self-hoster on a private network egma cannot see. The
+   * cost is written beside the example instead, in `.env.example`, the compose
+   * file and the README.
+   */
+  it("allows a plaintext store on a remote address, because the page reaching it is plaintext too", () => {
+    expect(
+      loadConfig({
+        ...enough,
+        EGMA_BASE_URL: "http://192.168.1.10:3101",
+        EGMA_BLOB_PUBLIC_URL: "http://192.168.1.10:9000",
+        EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
+        EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
+      }).blob?.publicUrl,
+    ).toBe("http://192.168.1.10:9000");
+  });
 });
 
 /**
