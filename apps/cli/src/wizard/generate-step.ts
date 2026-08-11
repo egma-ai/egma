@@ -55,7 +55,7 @@ import type { DrivenAgentLog } from "./driven-agent-log.ts";
 import type { ExitReport } from "./exit-line.ts";
 import type { Facts } from "./discovery.ts";
 import { readExistingTests } from "./existing-tests.ts";
-import { gateFrom, type HeldBack } from "./gate.ts";
+import { destinationOf, gateFrom, type HeldBack } from "./gate.ts";
 import { MarkerStream, type ParsedLine } from "./markers.ts";
 import { ACTION_MARK, DETAIL_MARK, FAILURE_MARK } from "./status.ts";
 import { stopReasonOf, stopReport, untilAborted } from "./stop.ts";
@@ -476,7 +476,9 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
   const about = {
     agentName: options.registered.agent.name,
     connectionName: options.registered.connection.name,
+    connectionType: options.registered.connection.type,
     modality: options.registered.connection.modality,
+    destination: destinationOf(options.registered.connection),
     suite,
   };
 

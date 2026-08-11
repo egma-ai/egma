@@ -214,12 +214,26 @@ export class HeadlessUI implements WizardUI {
     }
   }
 
+  /**
+   * The list a screen would have shown, as lines something can read.
+   *
+   * What runs is named as well as what is being run, because agreeing to this
+   * list is agreeing to use that connection: with nobody watching, consent was
+   * given in the command, and the output is the only place it is ever written
+   * down what that consent reached. A connection that dials says so and says
+   * where, so a phone run's cost is on the record before the first simulation
+   * rather than afterwards in somebody's carrier bill.
+   */
   setGate(gate: TestGate | null): void {
     if (gate === null) return;
     this.record.gate = gate;
     for (const row of gate.rows) this.write(`test: ${row.name} ${row.persona}`);
     for (const held of gate.heldBack) this.write(`held-back: ${held.shown} ${held.reason}`);
     this.write(`tests: ${gate.rows.length}`);
+    this.write(
+      `connection: ${gate.connectionName} ${gate.connectionType} ${gate.modality}`,
+    );
+    if (gate.destination !== null) this.write(`dials: ${gate.destination}`);
   }
 
   /**
