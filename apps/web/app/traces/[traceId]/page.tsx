@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useState, type CSSProperties } from "react";
 
 import {
   DETAIL,
   FACTS,
   LIST,
   SPEAKERS,
+  UNKNOWN_STEP_LABEL,
   stepLabel,
 } from "../../../lib/transcript-copy.ts";
 import {
@@ -15,6 +16,7 @@ import {
   howFarIn,
   howLong,
   isHuman,
+  milliseconds,
   somethingFailed,
   stepsInside,
   whenItWas,
@@ -22,33 +24,14 @@ import {
   type Facts as TraceFacts,
   type Step,
 } from "../../../lib/transcripts.ts";
-import { AppShell, Notice, ProductPage, StatePage, styles } from "../../ui.tsx";
-
-/**
- * One exchange, read the way somebody actually reads one: **the transcript
- * first**, and the machinery underneath it only when asked.
- *
- * The order of the page is the argument it makes. A person opening this has a
- * question about an exchange their agent had — what was said, in what order,
- * and where the time went — and the timed steps inside a turn are the answer to
- * the third question, not the first. So turns are the page, each one opens onto
- * the steps that happened inside it, and each of those opens again onto exactly
- * what was recorded. Nothing is hidden and nothing is in the way.
- *
- * **The window travels in the address.** The endpoint under this page requires
- * one — a name is not a prefix of the store's filing order, so a lookup naming
- * only a name would have nothing to prune with and would read every partition
- * there is — and the row that linked here already knew when the exchange
- * happened. That is what makes this page a link somebody can send, and why
- * arriving without the two parameters is answered with an explanation rather
- * than an error.
- *
- * **Sparse coverage renders.** Providers differ in what they report: some send
- * no steps inside a turn at all, and LiveKit sends no recognition step because
- * what was heard rides the turn itself. Every one of those is a real answer
- * here and says so, because a page that quietly showed nothing would be
- * indistinguishable from one that had nothing to show.
- */
+import {
+  AppShell,
+  Notice,
+  ProductPage,
+  ProductStatePage,
+  StatePage,
+  styles,
+} from "../../ui.tsx";
 
 type State =
   | { status: "loading" }
@@ -58,6 +41,15 @@ type State =
   | { status: "failed"; why: string }
   | { status: "read"; detail: Detail };
 
+type View = "transcript" | "timeline" | "execution";
+type PositionedStep = { readonly step: Step; readonly depth: number };
+
+const VIEWS: readonly { readonly id: View; readonly label: string }[] = [
+  { id: "transcript", label: DETAIL.views.transcript },
+  { id: "timeline", label: DETAIL.views.timeline },
+  { id: "execution", label: DETAIL.views.execution },
+];
+
 export default function TranscriptPage({
   params,
 }: {
@@ -65,13 +57,11 @@ export default function TranscriptPage({
 }) {
   const { traceId } = use(params);
   const [state, setState] = useState<State>({ status: "loading" });
+  const [view, setView] = useState<View>("transcript");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     let current = true;
-
-    // Read from the address rather than from a router hook, because this is the
-    // whole of what makes the page deep-linkable and the address is where a
-    // link somebody was sent carries it.
     const asked = new URLSearchParams(globalThis.location.search);
     const from = asked.get("from");
     const to = asked.get("to");
@@ -114,7 +104,7 @@ export default function TranscriptPage({
   }, [traceId]);
 
   if (state.status === "loading") {
-    return <StatePage title={DETAIL.title} lead={DETAIL.loading} />;
+    return <ProductStatePage active="transcripts" title={DETAIL.title} lead={DETAIL.loading} />;
   }
 
   if (state.status === "signed-out") {
@@ -130,191 +120,486 @@ export default function TranscriptPage({
 
   if (state.status === "no-window") {
     return (
-      <StatePage title={DETAIL.needsWindow} lead={DETAIL.needsWindowLead}>
+      <ProductStatePage active="transcripts" title={DETAIL.needsWindow} lead={DETAIL.needsWindowLead}>
         <p className={styles.linkLine}>
           <Link href="/traces">{DETAIL.back}</Link>
         </p>
-      </StatePage>
+      </ProductStatePage>
     );
   }
 
   if (state.status === "missing") {
     return (
-      <StatePage title={DETAIL.missing} lead={DETAIL.missingLead}>
+      <ProductStatePage active="transcripts" title={DETAIL.missing} lead={DETAIL.missingLead}>
         <p className={styles.linkLine}>
           <Link href="/traces">{DETAIL.back}</Link>
         </p>
-      </StatePage>
+      </ProductStatePage>
     );
   }
 
   if (state.status === "failed") {
     return (
-      <StatePage title={DETAIL.title}>
+      <ProductStatePage active="transcripts" title={DETAIL.title}>
         <Notice tone="error">{state.why}</Notice>
         <p className={styles.linkLine}>
           <Link href="/traces">{DETAIL.back}</Link>
         </p>
-      </StatePage>
+      </ProductStatePage>
     );
   }
 
   const { detail } = state;
   const openedAt = detail.trace.started_at;
+  const positioned = positionedSteps(detail);
+  const selected = positioned.find(({ step }) => step.span_id === selectedId)?.step
+    ?? detail.turns[0]
+    ?? detail.spans[0]
+    ?? null;
+  const failures = positioned
+    .map(({ step }) => step)
+    .filter((step) => step.status === "error");
+
+  function select(step: Step): void {
+    setSelectedId(step.span_id);
+  }
+
+  function moveBetweenFailures(direction: -1 | 1): void {
+    if (failures.length === 0) return;
+    const selectedFailure = failures.findIndex((step) => step.span_id === selected?.span_id);
+    const from = selectedFailure < 0 ? (direction > 0 ? -1 : 0) : selectedFailure;
+    const next = (from + direction + failures.length) % failures.length;
+    setSelectedId(failures[next]?.span_id ?? null);
+    setView("execution");
+  }
 
   return (
     <AppShell active="transcripts">
-      <ProductPage>
+      <ProductPage wide>
         <Link className={styles.backLink} href="/traces">← {DETAIL.back}</Link>
         <header className={styles.detailHeader}>
           <div>
             <p className={styles.eyebrow}>{detail.trace.source} / {detail.trace.environment}</p>
             <h1>{DETAIL.title}</h1>
-            <p>{whenItWas(openedAt)} · {howLong(detail.trace.duration_ns)}</p>
-            {detail.trace.provider_call_id === "" ? null : <p className={styles.detailReference}>{FACTS.reference}: <span className={styles.mono}>{detail.trace.provider_call_id}</span></p>}
+            <p className={styles.detailLead}>{whenItWas(openedAt)} · {howLong(detail.trace.duration_ns)}</p>
           </div>
-          <span className={`${styles.status} ${detail.trace.errored_span_count > 0 ? styles.statusBad : ""}`}>{detail.trace.errored_span_count === 0 ? "Recorded" : `${detail.trace.errored_span_count} errors`}</span>
+          <span className={`${styles.status} ${detail.trace.errored_span_count > 0 ? styles.statusBad : ""}`}>
+            {detail.trace.errored_span_count === 0 ? DETAIL.recorded : DETAIL.errors(detail.trace.errored_span_count)}
+          </span>
         </header>
+
         <Summary facts={detail.trace} />
 
-        <div className={styles.transcript}>
-          <h2 className={styles.sectionTitle}>{DETAIL.transcript}</h2>
-          {detail.spans_truncated ? <Notice tone="error">{DETAIL.truncated}</Notice> : null}
-          {detail.turns.length === 0 ? <Notice>{DETAIL.noTurns}</Notice> : detail.turns.map((turn) => <Turn key={turn.span_id} turn={turn} openedAt={openedAt} />)}
-          {detail.spans.length === 0 ? null : (
-            <details className={styles.otherSteps}>
-              <summary>{DETAIL.otherSteps}</summary><p className={styles.muted}>{DETAIL.otherStepsLead}</p>
-              {detail.spans.map((step) => <Timed key={step.span_id} step={step} openedAt={openedAt} />)}
-            </details>
+        <div className={styles.traceToolbar}>
+          <div className={styles.traceViewTabs} role="tablist" aria-label={DETAIL.viewLabel}>
+            {VIEWS.map((item) => (
+              <button
+                key={item.id}
+                className={view === item.id ? styles.traceViewTabActive : undefined}
+                type="button"
+                role="tab"
+                aria-selected={view === item.id}
+                onClick={() => setView(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          {failures.length === 0 ? null : (
+            <div className={styles.issueNavigator}>
+              <span>{DETAIL.problems(failures.length)}</span>
+              <button type="button" aria-label={DETAIL.previousProblem} onClick={() => moveBetweenFailures(-1)}>←</button>
+              <button type="button" aria-label={DETAIL.nextProblem} onClick={() => moveBetweenFailures(1)}>→</button>
+            </div>
           )}
+        </div>
+
+        {detail.spans_truncated ? <Notice tone="error">{DETAIL.truncated}</Notice> : null}
+
+        <div className={styles.traceLayout}>
+          <section className={styles.traceViews}>
+            <div role="tabpanel" hidden={view !== "transcript"}>
+              <TranscriptView detail={detail} selectedId={selected?.span_id ?? null} onSelect={select} />
+            </div>
+            <div role="tabpanel" hidden={view !== "timeline"}>
+              <TimelineView detail={detail} steps={positioned} selectedId={selected?.span_id ?? null} onSelect={select} />
+            </div>
+            <div role="tabpanel" hidden={view !== "execution"}>
+              <ExecutionView detail={detail} selectedId={selected?.span_id ?? null} onSelect={select} />
+            </div>
+          </section>
+          <Inspector selected={selected} facts={detail.trace} openedAt={openedAt} />
         </div>
       </ProductPage>
     </AppShell>
   );
 }
 
-/** What the list already said about this exchange, said again in full. */
 function Summary({ facts }: { facts: TraceFacts }) {
   const primary: readonly (readonly [string, string, boolean])[] = [
     [FACTS.duration, howLong(facts.duration_ns), false],
-    [
-      FACTS.turns,
-      `${facts.turn_counts.human} ${LIST.human} · ${facts.turn_counts.agent} ${LIST.agent}`,
-      false,
-    ],
+    [FACTS.turns, `${facts.turn_counts.human} ${LIST.human} · ${facts.turn_counts.agent} ${LIST.agent}`, false],
+    [FACTS.steps, String(facts.span_count), false],
     [FACTS.tools, String(facts.tool_span_count), false],
-    [
-      FACTS.errors,
-      String(facts.errored_span_count),
-      facts.errored_span_count > 0,
-    ],
-  ];
-
-  const more: readonly (readonly [string, string, boolean])[] = [
-    [FACTS.started, whenItWas(facts.started_at), false], [FACTS.ended, whenItWas(facts.ended_at), false],
-    [FACTS.steps, String(facts.span_count), false], [FACTS.source, facts.source, false],
-    [FACTS.environment, facts.environment, false], [FACTS.connection, facts.connection_type, false],
-    [FACTS.reference, facts.provider_call_id, false],
+    [FACTS.errors, String(facts.errored_span_count), facts.errored_span_count > 0],
   ];
 
   return (
-    <>
-      <section className={styles.detailFacts}>{primary.map(([label, value, wrong]) => <div className={styles.contextFact} key={label}><span>{label}</span><strong className={wrong ? styles.wrong : undefined}>{value}</strong></div>)}</section>
-      <details className={styles.otherSteps}>
-        <summary>Technical details</summary>
-        <dl className={styles.definitionList}>{more.filter(([, value]) => value !== "").map(([label, value, wrong]) => <div className={styles.definitionRow} key={label}><dt>{label}</dt><dd className={wrong ? styles.wrong : undefined}>{value}</dd></div>)}</dl>
-      </details>
-    </>
+    <section className={styles.detailFacts} aria-label={DETAIL.summary}>
+      {primary.map(([label, value, wrong]) => (
+        <div className={styles.contextFact} key={label}>
+          <span>{label}</span>
+          <strong className={wrong ? styles.wrong : undefined}>{value}</strong>
+        </div>
+      ))}
+    </section>
   );
 }
 
-/**
- * One turn: who spoke, what they said, when, and what happened inside it.
- *
- * A `<details>` rather than a click handler, because that is what the element
- * is for — it opens with a keyboard, it is announced as expandable without an
- * aria attribute anybody has to remember to keep in step, and it works before
- * a line of this page's script has run.
- *
- * The failure marker is on the **summary**, not inside. A turn that failed four
- * adapters down is still the turn that failed, and somebody scanning a
- * transcript for what went wrong must not have to open all thirteen to find it.
- */
-function Turn({ turn, openedAt }: { turn: Step; openedAt: string }) {
-  const inside = stepsInside(turn);
-  const failed = somethingFailed(turn);
-  const human = isHuman(turn);
+function TranscriptView({
+  detail,
+  selectedId,
+  onSelect,
+}: {
+  detail: Detail;
+  selectedId: string | null;
+  onSelect: (step: Step) => void;
+}) {
+  const openedAt = detail.trace.started_at;
 
   return (
-    <details className={styles.turn}>
+    <div className={styles.transcript}>
+      <div className={styles.traceViewHeading}>
+        <h2>{DETAIL.transcript}</h2>
+        <p>{DETAIL.transcriptLead}</p>
+      </div>
+      {detail.turns.length === 0 ? (
+        <Notice>{DETAIL.noTurns}</Notice>
+      ) : (
+        detail.turns.map((turn) => (
+          <Turn
+            key={turn.span_id}
+            turn={turn}
+            openedAt={openedAt}
+            selectedId={selectedId}
+            onSelect={onSelect}
+          />
+        ))
+      )}
+      {detail.spans.length === 0 ? null : (
+        <details className={styles.otherSteps}>
+          <summary>{DETAIL.otherSteps}</summary>
+          <p className={styles.muted}>{DETAIL.otherStepsLead}</p>
+          <div className={styles.stepStack}>
+            {detail.spans.map((step) => (
+              <Timed key={step.span_id} step={step} openedAt={openedAt} selectedId={selectedId} onSelect={onSelect} />
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function Turn({
+  turn,
+  openedAt,
+  selectedId,
+  onSelect,
+}: {
+  turn: Step;
+  openedAt: string;
+  selectedId: string | null;
+  onSelect: (step: Step) => void;
+}) {
+  const inside = stepsInside(turn);
+  const failed = turn.status === "error" || somethingFailed(turn);
+  const human = isHuman(turn);
+  const selected = turn.span_id === selectedId;
+
+  return (
+    <details
+      className={`${styles.turn} ${human ? styles.turnHuman : styles.turnAgent} ${selected ? styles.turnSelected : ""}`}
+      data-turn="true"
+      onToggle={(event) => {
+        if (event.currentTarget.open) onSelect(turn);
+      }}
+    >
       <summary>
-        <span className={styles.turnSpeaker}>
-          {human ? SPEAKERS.human : SPEAKERS.agent}
+        <span className={styles.turnRail}>
+          <span>{howFarIn(turn.started_at, openedAt)}</span>
+          <span aria-hidden="true" />
         </span>
         <span className={styles.turnText}>
-          {turn.text === "" ? <span className={styles.muted}>{DETAIL.nothingSaid}</span> : turn.text}
-          <small className={styles.turnMeta}>{howFarIn(turn.started_at, openedAt)} · {howLong(turn.duration_ns)} · {DETAIL.steps(inside)}{failed ? <> · <span className={styles.wrong}>{DETAIL.failedInside}</span></> : null}</small>
+          <span className={styles.turnHeading}>
+            <strong>{human ? SPEAKERS.human : SPEAKERS.agent}</strong>
+            <small>{howLong(turn.duration_ns)} · {DETAIL.steps(inside)}</small>
+          </span>
+          <span className={styles.turnWords}>
+            {turn.text === "" ? <span className={styles.muted}>{DETAIL.nothingSaid}</span> : turn.text}
+          </span>
+          {failed ? <small className={styles.turnProblem}>{DETAIL.failedInside}</small> : null}
         </span>
-        <span className={styles.turnMarker}>+</span>
+        <span className={styles.turnMarker} aria-hidden="true">+</span>
       </summary>
-
       <div className={styles.turnBody}>
         {turn.spans.length === 0 ? (
           <p className={styles.muted}>{DETAIL.noSteps}</p>
         ) : (
-          turn.spans.map((step) => (
-            <Timed key={step.span_id} step={step} openedAt={openedAt} />
-          ))
+          <div className={styles.stepStack}>
+            {turn.spans.map((step) => (
+              <Timed key={step.span_id} step={step} openedAt={openedAt} selectedId={selectedId} onSelect={onSelect} />
+            ))}
+          </div>
         )}
       </div>
     </details>
   );
 }
 
-/**
- * One timed step, and everything under it.
- *
- * The provider's own name for the step is shown beside egma's word for it,
- * because the two carry different information and neither replaces the other:
- * egma's says what kind of thing this is, and the provider's says which one —
- * LiveKit nests a model request four adapters deep and only the innermost names
- * the model that actually answered.
- *
- * Opening a step reaches exactly what was recorded about it. That is the
- * ticket's line: raw facts are **reachable from the expanded view, and not the
- * default presentation** — a transcript stops being one the moment it is a
- * table of columns.
- */
-function Timed({ step, openedAt }: { step: Step; openedAt: string }) {
+function Timed({
+  step,
+  openedAt,
+  selectedId,
+  onSelect,
+}: {
+  step: Step;
+  openedAt: string;
+  selectedId: string | null;
+  onSelect: (step: Step) => void;
+}) {
   const failed = step.status === "error";
   const marked = failed || everyStep(step.spans).some((one) => one.status === "error");
 
   return (
-    <details className={`${styles.step} ${marked ? styles.stepFailed : ""}`}>
+    <details
+      className={`${styles.step} ${marked ? styles.stepFailed : ""} ${selectedId === step.span_id ? styles.stepSelected : ""}`}
+      onToggle={(event) => {
+        if (event.currentTarget.open) onSelect(step);
+      }}
+    >
       <summary>
-        <strong>{stepLabel(step.kind)}</strong>
-        <span className={styles.muted}>
-          {" "}· <span className={styles.mono}>{step.name}</span> ·{" "}
-          {howLong(step.duration_ns)}
+        <span className={styles.stepIdentity}>
+          <strong>{presentedStepLabel(step)}</strong>
+          <span className={styles.mono}>{step.name}</span>
         </span>
-        {failed ? (
-          <>
-            {" · "}
-            <span className={styles.wrong}>{DETAIL.failed}</span>
-          </>
-        ) : null}
+        <span className={styles.stepTiming}>
+          {howFarIn(step.started_at, openedAt)} · {howLong(step.duration_ns)}
+          {failed ? <span className={styles.wrong}> · {DETAIL.failed}</span> : null}
+        </span>
       </summary>
-
-      <Recorded step={step} openedAt={openedAt} />
-
-      {step.spans.map((child) => (
-        <Timed key={child.span_id} step={child} openedAt={openedAt} />
-      ))}
+      <div className={styles.stepBody}>
+        <Recorded step={step} openedAt={openedAt} />
+        {step.spans.length === 0 ? null : (
+          <div className={styles.stepStack}>
+            {step.spans.map((child) => (
+              <Timed key={child.span_id} step={child} openedAt={openedAt} selectedId={selectedId} onSelect={onSelect} />
+            ))}
+          </div>
+        )}
+      </div>
     </details>
   );
 }
 
-/** Everything the store holds about one step, once somebody has asked for it. */
+function TimelineView({
+  detail,
+  steps,
+  selectedId,
+  onSelect,
+}: {
+  detail: Detail;
+  steps: readonly PositionedStep[];
+  selectedId: string | null;
+  onSelect: (step: Step) => void;
+}) {
+  const total = Math.max(milliseconds(detail.trace.duration_ns), 1);
+  const openedAt = Date.parse(detail.trace.started_at);
+
+  return (
+    <div>
+      <div className={styles.traceViewHeading}>
+        <h2>{DETAIL.views.timeline}</h2>
+        <p>{DETAIL.timelineLead}</p>
+      </div>
+      {steps.length === 0 ? <Notice>{DETAIL.noStepsAtAll}</Notice> : (
+        <div className={styles.timelineList}>
+          {steps.map(({ step, depth }) => {
+            const offset = Math.max(Date.parse(step.started_at) - openedAt, 0);
+            const duration = Math.max(milliseconds(step.duration_ns), 0);
+            const left = Math.min((offset / total) * 100, 100);
+            const width = Math.max(Math.min((duration / total) * 100, 100 - left), .8);
+            const style = {
+              "--timeline-indent": `${Math.min(depth, 6) * 12}px`,
+              "--timeline-left": `${left}%`,
+              "--timeline-width": `${width}%`,
+            } as CSSProperties;
+
+            return (
+              <button
+                key={step.span_id}
+                className={`${styles.timelineRow} ${selectedId === step.span_id ? styles.timelineRowSelected : ""}`}
+                type="button"
+                style={style}
+                onClick={() => onSelect(step)}
+              >
+                <span className={styles.timelineName}>
+                  <strong>{presentedStepLabel(step)}</strong>
+                  <span>{step.name}</span>
+                </span>
+                <span className={styles.timelineTrack} aria-hidden="true">
+                  <span className={step.status === "error" ? styles.timelineBarBad : undefined} />
+                </span>
+                <span className={styles.timelineDuration}>{howLong(step.duration_ns)}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ExecutionView({
+  detail,
+  selectedId,
+  onSelect,
+}: {
+  detail: Detail;
+  selectedId: string | null;
+  onSelect: (step: Step) => void;
+}) {
+  const groups = [
+    ...detail.turns.map((turn) => ({
+      id: turn.span_id,
+      label: `${isHuman(turn) ? SPEAKERS.human : SPEAKERS.agent} ${howFarIn(turn.started_at, detail.trace.started_at)}`,
+      steps: flatten(turn.spans),
+    })),
+    ...(detail.spans.length === 0 ? [] : [{ id: "outside", label: DETAIL.otherSteps, steps: flatten(detail.spans) }]),
+  ].filter((group) => group.steps.length > 0);
+
+  return (
+    <div>
+      <div className={styles.traceViewHeading}>
+        <h2>{DETAIL.views.execution}</h2>
+        <p>{DETAIL.executionLead}</p>
+      </div>
+      {groups.length === 0 ? <Notice>{DETAIL.noStepsAtAll}</Notice> : (
+        <div className={styles.executionGroups}>
+          {groups.map((group) => (
+            <section className={styles.executionGroup} key={group.id}>
+              <h3>{group.label}</h3>
+              {group.steps.map(({ step, depth }) => (
+                <button
+                  key={step.span_id}
+                  className={`${styles.executionRow} ${selectedId === step.span_id ? styles.executionRowSelected : ""}`}
+                  type="button"
+                  style={{ "--execution-indent": `${Math.min(depth, 6) * 14}px` } as CSSProperties}
+                  onClick={() => onSelect(step)}
+                >
+                  <span>
+                    <strong>{presentedStepLabel(step)}</strong>
+                    <small className={styles.mono}>{step.name}</small>
+                  </span>
+                  <span className={step.status === "error" ? styles.wrong : styles.muted}>
+                    {step.status === "error" ? DETAIL.failed : howLong(step.duration_ns)}
+                  </span>
+                </button>
+              ))}
+            </section>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Inspector({
+  selected,
+  facts,
+  openedAt,
+}: {
+  selected: Step | null;
+  facts: TraceFacts;
+  openedAt: string;
+}) {
+  return (
+    <aside className={styles.traceInspector} aria-label={DETAIL.inspector}>
+      {selected === null ? (
+        <p className={styles.muted}>{DETAIL.nothingSelected}</p>
+      ) : (
+        <>
+          <div className={styles.inspectorHeader}>
+            <p className={styles.eyebrow}>{presentedStepLabel(selected)}</p>
+            <h2>{selected.text || selected.tool_name || selected.name}</h2>
+            <p>{howFarIn(selected.started_at, openedAt)} · {howLong(selected.duration_ns)}</p>
+          </div>
+
+          <dl className={styles.inspectorFacts}>
+            <div><dt>{FACTS.status}</dt><dd className={selected.status === "error" ? styles.wrong : undefined}>{readableStatus(selected.status)}</dd></div>
+            <div><dt>{FACTS.started}</dt><dd>{whenItWas(selected.started_at)}</dd></div>
+            <div><dt>{FACTS.duration}</dt><dd>{howLong(selected.duration_ns)}</dd></div>
+          </dl>
+
+          {selected.tool_name === "" ? null : (
+            <section className={styles.inspectorSection}>
+              <h3>{DETAIL.toolWork}</h3>
+              <p className={styles.mono}>{selected.tool_name}</p>
+              {selected.tool_arguments === "" ? null : <Payload label={FACTS.toolArguments} value={selected.tool_arguments} />}
+              {selected.tool_result === "" ? null : <Payload label={FACTS.toolResult} value={selected.tool_result} />}
+            </section>
+          )}
+
+          {selected.audio_url === "" ? null : (
+            <p className={styles.inspectorLink}><a href={selected.audio_url}>{DETAIL.openAudio}</a></p>
+          )}
+
+          <details className={styles.inspectorDetails}>
+            <summary>{DETAIL.technicalDetails}</summary>
+            <Recorded step={selected} openedAt={openedAt} />
+          </details>
+        </>
+      )}
+
+      <details className={styles.inspectorDetails}>
+        <summary>{DETAIL.recordingDetails}</summary>
+        <RecordingDetails facts={facts} />
+      </details>
+    </aside>
+  );
+}
+
+function Payload({ label, value }: { label: string; value: string }) {
+  return (
+    <div className={styles.payload}>
+      <span>{label}</span>
+      <pre>{value}</pre>
+    </div>
+  );
+}
+
+function RecordingDetails({ facts }: { facts: TraceFacts }) {
+  const shown: readonly (readonly [string, string])[] = [
+    [FACTS.started, whenItWas(facts.started_at)],
+    [FACTS.ended, whenItWas(facts.ended_at)],
+    [FACTS.source, facts.source],
+    [FACTS.environment, facts.environment],
+    [FACTS.connection, facts.connection_type],
+    [FACTS.reference, facts.provider_call_id],
+  ];
+
+  return (
+    <dl className={styles.recorded}>
+      {shown.filter(([, value]) => value !== "").map(([label, value]) => (
+        <div key={label}>
+          <dt className={styles.muted}>{label}</dt>
+          <dd className={styles.mono}>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 function Recorded({ step, openedAt }: { step: Step; openedAt: string }) {
   const shown: readonly (readonly [string, string])[] = [
     [FACTS.kind, stepLabel(step.kind)],
@@ -333,16 +618,39 @@ function Recorded({ step, openedAt }: { step: Step; openedAt: string }) {
 
   return (
     <dl className={styles.recorded}>
-      {shown
-        .filter(([, value]) => value !== "")
-        .map(([label, value]) => (
-          <div key={label}>
-            <dt className={styles.muted}>{label}</dt>
-            <dd className={styles.mono}>
-              {value}
-            </dd>
-          </div>
-        ))}
+      {shown.filter(([, value]) => value !== "").map(([label, value]) => (
+        <div key={label}>
+          <dt className={styles.muted}>{label}</dt>
+          <dd className={styles.mono}>{value}</dd>
+        </div>
+      ))}
     </dl>
   );
+}
+
+function flatten(steps: readonly Step[], depth = 0): PositionedStep[] {
+  return steps.flatMap((step) => [
+    { step, depth },
+    ...flatten(step.spans, depth + 1),
+  ]);
+}
+
+function positionedSteps(detail: Detail): PositionedStep[] {
+  const seen = new Set<string>();
+  return [...flatten(detail.turns), ...flatten(detail.spans)].filter(({ step }) => {
+    if (seen.has(step.span_id)) return false;
+    seen.add(step.span_id);
+    return true;
+  });
+}
+
+function readableStatus(status: string): string {
+  return status === "" || status === "unset" ? DETAIL.notReported : status;
+}
+
+function presentedStepLabel(step: Step): string {
+  const known = stepLabel(step.kind);
+  if (known !== UNKNOWN_STEP_LABEL || step.name === "") return known;
+  const words = step.name.replaceAll(/[_-]+/g, " ").trim();
+  return words === "" ? known : `${words.slice(0, 1).toUpperCase()}${words.slice(1)}`;
 }

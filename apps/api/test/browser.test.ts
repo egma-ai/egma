@@ -623,25 +623,29 @@ describe("the list of what an organization recorded", () => {
       expect(await page.getByRole("tab", { name: "People" }).count()).toBe(1);
       expect(await page.getByRole("tab", { name: "Invitations" }).count()).toBe(1);
       await page.evaluate(() => {
-        Reflect.set(window, "__egma_same_document_navigation", true);
+        Reflect.set(globalThis, "__egma_same_document_navigation", true);
       });
       await page.getByRole("link", { name: "Transcripts", exact: true }).click();
       await page.waitForURL(/\/traces$/);
 
       expect(
         await page.evaluate(() =>
-          Reflect.get(window, "__egma_same_document_navigation"),
+          Reflect.get(globalThis, "__egma_same_document_navigation"),
         ),
       ).toBe(true);
       expect(
-        await page.locator("#window").evaluate((element) =>
-          getComputedStyle(element).appearance,
-        ),
+        await page.locator("#window").evaluate((element) => {
+          const styleOf = Reflect.get(globalThis, "getComputedStyle") as
+            (target: unknown) => { readonly appearance: string };
+          return styleOf(element).appearance;
+        }),
       ).toBe("base-select");
       expect(
-        await page.locator("#window").evaluate((element) =>
-          getComputedStyle(element).alignItems,
-        ),
+        await page.locator("#window").evaluate((element) => {
+          const styleOf = Reflect.get(globalThis, "getComputedStyle") as
+            (target: unknown) => { readonly alignItems: string };
+          return styleOf(element).alignItems;
+        }),
       ).toBe("center");
     },
     SETTLE,
@@ -745,8 +749,17 @@ describe("one exchange, read as a transcript", () => {
   async function openIt(): Promise<void> {
     await page.goto(`${origin}/traces`);
     await page.waitForSelector("table");
+    await page.evaluate(() => {
+      const pageDocument = Reflect.get(globalThis, "document") as {
+        readonly body: { readonly scrollHeight: number };
+      };
+      const scrollTo = Reflect.get(globalThis, "scrollTo") as
+        (x: number, y: number) => void;
+      Reflect.apply(scrollTo, globalThis, [0, pageDocument.body.scrollHeight]);
+    });
     await page.locator("tbody tr td a").first().click();
     await page.waitForSelector("text=The exchange");
+    await expect.poll(() => page.evaluate(() => Number(Reflect.get(globalThis, "scrollY")))).toBe(0);
   }
 
   it(
@@ -767,9 +780,10 @@ describe("one exchange, read as a transcript", () => {
 
       // And it deep-links: the same address, opened cold, is the same page.
       const address = page.url();
-      await page.goto(`${origin}/`);
+      await page.goto(`${origin}/sign-in`);
       await page.goto(address);
       await page.waitForSelector("text=The exchange");
+      await page.getByText("Recording details", { exact: true }).click();
       expect(await page.innerText("main")).toContain(FIXTURE_PROVIDER_CALL_ID);
     },
     SETTLE,
@@ -824,12 +838,12 @@ describe("one exchange, read as a transcript", () => {
       // nothing out loud, because all it did was reach for the weather. Six
       // timed things happened inside it — the tool, and a model request that
       // nests four adapters deep — and the count says so before it is opened.
-      const turns = page.locator("main > div > details");
+      const turns = page.locator('[data-turn="true"]');
       const weather = turns.nth(4);
       expect(await weather.innerText()).toContain("6 steps");
 
       await weather.locator("summary").first().click();
-      const steps = weather.locator("> div > details");
+      const steps = weather.locator(":scope > div > div > details");
       expect(await steps.count()).toBe(2);
       expect(await steps.nth(0).innerText()).toContain("Model");
       expect(await steps.nth(1).innerText()).toContain("Tool");
@@ -864,7 +878,7 @@ describe("one exchange, read as a transcript", () => {
       // One click in, it is there, under egma's word for it rather than the
       // provider's. `agent_session` is the name LiveKit gave it and it is shown
       // beside — the two carry different information.
-      const around = page.locator("main > div > details").last();
+      const around = page.locator("details", { hasText: "Everything else recorded" }).last();
       await around.locator("summary").first().click();
       const reached = await around.innerText();
       expect(reached).toContain("Overview");

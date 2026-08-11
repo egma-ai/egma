@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
 import type { Me } from "../lib/me.ts";
@@ -139,6 +140,7 @@ export function AppShell({
   initialMe?: Me;
   children: ReactNode;
 }) {
+  const pathname = usePathname();
   const [me, setMe] = useState<Me | null>(initialMe ?? null);
   const [signingOut, setSigningOut] = useState(false);
 
@@ -156,6 +158,10 @@ export function AppShell({
       current = false;
     };
   }, [initialMe]);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [pathname]);
 
   const initial = me?.user.email.trim().slice(0, 1).toUpperCase() || "E";
 
@@ -255,6 +261,36 @@ export function ProductPage({
   wide?: boolean;
 }) {
   return <main className={`${styles.productPage} ${wide ? styles.productPageWide : ""}`}>{children}</main>;
+}
+
+/**
+ * A request state inside the signed-in product.
+ *
+ * Access pages and product pages deliberately use different compositions. A
+ * slow product request must not make the sidebar, navigation and account menu
+ * disappear while the browser waits for data.
+ */
+export function ProductStatePage({
+  active,
+  eyebrow,
+  title,
+  lead,
+  children,
+}: {
+  active?: AppSection;
+  eyebrow?: string;
+  title: string;
+  lead?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <AppShell active={active}>
+      <ProductPage>
+        <PageHeader eyebrow={eyebrow} title={title} lead={lead} />
+        {children === undefined ? null : <div className={styles.productStateBody}>{children}</div>}
+      </ProductPage>
+    </AppShell>
+  );
 }
 
 export function PageHeader({

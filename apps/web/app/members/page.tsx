@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { AppShell, Field, Notice, PageHeader, ProductPage, StatePage, styles } from "../ui.tsx";
+import { AppShell, Field, Notice, PageHeader, ProductPage, ProductStatePage, StatePage, styles } from "../ui.tsx";
 
 type Member = {
   user_id: string;
@@ -176,7 +176,7 @@ export default function MembersPage() {
 
   if (loadFailed && roster === null) {
     return (
-      <StatePage title="Organization settings could not be loaded" lead="Egma could not reach the organization right now.">
+      <ProductStatePage eyebrow="Organization" title="Organization settings could not be loaded" lead="Egma could not reach the organization right now.">
         <button
           className={styles.button}
           type="button"
@@ -188,11 +188,11 @@ export default function MembersPage() {
         >
           Try again
         </button>
-      </StatePage>
+      </ProductStatePage>
     );
   }
 
-  if (roster === null) return <StatePage title="Loading organization settings" lead="Reading this organization’s members and invitations." />;
+  if (roster === null) return <ProductStatePage eyebrow="Organization" title="Organization settings" lead="Reading this organization’s members and invitations." />;
 
   const shownTab = roster.may_manage_members ? tab : "people";
 

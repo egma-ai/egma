@@ -275,6 +275,34 @@ describe("the pages", () => {
     expect(home).not.toContain("Sign out");
   });
 
+  /**
+   * Moving between signed-in pages must not briefly replace the application
+   * with the access-page composition. The request can still be pending or can
+   * fail, but the navigation and account controls remain stable until the API
+   * has explicitly said that the session is gone.
+   */
+  it("keep the application shell while signed-in page data settles", async () => {
+    const shell = await readFile(path.join(WEB, "app/ui.tsx"), "utf8");
+    const members = await readFile(
+      path.join(WEB, "app/members/page.tsx"),
+      "utf8",
+    );
+    const transcript = await readFile(
+      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      "utf8",
+    );
+
+    expect(shell).toContain("export function ProductStatePage");
+    expect(members).toContain("<ProductStatePage");
+    expect(transcript).toContain('<ProductStatePage active="transcripts"');
+    expect(members).not.toContain(
+      'return <StatePage title="Loading organization settings"',
+    );
+    expect(transcript).not.toMatch(
+      /state\.status === "loading"[\s\S]*?return <StatePage/,
+    );
+  });
+
   it("reach the API for the device flow at paths this instance rewrites", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
     const approve = await readFile(
