@@ -161,10 +161,30 @@ class ConductParameters:
     a hang-up — is spent in audio like everything else. Same budget, same
     meaning, two clocks, because only one of them is ours."""
 
-    yields_to_the_agent: bool = False
+    yields_to_the_agent: bool = True
     """Whether the agent speaking cuts the persona's own utterance short.
-    Off for now: moving who conducts is one change, and being interrupted
-    is a behavior of its own, with a record of its own."""
+
+    **On, because off loses the agent's words.** While this is false the
+    pipeline does not merely keep the persona talking — far-end speech
+    that arrives during a persona utterance never starts a turn, so it is
+    never transcribed and never reaches the record. A real call proved
+    it: the agent said "I'll let the team know you need to move your
+    facial from Thursday afternoon and have them reach out", and the
+    transcript kept only "reach out to set a new time". A grader reading
+    that would fail an agent for omitting what it actually said, which is
+    the one failure this product exists to prevent.
+
+    It also ended the loop that caused it. The persona, hearing no reply,
+    asked again — three times, nineteen seconds — while the agent waited
+    for it to stop.
+
+    A person on a phone stops talking when the other person speaks, so
+    this is also the honest default. What is still open is *how much* a
+    given persona yields: patience and barge-in propensity are traits,
+    and the timing model that turns a trait into a number is the open
+    grilling ticket. This flag stays here for that work to replace, and a
+    persona that should talk over the agent will set it false on purpose
+    rather than inheriting it by accident."""
 
 
 DEFAULT_CONDUCT = ConductParameters()
