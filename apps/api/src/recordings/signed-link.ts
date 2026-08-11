@@ -109,6 +109,14 @@ export type SignedLink = {
  * may decline to play what it will not name. S3 and MinIO both honour this
  * override on a presigned GET, and it is part of the signature, so nobody can
  * change it after the fact.
+ *
+ * **The extension decides it, and only `.wav` is claimed.** The one thing that
+ * writes these objects writes a WAV and names it `dual-channel.wav`, so the
+ * extension is not a guess about the bytes — it is the same fact read from the
+ * reference. Anything else gets no override at all rather than a made-up one:
+ * this side has not read the bytes, and telling a browser that an unknown
+ * object is audio would turn "egma cannot resolve this" into "your recording is
+ * corrupt", which sends somebody looking in the wrong place.
  */
 export function signedRecordingLink(
   store: BlobStore,

@@ -100,6 +100,15 @@ services:
       # below — so the worst a leaked one can do is read a recording, never
       # replace one.
       #
+      # What this *does* change: the store's root credential, which can write,
+      # is now reachable from wherever this port is. It was unreachable while
+      # there was no `ports:` here, and the development default below was
+      # harmless in the way the LiveKit key still is. It is not any more.
+      # **Change EGMA_S3_SECRET_ACCESS_KEY in .env before anybody else can
+      # reach this machine**, or move this port to loopback with
+      # `EGMA_S3_PORT` and a `docker-compose.override.yml` if the browsers that
+      # need recordings are all on it.
+      #
       # **EGMA_BLOB_PUBLIC_URL on the api service must name this address**, and
       # naming the wrong one is the single most common way a self-hosted object
       # store breaks. A signature covers the host it was made for: sign for

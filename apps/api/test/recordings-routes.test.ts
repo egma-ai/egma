@@ -137,9 +137,9 @@ describe("who may hear a recording", () => {
       String(RECORDING_LINK_SECONDS),
     );
 
-    // And egma's copy of it, so a page can say the link went stale rather than
-    // leaving somebody looking at a player that stopped working.
-    expect(resolved.body.expires_in_seconds).toBe(RECORDING_LINK_SECONDS);
+    // And egma's copy of it, which is what lets a page tell "the link went
+    // stale" from "the recording is gone" and ask again rather than leaving
+    // somebody looking at a scrubber that stopped working.
     const expiresAt = Date.parse(String(resolved.body.expires_at));
     expect(expiresAt).toBeGreaterThanOrEqual(
       before + RECORDING_LINK_SECONDS * 1000,
@@ -291,16 +291,8 @@ describe("what the run's own results say about audio", () => {
     const heard = simulations.find((one) => one.id === run.heard);
     const silent = simulations.find((one) => one.id === run.silent);
 
-    expect(heard).toMatchObject({
-      modality: "voice",
-      has_recording: true,
-      measured_audio_band_hertz: 8000,
-    });
-    expect(silent).toMatchObject({
-      modality: "voice",
-      has_recording: false,
-      measured_audio_band_hertz: null,
-    });
+    expect(heard).toMatchObject({ modality: "voice", has_recording: true });
+    expect(silent).toMatchObject({ modality: "voice", has_recording: false });
 
     // The reference itself never travels. It is opaque, it means something only
     // to whoever resolves it, and a page that carried one would be a page whose

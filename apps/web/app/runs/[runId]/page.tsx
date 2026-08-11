@@ -45,7 +45,6 @@ type Simulation = {
    * colleague.
    */
   readonly has_recording: boolean;
-  readonly measured_audio_band_hertz: number | null;
 };
 
 type Run = {
@@ -333,7 +332,7 @@ function SimulationResult({ simulation }: { simulation: Simulation }) {
           as an honest absence, and sends somebody looking for the fault.
         */}
         {opened && simulation.modality === "voice" && simulation.has_recording ? (
-          <RecordingPlayer simulation={simulation} />
+          <RecordingPlayer simulationId={simulation.id} />
         ) : null}
 
         <p className={styles.runTally}>{tally(simulation.counts)}</p>
@@ -365,7 +364,13 @@ function SimulationResult({ simulation }: { simulation: Simulation }) {
  */
 type Playable =
   | { readonly status: "resolving" }
-  | { readonly status: "ready"; readonly url: string; readonly band: number | null }
+  | {
+      readonly status: "ready";
+      readonly url: string;
+      readonly band: number | null;
+      /** When the store stops honouring this link, so a stale one is knowable. */
+      readonly expiresAt: number;
+    }
   | { readonly status: "failed"; readonly why: string };
 
 /**
@@ -382,8 +387,11 @@ type Playable =
  * through egma, which is what makes seeking cost nothing: dragging the scrubber
  * is a byte range the store serves.
  */
-function RecordingPlayer({ simulation }: { simulation: Simulation }) {
+function RecordingPlayer({ simulationId }: { simulationId: string }) {
   const [playable, setPlayable] = useState<Playable>({ status: "resolving" });
+  // Counts how many times the link has been asked for. Bumping it re-runs the
+  // effect, which is how a link that went stale is replaced by a fresh one.
+  const [asked, setAsked] = useState(0);
 
   useEffect(() => {
     let stopped = false;
@@ -391,7 +399,7 @@ function RecordingPlayer({ simulation }: { simulation: Simulation }) {
     const resolve = async (): Promise<void> => {
       try {
         const answer = await fetch(
-          `/api/simulations/${encodeURIComponent(simulation.id)}/recording`,
+          `/api/simulations/${encodeURIComponent(simulationId)}/recording`,
           { headers: { accept: "application/json" }, cache: "no-store" },
         );
         if (stopped) return;
@@ -408,6 +416,7 @@ function RecordingPlayer({ simulation }: { simulation: Simulation }) {
         }
         const resolved = (await answer.json()) as {
           url: string;
+          expires_at: string;
           measured_audio_band_hertz: number | null;
         };
         if (stopped) return;
@@ -415,6 +424,7 @@ function RecordingPlayer({ simulation }: { simulation: Simulation }) {
           status: "ready",
           url: resolved.url,
           band: resolved.measured_audio_band_hertz,
+          expiresAt: Date.parse(resolved.expires_at),
         });
       } catch {
         if (!stopped) {
@@ -430,7 +440,7 @@ function RecordingPlayer({ simulation }: { simulation: Simulation }) {
     return () => {
       stopped = true;
     };
-  }, [simulation.id]);
+  }, [simulationId, asked]);
 
   if (playable.status === "resolving") {
     return <p className={styles.runTally}>Finding the recording…</p>;
@@ -453,11 +463,21 @@ function RecordingPlayer({ simulation }: { simulation: Simulation }) {
         preload="metadata"
         src={playable.url}
         data-recording="true"
+        // A link lives a quarter of an hour, and a results page left open for
+        // an afternoon outlives it: the next seek comes back refused, and what
+        // a person sees is a scrubber that stopped working for no stated
+        // reason. So a failure after the link's own moment is read as a stale
+        // link and answered by asking for a new one — the reader may still
+        // hear it, and only the proof of that had a deadline. A failure
+        // *before* it is a real one and is left to show.
+        onError={() => {
+          if (Date.now() >= playable.expiresAt) setAsked((again) => again + 1);
+        }}
       >
         Your browser cannot play audio.
       </audio>
       <p>
-        Left channel is the person who called; right channel is the agent.
+        Left channel is the persona, right channel is the agent.
         {playable.band === null
           ? ""
           : ` Heard at ${String(playable.band)} Hz.`}

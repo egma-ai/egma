@@ -158,6 +158,21 @@ describe("the API's deployment story", () => {
       ).toBe(false);
     }
 
+    // The API holds exactly one address for the store and it is the browser's.
+    // The mistake this guards is a plausible one: somebody finds that
+    // `http://localhost:9000` does not answer from inside the container, "fixes"
+    // the default to the service name that does, and every recording then fails
+    // from every browser with `SignatureDoesNotMatch` — an error naming neither
+    // address. Every route test would still pass, because from inside one
+    // process the signed address and the fetched address are the same address
+    // by construction.
+    expect(
+      /EGMA_BLOB_PUBLIC_URL:.*minio:9000/u.test(api),
+      "the api service signs recording links for the address it reaches the " +
+        "store at, which is not the address a browser uses",
+    ).toBe(false);
+    expect(api).not.toContain("EGMA_SIMULATOR_S3_ENDPOINT");
+
     // And what that read-only credential is allowed to do, held against the
     // policy the object-storage suite proves against a real MinIO. The two are
     // the same sentence in two files, and a drift between them would mean the

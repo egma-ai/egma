@@ -214,6 +214,90 @@ describe("configuration", () => {
       loadConfig({ ...enough, EGMA_SMTP_URL: "https://mail.acme.example" }),
     ).toThrow(/smtp/);
   });
+
+  /**
+   * The recording store, on the mail transport's exact terms: **unset is the
+   * ordinary case and is never an error**, and set-but-unusable refuses to
+   * start rather than being discovered by somebody pressing play.
+   *
+   * Naming where a browser reaches the store is the whole of what turns
+   * resolution on — the pattern the simulator already uses, where naming an
+   * endpoint is what sends recordings to object storage at all.
+   */
+  it("resolves no recording until somebody says where a browser reaches the store", () => {
+    expect(loadConfig(enough).blob).toBeUndefined();
+
+    const named = loadConfig({
+      ...enough,
+      EGMA_BLOB_PUBLIC_URL: "https://recordings.acme.example/",
+      EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
+      EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
+    });
+    expect(named.blob).toEqual({
+      // The trailing slash is dropped here rather than at every use, so the
+      // path a signature is computed over cannot end up with a double slash in
+      // it — which the store would treat as a different object entirely.
+      publicUrl: "https://recordings.acme.example",
+      bucket: "egma-recordings",
+      region: "us-east-1",
+      accessKeyId: "a-read-only-key-id",
+      secretAccessKey: "a-read-only-secret",
+    });
+  });
+
+  it("refuses half a store credential, by name, rather than losing every recording quietly", () => {
+    // Half of this is a deployment where the platform runs, every run runs, and
+    // every single press of play fails against the store's own refusal — which
+    // nobody reading the product can see.
+    expect(() =>
+      loadConfig({
+        ...enough,
+        EGMA_BLOB_PUBLIC_URL: "https://recordings.acme.example",
+        EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
+      }),
+    ).toThrow(/EGMA_BLOB_SECRET_ACCESS_KEY/);
+    expect(() =>
+      loadConfig({
+        ...enough,
+        EGMA_BLOB_PUBLIC_URL: "https://recordings.acme.example",
+        EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
+      }),
+    ).toThrow(/EGMA_BLOB_ACCESS_KEY_ID/);
+  });
+
+  it("refuses an address a browser could never fetch a recording from", () => {
+    const withCredential = {
+      ...enough,
+      EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
+      EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
+    };
+    expect(() =>
+      loadConfig({ ...withCredential, EGMA_BLOB_PUBLIC_URL: "not a url" }),
+    ).toThrow(/EGMA_BLOB_PUBLIC_URL is not a URL/);
+    // A scheme a browser cannot fetch over is refused here rather than becoming
+    // a link that resolves to nothing on the one page that offers it.
+    expect(() =>
+      loadConfig({
+        ...withCredential,
+        EGMA_BLOB_PUBLIC_URL: "s3://egma-recordings",
+      }),
+    ).toThrow(/EGMA_BLOB_PUBLIC_URL speaks s3:/);
+  });
+
+  it("refuses a bucket name no store would take, for the reason a key is confined", () => {
+    // A name carrying a separator puts a prefix nobody configured in front of
+    // every key, so a reference the simulator can resolve resolves to nothing
+    // here — and the store's answer names the object rather than the setting.
+    expect(() =>
+      loadConfig({
+        ...enough,
+        EGMA_BLOB_PUBLIC_URL: "https://recordings.acme.example",
+        EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
+        EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
+        EGMA_BLOB_BUCKET: "recordings/of-acme",
+      }),
+    ).toThrow(/EGMA_BLOB_BUCKET must be a bucket name/);
+  });
 });
 
 /**

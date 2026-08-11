@@ -11,7 +11,6 @@ import {
   unprocessable,
 } from "../http/refusals.ts";
 import {
-  RECORDING_LINK_SECONDS,
   signedRecordingLink,
   type BlobStore,
 } from "../recordings/signed-link.ts";
@@ -151,8 +150,12 @@ export async function recordingRoutes(
       // side's business, and a client that learned to compose one for itself
       // would be a client that breaks the day the deployment moves its store.
       url: link.url,
+      // When the store stops honouring it. A client that keeps a results page
+      // open for an afternoon needs this to tell "the recording is gone" from
+      // "the link went stale" — the second is recoverable by asking again, and
+      // a player that could not tell them apart would present a dead scrubber
+      // as a broken recording.
       expires_at: link.expiresAt.toISOString(),
-      expires_in_seconds: RECORDING_LINK_SECONDS,
       // What band the recording was measured at, carried beside it because two
       // bands are two units: the narrow band a telephone carries strips what an
       // audio grader reads, and a reader listening should know which one they

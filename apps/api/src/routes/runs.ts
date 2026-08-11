@@ -246,7 +246,6 @@ function describedSimulation(
     // player at all, which is the difference between an honest absence and a
     // disabled control that reads as a broken feature.
     has_recording: one.recordingReference !== null,
-    measured_audio_band_hertz: one.measuredAudioBandHertz,
   };
 }
 
