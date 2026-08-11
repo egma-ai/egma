@@ -12,6 +12,7 @@ import {
 } from "../http/refusals.ts";
 import {
   signedRecordingLink,
+  UnsignableReferenceError,
   type BlobStore,
 } from "../recordings/signed-link.ts";
 
@@ -142,7 +143,26 @@ export async function recordingRoutes(
       );
     }
 
-    const link = signedRecordingLink(options.blob, simulation.recordingReference);
+    // A reference nothing egma writes could have produced — one walking upwards
+    // out of the bucket. Answered as a refusal about the row rather than as a
+    // fault, because there is no request the caller could send that would fix
+    // it and no link that would be honest to hand back.
+    let link;
+    try {
+      link = signedRecordingLink(options.blob, simulation.recordingReference);
+    } catch (why) {
+      if (!(why instanceof UnsignableReferenceError)) throw why;
+      request.log.error(
+        { simulationId: simulation.id },
+        `simulation ${simulation.id} carries a recording reference egma will ` +
+          `not sign; it did not come from a simulator`,
+      );
+      return unprocessable(
+        reply,
+        `simulation ${simulation.id} points at a recording egma will not ` +
+          `resolve: ${why.message}`,
+      );
+    }
 
     return reply.send({
       simulation_id: simulation.id,
@@ -161,10 +181,6 @@ export async function recordingRoutes(
       // audio grader reads, and a reader listening should know which one they
       // are hearing. Null on a recording written before the measure existed.
       measured_audio_band_hertz: simulation.measuredAudioBandHertz,
-      // One person to a channel, which is the whole reason the recording is
-      // dual-channel: a reader who cannot tell whether the agent said nothing
-      // or the persona talked over it can listen to one side alone.
-      channels: { left: "persona", right: "agent" },
     });
   });
 

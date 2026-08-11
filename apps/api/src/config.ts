@@ -379,6 +379,29 @@ function blobStore(environment: NodeJS.ProcessEnv): BlobStore | undefined {
         "recording over http: or https:",
     );
   }
+  // Scheme, host and port, and nothing after them — the same narrowing
+  // `EGMA_BASE_URL` makes, for a reason of its own. A signature covers the whole
+  // path, prefix included, so a store put behind a proxy on a sub-path only
+  // works if that proxy passes its own prefix through to the store; the ordinary
+  // arrangement strips it, and then every link is signed for one path and
+  // presented at another. That failure looks like `SignatureDoesNotMatch`, names
+  // nothing, and would be admitted here by a setting nobody could test. Refused
+  // while this setting is new enough that no deployment is on it.
+  if (
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    (parsed.pathname !== "" && parsed.pathname !== "/") ||
+    parsed.search !== "" ||
+    parsed.hash !== ""
+  ) {
+    throw new Error(
+      `EGMA_BLOB_PUBLIC_URL must be only the address a browser reaches the ` +
+        `recording store at — scheme, host and port, nothing else — and this ` +
+        `one carries more. Set it to ${parsed.origin}. A signed link covers ` +
+        `the path it was signed for, so egma cannot serve a store under a ` +
+        `sub-path a proxy then rewrites.`,
+    );
+  }
 
   const accessKeyId = environment.EGMA_BLOB_ACCESS_KEY_ID?.trim() || "";
   const secretAccessKey = environment.EGMA_BLOB_SECRET_ACCESS_KEY?.trim() || "";
@@ -410,21 +433,54 @@ function blobStore(environment: NodeJS.ProcessEnv): BlobStore | undefined {
   }
 
   return {
-    publicUrl: publicUrl.replace(/\/+$/u, ""),
+    publicUrl: parsed.origin,
     bucket,
-    // What to sign for when nobody said. MinIO ignores the region entirely and
-    // every signature must still carry one, so this is the value that lets a
-    // deployment with no region at all work — and the one a deployment on real
-    // S3 will nearly always be replacing. The same default the simulator uses,
-    // because the two halves sign against one store.
-    region: environment.EGMA_BLOB_REGION?.trim() || "us-east-1",
+    region: blobRegion(environment, parsed),
     accessKeyId,
     secretAccessKey,
   };
 }
 
+/**
+ * What to sign for.
+ *
+ * MinIO ignores the region entirely and every signature must still carry one,
+ * so `us-east-1` is the value that lets a deployment with no region at all
+ * work — the same default the simulator uses, because the two halves sign
+ * against one store and a disagreement between them is every upload working and
+ * every playback failing.
+ *
+ * **On real S3 the default is not a default, it is a wrong answer**, and it is
+ * refused rather than signed with. A bucket in `eu-west-1` signed for
+ * `us-east-1` answers `SignatureDoesNotMatch` on every single recording, naming
+ * neither the region nor the variable — the same nameless failure the public
+ * address is a separate setting to prevent, arriving by a second route. The one
+ * deployment that can be *known* to be wrong is the one whose store is AWS's
+ * own, where a region is never optional, so that is the one this refuses.
+ */
+function blobRegion(environment: NodeJS.ProcessEnv, address: URL): string {
+  const named = environment.EGMA_BLOB_REGION?.trim() || "";
+  if (named !== "") return named;
+
+  if (address.hostname.endsWith(".amazonaws.com")) {
+    throw new Error(
+      `EGMA_BLOB_PUBLIC_URL points at ${address.hostname}, which is Amazon's ` +
+        "own S3, and no EGMA_BLOB_REGION was set. A signature carries the " +
+        "region and S3 refuses one signed for another, so egma would sign " +
+        "every recording for us-east-1 and every one of them would come back " +
+        "SignatureDoesNotMatch. Set EGMA_BLOB_REGION to the bucket's region — " +
+        "the same one the simulator uploads with, which is EGMA_S3_REGION if " +
+        "you set them from one place.",
+    );
+  }
+  return DEFAULT_BLOB_REGION;
+}
+
 /** The bucket the deployment creates on first start; nobody running the compose file names it. */
 const DEFAULT_BLOB_BUCKET = "egma-recordings";
+
+/** What a store that ignores regions is signed for. See `blobRegion`. */
+const DEFAULT_BLOB_REGION = "us-east-1";
 
 /**
  * The platform's default judge, or `undefined` where it has none.

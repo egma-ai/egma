@@ -249,6 +249,48 @@ describe("what has no recording to hear", () => {
     expect(String(refused.body.message)).toContain("never connected");
     expect(String(refused.body.message)).toContain("the store refused");
   });
+
+  /**
+   * A reference that tries to walk out of the bucket is never signed.
+   *
+   * **The line that actually holds is the store's**: the read credential is
+   * granted `s3:GetObject` on this bucket and nothing else, so a cross-bucket
+   * key is refused by MinIO however it is shaped, which
+   * `recording-store.test.ts` proves against a real one. This is depth behind
+   * that line, because the line is a policy document in a compose job and a
+   * deployment that ever widened it would lose the containment with nothing
+   * saying so.
+   *
+   * It is deliberately a **shape check and not a second `confined_key`**. That
+   * rule lives once, in the simulator, shared between both of its stores;
+   * a second implementation in a second language would be a second chance to
+   * get it wrong, and a copy that disagreed would make an honest recording
+   * unresolvable by the very reference its own simulation reported.
+   */
+  it("will not sign a reference that walks out of the bucket", async () => {
+    const { who } = await aCustomerWhoHasRecorded("recording_traversal");
+
+    // Written straight onto the row, past the simulator that would have
+    // confined it — which is what whoever holds the service token could do, and
+    // what any future writer that skipped the simulator would do by accident.
+    for (const reference of [
+      "../another-bucket/stolen.wav",
+      "/etc/passwd",
+      "sim_01/../../elsewhere/dual-channel.wav",
+    ]) {
+      const planted = await aConductedRun(api.app, who, { reference });
+      const refused = await request(
+        "GET",
+        recordingPathFor(planted.heard),
+        who.key,
+      );
+
+      expect(refused.statusCode, reference).toBe(422);
+      expect(String(refused.body.message)).toContain("will not resolve");
+      // And nothing signed comes back, so there is no link to try.
+      expect(refused.body.url).toBeUndefined();
+    }
+  });
 });
 
 describe("a deployment that named no store", () => {

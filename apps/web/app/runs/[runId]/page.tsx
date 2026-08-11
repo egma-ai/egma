@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 
 import { runProgress } from "../../../lib/run-progress.ts";
 import type { Judgment } from "../../../lib/transcripts.ts";
@@ -368,8 +368,6 @@ type Playable =
       readonly status: "ready";
       readonly url: string;
       readonly band: number | null;
-      /** When the store stops honouring this link, so a stale one is knowable. */
-      readonly expiresAt: number;
     }
   | { readonly status: "failed"; readonly why: string };
 
@@ -392,6 +390,11 @@ function RecordingPlayer({ simulationId }: { simulationId: string }) {
   // Counts how many times the link has been asked for. Bumping it re-runs the
   // effect, which is how a link that went stale is replaced by a fresh one.
   const [asked, setAsked] = useState(0);
+  const player = useRef<HTMLAudioElement | null>(null);
+  /** Where the listener was, to be put back after a link is replaced. */
+  const resumeAt = useRef(0);
+  /** Whether this link is already the answer to a failure. See `onError`. */
+  const isASecondTry = useRef(false);
 
   useEffect(() => {
     let stopped = false;
@@ -414,9 +417,16 @@ function RecordingPlayer({ simulationId }: { simulationId: string }) {
               `Egma answered ${String(answer.status)} for this recording.`,
           });
         }
+        // `expires_at` comes back with this and is deliberately not read. It is
+        // there for a client that *keeps* a link — the terminal, anything that
+        // caches one — and this page keeps none. Branching on it here would
+        // mean comparing a server's timestamp to this browser's clock, and a
+        // browser a few minutes slow would decide a dead link was still good
+        // and never ask again, which is the dead scrubber this whole path
+        // exists to prevent. What replaces a link here is a failure, not a
+        // clock.
         const resolved = (await answer.json()) as {
           url: string;
-          expires_at: string;
           measured_audio_band_hertz: number | null;
         };
         if (stopped) return;
@@ -424,7 +434,6 @@ function RecordingPlayer({ simulationId }: { simulationId: string }) {
           status: "ready",
           url: resolved.url,
           band: resolved.measured_audio_band_hertz,
-          expiresAt: Date.parse(resolved.expires_at),
         });
       } catch {
         if (!stopped) {
@@ -442,6 +451,25 @@ function RecordingPlayer({ simulationId }: { simulationId: string }) {
     };
   }, [simulationId, asked]);
 
+  /**
+   * A replacement link is loaded because it is a replacement, not because it
+   * happens to read differently.
+   *
+   * A signature is stamped to the second, so a link asked for again inside the
+   * same second as the one it replaces comes back **byte for byte identical** —
+   * same instant, same expiry, same signature. React then sets `src` to the
+   * string it already holds, the DOM does not change, no request is made, and
+   * the recovery above quietly does nothing at all. Which is the whole failure
+   * it was written to fix, hiding behind a string comparison.
+   *
+   * So a retry says `load()` out loud. It is skipped on the first resolve,
+   * where the element loads on its own and calling this would fetch twice.
+   */
+  useEffect(() => {
+    if (playable.status !== "ready" || asked === 0) return;
+    player.current?.load();
+  }, [playable, asked]);
+
   if (playable.status === "resolving") {
     return <p className={styles.runTally}>Finding the recording…</p>;
   }
@@ -458,20 +486,51 @@ function RecordingPlayer({ simulationId }: { simulationId: string }) {
         lives a quarter of an hour — every seek is a fresh request against it.
       */}
       <audio
+        ref={player}
         className={styles.runRecordingPlayer}
         controls
         preload="metadata"
         src={playable.url}
         data-recording="true"
-        // A link lives a quarter of an hour, and a results page left open for
-        // an afternoon outlives it: the next seek comes back refused, and what
-        // a person sees is a scrubber that stopped working for no stated
-        // reason. So a failure after the link's own moment is read as a stale
-        // link and answered by asking for a new one — the reader may still
-        // hear it, and only the proof of that had a deadline. A failure
-        // *before* it is a real one and is left to show.
+        // A link lives a quarter of an hour and a results page left open for an
+        // afternoon outlives it: the next seek comes back refused, and what a
+        // person sees is a scrubber that stopped for no stated reason.
+        //
+        // **One retry, asked for unconditionally, and only the second failure
+        // is believed.** The obvious version of this compares the link's expiry
+        // to `Date.now()` and refreshes only past it — and that is wrong,
+        // because `Date.now()` is the *reader's* clock: a browser a few minutes
+        // slow decides a dead link is still good and never asks again, which is
+        // exactly the failure this is here to fix, now reachable only by people
+        // whose laptops are wrong. A link is cheap and a second one settles it,
+        // so nothing here reasons about time at all.
+        //
+        // It cannot loop: the retry flag is set before asking and cleared only
+        // by a load that worked, so a store that is genuinely gone costs two
+        // requests and then says so.
         onError={() => {
-          if (Date.now() >= playable.expiresAt) setAsked((again) => again + 1);
+          if (isASecondTry.current) {
+            return setPlayable({
+              status: "failed",
+              why: "This recording could not be played. The store it lives in may be unreachable.",
+            });
+          }
+          isASecondTry.current = true;
+          // Kept before the source is replaced, because replacing it sends the
+          // element back to the beginning — and being thrown to the start of a
+          // recording you were four minutes into is its own small betrayal.
+          resumeAt.current = player.current?.currentTime ?? 0;
+          setAsked((again) => again + 1);
+        }}
+        // A link that loads is a link that works, so the next expiry — hours
+        // later, on a page nobody reloaded — gets its own retry rather than
+        // being treated as the second failure of a problem long since over.
+        onLoadedMetadata={() => {
+          isASecondTry.current = false;
+          if (resumeAt.current > 0 && player.current !== null) {
+            player.current.currentTime = resumeAt.current;
+            resumeAt.current = 0;
+          }
         }}
       >
         Your browser cannot play audio.

@@ -134,6 +134,30 @@ describe("the API's deployment story", () => {
     }
   });
 
+  it("publishes the recording store to this machine and no further, by default", () => {
+    // The one port in this file whose default bind is a security decision.
+    // What answers on it is the store's admin surface and its *root*
+    // credential — which can list, replace and delete every recording a
+    // deployment holds — and the development default for that credential is
+    // written in this repository. Bound to 0.0.0.0, `docker compose up` on a
+    // shared network hands every customer's recording to the room, to read and
+    // to overwrite. This product calls a recording evidence.
+    //
+    // Held as a test rather than as the comment beside it, because a comment
+    // does not close a port. The publishing itself is required — a browser has
+    // to fetch a recording — so what is asserted is the host it is published
+    // to, and that opening it is a variable somebody sets on purpose.
+    const block = serviceBlock("minio");
+    const published = /^\s*-\s*"(.+:9000)"\s*$/mu.exec(block)?.[1] ?? "";
+    expect(published, "the minio service publishes its API port").not.toBe("");
+    expect(
+      published.startsWith("${EGMA_S3_BIND:-127.0.0.1}:"),
+      `the recording store is published as ${published}, which does not bind ` +
+        "to loopback by default — the store's root credential can overwrite " +
+        "every recording, and its default is public in this repository",
+    ).toBe(true);
+  });
+
   it("gives the API a store credential that can only read, and never the simulator's", () => {
     const compose = readFileSync(path.join(ROOT, "docker-compose.yml"), "utf8");
     const api = serviceBlock("api");

@@ -122,10 +122,31 @@ Leaving it unset is allowed and breaks nothing else: the platform runs, runs run
 and asking for a recording answers with the name of this variable rather than
 with a player that does nothing.
 
+**The store is published to this machine and no further**, and opening it is a
+decision rather than a default. What answers on that port is not only the
+recordings: it is the store's admin surface and its root credential, which can
+list, replace and delete every recording you hold — and this repository ships a
+development default for that credential, so on `0.0.0.0` a `docker compose up`
+on shared wifi hands every recording to the room, to read and to overwrite. A
+recording is evidence, and evidence somebody else can replace is not evidence.
+Loopback costs the default deployment nothing, because the default assumes the
+browser is on this machine. When it is not — a server, a colleague — set
+`EGMA_S3_BIND=0.0.0.0` and point `EGMA_BLOB_PUBLIC_URL` at the address those
+browsers use, and **change `EGMA_S3_SECRET_ACCESS_KEY` first**.
+
 **The API's store credential is read-only**, created by the deployment on first
 start and separate from the one the simulator writes with. A leaked read
-credential must not be usable to overwrite a call recording, so it can fetch one
+credential must not be usable to overwrite a recording, so it can fetch one
 object at a time and cannot write, delete or list.
+
+**`EGMA_S3_REGION` is set once and both halves read it.** The simulator signs
+its uploads with a region and the API signs playback links with one, and two
+halves of one store signing for two different regions is every upload working
+and every playback failing with — again — `SignatureDoesNotMatch`. Empty is
+right for the MinIO this file runs, which ignores regions entirely; a bucket on
+Amazon's own S3 needs its real region, and the API refuses to start pointed at
+an `amazonaws.com` address without one rather than signing everything for
+`us-east-1` and letting you discover it one recording at a time.
 
 **`EGMA_SIMULATOR_SERVICE_TOKEN` is what the simulator shows the API to claim
 work, and the API refuses to start without one.** The answers to a claim carry

@@ -53,6 +53,14 @@ const A_TEST = {
 /** Who moved the conversations, as a simulator names itself. */
 const CLAIMANT = "simulator-blue-1";
 
+/**
+ * How many runs this file has built, which is what keeps the people calling in
+ * one run distinct from the people calling in the next. Two personas of one
+ * name in one project make naming a persona in a test ambiguous, and the
+ * product refuses that rather than guessing.
+ */
+let conducted = 0;
+
 export type ConductedRun = {
   readonly runId: string;
   /** The conversation that has audio, and the reference it reported. */
@@ -144,19 +152,32 @@ export async function aConductedRun(
     name: `Front desk ${modality}`,
     connection: modality === "voice" ? A_VOICE_AGENT : A_CHAT_AGENT,
   });
-  expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
+  // 201 the first time and 200 `reused` after it — registering the same agent
+  // through the same wizard twice is a thing the product answers rather than
+  // refuses, and one customer wanting two runs is an ordinary case here.
+  expect(
+    [200, 201],
+    JSON.stringify(registered.body),
+  ).toContain(registered.statusCode);
   const connectionId = (registered.body.connection as { id: string }).id;
 
   // Two people to call about the one test, which is what makes a run of two
   // conversations rather than a run of one.
-  for (const name of ["Impatient Rita", "Deliberate Sam"]) {
+  //
+  // Named apart per run rather than reused, because a project holding two
+  // people of one name is a project where naming a persona in a test is
+  // ambiguous — which the product refuses, correctly, and which a caller
+  // wanting a second run has no reason to meet.
+  const runs = (conducted += 1);
+  const callers = [`Impatient Rita ${runs}`, `Deliberate Sam ${runs}`];
+  for (const name of callers) {
     await createPersona(who.auth, { name, traits: NEUTRAL_TRAITS });
   }
 
   const pushed = await ask(app, "POST", "/api/tests", who.key, {
     ...A_TEST,
-    name: "Reschedules a booked appointment",
-    personas: ["Impatient Rita", "Deliberate Sam"],
+    name: `Reschedules a booked appointment ${runs}`,
+    personas: callers,
   });
   expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 

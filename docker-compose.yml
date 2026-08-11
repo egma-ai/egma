@@ -100,14 +100,27 @@ services:
       # below — so the worst a leaked one can do is read a recording, never
       # replace one.
       #
-      # What this *does* change: the store's root credential, which can write,
-      # is now reachable from wherever this port is. It was unreachable while
-      # there was no `ports:` here, and the development default below was
-      # harmless in the way the LiveKit key still is. It is not any more.
-      # **Change EGMA_S3_SECRET_ACCESS_KEY in .env before anybody else can
-      # reach this machine**, or move this port to loopback with
-      # `EGMA_S3_PORT` and a `docker-compose.override.yml` if the browsers that
-      # need recordings are all on it.
+      # **Published to this machine and no further**, which is the LiveKit
+      # server's idiom above and for a sharper version of its reason. What
+      # answers on this port is not only the recordings: it is the store's
+      # admin surface and its *root* credential, which can list, replace and
+      # delete every recording a deployment holds — and the development default
+      # for that credential is written in this repository, where anybody can
+      # read it. On 0.0.0.0 that is `docker compose up` on a coffee-shop
+      # network handing every customer's recording to the room, to read and to
+      # overwrite. This product calls a recording evidence, and evidence
+      # somebody else can replace is not evidence.
+      #
+      # The default costs the default deployment nothing, because
+      # EGMA_BLOB_PUBLIC_URL defaults to `http://localhost:9000` — a browser on
+      # this machine, which is the deployment this file is written for.
+      #
+      # **Opening it is one variable, and it is a real decision.** A deployment
+      # whose browsers are somewhere else — a server, a colleague's laptop —
+      # sets `EGMA_S3_BIND=0.0.0.0` and sets EGMA_BLOB_PUBLIC_URL to the
+      # address those browsers use. Change EGMA_S3_SECRET_ACCESS_KEY *first*:
+      # widening the bind without it is the one step in this file that hands a
+      # published, writable store to whoever can route to the machine.
       #
       # **EGMA_BLOB_PUBLIC_URL on the api service must name this address**, and
       # naming the wrong one is the single most common way a self-hosted object
@@ -118,7 +131,7 @@ services:
       # default below assumes a browser on this machine. An egma other people
       # reach — at 192.168.1.10, at egma.example — must say so there, the same
       # way it already has to say so in EGMA_BASE_URL.
-      - "${EGMA_S3_PORT:-9000}:9000"
+      - "${EGMA_S3_BIND:-127.0.0.1}:${EGMA_S3_PORT:-9000}:9000"
     healthcheck:
       # `mc` ships inside this image, so the probe needs no second one. `local`
       # is the alias the server answers to from inside its own container.
@@ -252,7 +265,14 @@ services:
       # variable rather than with an empty player.
       EGMA_BLOB_PUBLIC_URL: ${EGMA_BLOB_PUBLIC_URL:-http://localhost:${EGMA_S3_PORT:-9000}}
       EGMA_BLOB_BUCKET: ${EGMA_BLOB_BUCKET:-${EGMA_S3_BUCKET:-egma-recordings}}
-      EGMA_BLOB_REGION: ${EGMA_BLOB_REGION:-}
+      # One region for one store, from one place. The simulator signs its
+      # uploads with a region and this container signs its playback links with
+      # one, and the day those two disagree is a day every upload works and
+      # every playback fails with `SignatureDoesNotMatch` — naming neither the
+      # setting nor the region, which is the same nameless failure the public
+      # address above is written about. So both default from `EGMA_S3_REGION`
+      # and a self-hoster on real S3 sets it once.
+      EGMA_BLOB_REGION: ${EGMA_BLOB_REGION:-${EGMA_S3_REGION:-}}
       # The read-only half of the store's credentials, interpolated from the
       # same pair the bucket job creates the user with so the two always match.
       # It can fetch one object at a time and nothing else — it cannot write,
@@ -444,7 +464,11 @@ services:
       # them is the most common way a self-hosted object store breaks.
       EGMA_SIMULATOR_S3_ENDPOINT: ${EGMA_SIMULATOR_S3_ENDPOINT:-http://minio:9000}
       EGMA_SIMULATOR_S3_BUCKET: ${EGMA_SIMULATOR_S3_BUCKET:-${EGMA_S3_BUCKET:-egma-recordings}}
-      EGMA_SIMULATOR_S3_REGION: ${EGMA_SIMULATOR_S3_REGION:-}
+      # The same region the API signs playback links with, from the same
+      # place — see EGMA_BLOB_REGION on the api service. Two halves of one
+      # store signing for two different regions is every upload working and
+      # every playback failing.
+      EGMA_SIMULATOR_S3_REGION: ${EGMA_SIMULATOR_S3_REGION:-${EGMA_S3_REGION:-}}
       # The write credential, interpolated from the same pair the store
       # above is stood up with so the two halves always match. A
       # deployment pointed at somebody else's S3 sets these two directly

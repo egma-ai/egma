@@ -46,14 +46,23 @@ import { createHash, createHmac } from "node:crypto";
  * store breaks. So `BlobStore.publicUrl` is *the browser's* address and there is
  * no second one in this process: the control plane never opens a connection to
  * the store at all, so it has no internal endpoint to confuse this with.
+ *
+ * **A clock is the other way to earn that same nameless refusal.** A signature
+ * carries the instant it was made at, and a store rejects one made too far from
+ * its own idea of now — so an API container whose clock has drifted from the
+ * store's refuses every recording with the identical `SignatureDoesNotMatch`,
+ * and nothing anywhere says the word "clock". If recordings stop playing on a
+ * deployment where nothing else changed, compare the two clocks first.
  */
 
 /** What the control plane knows about the store recordings live in. */
 export type BlobStore = {
   /**
-   * The address **a browser** reaches the store at, scheme and host and port —
-   * `EGMA_BLOB_PUBLIC_URL`. A path is honoured, for the deployment that puts
-   * the store behind a reverse proxy on a sub-path.
+   * The address **a browser** reaches the store at — `EGMA_BLOB_PUBLIC_URL`,
+   * and only ever an origin: scheme, host and port. A sub-path is refused where
+   * the setting is read, because a signature covers the path it was signed for
+   * and the ordinary reverse proxy strips its own prefix before the store sees
+   * it.
    */
   readonly publicUrl: string;
   readonly bucket: string;
@@ -84,7 +93,10 @@ export type BlobStore = {
  *
  * It is a constant rather than a setting because there is no deployment whose
  * answer differs, and a setting nobody has a reason to change is a setting
- * somebody will eventually set to a year.
+ * somebody will eventually set to a year. Nothing here enforces a ceiling on
+ * `X-Amz-Expires`: **the bound is the store's** — S3 refuses a presigned
+ * request over seven days — so a value past that would be refused at fetch
+ * time rather than at signing time, which is a worse place to find out.
  */
 export const RECORDING_LINK_SECONDS = 15 * 60;
 
@@ -95,13 +107,65 @@ export type SignedLink = {
 };
 
 /**
+ * A reference this side declines to sign at all.
+ *
+ * Raised rather than answered, because there is no honest link to return: the
+ * caller's own refusal sentence is the only correct outcome, and returning
+ * something signable would be this module inventing an object.
+ */
+export class UnsignableReferenceError extends Error {}
+
+/**
+ * A reference shaped so that no signature can reach outside the bucket.
+ *
+ * **The rule that confines a key lives in the simulator and is not copied
+ * here.** `confined_key` in `apps/simulator/src/egma_simulator/blob.py` flattens
+ * any key that could name something outside the bucket, it is shared between
+ * both of that side's stores on purpose, and a second implementation in a second
+ * language would be a second chance to get it wrong — worse, a *disagreeing*
+ * copy would make a recording unresolvable by the very reference its own
+ * simulation reported. So this is not that rule. It is a shape check with two
+ * cases and no rewriting.
+ *
+ * **What it is depth for.** The reference reaches a row through the report door,
+ * which is gated by the service token — so whoever holds that token, or anything
+ * that ever writes a row without going through the simulator, could store
+ * `../another-bucket/x`. The real containment against that is the store's own
+ * policy: the read credential is granted `s3:GetObject` on this bucket and
+ * nothing else, so a cross-bucket read is refused by the store however the key
+ * is shaped. That is the line that actually holds, and it is proved against a
+ * real MinIO. This check exists because that line is a *policy* — one JSON
+ * document in a compose job — and a deployment that ever widens it would lose
+ * the containment with nothing saying so. Two independent reasons a traversal
+ * cannot work is the point; neither is redundant while the other is a
+ * configuration file.
+ */
+function refuseAnUnsignableReference(reference: string): void {
+  const segments = reference.split("/");
+  if (
+    reference.startsWith("/") ||
+    reference.startsWith("\\") ||
+    segments.includes("..") ||
+    segments.includes(".")
+  ) {
+    throw new UnsignableReferenceError(
+      `a recording reference cannot start at a separator or walk upwards, ` +
+        `and this one does. Nothing egma writes produces such a reference — ` +
+        `the simulator confines every key before it reports one — so this row ` +
+        `was written by something else.`,
+    );
+  }
+}
+
+/**
  * One recording's reference as a link, ready to hand to a browser.
  *
- * The reference is used as the object key exactly as the simulator reported it.
- * It is already confined at the seam that wrote it — the simulator flattens any
- * key that could name something outside its bucket — and it is signed here
- * rather than re-checked, because a key this process rewrote would resolve to a
- * different object than the one the simulation says it wrote.
+ * The reference is used as the object key exactly as the simulator reported it,
+ * past the shape check above. It is already confined at the seam that wrote it,
+ * and it is signed here rather than *rewritten*, because a key this process
+ * reshaped would resolve to a different object than the one the simulation says
+ * it wrote — which is the same failure as no recording at all, arriving with a
+ * link that looks fine.
  *
  * `response-content-type` is asked for on the way out. The simulator writes the
  * object without declaring a type, so the store answers
@@ -128,6 +192,8 @@ export function signedRecordingLink(
     readonly expiresInSeconds?: number;
   } = {},
 ): SignedLink {
+  refuseAnUnsignableReference(reference);
+
   const at = options.at ?? new Date();
   const expiresInSeconds = options.expiresInSeconds ?? RECORDING_LINK_SECONDS;
 
@@ -172,8 +238,11 @@ export function presignedObjectUrl(options: {
   // network and no per-bucket name at all, and a link to
   // `http://egma-recordings.minio:9000` would resolve nothing. AWS serves both
   // styles, so a deployment pointed at real S3 pays nothing for this.
-  const basePath = address.pathname.replace(/\/+$/u, "");
-  const canonicalUri = `${basePath}/${encodePath(store.bucket)}/${encodePath(key)}`;
+  //
+  // The path starts at the root, with nothing in front of the bucket. There is
+  // no prefix to carry: `EGMA_BLOB_PUBLIC_URL` is refused unless it is an origin
+  // and nothing more, so `store.publicUrl` has no path in it to honour.
+  const canonicalUri = `/${encodePath(store.bucket)}/${encodePath(key)}`;
 
   const stamp = timestamps(at);
   const scope = `${stamp.day}/${store.region}/s3/aws4_request`;

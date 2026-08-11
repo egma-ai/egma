@@ -298,6 +298,77 @@ describe("configuration", () => {
       }),
     ).toThrow(/EGMA_BLOB_BUCKET must be a bucket name/);
   });
+
+  it("refuses a store address carrying anything after the port", () => {
+    // The same narrowing EGMA_BASE_URL makes, for a reason of its own: a
+    // signature covers the whole path, so a store served under a sub-path works
+    // only if the proxy in front passes its own prefix through — and the
+    // ordinary arrangement strips it, which makes every link signed for one
+    // path and presented at another. Refused while this setting is new enough
+    // that no deployment is on it.
+    const withCredential = {
+      ...enough,
+      EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
+      EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
+    };
+    expect(() =>
+      loadConfig({
+        ...withCredential,
+        EGMA_BLOB_PUBLIC_URL: "https://egma.acme.example/recordings",
+      }),
+    ).toThrow(/must be only the address a browser reaches/);
+    // And it names what to set instead, because a deployment meeting this on an
+    // upgrade should not have to work out which part offended.
+    expect(() =>
+      loadConfig({
+        ...withCredential,
+        EGMA_BLOB_PUBLIC_URL: "https://egma.acme.example/recordings",
+      }),
+    ).toThrow(/Set it to https:\/\/egma\.acme\.example/);
+  });
+
+  /**
+   * The region, which has exactly one honest default and one deployment where
+   * that default is a wrong answer rather than a default.
+   *
+   * MinIO ignores regions entirely and every signature must still carry one, so
+   * `us-east-1` is what lets a deployment that named none work at all. Amazon's
+   * own S3 does not ignore it: a bucket in `eu-west-1` signed for `us-east-1`
+   * refuses every recording with `SignatureDoesNotMatch`, naming neither the
+   * region nor the variable — which is the same nameless failure the browser's
+   * address is a separate setting to prevent, arriving by a second route.
+   */
+  it("signs for us-east-1 where the store ignores regions, and refuses to guess where it does not", () => {
+    const withCredential = {
+      ...enough,
+      EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
+      EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
+    };
+
+    expect(
+      loadConfig({
+        ...withCredential,
+        EGMA_BLOB_PUBLIC_URL: "http://localhost:9000",
+      }).blob?.region,
+    ).toBe("us-east-1");
+
+    expect(() =>
+      loadConfig({
+        ...withCredential,
+        EGMA_BLOB_PUBLIC_URL: "https://egma-recordings.s3.eu-west-1.amazonaws.com",
+      }),
+    ).toThrow(/EGMA_BLOB_REGION/);
+
+    // Named, and it is taken as named — the refusal is about guessing, never
+    // about Amazon.
+    expect(
+      loadConfig({
+        ...withCredential,
+        EGMA_BLOB_PUBLIC_URL: "https://egma-recordings.s3.eu-west-1.amazonaws.com",
+        EGMA_BLOB_REGION: "eu-west-1",
+      }).blob?.region,
+    ).toBe("eu-west-1");
+  });
 });
 
 /**

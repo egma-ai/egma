@@ -1130,19 +1130,30 @@ describe("the saved theme", () => {
 /**
  * Hearing a recording from a run's results.
  *
- * **This file resists growing, and this is the one thing that had to grow it.**
- * Every refusal, every sentence and the shape of the link are proved at the
- * route seam beside it, where each costs milliseconds. What cannot be proved
- * there — cannot be proved *anywhere* else — is the address binding, because the
- * bug **is** the browser using a different address than the platform. A test
- * that signed a link and fetched it from inside this process would fetch it from
- * the address it was signed for by construction, and would pass on exactly the
- * deployment where nobody can hear anything. So: a real Chrome, a real page, a
- * real signed link, a real MinIO on an address that is not the API's, and a
- * recording that really decodes.
+ * **This file resists growing, and this is what had to grow it.** Every refusal,
+ * every sentence and the shape of the link are proved at the route seam beside
+ * it, where each costs milliseconds. What no route test can reach is whether a
+ * *browser* can do anything with what the API mints: whether a real Chrome
+ * fetches the signed link, decodes what comes back, seeks inside it, and
+ * recovers when a link stops working. Those are the browser's own behaviours and
+ * this is the only place they happen.
  *
- * One test, and it is the whole story: a player where there is audio, nothing at
- * all where there is not, and seeking that works.
+ * **What this does not prove, said plainly, because a comment that overstates
+ * its own proof is how a guarantee rots.** It does *not* prove the address
+ * binding on its own. The store here answers on the same address this process
+ * would use, so signed host and fetched host are equal by construction and would
+ * stay equal if the API started signing for its own endpoint. What proves that
+ * is two other things: `recordings-routes.test.ts` asserts the minted host is
+ * the configured browser one and carries no internal name, `recording-store.test.ts`
+ * makes a real MinIO refuse a link signed for a different host, and — the guard
+ * that catches the mistake somebody would actually make — the compose check in
+ * `deployment.test.ts` fails if `EGMA_BLOB_PUBLIC_URL` is ever defaulted to
+ * `minio:9000`. This file is the other half of that: proof that the whole chain
+ * ends in audio a person can hear.
+ *
+ * Two tests. The first is the story — a player where there is audio, seeking,
+ * recovery, and nothing at all where there is no recording. The second is the
+ * other way to have nothing to play, which is a modality that can never have any.
  */
 describe.skipIf(!storage.available)("hearing a recording from a run", () => {
   it(
@@ -1216,6 +1227,70 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
         )
         .toBe(5);
 
+      /*
+       * A link that has stopped working is asked for again, and the listener is
+       * put back where they were.
+       *
+       * A results page open for an afternoon outlives the fifteen minutes a
+       * link lives, and what a person then meets is a scrubber that stopped for
+       * no stated reason. Waiting out a real expiry is not a test anybody can
+       * run, so the store is made to refuse **once** — which is byte for byte
+       * what an expired link looks like to this element — and what is asserted
+       * is that the page recovers on its own, rather than that it noticed a
+       * clock. The recovery deliberately does not consult one: a browser a few
+       * minutes slow would decide a dead link was still good and never ask.
+       */
+      let refusals = 0;
+      await page.route(`${running.store.publicUrl}/**`, async (route) => {
+        refusals += 1;
+        if (refusals > 1) return route.continue();
+        return route.fulfill({
+          status: 403,
+          contentType: "application/xml",
+          body: "<Error><Code>AccessDenied</Code><Message>Request has expired</Message></Error>",
+        });
+      });
+      try {
+        await player.evaluate((element) => {
+          const audio = element as unknown as {
+            currentTime: number;
+            load(): void;
+            dispatchEvent(event: unknown): void;
+          };
+          audio.currentTime = 0.75;
+          const Event = Reflect.get(globalThis, "Event") as new (
+            name: string,
+          ) => unknown;
+          audio.dispatchEvent(new Event("error"));
+        });
+
+        // A second link was asked for, off the same page, with no reload.
+        await expect
+          .poll(() => refusals, { timeout: 30_000 })
+          .toBeGreaterThan(1);
+
+        // And it plays, from where the listener had got to rather than from the
+        // beginning — being thrown back to the start of a recording you were
+        // part-way into is its own small betrayal.
+        await expect
+          .poll(
+            () =>
+              player.evaluate((element) => {
+                const audio = element as unknown as {
+                  readyState: number;
+                  currentTime: number;
+                };
+                return audio.readyState >= 1
+                  ? Math.round(audio.currentTime * 100)
+                  : -1;
+              }),
+            { timeout: 30_000 },
+          )
+          .toBe(75);
+      } finally {
+        await page.unroute(`${running.store.publicUrl}/**`);
+      }
+
       // The other conversation of the same run never connected, so it wrote no
       // recording — and it is offered no control at all. A disabled player
       // there would read as a broken feature rather than an honest absence.
@@ -1230,6 +1305,41 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
       await silent.locator("p").first().waitFor();
       expect(await silent.locator("audio").count()).toBe(0);
       expect(await page.locator("audio").count()).toBe(1);
+    },
+    SETTLE,
+  );
+
+  it(
+    "offers a chat nothing at all, because a chat has no audio and never will",
+    async () => {
+      // The other half of "only where there is something to play", and the half
+      // the run above cannot reach: that one turns on whether a recording was
+      // *written*, and this one on whether audio could exist at all. The page
+      // asks both questions and only one of them was being answered here.
+      //
+      // Refusing a chat is proved at the route seam. What is proved here is the
+      // page's own promise: no player, no placeholder, no disabled control —
+      // nothing, so the product never implies audio that cannot exist.
+      const hers = (await page.context().cookies(origin))
+        .map((cookie) => `${cookie.name}=${cookie.value}`)
+        .join("; ");
+      const who = await standingOf(instance.api, hers, "her chats");
+      const run = await aConductedRun(instance.api, who, {
+        reference: "unused-by-a-chat",
+        modality: "chat",
+        label: "a folder of chats",
+      });
+
+      await page.goto(`${origin}/runs/${run.runId}`);
+      const chat = page.locator(`details[data-simulation="${run.heard}"]`);
+      await chat.waitFor({ timeout: 30_000 });
+      await chat.locator("summary").first().click();
+      await chat.locator("p").first().waitFor();
+
+      expect(await page.locator("audio").count()).toBe(0);
+      // Not even the line that says a recording is being looked for, which is
+      // the one thing on this path that could momentarily imply there is one.
+      expect(await chat.innerText()).not.toContain("Finding the recording");
     },
     SETTLE,
   );
