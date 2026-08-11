@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 
-import { returnPathIn, withReturnTo } from "../../lib/return-to.ts";
+import {
+  DEFAULT_SIGNED_IN_PATH,
+  returnPathIn,
+  withReturnTo,
+} from "../../lib/return-to.ts";
 import {
   DEFAULT_PROJECT_NAME,
   organizationNameFromEmail,
@@ -80,7 +84,7 @@ export default function SignUpPage() {
         body: JSON.stringify({ email, password, organizationName, projectName }),
       });
       if (response.ok) {
-        window.location.assign(returnTo ?? "/");
+        window.location.assign(returnTo ?? DEFAULT_SIGNED_IN_PATH);
         return;
       }
       const body = (await response.json().catch(() => ({}))) as {

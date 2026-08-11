@@ -7,7 +7,12 @@ import {
   DEFAULT_PROJECT_NAME as API_DEFAULT_PROJECT_NAME,
   organizationNameFromEmail as apiOrganizationNameFromEmail,
 } from "../../api/src/auth/naming.ts";
-import { returnPathIn, safeReturnPath } from "../lib/return-to.ts";
+import { runProgress } from "../lib/run-progress.ts";
+import {
+  DEFAULT_SIGNED_IN_PATH,
+  returnPathIn,
+  safeReturnPath,
+} from "../lib/return-to.ts";
 import {
   DEFAULT_PROJECT_NAME,
   organizationNameFromEmail,
@@ -295,11 +300,13 @@ describe("the pages", () => {
       path.join(WEB, "app/runs/[runId]/page.tsx"),
       "utf8",
     );
-
+    const root = await readFile(path.join(WEB, "app/page.tsx"), "utf8");
     expect(shell).toContain("export function ProductStatePage");
     expect(members).toContain("<ProductStatePage");
     expect(transcript).toContain('<ProductStatePage active="transcripts"');
     expect(run).toContain('<ProductStatePage active="transcripts"');
+    expect(root).toContain('<ProductStatePage');
+    expect(root).not.toContain("<StatePage");
     expect(members).not.toContain(
       'return <StatePage title="Loading organization settings"',
     );
@@ -316,14 +323,34 @@ describe("the pages", () => {
       path.join(WEB, "app/runs/[runId]/page.tsx"),
       "utf8",
     );
+    const judgment = await readFile(
+      path.join(WEB, "app/judgment-card.tsx"),
+      "utf8",
+    );
 
     expect(run).toContain("/api/runs/");
-    expect(run).toContain("run.failed_count");
+    expect(run).toContain("runProgress(run)");
     expect(run).toContain("run.graded_count");
     expect(run).toContain("simulation.verdicts.map");
     expect(run).toContain("This is an execution problem, not a failed grader verdict.");
-    expect(run).toContain("judgment.rationale");
-    expect(run).toContain("judgment.cited_turns");
+    expect(run).toContain("<JudgmentCard");
+    expect(judgment).toContain("judgment.rationale");
+    expect(judgment).toContain("judgment.cited_turns");
+  });
+
+  it("shows the aggregate trace outcome", async () => {
+    const transcript = await readFile(
+      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      "utf8",
+    );
+    const contract = await readFile(
+      path.join(WEB, "lib/transcripts.ts"),
+      "utf8",
+    );
+
+    expect(contract).toContain("readonly outcome: Outcome | null");
+    expect(transcript).toContain("<OutcomeSummary outcome={detail.outcome}");
+    expect(transcript).toContain('aria-label="Grading outcome"');
   });
 
   it("reach the API for the device flow at paths this instance rewrites", async () => {
@@ -343,6 +370,18 @@ describe("the pages", () => {
 });
 
 describe("coming back after signing in", () => {
+  it("opens the transcript list by default", async () => {
+    const signIn = await readFile(path.join(WEB, "app/sign-in/page.tsx"), "utf8");
+    const signup = await readFile(path.join(WEB, "app/signup/page.tsx"), "utf8");
+    const invite = await readFile(path.join(WEB, "app/invite/page.tsx"), "utf8");
+
+    expect(DEFAULT_SIGNED_IN_PATH).toBe("/traces");
+    for (const page of [signIn, signup, invite]) {
+      expect(page).toContain("DEFAULT_SIGNED_IN_PATH");
+      expect(page).not.toContain('window.location.assign("/")');
+    }
+  });
+
   it("goes where the page was asked to go", () => {
     expect(returnPathIn("?next=%2Fdevice%2Fapprove%3Fuser_code%3DABCD1234")).toBe(
       "/device/approve?user_code=ABCD1234",
@@ -367,5 +406,27 @@ describe("coming back after signing in", () => {
     ]) {
       expect(safeReturnPath(elsewhere), elsewhere).toBeNull();
     }
+  });
+});
+
+describe("run progress", () => {
+  it("uses the simulation rows while aggregate counters are still empty", () => {
+    expect(runProgress({
+      expected_simulation_count: 3,
+      graded_count: 1,
+      simulations: [
+        { status: "completed" },
+        { status: "failed" },
+        { status: "running" },
+      ],
+    })).toEqual({ finished: 2, gradable: 2, failed: 1, moving: true });
+  });
+
+  it("does not wait for a canceled simulation to be graded", () => {
+    expect(runProgress({
+      expected_simulation_count: 2,
+      graded_count: 1,
+      simulations: [{ status: "completed" }, { status: "canceled" }],
+    })).toEqual({ finished: 2, gradable: 1, failed: 0, moving: false });
   });
 });

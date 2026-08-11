@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from "react";
 
-import { withReturnTo } from "../../lib/return-to.ts";
+import {
+  DEFAULT_SIGNED_IN_PATH,
+  withReturnTo,
+} from "../../lib/return-to.ts";
 import { AuthShell, Field, Notice, StatePage, styles } from "../ui.tsx";
 
 /**
@@ -116,7 +119,7 @@ export default function InvitePage() {
         body: JSON.stringify(body),
       });
       if (response.ok) {
-        window.location.assign("/");
+        window.location.assign(DEFAULT_SIGNED_IN_PATH);
         return;
       }
       const said = (await response.json().catch(() => ({}))) as {

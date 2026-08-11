@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 
-import { humanizeIdentifier } from "../../../lib/transcripts.ts";
+import { runProgress } from "../../../lib/run-progress.ts";
+import type { Judgment } from "../../../lib/transcripts.ts";
+import { JudgmentCard } from "../../judgment-card.tsx";
 
 import {
   AppShell,
@@ -20,18 +22,6 @@ type Counts = {
   readonly skipped: number;
   readonly errored: number;
   readonly total: number;
-};
-
-type Judgment = {
-  readonly grader_id: string;
-  readonly dimension: string;
-  readonly verdict: string;
-  readonly score: number;
-  readonly priority: string;
-  readonly rationale: string;
-  readonly cited_turns: readonly string[];
-  readonly judged_by: string;
-  readonly judged_at: string;
 };
 
 type Simulation = {
@@ -82,13 +72,8 @@ type State =
 
 const AGAIN_MS = 4000;
 
-function conducted(run: Run): number {
-  return (run.completed_count ?? 0) + (run.failed_count ?? 0) + (run.canceled_count ?? 0);
-}
-
 function stillMoving(run: Run): boolean {
-  const finished = conducted(run);
-  return finished < run.expected_simulation_count || run.graded_count < finished;
+  return runProgress(run).moving;
 }
 
 function tally(counts: Counts | null): string {
@@ -176,9 +161,9 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
   }
 
   const { run } = state;
-  const finished = conducted(run);
-  const moving = stillMoving(run);
-  const executionFailed = (run.failed_count ?? 0) > 0;
+  const progress = runProgress(run);
+  const moving = progress.moving;
+  const executionFailed = progress.failed > 0;
 
   return (
     <AppShell active="transcripts">
@@ -195,14 +180,14 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
               {run.modality === null ? "" : ` · ${run.modality}`}
             </p>
           </div>
-          <span className={`${styles.status} ${executionFailed ? styles.statusBad : ""}`}>
+          <span className={`${styles.status} ${executionFailed ? styles.statusBad : run.status === "canceled" ? styles.statusNeutral : ""}`}>
             {moving ? "Updating" : run.status}
           </span>
         </header>
 
         <section className={styles.runFacts} aria-label="Run summary">
-          <RunFact label="Execution" value={`${finished}/${run.expected_simulation_count} finished`} bad={executionFailed} />
-          <RunFact label="Grading" value={`${run.graded_count}/${finished || run.expected_simulation_count} judged`} />
+          <RunFact label="Execution" value={`${progress.finished}/${run.expected_simulation_count} finished`} bad={executionFailed} />
+          <RunFact label="Grading" value={`${run.graded_count}/${progress.gradable} judged`} />
           <RunFact label="Verdict" value={run.verdict ?? "Awaiting grading"} verdict={run.verdict} />
           <RunFact label="Score" value={shownScore(run.score)} />
         </section>
@@ -210,7 +195,7 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
         {moving ? <Notice>Updating as conversations finish and verdicts arrive.</Notice> : null}
         {executionFailed ? (
           <Notice tone="error">
-            {run.failed_count} {run.failed_count === 1 ? "conversation could" : "conversations could"} not be conducted. This is an execution problem, not a failed grader verdict.
+            {progress.failed} {progress.failed === 1 ? "conversation could" : "conversations could"} not be conducted. This is an execution problem, not a failed grader verdict.
           </Notice>
         ) : null}
 
@@ -322,22 +307,11 @@ function SimulationResult({ simulation }: { simulation: Simulation }) {
         ) : (
           <div className={styles.runJudgments}>
             {simulation.verdicts.map((judgment) => (
-              <article
-                className={styles.runJudgment}
-                data-verdict={judgment.verdict}
+              <JudgmentCard
                 key={`${judgment.grader_id}:${judgment.dimension}:${judgment.judged_at}`}
-              >
-                <div className={styles.judgmentHeading}>
-                  <span className={styles.verdictChip}>{judgment.verdict}</span>
-                  <strong>{humanizeIdentifier(judgment.dimension)}</strong>
-                  <span>{judgment.priority}</span>
-                </div>
-                <p>{judgment.rationale}</p>
-                <small>
-                  Judged by <span className={styles.mono}>{judgment.judged_by}</span>
-                  {judgment.cited_turns.length === 0 ? "" : ` · ${judgment.cited_turns.join(", ")}`}
-                </small>
-              </article>
+                judgment={judgment}
+                placement="result"
+              />
             ))}
           </div>
         )}

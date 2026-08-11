@@ -137,6 +137,7 @@
 .status { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid color-mix(in srgb, var(--good) 35%, var(--border)); border-radius: 999px; color: var(--good); font-family: var(--mono); font-size: 10px; text-transform: uppercase; }
 .status::before { width: 6px; height: 6px; border-radius: 50%; background: currentColor; content: ""; }
 .statusBad { border-color: color-mix(in srgb, var(--bad) 38%, var(--border)); color: var(--bad); }
+.statusNeutral { border-color: var(--border-strong); color: var(--muted); }
 .traceToolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 32px; border-bottom: 1px solid var(--border); }
 .traceViewTabs { display: flex; gap: 26px; }
 .traceViewTabs button { min-height: 44px; margin-bottom: -1px; padding: 0 1px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); cursor: pointer; font-family: var(--mono); font-size: 11px; }
@@ -193,6 +194,9 @@
 .runFacts .contextFact[data-verdict="passed"] strong { color: var(--good); }
 .runFacts .contextFact[data-verdict="failed"] strong, .runFacts .contextFact[data-verdict="errored"] strong { color: var(--bad); }
 .runFacts + .notice { margin-top: 22px; }
+.traceOutcome { grid-template-columns: repeat(3, minmax(0, 1fr)); background: var(--surface-soft); }
+.traceOutcome .contextFact:first-child { padding-left: 18px; }
+.traceOutcome .contextFact:last-child { padding-right: 18px; }
 .runSection { padding: 38px 0; border-bottom: 1px solid var(--border); }
 .runSectionHeading { display: flex; min-width: 0; align-items: flex-end; justify-content: space-between; gap: 28px; margin-bottom: 22px; }
 .runSectionHeading h2 { margin: 0; font-size: 27px; font-weight: 520; letter-spacing: -.03em; }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { StatePage, styles } from "./ui.tsx";
+import { ProductStatePage, styles } from "./ui.tsx";
 
 /**
  * The root address is an entrance, not a second product page.
@@ -42,7 +42,8 @@ export default function RootPage() {
   }, [attempt]);
 
   return (
-    <StatePage
+    <ProductStatePage
+      active="transcripts"
       title={failed ? "Egma could not be reached." : "Opening egma"}
       lead={failed ? "Check the API, then try again." : "Checking your session."}
     >
@@ -55,6 +56,6 @@ export default function RootPage() {
           Try again
         </button>
       ) : null}
-    </StatePage>
+    </ProductStatePage>
   );
 }

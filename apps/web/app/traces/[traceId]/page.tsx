@@ -15,7 +15,6 @@ import {
   everyStep,
   howFarIn,
   howLong,
-  humanizeIdentifier,
   isHuman,
   milliseconds,
   somethingFailed,
@@ -24,9 +23,10 @@ import {
   turnsCited,
   type Detail,
   type Facts as TraceFacts,
-  type Judgment,
+  type Outcome,
   type Step,
 } from "../../../lib/transcripts.ts";
+import { JudgmentCard } from "../../judgment-card.tsx";
 import {
   AppShell,
   Notice,
@@ -192,6 +192,7 @@ export default function TranscriptPage({
         </header>
 
         <Summary facts={detail.trace} />
+        {detail.outcome ? <OutcomeSummary outcome={detail.outcome} /> : null}
 
         <div className={styles.traceToolbar}>
           <div className={styles.traceViewTabs} role="tablist" aria-label={DETAIL.viewLabel}>
@@ -255,6 +256,30 @@ function Summary({ facts }: { facts: TraceFacts }) {
           <strong className={wrong ? styles.wrong : undefined}>{value}</strong>
         </div>
       ))}
+    </section>
+  );
+}
+
+function OutcomeSummary({ outcome }: { outcome: Outcome }) {
+  const checks = [`${outcome.counts.passed}/${outcome.counts.total} passed`];
+  if (outcome.counts.failed > 0) checks.push(`${outcome.counts.failed} failed`);
+  if (outcome.counts.skipped > 0) checks.push(`${outcome.counts.skipped} skipped`);
+  if (outcome.counts.errored > 0) checks.push(`${outcome.counts.errored} errored`);
+
+  return (
+    <section className={`${styles.runFacts} ${styles.traceOutcome}`} aria-label="Grading outcome">
+      <div className={styles.contextFact} data-verdict={outcome.verdict}>
+        <span>Verdict</span>
+        <strong>{outcome.verdict}</strong>
+      </div>
+      <div className={styles.contextFact}>
+        <span>Score</span>
+        <strong>{outcome.score === null ? "—" : String(Math.round(outcome.score * 1000) / 1000)}</strong>
+      </div>
+      <div className={styles.contextFact}>
+        <span>Checks</span>
+        <strong>{checks.join(" · ")}</strong>
+      </div>
     </section>
   );
 }
@@ -665,20 +690,4 @@ function presentedStepLabel(step: Step): string {
   if (known !== UNKNOWN_STEP_LABEL || step.name === "") return known;
   const words = step.name.replaceAll(/[_-]+/g, " ").trim();
   return words === "" ? known : `${words.slice(0, 1).toUpperCase()}${words.slice(1)}`;
-}
-
-function JudgmentCard({ judgment }: { judgment: Judgment }) {
-  return (
-    <article className={styles.judgmentCard} data-verdict={judgment.verdict}>
-      <div className={styles.judgmentHeading}>
-        <span className={styles.verdictChip}>{judgment.verdict}</span>
-        <strong>{humanizeIdentifier(judgment.dimension)}</strong>
-        <span>{judgment.priority}</span>
-      </div>
-      <p>{judgment.rationale}</p>
-      <small>
-        {DETAIL.judgedBy} <span className={styles.mono}>{judgment.judged_by}</span>
-      </small>
-    </article>
-  );
 }
