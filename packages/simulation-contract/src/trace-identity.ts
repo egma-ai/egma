@@ -69,3 +69,36 @@ export function traceIdOfSimulation(simulationId: string): string | undefined {
 
   return value.toString(16).padStart(TRACE_ID_HEX_LENGTH, "0");
 }
+
+/** How many Crockford characters a simulation id carries after its prefix. */
+const SIMULATION_ID_CHARACTERS = 26;
+
+/**
+ * The other direction: the simulation a trace is, or `undefined` for a trace
+ * that is not one of egma's simulations.
+ *
+ * Needed because the two forms are read from opposite ends. A grader is handed
+ * a **simulation** and goes looking for its spans, so it derives forwards. A
+ * reader opens a **transcript** — which is filed under the trace id the spans
+ * carry — and wants the verdicts, which are filed under the simulation id. That
+ * reader has only the hex, and inventing a second mapping to store would be the
+ * very thing the forward derivation exists to avoid.
+ *
+ * The round trip is exact because it is the same 128 bits written two ways. A
+ * production trace, whose id came off somebody else's wire, is not a simulation
+ * — but its bits still convert to a well-formed string, so this can only ever
+ * say "here is the simulation id those bits spell", never "a simulation by that
+ * id exists". The caller finds that out by reading, and a production trace's
+ * lookup simply returns no verdicts filed that way.
+ */
+export function simulationIdOfTrace(traceId: string): string | undefined {
+  if (!/^[0-9a-f]{32}$/u.test(traceId)) return undefined;
+
+  let value = BigInt(`0x${traceId}`);
+  const characters: string[] = [];
+  for (let at = 0; at < SIMULATION_ID_CHARACTERS; at += 1) {
+    characters.push(CROCKFORD_ALPHABET[Number(value & 31n)] ?? "0");
+    value >>= BITS_PER_CHARACTER;
+  }
+  return `sim_${characters.reverse().join("")}`;
+}

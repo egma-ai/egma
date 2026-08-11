@@ -17,8 +17,10 @@ import {
   somethingFailed,
   stepsInside,
   whenItWas,
+  turnsCited,
   type Detail,
   type Facts as TraceFacts,
+  type Judgment,
   type Step,
 } from "../../../lib/transcripts.ts";
 import { Card, Screen, styles } from "../../ui.tsx";
@@ -180,8 +182,18 @@ export default function TranscriptPage({
       {detail.turns.length === 0 ? (
         <p style={styles.lead}>{DETAIL.noTurns}</p>
       ) : (
-        detail.turns.map((turn) => (
-          <Turn key={turn.span_id} turn={turn} openedAt={openedAt} />
+        detail.turns.map((turn, at) => (
+          <div key={turn.span_id}>
+            <Turn turn={turn} openedAt={openedAt} />
+            {/* The judgments that read this turn, against the turn itself.
+                A verdict citing turn 9 belongs beside turn 9 — reading it on
+                another page means holding a transcript in your head. */}
+            {(detail.verdicts ?? [])
+              .filter((its) => turnsCited(its).includes(at + 1))
+              .map((its) => (
+                <Judged key={`${its.grader_id}:${its.dimension}:${its.judged_at}`} judgment={its} />
+              ))}
+          </div>
         ))
       )}
 
@@ -407,5 +419,53 @@ function Recorded({ step, openedAt }: { step: Step; openedAt: string }) {
           </div>
         ))}
     </dl>
+  );
+}
+
+const VERDICT_COLOR: Record<string, string> = {
+  passed: "#1f7a3f",
+  failed: "#b00020",
+  skipped: "#8a6d00",
+  errored: "#b00020",
+};
+
+/**
+ * One judgment, against the turn it cites.
+ *
+ * The judge is named on every one. A verdict nobody can attribute is a verdict
+ * nobody can argue with, and arguing with them is how a suite gets better.
+ */
+function Judged({ judgment }: { judgment: Judgment }) {
+  return (
+    <div
+      style={{
+        margin: "0 0 0.5rem 1.25rem",
+        padding: "0.5rem 0.75rem",
+        borderLeft: `3px solid ${VERDICT_COLOR[judgment.verdict] ?? "#999"}`,
+        background: "#fafafa",
+      }}
+    >
+      <div style={{ display: "flex", gap: "0.5rem", alignItems: "baseline" }}>
+        <span
+          style={{
+            color: VERDICT_COLOR[judgment.verdict] ?? "#111",
+            fontWeight: 600,
+            fontSize: "0.875rem",
+          }}
+        >
+          {judgment.verdict}
+        </span>
+        <span style={styles.monospace}>{judgment.dimension}</span>
+        <span style={{ ...styles.muted, fontSize: "0.8125rem" }}>
+          {judgment.priority}
+        </span>
+      </div>
+      <p style={{ margin: "0.25rem 0 0.25rem", fontSize: "0.9375rem", lineHeight: 1.5 }}>
+        {judgment.rationale}
+      </p>
+      <p style={{ ...styles.muted, margin: 0, fontSize: "0.8125rem" }}>
+        judged by <span style={styles.monospace}>{judgment.judged_by}</span>
+      </p>
+    </div>
   );
 }

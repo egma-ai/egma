@@ -64,12 +64,47 @@ export type Step = {
   readonly spans: readonly Step[];
 };
 
+/** One judge's answer about this exchange, as the read hands it over. */
+export type Judgment = {
+  readonly grader_id: string;
+  readonly dimension: string;
+  readonly verdict: string;
+  readonly score: number;
+  readonly priority: string;
+  readonly rationale: string;
+  /** Turn positions, as `turn:1`. What the judge read, in the judge's terms. */
+  readonly cited_turns: readonly string[];
+  readonly judged_by: string;
+  readonly judged_at: string;
+};
+
 export type Detail = {
   readonly trace: Facts;
   readonly turns: readonly Step[];
   readonly spans: readonly Step[];
   readonly spans_truncated: boolean;
+  /** Absent on a trace nothing has judged, and on one whose store is down. */
+  readonly verdicts?: readonly Judgment[];
 };
+
+/**
+ * Which turn a judgment is about, as a position.
+ *
+ * A judgment cites `turn:9` because the judge was shown a numbered transcript
+ * and answered with the number it read. Positions survive spans ageing out of
+ * the store, which ids do not — so the citation stays readable long after the
+ * span it came on is gone.
+ */
+export function turnsCited(one: Judgment): readonly number[] {
+  const at: number[] = [];
+  for (const cited of one.cited_turns) {
+    const [prefix, number] = cited.split(":");
+    if (prefix !== "turn") continue;
+    const parsed = Number(number);
+    if (Number.isInteger(parsed) && parsed > 0) at.push(parsed);
+  }
+  return at;
+}
 
 export type Window = { readonly from: string; readonly to: string };
 

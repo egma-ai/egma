@@ -14,7 +14,10 @@
 
 export { reportComplaints, specComplaints } from "./documents.ts";
 
-export { traceIdOfSimulation } from "./trace-identity.ts";
+export {
+  simulationIdOfTrace,
+  traceIdOfSimulation,
+} from "./trace-identity.ts";
 
 export {
   catalogedMeasure,
