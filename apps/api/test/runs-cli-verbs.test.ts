@@ -96,10 +96,31 @@ async function signedInAs(person: Customer): Promise<SignedIn> {
   return { url: "http://egma.test", key };
 }
 
+/**
+ * A deployment `egma self-host phone setup` has finished with: somewhere to
+ * route a call, a number it comes from, and a voice to speak with. Non-secret,
+ * all three — see `phone-readiness.ts`.
+ */
+const PHONE_IS_SET_UP = {
+  trunkAddress: "egma-simulator-106e37f8.pstn.twilio.com",
+  sourceNumber: "+18885550123",
+  speechProvider: "openai",
+} as const;
+
+/** A number egma dials, registered the way the wizard registers one. */
+const PHONE_CONNECTION = {
+  type: "phone",
+  modality: "voice",
+  config: { phoneNumber: "+15551234567" },
+} as const;
+
 const CLAIMANT = "simulator-blue-1";
 
 /** A signed-in developer with an agent to check and two tests to check it. */
-async function readyToRun(label: string): Promise<{
+async function readyToRun(
+  label: string,
+  options: { readonly phoneIsSetUp?: boolean } = {},
+): Promise<{
   ada: Customer;
   signedIn: SignedIn;
   fetchImpl: Fetch;
@@ -107,7 +128,10 @@ async function readyToRun(label: string): Promise<{
   connectionId: string;
   versions: string[];
 }> {
-  api = await createApi(label);
+  api = await createApi(
+    label,
+    options.phoneIsSetUp === true ? { phone: PHONE_IS_SET_UP } : {},
+  );
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const signedIn = await signedInAs(ada);
   const fetchImpl = fetchThrough(api.app);
@@ -204,9 +228,10 @@ describe("starting a run from the terminal's own code", () => {
     expect(read).toEqual(answer.run);
   });
 
-  it("starts a run over a phone connection, because the phone adapter has shipped", async () => {
+  it("starts a run over a phone connection, because the phone adapter has shipped and this platform can dial", async () => {
     const { signedIn, fetchImpl, versions } = await readyToRun(
       "runs_cli_over_phone",
+      { phoneIsSetUp: true },
     );
 
     const registered = await api.app.inject({
@@ -242,6 +267,51 @@ describe("starting a run from the terminal's own code", () => {
     if (answer.kind !== "started") return;
     expect(answer.run.connectionType).toBe("phone");
     expect(answer.run.modality).toBe("voice");
+  });
+
+  /**
+   * The other half of the same door, from the terminal's side.
+   *
+   * The refusal a platform with no carrier answers with is not a shape this
+   * client knows about — it is a 422 like any other, and the client's whole
+   * job is to carry the sentence up unread. That is worth pinning here rather
+   * than only at the route: a client that started branching on codes would
+   * pass the route's test and still leave a developer with egma's paraphrase
+   * of somebody else's decision.
+   */
+  it("carries a platform-with-no-carrier's refusal up as an answer, word for word", async () => {
+    const { signedIn, fetchImpl, versions } = await readyToRun(
+      "runs_cli_phone_unset",
+    );
+
+    const registered = await api.app.inject({
+      method: "POST",
+      url: "/api/agents",
+      headers: { authorization: `Bearer ${signedIn.key}` },
+      payload: { name: "Front desk line", connection: PHONE_CONNECTION },
+    });
+    const dialled = (registered.json() as { connection: { id: string } })
+      .connection;
+
+    const answer = await startRun(
+      signedIn,
+      {
+        agentId: "",
+        connectionId: dialled.id,
+        testVersionIds: [versions[0] ?? ""],
+      },
+      fetchImpl,
+    );
+
+    expect(answer.kind).toBe("refused");
+    if (answer.kind !== "refused") return;
+    expect(answer.reason).toBe(
+      "this egma has not been set up to place phone calls, so nothing was " +
+        "dialled and nothing was charged. It is missing the carrier trunk " +
+        "and the source number and the speech provider. Whoever runs this " +
+        "platform makes it ready with one command in the platform workspace: " +
+        "egma self-host phone setup.",
+    );
   });
 
   it("hands the platform's own refusal back as an answer, word for word", async () => {

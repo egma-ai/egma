@@ -143,6 +143,13 @@ const CONTEXT_REQUIRING = [
   "clonePersona",
   "cloneTest",
   "completeSimulation",
+  // The type of one connection, by its id alone — the only connection read
+  // that does not name an agent. It exists for the deployment gate in front of
+  // run creation, which is handed a connection id and no agent id and has to
+  // know whether a phone call is what this run would place. It answers a type
+  // and nothing else, so what this widening lets out is a word from a closed
+  // set and never a config or a credential.
+  "connectionTypeOf",
   "correctVerdict",
   "createAgent",
   "createApiKey",
