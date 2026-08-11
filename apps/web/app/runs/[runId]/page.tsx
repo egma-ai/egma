@@ -36,6 +36,18 @@ type Counts = {
   readonly total: number;
 };
 
+type Judgment = {
+  readonly grader_id: string;
+  readonly dimension: string;
+  readonly verdict: string;
+  readonly score: number;
+  readonly priority: string;
+  readonly rationale: string;
+  readonly cited_turns: readonly string[];
+  readonly judged_by: string;
+  readonly judged_at: string;
+};
+
 type Simulation = {
   readonly id: string;
   readonly position: number;
@@ -46,6 +58,7 @@ type Simulation = {
   readonly verdict: string | null;
   readonly score: number | null;
   readonly counts: Counts | null;
+  readonly verdicts: readonly Judgment[];
   readonly reason: string | null;
 };
 
@@ -290,6 +303,52 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
           </tbody>
         </table>
       </div>
+
+      {/* What each judge actually decided, and why. The table above says how
+          many passed; this is the part somebody came to read. Every row names
+          the judge that wrote it and the turns it cited, so a verdict can be
+          argued with rather than only accepted. */}
+      {run.simulations
+        .filter((one) => one.verdicts.length > 0)
+        .map((one) => (
+          <section key={one.id} style={{ marginTop: "2rem" }}>
+            <h3 style={{ ...styles.label, fontSize: "0.9375rem" }}>
+              {one.position}. {one.test_name ?? one.id}
+              {one.persona_name === null ? null : (
+                <span style={styles.muted}> · {one.persona_name}</span>
+              )}
+            </h3>
+            {one.verdicts.map((its) => (
+              <div
+                key={`${its.grader_id}:${its.dimension}:${its.judged_at}`}
+                style={{
+                  borderTop: "1px solid #eee",
+                  padding: "0.75rem 0",
+                }}
+              >
+                <div style={{ display: "flex", gap: "0.5rem", alignItems: "baseline" }}>
+                  <Verdict what={its.verdict} />
+                  <span style={styles.monospace}>{its.dimension}</span>
+                  <span style={styles.muted}>{its.priority}</span>
+                </div>
+                <p style={{ margin: "0.375rem 0 0.25rem", lineHeight: 1.5 }}>
+                  {its.rationale}
+                </p>
+                <p style={{ ...styles.aside, margin: 0, fontSize: "0.8125rem" }}>
+                  judged by <span style={styles.monospace}>{its.judged_by}</span>
+                  {its.cited_turns.length === 0 ? null : (
+                    <>
+                      {" · citing "}
+                      <span style={styles.monospace}>
+                        {its.cited_turns.join(", ")}
+                      </span>
+                    </>
+                  )}
+                </p>
+              </div>
+            ))}
+          </section>
+        ))}
 
       {run.simulations.length === 0 ? (
         <p style={styles.aside}>This run has no conversations yet.</p>

@@ -8,11 +8,13 @@ import {
   NotPermittedError,
   ProjectOutsideOrganizationError,
   readRunVerdicts,
+  readVerdicts,
   RunWriteRefusedError,
   startRun,
   type AuthContext,
   type ConductedSimulation,
   type Run,
+  type RecordedVerdict,
   type RunEvent,
   type RunVerdicts,
   type SimulationVerdicts,
@@ -186,6 +188,7 @@ const NO_SUCH_RUN =
 function describedSimulation(
   one: ConductedSimulation,
   judged: SimulationVerdicts | undefined,
+  rows: readonly RecordedVerdict[],
 ): Record<string, unknown> {
   return {
     id: one.id,
@@ -204,6 +207,22 @@ function describedSimulation(
     // failing agent, and a summary that hid either would say the opposite of
     // what happened.
     counts: judged === undefined ? null : judged.outcome.counts,
+    // Every judged behaviour, whole. The fold above says how many passed; this
+    // says which ones and why, because "2 of 3 passed" without the rationale
+    // sends somebody to read a transcript to work out what egma already knew.
+    // The judge is named on every row: a verdict nobody can attribute is a
+    // verdict nobody can argue with.
+    verdicts: rows.map((its) => ({
+      grader_id: its.graderId,
+      dimension: its.dimension,
+      verdict: its.verdict,
+      score: its.score,
+      priority: its.priority,
+      rationale: its.rationale,
+      cited_turns: [...its.citedSpanIds],
+      judged_by: its.judgedBy,
+      judged_at: its.judgedAt,
+    })),
     reason: one.endingReason,
   };
 }
@@ -221,6 +240,7 @@ function describedRun(
   simulations: readonly ConductedSimulation[],
   baseUrl: string,
   judged?: RunVerdicts,
+  rowsBySimulation?: ReadonlyMap<string, readonly RecordedVerdict[]>,
 ): Record<string, unknown> {
   const bySimulation = new Map(
     (judged?.simulations ?? []).map((its) => [its.simulationId, its] as const),
@@ -262,7 +282,11 @@ function describedRun(
       counts: its.outcome.counts,
     })),
     simulations: simulations.map((its) =>
-      describedSimulation(its, bySimulation.get(its.id)),
+      describedSimulation(
+        its,
+        bySimulation.get(its.id),
+        rowsBySimulation?.get(its.id) ?? [],
+      ),
     ),
   };
 }
@@ -312,7 +336,20 @@ async function runAsItStands(
   // verdict store degrades to "pending" — which is the same shape a genuinely
   // ungraded run has, and which the next read corrects on its own.
   const judged = await readRunVerdicts(auth, runId).catch(() => undefined);
-  return describedRun(header, simulations, baseUrl, judged);
+
+  // The rows themselves, one conversation at a time. The run fold deliberately
+  // does not carry them — a run of two hundred conversations would be a page
+  // nobody asked for — so they are gathered only for the conversations this run
+  // actually has, and only for the ones something has judged.
+  const rowsBySimulation = new Map<string, readonly RecordedVerdict[]>();
+  await Promise.all(
+    (judged?.simulations ?? []).map(async (its) => {
+      const read = await readVerdicts(auth, its.simulationId).catch(() => undefined);
+      if (read !== undefined) rowsBySimulation.set(its.simulationId, read.verdicts);
+    }),
+  );
+
+  return describedRun(header, simulations, baseUrl, judged, rowsBySimulation);
 }
 
 export async function runRoutes(
