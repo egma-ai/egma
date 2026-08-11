@@ -15,7 +15,16 @@
  * no compose file is not an unconfigured workspace, it is somewhere else.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 /** What names a directory as a platform workspace. */
@@ -128,7 +137,32 @@ export function writePlatformConfig(
     ...Object.entries(values).map(([name, value]) => `${name}=${value}`),
     "",
   ].join("\n");
-  writeFileSync(file, body, { mode: PRIVATE_FILE_MODE });
-  chmodSync(file, PRIVATE_FILE_MODE);
+  // **Written beside the file and renamed over it, never into it.**
+  //
+  // This file holds the only copy of a SIP password Twilio has already
+  // accepted, and `writeFileSync` onto the live path truncates before it
+  // writes. A process that dies in that window leaves a half-written config —
+  // a deployment that reads as configured and authenticates nothing, which is
+  // harder to diagnose than one that is plainly absent.
+  //
+  // A rename within a directory is atomic, so a reader sees the whole old file
+  // or the whole new one and never a partial. `wx` makes the temporary this
+  // run's own file or nothing at all, and it is removed if anything downstream
+  // of it fails, so a crash leaves no litter beside a working configuration.
+  // The same mechanism the credentials store uses, for the same reason.
+  const fresh = path.join(
+    path.dirname(file),
+    `.platform-${process.pid}-${randomBytes(6).toString("hex")}.env`,
+  );
+  writeFileSync(fresh, body, { mode: PRIVATE_FILE_MODE, flag: "wx" });
+  try {
+    // The umask can only narrow what a file is created with, so this is what
+    // makes the mode exactly 0600 rather than 0600-or-less.
+    chmodSync(fresh, PRIVATE_FILE_MODE);
+    renameSync(fresh, file);
+  } catch (cause) {
+    rmSync(fresh, { force: true });
+    throw cause;
+  }
   return file;
 }
