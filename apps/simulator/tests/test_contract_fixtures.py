@@ -49,6 +49,11 @@ def read_json(path: Path) -> dict:
 # TypeScript suite's EXPECTED_REJECTION, kept in its shape on purpose.
 EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
     "spec/limits-missing.json": ("", "required", "limits"),
+    "spec/mock-tool-answering-two-ways.json": (
+        "/mock_tools/0/answer",
+        "additionalProperties",
+        "error",
+    ),
     "spec/modality-unknown.json": ("/modality", "enum", None),
     "spec/unknown-field.json": ("", "additionalProperties", "agent_id"),
     "spec/wrong-contract-version.json": ("/contract_version", "const", None),

@@ -20,6 +20,13 @@ export {
 } from "./trace-identity.ts";
 
 export {
+  bannedWordIn,
+  BANNED_MOCK_TOOL_WORDS,
+  type BannedWord,
+  type BannedWordFound,
+} from "./vocabulary.ts";
+
+export {
   catalogedMeasure,
   isCatalogedMeasure,
   measureAccepts,

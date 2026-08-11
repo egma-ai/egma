@@ -147,6 +147,7 @@ describe("commands after a repository is bound", () => {
         version: null,
         scenario: `The persona needs a different appointment time in case ${number}.`,
         expectedBehaviors: ["The agent confirms the new time."],
+        mockTools: [],
       });
     }
 

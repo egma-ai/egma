@@ -61,6 +61,16 @@ Always :data:`ROOM_BAND_HZ` — wideband, where a phone call is narrowband
 and the transport resamples what arrives, so what a record stamps is
 measured off the audio the recorder really saw.
 
+## Answering for the agent's tools
+
+A room is the one connection where egma can stand in the agent's tool
+path, because it is the one where egma is already in the room with it. The
+mock-tool exchange is offered on egma's own participant and the agent's
+side is told where to find it in the dispatch metadata; what answers it is
+:mod:`egma_simulator.mock_tools`, handed to this plug already holding the
+answers the run resolved. Nothing about it is this file's: the plug passes
+it to the driver that joins the room, and the driver offers it there.
+
 ## Where a turn begins and ends
 
 Nowhere in here. A live room carries no end-of-turn signal any more than a
@@ -77,6 +87,7 @@ from typing import Any
 
 from ..media import MediaBackendError
 from ..media.livekit_room import ROOM_BAND_HZ, LiveKitRoomBackend, RoomSettings
+from ..mock_tools import MockToolSeam
 from . import PlugError
 from .media_line import MediaLine
 
@@ -100,6 +111,7 @@ class LiveKitRoom:
         config: dict[str, Any],
         credentials: object,
         simulation_id: str,
+        mock_tools: MockToolSeam | None = None,
         driver: Any = None,
     ) -> None:
         if modality != "voice":
@@ -122,6 +134,7 @@ class LiveKitRoom:
             settings=_read(config, credentials),
             band_hz=self._band_hz,
             simulation_id=simulation_id,
+            mock_tools=mock_tools,
         )
         self._line: MediaLine | None = None
         self._reference: str | None = None

@@ -40,8 +40,7 @@ import {
   BoundPlatformAddressError,
   BoundPlatformUnavailableError,
   credentialsFileIn,
-  DEFAULT_PLATFORM_URL,
-  DefaultPlatformUnusableError,
+  NoPlatformNamedError,
   KEYS_UNUSABLE,
   KeysUnusableError,
   PlatformBindingMismatchError,
@@ -241,8 +240,9 @@ export function helpText(): string {
     "                           environment, never as an argument.",
     "  egma init [options]      Make the egma folder this repository's tests",
     "                           live in. Safe to run again.",
-    "  egma pull [options]      Write egma's current test versions into it.",
-    "  egma push [options]      Upload the tests in it. Refuses, naming names,",
+    "  egma pull [options]      Write egma's current test versions, and the mock",
+    "                           tools it answers with, into it.",
+    "  egma push [options]      Upload what is in it. Refuses, naming names,",
     "                           when egma has moved on since your last pull.",
     "  egma run [options]       Run this folder's tests, pinning the version of",
     "                           each. Follows the run and prints every change.",
@@ -355,7 +355,8 @@ export function helpText(): string {
     "  0 done   1 no egma folder here   2 not signed in",
     "  4 egma did not answer, or refused",
     "  5 push refused: egma has moved on, pull first",
-    "  6 egma turned a test away at its door   130 stopped part way",
+    "  6 egma turned a test or a mock tool away at its door",
+    "  130 stopped part way",
     "",
     "What egma run prints, one fact per line:",
     "  url, folder, agent, connection, one pin: line per test version it pinned,",
@@ -732,7 +733,10 @@ export async function main(argv: readonly string[]): Promise<void> {
   // in, or sends an identifier anywhere.
   if (invocation.verb === "init") {
     process.exitCode = await runFolderVerb(invocation.verb, invocation, {
-      url: DEFAULT_PLATFORM_URL,
+      // `init` writes a folder and talks to nothing, so there is no platform to
+      // name. Empty rather than a placeholder address: a real-looking one here
+      // would be a lie the next reader has to disprove.
+      url: "",
       credentialsFile: credentialsFileIn(process.env),
     });
     return;
@@ -799,7 +803,7 @@ export async function main(argv: readonly string[]): Promise<void> {
       error instanceof PlatformUnreachableError ||
       error instanceof PlatformIdentityError ||
       error instanceof BoundPlatformUnavailableError ||
-      error instanceof DefaultPlatformUnusableError
+      error instanceof NoPlatformNamedError
     ) {
       const status = refused ? "refused" : "unreachable";
       const message = (error as Error).message;

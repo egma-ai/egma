@@ -42,7 +42,7 @@ import { CLI_ENTRY } from "./support/workspace.ts";
 const AUTH_TOKEN = "SENTINEL-twilio-auth-token-0f1c8a2e4b6d";
 const OPENAI_KEY = "sk-SENTINEL-openai-key-9a7c3e5f1b2d4680";
 const ACCOUNT_SID = "AC00000000000000000000000000000001";
-const SOURCE_NUMBER = "+18884174625";
+const SOURCE_NUMBER = "+15550100100";
 const NUMBER_SID = "PN00000000000000000000000000000001";
 
 const EXISTING_TRUNK = { sid: "TK00000000000000000000000000000001", domain: "egma-simulator-abc123.pstn.twilio.com" };

@@ -51,7 +51,7 @@ describe("phone readiness", () => {
     // refusal has to say which half so somebody can act on it.
     const readiness = phoneReadiness({
       trunkAddress: "egma-simulator-abc.pstn.twilio.com",
-      sourceNumber: "+18884174625",
+      sourceNumber: "+15550100100",
       speechProvider: null,
     });
 
@@ -67,7 +67,7 @@ describe("phone readiness", () => {
   it("is ready once all three are there", () => {
     const readiness = phoneReadiness({
       trunkAddress: "egma-simulator-abc.pstn.twilio.com",
-      sourceNumber: "+18884174625",
+      sourceNumber: "+15550100100",
       speechProvider: "openai",
     });
 
@@ -79,7 +79,7 @@ describe("phone readiness", () => {
     const config = loadConfig({
       ...BASE,
       EGMA_PHONE_TRUNK_ADDRESS: "egma-simulator-abc.pstn.twilio.com",
-      EGMA_PHONE_SOURCE_NUMBER: "+18884174625",
+      EGMA_PHONE_SOURCE_NUMBER: "+15550100100",
       EGMA_PHONE_SPEECH_PROVIDER: "openai",
     });
 

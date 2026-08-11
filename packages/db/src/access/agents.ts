@@ -205,8 +205,13 @@ function validName(name: string, what: string): string {
  * the constraint's own name, walking the `cause` chain because the query layer
  * may hand the driver's error back wrapped — recognising it by message
  * substring would break silently the day the text changed.
+ *
+ * Exported to the module, not from the package: every factory with a
+ * uniqueness rule owes the loser a sentence rather than a driver error, and one
+ * of them recognising the loss differently from another is how a race comes to
+ * be answered as a fault on one path and as an answer on the next.
  */
-function lostToConstraint(error: unknown, constraint: string): boolean {
+export function lostToConstraint(error: unknown, constraint: string): boolean {
   for (
     let at: unknown = error, depth = 0;
     at !== undefined && at !== null && depth < 4;

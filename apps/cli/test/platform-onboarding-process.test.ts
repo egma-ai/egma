@@ -68,6 +68,7 @@ it("verifies an explicitly selected platform and commits its identity on first o
         version: null,
         scenario: `The persona needs a different appointment time in case ${number}.`,
         expectedBehaviors: ["The agent confirms the new time."],
+        mockTools: [],
       });
     }
     await expect(readConfig(paths.config)).rejects.toMatchObject({ code: "ENOENT" });

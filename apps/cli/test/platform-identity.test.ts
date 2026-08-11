@@ -4,8 +4,7 @@ import { createEgmaFolder } from "../src/folder/egma-folder.ts";
 import {
   BoundPlatformAddressError,
   BoundPlatformUnavailableError,
-  DEFAULT_PLATFORM_URL,
-  DefaultPlatformUnusableError,
+  NoPlatformNamedError,
   PlatformBindingMismatchError,
   resolvePlatformAccess,
 } from "../src/platform/credentials.ts";
@@ -257,11 +256,13 @@ describe("verifying an Egma platform", () => {
       }),
     );
 
-    expect(refusal).toBeInstanceOf(DefaultPlatformUnusableError);
-    expect(refusal.message).toContain(DEFAULT_PLATFORM_URL);
+    expect(refusal).toBeInstanceOf(NoPlatformNamedError);
     expect(refusal.message).toContain("--url <address>");
     expect(refusal.message).toContain("EGMA_URL");
-    // Not somebody's deployment, so not somebody's misconfiguration.
+    expect(refusal.message).toContain("Nothing was sent");
+    // No address is named, because there is none to name — and nothing was
+    // asked of any host, so no deployment is described as broken.
+    expect(refusal.message).not.toMatch(/https?:\/\//u);
     expect(refusal.message).not.toMatch(/sign-in page|proxy|this is where to look/u);
   });
 
@@ -312,27 +313,27 @@ describe("verifying an Egma platform", () => {
     await expect(stalled).rejects.toThrow("did not answer within");
   });
 
-  it("uses Egma Cloud only when the repository is unbound", async () => {
+  it("asks nothing at all when no platform is named", async () => {
     const requested: string[] = [];
-    const access = await resolvePlatformAccess({
-      env: workspace.env(),
-      flag: null,
-      cwd: workspace.dir,
-      fetchImpl: async (input) => {
-        requested.push(String(input));
-        return new Response(
-          JSON.stringify({
-            instance_id: "pf_01K3XQ7M4E8YB2FVN0H9TZQWEA",
-            origin: DEFAULT_PLATFORM_URL,
-          }),
-          { status: 200 },
-        );
-      },
-    });
+    await expect(
+      resolvePlatformAccess({
+        env: workspace.env(),
+        flag: null,
+        cwd: workspace.dir,
+        fetchImpl: async (input) => {
+          requested.push(String(input));
+          return new Response(null, { status: 200 });
+        },
+      }),
+    ).rejects.toBeInstanceOf(NoPlatformNamedError);
 
-    expect(access.url).toBe(DEFAULT_PLATFORM_URL);
-    expect(requested).toEqual([`${DEFAULT_PLATFORM_URL}/api/platform`]);
+    // The whole point of refusing here rather than falling back: with no
+    // hosted platform to reach for, an address invented at this moment would
+    // belong to somebody else, and probing it would report their server as a
+    // broken egma.
+    expect(requested).toEqual([]);
   });
+
 
   /**
    * A refusal names the platform the developer asked about.

@@ -51,6 +51,7 @@ beforeEach(async () => {
     version: null,
     scenario: "The persona asks to move an appointment.",
     expectedBehaviors: ["The agent confirms the new time."],
+    mockTools: [],
   });
 
   await mkdir(workspace.egmaFolder, { recursive: true });

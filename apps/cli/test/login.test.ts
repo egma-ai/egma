@@ -29,7 +29,6 @@ import {
   readCredentials,
   resolvePlatformUrl,
   writeCredentials,
-  DEFAULT_PLATFORM_URL,
   UnusableUrlError,
 } from "../src/platform/credentials.ts";
 import { logIn, type LoginPrompt } from "../src/platform/login.ts";
@@ -440,7 +439,11 @@ describe("which egma a command talks to", () => {
       "http://bound.example",
     );
 
-    expect(resolvePlatformUrl({ flag: null, env: "", binding: null })).toBe(DEFAULT_PLATFORM_URL);
+    // Nothing names a platform, and egma has no hosted one to fall back to, so
+    // this refuses rather than inventing an address to go and probe.
+    expect(() => resolvePlatformUrl({ flag: null, env: "", binding: null })).toThrow(
+      "names no Egma platform",
+    );
   });
 
   it("refuses an address that is not one, and names where it came from", () => {

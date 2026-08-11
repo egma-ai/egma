@@ -110,9 +110,11 @@ export default function Home() {
       </p>
 
       <p style={styles.aside}>
-        Nothing else is built yet. Everything a test needs — agents,
-        connections, personas, graders — arrives with the effort that can
-        run one.
+        A run opens at its own address, which the terminal prints when the run
+        starts and which is safe to paste to a colleague — it carries no key,
+        so it shows what the person opening it is allowed to see. Agents,
+        connections and personas are made from the terminal today; this side is
+        where you read what happened.
       </p>
 
       <p style={styles.aside}>

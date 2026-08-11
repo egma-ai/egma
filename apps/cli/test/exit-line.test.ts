@@ -7,7 +7,7 @@ import {
   type ExitReport,
 } from "../src/wizard/exit-line.ts";
 
-const RESULTS_URL = "https://app.egma.ai/runs/run_01K7QXV2M8ZB4C6D8E0F2G4H6J";
+const RESULTS_URL = "http://localhost:3101/runs/run_01K7QXV2M8ZB4C6D8E0F2G4H6J";
 
 const EVERY_ENDING: readonly ExitReport[] = [
   { kind: "found-agent", framework: "retell-sdk", prompts: "prompts/order-line.md" },

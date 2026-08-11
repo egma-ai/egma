@@ -264,12 +264,18 @@ def a_spec(
     max_turns: int,
     max_duration_seconds: int,
     modality: str = "chat",
+    mock_tools: list[dict] | None = None,
 ) -> dict:
     """The envelope every spec shares: one persona, one scenario, one set of
     walls, one exchange. What differs between two specs is the connection
     block and the modality, which is exactly the difference the plug seam
-    exists to absorb."""
-    return {
+    exists to absorb.
+
+    ``mock_tools`` is left off the document entirely when there are none,
+    rather than sent as an empty list: absent is what the control plane
+    really sends for a project that mocks nothing, and a spec that said
+    ``[]`` would be exercising a shape nothing produces."""
+    spec = {
         "contract_version": 1,
         "simulation_id": simulation_id,
         "modality": modality,
@@ -281,6 +287,9 @@ def a_spec(
             "max_turns": max_turns,
         },
     }
+    if mock_tools:
+        spec["mock_tools"] = mock_tools
+    return spec
 
 
 def scripted_spec(

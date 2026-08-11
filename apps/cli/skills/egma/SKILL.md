@@ -28,6 +28,7 @@ the work; `--help` is the current detail.
 ```
 egma/
   config.yaml     what this folder points at — names and ids
+  mock-tools.md   what egma answers for the agent's tools with
   tests/          one markdown file per test
 ```
 
@@ -62,6 +63,43 @@ week. They are short of time and already annoyed.
 - **`version:`** is egma's. `pull` and `push` write it. Never write or edit
   that line yourself: it is how egma knows what this file is a draft of.
 
+## The mocked world
+
+A **mock tool** answers for one of the agent's tools while a simulation runs, so
+a test never reaches the real backend and can ask for the branch it needs — an
+empty calendar, a booking service that is down. The project's own live in
+`egma/mock-tools.md`, the tool named in the heading and the answer in the block
+under it:
+
+`````markdown
+## Mock tools
+### check_availability
+```json
+{
+  "answer": { "slots": [] },
+  "delay_ms": 250
+}
+```
+`````
+
+- **`answer`** is whatever that tool returns — any shape, including `null`.
+- **`error`** instead of `answer` is the failure it raises. One of the two,
+  never both.
+- **`delay_ms`** holds the answer back, so a mocked backend takes as long as the
+  real one. Leave it out for none.
+- **`agents`** is a list of agent names this mock tool applies to. Leave it out
+  and it applies to every agent in the project, which is what keeps two prompt
+  variants comparable.
+
+A test that needs a different answer writes the same section into its own file,
+under the expected behaviors. That override belongs to the test and is versioned
+with it; the project's mock tools are the one authored thing egma does not
+version, so pushing an edit writes over what was there.
+
+Neither verb removes one. A block taken out of `egma/mock-tools.md` comes back
+on the next `egma pull`, exactly as deleting a test file does not delete the
+test.
+
 ## Keeping the folder and egma in step
 
 ```sh
@@ -79,6 +117,9 @@ push again. Never delete a `version:` line to get past the refusal; that
 discards the other person's work.
 
 `push` also relays egma's own refusals word for word. Fix the file it names.
+Every rule about what a mock tool may answer with — one branch and not two, how
+long a delay may be, how large an answer may be — is egma's and is answered at
+egma's door, so the sentence you get back is the whole of what to fix.
 
 ## Starting a run
 
@@ -96,7 +137,7 @@ when a verdict lands, and a summary you can parse:
 
 ```
 run: run_01K…
-results: https://app.egma.ai/runs/run_01K…
+results: http://localhost:3101/runs/run_01K…
 simulation: missed-appointment-reschedule impatient-regular running
 verdict: missed-appointment-reschedule impatient-regular passed
 passed: 9
@@ -153,6 +194,7 @@ They are not interchangeable, and the developer's team uses them precisely.
 | Word | Means |
 | --- | --- |
 | `agent` | the developer's voice agent, under test — never you |
+| `mock tool` | egma's answer for one of that agent's tools |
 | `persona` | the synthetic person who speaks to it |
 | `test` | one authored situation, plus what should happen |
 | `test suite` | a saved selection over a project's tests |

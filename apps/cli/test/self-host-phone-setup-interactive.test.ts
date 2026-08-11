@@ -25,7 +25,7 @@ import { runInTerminal, showing, type TerminalRun } from "./support/pty.ts";
 import { CLI_ENTRY } from "./support/workspace.ts";
 
 const ACCOUNT_SID = "AC00000000000000000000000000000001";
-const SOURCE_NUMBER = "+18884174625";
+const SOURCE_NUMBER = "+15550100100";
 const NUMBER_SID = "PN00000000000000000000000000000001";
 const EXISTING_TRUNK = {
   sid: "TK00000000000000000000000000000001",

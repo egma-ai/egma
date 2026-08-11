@@ -1,0 +1,77 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "egma-simulator" } },
+          { "key": "egma.simulation_id", "value": { "stringValue": "sim_01K3XV2D6H9E4TBQZ7MKR0NFAC" } }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "egma-simulator", "version": "1" },
+          "spans": [
+            {
+              "traceId": "0198fbb134d14b89a5dfe7a4f00abd4c",
+              "spanId": "cc30000000000002",
+              "parentSpanId": "cc30000000000001",
+              "name": "tool_call",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1785931204118000000",
+              "endTimeUnixNano": "1785931204368000000",
+              "attributes": [
+                { "key": "egma.tool.name", "value": { "stringValue": "check_calendar" } },
+                {
+                  "key": "egma.tool.arguments",
+                  "value": { "stringValue": "{\"date\":\"2026-08-13\",\"duration_minutes\":30}" }
+                },
+                {
+                  "key": "egma.tool.result",
+                  "value": { "stringValue": "{\"slots\":[]}" }
+                },
+                { "key": "egma.tool.provenance", "value": { "stringValue": "mocked" } },
+                { "key": "egma.tool.mock_tool", "value": { "stringValue": "check_calendar" } }
+              ]
+            },
+            {
+              "traceId": "0198fbb134d14b89a5dfe7a4f00abd4c",
+              "spanId": "cc30000000000003",
+              "parentSpanId": "cc30000000000001",
+              "name": "tool_call",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1785931221540000000",
+              "endTimeUnixNano": "1785931221546000000",
+              "attributes": [
+                { "key": "egma.tool.name", "value": { "stringValue": "send_confirmation_sms" } },
+                {
+                  "key": "egma.tool.result",
+                  "value": { "stringValue": "{\"delivered\":true}" }
+                },
+                { "key": "egma.tool.provenance", "value": { "stringValue": "mocked" } },
+                { "key": "egma.tool.mock_tool", "value": { "stringValue": "send_confirmation_sms" } },
+                { "key": "egma.tool.late_attached", "value": { "boolValue": true } }
+              ]
+            },
+            {
+              "traceId": "0198fbb134d14b89a5dfe7a4f00abd4c",
+              "spanId": "cc30000000000004",
+              "parentSpanId": "cc30000000000001",
+              "name": "tool_call",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1785931233900000000",
+              "endTimeUnixNano": "1785931233901000000",
+              "attributes": [
+                { "key": "egma.tool.name", "value": { "stringValue": "charge_card" } },
+                {
+                  "key": "egma.tool.arguments",
+                  "value": { "stringValue": "{\"amount_cents\":4200}" }
+                },
+                { "key": "egma.tool.provenance", "value": { "stringValue": "refused" } }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -3,6 +3,8 @@
 The first open-source platform purpose-built to help teams shipping voice agents
 gain trust in the agent they ship to production.
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/egma-ai/egma)
+
 ## Running it
 
 You need Docker with Compose. Nothing else.
@@ -15,7 +17,7 @@ laptop that is often the same person, and the two directories are still
 separate, because one platform serves many repositories.
 
 ```bash
-npx egma self-host up
+npx egma-cli self-host up
 ```
 
 That starts the whole platform and prints the address an agent repository
@@ -59,7 +61,7 @@ perfectly well, so `self-host up` brings one up *ready* and says phone is `setup
 required`. One more command in this directory makes it able to place calls:
 
 ```bash
-npx egma self-host phone setup
+npx egma-cli self-host phone setup
 ```
 
 It asks for a Twilio account, a voice number that account **already owns**, and
@@ -126,8 +128,14 @@ at all.
 
 ## Your first run, from a terminal
 
-With an instance up and an account on it, the walk is one command. That command
-is not on npm yet, so it comes from this checkout:
+With an instance up and an account on it, the walk is one command:
+
+```bash
+cd ~/your-voice-agent
+EGMA_URL=http://localhost:3101 npx egma-cli
+```
+
+To run it from this checkout instead — for development, or ahead of a release:
 
 ```bash
 pnpm install                    # once
@@ -142,7 +150,7 @@ cd ~/your-voice-agent
 EGMA_URL=http://localhost:3101 node ~/egma/apps/cli/dist/bin.js
 ```
 
-`~/egma` is this checkout; when the package ships, that line becomes `npx egma`.
+`~/egma` is this checkout. The published package is `egma-cli`; the command it installs is `egma`.
 
 It signs that machine in — a short code, approved in the browser you signed up
 in — registers your voice agent together with the way egma reaches it, writes a
@@ -152,12 +160,14 @@ a verb (`egma login`, `egma connect`, `egma push`, `egma run`) that prints one
 fact per line and answers with a number, for a coding agent driving it with
 nobody watching. `apps/cli/README.md` is the whole of it.
 
-**Where it stops today, said plainly.** The run is created and followed live,
-and no verdict arrives: nothing claims a simulation yet, so the run stays
-pending and every simulation stays queued. Both services below are real — the
-simulator conducts a conversation and the grader judges one — and what is
-missing between them and your run is the seam a simulator claims its work
-through. Everything before that is real, and the run you started is yours — at
+**What happens, said plainly.** The run is created and followed live, the
+simulator claims it and conducts the conversation, and the grader judges what
+it did. Verdicts arrive after the conversation ends — one per expected
+behaviour, each carrying its own rationale, the turns it cites and the judge
+that wrote it. Execution and grading are reported separately, because a run
+whose calls have all finished is not yet a run whose judgment is in.
+
+Everything before that is real, and the run you started is yours — at
 the address the terminal printed, with no token on it.
 
 The same walk runs as a check. On a checkout that has had `pnpm install`, and on
@@ -250,8 +260,9 @@ customer's choice, not egma's. `apps/grader/README.md` is the whole table.
 
 ### Watching a simulator without a control plane
 
-The endpoints the simulator dials are still being built, so there is nothing to
-trigger a run with yet. To see the machinery work anyway, start it against the
+A real run needs a platform to claim work from. To watch the simulator's own
+machinery in isolation instead — no database, no control plane — start it
+against the
 **workbench** — a fake control plane that speaks the same contract from spec
 fixtures, with no database anywhere:
 
@@ -312,25 +323,25 @@ there.
 that is routine.** Set `EGMA_LIVEKIT_SIP_EXTERNAL_IP` to the address and open
 UDP 5060 plus the RTP range to your carrier's published ranges.
 
-**On a laptop behind an ordinary router it does not work, and "required" is
-measured rather than assumed.** The gateway discovers its public address by
-asking a STUN server, which answers with the address only — and pairs it with
-its own *local* RTP port. On a consumer router that pairing names nothing. Here
-is the measurement, from a MacBook behind a home router: a UDP socket bound to
-port 10019 is seen by the outside world as port 41110, another on 10105 as
-39306, another on 10106 as 64104 — a different arbitrary port every time, and
-no inbound mapping for any of them. So audio addressed to the advertised
-`public-address:10019` arrives nowhere. Signalling is only luckier, not
-reliable: of four INVITEs sent through that router, two brought the carrier's
-own answer back and two timed out having heard nothing.
+**On a laptop behind an ordinary router it depends on your carrier, and we have
+now measured both answers.** The gateway discovers its public address by asking
+a STUN server, which answers with the address only — and pairs it with its own
+*local* RTP port. On some consumer routers that pairing names nothing: measured
+from a MacBook behind one home router, a UDP socket bound to port 10019 was
+seen outside as 41110, another on 10105 as 39306, another on 10106 as 64104 — a
+different arbitrary port every time, and no inbound mapping for any of them.
 
-The one thing that could rescue a NATed gateway is the carrier ignoring the
-address in the SDP and replying to wherever our audio came from — symmetric
-RTP latching, which many carriers do. We could not settle whether ours does,
-because the account we tested with refused every call before it was answered
-and latching only happens after. So: **a public IP or a 1:1 NAT is required.**
-If your carrier latches you may get away with less, but do not plan a
-deployment on it. Use LiveKit Cloud instead — same API, same trunk, same code,
+What rescues a NATed gateway is the carrier ignoring the address in the SDP and
+replying to wherever our audio came from — **symmetric RTP latching**, which
+many carriers do. **Twilio does.** A real outbound call from a MacBook behind an
+ordinary home router, with no port forwarding, carried two minutes of two-way
+audio and reached the agent under test. A second home router measured
+port-preserving and endpoint-independent across three STUN servers, which is
+why that call worked.
+
+So: **on a server with a public IP this is routine, and on a laptop it depends
+on your carrier latching.** Try it — a failed call costs a few cents and tells
+you in under a minute. If yours does not latch, use LiveKit Cloud — same API, same trunk, same code,
 one URL.
 
 The RTP range is 21 ports by default, not LiveKit's own 10000-20000: that is
@@ -345,7 +356,7 @@ You should not have to hand-build SIP paperwork in somebody's console, and you
 do not:
 
 ```bash
-npx egma self-host phone setup
+npx egma-cli self-host phone setup
 ```
 
 It reads your account first and shows you a plan — what it would create and what
@@ -449,9 +460,9 @@ recipe to run it safely.
 
 ## Working on it
 
-Node 24 and pnpm 10. The simulator is Python, managed by
-[uv](https://docs.astral.sh/uv/) — install it too, and `pnpm test` covers
-both worlds.
+Node 24 and pnpm 10. Two things here are Python, managed by
+[uv](https://docs.astral.sh/uv/) — the simulator and the SDK a customer
+installs — so install uv too, and `pnpm test` covers all three worlds.
 
 ```bash
 pnpm install
@@ -507,6 +518,10 @@ packages/simulation-contract
                 The versioned JSON contract between the control plane and the
                 simulator: a schema per direction, golden fixtures beside
                 them, and the suite that holds both to the fixtures.
+sdks/python     The package a customer installs inside their own LiveKit
+                agent, so egma can answer for the agent's tools while a
+                simulation runs and touch nothing anywhere else. Published
+                to PyPI as `egma`. Own toolchain (uv); see its README.
 ```
 
 The two processes answer on **one origin**. The web application proxies the

@@ -25,14 +25,18 @@ import {
 import { PlatformUnreachableError, type Fetch } from "./device-flow.ts";
 
 /**
- * The address a command falls back to when nothing else names one.
+ * There is no fallback address, and that is the honest state of the world.
  *
- * It is egma's own built-in default and not a platform the developer runs, so
- * nothing that goes wrong there is theirs to go and inspect. Anything it
- * answers is reported as "egma's default address is not usable, name yours" —
- * never as a deployment somebody ought to go and fix.
+ * egma has no hosted platform yet. A built-in default pointing at one that does
+ * not exist would send an unbound repository to probe somebody else's website
+ * and then report *their* server as a broken egma — which is the opposite of
+ * useful. So a command that names no platform is refused here, before any
+ * address is asked anything, and the refusal says the one move that is the
+ * developer's: name theirs.
+ *
+ * When there is a hosted platform, this is where its address goes and
+ * `NoPlatformNamedError` becomes the fallback again.
  */
-export const DEFAULT_PLATFORM_URL = "https://app.egma.ai";
 
 /** Owner only, on the file and on the folder that holds it. */
 const FILE_MODE = 0o600;
@@ -335,7 +339,7 @@ export class UnusableUrlError extends Error {
 }
 
 /** Where a selected address came from. It decides who a refusal names. */
-export type PlatformSource = "--url" | "EGMA_URL" | "binding" | "cloud";
+export type PlatformSource = "--url" | "EGMA_URL" | "binding";
 
 export type SelectedPlatform = {
   readonly url: string;
@@ -346,7 +350,6 @@ const SOURCE_NAMES: Record<PlatformSource, string> = {
   "--url": "--url",
   EGMA_URL: "EGMA_URL",
   binding: "the repository platform binding",
-  cloud: "Egma Cloud",
 };
 
 /**
@@ -381,7 +384,7 @@ export function selectPlatform(choice: PlatformChoice): SelectedPlatform {
       throw new UnusableUrlError(SOURCE_NAMES[source]);
     }
   }
-  return { url: DEFAULT_PLATFORM_URL, source: "cloud" };
+  throw new NoPlatformNamedError();
 }
 
 /** The address alone, for callers that do not have to say where it came from. */
@@ -448,13 +451,12 @@ export class BoundPlatformUnavailableError extends Error {
  * somebody can go and look at, and saying that about this address would send a
  * developer off to inspect a website that is not theirs.
  */
-export class DefaultPlatformUnusableError extends Error {
-  constructor(cause: unknown) {
+export class NoPlatformNamedError extends Error {
+  constructor() {
     super(
-      `This repository names no Egma platform, so egma tried its built-in default at ${DEFAULT_PLATFORM_URL}, and that did not answer as an Egma platform. Point egma at yours: run it again with --url <address>, or set EGMA_URL for this shell. Nothing was sent.`,
-      { cause },
+      "This repository names no Egma platform, and egma has no hosted one to fall back to. Point egma at yours: run it again with --url <address>, or set EGMA_URL for this shell. Nothing was sent.",
     );
-    this.name = "DefaultPlatformUnusableError";
+    this.name = "NoPlatformNamedError";
   }
 }
 
@@ -517,7 +519,6 @@ export async function resolvePlatformAccess(choice: {
       throw new BoundPlatformUnavailableError(binding, cause);
     }
     // Nobody chose this address, so nobody can be sent to go and look at it.
-    if (selected.source === "cloud") throw new DefaultPlatformUnusableError(cause);
     throw cause;
   }
 

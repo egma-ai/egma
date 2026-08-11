@@ -24,12 +24,23 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from ..contract import ERROR
+from ..mock_tools import MockToolRefusal
 from . import MediaBackendError
 
 logger = logging.getLogger(__name__)
+
+RpcMethod = Callable[[str], Awaitable[str]]
+"""One method somebody in the room may call: a payload in, a payload out.
+
+Deliberately the whole surface. What answers these knows nothing about
+rooms, participants or LiveKit — it takes the bytes of a request and hands
+back the bytes of a reply — so the same handler is registered against a
+real room and against the room-shaped fake with nothing in it changing.
+"""
 
 ROOM_PREFIX = "egma-sim"
 """What a simulation's room is called. One room per simulation, never
@@ -77,6 +88,32 @@ def persona_name_for(simulation_id: str) -> str:
     and a token can be minted for exactly it.
     """
     return f"{PERSONA_IDENTITY}-{simulation_id}"
+
+
+def answering(handler: RpcMethod) -> Callable[[Any], Awaitable[str]]:
+    """One handler, wrapped so its refusals leave as the room's own error.
+
+    What answers a method raises :class:`MockToolRefusal` when it will not
+    answer — a payload it cannot read, a tool it has no answer for — and
+    the room turns that into the transport's typed error, code and
+    sentence intact, so the caller is refused rather than left waiting.
+    Anything else the handler raises is the caller's to hear as an
+    application error, which is what the transport does with it by default.
+
+    The wrapping is here, once, rather than at each place a handler is
+    registered: a room-shaped fake that converted refusals its own way
+    would be proving its own conversion rather than this one.
+    """
+
+    async def answer(invocation: Any) -> str:
+        from livekit import rtc
+
+        try:
+            return await handler(invocation.payload)
+        except MockToolRefusal as refused:
+            raise rtc.RpcError(refused.code, refused.message) from refused
+
+    return answer
 
 
 async def first_of(*events: asyncio.Event, within: float) -> bool:
@@ -326,6 +363,32 @@ class JoinedRoom:
 
         self._session = session
         return session
+
+    def register_rpc(self, method: str, handler: RpcMethod) -> None:
+        """Let anybody in the room call ``method`` on egma's participant.
+
+        Room membership is the whole of the authorisation, and that is the
+        design rather than a shortcut: a token into one room is minted for
+        one simulation and nothing else, so the only callers are the agent
+        egma is testing and egma itself. In a room with no egma
+        participant there is nothing registered and nothing to call, which
+        is what makes production safe by absence rather than by
+        configuration.
+        """
+        if self._transport is None:
+            raise MediaBackendError(
+                f"{method} was offered before the room was joined; there is "
+                "no participant to register it on",
+                ending=ERROR,
+            )
+        # The transport offers no public way to the room it joined, so this
+        # reaches through it to the participant underneath. A debt owed to
+        # the pinned version, and a small one: it is the one line of this
+        # file that knows the transport has an inside, and the seam it
+        # serves is named in the four verbs above it.
+        self._transport._client.room.local_participant.register_rpc_method(
+            method, answering(handler)
+        )
 
     async def leave(self) -> None:
         """End the transport and let go of it, from any state."""

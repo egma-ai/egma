@@ -147,6 +147,7 @@ it("refuses a repository bound to another real local platform before sending its
       version: testResource.version_id,
       scenario: "The persona asks to move an appointment.",
       expectedBehaviors: ["The agent confirms the new time."],
+      mockTools: [],
     });
 
     // Prove the observer is in front of authentication. Platform A's key is
@@ -316,6 +317,7 @@ it("refuses when the bound real platform is down, and reaches no other platform"
       version: testResource.version_id,
       scenario: "The persona asks to move an appointment.",
       expectedBehaviors: ["The agent confirms the new time."],
+      mockTools: [],
     });
     const repositoryIds = [
       resources.agent.id,

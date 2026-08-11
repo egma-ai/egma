@@ -16,7 +16,13 @@ import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
-import { SKILL_NAMES, instructionsWith, skill, skillFile } from "../src/skills/index.ts";
+import {
+  SKILL_NAMES,
+  installableSkill,
+  instructionsWith,
+  skill,
+  skillFile,
+} from "../src/skills/index.ts";
 import { FACTS } from "../src/wizard/facts.ts";
 import { pasteFallbackMessage } from "../src/wizard/no-coding-agent.ts";
 import { BANNED, SCENARIO_HEADING } from "./support/glossary.ts";
@@ -86,6 +92,103 @@ describe("egma's skills", () => {
       expect(readme, fact.name).toContain(fact.phrase);
       expect(pasted, fact.name).toContain(fact.phrase);
     }
+  });
+
+  /**
+   * The folder's layout is written down in three places — the module that makes
+   * it, the skill a coding agent reads, and the README a person reads — and a
+   * layout that says three different things is two of them being wrong. This
+   * holds the two shipped ones to the same line, so a part of the folder added
+   * without a home in the documentation fails here.
+   */
+  it("say what is in the folder, and agree with the README about it", () => {
+    const layout = [
+      "egma/",
+      "  config.yaml     what this folder points at — names and ids",
+      "  mock-tools.md   what egma answers for the agent's tools with",
+      "  tests/          one markdown file per test",
+    ].join("\n");
+
+    expect(installableSkill()).toContain(layout);
+    expect(readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8")).toContain(layout);
+  });
+
+  /**
+   * A fence that holds a fence has to be longer than the one it holds.
+   *
+   * This is the mistake that makes a document look right in a diff and wrong
+   * everywhere it is read: the inner fence closes the outer one, and everything
+   * after it — headings, prose, the rest of the page — renders as a code block.
+   * A skill is read by a coding agent and a README by a person, and neither of
+   * them can tell you the file broke.
+   */
+  it("still read as prose after the examples that show a fence", () => {
+    /**
+     * Every line the reader is shown as code, by markdown's own rule: a fence
+     * opens on a run of three or more backticks, and closes only on a run at
+     * least as long *with nothing after it*. A ```json line inside a ```markdown
+     * block therefore does not close it — but the ``` ending the JSON does, and
+     * the fence meant to close the outer block opens a new one that runs on
+     * until something else closes it.
+     */
+    const insideAFence = (content: string): ReadonlySet<string> => {
+      const shown = new Set<string>();
+      let open: number | null = null;
+      for (const raw of content.split("\n")) {
+        const fence = /^\s*(`{3,})\s*(\S*)\s*$/u.exec(raw);
+        if (fence !== null) {
+          const ticks = (fence[1] as string).length;
+          if (open === null) open = ticks;
+          else if (fence[2] === "" && ticks >= open) open = null;
+          continue;
+        }
+        if (open !== null) shown.add(raw.trim());
+      }
+      return shown;
+    };
+
+    // One heading from below each example, per document. If an example's fences
+    // are nested wrongly, the heading after it is swallowed into a code block
+    // and the whole of the rest of the section goes with it — which reads
+    // perfectly in a diff and is broken everywhere it is rendered.
+    const held: readonly (readonly [string, string, string])[] = [
+      [
+        "skills/egma/SKILL.md",
+        installableSkill(),
+        "## Keeping the folder and egma in step",
+      ],
+      ["skills/writing-tests.md", skill("writing-tests"), "## How to report: marker lines"],
+      [
+        "README.md",
+        readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8"),
+        "## Your first suite of tests",
+      ],
+    ];
+
+    for (const [where, content, heading] of held) {
+      expect(content, where).toContain(heading);
+      expect({ where, shownAsCode: insideAFence(content).has(heading) }).toEqual({
+        where,
+        shownAsCode: false,
+      });
+    }
+  });
+
+  it("say where a mock tool goes, and which half of it versions", () => {
+    const driving = installableSkill();
+    expect(driving).toContain("egma/mock-tools.md");
+    expect(driving).toContain("## Mock tools");
+    // The two halves behave differently, and a coding agent that did not know
+    // which was which would author the wrong one.
+    const unwrapped = driving.replace(/\s+/g, " ");
+    expect(unwrapped).toContain("the one authored thing egma does not version");
+    expect(unwrapped).toContain("That override belongs to the test and is versioned with it");
+
+    // The skill that writes tests points at the test's own file and nowhere
+    // else, because it must never author the project's mocked world.
+    const writing = skill("writing-tests").replace(/\s+/g, " ");
+    expect(writing).toContain("## Mock tools");
+    expect(writing).toContain("not `egma/mock-tools.md`");
   });
 
   it("say what a Retell voice agent looks like, both ways round", () => {

@@ -84,6 +84,16 @@ type StatusEvent = {
       readonly recording: string;
     } | null;
     readonly provider_reference: string | null;
+    /**
+     * The one terminal fact that may be omitted, and the only one whose
+     * absence is itself a sentence: the agent was never asked what tools it
+     * has, so nothing was learned and nothing is claimed.
+     */
+    readonly mock_tool_coverage?: {
+      readonly discovered: readonly string[];
+      readonly covered: readonly string[];
+      readonly uncovered: readonly string[];
+    };
   };
 };
 
@@ -143,6 +153,14 @@ function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
           measuredAudioBandHertz: facts.audio.measured_sample_rate_hz,
           recordingReference: facts.audio.recording,
         }),
+    // Left off where the document left it off, rather than landed as three
+    // empty lists: absent is the report saying nobody was ever asked, and
+    // empty is the asking happening and nothing coming back. Writing one for
+    // the other would be this door inventing a fact the simulator declined to
+    // claim.
+    ...(facts.mock_tool_coverage === undefined
+      ? {}
+      : { mockToolCoverage: facts.mock_tool_coverage }),
     // Absent when incoherent, so the landing's own stamps stand for both.
     ...(reportedMoments(facts) ?? {}),
   };

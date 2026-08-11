@@ -66,9 +66,9 @@ line, and exits with a number you can branch on. That is how a coding agent
 signs a machine in.
 
 ```
-url: https://app.egma.ai
+url: http://localhost:3101
 code: WDJBMJHT
-approve_url: https://app.egma.ai/device?user_code=WDJBMJHT
+approve_url: http://localhost:3101/device?user_code=WDJBMJHT
 browser: opened
 waiting: for this code to be approved in a browser
 status: stored
@@ -197,7 +197,7 @@ results history. `agent_registration:` and `connection_registration:` say the
 same thing for each half, as `created` or `reused`.
 
 ```
-url: https://app.egma.ai
+url: http://localhost:3101
 retell_agents: 1
 retell_agent_id: agent_…
 retell_response_engine: retell-llm
@@ -230,6 +230,7 @@ status: connected
 ```
 egma/
   config.yaml     what this folder points at — names and ids
+  mock-tools.md   what egma answers for the agent's tools with
   tests/          one markdown file per test
 ```
 
@@ -257,6 +258,30 @@ reschedule this week. They are short on time and irritated.
 Name a persona only when the situation needs a particular kind of person on the
 other end; leave `personas` out and the default one applies. `version:` is
 absent until `pull` or `push` writes it.
+
+`egma/mock-tools.md` is the mocked world: a **mock tool** answers for one of
+your agent's tools while a simulation runs, so a test never reaches your real
+backend and can ask for the branch you want to see — an empty calendar, a
+booking service that is down.
+
+``````markdown
+## Mock tools
+### check_availability
+```json
+{
+  "answer": { "slots": [] },
+  "delay_ms": 250
+}
+```
+``````
+
+Send `error` instead of `answer` for the failure a tool raises, `delay_ms` to
+make a mocked backend take as long as the real one, and `agents` to narrow a
+mock tool to some of your agents rather than all of them. A test that needs a
+different answer writes the same section into its own file, below its expected
+behaviors — that override belongs to the test and is versioned with it, while
+the project's own mock tools are the one authored thing egma does not version,
+so pushing an edit writes over what was there.
 
 ## Your first suite of tests
 
@@ -338,12 +363,13 @@ passed 1  ·  failed 0  ·  skipped 0  ·  errored 0  ·  waiting 11
 that is the point where you stop taking egma's word for it — and then closes.
 The run carries on on egma; shutting your terminal has never stopped one.
 
-**On an instance today, no verdict arrives yet.** The run is created, it is
-followed live, and every simulation sits in `queued`, because the piece that
-hands a test to the simulator and the grader that scores what it did are still
-being built. Everything up to that point is real. Until they land, close the
-window when you have seen the run — the run is yours on egma either way, at the
-address the screen shows.
+**Verdicts arrive after the conversation ends.** The simulator claims each
+simulation and conducts it; the grader judges what it did and writes one
+verdict per expected behaviour, each with its own rationale, the turns it
+cites, and the judge that wrote it. The screen keeps following until every
+simulation has finished **and** every one has been judged — those are two
+different moments. Close the window whenever you like; the run is yours on egma
+either way, at the address the screen shows.
 
 A **verdict** is one of four, and egma never turns four into three:
 
@@ -369,7 +395,7 @@ is the same thing with nobody watching. It pins the version of every test it
 runs, prints every change as it lands, and answers with a number:
 
 ```
-url: https://app.egma.ai
+url: http://localhost:3101
 folder: /repo/egma
 agent: agt_01K…
 connection: con_01K…
@@ -378,7 +404,7 @@ pin: lost-the-order-number tstv_01K…
 run: run_01K…
 tests: 2
 simulations: 2
-results: https://app.egma.ai/runs/run_01K…
+results: http://localhost:3101/runs/run_01K…
 simulation: quoted-a-price default-persona running
 verdict: quoted-a-price default-persona passed
 first-verdict: quoted-a-price default-persona passed
@@ -446,7 +472,7 @@ text, each item alone on its line so a triple-click takes it whole:
 ```
 ✓ Your first run is live — 3 of 12 graded so far.
 
-https://app.egma.ai/runs/run_01K7QXV2M8ZB4C6D8E0F2G4H6J
+http://localhost:3101/runs/run_01K7QXV2M8ZB4C6D8E0F2G4H6J
 
 Tests are code now: egma/tests/ (committed). Edit them, then egma push.
 Hand your coding agent this: "Read egma/config.yaml, then egma --help — you can pull, push, and trigger runs from here."
@@ -632,7 +658,7 @@ Clone the repository, then, from your checkout of it:
 
 ```
 pnpm install
-npx egma self-host up
+npx egma-cli self-host up
 ```
 
 That starts a whole egma — Postgres, ClickHouse, the API, the pages, the
@@ -645,7 +671,7 @@ because a platform with no carrier runs text simulations perfectly well. To make
 it able to place calls, one more command in the same directory:
 
 ```
-npx egma self-host phone setup
+npx egma-cli self-host phone setup
 ```
 
 It asks for a Twilio account, a voice number that account **already owns**, and
@@ -676,12 +702,11 @@ The wizard signs this machine in against that instance, registers your agent
 and a way to reach it, writes a first suite of tests with your coding agent,
 puts them on egma when you say so, and starts a run over them.
 
-**Where it stops today.** The run is created and followed live, and no verdict
-arrives: nothing claims a simulation yet, so the run stays pending and every
-simulation stays queued. What is missing is the grader and the piece that hands
-a test to the simulator; both are being built. Everything before them is real,
-and the moment they land the first verdict arrives on the same screen with
-nothing here to change.
+**Then it waits for the answer.** The simulator claims the work and holds the
+conversation; the grader judges it afterwards. The first verdict opens the run
+page, and the screen keeps following until execution and grading are both
+finished — a run whose calls have all ended is not yet a run whose judgment is
+in, and the two are reported apart so neither can be mistaken for the other.
 
 The whole walk is checked against a real instance the same way. On a checkout
 that has had `pnpm install`, and on a machine with a Chrome — or with

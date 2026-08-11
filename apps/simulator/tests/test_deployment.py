@@ -1,8 +1,9 @@
 """The deployment story, checked against the code that reads it.
 
-Three files tell a self-hoster how to run this: `docker-compose.yml`, the
-opt-in `docker-compose.phone.yml` beside it, and `.env.example`. A fourth,
-this app's README, is the table they are all summarised in. Every one of
+Two files tell a self-hoster how to run this: `docker-compose.yml` — which
+carries the phone stack too, since there is no overlay to ask for any more —
+and `.env.example`. A third, this app's README, is the table they are all
+summarised in. Every one of
 them names environment variables, and every one of them can fall behind
 the module that reads them — silently, because nothing fails when a
 variable is documented and unread, or read and undocumented. The second

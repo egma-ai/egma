@@ -49,6 +49,22 @@ Rules for the file, and none of them is optional:
 - **`## Expected behaviors`** is a numbered list, and **there is always at
   least one**. A test with none can never fail, so egma refuses it and the
   developer is told a file was thrown away. Two to four is a good number.
+- **`## Mock tools`** is optional, comes last, and you leave it out unless the
+  task below names the tools egma answers for. It is how one test asks for a
+  different answer from one of the agent's tools — an empty calendar, a booking
+  service that is down — and it looks like this:
+
+  ````markdown
+  ## Mock tools
+  ### check_availability
+  ```json
+  { "answer": { "slots": [] } }
+  ```
+  ````
+
+  The heading is the tool's name, exactly as the agent registers it. The block
+  holds `answer` with what the tool returns, or `error` with the failure it
+  raises — one of the two, never both.
 
 ## What makes an expected behavior worth having
 
@@ -105,7 +121,9 @@ same line as a marker.**
 - **Write one file at a time**, in the order you planned them, and announce
   each one as you go. Do not write them all at the end.
 - **Write only inside `egma/tests/`.** Change nothing else in the repository —
-  no source file, no configuration, no `egma/config.yaml`.
+  no source file, no configuration, no `egma/config.yaml`, and not
+  `egma/mock-tools.md`: a test that needs a different answer says so in its own
+  file, under its own `## Mock tools` heading.
 - **Do not reuse a name** that is already taken by a file in that folder.
 - **Never write a file with an empty `## Expected behaviors` list.** If you
   cannot say what should happen, do not write the test at all.

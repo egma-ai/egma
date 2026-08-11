@@ -20,8 +20,12 @@
  * nothing further up can do anything sensible with it.
  */
 
-import { PlatformUnreachableError, type Fetch } from "./device-flow.ts";
+import type { MockToolEntry } from "../folder/mock-tools.ts";
+import type { Fetch } from "./device-flow.ts";
+import { overrideFrom } from "./mock-tools.ts";
+import { PlatformRefusedError } from "./refused.ts";
 import type { SignedIn } from "./signed-in.ts";
+import { ask, saidBy, text, textList } from "./wire.ts";
 
 /** A test as the platform currently has it. */
 export type PlatformTest = {
@@ -34,6 +38,15 @@ export type PlatformTest = {
   readonly expectedBehaviors: readonly string[];
   /** By name, in the order they were authored. */
   readonly personas: readonly string[];
+  /**
+   * The tools this test answers for itself.
+   *
+   * Content, like the expected behaviors beside them: an override versions with
+   * the test, so editing one mints the next version exactly as editing a
+   * behavior does. That is why they ride this shape rather than the mock tool
+   * group's, which versions nothing.
+   */
+  readonly mockTools: readonly MockToolEntry[];
 };
 
 /** One frozen version, and whether the test has since moved past it. */
@@ -57,37 +70,6 @@ export type WriteAnswer =
     }
   /** The platform turned the test away at its door, in its own words. */
   | { readonly kind: "turned-away"; readonly reason: string };
-
-/** An answer egma asked for and did not get. */
-export class PlatformRefusedError extends Error {
-  readonly status: number;
-
-  constructor(status: number, said: string) {
-    super(said);
-    this.name = "PlatformRefusedError";
-    this.status = status;
-  }
-}
-
-/**
- * A string off the wire, with nothing in it a terminal would obey.
- *
- * Everything read here is either printed on a line a coding agent parses or
- * written into a file in the developer's repository, and a terminal reads a
- * control character as an instruction rather than as text: a test name carrying
- * an escape sequence could redraw what egma just said, and one carrying a line
- * break would turn one printed fact into two. They come off at the one edge
- * that reads the wire, so nothing below here has to remember. Same rule, same
- * reason, as the login end of this seam.
- */
-function text(value: unknown): string {
-  return typeof value === "string" ? value.replaceAll(/[\p{Cc}\p{Cf}]/gu, "").trim() : "";
-}
-
-function textList(value: unknown): readonly string[] {
-  if (!Array.isArray(value)) return [];
-  return value.map((item) => text(item)).filter((item) => item !== "");
-}
 
 /**
  * The personas a version names, by name.
@@ -116,46 +98,23 @@ function testFrom(body: Record<string, unknown>): PlatformTest {
     scenario: text(body.scenario),
     expectedBehaviors: textList(body.expected_behaviors),
     personas: personaNames(body.personas),
+    mockTools: mockToolsIn(body.mock_tools),
   };
 }
 
-async function bodyOf(response: Response): Promise<Record<string, unknown>> {
-  return (await response.json().catch(() => ({}))) as Record<string, unknown>;
-}
-
-/** What the platform said about a refusal, or egma's own words for a silence. */
-function saidBy(body: Record<string, unknown>, status: number): string {
-  const message = text(body.message).trim();
-  return message === "" ? `egma answered ${status} and said nothing about it` : message;
-}
-
-type Call = {
-  readonly signedIn: SignedIn;
-  readonly path: string;
-  readonly method?: string;
-  readonly body?: unknown;
-  readonly fetchImpl?: Fetch;
-};
-
-async function ask(call: Call): Promise<{ response: Response; body: Record<string, unknown> }> {
-  const fetchImpl = call.fetchImpl ?? fetch;
-  const address = `${call.signedIn.url}${call.path}`;
-
-  let response: Response;
-  try {
-    response = await fetchImpl(address, {
-      method: call.method ?? "GET",
-      headers: {
-        authorization: `Bearer ${call.signedIn.key}`,
-        ...(call.body === undefined ? {} : { "content-type": "application/json" }),
-      },
-      ...(call.body === undefined ? {} : { body: JSON.stringify(call.body) }),
-    });
-  } catch (cause) {
-    throw new PlatformUnreachableError(call.signedIn.url, cause);
-  }
-
-  return { response, body: await bodyOf(response) };
+/**
+ * The overrides a test carries, in the order they were authored.
+ *
+ * Order is content: it is what the platform stores and what it compares an edit
+ * against, so a folder that reordered them would mint a version saying nothing.
+ */
+function mockToolsIn(value: unknown): readonly MockToolEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) =>
+    typeof entry === "object" && entry !== null
+      ? [overrideFrom(entry as Record<string, unknown>)]
+      : [],
+  );
 }
 
 /**
@@ -229,6 +188,12 @@ export type TestInput = {
   readonly expectedBehaviors: readonly string[];
   /** By name. Empty takes the default persona. */
   readonly personas: readonly string[];
+  /**
+   * The tools this test answers for itself. Empty clears them and leaves the
+   * project's mock tools the whole world, which is why it is always sent: a
+   * write that left the field out would keep overrides the file no longer has.
+   */
+  readonly mockTools: readonly MockToolEntry[];
 };
 
 function writeBody(input: TestInput): Record<string, unknown> {
@@ -237,6 +202,10 @@ function writeBody(input: TestInput): Record<string, unknown> {
     scenario: input.scenario,
     expected_behaviors: [...input.expectedBehaviors],
     personas: [...input.personas],
+    // The heading names the tool and the block says the rest, so what goes up
+    // is the block with the heading's name put back on it. Nothing here judges
+    // what the block said; egma's door does, in egma's own words.
+    mock_tools: input.mockTools.map((entry) => ({ ...entry.says, tool: entry.tool })),
   };
 }
 

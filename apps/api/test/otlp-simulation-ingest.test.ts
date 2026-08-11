@@ -62,6 +62,8 @@ const CHAT_SIMULATION = "sim_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const CHAT_TRACE = "0198fb73d08e479627eea08a75fbf1d8";
 const VOICE_SIMULATION = "sim_01K3XSW9GJ2Q4RD8VXH0MEKAFP";
 const VOICE_TRACE = "0198fb9e261215c986a37d8828e9a9f6";
+const MOCKED_SIMULATION = "sim_01K3XV2D6H9E4TBQZ7MKR0NFAC";
+const MOCKED_TRACE = "0198fbb134d14b89a5dfe7a4f00abd4c";
 
 /** What the test API's configuration holds, and the simulator would be started with. */
 const SERVICE_TOKEN = "egma_st_held-by-this-test-suite-alone";
@@ -170,6 +172,7 @@ beforeAll(async () => {
   acmeSeed = chat;
   const voice = await seedSimulationNamed(globex, "voice", VOICE_SIMULATION);
   voiceRunId = voice.runId;
+  await seedSimulationNamed(acme, "mocked", MOCKED_SIMULATION);
 });
 
 afterAll(async () => {
@@ -369,6 +372,56 @@ describe("the contract's golden flushes, posted with the service token", () => {
         "and agent.started_at < human.started_at + intDivOrZero(human.duration_ns, 1000) / 1000000",
     );
     expect(Number(overlap?.n)).toBe(1);
+  });
+
+  /**
+   * The answer egma served, kept as an answer. The simulator authors it from
+   * inside the exchange it conducted, so unlike the return values of a call
+   * egma only watched go past, there is nothing invented in writing it down —
+   * and the vocabulary only lets it be written beside the stamp saying where
+   * it came from. The stamp, the mock tool that answered and the late-attached
+   * flag have no columns of their own and are not given one: they ride the
+   * payload whole, which is what makes lifting the queried fields out lose
+   * nothing.
+   */
+  it("keep the answer a mock tool served, and everything that says where it came from", async () => {
+    const landed = await post(await fixture("valid", "voice-mocked-tool-calls.json"));
+    expect(landed.statusCode, landed.body).toBe(200);
+
+    const rows = await store().rows<{
+      tool_name: string;
+      tool_arguments: string;
+      tool_result: string;
+      payload: string;
+    }>(
+      "select tool_name, tool_arguments, tool_result, payload from spans " +
+        `where trace_id = '${MOCKED_TRACE}' and kind = 'tool' order by started_at`,
+    );
+
+    expect(
+      rows.map((row) => [row.tool_name, row.tool_arguments, row.tool_result]),
+    ).toEqual([
+      [
+        "check_calendar",
+        '{"date":"2026-08-13","duration_minutes":30}',
+        '{"slots":[]}',
+      ],
+      // A call served for a tool the agent had not reported having. Its
+      // arguments never arrived, and an absent fact stays absent.
+      ["send_confirmation_sms", "", '{"delivered":true}'],
+      // A call egma would not answer: the arguments are what the agent tried
+      // to do, and there is no result because nothing served it.
+      ["charge_card", '{"amount_cents":4200}', ""],
+    ]);
+
+    expect(rows[0]?.payload).toContain('"egma.tool.provenance"');
+    expect(rows[0]?.payload).toContain('"mocked"');
+    expect(rows[1]?.payload).toContain('"egma.tool.late_attached"');
+    expect(rows[1]?.payload).toContain('"boolValue":true');
+    // The refusal's own stamp survives the door whole. Without it the row
+    // would read exactly like a call egma was never in the path of, which is
+    // the opposite fact about whether the agent's backend ran.
+    expect(rows[2]?.payload).toContain('"refused"');
   });
 });
 
