@@ -311,6 +311,10 @@ describe("the two kinds of audio a transcript can offer", () => {
       "the recorded fact beside it": copy.FACTS.audio,
       "the player's own name": copy.RECORDING.label,
       "what is said beside the player": copy.RECORDING.caption,
+      // The sentence a reader meets when it stops working is the one place
+      // this rule is easiest to forget, and the worst place to forget it: it
+      // arrives when somebody is already confused about what they are hearing.
+      "what is said when it will not play": copy.RECORDING.unplayable,
     };
 
     for (const [where, said] of Object.entries(labels)) {

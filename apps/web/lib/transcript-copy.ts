@@ -221,8 +221,24 @@ export const RECORDING = {
    * an audio grader reads — so a reader listening is told which one this is.
    */
   band: (hertz: number) => `Heard at ${String(hertz)} Hz.`,
+  fallback: "Your browser cannot play audio.",
+  /**
+   * Said only once a player has been on screen, and it names whose audio it is
+   * for the same reason every other label here does — "this audio could not be
+   * played" would leave a reader wondering which of the two failed.
+   */
   unplayable:
-    "This audio could not be played. The store it lives in may be unreachable.",
+    "egma's own audio of this exchange could not be played. The store it " +
+    "lives in may be unreachable.",
+  /**
+   * Reached only when egma itself is at fault. A transcript shows nothing for a
+   * conversation that recorded nothing — but a deployment that cannot answer is
+   * not that, and a broken egma that looked exactly like a product working
+   * correctly is the failure this whole effort exists to end.
+   */
+  unreachable: LIST.unreachable,
+  refused: (status: number) =>
+    `egma answered ${String(status)} for the audio it recorded here.`,
 } as const;
 
 /**

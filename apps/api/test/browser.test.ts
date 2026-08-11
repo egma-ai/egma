@@ -1455,15 +1455,33 @@ describe.skipIf(!storage.available)("hearing a recording from a transcript", () 
       expect(await page.innerText("main")).toContain("egma's own audio");
       saysNothingBanned(await page.innerText("main"));
 
-      // The other conversation of the same run recorded nothing, and its
-      // transcript offers no control at all — not a disabled one, which reads
-      // as a broken feature rather than as an honest absence.
+      /*
+       * The other conversation of the same run recorded nothing, and its
+       * transcript offers no control at all — not a disabled one, which reads
+       * as a broken feature rather than as an honest absence.
+       *
+       * **Waited for rather than looked at.** A player only appears once the
+       * ask has been answered, so counting the elements the moment the turns
+       * arrive would pass whether or not this page had learned to behave: the
+       * request has barely left. So the refusal itself is what is waited on,
+       * and only then is the page held to showing nothing.
+       */
+      const refused = page.waitForResponse(
+        (answer) =>
+          answer.url().includes("/api/simulations/") &&
+          answer.url().endsWith("/recording"),
+      );
       await openTranscript(silent);
+      expect((await refused).status()).toBe(404);
+
       expect(await page.innerText("main")).toContain("Is anybody there?");
       expect(await page.locator("audio").count()).toBe(0);
-      // Not even the line that says one is being looked for, which would imply
-      // audio that does not exist.
-      expect(await page.innerText("main")).not.toContain("Finding the recording");
+      // And the refusal's own sentence — written for whoever is reading a log
+      // or a terminal — never reaches the page either. A transcript that
+      // printed "this conversation has no recording" beside every chat and
+      // every call that never connected would be the disabled control again,
+      // wearing a sentence.
+      expect(await page.innerText("main")).not.toContain("has no recording");
     },
     SETTLE,
   );

@@ -24,6 +24,13 @@ import { Notice, styles } from "./ui.tsx";
  * page speaks the transcript's own vocabulary — `human` and `agent` — which is
  * held against the banned list in one file. One sentence for two surfaces would
  * have to be wrong on one of them.
+ *
+ * Every string this can render comes from those words, with exactly one
+ * exception: the line saying a link is being fetched, which is behind
+ * `knownToExist` and therefore cannot reach a transcript at all. That is what
+ * keeps the transcript surface's copy checkable in one file — any word that
+ * could appear there belongs in `RecordingWords`, including the ones only a
+ * broken deployment would ever show.
  */
 
 export type RecordingWords = {
@@ -33,8 +40,18 @@ export type RecordingWords = {
   readonly caption: string;
   /** The band it was measured at, where the conversation reported one. */
   readonly band: (hertz: number) => string;
+  /** For a browser that cannot play the element at all. */
+  readonly fallback: string;
   /** When a player that was already on screen stops working. */
   readonly unplayable: string;
+  /** When egma itself could not be asked. */
+  readonly unreachable: string;
+  /**
+   * When egma answered, but with neither a link nor a sentence of its own — a
+   * proxy's own page, most likely, since every refusal this route writes
+   * carries a message and that message is shown instead of this.
+   */
+  readonly refused: (status: number) => string;
 };
 
 /**
@@ -44,12 +61,11 @@ export type RecordingWords = {
  * something, which is the moment they asked.
  *
  * **The two failures are separate states because they are separate facts.**
- * `unresolved` is egma declining to hand over a link — which on a transcript is
- * an ordinary answer meaning there is nothing to hear, and shows nothing at
- * all. `unplayable` is a link that resolved and a store that then would not
- * serve it twice running: by then a player is already on screen, somebody has
- * pressed play, and a control that silently vanished would be worse than the
- * error it was hiding. So that one is always said out loud, on both surfaces.
+ * `unresolved` is egma declining to hand over a link at all. `unplayable` is a
+ * link that resolved and a store that then would not serve it twice running:
+ * by then a player is on screen, somebody has pressed play, and a control that
+ * silently vanished would be worse than the error it was hiding — so that one
+ * is always said out loud, on both surfaces.
  */
 type Playable =
   | { readonly status: "resolving" }
@@ -58,8 +74,34 @@ type Playable =
       readonly url: string;
       readonly band: number | null;
     }
-  | { readonly status: "unresolved"; readonly why: string }
+  | {
+      readonly status: "unresolved";
+      readonly why: string;
+      /**
+       * Whether egma answered about *this conversation* — as opposed to about
+       * itself. It is what decides whether a surface asking "is there anything
+       * here?" may quietly accept the answer.
+       */
+      readonly aboutThisConversation: boolean;
+    }
   | { readonly status: "unplayable" };
+
+/**
+ * Which refusals are about the conversation rather than about egma.
+ *
+ * `404` is *no simulation of yours has that id* and *this one recorded
+ * nothing*; `422` is *a chat has no audio and never will*. Each is a settled
+ * fact about the thing being asked about, and the honest way to show it is to
+ * offer nothing at all.
+ *
+ * Everything else is about egma — a deployment that named no store, a fault, a
+ * proxy not forwarding this path — and every one of those is shown, on both
+ * surfaces. A store nobody configured must not look like a conversation that
+ * was never recorded: that confusion is the exact failure the spec's Further
+ * Notes are about, and hiding a fault on the surface that asks about every
+ * conversation would spread it rather than contain it.
+ */
+const ABOUT_THIS_CONVERSATION: ReadonlySet<number> = new Set([404, 422]);
 
 export type RecordingPlayerProps = {
   readonly simulationId: string;
@@ -68,17 +110,20 @@ export type RecordingPlayerProps = {
    * Whether the surface already knows there is a recording to hear.
    *
    * A run's results do: the run's own answer says which conversations have one,
-   * so this is mounted only where there is, and a link that will not resolve is
-   * a genuine fault worth a sentence.
+   * so this is mounted only where there is, and a refusal there contradicts
+   * what the same page was just told — worth a sentence, whatever it says.
    *
    * A transcript does not. It holds a trace identifier, which says which
    * simulation this is and nothing about whether that simulation recorded
    * anything — a chat never can, and a voice conversation whose call never
-   * connected did not. So asking *is* how it finds out, every refusal is an
-   * answer rather than a fault, and the honest thing to show for one is
-   * nothing at all: not a disabled control, not an error, and not even the line
-   * saying a recording is being looked for, because each of those implies audio
-   * that does not exist.
+   * connected did not. So asking *is* how it finds out, an answer about this
+   * conversation is an answer rather than a fault, and the honest thing to show
+   * for one is nothing at all: not a disabled control, not an error, and not
+   * even the line saying a recording is being looked for, because each of those
+   * implies audio that does not exist.
+   *
+   * It buys silence for that one case and no other. A fault is still said, and
+   * so is a refusal of a link that had already worked — see `hidden` below.
    */
   readonly knownToExist: boolean;
 };
@@ -121,14 +166,21 @@ export function RecordingPlayer({
         );
         if (stopped) return;
         if (!answer.ok) {
+          // Whether **egma** answered, and not only what the status was. A
+          // proxy that is not forwarding this path answers 404 with its own
+          // page — no JSON, no sentence — and that is a broken deployment
+          // rather than a conversation with no audio. It has happened once
+          // already on this exact route, and it is the reason a status alone
+          // is not enough to go quiet on.
           const said = (await answer.json().catch(() => ({}))) as {
             message?: string;
           };
           return setPlayable({
             status: "unresolved",
-            why:
-              said.message ??
-              `Egma answered ${String(answer.status)} for this recording.`,
+            why: said.message ?? words.refused(answer.status),
+            aboutThisConversation:
+              said.message !== undefined &&
+              ABOUT_THIS_CONVERSATION.has(answer.status),
           });
         }
         // `expires_at` comes back with this and is deliberately not read. It is
@@ -153,7 +205,10 @@ export function RecordingPlayer({
         if (!stopped) {
           setPlayable({
             status: "unresolved",
-            why: "Egma could not be reached for this recording.",
+            why: words.unreachable,
+            // Nothing was answered at all, so nothing was said about this
+            // conversation. An egma that cannot be reached is a fault.
+            aboutThisConversation: false,
           });
         }
       }
@@ -163,6 +218,9 @@ export function RecordingPlayer({
     return () => {
       stopped = true;
     };
+    // `words` is deliberately not a dependency. It is one constant per surface,
+    // and depending on an object would make a caller that built it inline
+    // re-ask for a link on every render — a fetch loop dressed as correctness.
   }, [simulationId, asked]);
 
   /**
@@ -185,12 +243,31 @@ export function RecordingPlayer({
   }, [playable, asked]);
 
   if (playable.status === "resolving") {
+    // Only where something is known to be coming. On a transcript this line
+    // would appear above every simulation's turns for as long as the ask takes,
+    // including the ones that recorded nothing, which is a promise of audio
+    // being made and then withdrawn.
     return knownToExist ? (
-      <p className={styles.runTally}>Finding the recording…</p>
+      <p className={styles.recordingSearching}>Finding the recording…</p>
     ) : null;
   }
   if (playable.status === "unresolved") {
-    return knownToExist ? <Notice tone="error">{playable.why}</Notice> : null;
+    /*
+     * Silence is bought for exactly one case: a surface that was asking
+     * whether there is anything here, being told there is not.
+     *
+     * `asked === 0` is what keeps that from swallowing a real failure. A retry
+     * only ever happens from the element's own `onError`, so past the first ask
+     * a link had already resolved and a player was already on screen — and a
+     * player that vanishes without a word is worse than the error it hides.
+     *
+     * So a transcript speaks here in two cases and no others: a link that had
+     * worked and then would not resolve again, and an answer that was about
+     * egma rather than about this conversation.
+     */
+    const hidden =
+      !knownToExist && asked === 0 && playable.aboutThisConversation;
+    return hidden ? null : <Notice tone="error">{playable.why}</Notice>;
   }
   if (playable.status === "unplayable") {
     return <Notice tone="error">{words.unplayable}</Notice>;
@@ -249,7 +326,7 @@ export function RecordingPlayer({
           }
         }}
       >
-        Your browser cannot play audio.
+        {words.fallback}
       </audio>
       <p>
         {words.caption}

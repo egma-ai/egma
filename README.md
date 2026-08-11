@@ -744,6 +744,14 @@ order they were taken, each carrying the spans that happened inside it, and
 `spans` for everything top-level that is not a turn — the root span above all.
 It takes `from`, `to` and `project_id` on the same terms.
 
+It also carries **`simulation_id`**: which simulation this trace is, when egma
+conducted it, and `null` when your own agent had the exchange in production. A
+simulation id and the trace its spans are filed under are the same 128 bits
+written two ways, so this is derived rather than stored — and it is sent only
+for a trace egma conducted, because a production trace converts just as neatly
+into an id nothing ever minted. It is what lets a reader holding one transcript
+ask for that conversation's recording without looking anything else up.
+
 Five things about the contract are worth knowing before you build on it:
 
 - **The window is required, and wider than 31 days is refused rather than
@@ -797,6 +805,16 @@ the model, the speech synthesis, the tool, the turn detection, the speaking —
 and expand a step again for exactly what was recorded about it. Anything that
 failed is marked on the turn before you open it.
 
+**If egma conducted the exchange and it was a voice one, its recording is right
+there** — a player above the turns, both channels, the human on the left and the
+agent on the right. That is where a turn looks wrong, so that is where you can
+settle whether the agent misbehaved or the transcription did. A chat, a call
+that never connected, and somebody else's production telemetry are offered
+nothing at all rather than a control that does nothing. Do not confuse it with
+**Open the audio your agent's telemetry attached**, which appears on a step and
+is your framework's own file at your framework's own address; the player says
+whose audio it is, and so does the link.
+
 Two things about this are worth knowing:
 
 - **The window rides in the address.** A transcript's link carries the window
@@ -809,9 +827,11 @@ Two things about this are worth knowing:
   **Mint the exporter's key against a project** and its telemetry lands where
   the dashboard looks.
 
-The pages are drawn from the two v1 endpoints above and nothing else — the same
-contract you would integrate against, on the same origin, authenticated by the
-same session that signed you in.
+The pages are drawn from the two v1 endpoints above — the same contract you
+would integrate against, on the same origin, authenticated by the same session
+that signed you in — plus one request per transcript that egma conducted, to
+turn its recording into a link the browser fetches from the object store
+directly.
 
 ## Adding a second person
 

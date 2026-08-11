@@ -305,8 +305,11 @@ const HEARD_ON_A_RUN: RecordingWords = {
   label: "Recording",
   caption: "Left channel is the persona, right channel is the agent.",
   band: (hertz) => `Heard at ${String(hertz)} Hz.`,
+  fallback: "Your browser cannot play audio.",
   unplayable:
     "This recording could not be played. The store it lives in may be unreachable.",
+  unreachable: "Egma could not be reached for this recording.",
+  refused: (status) => `Egma answered ${String(status)} for this recording.`,
 };
 
 function SimulationResult({ simulation }: { simulation: Simulation }) {
