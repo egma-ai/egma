@@ -301,6 +301,13 @@ describe("what has no recording to hear", () => {
       expect(String(refused.body.message)).toContain("will not resolve");
       // And nothing signed comes back, so there is no link to try.
       expect(refused.body.url).toBeUndefined();
+      // Its own code, and deliberately not the chat refusal's. This is a
+      // **defect** — a row carrying something no simulator could have written,
+      // pointing at audio that may well exist — while a chat is a settled fact
+      // about the conversation. A surface that shows nothing for the settled
+      // facts must not go quiet on this one too, and the code is what lets it
+      // tell them apart.
+      expect(refused.body.error, reference).toBe("unsignable_reference");
     }
   });
 });

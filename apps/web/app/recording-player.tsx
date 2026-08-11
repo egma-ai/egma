@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { offersNothing } from "../lib/recording-refusals.ts";
 import { Notice, styles } from "./ui.tsx";
 
 /**
@@ -31,6 +32,13 @@ import { Notice, styles } from "./ui.tsx";
  * keeps the transcript surface's copy checkable in one file — any word that
  * could appear there belongs in `RecordingWords`, including the ones only a
  * broken deployment would ever show.
+ *
+ * A refusal egma writes is shown as its own sentence, which is a **wire**
+ * sentence rather than page copy — the same way a run's results have shown one
+ * since ticket 02, and the reason a client is given a stable code to branch on
+ * and a sentence that improves. Which refusals reach a screen at all is decided
+ * by `offersNothing`; the one that says `conversation` out loud is the chat
+ * refusal, and a chat is an absence, so it is never one of them.
  */
 
 export type RecordingWords = {
@@ -78,30 +86,13 @@ type Playable =
       readonly status: "unresolved";
       readonly why: string;
       /**
-       * Whether egma answered about *this conversation* — as opposed to about
-       * itself. It is what decides whether a surface asking "is there anything
-       * here?" may quietly accept the answer.
+       * egma's own refusal code, or nothing for an answer that was not egma's.
+       * `offersNothing` reads it; see `lib/recording-refusals.ts` for why it is
+       * the code and never the status.
        */
-      readonly aboutThisConversation: boolean;
+      readonly code: string | undefined;
     }
   | { readonly status: "unplayable" };
-
-/**
- * Which refusals are about the conversation rather than about egma.
- *
- * `404` is *no simulation of yours has that id* and *this one recorded
- * nothing*; `422` is *a chat has no audio and never will*. Each is a settled
- * fact about the thing being asked about, and the honest way to show it is to
- * offer nothing at all.
- *
- * Everything else is about egma — a deployment that named no store, a fault, a
- * proxy not forwarding this path — and every one of those is shown, on both
- * surfaces. A store nobody configured must not look like a conversation that
- * was never recorded: that confusion is the exact failure the spec's Further
- * Notes are about, and hiding a fault on the surface that asks about every
- * conversation would spread it rather than contain it.
- */
-const ABOUT_THIS_CONVERSATION: ReadonlySet<number> = new Set([404, 422]);
 
 export type RecordingPlayerProps = {
   readonly simulationId: string;
@@ -166,21 +157,19 @@ export function RecordingPlayer({
         );
         if (stopped) return;
         if (!answer.ok) {
-          // Whether **egma** answered, and not only what the status was. A
-          // proxy that is not forwarding this path answers 404 with its own
-          // page — no JSON, no sentence — and that is a broken deployment
-          // rather than a conversation with no audio. It has happened once
-          // already on this exact route, and it is the reason a status alone
-          // is not enough to go quiet on.
+          // The **code**, which is what egma promises never to change, and the
+          // sentence, which it improves. Anything that is not egma answering —
+          // a proxy's own page for a path it stopped forwarding, a body that
+          // will not parse — carries neither, and is a broken deployment rather
+          // than a conversation with no audio.
           const said = (await answer.json().catch(() => ({}))) as {
+            error?: string;
             message?: string;
           };
           return setPlayable({
             status: "unresolved",
             why: said.message ?? words.refused(answer.status),
-            aboutThisConversation:
-              said.message !== undefined &&
-              ABOUT_THIS_CONVERSATION.has(answer.status),
+            code: said.error,
           });
         }
         // `expires_at` comes back with this and is deliberately not read. It is
@@ -206,9 +195,9 @@ export function RecordingPlayer({
           setPlayable({
             status: "unresolved",
             why: words.unreachable,
-            // Nothing was answered at all, so nothing was said about this
+            // Nothing answered at all, so egma said nothing about this
             // conversation. An egma that cannot be reached is a fault.
-            aboutThisConversation: false,
+            code: undefined,
           });
         }
       }
@@ -252,22 +241,14 @@ export function RecordingPlayer({
     ) : null;
   }
   if (playable.status === "unresolved") {
-    /*
-     * Silence is bought for exactly one case: a surface that was asking
-     * whether there is anything here, being told there is not.
-     *
-     * `asked === 0` is what keeps that from swallowing a real failure. A retry
-     * only ever happens from the element's own `onError`, so past the first ask
-     * a link had already resolved and a player was already on screen — and a
-     * player that vanishes without a word is worse than the error it hides.
-     *
-     * So a transcript speaks here in two cases and no others: a link that had
-     * worked and then would not resolve again, and an answer that was about
-     * egma rather than about this conversation.
-     */
-    const hidden =
-      !knownToExist && asked === 0 && playable.aboutThisConversation;
-    return hidden ? null : <Notice tone="error">{playable.why}</Notice>;
+    // The rule itself is in `lib/recording-refusals.ts`, tested there. A retry
+    // only ever happens from the element's own `onError`, so `asked > 0` is
+    // exactly "a link had already resolved and a player was already on screen".
+    const nothing = offersNothing(
+      { code: playable.code },
+      { knownToExist, afterOneWorked: asked > 0 },
+    );
+    return nothing ? null : <Notice tone="error">{playable.why}</Notice>;
   }
   if (playable.status === "unplayable") {
     return <Notice tone="error">{words.unplayable}</Notice>;

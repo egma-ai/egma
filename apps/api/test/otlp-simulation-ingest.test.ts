@@ -574,6 +574,40 @@ describe("a resource that names no simulation, or one egma never conducted", () 
 
     expect(await countOf("select count() as n from spans")).toBe(before);
   });
+
+  /**
+   * A resource naming one simulation while filing its spans under another
+   * simulation's trace.
+   *
+   * **This is the check that stops a transcript playing the wrong
+   * conversation's audio.** The two identifiers are the same 128 bits written
+   * two ways, and both directions are read: a reader opening a transcript
+   * converts the trace id back into a simulation id to find that conversation's
+   * verdicts and its recording. So spans filed under somebody else's trace put
+   * one conversation's turns on screen beside another's audio — inside one
+   * organization, with nothing anywhere saying the two disagree.
+   *
+   * Nothing egma ships can produce it: the simulator derives the trace from the
+   * id it was handed. Which is why it is asserted rather than assumed — the
+   * emitter taking a trace id from a provider instead would be a small change
+   * over there and a wrong recording over here.
+   */
+  it("is refused whole when its spans are filed under another simulation's trace", async () => {
+    const body = (
+      await fixture("valid", "chat-flush-1-turns.json")
+    ).replaceAll(CHAT_TRACE, VOICE_TRACE);
+
+    const before = await countOf("select count() as n from spans");
+    const refused = await post(body);
+
+    expect(refused.statusCode, refused.body).toBe(400);
+    const refusal = refused.json() as { code: number; message: string };
+    expect(refusal.message).toContain(CHAT_SIMULATION);
+    expect(refusal.message).toContain(VOICE_TRACE);
+    expect(refusal.message).toContain(CHAT_TRACE);
+
+    expect(await countOf("select count() as n from spans")).toBe(before);
+  });
 });
 
 describe("a payload that claims a tenant on the service path", () => {

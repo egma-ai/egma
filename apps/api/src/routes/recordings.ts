@@ -9,6 +9,7 @@ import {
   notFound,
   notPermitted,
   unprocessable,
+  unsignableReference,
 } from "../http/refusals.ts";
 import {
   signedRecordingLink,
@@ -66,6 +67,15 @@ import {
  *    refusal that is about the deployment rather than about the request, and
  *    answering it before the three above would let a stranger learn whether a
  *    simulation exists by watching which sentence comes back.
+ *
+ * **Two of those are settled facts about the conversation and one is a defect,
+ * and the codes say which.** `not_found` and `unprocessable` mean there is
+ * nothing to hear and there never was — a surface that asks about every
+ * conversation it shows may answer them by offering nothing at all. A reference
+ * egma will not sign is not that: it answers `unsignable_reference`, because a
+ * row carrying something no simulator could have written is a fault, the audio
+ * it points at may well exist, and a fault that shares a code with an honest
+ * absence goes invisible on exactly the surface that would meet it most.
  */
 
 export type RecordingRoutesOptions = {
@@ -157,7 +167,7 @@ export async function recordingRoutes(
         `simulation ${simulation.id} carries a recording reference egma will ` +
           `not sign; it did not come from a simulator`,
       );
-      return unprocessable(
+      return unsignableReference(
         reply,
         `simulation ${simulation.id} points at a recording egma will not ` +
           `resolve: ${why.message}`,

@@ -628,8 +628,8 @@ function Inspector({
       )}
 
       <details className={styles.inspectorDetails}>
-        <summary>{DETAIL.recordingDetails}</summary>
-        <RecordingDetails facts={facts} />
+        <summary>{DETAIL.whereItCameFrom}</summary>
+        <WhereItCameFrom facts={facts} />
       </details>
     </aside>
   );
@@ -644,7 +644,13 @@ function Payload({ label, value }: { label: string; value: string }) {
   );
 }
 
-function RecordingDetails({ facts }: { facts: TraceFacts }) {
+/**
+ * Where this exchange came from and when — the disclosure whose label stopped
+ * saying "Recording" the day this page grew an audio player. The component
+ * carries the same name as the words on the screen, so nobody reading the code
+ * goes looking for the recording in it.
+ */
+function WhereItCameFrom({ facts }: { facts: TraceFacts }) {
   const shown: readonly (readonly [string, string])[] = [
     [FACTS.started, whenItWas(facts.started_at)],
     [FACTS.ended, whenItWas(facts.ended_at)],

@@ -125,9 +125,11 @@ export const DETAIL = {
   /**
    * The facts about how this exchange reached egma — when, from where, over
    * what. It used to read "Recording details", which was unambiguous until a
-   * page with an audio player on it made "recording" a noun again.
+   * page with an audio player on it made "recording" a noun again. The key and
+   * the component behind it were renamed with the words, so that reading the
+   * code and reading the screen give the same answer.
    */
-  recordingDetails: "Where this came from",
+  whereItCameFrom: "Where this came from",
   judgedBy: "Judged by",
   missing: "That transcript is not here",
   missingLead:
@@ -221,7 +223,12 @@ export const RECORDING = {
    * an audio grader reads — so a reader listening is told which one this is.
    */
   band: (hertz: number) => `Heard at ${String(hertz)} Hz.`,
-  fallback: "Your browser cannot play audio.",
+  /**
+   * For a browser that cannot play the element at all. It names an owner like
+   * every other line here: a reader whose browser refuses one of the two
+   * audios on this page still has to know which one it refused.
+   */
+  fallback: "Your browser cannot play egma's own audio.",
   /**
    * Said only once a player has been on screen, and it names whose audio it is
    * for the same reason every other label here does — "this audio could not be

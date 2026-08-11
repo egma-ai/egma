@@ -11,6 +11,7 @@ import {
   type NewSpan,
   type SimulationStanding,
 } from "@egma/db";
+import { traceIdOfSimulation } from "@egma/simulation-contract";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { requesterOf } from "../http/credentialed.ts";
@@ -252,6 +253,14 @@ declare module "fastify" {
 }
 
 /**
+ * A trace id as OpenTelemetry writes one: 16 bytes of lowercase hex. Matched
+ * before a span's own is held against the trace its simulation spells, so that
+ * an id which is not one at all stays normalisation's business rather than
+ * this door's.
+ */
+const A_TRACE_ID = /^[0-9a-f]{32}$/u;
+
+/**
  * The spans of one customer's simulations, with the context they are filed
  * under. One export may carry several simulations — even several customers' —
  * so the resources are gathered by the tenancy their rows resolved to, and
@@ -347,6 +356,61 @@ async function simulatorExport(
         "and check the simulator is pointed at the deployment that handed " +
         "the work out. Nothing from this request was stored.",
     );
+  }
+
+  /*
+   * And every span is filed under the trace its own simulation's id spells.
+   *
+   * **This is what stops a transcript playing the wrong conversation's audio.**
+   * A simulation id and its trace id are the same 128 bits written two ways,
+   * and both directions of that derivation are load-bearing reads: a reader
+   * opening a transcript converts the trace id back into a simulation id to
+   * find its verdicts, and — since ticket 03 — to resolve its recording. So a
+   * resource that named simulation A while filing its spans under B's trace
+   * would hand whoever opened that transcript B's turns beside A's audio, both
+   * inside one organization, with nothing anywhere saying they disagree.
+   *
+   * Nothing egma ships can do it: the simulator derives the trace from the id
+   * it was handed and authors every span itself, forwarding none. That is
+   * exactly why it is checked here rather than trusted — the invariant is worth
+   * more than the emitter's current good behaviour, and an emitter that took a
+   * trace id from a provider instead would be a one-line change over there and
+   * a wrong recording over here.
+   *
+   * Refused whole, like every other attribution failure at this door: a partial
+   * success would tell the sender's write-ahead log that evidence landed when
+   * it landed somewhere nobody will look, and the 400 is terminal so the defect
+   * surfaces in the simulator's log rather than looping. A malformed id is
+   * deliberately not this check's business — normalisation already rejects
+   * those span by span, and widening this to catch them would turn a per-span
+   * rejection into a whole refused export.
+   */
+  for (const [index, resourceSpans] of resources.entries()) {
+    const simulationId = named[index] ?? "";
+    const belongsUnder = traceIdOfSimulation(simulationId);
+    if (belongsUnder === undefined) continue;
+
+    for (const scopeSpans of resourceSpans.scopeSpans ?? []) {
+      for (const span of scopeSpans.spans ?? []) {
+        const filedUnder = (span.traceId ?? "").toLowerCase();
+        if (!A_TRACE_ID.test(filedUnder) || filedUnder === belongsUnder) {
+          continue;
+        }
+        return statusResponse(
+          reply,
+          encoding,
+          400,
+          RPC_INVALID_ARGUMENT,
+          `a span of simulation ${simulationId} is filed under trace ` +
+            `${filedUnder}, and that simulation's spans belong under ` +
+            `${belongsUnder}. The two are the same 128 bits written twice, so ` +
+            "derive the trace id from the simulation id rather than taking " +
+            "one from a provider — filing under another simulation's trace " +
+            "would show a reader that conversation's turns beside this one's " +
+            "audio. Nothing from this request was stored.",
+        );
+      }
+    }
   }
 
   // Gathered by the customer each simulation resolved to, in arrival order —
