@@ -376,8 +376,7 @@ nothing ever dials in.
 The repository's `docker-compose.yml` runs it as one more service beside
 the API, with a named volume for the write-ahead log and an object store
 for the recordings, and `docker-compose.workbench.yml` is the dev overlay
-that stands a
-workbench up beside it and points the simulator there:
+that stands a workbench up beside it and points the simulator there:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.workbench.yml \

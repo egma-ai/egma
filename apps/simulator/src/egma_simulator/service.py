@@ -72,13 +72,20 @@ def blob_store_for(config: SimulatorConfig) -> BlobStore:
     the same shape as naming a media backend, and the reason the entire
     test suite runs against a directory with no container anywhere. The
     two are exclusive because the configuration made them so: a
-    deployment with a store has no blob directory to fall back to, and
-    writing a recording to both places would leave the failure this
-    effort exists to end standing behind a copy that happens to be
-    reachable.
+    deployment with a store has no blob directory to fall back to. One
+    place or the other, never both — a copy kept on the container's own
+    disk beside the one in the store would hide exactly the fault the
+    store is here to fix, until the day a second simulator made half the
+    recordings unreadable and nothing said so.
 
     Everything above this line is given a :class:`BlobStore` and never
     learns which one it got.
+
+    The settings are taken apart here rather than handed over whole, so
+    that ``blob.py`` stays a leaf: it knows what an object store needs and
+    nothing about where a deployment's answers come from. That is what
+    lets the seam be tested with five arguments and no environment, and
+    what would otherwise make the store's tests configuration's tests too.
     """
     store = config.object_store
     if store is None:

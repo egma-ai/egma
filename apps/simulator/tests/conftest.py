@@ -29,6 +29,7 @@ import pytest
 from aiohttp import web
 from retell_stub import RetellStub, RunningStub, serving
 
+from egma_simulator.config import DEFAULT_S3_BUCKET, DEFAULT_S3_REGION
 from egma_simulator.contract import contract_dir
 from egma_simulator.workbench.app import WorkbenchState, build_app
 
@@ -256,20 +257,24 @@ image nobody deploys would prove it about the wrong store the first time
 the two drifted.
 """
 
-OBJECT_STORAGE_ACCESS_KEY_ID = "egma-test-object-storage"
+OBJECT_STORAGE_ACCESS_KEY_ID = "SENTINEL-object-storage-key-id-6d19"
 OBJECT_STORAGE_SECRET_ACCESS_KEY = "SENTINEL-object-storage-secret-3f8c1a9d47b2"
 """The credential the test store is stood up with.
 
-Its secret half is a sentinel like every other planted credential in this
-suite, so a simulator configured to write to object storage is really
-holding one while it conducts — which is what makes scanning its output
-prove anything. MinIO refuses a root password under eight characters, so
-this is also the shortest thing that would work.
+Both halves are sentinels, like every other planted credential in this
+suite and for the same reason: a simulator configured to write to object
+storage is really holding them while it conducts, which is what makes
+scanning its output prove anything. Both, rather than the secret alone,
+because the simulator treats a key id as half of one credential and keeps
+it out of its logs too — a claim that is worth exactly as much as the scan
+behind it. MinIO refuses a root password under eight characters, so the
+second is also the shortest thing that would work.
 """
 
-OBJECT_STORAGE_BUCKET = "egma-recordings"
-"""The bucket the deployment creates on first start. Named here too, so
-what the suite proves is what `docker-compose.yml` runs."""
+OBJECT_STORAGE_BUCKET = DEFAULT_S3_BUCKET
+"""The bucket the deployment creates on first start, read from the code
+that names it rather than restated — one name, so the suite cannot end up
+proving something about a bucket no deployment has."""
 
 
 @dataclass
@@ -316,7 +321,7 @@ def object_client(env: Mapping[str, str]):
         endpoint_url=env["EGMA_SIMULATOR_S3_ENDPOINT"],
         aws_access_key_id=env["EGMA_SIMULATOR_S3_ACCESS_KEY_ID"],
         aws_secret_access_key=env["EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY"],
-        region_name=env.get("EGMA_SIMULATOR_S3_REGION", "us-east-1"),
+        region_name=env.get("EGMA_SIMULATOR_S3_REGION", DEFAULT_S3_REGION),
         config=Config(s3={"addressing_style": "path"}),
     )
 

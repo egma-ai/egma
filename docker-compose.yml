@@ -110,10 +110,11 @@ services:
     environment:
       EGMA_S3_ACCESS_KEY_ID: ${EGMA_S3_ACCESS_KEY_ID:-egma}
       EGMA_S3_SECRET_ACCESS_KEY: ${EGMA_S3_SECRET_ACCESS_KEY:-egma-development-only-object-storage-secret-change-it}
-    # The credentials reach `mc` through the environment rather than through
-    # this command line, so that a `docker inspect` or a process listing on the
-    # host does not carry the store's password. `$$` is an escaped `$`: compose
-    # leaves it alone and the shell inside the container reads it.
+    # The credentials reach `mc` through the environment rather than as
+    # arguments, so the store's password is not in this container's command
+    # line — which `ps` on the host and `docker top` both show to anybody who
+    # can read them. `$$` is an escaped `$`: compose leaves it alone and the
+    # shell inside the container reads it.
     entrypoint:
       - sh
       - -c
@@ -322,14 +323,13 @@ services:
       EGMA_SIMULATOR_SIP_TRUNK_USERNAME: ${EGMA_SIMULATOR_SIP_TRUNK_USERNAME:-}
       EGMA_SIMULATOR_SIP_TRUNK_PASSWORD: ${EGMA_SIMULATOR_SIP_TRUNK_PASSWORD:-}
       # Where recordings go. Naming an endpoint is the whole of what sends
-      # them to object storage; naming none keeps them in a directory
-      # inside this container, which is what a bare `egma-simulator`
-      # process on somebody's laptop does and what the test suite runs on.
-      # This deployment names one, so no recording touches this
-      # container's disk — which is the point: a recording only the
-      # container that made it can read is a recording nobody can hear,
-      # and starting a second simulator would silently lose half the
-      # audio.
+      # them to object storage; naming none keeps them in a directory on
+      # whatever disk the process is running on, which is what a bare
+      # `egma-simulator` and the test suite do. This deployment names one,
+      # so no recording touches the simulator container's disk — which is
+      # the point: a recording only the container that made it can read is
+      # a recording nobody can hear, and starting a second simulator would
+      # silently lose half the audio.
       #
       # The service name, not the address a browser uses. They are two
       # different addresses on nearly every real deployment and confusing

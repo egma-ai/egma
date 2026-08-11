@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import pytest
 from conftest import (
+    OBJECT_STORAGE_ACCESS_KEY_ID,
     OBJECT_STORAGE_SECRET_ACCESS_KEY,
     ObjectStorage,
     assert_kept_secret,
@@ -30,6 +31,7 @@ from conftest import (
 )
 
 from egma_simulator.blob import S3BlobStore, confined_key
+from egma_simulator.config import DEFAULT_S3_REGION
 
 
 def store_for(storage: ObjectStorage) -> S3BlobStore:
@@ -39,7 +41,7 @@ def store_for(storage: ObjectStorage) -> S3BlobStore:
         bucket=storage.bucket,
         access_key_id=storage.env["EGMA_SIMULATOR_S3_ACCESS_KEY_ID"],
         secret_access_key=storage.env["EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY"],
-        region="us-east-1",
+        region=DEFAULT_S3_REGION,
     )
 
 
@@ -191,18 +193,20 @@ async def test_the_simulator_keeps_no_audio_of_its_own(
     )
 
 
-async def test_the_write_credential_never_leaves_the_process(
+async def test_neither_half_of_the_write_credential_leaves_the_process(
     workbench, start_simulator, object_storage
 ):
     """A simulator that really holds an object-storage credential emits it
     nowhere.
 
-    The credential the test store was stood up with is a sentinel, so this
-    is the same scan the spec-credential tests run — over the reports, over
-    every byte the child wrote, and over the write-ahead log — with the
-    process at its loudest, which is both the level somebody turns on when
-    a recording is not arriving and the level botocore writes request
-    headers at.
+    Both halves the store was stood up with are sentinels, so this is the
+    same scan the spec-credential tests run — over the reports, over every
+    byte the child wrote, and over the write-ahead log — with the process
+    at its loudest, which is both the level somebody turns on when a
+    recording is not arriving and the level botocore writes request headers
+    at. Both halves rather than the secret alone, because the key id is
+    kept out of logs on the same terms and a claim with no scan behind it
+    is worth nothing.
     """
     spec = loopback_spec(
         "sim-object-storage-secret",
@@ -219,6 +223,5 @@ async def test_the_write_credential_never_leaves_the_process(
     assert terminal["status"] == "completed", terminal["reason"]
 
     simulator.stop()
-    assert_kept_secret(
-        OBJECT_STORAGE_SECRET_ACCESS_KEY, records=records, simulator=simulator
-    )
+    for half in (OBJECT_STORAGE_ACCESS_KEY_ID, OBJECT_STORAGE_SECRET_ACCESS_KEY):
+        assert_kept_secret(half, records=records, simulator=simulator)

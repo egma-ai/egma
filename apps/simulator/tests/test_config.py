@@ -619,10 +619,10 @@ def test_naming_an_endpoint_is_what_sends_recordings_to_object_storage(env):
     assert store.region == "us-east-1"
 
 
-def test_the_bucket_and_the_region_have_working_defaults(env):
+def test_the_bucket_and_the_region_can_both_be_moved(env):
     """Two settings a self-hoster running the deployment's own compose file
-    never has to think about, and a deployment on somebody else's S3 can
-    still move."""
+    never has to think about — the test above proves what they default to —
+    and that a deployment on somebody else's S3 can still move."""
     a_deployment_with_object_storage(
         env,
         EGMA_SIMULATOR_S3_BUCKET="somebody-elses-bucket",

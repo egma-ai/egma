@@ -78,6 +78,15 @@ and every request must still carry one, so this is the value that lets a
 deployment with no region at all work — and the one a deployment on real
 S3 will nearly always be replacing."""
 
+NAMED_A_STORE = (
+    "EGMA_SIMULATOR_S3_ENDPOINT names an object store to write recordings to"
+)
+"""What makes the object store's other variables required, said the way a
+refusal says it. A simulator holding half a credential conducts every
+voice simulation it claims to the end and then loses the recording, one
+after another, with the store's own refusal in the log rather than the one
+sentence naming the variable to set."""
+
 S3_BUCKET_NAME = re.compile(r"\A[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\Z")
 """What every object store agrees a bucket may be called: lower case,
 three to sixty-three characters, and no separator.
@@ -268,11 +277,16 @@ class MediaSettings:
         if named != "livekit":
             return cls(backend=named)
 
+        chosen = f"EGMA_SIMULATOR_MEDIA_BACKEND={named}"
         settings = cls(
             backend=named,
-            livekit_url=_needed("EGMA_SIMULATOR_LIVEKIT_URL", named),
-            livekit_api_key=_needed("EGMA_SIMULATOR_LIVEKIT_API_KEY", named),
-            livekit_api_secret=_needed("EGMA_SIMULATOR_LIVEKIT_API_SECRET", named),
+            livekit_url=_needed("EGMA_SIMULATOR_LIVEKIT_URL", because=chosen),
+            livekit_api_key=_needed(
+                "EGMA_SIMULATOR_LIVEKIT_API_KEY", because=chosen
+            ),
+            livekit_api_secret=_needed(
+                "EGMA_SIMULATOR_LIVEKIT_API_SECRET", because=chosen
+            ),
             trunk_id=_text("EGMA_SIMULATOR_SIP_TRUNK_ID"),
             trunk_address=_text("EGMA_SIMULATOR_SIP_TRUNK_ADDRESS"),
             trunk_number=_text("EGMA_SIMULATOR_SIP_TRUNK_NUMBER"),
@@ -318,14 +332,18 @@ class MediaSettings:
         return settings
 
 
-def _needed(variable: str, backend: str) -> str:
-    """A variable one chosen media backend cannot do without."""
+def _needed(variable: str, *, because: str) -> str:
+    """A variable one thing this deployment chose cannot do without.
+
+    The refusal names both: the variable to set, and what made it
+    required. A simulator started without one of these conducts every
+    simulation it claims to a failure with the provider's own words —
+    which say nothing about which of somebody's variables to fix — so it
+    says it here, before it claims anything.
+    """
     value = _text(variable)
     if value is None:
-        raise ValueError(
-            f"{variable} is required when "
-            f"EGMA_SIMULATOR_MEDIA_BACKEND={backend}"
-        )
+        raise ValueError(f"{variable} is required when {because}")
     return value
 
 
@@ -337,7 +355,7 @@ class ObjectStoreSettings:
     container can read, and a deployment is invited to run more than one
     simulator — so the second one's audio becomes unreadable with nothing
     said. Object storage is what the whole deployment shares, and these
-    are the four facts needed to reach it.
+    are the five facts needed to reach it.
 
     They arrive the way everything else does, and a deployment that names
     no endpoint gets no settings at all: the filesystem store stands, and
@@ -362,24 +380,22 @@ class ObjectStoreSettings:
     bucket: str
     region: str
 
-    access_key_id: str | None = field(default=None, repr=False)
-    secret_access_key: str | None = field(default=None, repr=False)
+    access_key_id: str = field(repr=False)
+    secret_access_key: str = field(repr=False)
     """The simulator's write credential, both halves kept out of the
-    dataclass repr. The key id is treated as secret beside the secret it
-    signs with because the two are one credential in two halves: they
-    arrive together, they are rotated together, and a log line carrying
-    either is a log line that should not have."""
+    dataclass repr, and neither of them optional: a store cannot be
+    reached without both, so settings that exist at all hold both. The key
+    id is treated as secret beside the secret it signs with because the
+    two are one credential in two halves — they arrive together, they are
+    rotated together, and a log line carrying either is a log line that
+    should not have."""
 
     @property
     def secrets(self) -> tuple[str, ...]:
         """Every secret these settings hold, for redaction. One place to
         ask, so a read credential arriving beside the write one cannot
         fall out of the scrubbing."""
-        return tuple(
-            secret
-            for secret in (self.access_key_id, self.secret_access_key)
-            if secret is not None
-        )
+        return (self.access_key_id, self.secret_access_key)
 
     @classmethod
     def from_env(cls) -> ObjectStoreSettings | None:
@@ -408,30 +424,13 @@ class ObjectStoreSettings:
             endpoint=endpoint.rstrip("/"),
             bucket=bucket,
             region=_text("EGMA_SIMULATOR_S3_REGION", DEFAULT_S3_REGION),
-            access_key_id=_needed_by_the_store(
-                "EGMA_SIMULATOR_S3_ACCESS_KEY_ID"
+            access_key_id=_needed(
+                "EGMA_SIMULATOR_S3_ACCESS_KEY_ID", because=NAMED_A_STORE
             ),
-            secret_access_key=_needed_by_the_store(
-                "EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY"
+            secret_access_key=_needed(
+                "EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY", because=NAMED_A_STORE
             ),
         )
-
-
-def _needed_by_the_store(variable: str) -> str:
-    """A variable object storage cannot be reached without.
-
-    A simulator with half a credential conducts every voice simulation to
-    its end and then loses the recording, one after another, with the
-    store's own refusal in the log rather than the one sentence that says
-    which variable to set. So it says it before it claims anything.
-    """
-    value = _text(variable)
-    if value is None:
-        raise ValueError(
-            f"{variable} is required when EGMA_SIMULATOR_S3_ENDPOINT names "
-            "an object store to write recordings to"
-        )
-    return value
 
 
 @dataclass(frozen=True)
