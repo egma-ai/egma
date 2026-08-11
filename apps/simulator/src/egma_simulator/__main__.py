@@ -66,12 +66,13 @@ def _gather_loguru(level: str) -> None:
 def secrets_of(config: SimulatorConfig) -> SecretRegistry:
     """Every secret this configuration holds, registered for redaction.
 
-    The model key, the speech-provider keys, the telephony secrets and
-    the service token are configuration rather than a spec's credentials,
-    but they are secrets all the same, and the same filter keeps them out
-    of logs — which matters most for the speech legs and the media
-    bridge, whose libraries log plenty on their own and would happily
-    print a refusal with the secret inside it.
+    The model key, the speech-provider keys, the telephony secrets, the
+    object store's write credential and the service token are
+    configuration rather than a spec's credentials, but they are secrets
+    all the same, and the same filter keeps them out of logs — which
+    matters most for the speech legs, the media bridge and the object
+    store's client, whose libraries log plenty on their own and would
+    happily print a refusal with the secret inside it.
 
     Written as one function so that what a running simulator registers is
     the thing a test can ask about, rather than something that happens
@@ -83,6 +84,7 @@ def secrets_of(config: SimulatorConfig) -> SecretRegistry:
         config.service_token,
         *config.speech_secrets,
         *config.media_secrets,
+        *config.object_store_secrets,
     ):
         if secret is not None:
             registry.register(secret)

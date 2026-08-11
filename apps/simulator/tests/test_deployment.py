@@ -39,7 +39,19 @@ DOCUMENTED_ELSEWHERE = {
     # purpose — a compose entry for it would invite somebody to point a
     # container at a contract it was not built with.
     "EGMA_SIMULATION_CONTRACT_DIR",
+    # Not this deployment's either, and it is the absence that says so.
+    # The compose deployment runs object storage, so a simulator container
+    # writes no audio to its own filesystem and has no recordings
+    # directory at all — a compose entry naming one would be a path
+    # nothing reads, on a volume a self-hoster would then expect to find
+    # recordings on. It stays documented for the other way of running the
+    # simulator: a bare process, which is what the workbench story and
+    # every contributor's checkout use.
+    "EGMA_SIMULATOR_BLOB_DIR",
 }
+"""Variables the code reads that no compose file passes, each for its own
+stated reason. Everything else must reach the container, because a
+variable a compose entry leaves out never arrives however it is set."""
 
 
 def repository_root() -> Path:
@@ -261,4 +273,22 @@ def test_the_gateway_listens_on_the_port_it_is_published_on():
     assert len(published) == 2, (
         "the published SIP port does not map to the same port inside the "
         f"container; found {len(published)} of the two mappings"
+    )
+
+
+def test_the_object_store_under_test_is_the_one_the_deployment_runs():
+    """The image the suite proves against and the image a self-hoster gets
+    are one release, named in two files.
+
+    Drift here is quiet and expensive: the object-storage tests would keep
+    passing against whatever they happened to pull while the deployment ran
+    something else, which is exactly the assurance those tests exist to
+    give up front.
+    """
+    from conftest import MINIO_IMAGE
+
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    assert f"image: {MINIO_IMAGE}" in compose, (
+        f"the tests start {MINIO_IMAGE} and docker-compose.yml runs some "
+        "other release of the object store"
     )

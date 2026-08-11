@@ -2,10 +2,12 @@
 
 A recording is too big to travel in a report and too useful to throw away,
 so the simulator writes it directly and reports only an opaque reference.
-The seam here is what that write goes through: one interface, with a
-filesystem-backed default, so a self-hoster reaches their first voice
-simulation with no object-storage container running and configures S3 or
-MinIO later without anything above this file noticing.
+The seam here is what that write goes through: one interface, with two
+implementations behind it. A deployment names an object-storage endpoint
+and its recordings land somewhere every part of that deployment can
+reach; it names none and a directory stands in, which is what lets the
+whole test suite run with no container anywhere and what a bare
+``egma-simulator`` process on somebody's laptop writes to.
 
 ``write`` is async because every implementation after the first one is a
 network call, and a synchronous seam would make an upload stall every
@@ -105,3 +107,87 @@ class FilesystemBlobStore:
         path = self._root / reference
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
+
+
+class S3BlobStore:
+    """The store a whole deployment can reach: one bucket, one object per key.
+
+    The implementation this seam was written for. Nothing above it moves
+    — a recording is still built once when the conversation ends, still
+    written through ``write``, still reported as one opaque reference —
+    and what changes is only where those bytes come to rest. Out of one
+    container's own disk, which nothing but that container can read, and
+    into storage the control plane and every other simulator share. A
+    self-hoster who starts a second simulator, which the deployment
+    invites them to do, then gets recordings from both, readable from
+    either; with a directory inside a container they get references that
+    point at nothing and no warning that half their audio is gone.
+
+    The reference is the confined key and nothing else — no bucket, no
+    endpoint, no signature, and nothing that would go stale the day the
+    deployment moved its store. Which store resolves a reference, and how
+    a browser is let at it, is the reader's business.
+
+    ``put_object`` is one request that both creates and replaces, so
+    writing a key twice leaves one object exactly as writing a path twice
+    leaves one file. There is no read here, and no delete: this seam is
+    what a simulator does, and a simulator only ever adds.
+    """
+
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        bucket: str,
+        access_key_id: str,
+        secret_access_key: str,
+        region: str,
+    ) -> None:
+        # The client is imported here rather than at the top of this file,
+        # on the rule this package already holds every provider library to:
+        # choosing the thing is what loads its client. A deployment that
+        # named no endpoint — a contributor's checkout, a first voice
+        # simulation, every suite here but one — never builds this store,
+        # and so never pays botocore's import to reach a directory.
+        import boto3
+        from botocore.config import Config as BotoConfig
+
+        self._bucket = bucket
+        # Path addressing, not the virtual-host style AWS defaults to.
+        # A MinIO answering at `http://minio:9000` has one name on the
+        # deployment's network and no per-bucket name at all, so a client
+        # that asked for `http://egma-recordings.minio:9000` would resolve
+        # nothing — and the error it raises names DNS rather than the
+        # addressing style that caused it. AWS itself serves both, so this
+        # costs a deployment pointed at real S3 nothing.
+        self._client = boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            aws_access_key_id=access_key_id,
+            aws_secret_access_key=secret_access_key,
+            region_name=region,
+            config=BotoConfig(
+                signature_version="s3v4", s3={"addressing_style": "path"}
+            ),
+        )
+
+    async def write(self, key: str, content: bytes) -> str:
+        """One recording into the bucket, off the event loop.
+
+        boto3 is synchronous and this seam is not, for the reason the
+        module docstring gives: an upload that blocked would stall every
+        other simulation this process is conducting, and a simulator
+        conducts several at once. So the call goes through a thread
+        exactly as the filesystem store's write does. One client serves
+        all of them — botocore's low-level clients are safe to call from
+        several threads, and a client per simulation would build a fresh
+        connection pool for one upload.
+        """
+        reference = confined_key(key)
+        await asyncio.to_thread(self._write_now, reference, content)
+        return reference
+
+    def _write_now(self, reference: str, content: bytes) -> None:
+        self._client.put_object(
+            Bucket=self._bucket, Key=reference, Body=content
+        )

@@ -49,6 +49,7 @@ second `up` typed by hand.
 | API | http://localhost:3100 |
 | Postgres | `postgres://egma:egma@localhost:5433/egma` |
 | ClickHouse | `http://egma:egma@localhost:8124/egma` |
+| Object store | none — reached on the deployment's own network |
 | Simulator | none — it only dials out |
 | Grader | none — it only dials out |
 | LiveKit server | 127.0.0.1:7880, for this machine only |
@@ -479,6 +480,13 @@ database of its own in whichever store it uses and drops it afterwards, so
 `pnpm test` needs credentials that may create databases. `pnpm db:up` starts
 both; point `TEST_DATABASE_URL` and `TEST_CLICKHOUSE_URL` somewhere else if you
 would rather use your own.
+
+The object store is real for the same reason and asks you for nothing. The
+handful of tests that need one start their own MinIO container, on a port of
+its own, and remove it afterwards; where docker cannot start one they say so
+and skip rather than pass quietly. Everything else in the simulator's suite
+writes its recordings to a directory, so a checkout costs you no object
+storage at all.
 
 One test drives a real browser: `apps/api/test/browser.test.ts` starts the API
 and the web application on ports of their own and clicks through the paths a

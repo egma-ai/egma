@@ -103,14 +103,19 @@ const READY_POLL_MS = 2_000;
 
 /**
  * Every service `self-host up` starts, in the order somebody would look for
- * them. Named in full rather than summarised: four of these — the simulator,
- * the grader, the SIP gateway and its Redis — publish nothing and have no page
- * to visit, so a line naming them is the only sign a person gets that they are
- * running at all.
+ * them. Named in full rather than summarised: five of these — the object
+ * store, the simulator, the grader, the SIP gateway and its Redis — publish
+ * nothing and have no page to visit, so a line naming them is the only sign a
+ * person gets that they are running at all.
+ *
+ * The one-shot job that creates the object store's bucket is deliberately not
+ * here. It runs and exits, so a person who went looking for it would find
+ * nothing running and read that as something broken.
  */
 const STARTED = [
   "postgres",
   "clickhouse",
+  "minio",
   "api",
   "web",
   "simulator",

@@ -568,3 +568,157 @@ def test_every_telephony_secret_is_registered_for_redaction_at_startup(env):
     assert A_LIVEKIT["EGMA_SIMULATOR_LIVEKIT_API_SECRET"] not in scrubbed
     assert A_LIVEKIT["EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"] not in scrubbed
     assert scrubbed.count("[redacted]") == 2
+
+
+# -- Where recordings go -----------------------------------------------------
+#
+# Naming an object-storage endpoint is the whole of what selects it, the
+# same way naming a media backend is the whole of what selects a bridge.
+# Absent, the filesystem store stands — which is what lets this suite, and
+# every contributor's checkout, run with no container at all.
+
+AN_OBJECT_STORE = {
+    "EGMA_SIMULATOR_S3_ENDPOINT": "http://minio:9000",
+    "EGMA_SIMULATOR_S3_ACCESS_KEY_ID": "egma-object-storage",
+    "EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY": "SENTINEL-object-storage-secret-71bd",
+}
+
+
+def a_deployment_with_object_storage(env, **changes: str | None):
+    """The environment of a simulator whose recordings leave its disk,
+    minus or plus whatever one test is about."""
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    for name, value in (AN_OBJECT_STORE | changes).items():
+        if value is None:
+            env.delenv(name, raising=False)
+        else:
+            env.setenv(name, value)
+
+
+def test_a_simulator_that_names_no_endpoint_keeps_its_recordings_on_disk(env):
+    """No container to run, and nothing to configure, is the whole point:
+    a first voice simulation costs a self-hoster no object storage, and a
+    contributor's checkout costs them none either."""
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+
+    config = SimulatorConfig.from_env()
+
+    assert config.object_store is None
+    assert config.blob_dir.is_dir()
+
+
+def test_naming_an_endpoint_is_what_sends_recordings_to_object_storage(env):
+    a_deployment_with_object_storage(env)
+
+    store = SimulatorConfig.from_env().object_store
+
+    assert store is not None
+    assert store.endpoint == "http://minio:9000"
+    assert store.access_key_id == "egma-object-storage"
+    assert store.bucket == "egma-recordings"
+    assert store.region == "us-east-1"
+
+
+def test_the_bucket_and_the_region_have_working_defaults(env):
+    """Two settings a self-hoster running the deployment's own compose file
+    never has to think about, and a deployment on somebody else's S3 can
+    still move."""
+    a_deployment_with_object_storage(
+        env,
+        EGMA_SIMULATOR_S3_BUCKET="somebody-elses-bucket",
+        EGMA_SIMULATOR_S3_REGION="eu-west-2",
+    )
+
+    store = SimulatorConfig.from_env().object_store
+
+    assert store.bucket == "somebody-elses-bucket"
+    assert store.region == "eu-west-2"
+
+
+def test_object_storage_leaves_no_blob_directory_to_prove(env):
+    """The directory is proved by writing to it, and nothing will write to
+    it: a deployment whose recordings go to a bucket must not be refused
+    over a filesystem it was never going to touch."""
+    a_deployment_with_object_storage(env, EGMA_SIMULATOR_BLOB_DIR=None)
+
+    config = SimulatorConfig.from_env()
+
+    assert config.blob_dir is None
+    assert config.wal_dir.is_dir(), "the write-ahead log still needs its volume"
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "EGMA_SIMULATOR_S3_ACCESS_KEY_ID",
+        "EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY",
+    ],
+)
+def test_object_storage_missing_a_credential_is_refused_by_name(env, missing):
+    """A simulator that cannot authenticate to the store would conduct
+    every voice simulation to the end and then lose its recording, one
+    after another, with the store's refusal rather than the one sentence
+    that says which variable to set."""
+    a_deployment_with_object_storage(env, **{missing: None})
+
+    with pytest.raises(ValueError) as refusal:
+        SimulatorConfig.from_env()
+
+    assert missing in str(refusal.value)
+
+
+def test_an_endpoint_with_no_scheme_is_refused_by_name(env):
+    """`minio:9000` is the natural thing to write next to a compose service
+    name, and it reaches nothing."""
+    a_deployment_with_object_storage(env, EGMA_SIMULATOR_S3_ENDPOINT="minio:9000")
+
+    with pytest.raises(ValueError) as refusal:
+        SimulatorConfig.from_env()
+
+    assert "EGMA_SIMULATOR_S3_ENDPOINT" in str(refusal.value)
+
+
+@pytest.mark.parametrize(
+    "bucket", ["Egma-Recordings", "egma recordings", "egma/recordings", "no"]
+)
+def test_a_bucket_name_no_store_would_take_is_refused_by_name(env, bucket):
+    """A bucket is not a free-text field, and a name with a separator in it
+    is worse than one merely refused: it would silently make the first part
+    of every key mean something the key confinement never agreed to."""
+    a_deployment_with_object_storage(env, EGMA_SIMULATOR_S3_BUCKET=bucket)
+
+    with pytest.raises(ValueError) as refusal:
+        SimulatorConfig.from_env()
+
+    assert "EGMA_SIMULATOR_S3_BUCKET" in str(refusal.value)
+
+
+def test_neither_half_of_the_object_storage_credential_ever_prints(env):
+    """A config that landed in a log line by accident says nothing."""
+    a_deployment_with_object_storage(env)
+    config = SimulatorConfig.from_env()
+
+    printed = repr(config) + repr(config.object_store)
+
+    assert AN_OBJECT_STORE["EGMA_SIMULATOR_S3_ACCESS_KEY_ID"] not in printed
+    assert AN_OBJECT_STORE["EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY"] not in printed
+
+
+def test_the_object_storage_credential_is_registered_for_redaction(env):
+    """botocore logs a refused request at DEBUG, headers and all, so what
+    keeps the write credential out of a chatty log is proved here — with
+    no store, no bucket and no network."""
+    from egma_simulator.__main__ import secrets_of
+
+    a_deployment_with_object_storage(env)
+    registry = secrets_of(SimulatorConfig.from_env())
+
+    scrubbed = registry.redact(
+        "the store refused key "
+        f"{AN_OBJECT_STORE['EGMA_SIMULATOR_S3_ACCESS_KEY_ID']} signing with "
+        f"{AN_OBJECT_STORE['EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY']}"
+    )
+
+    assert AN_OBJECT_STORE["EGMA_SIMULATOR_S3_ACCESS_KEY_ID"] not in scrubbed
+    assert AN_OBJECT_STORE["EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY"] not in scrubbed
+    assert scrubbed.count("[redacted]") == 2

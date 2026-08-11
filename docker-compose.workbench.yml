@@ -65,3 +65,9 @@ services:
     depends_on: !override
       workbench:
         condition: service_started
+      # The object store stays, because the demo's whole point is a real
+      # voice simulation and a real voice simulation leaves a recording.
+      # Naming the two services above brings this up with them, so the
+      # demo is still two words on a command line.
+      minio-bucket:
+        condition: service_completed_successfully

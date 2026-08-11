@@ -42,6 +42,12 @@ ALLOWED_DEPENDENCIES = {
     "pipecat-ai",
     "loguru",  # what pipecat logs through, gathered under one filter
     "nltk",  # pipecat's tokenizer, held to no downloads (see __init__)
+    # The object store a deployment's recordings land in. Signing an S3
+    # request by hand is security-adjacent code nobody should write twice,
+    # and this is the client every store the seam will ever meet already
+    # speaks. It is loaded only where an endpoint was named: the guard
+    # below.
+    "boto3",
 }
 
 SPEECH_PROVIDER_MODULES = (
@@ -65,6 +71,13 @@ MEDIA_BACKEND_MODULES = (
 through, and the modules a simulator that dials no phone must never load.
 ``livekit`` is a native wheel with a Rust runtime inside it — precisely
 the sort of cost only a deployment that asked for it should pay."""
+
+OBJECT_STORE_MODULES = ("boto3", "botocore")
+"""The same rule again: the client the object-storage blob store speaks
+through, and the modules a deployment that named no endpoint must never
+load. The filesystem store is what a contributor's checkout, a first voice
+simulation and every suite here but one run on, and botocore is a large
+import to pay for a store nobody configured."""
 
 # A datastore driver in here would mean the simulator had stopped asking
 # the control plane and started reading its answers, which is the one thing
@@ -126,6 +139,8 @@ def test_no_module_imports_anything_from_outside_the_app():
         "loguru",
         "nltk",
         "livekit",
+        "boto3",
+        "botocore",
     }
     permitted = allowed_modules | set(sys.stdlib_module_names) | {"egma_simulator"}
 
@@ -163,8 +178,16 @@ def test_a_provider_library_is_never_imported_at_module_scope():
     the simulator only ever imports one after configuration has asked for
     it. Written as a rule rather than as care: an import moved to the top
     of a file for tidiness would undo it silently.
+
+    The object store's client is held to the same rule as the speech legs
+    and the bridge, and for the same reason: naming an endpoint is what
+    selects it, so a deployment that named none must not load it.
     """
-    deferred = set(SPEECH_PROVIDER_MODULES) | set(MEDIA_BACKEND_MODULES)
+    deferred = (
+        set(SPEECH_PROVIDER_MODULES)
+        | set(MEDIA_BACKEND_MODULES)
+        | set(OBJECT_STORE_MODULES)
+    )
     offenders: dict[str, set[str]] = {}
     for file in source_files():
         tree = ast.parse(file.read_text(encoding="utf-8"), filename=str(file))
@@ -187,8 +210,8 @@ def test_a_provider_library_is_never_imported_at_module_scope():
             offenders[str(file.relative_to(APP_ROOT))] = eager
 
     assert not offenders, (
-        f"a speech provider's library is imported eagerly: {offenders}. It is "
-        "imported where the provider is chosen, so an unconfigured simulator "
+        f"a library a deployment chooses is imported eagerly: {offenders}. It "
+        "is imported where that choice is read, so an unconfigured simulator "
         "never loads it at all."
     )
 
@@ -199,9 +222,13 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
     A fresh process conducts two whole voice simulations with nothing
     configured — one against the loopback counterpart and one that dials
     a number through the scripted media backend — and then says which
-    provider and bridge libraries it loaded. It has to be a fresh one:
-    this suite configures the providers elsewhere, so by the time it asks,
-    its own modules are already loaded.
+    provider, bridge and object-storage libraries it loaded. It has to be
+    a fresh one: this suite configures the providers elsewhere, so by the
+    time it asks, its own modules are already loaded.
+
+    Both simulations write their recording through the filesystem store,
+    which is what a deployment that named no endpoint gets — so a client
+    loaded here would be a client every checkout pays for.
     """
     proof = textwrap.dedent(
         """
@@ -287,7 +314,9 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
         asyncio.run(conduct_both())
         print(json.dumps(sorted(
             name for name in sys.modules
-            if name.split(".")[0] in ("deepgram", "elevenlabs", "livekit")
+            if name.split(".")[0] in (
+                "deepgram", "elevenlabs", "livekit", "boto3", "botocore"
+            )
             or name.startswith("pipecat.services.deepgram")
             or name.startswith("pipecat.services.elevenlabs")
             or name.startswith("pipecat.transports.livekit")
@@ -306,8 +335,8 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
     loaded = json.loads(finished.stdout.strip().splitlines()[-1])
     assert loaded == [], (
         f"an unconfigured voice simulation loaded {loaded}; a provider "
-        "library or a media bridge is a cost only a deployment that asked "
-        "for it should pay"
+        "library, a media bridge or an object-storage client is a cost only "
+        "a deployment that asked for it should pay"
     )
 
 

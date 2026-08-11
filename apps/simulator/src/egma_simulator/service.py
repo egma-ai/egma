@@ -35,7 +35,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
-from .blob import BlobStore, FilesystemBlobStore
+from .blob import BlobStore, FilesystemBlobStore, S3BlobStore
 from .client import ClaimFailure, ControlPlaneClient, HeartbeatFailure
 from .config import SimulatorConfig
 from .contract import ContractViolation
@@ -63,6 +63,33 @@ a day of a log nobody can read, with the only thing that would be news, the
 failure changing, buried inside it. So a failure speaks up when it is new
 and once a minute while it persists; the repeats are still there at DEBUG
 for whoever wants to count them."""
+
+
+def blob_store_for(config: SimulatorConfig) -> BlobStore:
+    """Where this simulator's recordings go, decided once at startup.
+
+    Naming an object-storage endpoint is the whole of what selects it —
+    the same shape as naming a media backend, and the reason the entire
+    test suite runs against a directory with no container anywhere. The
+    two are exclusive because the configuration made them so: a
+    deployment with a store has no blob directory to fall back to, and
+    writing a recording to both places would leave the failure this
+    effort exists to end standing behind a copy that happens to be
+    reachable.
+
+    Everything above this line is given a :class:`BlobStore` and never
+    learns which one it got.
+    """
+    store = config.object_store
+    if store is None:
+        return FilesystemBlobStore(config.blob_dir)
+    return S3BlobStore(
+        endpoint=store.endpoint,
+        bucket=store.bucket,
+        access_key_id=store.access_key_id,
+        secret_access_key=store.secret_access_key,
+        region=store.region,
+    )
 
 
 class Executor(Protocol):
@@ -451,7 +478,7 @@ class SimulatorService:
     def __init__(self, config: SimulatorConfig, *, secrets: SecretRegistry) -> None:
         self._config = config
         self._secrets = secrets
-        self._blobs = FilesystemBlobStore(config.blob_dir)
+        self._blobs = blob_store_for(config)
         self._last_claim_failure: str | None = None
         # Two clocks, because they answer two questions. One is how long
         # this failure has been going on, which is what the operator wants

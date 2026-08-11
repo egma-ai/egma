@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import socket
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,6 +67,25 @@ MEDIA_BACKENDS = ("scripted", "livekit")
 """How a phone call's audio may travel. Naming one is what makes a
 simulator able to dial at all, and what makes that backend's own
 variables required."""
+
+DEFAULT_S3_BUCKET = "egma-recordings"
+"""The bucket the deployment creates on its first start. A self-hoster
+running the compose file this repository ships never names it."""
+
+DEFAULT_S3_REGION = "us-east-1"
+"""What to sign for when nobody said. MinIO ignores the region entirely
+and every request must still carry one, so this is the value that lets a
+deployment with no region at all work — and the one a deployment on real
+S3 will nearly always be replacing."""
+
+S3_BUCKET_NAME = re.compile(r"\A[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\Z")
+"""What every object store agrees a bucket may be called: lower case,
+three to sixty-three characters, and no separator.
+
+Checked here rather than left to the client, because the failure is worse
+than a refused request. A name carrying a ``/`` would put a prefix nobody
+configured in front of every key, which is the one thing the key
+confinement in ``blob.py`` exists to make impossible."""
 
 
 def _text(name: str, fallback: str | None = None) -> str | None:
@@ -310,6 +330,111 @@ def _needed(variable: str, backend: str) -> str:
 
 
 @dataclass(frozen=True)
+class ObjectStoreSettings:
+    """Where this deployment's recordings land, read once at startup.
+
+    A recording written inside the simulator is a recording only that
+    container can read, and a deployment is invited to run more than one
+    simulator — so the second one's audio becomes unreadable with nothing
+    said. Object storage is what the whole deployment shares, and these
+    are the four facts needed to reach it.
+
+    They arrive the way everything else does, and a deployment that names
+    no endpoint gets no settings at all: the filesystem store stands, and
+    a contributor's checkout costs them no container. This is the same
+    shape as :class:`MediaSettings` on purpose — naming the thing is what
+    selects it, and what makes the rest of its variables required.
+
+    What is checked here is what can be checked without a network. That
+    the store is up, that the bucket is there, and that the credential is
+    the right one are answers only the store has, and a simulator that
+    refused to start until it could ask would be a simulator that dies
+    because its object store was five seconds behind it. The deployment
+    orders that instead: the bucket job runs to completion before the
+    simulator starts.
+    """
+
+    endpoint: str
+    """Where the store answers, on the deployment's own network. Not the
+    address a browser uses — that belongs to whoever signs links for one,
+    and the two differ on nearly every real deployment."""
+
+    bucket: str
+    region: str
+
+    access_key_id: str | None = field(default=None, repr=False)
+    secret_access_key: str | None = field(default=None, repr=False)
+    """The simulator's write credential, both halves kept out of the
+    dataclass repr. The key id is treated as secret beside the secret it
+    signs with because the two are one credential in two halves: they
+    arrive together, they are rotated together, and a log line carrying
+    either is a log line that should not have."""
+
+    @property
+    def secrets(self) -> tuple[str, ...]:
+        """Every secret these settings hold, for redaction. One place to
+        ask, so a read credential arriving beside the write one cannot
+        fall out of the scrubbing."""
+        return tuple(
+            secret
+            for secret in (self.access_key_id, self.secret_access_key)
+            if secret is not None
+        )
+
+    @classmethod
+    def from_env(cls) -> ObjectStoreSettings | None:
+        """This deployment's object store, or ``None`` where it names none."""
+        endpoint = _text("EGMA_SIMULATOR_S3_ENDPOINT")
+        if endpoint is None:
+            return None
+        if not endpoint.startswith(("http://", "https://")):
+            # `minio:9000` is the natural thing to write next to a compose
+            # service name, and it reaches nothing. Said now rather than
+            # by every recording failing against an unreadable URL.
+            raise ValueError(
+                "EGMA_SIMULATOR_S3_ENDPOINT must start with http:// or "
+                f"https://, got {endpoint!r}"
+            )
+
+        bucket = _text("EGMA_SIMULATOR_S3_BUCKET", DEFAULT_S3_BUCKET)
+        if not S3_BUCKET_NAME.match(bucket):
+            raise ValueError(
+                "EGMA_SIMULATOR_S3_BUCKET must be a bucket name — lower "
+                "case, 3 to 63 characters, letters, digits, dots and "
+                f"hyphens, and no separator; got {bucket!r}"
+            )
+
+        return cls(
+            endpoint=endpoint.rstrip("/"),
+            bucket=bucket,
+            region=_text("EGMA_SIMULATOR_S3_REGION", DEFAULT_S3_REGION),
+            access_key_id=_needed_by_the_store(
+                "EGMA_SIMULATOR_S3_ACCESS_KEY_ID"
+            ),
+            secret_access_key=_needed_by_the_store(
+                "EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY"
+            ),
+        )
+
+
+def _needed_by_the_store(variable: str) -> str:
+    """A variable object storage cannot be reached without.
+
+    A simulator with half a credential conducts every voice simulation to
+    its end and then loses the recording, one after another, with the
+    store's own refusal in the log rather than the one sentence that says
+    which variable to set. So it says it before it claims anything.
+    """
+    value = _text(variable)
+    if value is None:
+        raise ValueError(
+            f"{variable} is required when EGMA_SIMULATOR_S3_ENDPOINT names "
+            "an object store to write recordings to"
+        )
+    return value
+
+
+@dataclass(frozen=True)
 class SimulatorConfig:
     """Everything the simulator reads from its environment."""
 
@@ -334,10 +459,19 @@ class SimulatorConfig:
     wal_dir: Path
     """Where report documents are written before they are sent."""
 
-    blob_dir: Path
+    blob_dir: Path | None
     """Where recordings land, for the filesystem-backed blob store — the
-    default one, so a first voice simulation needs no object storage
-    running. A report carries only the reference."""
+    one that stands when this deployment names no object-storage endpoint,
+    so a first voice simulation needs no container running. A report
+    carries only the reference.
+
+    ``None`` exactly when :attr:`object_store` is set: the two are one
+    decision, and the pairing is what lets the store be chosen by asking
+    which of them is there. It is ``None`` rather than an unused path
+    because proving this directory is *writing* to it, and a deployment
+    whose recordings go to a bucket must not be refused over a filesystem
+    it was never going to touch — a read-only root is an ordinary way to
+    harden a container."""
 
     log_level: str
 
@@ -406,6 +540,11 @@ class SimulatorConfig:
     all. ``None`` where none was named, and a simulation that then names a
     phone number is refused with a sentence naming the variable."""
 
+    object_store: ObjectStoreSettings | None = None
+    """Where recordings go for a deployment that runs object storage.
+    ``None`` where it names no endpoint, and then :attr:`blob_dir` is
+    where they go instead."""
+
     @property
     def speech_secrets(self) -> tuple[str, ...]:
         """Every provider key this configuration holds.
@@ -430,6 +569,14 @@ class SimulatorConfig:
     def media_secrets(self) -> tuple[str, ...]:
         """Every secret the media configuration holds, for the same reason."""
         return () if self.media is None else self.media.secrets
+
+    @property
+    def object_store_secrets(self) -> tuple[str, ...]:
+        """Every secret the object store's configuration holds, for the same
+        reason again — botocore logs a refused request at DEBUG, headers
+        and all, and DEBUG is exactly the level somebody turns on when a
+        recording is not arriving."""
+        return () if self.object_store is None else self.object_store.secrets
 
     @classmethod
     def from_env(cls) -> SimulatorConfig:
@@ -486,6 +633,10 @@ class SimulatorConfig:
             if provider != "scripted"
         }
 
+        # Read before the directories below, because it decides whether one
+        # of them is a directory at all.
+        object_store = ObjectStoreSettings.from_env()
+
         return cls(
             control_plane_url=url.rstrip("/"),
             claimant=_text(
@@ -502,9 +653,15 @@ class SimulatorConfig:
                 "EGMA_SIMULATOR_WAL_DIR",
                 Path(_text("EGMA_SIMULATOR_WAL_DIR", ".egma-simulator/wal")),
             ),
-            blob_dir=_writable_directory(
-                "EGMA_SIMULATOR_BLOB_DIR",
-                Path(_text("EGMA_SIMULATOR_BLOB_DIR", ".egma-simulator/blobs")),
+            blob_dir=(
+                None
+                if object_store is not None
+                else _writable_directory(
+                    "EGMA_SIMULATOR_BLOB_DIR",
+                    Path(
+                        _text("EGMA_SIMULATOR_BLOB_DIR", ".egma-simulator/blobs")
+                    ),
+                )
             ),
             log_level=_level("EGMA_SIMULATOR_LOG_LEVEL", "INFO"),
             service_token=_text("EGMA_SIMULATOR_SERVICE_TOKEN"),
@@ -524,4 +681,5 @@ class SimulatorConfig:
             tts_model=_text("EGMA_SIMULATOR_TTS_MODEL", DEFAULT_TTS_MODEL),
             tts_voice=_text("EGMA_SIMULATOR_TTS_VOICE", DEFAULT_TTS_VOICE),
             media=MediaSettings.from_env(),
+            object_store=object_store,
         )

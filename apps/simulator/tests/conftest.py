@@ -14,10 +14,14 @@ import contextlib
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
-from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass, field
+import time
+import urllib.error
+import urllib.request
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 import aiohttp
@@ -125,11 +129,27 @@ class SimulatorProcess:
     stderr_path: Path
     wal_dir: Path
     blob_dir: Path
-    extra_env: dict[str, str] = field(default_factory=dict)
+    env: dict[str, str]
+    """The whole environment this child was started with — which is the
+    whole of what it was told, and so the only thing that can say where
+    its recordings went."""
 
     def blob(self, reference: str) -> bytes:
-        """What a reported reference actually resolves to on disk."""
-        return (self.blob_dir / reference).read_bytes()
+        """What a reported reference actually resolves to, read out of
+        whichever store this simulator was configured with.
+
+        A reference is opaque: it carries no bucket, no directory and no
+        address, so nothing about it says where to look. What says it is
+        the configuration the simulator was given, which is why this
+        reads that rather than opening a directory it assumed. Every
+        assertion about a recording in this suite goes through here, so
+        moving the store from a directory to a bucket costs this helper
+        and not one test.
+        """
+        endpoint = self.env.get("EGMA_SIMULATOR_S3_ENDPOINT", "").strip()
+        if not endpoint:
+            return (self.blob_dir / reference).read_bytes()
+        return object_in_storage(self.env, reference)
 
     def output(self) -> str:
         return (
@@ -202,7 +222,7 @@ def start_simulator(
             stderr_path=stderr_path,
             wal_dir=wal_dir,
             blob_dir=blob_dir,
-            extra_env=extra_env or {},
+            env=env,
         )
         started.append(simulator)
         return simulator
@@ -211,6 +231,189 @@ def start_simulator(
 
     for simulator in started:
         simulator.stop()
+
+
+# -- A real object store, or a visible skip ----------------------------------
+#
+# The store the deployment runs is MinIO, and what is proved against it
+# here is proved against the real thing: a real bucket, a real signature,
+# a real HTTP round trip. There is no fake, on purpose — an in-memory
+# stand-in would agree with whatever this code believed about signatures,
+# addressing and keys, which is the entire set of things that go wrong.
+#
+# It is the pattern the live speech and live phone suites already use, one
+# notch cheaper: those need somebody's provider account, and this needs a
+# container anybody can start. Where docker cannot start one the tests say
+# so and skip — never silently pass, and never fail somebody's checkout for
+# infrastructure they were promised they would not need.
+
+MINIO_IMAGE = "minio/minio:RELEASE.2025-09-07T16-13-09Z"
+"""The release `docker-compose.yml` runs, named again here.
+
+The same release rather than a moving tag, and checked against the compose
+file by `test_deployment.py`: proving the object-storage path against an
+image nobody deploys would prove it about the wrong store the first time
+the two drifted.
+"""
+
+OBJECT_STORAGE_ACCESS_KEY_ID = "egma-test-object-storage"
+OBJECT_STORAGE_SECRET_ACCESS_KEY = "SENTINEL-object-storage-secret-3f8c1a9d47b2"
+"""The credential the test store is stood up with.
+
+Its secret half is a sentinel like every other planted credential in this
+suite, so a simulator configured to write to object storage is really
+holding one while it conducts — which is what makes scanning its output
+prove anything. MinIO refuses a root password under eight characters, so
+this is also the shortest thing that would work.
+"""
+
+OBJECT_STORAGE_BUCKET = "egma-recordings"
+"""The bucket the deployment creates on first start. Named here too, so
+what the suite proves is what `docker-compose.yml` runs."""
+
+
+@dataclass
+class ObjectStorage:
+    """One real object store, and the settings a simulator reaches it by."""
+
+    endpoint: str
+    bucket: str
+
+    @property
+    def env(self) -> dict[str, str]:
+        """What to hand a simulator so its recordings land here.
+
+        Naming the endpoint is the whole of what selects object storage,
+        exactly as naming a media backend is the whole of what selects a
+        bridge — so this dictionary *is* the choice, and a suite that
+        leaves it out is a suite running on the filesystem store.
+        """
+        return {
+            "EGMA_SIMULATOR_S3_ENDPOINT": self.endpoint,
+            "EGMA_SIMULATOR_S3_BUCKET": self.bucket,
+            "EGMA_SIMULATOR_S3_ACCESS_KEY_ID": OBJECT_STORAGE_ACCESS_KEY_ID,
+            "EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY": (
+                OBJECT_STORAGE_SECRET_ACCESS_KEY
+            ),
+        }
+
+
+def object_client(env: Mapping[str, str]):
+    """A client for the store these settings name, built here rather than
+    borrowed from the simulator.
+
+    Reading a recording back through the simulator's own store object
+    would prove that the code agrees with itself. This builds its own
+    client from the same environment a deployment sets, so what it proves
+    is that some other reader — which is every reader in the deployment —
+    finds the bytes where the reference says they are.
+    """
+    import boto3
+    from botocore.config import Config
+
+    return boto3.client(
+        "s3",
+        endpoint_url=env["EGMA_SIMULATOR_S3_ENDPOINT"],
+        aws_access_key_id=env["EGMA_SIMULATOR_S3_ACCESS_KEY_ID"],
+        aws_secret_access_key=env["EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY"],
+        region_name=env.get("EGMA_SIMULATOR_S3_REGION", "us-east-1"),
+        config=Config(s3={"addressing_style": "path"}),
+    )
+
+
+def object_in_storage(env: Mapping[str, str], reference: str) -> bytes:
+    """The bytes one reference names, out of the store these settings name."""
+    answer = object_client(env).get_object(
+        Bucket=env.get("EGMA_SIMULATOR_S3_BUCKET", OBJECT_STORAGE_BUCKET),
+        Key=reference,
+    )
+    return answer["Body"].read()
+
+
+def _free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+def _answering(url: str, *, within_seconds: float) -> bool:
+    deadline = time.monotonic() + within_seconds
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=2) as answer:
+                if answer.status == 200:
+                    return True
+        except (urllib.error.URLError, OSError, TimeoutError):
+            pass
+        time.sleep(0.2)
+    return False
+
+
+@pytest.fixture(scope="session")
+def object_storage() -> Iterator[ObjectStorage]:
+    """A MinIO of this session's own, on a port nothing else has.
+
+    Session-scoped because starting one costs a second or two and every
+    test that wants one wants the same one; published on loopback and on
+    an ephemeral port so two checkouts building at once cannot collide.
+
+    The bucket is made here rather than assumed, which is the same thing
+    `docker-compose.yml` does with a one-shot job: a fresh volume arrives
+    empty, and a store with no bucket in it refuses every write with an
+    error about a bucket nobody was told to create.
+    """
+    port = _free_port()
+    name = f"egma-test-minio-{os.getpid()}-{port}"
+    try:
+        started = subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--detach",
+                "--name",
+                name,
+                "--publish",
+                f"127.0.0.1:{port}:9000",
+                "--env",
+                f"MINIO_ROOT_USER={OBJECT_STORAGE_ACCESS_KEY_ID}",
+                "--env",
+                f"MINIO_ROOT_PASSWORD={OBJECT_STORAGE_SECRET_ACCESS_KEY}",
+                MINIO_IMAGE,
+                "server",
+                "/data",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as unavailable:
+        pytest.skip(
+            "docker could not start an object store "
+            f"({type(unavailable).__name__}), so the object-storage path is "
+            f"not proved here; `docker run -p 9000:9000 {MINIO_IMAGE} server "
+            "/data` is the whole of what these tests need"
+        )
+    if started.returncode != 0:
+        pytest.skip(
+            f"docker refused to start {MINIO_IMAGE}, so the object-storage "
+            f"path is not proved here: {started.stderr.strip()}"
+        )
+
+    endpoint = f"http://127.0.0.1:{port}"
+    try:
+        if not _answering(f"{endpoint}/minio/health/live", within_seconds=60):
+            pytest.skip(
+                f"{MINIO_IMAGE} started but never answered its health probe "
+                f"at {endpoint}, so the object-storage path is not proved here"
+            )
+        storage = ObjectStorage(endpoint=endpoint, bucket=OBJECT_STORAGE_BUCKET)
+        object_client(storage.env).create_bucket(Bucket=storage.bucket)
+        yield storage
+    finally:
+        subprocess.run(
+            ["docker", "rm", "--force", name], capture_output=True, timeout=60
+        )
 
 
 @pytest.fixture
