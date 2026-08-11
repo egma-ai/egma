@@ -8,6 +8,7 @@ import {
   everyStep,
   howFarIn,
   howLong,
+  humanizeIdentifier,
   isHuman,
   milliseconds,
   recentWindow,
@@ -285,7 +286,7 @@ describe("what a stored kind is called where somebody reads it", () => {
   });
 
   it("makes a grader dimension readable without changing its words", () => {
-    expect(copy.humanizeIdentifier("appointment_change_policy")).toBe(
+    expect(humanizeIdentifier("appointment_change_policy")).toBe(
       "Appointment change policy",
     );
   });

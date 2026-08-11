@@ -9,13 +9,13 @@ import {
   LIST,
   SPEAKERS,
   UNKNOWN_STEP_LABEL,
-  humanizeIdentifier,
   stepLabel,
 } from "../../../lib/transcript-copy.ts";
 import {
   everyStep,
   howFarIn,
   howLong,
+  humanizeIdentifier,
   isHuman,
   milliseconds,
   somethingFailed,

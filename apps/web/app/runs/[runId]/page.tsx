@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 
-import { humanizeIdentifier } from "../../../lib/transcript-copy.ts";
+import { humanizeIdentifier } from "../../../lib/transcripts.ts";
 
 import {
   AppShell,
