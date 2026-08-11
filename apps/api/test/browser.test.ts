@@ -80,6 +80,17 @@ afterAll(async () => {
   await instance?.close();
 });
 
+describe("entering the app", () => {
+  it(
+    "sends a signed-out person from the root address to sign in",
+    async () => {
+      await page.goto(`${origin}/`);
+      await page.waitForURL(`${origin}/sign-in`);
+    },
+    SETTLE,
+  );
+});
+
 describe("logging in from a terminal", () => {
   it(
     "opens a browser on a prefilled code, signs up, approves, and leaves a working key behind",
