@@ -38,7 +38,7 @@
  * had `pnpm install`:
  *
  *   pnpm db:up
- *   pnpm --filter egma-cli smoke:walk
+ *   pnpm --filter @egma/cli smoke:walk
  *
  * The first starts the Postgres and the ClickHouse; the second builds
  * everything this needs and walks. Set `RETELL_API_KEY` in the environment of
@@ -647,7 +647,7 @@ function proven(): void {
 
 async function main(): Promise<void> {
   if (!(await stat(CLI_ENTRY).then((found) => found.isFile(), () => false))) {
-    say(`FAILED: ${CLI_ENTRY} is not built. Run pnpm --filter egma-cli smoke:walk.`);
+    say(`FAILED: ${CLI_ENTRY} is not built. Run pnpm --filter @egma/cli smoke:walk.`);
     process.exitCode = 1;
     return;
   }

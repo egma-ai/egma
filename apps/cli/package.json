@@ -1,14 +1,30 @@
 {
-  "name": "egma-cli",
-  "version": "0.0.0",
+  "name": "@egma/cli",
+  "version": "0.1.1",
   "type": "module",
-  "description": "The egma wizard and client: npx egma walks a developer to their first run.",
+  "description": "The egma wizard and client: npx @egma/cli walks a developer to their first run.",
   "license": "Apache-2.0",
+  "homepage": "https://github.com/egma-ai/egma",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/egma-ai/egma.git",
+    "directory": "apps/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/egma-ai/egma/issues"
+  },
+  "keywords": [
+    "voice-agents",
+    "testing",
+    "simulation",
+    "open-source"
+  ],
   "bin": {
-    "egma": "./dist/bin.js"
+    "egma": "dist/bin.js"
   },
   "files": [
     "dist",
+    "!dist/.tsbuildinfo",
     "skills",
     "NOTICE",
     "README.md"
@@ -21,6 +37,7 @@
   },
   "scripts": {
     "build": "tsc -b",
+    "prepublishOnly": "pnpm -w build",
     "smoke": "node smoke/real-claude-code.ts && node smoke/real-claude-code-fence.ts && node smoke/real-claude-code-discovery.ts && node smoke/real-claude-code-generation.ts",
     "smoke:platform": "node smoke/real-platform-login.ts",
     "smoke:retell": "node smoke/real-retell-connect.ts",

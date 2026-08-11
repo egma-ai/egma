@@ -376,7 +376,7 @@ async function runUp(
     options.out(`phone_missing: ${platform.phoneMissing.join(", ")}`);
   }
   options.out("status: ready");
-  options.out(`connect: npx egma --url ${address}`);
+  options.out(`connect: npx @egma/cli --url ${address}`);
 
   options.fail("");
   options.fail(`egma is running at ${address}`);
@@ -387,7 +387,7 @@ async function runUp(
   );
   options.fail("");
   options.fail("In your agent repository, once:");
-  options.fail(`  npx egma --url ${address}`);
+  options.fail(`  npx @egma/cli --url ${address}`);
   return SELF_HOST_EXIT.ok;
 }
 

@@ -17,7 +17,7 @@ laptop that is often the same person, and the two directories are still
 separate, because one platform serves many repositories.
 
 ```bash
-npx egma-cli self-host up
+npx @egma/cli self-host up
 ```
 
 That starts the whole platform and prints the address an agent repository
@@ -62,7 +62,7 @@ perfectly well, so `self-host up` brings one up *ready* and says phone is `setup
 required`. One more command in this directory makes it able to place calls:
 
 ```bash
-npx egma-cli self-host phone setup
+npx @egma/cli self-host phone setup
 ```
 
 It asks for a Twilio account, a voice number that account **already owns**, and
@@ -191,14 +191,14 @@ With an instance up and an account on it, the walk is one command:
 
 ```bash
 cd ~/your-voice-agent
-EGMA_URL=http://localhost:3101 npx egma-cli
+EGMA_URL=http://localhost:3101 npx @egma/cli
 ```
 
 To run it from this checkout instead — for development, or ahead of a release:
 
 ```bash
 pnpm install                    # once
-pnpm --filter egma-cli build    # builds it into apps/cli/dist
+pnpm --filter @egma/cli build    # builds it into apps/cli/dist
 ```
 
 Then run it in the repository that holds your voice agent, naming the instance
@@ -209,7 +209,7 @@ cd ~/your-voice-agent
 EGMA_URL=http://localhost:3101 node ~/egma/apps/cli/dist/bin.js
 ```
 
-`~/egma` is this checkout. The published package is `egma-cli`; the command it installs is `egma`.
+`~/egma` is this checkout. The published package is `@egma/cli`; the command it installs is `egma`.
 
 It signs that machine in — a short code, approved in the browser you signed up
 in — registers your voice agent together with the way egma reaches it, writes a
@@ -236,7 +236,7 @@ commands:
 
 ```bash
 pnpm db:up
-pnpm --filter egma-cli smoke:walk
+pnpm --filter @egma/cli smoke:walk
 ```
 
 They start a whole egma of its own, sign in through a real browser, register,
@@ -415,7 +415,7 @@ You should not have to hand-build SIP paperwork in somebody's console, and you
 do not:
 
 ```bash
-npx egma-cli self-host phone setup
+npx @egma/cli self-host phone setup
 ```
 
 It reads your account first and shows you a plan — what it would create and what

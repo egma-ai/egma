@@ -3,16 +3,14 @@
 The egma wizard and client, in one command.
 
 ```
-npx egma
+npx @egma/cli
 ```
 
-**Not yet, though: that package is not published.** The name on npm is a
-placeholder that holds it and runs nothing, so today the command is built from
-a checkout — see [Trying it on an instance of your
+The package is `@egma/cli`; the command it installs is `egma`. Running it from
+a checkout instead — for development, or ahead of a release — is
+`node …/apps/cli/dist/bin.js`, the same command with every option and every
+verb the same. See [Trying it on an instance of your
 own](#trying-it-on-an-instance-of-your-own) for the two lines that do it.
-Everywhere below, `npx egma` is the shape the command takes when it ships;
-`node …/apps/cli/dist/bin.js` is the same command today, and every option and
-every verb is the same.
 
 Run it in your repository. It opens a terminal wizard, tells you what it is
 about to do, and starts on one keystroke. When it closes, your terminal has one
@@ -27,7 +25,7 @@ is how CI runs it.
 
 <!-- The facts are FACTS in src/wizard/facts.ts, which is the source of truth; keep this sentence in step. -->
 
-`npx egma` signs this machine in to egma, then finds your voice agent. It starts
+`npx @egma/cli` signs this machine in to egma, then finds your voice agent. It starts
 the coding agent you already have, hands it egma's own notes on how voice agents
 are built, and has it read this folder and report which framework runs it, where
 its prompts live, where its tools are defined, how it reaches production, and
@@ -658,7 +656,7 @@ Clone the repository, then, from your checkout of it:
 
 ```
 pnpm install
-npx egma-cli self-host up
+npx @egma/cli self-host up
 ```
 
 That starts a whole egma — Postgres, ClickHouse, the API, the pages, the
@@ -671,7 +669,7 @@ because a platform with no carrier runs text simulations perfectly well. To make
 it able to place calls, one more command in the same directory:
 
 ```
-npx egma-cli self-host phone setup
+npx @egma/cli self-host phone setup
 ```
 
 It asks for a Twilio account, a voice number that account **already owns**, and
@@ -681,10 +679,10 @@ or registers a number. The Twilio Auth Token is used once and kept nowhere: what
 runs afterwards holds a SIP credential for one trunk and nothing else on that
 account.
 
-The command itself is not on npm yet, so build it from the same checkout:
+To run the command from this same checkout rather than from npm, build it:
 
 ```
-pnpm --filter egma-cli build
+pnpm --filter @egma/cli build
 ```
 
 Then run it from the repository that holds your voice agent, naming the
@@ -695,8 +693,8 @@ cd ~/your-voice-agent
 EGMA_URL=http://localhost:3101 node ~/egma/apps/cli/dist/bin.js
 ```
 
-(`~/egma` is wherever you cloned this. When the package ships, that whole line
-becomes `npx egma`.)
+(`~/egma` is wherever you cloned this. From npm, that whole line is
+`EGMA_URL=http://localhost:3101 npx @egma/cli`.)
 
 The wizard signs this machine in against that instance, registers your agent
 and a way to reach it, writes a first suite of tests with your coding agent,
@@ -715,7 +713,7 @@ approval really happens in a browser — it is two commands:
 
 ```
 pnpm db:up
-pnpm --filter egma-cli smoke:walk
+pnpm --filter @egma/cli smoke:walk
 ```
 
 The second builds everything it needs, starts an egma of its own, signs in,
