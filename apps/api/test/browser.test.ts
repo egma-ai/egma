@@ -14,7 +14,11 @@ import {
   startObjectStorage,
   type ObjectStorage,
 } from "./support/object-storage.ts";
-import { aConductedRun, standingOf } from "./support/recordings.ts";
+import {
+  aConductedRun,
+  fileTranscriptOf,
+  standingOf,
+} from "./support/recordings.ts";
 
 /**
  * Everything a person actually clicks through, once each, in a real browser:
@@ -843,7 +847,7 @@ describe("one exchange, read as a transcript", () => {
       await page.goto(`${origin}/sign-in`);
       await page.goto(address);
       await page.waitForSelector("text=The exchange");
-      await page.getByText("Recording details", { exact: true }).click();
+      await page.getByText("Where this came from", { exact: true }).click();
       expect(await page.innerText("main")).toContain(FIXTURE_PROVIDER_CALL_ID);
     },
     SETTLE,
@@ -1340,6 +1344,126 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
       // Not even the line that says a recording is being looked for, which is
       // the one thing on this path that could momentarily imply there is one.
       expect(await chat.innerText()).not.toContain("Finding the recording");
+    },
+    SETTLE,
+  );
+});
+
+/**
+ * Hearing the same recording from the transcript, which is where the doubt is.
+ *
+ * **The minimum this file can grow by, and it does have to grow.** A transcript
+ * resolves its recording from the trace identifier it already holds — the two
+ * are the same number in two forms — and every part of that is proved at the
+ * route seam beside it, in milliseconds: that the read names the simulation,
+ * that the recording route then answers, and that a conversation which recorded
+ * nothing is refused. What no route test reaches is whether a *browser* on this
+ * page ends up with audio a person can hear, and whether the page that asks
+ * about every exchange stays quiet on the ones that have none.
+ *
+ * One test, two transcripts of one run: the conversation that recorded, and the
+ * one whose call never connected.
+ */
+describe.skipIf(!storage.available)("hearing a recording from a transcript", () => {
+  it(
+    "plays it beside the turns, and offers nothing where there is none",
+    async () => {
+      const running = storage as Extract<ObjectStorage, { available: true }>;
+      const reference = "sim_01JQ0A2B3C4D5E6F7G8H9J0M/dual-channel.wav";
+      await running.put(reference, aRecording());
+
+      const hers = (await page.context().cookies(origin))
+        .map((cookie) => `${cookie.name}=${cookie.value}`)
+        .join("; ");
+      const who = await standingOf(instance.api, hers, "her transcripts");
+      const run = await aConductedRun(instance.api, who, { reference });
+
+      // The telemetry a simulator files for each of them, under the trace the
+      // contract derives from the simulation id. Nothing here chooses an
+      // address: that derivation is what makes a transcript and a run's results
+      // two views of one conversation.
+      const at = new Date(AT.getTime() - 5 * 60 * 1000);
+      const heard = await fileTranscriptOf(
+        instance.api,
+        run.heard,
+        { human: "I need to move my cleaning.", agent: "Of course — when to?" },
+        at,
+      );
+      const silent = await fileTranscriptOf(
+        instance.api,
+        run.silent,
+        { human: "Hello? Is anybody there?", agent: "" },
+        at,
+      );
+
+      const openTranscript = async (filed: typeof heard): Promise<void> => {
+        const asked = new URLSearchParams({ from: filed.from, to: filed.to });
+        await page.goto(
+          `${origin}/traces/${filed.traceId}?${asked.toString()}`,
+        );
+        await page.waitForSelector("text=The exchange");
+      };
+
+      await openTranscript(heard);
+
+      // The turns are here, which is the whole reason somebody is on this page
+      // rather than on the run's results.
+      const shown = await page.innerText("main");
+      expect(shown).toContain("I need to move my cleaning.");
+
+      const player = page.locator("audio[data-recording]");
+      await player.waitFor({ timeout: 30_000 });
+
+      // The bytes come from the store and never through egma, exactly as they
+      // do on the other surface — one route served both.
+      const source = await player.getAttribute("src");
+      expect(new URL(source ?? "").origin).toBe(running.store.publicUrl);
+      expect(source).toContain("X-Amz-Signature=");
+
+      // And a real Chrome made audio of it.
+      await expect
+        .poll(
+          () =>
+            player.evaluate((element) => {
+              const audio = element as unknown as {
+                readyState: number;
+                duration: number;
+              };
+              return audio.readyState >= 1 && audio.duration > 0.5;
+            }),
+          { timeout: 30_000 },
+        )
+        .toBe(true);
+
+      // Seeking, so the one turn somebody doubts can be reached without
+      // listening from the start.
+      await player.evaluate((element) => {
+        (element as unknown as { currentTime: number }).currentTime = 0.5;
+      });
+      await expect
+        .poll(() =>
+          player.evaluate((element) =>
+            Math.round(
+              (element as unknown as { currentTime: number }).currentTime * 10,
+            ),
+          ),
+        )
+        .toBe(5);
+
+      // Said beside it, so nobody mistakes egma's own audio for the audio a
+      // framework's telemetry attached to a step of this same exchange.
+      expect(await page.innerText("main")).toContain("egma's own audio");
+      saysNothingBanned(await page.innerText("main"));
+
+      // The other conversation of the same run recorded nothing, and its
+      // transcript offers no control at all — not a disabled one, which reads
+      // as a broken feature rather than as an honest absence.
+      await openTranscript(silent);
+      expect(await page.innerText("main")).toContain("Is anybody there?");
+      expect(await page.locator("audio").count()).toBe(0);
+      // Not even the line that says one is being looked for, which would imply
+      // audio that does not exist.
+      expect(await page.innerText("main")).not.toContain("Finding the recording");
     },
     SETTLE,
   );

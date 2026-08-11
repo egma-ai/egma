@@ -1,11 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { use, useEffect, useRef, useState } from "react";
+import { use, useEffect, useState } from "react";
 
 import { runProgress } from "../../../lib/run-progress.ts";
 import type { Judgment } from "../../../lib/transcripts.ts";
 import { JudgmentCard } from "../../judgment-card.tsx";
+import {
+  RecordingPlayer,
+  type RecordingWords,
+} from "../../recording-player.tsx";
 
 import {
   AppShell,
@@ -287,6 +291,24 @@ function RunFact({
   );
 }
 
+/**
+ * What the player says here.
+ *
+ * **`persona` is the right word on this page and only on this page.** A run is
+ * a set of conversations each of which a persona had, and this page names the
+ * persona of every one of them a line above the player. The transcript surface
+ * says `human` instead, because a transcript may be a production exchange
+ * nobody simulated and there is no persona in it to name; its words are held
+ * against the banned list in `transcript-copy.ts`.
+ */
+const HEARD_ON_A_RUN: RecordingWords = {
+  label: "Recording",
+  caption: "Left channel is the persona, right channel is the agent.",
+  band: (hertz) => `Heard at ${String(hertz)} Hz.`,
+  unplayable:
+    "This recording could not be played. The store it lives in may be unreachable.",
+};
+
 function SimulationResult({ simulation }: { simulation: Simulation }) {
   const operationalFailure = simulation.status === "failed";
   // Nothing is asked for until somebody opens this conversation. A run can hold
@@ -332,7 +354,13 @@ function SimulationResult({ simulation }: { simulation: Simulation }) {
           as an honest absence, and sends somebody looking for the fault.
         */}
         {opened && simulation.modality === "voice" && simulation.has_recording ? (
-          <RecordingPlayer simulationId={simulation.id} />
+          <RecordingPlayer
+            simulationId={simulation.id}
+            words={HEARD_ON_A_RUN}
+            // This run's own answer already said there is one, so a link that
+            // will not resolve here is a fault and says so.
+            knownToExist
+          />
         ) : null}
 
         <p className={styles.runTally}>{tally(simulation.counts)}</p>
@@ -352,196 +380,6 @@ function SimulationResult({ simulation }: { simulation: Simulation }) {
         )}
       </div>
     </details>
-  );
-}
-
-/**
- * What a recording resolves to, or why it did not.
- *
- * Three states and no fourth. There is no "idle": this component is only
- * mounted once somebody has opened the conversation, which is the moment they
- * asked.
- */
-type Playable =
-  | { readonly status: "resolving" }
-  | {
-      readonly status: "ready";
-      readonly url: string;
-      readonly band: number | null;
-    }
-  | { readonly status: "failed"; readonly why: string };
-
-/**
- * The recording of one voice conversation, fetched when somebody opens it.
- *
- * **The page fetches its own link rather than carrying one**, and that is what
- * keeps the address of these results shareable. A link to a recording is signed,
- * short-lived and bound to one object; baking one into the run's own answer
- * would put a credential in the address bar, make the page stale a quarter of an
- * hour after it loaded, and mean that a run of two hundred conversations minted
- * two hundred links to serve the one somebody wanted.
- *
- * The audio itself goes from the store straight to this element and never
- * through egma, which is what makes seeking cost nothing: dragging the scrubber
- * is a byte range the store serves.
- */
-function RecordingPlayer({ simulationId }: { simulationId: string }) {
-  const [playable, setPlayable] = useState<Playable>({ status: "resolving" });
-  // Counts how many times the link has been asked for. Bumping it re-runs the
-  // effect, which is how a link that went stale is replaced by a fresh one.
-  const [asked, setAsked] = useState(0);
-  const player = useRef<HTMLAudioElement | null>(null);
-  /** Where the listener was, to be put back after a link is replaced. */
-  const resumeAt = useRef(0);
-  /** Whether this link is already the answer to a failure. See `onError`. */
-  const isASecondTry = useRef(false);
-
-  useEffect(() => {
-    let stopped = false;
-
-    const resolve = async (): Promise<void> => {
-      try {
-        const answer = await fetch(
-          `/api/simulations/${encodeURIComponent(simulationId)}/recording`,
-          { headers: { accept: "application/json" }, cache: "no-store" },
-        );
-        if (stopped) return;
-        if (!answer.ok) {
-          const said = (await answer.json().catch(() => ({}))) as {
-            message?: string;
-          };
-          return setPlayable({
-            status: "failed",
-            why:
-              said.message ??
-              `Egma answered ${String(answer.status)} for this recording.`,
-          });
-        }
-        // `expires_at` comes back with this and is deliberately not read. It is
-        // there for a client that *keeps* a link — the terminal, anything that
-        // caches one — and this page keeps none. Branching on it here would
-        // mean comparing a server's timestamp to this browser's clock, and a
-        // browser a few minutes slow would decide a dead link was still good
-        // and never ask again, which is the dead scrubber this whole path
-        // exists to prevent. What replaces a link here is a failure, not a
-        // clock.
-        const resolved = (await answer.json()) as {
-          url: string;
-          measured_audio_band_hertz: number | null;
-        };
-        if (stopped) return;
-        setPlayable({
-          status: "ready",
-          url: resolved.url,
-          band: resolved.measured_audio_band_hertz,
-        });
-      } catch {
-        if (!stopped) {
-          setPlayable({
-            status: "failed",
-            why: "Egma could not be reached for this recording.",
-          });
-        }
-      }
-    };
-
-    void resolve();
-    return () => {
-      stopped = true;
-    };
-  }, [simulationId, asked]);
-
-  /**
-   * A replacement link is loaded because it is a replacement, not because it
-   * happens to read differently.
-   *
-   * A signature is stamped to the second, so a link asked for again inside the
-   * same second as the one it replaces comes back **byte for byte identical** —
-   * same instant, same expiry, same signature. React then sets `src` to the
-   * string it already holds, the DOM does not change, no request is made, and
-   * the recovery above quietly does nothing at all. Which is the whole failure
-   * it was written to fix, hiding behind a string comparison.
-   *
-   * So a retry says `load()` out loud. It is skipped on the first resolve,
-   * where the element loads on its own and calling this would fetch twice.
-   */
-  useEffect(() => {
-    if (playable.status !== "ready" || asked === 0) return;
-    player.current?.load();
-  }, [playable, asked]);
-
-  if (playable.status === "resolving") {
-    return <p className={styles.runTally}>Finding the recording…</p>;
-  }
-  if (playable.status === "failed") {
-    return <Notice tone="error">{playable.why}</Notice>;
-  }
-
-  return (
-    <section className={styles.runRecording} aria-label="Recording">
-      {/*
-        `preload="metadata"` rather than `none`: the browser fetches enough to
-        know how long the recording is, which is what makes the scrubber a
-        scrubber rather than a line nobody can aim at. It is also why the link
-        lives a quarter of an hour — every seek is a fresh request against it.
-      */}
-      <audio
-        ref={player}
-        className={styles.runRecordingPlayer}
-        controls
-        preload="metadata"
-        src={playable.url}
-        data-recording="true"
-        // A link lives a quarter of an hour and a results page left open for an
-        // afternoon outlives it: the next seek comes back refused, and what a
-        // person sees is a scrubber that stopped for no stated reason.
-        //
-        // **One retry, asked for unconditionally, and only the second failure
-        // is believed.** The obvious version of this compares the link's expiry
-        // to `Date.now()` and refreshes only past it — and that is wrong,
-        // because `Date.now()` is the *reader's* clock: a browser a few minutes
-        // slow decides a dead link is still good and never asks again, which is
-        // exactly the failure this is here to fix, now reachable only by people
-        // whose laptops are wrong. A link is cheap and a second one settles it,
-        // so nothing here reasons about time at all.
-        //
-        // It cannot loop: the retry flag is set before asking and cleared only
-        // by a load that worked, so a store that is genuinely gone costs two
-        // requests and then says so.
-        onError={() => {
-          if (isASecondTry.current) {
-            return setPlayable({
-              status: "failed",
-              why: "This recording could not be played. The store it lives in may be unreachable.",
-            });
-          }
-          isASecondTry.current = true;
-          // Kept before the source is replaced, because replacing it sends the
-          // element back to the beginning — and being thrown to the start of a
-          // recording you were four minutes into is its own small betrayal.
-          resumeAt.current = player.current?.currentTime ?? 0;
-          setAsked((again) => again + 1);
-        }}
-        // A link that loads is a link that works, so the next expiry — hours
-        // later, on a page nobody reloaded — gets its own retry rather than
-        // being treated as the second failure of a problem long since over.
-        onLoadedMetadata={() => {
-          isASecondTry.current = false;
-          if (resumeAt.current > 0 && player.current !== null) {
-            player.current.currentTime = resumeAt.current;
-            resumeAt.current = 0;
-          }
-        }}
-      >
-        Your browser cannot play audio.
-      </audio>
-      <p>
-        Left channel is the persona, right channel is the agent.
-        {playable.band === null
-          ? ""
-          : ` Heard at ${String(playable.band)} Hz.`}
-      </p>
-    </section>
   );
 }
 

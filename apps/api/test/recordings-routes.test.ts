@@ -4,8 +4,20 @@ import { afterEach, describe, expect, it } from "vitest";
 import { recordingPathFor } from "../src/routes/recordings.ts";
 import { RECORDING_LINK_SECONDS } from "../src/recordings/signed-link.ts";
 import { createApi, type TestApi } from "./support/api.ts";
-import { aConductedRun, standingOf, type Standing } from "./support/recordings.ts";
-import { colleagueOf, request as ask, signUp, type Answer } from "./support/traces.ts";
+import {
+  aConductedRun,
+  fileTranscriptOf,
+  standingOf,
+  type Standing,
+} from "./support/recordings.ts";
+import {
+  colleagueOf,
+  readTraceOverHttp,
+  request as ask,
+  signUp,
+  type Answer,
+  type TraceDetailBody,
+} from "./support/traces.ts";
 
 /**
  * Resolving a recording, over real HTTP against real Postgres.
@@ -340,5 +352,93 @@ describe("what the run's own results say about audio", () => {
     // to whoever resolves it, and a page that carried one would be a page whose
     // address could not be shared.
     expect(JSON.stringify(read.body)).not.toContain(A_REFERENCE);
+  });
+});
+
+/**
+ * The second surface, reaching the first surface's route with what it already
+ * holds.
+ *
+ * A transcript is opened by trace id and knows nothing else — no run, no
+ * conversation id, no reference. What makes a player possible there without a
+ * second endpoint is that a trace identifier and a simulation identifier are
+ * the same 128 bits written two ways: the read a transcript already makes
+ * derives the second from the first and says so, and the recording route that
+ * serves a run's results then serves this one unchanged.
+ *
+ * Both halves are asserted here, because a route that answered only the happy
+ * one would put a player on a transcript that has nothing to play.
+ */
+describe("what a transcript says about audio", () => {
+  it("names the simulation it is, so one route serves both surfaces", async () => {
+    api = await createApi("recording_transcript", {
+      blob: A_BROWSERS_STORE,
+      traceStore: true,
+    });
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const who = await standingOf(api.app, ada.cookie, "a terminal");
+    const run = await aConductedRun(api.app, who, { reference: A_REFERENCE });
+
+    const at = new Date("2026-08-11T09:00:00Z");
+    const heard = await fileTranscriptOf(
+      api.app,
+      run.heard,
+      { human: "I need to move my cleaning.", agent: "Of course — when to?" },
+      at,
+    );
+    const silent = await fileTranscriptOf(
+      api.app,
+      run.silent,
+      { human: "Hello?", agent: "" },
+      at,
+    );
+
+    // The address is the trace's, and nothing about a simulation is in it.
+    expect(heard.traceId).not.toContain(run.heard);
+
+    const read = await readTraceOverHttp(api.app, who.key, heard.traceId, {
+      from: heard.from,
+      to: heard.to,
+    });
+    expect(read.statusCode, read.body).toBe(200);
+    const transcript = read.json() as TraceDetailBody;
+    expect(transcript.trace.source).toBe("simulation");
+    expect(transcript.simulation_id).toBe(run.heard);
+
+    // Which is the whole ticket: the id that came back off the transcript's own
+    // read goes straight at the route a run's results use, and comes back with
+    // a link to the same audio.
+    const resolved = await request(
+      "GET",
+      recordingPathFor(String(transcript.simulation_id)),
+      who.key,
+    );
+    expect(resolved.statusCode, JSON.stringify(resolved.body)).toBe(200);
+    expect(resolved.body.simulation_id).toBe(run.heard);
+    expect(new URL(String(resolved.body.url)).origin).toBe(
+      A_BROWSERS_STORE.publicUrl,
+    );
+
+    // And the other conversation of the same run, whose call never connected,
+    // is named just as plainly and refused just as plainly. That refusal is
+    // what a transcript shows nothing at all for — a control that did nothing
+    // would read as a broken feature rather than as an honest absence.
+    const nothingToHear = await readTraceOverHttp(
+      api.app,
+      who.key,
+      silent.traceId,
+      { from: silent.from, to: silent.to },
+    );
+    expect(nothingToHear.statusCode, nothingToHear.body).toBe(200);
+    const quiet = (nothingToHear.json() as TraceDetailBody).simulation_id;
+    expect(quiet).toBe(run.silent);
+
+    const refused = await request(
+      "GET",
+      recordingPathFor(String(quiet)),
+      who.key,
+    );
+    expect(refused.statusCode).toBe(404);
+    expect(refused.body.url).toBeUndefined();
   });
 });

@@ -5,9 +5,11 @@ import {
   startSimulation,
   type AuthContext,
 } from "@egma/db";
+import { traceIdOfSimulation } from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
 import { expect } from "vitest";
 
+import { OTLP_TRACES_PATH } from "../../src/routes/traces.ts";
 import { mintKey, NEUTRAL_TRAITS, request as ask } from "./traces.ts";
 
 /**
@@ -52,6 +54,120 @@ const A_TEST = {
 
 /** Who moved the conversations, as a simulator names itself. */
 const CLAIMANT = "simulator-blue-1";
+
+/**
+ * The service token every test instance is built with. A simulator's spans go
+ * in at the same door a customer's do, holding this instead of a customer key.
+ */
+const SERVICE_TOKEN = "egma_st_held-by-this-test-suite-alone";
+
+/** How wide a window a reader asks about, either side of the exchange. */
+const AROUND_IT_SECONDS = 30;
+
+export type FiledTranscript = {
+  /** Where the spans are filed, which is the address a reader opens. */
+  readonly traceId: string;
+  /** A window containing it, because the store is filed by time. */
+  readonly from: string;
+  readonly to: string;
+};
+
+/**
+ * One conversation's own telemetry, filed the way its simulator files it.
+ *
+ * The transcript surface reads spans, and a run's results read rows — so a
+ * conversation that has been conducted but never emitted anything has results
+ * to show and no transcript to open. This is the other half: two turns and the
+ * span they happened inside, posted at the real door with the service token and
+ * a resource naming the simulation, which is the only way spans are ever filed
+ * as egma's own rather than as a customer's production telemetry.
+ *
+ * **The trace id is derived and never chosen.** A simulation id and the trace
+ * its spans are filed under are the same 128 bits written two ways, and the
+ * contract's own function is what writes them here — the same one the emitter
+ * uses. Picking an id would prove that a page can read spans; deriving it is
+ * what proves a transcript and a run's results are looking at one conversation.
+ */
+export async function fileTranscriptOf(
+  app: FastifyInstance,
+  simulationId: string,
+  said: { readonly human: string; readonly agent: string },
+  openedAt: Date,
+): Promise<FiledTranscript> {
+  const traceId = traceIdOfSimulation(simulationId);
+  expect(traceId, `${simulationId} names a trace`).toBeDefined();
+  const trace = traceId ?? "";
+
+  const at = (offsetSeconds: number): string =>
+    String(BigInt(openedAt.getTime() + offsetSeconds * 1000) * 1_000_000n);
+  const root = `${trace.slice(0, 14)}01`;
+  const span = (
+    suffix: string,
+    name: string,
+    parentSpanId: string,
+    from: number,
+    to: number,
+    text?: string,
+  ) => ({
+    traceId: trace,
+    spanId: `${trace.slice(0, 14)}${suffix}`,
+    parentSpanId,
+    name,
+    kind: "SPAN_KIND_INTERNAL",
+    startTimeUnixNano: at(from),
+    endTimeUnixNano: at(to),
+    attributes:
+      text === undefined
+        ? []
+        : [{ key: "egma.turn.text", value: { stringValue: text } }],
+  });
+
+  const posted = await app.inject({
+    method: "POST",
+    url: OTLP_TRACES_PATH,
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${SERVICE_TOKEN}`,
+    },
+    payload: JSON.stringify({
+      resourceSpans: [
+        {
+          resource: {
+            attributes: [
+              {
+                key: "service.name",
+                value: { stringValue: "egma-simulator" },
+              },
+              {
+                key: "egma.simulation_id",
+                value: { stringValue: simulationId },
+              },
+            ],
+          },
+          scopeSpans: [
+            {
+              scope: { name: "egma-simulator", version: "1" },
+              spans: [
+                span("01", "simulation", "", 0, 4),
+                span("02", "human_turn", root, 1, 2, said.human),
+                span("03", "agent_turn", root, 2, 3, said.agent),
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  });
+  expect(posted.statusCode, posted.body).toBe(200);
+
+  return {
+    traceId: trace,
+    from: new Date(
+      openedAt.getTime() - AROUND_IT_SECONDS * 1000,
+    ).toISOString(),
+    to: new Date(openedAt.getTime() + AROUND_IT_SECONDS * 1000).toISOString(),
+  };
+}
 
 /**
  * How many runs this file has built, which is what keeps the people calling in

@@ -97,6 +97,17 @@ export type Detail = {
   readonly turns: readonly Step[];
   readonly spans: readonly Step[];
   readonly spans_truncated: boolean;
+  /**
+   * The simulation this exchange is, when egma conducted it, and `null` when a
+   * customer's own agent did.
+   *
+   * The two identifiers are the same 128 bits written two ways, so the read
+   * derives one from the other and says so here rather than making this page
+   * ask a second question. It is what lets a transcript resolve its own
+   * recording: everything else about audio is settled by asking for a link,
+   * which is refused where there is nothing to hear.
+   */
+  readonly simulation_id?: string | null;
   /** Absent on a trace nothing has judged, and on one whose store is down. */
   readonly verdicts?: readonly Judgment[];
   /** The result folded over every judgment, or null before grading finishes. */

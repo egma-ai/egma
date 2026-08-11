@@ -445,8 +445,9 @@ Then watch the workbench's log: the claim, the call, each turn of the
 conversation as it is spoken, the timings measured off the audio, and the
 recording's reference. The `.wav` is in the object store, with the persona on one
 channel and the agent on the other. From a full deployment you press play on the
-run's results and hear it; the workbench overlay starts no API and no pages, so
-this brings it out to listen to instead:
+run's results — or beside the turns of that conversation's transcript, which is
+where a turn looks wrong in the first place — and hear it; the workbench overlay
+starts no API and no pages, so this brings it out to listen to instead:
 
 ```bash
 docker compose exec minio sh -c \

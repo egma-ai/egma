@@ -293,6 +293,49 @@ describe("what a stored kind is called where somebody reads it", () => {
 });
 
 /**
+ * Two different things with one word between them.
+ *
+ * A step on this page can carry audio the agent's **own telemetry** attached to
+ * it — somebody else's file, at somebody else's address. Beside it now sits
+ * egma's own recording of the exchange, both channels, measured off the line
+ * egma drove. Hearing one while believing it is the other is a wrong conclusion
+ * about a production agent, so the rule is that neither is ever called just
+ * "audio": every label that names audio names whose it is.
+ */
+describe("the two kinds of audio a transcript can offer", () => {
+  const NAMES_WHOSE_IT_IS = /\begma\b|\byour\b/iu;
+
+  it("never leaves either one unattributed", () => {
+    const labels = {
+      "the link to a step's audio": copy.DETAIL.openAudio,
+      "the recorded fact beside it": copy.FACTS.audio,
+      "the player's own name": copy.RECORDING.label,
+      "what is said beside the player": copy.RECORDING.caption,
+    };
+
+    for (const [where, said] of Object.entries(labels)) {
+      expect(NAMES_WHOSE_IT_IS.test(said), `${where}: "${said}"`).toBe(true);
+    }
+
+    // And no two of them are the same words, which is the failure this is
+    // guarding: one label copied onto both would attribute nothing.
+    expect(new Set(Object.values(labels)).size).toBe(
+      Object.values(labels).length,
+    );
+  });
+
+  /**
+   * Two channels exist so that either speaker can be heard alone when a turn
+   * reads wrong, which is worth nothing if nobody is told which is which.
+   */
+  it("says which speaker is on which channel, in the transcript's own words", () => {
+    expect(copy.RECORDING.caption).toContain(copy.LIST.human);
+    expect(copy.RECORDING.caption).toContain(copy.LIST.agent);
+    expect(copy.RECORDING.band(8000)).toContain("8000");
+  });
+});
+
+/**
  * The banned list, as the domain model writes it.
  *
  * `trace` and `span` are on it for these pages specifically: both are storage
