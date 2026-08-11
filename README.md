@@ -118,6 +118,22 @@ neither address. The default assumes a browser on this machine; an instance
 others reach at `http://192.168.1.10:3101` has to say `http://192.168.1.10:9000`
 here, exactly as it has to say the first address in `EGMA_BASE_URL`.
 
+*The two settings must agree about `http:` and `https:`.* They are one browser's
+two addresses, and a page served over `https:` may not fetch audio over `http:` —
+every browser blocks that as mixed content before the request is sent, so the
+store is never asked and a perfect signature is never checked. The API refuses to
+start on that pair and names both variables, because the alternative is a player
+that fails with the reason only in the browser's console. An `http:` egma reading
+an `https:` store is fine, and both on `http:` is the default deployment.
+
+*A plaintext address here is allowed and is not free.* `http://192.168.1.10:9000`
+works, and it also means the recording — a customer's call audio — and the
+fifteen-minute link that replays it travel readable by anybody who can watch that
+network. `http://localhost:9000`, the default, shows that to nobody. Egma does not
+refuse it, because an egma on `http:` is already handing that same network the
+session cookie that opens every recording; on a network you do not trust, put the
+store behind the same certificate as egma and set both addresses to `https:`.
+
 Leaving it unset is allowed and breaks nothing else: the platform runs, runs run,
 and asking for a recording answers with the name of this variable rather than
 with a player that does nothing.

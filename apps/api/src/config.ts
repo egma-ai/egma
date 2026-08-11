@@ -331,7 +331,7 @@ export function loadConfig(
       speechProvider: environment.EGMA_PHONE_SPEECH_PROVIDER?.trim() || null,
     },
     defaultJudge: defaultJudge(environment),
-    blob: blobStore(environment),
+    blob: blobStore(environment, parsedBaseUrl),
   };
 }
 
@@ -357,8 +357,16 @@ export function loadConfig(
  * discipline: half a credential resolves no recording at all and would be
  * discovered by somebody pressing play, one simulation at a time, with the
  * store's own refusal in a log they cannot see.
+ *
+ * **`baseUrl` is here for one reason: the two addresses have to agree about
+ * scheme.** Both are addresses of *the same browser* — one to egma, one to the
+ * store — and an `https:` page may not fetch `http:` audio. See the mixed
+ * content refusal below.
  */
-function blobStore(environment: NodeJS.ProcessEnv): BlobStore | undefined {
+function blobStore(
+  environment: NodeJS.ProcessEnv,
+  baseUrl: URL,
+): BlobStore | undefined {
   const publicUrl = environment.EGMA_BLOB_PUBLIC_URL?.trim() || "";
   if (publicUrl === "") return undefined;
 
@@ -377,6 +385,43 @@ function blobStore(environment: NodeJS.ProcessEnv): BlobStore | undefined {
     throw new Error(
       `EGMA_BLOB_PUBLIC_URL speaks ${parsed.protocol} and a browser fetches a ` +
         "recording over http: or https:",
+    );
+  }
+  // The two settings are one browser's two addresses, and a browser will not
+  // mix their schemes. A page served over https: may not fetch audio over
+  // http:: every browser blocks it as mixed content *before the request is
+  // made*, so the store is never asked, the signature is never checked, and
+  // the only sentence naming the reason is in a console the person pressing
+  // play is not looking at. That is this effort's own bug class arriving by a
+  // third route — a setting whose wrong value fails while naming nothing —
+  // after the address binding and the region defaulting from nothing. Both of
+  // those were closed by refusing here, by name, and so is this.
+  //
+  // Only this one pair is incoherent. An http: egma with an https: store is
+  // fine — a plaintext page may fetch encrypted bytes — and an http: egma with
+  // an http: store is the ordinary deployment this compose file ships, so
+  // `http://localhost:9000` must keep starting and does.
+  //
+  // A plaintext store on a *remote* address is allowed and not refused,
+  // deliberately: it is only reachable from an egma that is itself plaintext,
+  // where the session cookie granting access to every recording already
+  // crosses the same network in the clear. Refusing the audio while serving
+  // the cookie would be a rule egma applies to one byte stream and not the
+  // other. What it costs is said beside the example, in `.env.example`, the
+  // compose file and the README, rather than decided for a self-hoster on a
+  // private network egma cannot see.
+  if (baseUrl.protocol === "https:" && parsed.protocol === "http:") {
+    throw new Error(
+      `EGMA_BASE_URL is ${baseUrl.origin}, which is https:, and ` +
+        `EGMA_BLOB_PUBLIC_URL is ${parsed.origin}, which is http:. A browser ` +
+        "will not fetch that: a page loaded over https: blocks audio loaded " +
+        "over http: as mixed content, and it blocks it before the request is " +
+        "sent — so every recording fails with the store never asked and the " +
+        "signature never checked, the player shows an error egma did not " +
+        "send, and the only explanation is a line in the browser's own " +
+        "console. Give EGMA_BLOB_PUBLIC_URL an https: address the browser " +
+        "reaches the store at — the proxy or certificate the store is " +
+        "published behind, alongside the one egma itself is published behind.",
     );
   }
   // Scheme, host and port, and nothing after them — the same narrowing
