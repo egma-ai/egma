@@ -110,7 +110,9 @@ describe("egma self-host up", () => {
       expect(run.stdout).toContain("status: ready");
       // Phone readiness is reported separately, and honestly.
       expect(run.stdout).toContain("phone: setup_required");
-      expect(run.stdout).toContain(`connect: npx egma --url ${platform.url}`);
+      expect(run.stdout).toContain(
+        `connect: npx @egma/cli --url ${platform.url}`,
+      );
 
       // Every service it started, named. Four of them — the simulator, the
       // grader, the SIP gateway and its Redis — publish nothing and have no
