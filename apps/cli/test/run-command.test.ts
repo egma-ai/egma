@@ -344,6 +344,96 @@ describe("egma run", () => {
     expect(factOf(said.lines, "simulations")).toBe("4");
   });
 
+  /**
+   * The run, written down beside the tests it ran.
+   *
+   * What is asserted is what a reviewer would open: the platform's own document,
+   * one line per simulation, and a summary somebody reads in a diff. The verb
+   * names every file it wrote, because a file nobody was told about is a file
+   * nobody commits.
+   */
+  it("writes the run into egma/runs, and names every file it wrote", async () => {
+    const registered = await register();
+    await makeFolder(registered);
+    await seed(["quoted-a-price", "open-on-sunday"]);
+
+    const said = await egmaRun({
+      during: () =>
+        scriptOnceStarted([
+          { simulation: "quoted-a-price", status: "claimed" },
+          { simulation: "quoted-a-price", status: "running" },
+          { simulation: "quoted-a-price", status: "completed", verdict: "passed" },
+          { simulation: "open-on-sunday", status: "claimed" },
+          { simulation: "open-on-sunday", status: "running" },
+          { simulation: "open-on-sunday", status: "completed", verdict: "failed" },
+        ]),
+    });
+
+    const runId = factOf(said.lines, "run");
+    expect(runId).toMatch(/^run_/u);
+    expect(valuesOf(said.lines, "wrote")).toEqual([
+      `egma/runs/${runId}/run.json`,
+      `egma/runs/${runId}/results.jsonl`,
+      `egma/runs/${runId}/summary.md`,
+    ]);
+
+    const directory = path.join(paths().runs, runId as string);
+
+    // The platform's whole account of the run, as the platform wrote it.
+    const document = JSON.parse(await readFile(path.join(directory, "run.json"), "utf8")) as {
+      id: string;
+      simulations: readonly { test_name: string; verdict: string | null }[];
+    };
+    expect(document.id).toBe(runId);
+    expect(document.simulations.map((one) => one.test_name).sort()).toEqual([
+      "open-on-sunday",
+      "quoted-a-price",
+    ]);
+
+    // One line per simulation, so the file greps and pipes into jq.
+    const results = (await readFile(path.join(directory, "results.jsonl"), "utf8"))
+      .split("\n")
+      .filter((line) => line !== "")
+      .map((line) => JSON.parse(line) as { test_name: string; verdict: string | null });
+    expect(results.map((one) => [one.test_name, one.verdict]).sort()).toEqual([
+      ["open-on-sunday", "failed"],
+      ["quoted-a-price", "passed"],
+    ]);
+
+    // And the same facts as something a person reads in a pull request.
+    const summary = await readFile(path.join(directory, "summary.md"), "utf8");
+    expect(summary).toContain(`# Run ${runId}`);
+    expect(summary).toContain("quoted-a-price");
+    expect(summary).toContain("open-on-sunday");
+  });
+
+  /**
+   * A run somebody stopped watching still happened, and what it decided before
+   * they walked away is worth having on disk.
+   */
+  it("writes the run down even when the developer stops watching", async () => {
+    const registered = await register();
+    await makeFolder(registered);
+    await seed(["quoted-a-price"]);
+
+    const stopping = new AbortController();
+    const said = await egmaRun({
+      signal: stopping.signal,
+      during: async () => {
+        await scriptOnceStarted([
+          { simulation: "quoted-a-price", status: "claimed" },
+          { simulation: "quoted-a-price", status: "running" },
+        ]);
+        stopping.abort("interrupt");
+      },
+    });
+
+    expect(said.code).toBe(RUN_EXIT.interrupted);
+    expect(factOf(said.lines, "status")).toBe("left-running");
+    const runId = factOf(said.lines, "run");
+    expect(valuesOf(said.lines, "wrote")).toContain(`egma/runs/${runId}/summary.md`);
+  });
+
   it("answers with the red-suite number when a test failed", async () => {
     const registered = await register();
     await makeFolder(registered);

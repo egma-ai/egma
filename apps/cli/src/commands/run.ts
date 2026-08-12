@@ -27,13 +27,21 @@
  * are counted and printed as themselves. The exit number tells them apart too:
  * a suite with a red test and a suite egma could not conduct want different
  * next actions, and a single "not zero" would hide which one happened.
+ *
+ * **What happened is written down beside the tests it happened to.** A
+ * finished run leaves `egma/runs/<run-id>/` in the repository, so the evidence
+ * a change works is reviewable in the same pull request as the change. Writing
+ * it can never fail the run: the run finished, whatever a file system did
+ * afterwards, and a verb that answered otherwise would be reporting the wrong
+ * event.
  */
 
-import { readConfig, folderPathsIn, type FolderConfig } from "../folder/egma-folder.ts";
+import { readConfig, folderPathsIn, type FolderConfig, type FolderPaths } from "../folder/egma-folder.ts";
 import { PlatformUnreachableError } from "../platform/device-flow.ts";
-import { startRun } from "../platform/runs.ts";
+import { readRunDocument, startRun } from "../platform/runs.ts";
 import { PlatformRefusedError } from "../platform/refused.ts";
 import { notSignedInRefusal, signedInAt, type SignedIn } from "../platform/signed-in.ts";
+import { stillMoving, writeRunArtifacts } from "../run/artifacts.ts";
 import { followRun, RunFollower } from "../run/follow.ts";
 import { changeLines, tallyLines } from "../run/lines.ts";
 import {
@@ -76,7 +84,86 @@ export type RunCommandOptions = FolderCommandOptions & {
   readonly signal?: AbortSignal;
   /** How long between asks while following. egma's own default when omitted. */
   readonly everyMs?: number;
+  /**
+   * How long to give the graders after the last conversation ends, before
+   * writing the run down with whatever has been decided so far.
+   */
+  readonly settleMs?: number;
 };
+
+/**
+ * How long egma waits for grading to finish before it writes the run down.
+ *
+ * Execution and grading settle separately, and the follow ends on the first of
+ * them. Long enough that an ordinary suite is written down judged, and bounded
+ * so that a grader that never answers costs a wait rather than a hang — the
+ * files are written either way, and a judgment that lands later is on the
+ * results page and in the next read.
+ */
+const SETTLE_MS = 20_000;
+
+/** How often egma asks, while waiting for that. */
+const SETTLE_EVERY_MS = 500;
+
+function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  if (signal?.aborted === true) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", stop);
+      resolve();
+    }, ms);
+    function stop(): void {
+      clearTimeout(timer);
+      resolve();
+    }
+    signal?.addEventListener("abort", stop, { once: true });
+  });
+}
+
+/**
+ * Write the run into the repository, and name every file it wrote.
+ *
+ * Nothing here can change what the run answered with. A platform that stopped
+ * answering, a folder somebody made read-only, a run this key can no longer
+ * see: each is said on its own line and none of them turns a green suite red.
+ * The failure this guards against is the loud one — a developer reading `1` and
+ * going to look for a broken test that was never broken.
+ */
+async function writeTheRunDown(
+  options: RunCommandOptions,
+  paths: FolderPaths,
+  signedIn: SignedIn,
+  runId: string,
+  waitForGrading: boolean,
+): Promise<void> {
+  try {
+    const until = Date.now() + (options.settleMs ?? SETTLE_MS);
+    let document = await readRunDocument(signedIn, runId);
+    while (
+      waitForGrading &&
+      document !== null &&
+      stillMoving(document) &&
+      Date.now() < until &&
+      options.signal?.aborted !== true
+    ) {
+      await pause(SETTLE_EVERY_MS, options.signal);
+      document = await readRunDocument(signedIn, runId);
+    }
+
+    if (document === null) {
+      options.out("wrote: nothing");
+      options.fail(`egma no longer has a run with the id ${runId}, so there was nothing to write down.`);
+      return;
+    }
+
+    const written = await writeRunArtifacts({ paths, document });
+    for (const file of written.shown) options.out(`wrote: ${file}`);
+  } catch (cause) {
+    const why = cause instanceof Error ? cause.message : String(cause);
+    options.out("wrote: nothing");
+    options.fail(`The run finished. egma could not write it into ${paths.runs}: ${why}`);
+  }
+}
 
 /** What the folder says this run is against, or what is missing from it. */
 function targetIn(config: FolderConfig): { readonly agentId: string; readonly connectionId: string } | string {
@@ -217,6 +304,12 @@ export async function runRunCommand(options: RunCommandOptions): Promise<number>
 
   const tally = follower.tally;
   for (const line of tallyLines(tally)) options.out(line);
+
+  // Written on both endings. A run somebody stopped watching is still a run
+  // that happened, and what it decided before they walked away is worth having
+  // on disk — the platform carries on either way, and the next read updates the
+  // same folder.
+  await writeTheRunDown(options, paths, signedIn, run.id, ending !== "interrupted");
 
   if (ending === "interrupted") {
     // The run is on the platform and it is still going. Saying it stopped

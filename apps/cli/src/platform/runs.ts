@@ -266,6 +266,38 @@ export async function getRun(
   return runFrom(body);
 }
 
+/**
+ * One run exactly as the platform describes it, whole and unnarrowed.
+ *
+ * Everything above reads a run into the handful of fields a terminal draws.
+ * This reads the same answer and keeps all of it — the judgments with their
+ * rationales, the graders each verdict is attributed to, the mocked world the
+ * run was frozen into — because what gets written into the developer's
+ * repository is the platform's account of the run and not egma's summary of it.
+ * A field this build has never heard of survives the trip for the same reason:
+ * dropping it here would mean a repository that silently holds less than the
+ * platform said.
+ *
+ * `null` for a run this key cannot see, which reads the same as one that was
+ * never started.
+ */
+export async function readRunDocument(
+  signedIn: SignedIn,
+  runId: string,
+  options: { readonly fetchImpl?: Fetch; readonly signal?: AbortSignal } = {},
+): Promise<Record<string, unknown> | null> {
+  const { response, body } = await ask({
+    signedIn,
+    path: `/api/runs/${encodeURIComponent(runId)}`,
+    ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
+
+  if (response.status === 404) return null;
+  if (!response.ok) throw new PlatformRefusedError(response.status, saidBy(body, response.status));
+  return body;
+}
+
 /** Everything that has changed since `after`, in the order it happened. */
 export async function runEvents(
   signedIn: SignedIn,

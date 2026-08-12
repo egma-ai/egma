@@ -6,6 +6,7 @@
  *   config.yaml     what this folder points at — names and ids
  *   mock-tools.md   what egma answers for the agent's tools with
  *   tests/          one markdown file per test
+ *   runs/           one folder per run, written when a run finishes
  * ```
  *
  * Everything in it is committed. Nothing secret ever lands here — the key this
@@ -39,6 +40,15 @@ export const FOLDER_NAME = "egma";
 export const CONFIG_FILE_NAME = "config.yaml";
 export const MOCK_TOOLS_FILE_NAME = "mock-tools.md";
 export const TESTS_FOLDER_NAME = "tests";
+/**
+ * Where a finished run writes down what happened.
+ *
+ * Beside the tests and committed with them, for the reason the tests are files
+ * at all: a result nobody can open in a pull request is a result nobody reads.
+ * `egma init` does not create it — a repository that has never run anything has
+ * nothing to put in it, and an empty directory is not a fact worth committing.
+ */
+export const RUNS_FOLDER_NAME = "runs";
 /** Reserved for per-agent memory files. Nothing creates it. */
 export const MEMORY_FOLDER_NAME = "memory";
 
@@ -60,6 +70,8 @@ export type FolderPaths = {
   /** The project's own mock tools. A test's overrides live in the test. */
   readonly mockTools: string;
   readonly tests: string;
+  /** Where finished runs are written down. Made by the run, not by `init`. */
+  readonly runs: string;
 };
 
 export function folderPathsIn(repository: string): FolderPaths {
@@ -69,6 +81,7 @@ export function folderPathsIn(repository: string): FolderPaths {
     config: path.join(root, CONFIG_FILE_NAME),
     mockTools: path.join(root, MOCK_TOOLS_FILE_NAME),
     tests: path.join(root, TESTS_FOLDER_NAME),
+    runs: path.join(root, RUNS_FOLDER_NAME),
   };
 }
 
