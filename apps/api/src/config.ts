@@ -1,6 +1,7 @@
 import { SERVICE_TOKEN_PREFIX } from "./auth/service-token.ts";
 import type { SmtpSettings } from "./auth/email.ts";
 import type { PhoneSettings } from "./phone-readiness.ts";
+import type { BlobStore } from "./recordings/signed-link.ts";
 
 /** A judge the platform hands to projects that have configured none. */
 export type DefaultJudge = {
@@ -99,6 +100,23 @@ export type Config = {
    * verdicts and says so, exactly as before.
    */
   readonly defaultJudge: DefaultJudge | undefined;
+  /**
+   * The object store voice simulations' recordings live in, or `undefined` on a
+   * deployment that has named none.
+   *
+   * **Naming the browser's address is what selects it**, the way naming an
+   * endpoint is what sends the simulator's recordings to object storage in the
+   * first place. Absent, the control plane can still read and report every
+   * simulation it could before; it simply cannot hand anybody a link to the
+   * audio, and it says so in a sentence naming the variable rather than
+   * answering an empty player.
+   *
+   * The address here is **the browser's**, and this process holds no other one.
+   * It never opens a connection to the store — signing is arithmetic — so there
+   * is no internal endpoint in this configuration for a future reader to sign
+   * against by mistake. See `recordings/signed-link.ts`.
+   */
+  readonly blob: BlobStore | undefined;
   /**
    * Where to post mail, if anywhere. **Absent is the ordinary case and is never
    * an error**: with no transport configured, signup asks for no verification
@@ -313,8 +331,201 @@ export function loadConfig(
       speechProvider: environment.EGMA_PHONE_SPEECH_PROVIDER?.trim() || null,
     },
     defaultJudge: defaultJudge(environment),
+    blob: blobStore(environment, parsedBaseUrl),
   };
 }
+
+/**
+ * The bucket that holds recordings and the read-only credential that reaches
+ * it, or `undefined` where nobody named one.
+ *
+ * **The address is the browser's, and that is this whole setting's reason for
+ * existing.** A signed link is bound by signature to the host it was signed for.
+ * The API reaches MinIO at `minio:9000` inside the compose network and a browser
+ * reaches it at whatever the deployment publishes — sign for one, fetch from the
+ * other, and the store answers `SignatureDoesNotMatch`, which names neither
+ * address and costs whoever meets it a day. So the browser's address is its own
+ * variable from the first commit rather than after the first report, and it is
+ * the only address this process holds.
+ *
+ * **The credential is read-only**, separate from the write credential the
+ * simulator holds. A leaked read credential must not be usable to overwrite a
+ * customer's call recording — the compose file's bucket job creates a MinIO user
+ * that can do nothing but `s3:GetObject`.
+ *
+ * All of it or none of it, refused at startup by name, on the simulator's
+ * discipline: half a credential resolves no recording at all and would be
+ * discovered by somebody pressing play, one simulation at a time, with the
+ * store's own refusal in a log they cannot see.
+ *
+ * **`baseUrl` is here for one reason: the two addresses have to agree about
+ * scheme.** Both are addresses of *the same browser* — one to egma, one to the
+ * store — and an `https:` page may not fetch `http:` audio. See the mixed
+ * content refusal below.
+ */
+function blobStore(
+  environment: NodeJS.ProcessEnv,
+  baseUrl: URL,
+): BlobStore | undefined {
+  const publicUrl = environment.EGMA_BLOB_PUBLIC_URL?.trim() || "";
+  if (publicUrl === "") return undefined;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(publicUrl);
+  } catch {
+    throw new Error(
+      `EGMA_BLOB_PUBLIC_URL is not a URL: ${publicUrl}. It is the address a ` +
+        "browser reaches the recording store at, and it looks like " +
+        "http://localhost:9000 — never the address this container reaches it " +
+        "at, because a signed link only works from the host it was signed for.",
+    );
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error(
+      `EGMA_BLOB_PUBLIC_URL speaks ${parsed.protocol} and a browser fetches a ` +
+        "recording over http: or https:",
+    );
+  }
+  // The two settings are one browser's two addresses, and a browser will not
+  // mix their schemes. A page served over https: may not fetch audio over
+  // http:: every browser blocks it as mixed content *before the request is
+  // made*, so the store is never asked, the signature is never checked, and
+  // the only sentence naming the reason is in a console the person pressing
+  // play is not looking at. That is this effort's own bug class arriving by a
+  // third route — a setting whose wrong value fails while naming nothing —
+  // after the address binding and the region defaulting from nothing. Both of
+  // those were closed by refusing here, by name, and so is this.
+  //
+  // Only this one pair is incoherent. An http: egma with an https: store is
+  // fine — a plaintext page may fetch encrypted bytes — and an http: egma with
+  // an http: store is the ordinary deployment this compose file ships, so
+  // `http://localhost:9000` must keep starting and does.
+  //
+  // A plaintext store on a *remote* address is allowed and not refused,
+  // deliberately: it is only reachable from an egma that is itself plaintext,
+  // where the session cookie granting access to every recording already
+  // crosses the same network in the clear. Refusing the audio while serving
+  // the cookie would be a rule egma applies to one byte stream and not the
+  // other. What it costs is said beside the example, in `.env.example`, the
+  // compose file and the README, rather than decided for a self-hoster on a
+  // private network egma cannot see.
+  if (baseUrl.protocol === "https:" && parsed.protocol === "http:") {
+    throw new Error(
+      `EGMA_BASE_URL is ${baseUrl.origin}, which is https:, and ` +
+        `EGMA_BLOB_PUBLIC_URL is ${parsed.origin}, which is http:. A browser ` +
+        "will not fetch that: a page loaded over https: blocks audio loaded " +
+        "over http: as mixed content, and it blocks it before the request is " +
+        "sent — so every recording fails with the store never asked and the " +
+        "signature never checked, the player shows an error egma did not " +
+        "send, and the only explanation is a line in the browser's own " +
+        "console. Give EGMA_BLOB_PUBLIC_URL an https: address the browser " +
+        "reaches the store at — the proxy or certificate the store is " +
+        "published behind, alongside the one egma itself is published behind.",
+    );
+  }
+  // Scheme, host and port, and nothing after them — the same narrowing
+  // `EGMA_BASE_URL` makes, for a reason of its own. A signature covers the whole
+  // path, prefix included, so a store put behind a proxy on a sub-path only
+  // works if that proxy passes its own prefix through to the store; the ordinary
+  // arrangement strips it, and then every link is signed for one path and
+  // presented at another. That failure looks like `SignatureDoesNotMatch`, names
+  // nothing, and would be admitted here by a setting nobody could test. Refused
+  // while this setting is new enough that no deployment is on it.
+  if (
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    (parsed.pathname !== "" && parsed.pathname !== "/") ||
+    parsed.search !== "" ||
+    parsed.hash !== ""
+  ) {
+    throw new Error(
+      `EGMA_BLOB_PUBLIC_URL must be only the address a browser reaches the ` +
+        `recording store at — scheme, host and port, nothing else — and this ` +
+        `one carries more. Set it to ${parsed.origin}. A signed link covers ` +
+        `the path it was signed for, so egma cannot serve a store under a ` +
+        `sub-path a proxy then rewrites.`,
+    );
+  }
+
+  const accessKeyId = environment.EGMA_BLOB_ACCESS_KEY_ID?.trim() || "";
+  const secretAccessKey = environment.EGMA_BLOB_SECRET_ACCESS_KEY?.trim() || "";
+  const missing = [
+    accessKeyId === "" ? "EGMA_BLOB_ACCESS_KEY_ID" : "",
+    secretAccessKey === "" ? "EGMA_BLOB_SECRET_ACCESS_KEY" : "",
+  ].filter((name) => name !== "");
+  if (missing.length > 0) {
+    throw new Error(
+      `EGMA_BLOB_PUBLIC_URL names a recording store and this deployment is ` +
+        `missing ${missing.join(" and ")}. Both halves are one credential, ` +
+        "and it should be the read-only one — the control plane never writes " +
+        "to the store, and a leaked read credential must not be usable to " +
+        "overwrite a customer's recording.",
+    );
+  }
+
+  // The bucket name is checked here for the reason the simulator checks its
+  // own: a name carrying a separator would put a prefix nobody configured in
+  // front of every key, so a reference that resolves for the simulator would
+  // resolve to nothing here, and the store's answer would name the object.
+  const bucket = environment.EGMA_BLOB_BUCKET?.trim() || DEFAULT_BLOB_BUCKET;
+  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u.test(bucket)) {
+    throw new Error(
+      `EGMA_BLOB_BUCKET must be a bucket name — lower case, 3 to 63 ` +
+        `characters, letters, digits, dots and hyphens, and no separator; ` +
+        `got ${bucket}`,
+    );
+  }
+
+  return {
+    publicUrl: parsed.origin,
+    bucket,
+    region: blobRegion(environment, parsed),
+    accessKeyId,
+    secretAccessKey,
+  };
+}
+
+/**
+ * What to sign for.
+ *
+ * MinIO ignores the region entirely and every signature must still carry one,
+ * so `us-east-1` is the value that lets a deployment with no region at all
+ * work — the same default the simulator uses, because the two halves sign
+ * against one store and a disagreement between them is every upload working and
+ * every playback failing.
+ *
+ * **On real S3 the default is not a default, it is a wrong answer**, and it is
+ * refused rather than signed with. A bucket in `eu-west-1` signed for
+ * `us-east-1` answers `SignatureDoesNotMatch` on every single recording, naming
+ * neither the region nor the variable — the same nameless failure the public
+ * address is a separate setting to prevent, arriving by a second route. The one
+ * deployment that can be *known* to be wrong is the one whose store is AWS's
+ * own, where a region is never optional, so that is the one this refuses.
+ */
+function blobRegion(environment: NodeJS.ProcessEnv, address: URL): string {
+  const named = environment.EGMA_BLOB_REGION?.trim() || "";
+  if (named !== "") return named;
+
+  if (address.hostname.endsWith(".amazonaws.com")) {
+    throw new Error(
+      `EGMA_BLOB_PUBLIC_URL points at ${address.hostname}, which is Amazon's ` +
+        "own S3, and no EGMA_BLOB_REGION was set. A signature carries the " +
+        "region and S3 refuses one signed for another, so egma would sign " +
+        "every recording for us-east-1 and every one of them would come back " +
+        "SignatureDoesNotMatch. Set EGMA_BLOB_REGION to the bucket's region — " +
+        "the same one the simulator uploads with, which is EGMA_S3_REGION if " +
+        "you set them from one place.",
+    );
+  }
+  return DEFAULT_BLOB_REGION;
+}
+
+/** The bucket the deployment creates on first start; nobody running the compose file names it. */
+const DEFAULT_BLOB_BUCKET = "egma-recordings";
+
+/** What a store that ignores regions is signed for. See `blobRegion`. */
+const DEFAULT_BLOB_REGION = "us-east-1";
 
 /**
  * The platform's default judge, or `undefined` where it has none.

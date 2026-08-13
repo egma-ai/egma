@@ -25,9 +25,11 @@ export const CODES = {
   conflict: 409,
   name_taken: 409,
   unprocessable: 422,
+  unsignable_reference: 422,
   no_adapter: 422,
   phone_setup_required: 422,
   too_many_requests: 429,
+  no_object_store: 503,
 } as const;
 
 export type RefusalCode = keyof typeof CODES;
@@ -78,6 +80,26 @@ export function unprocessable(
   message: string,
 ): FastifyReply {
   return refuse(reply, "unprocessable", message);
+}
+
+/**
+ * A recording whose reference egma will not sign.
+ *
+ * **Its own code rather than an `unprocessable`, and the distinction is what a
+ * reader does next.** Every other 422 on the recording route is a settled fact
+ * about the conversation — *a chat has no audio and never will* — and a surface
+ * that asks about every conversation it shows answers those by offering
+ * nothing, because there is nothing and there never was. This one is a *defect*:
+ * a row is carrying a reference no simulator could have written, and the audio
+ * it points at may well exist. Sharing a code with the honest absences would
+ * make a corrupt row invisible on exactly the surface that would meet it most —
+ * a data fault dressed as a conversation that was never recorded.
+ */
+export function unsignableReference(
+  reply: FastifyReply,
+  message: string,
+): FastifyReply {
+  return refuse(reply, "unsignable_reference", message);
 }
 
 /**
@@ -164,6 +186,29 @@ export function wrongServiceToken(reply: FastifyReply): FastifyReply {
       "the same value — restart whichever holds a stale one. A customer key " +
       "starts egma_sk_ and files under its own account instead.",
   );
+}
+
+/**
+ * The reader may have this, and this deployment has nowhere to get it from.
+ *
+ * The only 5xx in this vocabulary, and it earns that: every other refusal here
+ * is about the request, and this one is about the installation. A recording
+ * exists, the person asking is entitled to it, and the control plane has not
+ * been told where a browser reaches the store — so the honest answer is that
+ * egma is not able to serve this right now, with the variable to set. Answering
+ * 404 would tell a reader their recording is gone, which is the one thing that
+ * is not true.
+ *
+ * It is deliberately the **last** refusal a route makes, after every question
+ * about who is asking and what they asked for. A configuration answer that
+ * arrived first would let a stranger learn whether a simulation exists by
+ * watching which sentence comes back.
+ */
+export function noObjectStore(
+  reply: FastifyReply,
+  message: string,
+): FastifyReply {
+  return refuse(reply, "no_object_store", message);
 }
 
 /** The organization's request budget is spent; the header says when to retry. */

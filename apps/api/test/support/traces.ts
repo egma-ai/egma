@@ -337,6 +337,8 @@ export type TraceDetailBody = {
   readonly turns: DetailSpan[];
   readonly spans: DetailSpan[];
   readonly spans_truncated: boolean;
+  /** The simulation this trace is, or `null` for a customer's own telemetry. */
+  readonly simulation_id: string | null;
 };
 
 export type ReadQuery = {

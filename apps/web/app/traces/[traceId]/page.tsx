@@ -7,6 +7,7 @@ import {
   DETAIL,
   FACTS,
   LIST,
+  RECORDING,
   SPEAKERS,
   UNKNOWN_STEP_LABEL,
   stepLabel,
@@ -27,6 +28,7 @@ import {
   type Step,
 } from "../../../lib/transcripts.ts";
 import { JudgmentCard } from "../../judgment-card.tsx";
+import { RecordingPlayer } from "../../recording-player.tsx";
 import {
   AppShell,
   Notice,
@@ -193,6 +195,33 @@ export default function TranscriptPage({
 
         <Summary facts={detail.trace} />
         {detail.outcome ? <OutcomeSummary outcome={detail.outcome} /> : null}
+
+        {/*
+          The audio of this exchange, where egma is the one who had it.
+
+          **Beside the turns, because this is where the doubt is.** Somebody
+          reading a transcript who cannot tell a misbehaving agent from a bad
+          transcription is already looking at the turn; sending them to the run
+          to hear it would put the evidence a page away from the doubt.
+
+          Above the views rather than inside the transcript one, so that
+          switching to the timeline never leaves audio playing behind a panel
+          with no controls on it — a hidden `<audio>` keeps going, and a person
+          hunting for the sound would have no way to stop it.
+
+          `simulation_id` is present only for an exchange egma conducted, which
+          is the one question this page can answer for itself; whether that
+          conversation recorded anything is the recording route's answer, and a
+          refusal there shows nothing at all rather than a control that does
+          nothing.
+        */}
+        {typeof detail.simulation_id === "string" ? (
+          <RecordingPlayer
+            simulationId={detail.simulation_id}
+            words={RECORDING}
+            knownToExist={false}
+          />
+        ) : null}
 
         <div className={styles.traceToolbar}>
           <div className={styles.traceViewTabs} role="tablist" aria-label={DETAIL.viewLabel}>
@@ -599,8 +628,8 @@ function Inspector({
       )}
 
       <details className={styles.inspectorDetails}>
-        <summary>{DETAIL.recordingDetails}</summary>
-        <RecordingDetails facts={facts} />
+        <summary>{DETAIL.whereItCameFrom}</summary>
+        <WhereItCameFrom facts={facts} />
       </details>
     </aside>
   );
@@ -615,7 +644,13 @@ function Payload({ label, value }: { label: string; value: string }) {
   );
 }
 
-function RecordingDetails({ facts }: { facts: TraceFacts }) {
+/**
+ * Where this exchange came from and when — the disclosure whose label stopped
+ * saying "Recording" the day this page grew an audio player. The component
+ * carries the same name as the words on the screen, so nobody reading the code
+ * goes looking for the recording in it.
+ */
+function WhereItCameFrom({ facts }: { facts: TraceFacts }) {
   const shown: readonly (readonly [string, string])[] = [
     [FACTS.started, whenItWas(facts.started_at)],
     [FACTS.ended, whenItWas(facts.ended_at)],

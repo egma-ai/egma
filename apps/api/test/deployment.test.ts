@@ -24,6 +24,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { BUCKET, READ_ONLY_POLICY } from "./support/object-storage.ts";
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const API = path.resolve(HERE, "..");
 const ROOT = path.resolve(API, "../..");
@@ -130,6 +132,79 @@ describe("the API's deployment story", () => {
     ]) {
       expect(api).not.toContain(secret);
     }
+  });
+
+  it("publishes the recording store to this machine and no further, by default", () => {
+    // The one port in this file whose default bind is a security decision.
+    // What answers on it is the store's admin surface and its *root*
+    // credential — which can list, replace and delete every recording a
+    // deployment holds — and the development default for that credential is
+    // written in this repository. Bound to 0.0.0.0, `docker compose up` on a
+    // shared network hands every customer's recording to the room, to read and
+    // to overwrite. This product calls a recording evidence.
+    //
+    // Held as a test rather than as the comment beside it, because a comment
+    // does not close a port. The publishing itself is required — a browser has
+    // to fetch a recording — so what is asserted is the host it is published
+    // to, and that opening it is a variable somebody sets on purpose.
+    const block = serviceBlock("minio");
+    const published = /^\s*-\s*"(.+:9000)"\s*$/mu.exec(block)?.[1] ?? "";
+    expect(published, "the minio service publishes its API port").not.toBe("");
+    expect(
+      published.startsWith("${EGMA_S3_BIND:-127.0.0.1}:"),
+      `the recording store is published as ${published}, which does not bind ` +
+        "to loopback by default — the store's root credential can overwrite " +
+        "every recording, and its default is public in this repository",
+    ).toBe(true);
+  });
+
+  it("gives the API a store credential that can only read, and never the simulator's", () => {
+    const compose = readFileSync(path.join(ROOT, "docker-compose.yml"), "utf8");
+    const api = serviceBlock("api");
+
+    // The whole reason there are two credentials. A leaked read credential must
+    // not be usable to overwrite a customer's call recording, and the one line
+    // that would undo that is the API being handed the write pair — which is
+    // exactly what an interpolation default would do if somebody "simplified"
+    // it. Neither write variable may appear on this service at all.
+    for (const write of [
+      "EGMA_S3_ACCESS_KEY_ID",
+      "EGMA_S3_SECRET_ACCESS_KEY",
+      "EGMA_SIMULATOR_S3_ACCESS_KEY_ID",
+      "EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY",
+    ]) {
+      // The read pair's own names contain `EGMA_S3_READ_…`, so the write names
+      // are looked for as whole words followed by `:-` or `}` — how compose
+      // writes an interpolation — rather than as substrings.
+      expect(
+        new RegExp(`\\$\\{${write}[:}]`, "u").test(api),
+        `the api service reads ${write}, which is a credential that can write`,
+      ).toBe(false);
+    }
+
+    // The API holds exactly one address for the store and it is the browser's.
+    // The mistake this guards is a plausible one: somebody finds that
+    // `http://localhost:9000` does not answer from inside the container, "fixes"
+    // the default to the service name that does, and every recording then fails
+    // from every browser with `SignatureDoesNotMatch` — an error naming neither
+    // address. Every route test would still pass, because from inside one
+    // process the signed address and the fetched address are the same address
+    // by construction.
+    expect(
+      /EGMA_BLOB_PUBLIC_URL:.*minio:9000/u.test(api),
+      "the api service signs recording links for the address it reaches the " +
+        "store at, which is not the address a browser uses",
+    ).toBe(false);
+    expect(api).not.toContain("EGMA_SIMULATOR_S3_ENDPOINT");
+
+    // And what that read-only credential is allowed to do, held against the
+    // policy the object-storage suite proves against a real MinIO. The two are
+    // the same sentence in two files, and a drift between them would mean the
+    // suite proving a policy nobody deploys.
+    const written =
+      /printf '([^']+)'\s*\n?\s*"\$\$EGMA_S3_BUCKET"/u.exec(compose)?.[1] ?? "";
+    expect(written, "the bucket job writes a policy document").not.toBe("");
+    expect(JSON.parse(written.replace("%s", BUCKET))).toEqual(READ_ONLY_POLICY);
   });
 
   it("never passes the Twilio Auth Token to any container", () => {

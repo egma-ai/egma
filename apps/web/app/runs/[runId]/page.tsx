@@ -6,6 +6,10 @@ import { use, useEffect, useState } from "react";
 import { runProgress } from "../../../lib/run-progress.ts";
 import type { Judgment } from "../../../lib/transcripts.ts";
 import { JudgmentCard } from "../../judgment-card.tsx";
+import {
+  RecordingPlayer,
+  type RecordingWords,
+} from "../../recording-player.tsx";
 
 import {
   AppShell,
@@ -36,6 +40,15 @@ type Simulation = {
   readonly counts: Counts | null;
   readonly verdicts: readonly Judgment[];
   readonly reason: string | null;
+  /** Voice or chat, as the row itself says rather than as the run does. */
+  readonly modality: string | null;
+  /**
+   * Whether there is a recording to hear. Not where it is: the reference is
+   * resolved on its own, when somebody opens this conversation, so that the
+   * address of this page carries no link and stays something you can send to a
+   * colleague.
+   */
+  readonly has_recording: boolean;
 };
 
 type Run = {
@@ -278,11 +291,46 @@ function RunFact({
   );
 }
 
+/**
+ * What the player says here.
+ *
+ * **`persona` is the right word on this page and only on this page.** A run is
+ * a set of conversations each of which a persona had, and this page names the
+ * persona of every one of them a line above the player. The transcript surface
+ * says `human` instead, because a transcript may be a production exchange
+ * nobody simulated and there is no persona in it to name; its words are held
+ * against the banned list in `transcript-copy.ts`.
+ */
+const HEARD_ON_A_RUN: RecordingWords = {
+  label: "Recording",
+  caption: "Left channel is the persona, right channel is the agent.",
+  band: (hertz) => `Heard at ${String(hertz)} Hz.`,
+  fallback: "Your browser cannot play audio.",
+  unplayable:
+    "This recording could not be played. The store it lives in may be unreachable.",
+  unreachable: "Egma could not be reached for this recording.",
+  refused: (status) => `Egma answered ${String(status)} for this recording.`,
+};
+
 function SimulationResult({ simulation }: { simulation: Simulation }) {
   const operationalFailure = simulation.status === "failed";
+  // Nothing is asked for until somebody opens this conversation. A run can hold
+  // two hundred of them, and resolving a link for every one on arrival would be
+  // two hundred requests for audio nobody has asked to hear.
+  const [opened, setOpened] = useState(false);
 
   return (
-    <details className={styles.runSimulation} data-verdict={simulation.verdict ?? undefined}>
+    <details
+      className={styles.runSimulation}
+      data-verdict={simulation.verdict ?? undefined}
+      // Named on the element so a person reading a run in a browser test can
+      // point at one conversation rather than at whichever row happened to be
+      // drawn first. Two conversations of one run differ only by who called.
+      data-simulation={simulation.id}
+      onToggle={(event) => {
+        if (event.currentTarget.open) setOpened(true);
+      }}
+    >
       <summary>
         <span className={styles.runPosition}>{String(simulation.position).padStart(2, "0")}</span>
         <span className={styles.runSimulationIdentity}>
@@ -300,6 +348,24 @@ function SimulationResult({ simulation }: { simulation: Simulation }) {
         {simulation.reason === null ? null : (
           <Notice tone="error">{simulation.reason}</Notice>
         )}
+
+        {/*
+          Only where there is something to play, and nothing at all where there
+          is not. A chat carries no audio and never will; a voice conversation
+          whose call never connected wrote none. Neither gets a control that
+          does nothing — a disabled player reads as a broken feature rather than
+          as an honest absence, and sends somebody looking for the fault.
+        */}
+        {opened && simulation.modality === "voice" && simulation.has_recording ? (
+          <RecordingPlayer
+            simulationId={simulation.id}
+            words={HEARD_ON_A_RUN}
+            // This run's own answer already said there is one, so a link that
+            // will not resolve here is a fault and says so.
+            knownToExist
+          />
+        ) : null}
+
         <p className={styles.runTally}>{tally(simulation.counts)}</p>
 
         {simulation.verdicts.length === 0 ? (

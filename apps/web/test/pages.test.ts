@@ -7,6 +7,11 @@ import {
   DEFAULT_PROJECT_NAME as API_DEFAULT_PROJECT_NAME,
   organizationNameFromEmail as apiOrganizationNameFromEmail,
 } from "../../api/src/auth/naming.ts";
+import { CODES } from "../../api/src/http/refusals.ts";
+import {
+  NOTHING_TO_HEAR,
+  offersNothing,
+} from "../lib/recording-refusals.ts";
 import { runProgress } from "../lib/run-progress.ts";
 import {
   DEFAULT_SIGNED_IN_PATH,
@@ -406,6 +411,108 @@ describe("coming back after signing in", () => {
     ]) {
       expect(safeReturnPath(elsewhere), elsewhere).toBeNull();
     }
+  });
+});
+
+/**
+ * When a page that was offered a recording shows nothing at all, and when it
+ * speaks.
+ *
+ * It is the whole substance of the player's honesty rule, and it has been got
+ * wrong twice — once by hiding a failure that arrived after a player was
+ * already on screen, once by hiding every fault egma could have. Both times it
+ * was carried entirely by a render branch, which nothing could reach. It is a
+ * function now, and this is where it is held.
+ */
+describe("a refusal of a recording", () => {
+  const A_TRANSCRIPT = { knownToExist: false, afterOneWorked: false };
+  const A_RUNS_RESULTS = { knownToExist: true, afterOneWorked: false };
+
+  /**
+   * The one case silence is bought for: a surface that was asking whether
+   * there is anything here at all, being told there is not. A chat can never
+   * have audio and a call that never connected wrote none — and a disabled
+   * control, or a sentence beside every one of them, reads as a broken feature
+   * rather than as an honest absence.
+   */
+  it("is answered with nothing where the surface was only asking", () => {
+    expect(offersNothing({ code: "not_found" }, A_TRANSCRIPT)).toBe(true);
+    expect(offersNothing({ code: "unprocessable" }, A_TRANSCRIPT)).toBe(true);
+  });
+
+  /**
+   * A run's results were told there is a recording before this component was
+   * mounted at all, so any refusal contradicts what the same page just said.
+   */
+  it("is always said where the page had already been told there is one", () => {
+    expect(offersNothing({ code: "not_found" }, A_RUNS_RESULTS)).toBe(false);
+    expect(offersNothing({ code: "unprocessable" }, A_RUNS_RESULTS)).toBe(false);
+  });
+
+  /**
+   * Everything about **egma** rather than about the conversation. A store
+   * nobody configured, a fault, an egma that answered nothing at all, and a row
+   * carrying a reference no simulator could have written — the last of which
+   * has a code of its own precisely so it is not mistaken for an absence.
+   *
+   * A deployment that is broken must never look like a product working
+   * correctly. That is the failure the recordings effort exists to end, and the
+   * surface that asks about every conversation somebody opens is where it would
+   * spread furthest.
+   */
+  it("is said out loud when it is about egma rather than about the conversation", () => {
+    for (const code of [
+      "no_object_store",
+      "unsignable_reference",
+      "not_permitted",
+      "too_many_requests",
+      "internal_error",
+    ]) {
+      expect(offersNothing({ code }, A_TRANSCRIPT), code).toBe(false);
+    }
+  });
+
+  /**
+   * And an answer that was not egma's at all.
+   *
+   * Fastify's own not-found reply is `{"statusCode":404,"error":"Not
+   * Found","message":"Route GET:… not found"}` — a 404 carrying a message, from
+   * a route that is not mounted, a container running a different version, or a
+   * proxy that has stopped forwarding this path. Reading the presence of a
+   * message would have gone quiet on every one of those. A code is the API's
+   * own promise and nobody else's, so a code is what is read; `Not Found` with
+   * a capital and a space is not one of them.
+   */
+  it("is said out loud when the answer did not come from egma", () => {
+    expect(offersNothing({ code: undefined }, A_TRANSCRIPT)).toBe(false);
+    expect(offersNothing({ code: "Not Found" }, A_TRANSCRIPT)).toBe(false);
+  });
+
+  /**
+   * A refusal arriving after a link had already worked is never quiet. By then
+   * somebody has a player on screen and may be part-way through listening, and
+   * a control that vanishes without a word is worse than the error it hides.
+   */
+  it("is said out loud once a player has already been on screen", () => {
+    for (const code of ["not_found", "unprocessable"]) {
+      expect(
+        offersNothing({ code }, { knownToExist: false, afterOneWorked: true }),
+        code,
+      ).toBe(false);
+    }
+  });
+
+  /**
+   * The codes are the API's, so they are read from the API's own vocabulary
+   * rather than typed twice. A code renamed on one side and not the other would
+   * make a transcript start speaking about every chat, or stop speaking about a
+   * fault — and neither would fail anything else.
+   */
+  it("names codes this API actually answers with", () => {
+    for (const code of NOTHING_TO_HEAR) {
+      expect(Object.keys(CODES), code).toContain(code);
+    }
+    expect(Object.keys(CODES)).toContain("unsignable_reference");
   });
 });
 

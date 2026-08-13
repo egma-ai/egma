@@ -88,10 +88,11 @@ plus what only audio can owe:
   across them are not comparable.
 - **A dual-channel recording**, the persona on channel 0 and the agent on
   channel 1, so either side can be heard alone when a transcript looks
-  wrong. It is written through the blob seam (`blob.py`) — an interface
-  with a filesystem-backed default, so a first voice simulation needs no
-  object storage running — and the report carries only the reference,
-  never the bytes and never a URL.
+  wrong. It is written through the blob seam (`blob.py`) — one interface
+  with two implementations, an object store for a deployment that names
+  an endpoint and a directory for one that does not, so a first voice
+  simulation needs no container running — and the report carries only the
+  reference, never the bytes and never a URL.
 - **Per-turn measurements**, all read from the audio itself rather than
   from a clock: `time_to_first_word` (how long the agent was quiet before
   speaking), `agent_speech_duration` and `persona_speech_duration`. Each
@@ -335,19 +336,34 @@ Everything arrives as environment variables.
 | `EGMA_SIMULATOR_SIP_TRUNK_USERNAME` | (with the password, or neither) | Credential auth for the inline trunk. |
 | `EGMA_SIMULATOR_SIP_TRUNK_PASSWORD` | (with the username, or neither) | The trunk password. Never logged. |
 | `EGMA_SIMULATOR_WAL_DIR` | `.egma-simulator/wal` | Where report documents land before sending. |
-| `EGMA_SIMULATOR_BLOB_DIR` | `.egma-simulator/blobs` | Where recordings land, for the filesystem-backed blob store. |
+| `EGMA_SIMULATOR_S3_ENDPOINT` | (none) | Where the object store recordings go to answers, on the deployment's own network. Naming it is the whole of what selects object storage, and what makes the two credentials below required; naming none keeps the filesystem store, so a checkout needs no container. |
+| `EGMA_SIMULATOR_S3_BUCKET` | `egma-recordings` | The bucket recordings land in. The deployment creates it on first start. |
+| `EGMA_SIMULATOR_S3_REGION` | `us-east-1` | What requests are signed for. MinIO ignores it; a bucket at a real provider does not. |
+| `EGMA_SIMULATOR_S3_ACCESS_KEY_ID` | (required with an endpoint) | The write credential's key id. Never logged. |
+| `EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY` | (required with an endpoint) | The write credential's secret. Never logged. |
+| `EGMA_SIMULATOR_BLOB_DIR` | `.egma-simulator/blobs` | Where recordings land when no endpoint above names an object store. Unread, and not even created, when one does. |
 | `EGMA_SIMULATOR_LOG_LEVEL` | `INFO` | The usual levels: `CRITICAL`, `ERROR`, `WARNING`, `INFO`, `DEBUG`. |
 | `EGMA_SIMULATION_CONTRACT_DIR` | auto-located | The contract package, when the repo layout isn't around it. |
 
 One of these is required and the rest have working defaults, which is the
 whole rule. Anything set to something unusable stops the process on its
 first line in a sentence naming the variable — a capacity that is not a
-number, a level nobody defined, a URL with no scheme, a directory that
-cannot be written. The two directories are proved by writing to them at
-startup, and made if they are not there, because a volume mounted wrongly
-would otherwise stay quiet until it lost a recording. Blank counts as
-unset everywhere, so a compose entry can carry `${VAR:-}` for every
-optional one.
+number, a level nobody defined, a URL with no scheme, a bucket no store
+would take, a credential missing beside the endpoint that needs it, a
+directory that cannot be written. Each directory it will really use is
+proved by writing to it at startup, and made if it is not there, because
+a volume mounted wrongly would otherwise stay quiet until it lost a
+report; a simulator sending its recordings to object storage has no
+recordings directory and is not asked for one. Blank counts as unset
+everywhere, so a compose entry can carry `${VAR:-}` for every optional
+one.
+
+What is *not* checked at startup is whether the object store answers.
+That is a question only the store can settle, and a simulator that
+refused to start until it could ask would be a simulator that dies
+because its store came up five seconds behind it. The deployment orders
+that instead: the bucket job runs to completion before the simulator
+starts.
 
 ## In a container
 
@@ -358,9 +374,9 @@ outside this directory, and it is copied in and pointed at with
 nothing ever dials in.
 
 The repository's `docker-compose.yml` runs it as one more service beside
-the API, with a named volume for the recordings and the write-ahead log,
-and `docker-compose.workbench.yml` is the dev overlay that stands a
-workbench up beside it and points the simulator there:
+the API, with a named volume for the write-ahead log and an object store
+for the recordings, and `docker-compose.workbench.yml` is the dev overlay
+that stands a workbench up beside it and points the simulator there:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.workbench.yml \
@@ -468,6 +484,19 @@ offline sentinel tests do. `TEST_DEEPGRAM_API_KEY` and
 `TEST_ELEVENLABS_API_KEY` are read first, for a machine that keeps its
 test credentials apart from its working ones.
 
+Object storage is real in `tests/test_object_storage.py` and costs you
+nothing to have: it starts a MinIO container of its own, on a port of its
+own, and removes it afterwards. Where docker cannot start one it says so
+and skips, never passing quietly. There is no fake, on purpose — a
+stand-in would agree with whatever this code believed about signatures,
+addressing and buckets, which is the whole set of things that go wrong
+between a client and an object store. It holds two things: the seam's own
+rules against the store a deployment really runs, and a whole voice
+simulation whose recording is fetched out of the bucket and listened to,
+one speaker to a channel. Every other suite here writes to a directory,
+which is what makes the rest of this app testable with no container at
+all.
+
 Carrier provisioning is no longer this app's: `egma self-host phone
 setup` owns it, and its tests live with the CLI, against a local server
 shaped like the two Twilio APIs it drives.
@@ -537,7 +566,9 @@ src/egma_simulator/
                   and listens with — no corpus, no provider, no network.
   recording.py    One simulation's dual-channel recording, and the two
                   audio facts a report carries about it.
-  blob.py         Where a recording is written and what a report points at.
+  blob.py         Where a recording is written and what a report points
+                  at: one key-confining seam, an object store and a
+                  directory behind it.
   walk.py         One chat simulation's exchange: the turn loop, limits,
                   cancel delivery, and how each walk names its ending.
   reporting.py    Event minting, the write-ahead log, ordered delivery.

@@ -114,14 +114,15 @@ describe("egma self-host up", () => {
         `connect: npx @egma/cli --url ${platform.url}`,
       );
 
-      // Every service it started, named. Four of them — the simulator, the
-      // grader, the SIP gateway and its Redis — publish nothing and have no
-      // page to visit, so this line is the only sign a person gets that they
-      // are running at all.
+      // Every service it started, named. Five of them — the object store, the
+      // simulator, the grader, the SIP gateway and its Redis — publish nothing
+      // and have no page to visit, so this line is the only sign a person gets
+      // that they are running at all.
       const services = /^services: (.+)$/mu.exec(run.stdout)?.[1]?.split(" ") ?? [];
       expect(services).toEqual([
         "postgres",
         "clickhouse",
+        "minio",
         "api",
         "web",
         "simulator",

@@ -214,6 +214,272 @@ describe("configuration", () => {
       loadConfig({ ...enough, EGMA_SMTP_URL: "https://mail.acme.example" }),
     ).toThrow(/smtp/);
   });
+
+  /**
+   * The recording store, on the mail transport's exact terms: **unset is the
+   * ordinary case and is never an error**, and set-but-unusable refuses to
+   * start rather than being discovered by somebody pressing play.
+   *
+   * Naming where a browser reaches the store is the whole of what turns
+   * resolution on — the pattern the simulator already uses, where naming an
+   * endpoint is what sends recordings to object storage at all.
+   */
+  it("resolves no recording until somebody says where a browser reaches the store", () => {
+    expect(loadConfig(enough).blob).toBeUndefined();
+
+    const named = loadConfig({
+      ...enough,
+      EGMA_BLOB_PUBLIC_URL: "https://recordings.acme.example/",
+      EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
+      EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
+    });
+    expect(named.blob).toEqual({
+      // The trailing slash is dropped here rather than at every use, so the
+      // path a signature is computed over cannot end up with a double slash in
+      // it — which the store would treat as a different object entirely.
+      publicUrl: "https://recordings.acme.example",
+      bucket: "egma-recordings",
+      region: "us-east-1",
+      accessKeyId: "a-read-only-key-id",
+      secretAccessKey: "a-read-only-secret",
+    });
+  });
+
+  it("refuses half a store credential, by name, rather than losing every recording quietly", () => {
+    // Half of this is a deployment where the platform runs, every run runs, and
+    // every single press of play fails against the store's own refusal — which
+    // nobody reading the product can see.
+    expect(() =>
+      loadConfig({
+        ...enough,
+        EGMA_BLOB_PUBLIC_URL: "https://recordings.acme.example",
+        EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
+      }),
+    ).toThrow(/EGMA_BLOB_SECRET_ACCESS_KEY/);
+    expect(() =>
+      loadConfig({
+        ...enough,
+        EGMA_BLOB_PUBLIC_URL: "https://recordings.acme.example",
+        EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
+      }),
+    ).toThrow(/EGMA_BLOB_ACCESS_KEY_ID/);
+  });
+
+  it("refuses an address a browser could never fetch a recording from", () => {
+    const withCredential = {
+      ...enough,
+      EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
+      EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
+    };
+    expect(() =>
+      loadConfig({ ...withCredential, EGMA_BLOB_PUBLIC_URL: "not a url" }),
+    ).toThrow(/EGMA_BLOB_PUBLIC_URL is not a URL/);
+    // A scheme a browser cannot fetch over is refused here rather than becoming
+    // a link that resolves to nothing on the one page that offers it.
+    expect(() =>
+      loadConfig({
+        ...withCredential,
+        EGMA_BLOB_PUBLIC_URL: "s3://egma-recordings",
+      }),
+    ).toThrow(/EGMA_BLOB_PUBLIC_URL speaks s3:/);
+  });
+
+  it("refuses a bucket name no store would take, for the reason a key is confined", () => {
+    // A name carrying a separator puts a prefix nobody configured in front of
+    // every key, so a reference the simulator can resolve resolves to nothing
+    // here — and the store's answer names the object rather than the setting.
+    expect(() =>
+      loadConfig({
+        ...enough,
+        EGMA_BLOB_PUBLIC_URL: "https://recordings.acme.example",
+        EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
+        EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
+        EGMA_BLOB_BUCKET: "recordings/of-acme",
+      }),
+    ).toThrow(/EGMA_BLOB_BUCKET must be a bucket name/);
+  });
+
+  it("refuses a store address carrying anything after the port", () => {
+    // The same narrowing EGMA_BASE_URL makes, for a reason of its own: a
+    // signature covers the whole path, so a store served under a sub-path works
+    // only if the proxy in front passes its own prefix through — and the
+    // ordinary arrangement strips it, which makes every link signed for one
+    // path and presented at another. Refused while this setting is new enough
+    // that no deployment is on it.
+    const withCredential = {
+      ...enough,
+      EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
+      EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
+    };
+    expect(() =>
+      loadConfig({
+        ...withCredential,
+        EGMA_BLOB_PUBLIC_URL: "https://egma.acme.example/recordings",
+      }),
+    ).toThrow(/must be only the address a browser reaches/);
+    // And it names what to set instead, because a deployment meeting this on an
+    // upgrade should not have to work out which part offended.
+    expect(() =>
+      loadConfig({
+        ...withCredential,
+        EGMA_BLOB_PUBLIC_URL: "https://egma.acme.example/recordings",
+      }),
+    ).toThrow(/Set it to https:\/\/egma\.acme\.example/);
+  });
+
+  /**
+   * The region, which has exactly one honest default and one deployment where
+   * that default is a wrong answer rather than a default.
+   *
+   * MinIO ignores regions entirely and every signature must still carry one, so
+   * `us-east-1` is what lets a deployment that named none work at all. Amazon's
+   * own S3 does not ignore it: a bucket in `eu-west-1` signed for `us-east-1`
+   * refuses every recording with `SignatureDoesNotMatch`, naming neither the
+   * region nor the variable — which is the same nameless failure the browser's
+   * address is a separate setting to prevent, arriving by a second route.
+   */
+  it("signs for us-east-1 where the store ignores regions, and refuses to guess where it does not", () => {
+    const withCredential = {
+      ...enough,
+      EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
+      EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
+    };
+
+    expect(
+      loadConfig({
+        ...withCredential,
+        EGMA_BLOB_PUBLIC_URL: "http://localhost:9000",
+      }).blob?.region,
+    ).toBe("us-east-1");
+
+    expect(() =>
+      loadConfig({
+        ...withCredential,
+        EGMA_BLOB_PUBLIC_URL: "https://egma-recordings.s3.eu-west-1.amazonaws.com",
+      }),
+    ).toThrow(/EGMA_BLOB_REGION/);
+
+    // Named, and it is taken as named — the refusal is about guessing, never
+    // about Amazon.
+    expect(
+      loadConfig({
+        ...withCredential,
+        EGMA_BLOB_PUBLIC_URL: "https://egma-recordings.s3.eu-west-1.amazonaws.com",
+        EGMA_BLOB_REGION: "eu-west-1",
+      }).blob?.region,
+    ).toBe("eu-west-1");
+  });
+
+  /**
+   * The one pair of schemes no browser will honour, and the one this file exists
+   * to refuse by name.
+   *
+   * Both settings are addresses of the *same browser* — one to egma, one to the
+   * store. A page served over https: may not fetch audio over http:: the browser
+   * blocks it as mixed content before the request is sent, so the store is never
+   * asked and the signature is never checked. The player fails and the only
+   * sentence naming the reason is in a console the person pressing play is not
+   * looking at. Which is exactly the failure the address binding and the region
+   * were each refused at startup to prevent, arriving by a third route.
+   */
+  it("refuses an https egma pointed at an http store, and names both variables", () => {
+    const withCredential = {
+      ...enough,
+      EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
+      EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
+    };
+
+    expect(() =>
+      loadConfig({
+        ...withCredential,
+        EGMA_BASE_URL: "https://egma.acme.example",
+        EGMA_BLOB_PUBLIC_URL: "http://192.168.1.10:9000",
+      }),
+    ).toThrow(/EGMA_BASE_URL is https:\/\/egma\.acme\.example/);
+    expect(() =>
+      loadConfig({
+        ...withCredential,
+        EGMA_BASE_URL: "https://egma.acme.example",
+        EGMA_BLOB_PUBLIC_URL: "http://192.168.1.10:9000",
+      }),
+    ).toThrow(/EGMA_BLOB_PUBLIC_URL is http:\/\/192\.168\.1\.10:9000/);
+    // And it says what the browser does, because "mixed content" is the word to
+    // search for and egma is the only thing in a position to say it.
+    expect(() =>
+      loadConfig({
+        ...withCredential,
+        EGMA_BASE_URL: "https://egma.acme.example",
+        EGMA_BLOB_PUBLIC_URL: "http://192.168.1.10:9000",
+      }),
+    ).toThrow(/mixed content/);
+  });
+
+  /**
+   * The three coherent pairs, pinned together so that closing the incoherent one
+   * cannot quietly close a deployment that works. The `http` + `http` case is the
+   * whole of what `docker compose up` ships, and it is the one that would hurt.
+   */
+  it("starts on every pair of schemes a browser will actually honour", () => {
+    const withCredential = {
+      ...enough,
+      EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
+      EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
+    };
+
+    // The default deployment: egma and its store both on this machine, in the
+    // clear, which is what the compose file publishes.
+    expect(
+      loadConfig({
+        ...withCredential,
+        EGMA_BASE_URL: "http://localhost:3101",
+        EGMA_BLOB_PUBLIC_URL: "http://localhost:9000",
+      }).blob?.publicUrl,
+    ).toBe("http://localhost:9000");
+
+    // Both behind certificates, which is the deployment other people use.
+    expect(
+      loadConfig({
+        ...withCredential,
+        EGMA_BASE_URL: "https://egma.acme.example",
+        EGMA_BLOB_PUBLIC_URL: "https://recordings.acme.example",
+      }).blob?.publicUrl,
+    ).toBe("https://recordings.acme.example");
+
+    // The converse of the refusal above, and not a problem: a plaintext page
+    // may fetch encrypted bytes. Nothing blocks this and egma must not either.
+    expect(
+      loadConfig({
+        ...withCredential,
+        EGMA_BASE_URL: "http://localhost:3101",
+        EGMA_BLOB_PUBLIC_URL: "https://recordings.acme.example",
+      }).blob?.publicUrl,
+    ).toBe("https://recordings.acme.example");
+  });
+
+  /**
+   * The judgement call, pinned so it is a decision rather than an oversight.
+   *
+   * A plaintext store at a *remote* address means the recording and a link
+   * reusable for fifteen minutes are readable by anybody who can see the
+   * traffic. It is allowed, because it is only reachable from an egma that is
+   * itself plaintext — where the session cookie that opens every recording
+   * already crosses the same network in the clear. Refusing the audio while
+   * serving the cookie would apply a rule to one byte stream and not the other,
+   * and would lock out a self-hoster on a private network egma cannot see. The
+   * cost is written beside the example instead, in `.env.example`, the compose
+   * file and the README.
+   */
+  it("allows a plaintext store on a remote address, because the page reaching it is plaintext too", () => {
+    expect(
+      loadConfig({
+        ...enough,
+        EGMA_BASE_URL: "http://192.168.1.10:3101",
+        EGMA_BLOB_PUBLIC_URL: "http://192.168.1.10:9000",
+        EGMA_BLOB_ACCESS_KEY_ID: "a-read-only-key-id",
+        EGMA_BLOB_SECRET_ACCESS_KEY: "a-read-only-secret",
+      }).blob?.publicUrl,
+    ).toBe("http://192.168.1.10:9000");
+  });
 });
 
 /**

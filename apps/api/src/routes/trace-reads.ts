@@ -365,6 +365,27 @@ export async function traceReadRoutes(
 
     return reply.send({
       ...describedDetail(detail),
+      // The same derivation again, and this time as an answer rather than as a
+      // lookup key: which simulation this trace *is*, for a reader holding only
+      // the hex.
+      //
+      // **Only where egma conducted the exchange.** Every trace id converts —
+      // they are the same 128 bits written two ways, so a customer's own
+      // production trace derives a perfectly well-formed simulation id that
+      // nothing ever minted. Sending that would be this endpoint claiming a
+      // simulation exists, and the transcript surface would go asking for the
+      // recording of a conversation egma never had. `source` is the row's own
+      // word for who conducted it, so it decides here rather than the reader
+      // guessing from an id that is always present.
+      //
+      // It is one field on an answer already being sent, computed from what is
+      // already in hand: no second read, no join, and no second endpoint for
+      // the surface that needs it. A transcript then resolves its recording
+      // through the one route a run's results use.
+      simulation_id:
+        detail.source === "simulation"
+          ? simulationIdOfTrace(traceId) ?? null
+          : null,
       verdicts: (judged?.verdicts ?? []).map((its) => ({
         grader_id: its.graderId,
         dimension: its.dimension,
