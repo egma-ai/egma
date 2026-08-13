@@ -64,6 +64,14 @@ export type TestApiOptions = {
    * never have noticed the run door letting a phone run through.
    */
   readonly phone?: Config["phone"];
+  /**
+   * The object store recordings are resolved against. Absent by default, and
+   * absent is the honest default: an egma nobody has pointed at a store is
+   * every egma before somebody sets one up, and a suite that quietly configured
+   * one everywhere would never notice the route failing to say which variable
+   * is missing.
+   */
+  readonly blob?: Config["blob"];
   readonly trustProxy?: boolean;
   /** Whether the transport claims a message actually reaches anybody. */
   readonly emailDelivers?: boolean;
@@ -132,6 +140,7 @@ export async function createApi(
     singleOrganization: options.singleOrganization ?? false,
     trustProxy: options.trustProxy ?? false,
     ...(options.phone === undefined ? {} : { phone: options.phone }),
+    ...(options.blob === undefined ? {} : { blob: options.blob }),
     ...(options.defaultJudge === undefined
       ? {}
       : { defaultJudge: options.defaultJudge }),

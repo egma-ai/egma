@@ -386,6 +386,24 @@ describe("the captured trace, read as a transcript", () => {
     expect(ids).toHaveLength(FIXTURE_TRACE.spans);
   });
 
+  /**
+   * This capture came off a customer's own agent, so egma conducted nothing
+   * here — and the answer says so by naming no simulation.
+   *
+   * The two identifiers are the same 128 bits written two ways, so *any* trace
+   * id converts to a well-formed simulation id, including this one. Sending it
+   * would be claiming a simulation exists, and the surface that reads this
+   * field would then go asking for a recording of a conversation egma never
+   * had. Which trace is a simulation is a fact the row carries — `source` — and
+   * it is read here rather than guessed by the reader.
+   */
+  it("names no simulation, because a customer's own agent had this exchange", async () => {
+    const detail = await transcript();
+
+    expect(detail.trace.source).toBe("production");
+    expect(detail.simulation_id).toBeNull();
+  });
+
   it("reports the trace's own facts beside the transcript, and no payload with them", async () => {
     const detail = await transcript();
 

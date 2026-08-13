@@ -236,6 +236,16 @@ function describedSimulation(
     })),
     reason: one.endingReason,
     mock_tool_coverage: describedMockToolCoverage(one.mockToolCoverage),
+    // What this conversation was: the row's own modality rather than the run's,
+    // because the row is what the database enforces the audio rule against.
+    modality: one.modality,
+    // Whether there is a recording to hear, and never where it is. The
+    // reference is opaque and stays that way — resolving it into a link is one
+    // route's job, and a page that carried a link would be a page whose address
+    // could not be shared. This is only enough to know whether to offer a
+    // player at all, which is the difference between an honest absence and a
+    // disabled control that reads as a broken feature.
+    has_recording: one.recordingReference !== null,
   };
 }
 

@@ -115,12 +115,26 @@ export const DETAIL = {
   gradersLead:
     "One judgment per check, each with the turns it read. The exchange is on " +
     "the left; nothing here is mixed into it.",
-  nothingJudged: "Nothing has judged this conversation.",
+  nothingJudged: "Nothing has judged this exchange.",
   notReported: "Not reported",
   toolWork: "Tool work",
-  openAudio: "Open recorded audio",
+  /**
+   * Audio a **step** carries, which is audio the agent's own telemetry attached
+   * to it — and it is named for whose it is, because the other audio on this
+   * page is egma's own. See `RECORDING` below: two different things, one word
+   * between them, and a reader has to know which one they are opening. It used
+   * to read "Open recorded audio", which named neither.
+   */
+  openAudio: "Open the audio your agent's telemetry attached",
   technicalDetails: "Technical details",
-  recordingDetails: "Recording details",
+  /**
+   * The facts about how this exchange reached egma — when, from where, over
+   * what. It used to read "Recording details", which was unambiguous until a
+   * page with an audio player on it made "recording" a noun again. The key and
+   * the component behind it were renamed with the words, so that reading the
+   * code and reading the screen give the same answer.
+   */
+  whereItCameFrom: "Where this came from",
   judgedBy: "Judged by",
   missing: "That transcript is not here",
   missingLead:
@@ -179,8 +193,64 @@ export const FACTS = {
   toolName: "Tool",
   toolArguments: "Asked with",
   toolResult: "Answered",
-  audio: "Audio",
+  /** Named for whose it is, for the same reason `DETAIL.openAudio` is. */
+  audio: "Audio from your telemetry",
   nanoseconds: "Nanoseconds",
+} as const;
+
+/**
+ * The audio **egma** recorded, and the words that keep it apart from the audio
+ * a step carries.
+ *
+ * Two different things share one word on this page, and the confusion is not
+ * hypothetical: a step can carry an `audio_url` the agent's own telemetry
+ * attached to it — somebody else's file, at somebody else's address, of
+ * whatever that framework decided to keep. What is below is egma's own: both
+ * sides of a voice conversation egma drove, the human on one channel and the
+ * agent on the other, so either can be heard alone when a turn reads wrong.
+ *
+ * Neither is ever named just "audio". Each says whose it is, everywhere it
+ * appears, so a reader never has to hold two labels side by side to work out
+ * which one they are hearing.
+ *
+ * `persona` is the word for the human side in a **run's** results, and it is
+ * deliberately not used here: a transcript may be a production exchange that
+ * nobody simulated, where there is no persona to name. `human` and `agent` are
+ * the two speakers a transcript labels, and they are what this says.
+ */
+export const RECORDING = {
+  label: "What egma heard",
+  caption:
+    "egma's own audio of this exchange. Left channel is the human side, " +
+    "right channel is the agent.",
+  /**
+   * Two bands are two units — the narrow band a telephone carries strips what
+   * an audio grader reads — so a reader listening is told which one this is.
+   */
+  band: (hertz: number) => `Heard at ${String(hertz)} Hz.`,
+  /**
+   * For a browser that cannot play the element at all. It names an owner like
+   * every other line here: a reader whose browser refuses one of the two
+   * audios on this page still has to know which one it refused.
+   */
+  fallback: "Your browser cannot play egma's own audio.",
+  /**
+   * Said only once a player has been on screen, and it names whose audio it is
+   * for the same reason every other label here does — "this audio could not be
+   * played" would leave a reader wondering which of the two failed.
+   */
+  unplayable:
+    "egma's own audio of this exchange could not be played. The store it " +
+    "lives in may be unreachable.",
+  /**
+   * Reached only when egma itself is at fault. A transcript shows nothing for a
+   * conversation that recorded nothing — but a deployment that cannot answer is
+   * not that, and a broken egma that looked exactly like a product working
+   * correctly is the failure this whole effort exists to end.
+   */
+  unreachable: LIST.unreachable,
+  refused: (status: number) =>
+    `egma answered ${String(status)} for the audio it recorded here.`,
 } as const;
 
 /**

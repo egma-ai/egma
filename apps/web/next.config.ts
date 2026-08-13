@@ -67,6 +67,16 @@ const config: NextConfig = {
         },
         { source: "/api/runs", destination: `${api}/api/runs` },
         { source: "/api/runs/:path*", destination: `${api}/api/runs/:path*` },
+        // One conversation's own paths — today, resolving its recording into a
+        // link the browser then fetches from the object store directly. Without
+        // this rule the request lands on this process's own file routing and
+        // comes back as Next's 404 page, which is not JSON and carries no
+        // sentence: the run results would show "Egma answered 404" for a
+        // recording that is sitting in the store, and nothing would say why.
+        {
+          source: "/api/simulations/:path*",
+          destination: `${api}/api/simulations/:path*`,
+        },
         // The public v1 contract, forwarded whole rather than read-endpoint by
         // read-endpoint. `/v1/traces` is one path answering two things — the
         // OTLP door on POST, the list on GET — and a proxy forwards paths, not

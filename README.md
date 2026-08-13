@@ -3,7 +3,7 @@
 The first open-source platform purpose-built to help teams shipping voice agents
 gain trust in the agent they ship to production.
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/egma-ai/egma)
+Understand the repo with Deepwiki - [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/egma-ai/egma)
 
 ## Running it
 
@@ -49,6 +49,7 @@ second `up` typed by hand.
 | API | http://localhost:3100 |
 | Postgres | `postgres://egma:egma@localhost:5433/egma` |
 | ClickHouse | `http://egma:egma@localhost:8124/egma` |
+| Object store | none — reached on the deployment's own network |
 | Simulator | none — it only dials out |
 | Grader | none — it only dials out |
 | LiveKit server | 127.0.0.1:7880, for this machine only |
@@ -104,6 +105,64 @@ and the rest kept. Serving egma under a subpath such as
 `https://egma.example/egma` never worked — the API answers at the root of this
 address — so the fix is to drop everything after the port. The startup message
 names the part to remove.
+
+**`EGMA_BLOB_PUBLIC_URL` is the address *a browser* reaches the recording store
+at, and it is set at the same moment as the one above.** A voice simulation's
+recording is played by the browser fetching it from the object store directly,
+using a short-lived link the API signs; the audio never travels through egma,
+which is what makes dragging the scrubber cost nothing. A signature covers the
+host it was made for — so if this names the address the API uses
+(`http://minio:9000`, inside the compose network) rather than the one a browser
+uses, every recording comes back `SignatureDoesNotMatch` and the error names
+neither address. The default assumes a browser on this machine; an instance
+others reach at `http://192.168.1.10:3101` has to say `http://192.168.1.10:9000`
+here, exactly as it has to say the first address in `EGMA_BASE_URL`.
+
+*The two settings must agree about `http:` and `https:`.* They are one browser's
+two addresses, and a page served over `https:` may not fetch audio over `http:` —
+every browser blocks that as mixed content before the request is sent, so the
+store is never asked and a perfect signature is never checked. The API refuses to
+start on that pair and names both variables, because the alternative is a player
+that fails with the reason only in the browser's console. An `http:` egma reading
+an `https:` store is fine, and both on `http:` is the default deployment.
+
+*A plaintext address here is allowed and is not free.* `http://192.168.1.10:9000`
+works, and it also means the recording — a customer's call audio — and the
+fifteen-minute link that replays it travel readable by anybody who can watch that
+network. `http://localhost:9000`, the default, shows that to nobody. Egma does not
+refuse it, because an egma on `http:` is already handing that same network the
+session cookie that opens every recording; on a network you do not trust, put the
+store behind the same certificate as egma and set both addresses to `https:`.
+
+Leaving it unset is allowed and breaks nothing else: the platform runs, runs run,
+and asking for a recording answers with the name of this variable rather than
+with a player that does nothing.
+
+**The store is published to this machine and no further**, and opening it is a
+decision rather than a default. What answers on that port is not only the
+recordings: it is the store's admin surface and its root credential, which can
+list, replace and delete every recording you hold — and this repository ships a
+development default for that credential, so on `0.0.0.0` a `docker compose up`
+on shared wifi hands every recording to the room, to read and to overwrite. A
+recording is evidence, and evidence somebody else can replace is not evidence.
+Loopback costs the default deployment nothing, because the default assumes the
+browser is on this machine. When it is not — a server, a colleague — set
+`EGMA_S3_BIND=0.0.0.0` and point `EGMA_BLOB_PUBLIC_URL` at the address those
+browsers use, and **change `EGMA_S3_SECRET_ACCESS_KEY` first**.
+
+**The API's store credential is read-only**, created by the deployment on first
+start and separate from the one the simulator writes with. A leaked read
+credential must not be usable to overwrite a recording, so it can fetch one
+object at a time and cannot write, delete or list.
+
+**`EGMA_S3_REGION` is set once and both halves read it.** The simulator signs
+its uploads with a region and the API signs playback links with one, and two
+halves of one store signing for two different regions is every upload working
+and every playback failing with — again — `SignatureDoesNotMatch`. Empty is
+right for the MinIO this file runs, which ignores regions entirely; a bucket on
+Amazon's own S3 needs its real region, and the API refuses to start pointed at
+an `amazonaws.com` address without one rather than signing everything for
+`us-east-1` and letting you discover it one recording at a time.
 
 **`EGMA_SIMULATOR_SERVICE_TOKEN` is what the simulator shows the API to claim
 work, and the API refuses to start without one.** The answers to a claim carry
@@ -400,10 +459,17 @@ the phone stack comes along because the simulator depends on it. What starts is 
 number instead of the fixture's placeholder, and a simulator that can dial it.
 Then watch the workbench's log: the claim, the call, each turn of the
 conversation as it is spoken, the timings measured off the audio, and the
-recording's reference. The `.wav` is on the `simulator-data` volume with the
-persona on one channel and the agent on the other —
-`docker compose cp simulator:/var/lib/egma-simulator/blobs/<reference> ./call.wav`
-brings it out to listen to.
+recording's reference. The `.wav` is in the object store, with the persona on one
+channel and the agent on the other. From a full deployment you press play on the
+run's results — or beside the turns of that conversation's transcript, which is
+where a turn looks wrong in the first place — and hear it; the workbench overlay
+starts no API and no pages, so this brings it out to listen to instead:
+
+```bash
+docker compose exec minio sh -c \
+  'mc alias set egma http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
+   mc cat "egma/egma-recordings/<reference>"' > call.wav
+```
 
 The persona speaks in a deterministic test tone unless you name real speech
 providers, and a real agent hears that as noise. `egma self-host phone setup`
@@ -480,10 +546,20 @@ database of its own in whichever store it uses and drops it afterwards, so
 both; point `TEST_DATABASE_URL` and `TEST_CLICKHOUSE_URL` somewhere else if you
 would rather use your own.
 
+The object store is real for the same reason and asks you for nothing. The
+handful of tests that need one start their own MinIO container, on a port of
+its own, and remove it afterwards; where docker cannot start one they say so
+and skip rather than pass quietly. Everything else in the simulator's suite
+writes its recordings to a directory, so a checkout costs you no object
+storage at all.
+
 One test drives a real browser: `apps/api/test/browser.test.ts` starts the API
 and the web application on ports of their own and clicks through the paths a
 person actually walks — logging in from a terminal, inviting a colleague on an
-instance with no mail configured, and reading what an agent did. It uses the
+instance with no mail configured, reading what an agent did, and playing a voice
+simulation's recording off a real object store. That last one is here rather than
+against the API because the failure it catches *is* a browser using a different
+address than the platform, which nothing inside one process can see. It uses the
 Chrome already on your machine, and failing that any Chromium under
 `PLAYWRIGHT_BROWSERS_PATH`; this repository depends on `playwright-core` and
 downloads no browser of its own, so **install Google Chrome or point that
@@ -684,6 +760,14 @@ order they were taken, each carrying the spans that happened inside it, and
 `spans` for everything top-level that is not a turn — the root span above all.
 It takes `from`, `to` and `project_id` on the same terms.
 
+It also carries **`simulation_id`**: which simulation this trace is, when egma
+conducted it, and `null` when your own agent had the exchange in production. A
+simulation id and the trace its spans are filed under are the same 128 bits
+written two ways, so this is derived rather than stored — and it is sent only
+for a trace egma conducted, because a production trace converts just as neatly
+into an id nothing ever minted. It is what lets a reader holding one transcript
+ask for that conversation's recording without looking anything else up.
+
 Five things about the contract are worth knowing before you build on it:
 
 - **The window is required, and wider than 31 days is refused rather than
@@ -737,6 +821,16 @@ the model, the speech synthesis, the tool, the turn detection, the speaking —
 and expand a step again for exactly what was recorded about it. Anything that
 failed is marked on the turn before you open it.
 
+**If egma conducted the exchange and it was a voice one, its recording is right
+there** — a player above the turns, both channels, the human on the left and the
+agent on the right. That is where a turn looks wrong, so that is where you can
+settle whether the agent misbehaved or the transcription did. A chat, a call
+that never connected, and somebody else's production telemetry are offered
+nothing at all rather than a control that does nothing. Do not confuse it with
+**Open the audio your agent's telemetry attached**, which appears on a step and
+is your framework's own file at your framework's own address; the player says
+whose audio it is, and so does the link.
+
 Two things about this are worth knowing:
 
 - **The window rides in the address.** A transcript's link carries the window
@@ -749,9 +843,11 @@ Two things about this are worth knowing:
   **Mint the exporter's key against a project** and its telemetry lands where
   the dashboard looks.
 
-The pages are drawn from the two v1 endpoints above and nothing else — the same
-contract you would integrate against, on the same origin, authenticated by the
-same session that signed you in.
+The pages are drawn from the two v1 endpoints above — the same contract you
+would integrate against, on the same origin, authenticated by the same session
+that signed you in — plus one request per transcript that egma conducted, to
+turn its recording into a link the browser fetches from the object store
+directly.
 
 ## Adding a second person
 

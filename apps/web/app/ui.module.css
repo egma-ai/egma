@@ -231,7 +231,10 @@
 .runSimulation[open] .runDisclosure { transform: rotate(45deg); }
 .runSimulationBody { padding: 4px 16px 20px 66px; border-top: 1px solid var(--border); }
 .runSimulationBody > .notice { margin: 18px 0 0; }
-.runTally { margin: 18px 0; color: var(--muted); font-family: var(--mono); font-size: 11px; }
+.runTally, .recordingSearching { margin: 18px 0; color: var(--muted); font-family: var(--mono); font-size: 11px; }
+.recording { margin: 18px 0; }
+.recording > p { margin: 8px 0 0; color: var(--faint); font-family: var(--mono); font-size: 10px; }
+.recordingPlayer { display: block; width: 100%; max-width: 520px; height: 40px; }
 .runJudgments { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .runJudgment { min-width: 0; padding: 15px; border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 8px; background: var(--surface-soft); }
 .runJudgment[data-verdict="passed"] { border-left-color: var(--good); }
