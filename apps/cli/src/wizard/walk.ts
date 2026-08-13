@@ -21,6 +21,7 @@ import { signedInAt } from "../platform/signed-in.ts";
 import type { ConnectOptions } from "../retell/connect.ts";
 import { homeIn } from "../skills/install.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
+import { alreadyConnected } from "./already-connected.ts";
 import { connectStep } from "./connect-step.ts";
 import { detect } from "./detection.ts";
 import { findTheAgent } from "./discovery.ts";
@@ -29,6 +30,7 @@ import type { ExitReport } from "./exit-line.ts";
 import { generateStep } from "./generate-step.ts";
 import { logInStep, type PlatformAccess } from "./login-step.ts";
 import { runStep } from "./run-step.ts";
+import { ACTION_MARK } from "./status.ts";
 import { stopReport, untilAborted } from "./stop.ts";
 
 export type WalkOptions = {
@@ -48,6 +50,15 @@ export type WalkOptions = {
   readonly retell?: ConnectOptions["retell"];
   /** How many tests a first suite holds. egma's own default when omitted. */
   readonly howManyTests?: number;
+  /**
+   * Stay on the run screen until every simulation has been judged.
+   *
+   * Off by default, and that default is the product's own decision: the wizard
+   * ends when the developer has seen a verdict, because the suite carries on on
+   * the platform whether a terminal is open or not. Turned on for the case that
+   * decision does not serve — somebody watching all of it, on purpose.
+   */
+  readonly waitForSuite?: boolean;
   /**
    * The developer's home, for the global scope of the skill offer.
    *
@@ -130,12 +141,31 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
     return found.report;
   }
 
+  // A repository that has been through connect once does not go through it
+  // again. The folder names an agent and a way to reach it, the platform
+  // confirms both for this key, and everything the step would ask for — the
+  // provider key above all — is a question whose answer is already on disk.
+  //
+  // Checked against the platform rather than read off the file, because two
+  // identifiers in a committed file are a claim: a clone of somebody else's
+  // repository names an agent this key cannot see, and a walk that believed it
+  // would run a suite against something the developer never chose.
+  const held = await alreadyConnected(
+    { url: options.platform.url, key: (await signedInAt(options.platform))?.key ?? "" },
+    cwd,
+  );
+  if (held !== null) {
+    ui.pushStatus(
+      `${ACTION_MARK} ${held.registered.agent.name} is already connected, over ${held.registered.connection.name}.`,
+    );
+  }
+
   // The binding is written inside the connect step, at the last moment before
   // egma asks the platform to create anything — not here. Bound at this line, a
   // walk that ended at the key box, at an unanswered choice of agent, or at
   // "text or phone?" would leave an egma folder behind holding nothing but a
   // binding, in a repository the developer had decided not to connect.
-  const connected = await connectStep({
+  const connected = held !== null ? null : await connectStep({
     ui,
     platform: options.platform,
     cwd,
@@ -149,10 +179,39 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
   // Nothing after this can name what a test is about, so a connect that did not
   // connect is where the walk stops.
   const signedIn = await signedInAt(options.platform);
-  if (connected.connected === null || signedIn === null) {
+  if (connected !== null && (connected.connected === null || signedIn === null)) {
     ui.setExit(connected.report);
     return connected.report;
   }
+  if (signedIn === null) {
+    const report: ExitReport = {
+      kind: "failed",
+      reason: "this machine is not signed in to egma. Run egma login, then try again.",
+    };
+    ui.setExit(report);
+    return report;
+  }
+
+  const registered = held?.registered ?? connected?.connected?.registered;
+  if (registered === undefined) {
+    const report: ExitReport = { kind: "failed", reason: "there is no agent to test." };
+    ui.setExit(report);
+    return report;
+  }
+
+  // The provider's own words, when connect fetched them. A skipped connect has
+  // none, and none is a shape this already has: an agent whose model the
+  // customer runs themselves keeps its prompt out of the provider too, and the
+  // generator works from the repository that discovery just read.
+  const providerConfig = connected?.connected?.config ?? {
+    agentId: "",
+    name: registered.agent.name,
+    modality: registered.connection.modality === "chat" ? ("chat" as const) : ("voice" as const),
+    voice: null,
+    engine: "retell-llm" as const,
+    prompt: null,
+    tools: [],
+  };
 
   const written = await generateStep({
     ui,
@@ -161,8 +220,8 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
     signal,
     log,
     signedIn,
-    registered: connected.connected.registered,
-    config: connected.connected.config,
+    registered,
+    config: providerConfig,
     facts: found.facts,
     ...(options.howManyTests === undefined ? {} : { howMany: options.howManyTests }),
   });
@@ -178,8 +237,8 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
   const report = await runStep({
     ui,
     signedIn,
-    agentId: connected.connected.registered.agent.id,
-    connectionId: connected.connected.registered.connection.id,
+    agentId: registered.agent.id,
+    connectionId: registered.connection.id,
     testVersionIds: written.pushed,
     suite: written.suite,
     drivenAgentId: launch.id,
@@ -187,6 +246,7 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
     home: options.home ?? homeIn(process.env),
     signal,
     ...(options.runPollMs === undefined ? {} : { everyMs: options.runPollMs }),
+    ...(options.waitForSuite === undefined ? {} : { waitForSuite: options.waitForSuite }),
   });
   ui.setExit(report);
   return report;

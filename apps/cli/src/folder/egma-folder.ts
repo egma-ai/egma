@@ -40,6 +40,28 @@ export const FOLDER_NAME = "egma";
 export const CONFIG_FILE_NAME = "config.yaml";
 export const MOCK_TOOLS_FILE_NAME = "mock-tools.md";
 export const TESTS_FOLDER_NAME = "tests";
+
+/**
+ * What a test file is called, and how to tell one from anything else in the
+ * folder.
+ *
+ * `.yml` is read as well as `.yaml`, because both are what people type, and
+ * egma writes the longer one. Written here rather than at each reader, so that
+ * the wizard's count, the generator's list and the folder's own read can never
+ * come to three different answers about what is a test.
+ */
+export const TEST_FILE_EXTENSION = ".yaml";
+
+const TEST_FILE_NAME = /\.ya?ml$/iu;
+
+export function isTestFileName(name: string): boolean {
+  return TEST_FILE_NAME.test(name);
+}
+
+/** The test's own name, as a file name carries it. */
+export function testNameFromFileName(name: string): string {
+  return name.replace(TEST_FILE_NAME, "");
+}
 /**
  * Where a finished run writes down what happened.
  *
@@ -490,7 +512,7 @@ export async function readFolder(paths: FolderPaths): Promise<FolderContents> {
 
   const found: FolderTest[] = [];
   const unreadable: UnreadableTest[] = [];
-  for (const name of names.filter((entry) => entry.endsWith(".md")).sort()) {
+  for (const name of names.filter(isTestFileName).sort()) {
     const file = path.join(paths.tests, name);
     const shown = `${FOLDER_NAME}/${TESTS_FOLDER_NAME}/${name}`;
     try {
@@ -498,7 +520,7 @@ export async function readFolder(paths: FolderPaths): Promise<FolderContents> {
       found.push({
         file,
         shown,
-        test: parseTestFile(document, name, name.replace(/\.md$/u, "")),
+        test: parseTestFile(document, name, testNameFromFileName(name)),
       });
     } catch (problem) {
       unreadable.push({

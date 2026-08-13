@@ -20,8 +20,8 @@ import {
   somethingFailed,
   stepsInside,
   whenItWas,
-  turnsCited,
   type Detail,
+  type Judgment,
   type Facts as TraceFacts,
   type Outcome,
   type Step,
@@ -232,7 +232,7 @@ export default function TranscriptPage({
               <ExecutionView detail={detail} selectedId={selected?.span_id ?? null} onSelect={select} />
             </div>
           </section>
-          <Inspector selected={selected} facts={detail.trace} openedAt={openedAt} />
+          <Judgments verdicts={detail.verdicts ?? []} />
         </div>
       </ProductPage>
     </AppShell>
@@ -304,23 +304,14 @@ function TranscriptView({
       {detail.turns.length === 0 ? (
         <Notice>{DETAIL.noTurns}</Notice>
       ) : (
-        detail.turns.map((turn, position) => (
-          <Fragment key={turn.span_id}>
-            <Turn
-              turn={turn}
-              openedAt={openedAt}
-              selectedId={selectedId}
-              onSelect={onSelect}
-            />
-            {(detail.verdicts ?? [])
-              .filter((judgment) => turnsCited(judgment).includes(position + 1))
-              .map((judgment) => (
-                <JudgmentCard
-                  key={`${judgment.grader_id}:${judgment.dimension}:${judgment.judged_at}`}
-                  judgment={judgment}
-                />
-              ))}
-          </Fragment>
+        detail.turns.map((turn) => (
+          <Turn
+            key={turn.span_id}
+            turn={turn}
+            openedAt={openedAt}
+            selectedId={selectedId}
+            onSelect={onSelect}
+          />
         ))
       )}
       {detail.spans.length === 0 ? null : (
@@ -551,89 +542,40 @@ function ExecutionView({
   );
 }
 
-function Inspector({
-  selected,
-  facts,
-  openedAt,
-}: {
-  selected: Step | null;
-  facts: TraceFacts;
-  openedAt: string;
-}) {
+/**
+ * What the graders decided, beside the exchange rather than inside it.
+ *
+ * These used to be spliced into the transcript under the turn each one cited,
+ * which read as though the judge were another speaker: a conversation somebody
+ * is trying to follow, interrupted every few turns by a verdict about it.
+ * Reading the exchange and auditing the judgment are two different jobs, done
+ * at different speeds, and neither is served by doing them in one column.
+ *
+ * So the transcript is the exchange and nothing else, and every judgment is
+ * here, whole, with the turns it read. Each one names its own check: the list
+ * on the right is the same list the test file was written with.
+ */
+function Judgments({ verdicts }: { verdicts: readonly Judgment[] }) {
   return (
-    <aside className={styles.traceInspector} aria-label={DETAIL.inspector}>
-      {selected === null ? (
-        <p className={styles.muted}>{DETAIL.nothingSelected}</p>
+    <aside className={styles.graderPanel} aria-label={DETAIL.graders}>
+      <div className={styles.graderPanelHeading}>
+        <h2>{DETAIL.graders}</h2>
+        <p>{DETAIL.gradersLead}</p>
+      </div>
+      {verdicts.length === 0 ? (
+        <p className={styles.muted}>{DETAIL.nothingJudged}</p>
       ) : (
-        <>
-          <div className={styles.inspectorHeader}>
-            <p className={styles.eyebrow}>{presentedStepLabel(selected)}</p>
-            <h2>{selected.text || selected.tool_name || selected.name}</h2>
-            <p>{howFarIn(selected.started_at, openedAt)} · {howLong(selected.duration_ns)}</p>
-          </div>
-
-          <dl className={styles.inspectorFacts}>
-            <div><dt>{FACTS.status}</dt><dd className={selected.status === "error" ? styles.wrong : undefined}>{readableStatus(selected.status)}</dd></div>
-            <div><dt>{FACTS.started}</dt><dd>{whenItWas(selected.started_at)}</dd></div>
-            <div><dt>{FACTS.duration}</dt><dd>{howLong(selected.duration_ns)}</dd></div>
-          </dl>
-
-          {selected.tool_name === "" ? null : (
-            <section className={styles.inspectorSection}>
-              <h3>{DETAIL.toolWork}</h3>
-              <p className={styles.mono}>{selected.tool_name}</p>
-              {selected.tool_arguments === "" ? null : <Payload label={FACTS.toolArguments} value={selected.tool_arguments} />}
-              {selected.tool_result === "" ? null : <Payload label={FACTS.toolResult} value={selected.tool_result} />}
-            </section>
-          )}
-
-          {selected.audio_url === "" ? null : (
-            <p className={styles.inspectorLink}><a href={selected.audio_url}>{DETAIL.openAudio}</a></p>
-          )}
-
-          <details className={styles.inspectorDetails}>
-            <summary>{DETAIL.technicalDetails}</summary>
-            <Recorded step={selected} openedAt={openedAt} />
-          </details>
-        </>
-      )}
-
-      <details className={styles.inspectorDetails}>
-        <summary>{DETAIL.recordingDetails}</summary>
-        <RecordingDetails facts={facts} />
-      </details>
-    </aside>
-  );
-}
-
-function Payload({ label, value }: { label: string; value: string }) {
-  return (
-    <div className={styles.payload}>
-      <span>{label}</span>
-      <pre>{value}</pre>
-    </div>
-  );
-}
-
-function RecordingDetails({ facts }: { facts: TraceFacts }) {
-  const shown: readonly (readonly [string, string])[] = [
-    [FACTS.started, whenItWas(facts.started_at)],
-    [FACTS.ended, whenItWas(facts.ended_at)],
-    [FACTS.source, facts.source],
-    [FACTS.environment, facts.environment],
-    [FACTS.connection, facts.connection_type],
-    [FACTS.reference, facts.provider_call_id],
-  ];
-
-  return (
-    <dl className={styles.recorded}>
-      {shown.filter(([, value]) => value !== "").map(([label, value]) => (
-        <div key={label}>
-          <dt className={styles.muted}>{label}</dt>
-          <dd className={styles.mono}>{value}</dd>
+        <div className={styles.judgmentStack}>
+          {verdicts.map((judgment) => (
+            <JudgmentCard
+              key={`${judgment.grader_id}:${judgment.dimension}:${judgment.judged_at}`}
+              judgment={judgment}
+              placement="result"
+            />
+          ))}
         </div>
-      ))}
-    </dl>
+      )}
+    </aside>
   );
 }
 

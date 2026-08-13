@@ -82,13 +82,13 @@ function undecorate(line: string): string {
  * The marker asks for a name and an agent that has just written a file often
  * gives the file instead, sometimes with a word of explanation after it. Both
  * say the same thing, so both are read: the first word is taken, a path is
- * reduced to its own last part, and `.md` comes off the end. A name egma
- * cannot make sense of is no marker at all.
+ * reduced to its own last part, and the extension comes off the end. A name
+ * egma cannot make sense of is no marker at all.
  */
 function testNameIn(rest: string): string | null {
   const first = rest.split(/\s/)[0] ?? "";
   const bare = first.replaceAll(/^[("'`]+|[)"'`,;:]+$/gu, "");
-  const last = (bare.split(/[/\\]/).pop() ?? "").replace(/\.md$/iu, "");
+  const last = (bare.split(/[/\\]/).pop() ?? "").replace(/\.(?:ya?ml|md)$/iu, "");
   return last === "" ? null : last;
 }
 

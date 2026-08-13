@@ -40,6 +40,8 @@ import {
   RUNS_FOLDER_NAME,
   type FolderPaths,
 } from "../folder/egma-folder.ts";
+import { readRunDocument } from "../platform/runs.ts";
+import type { SignedIn } from "../platform/signed-in.ts";
 import { text } from "../platform/wire.ts";
 
 export const RUN_DOCUMENT_FILE_NAME = "run.json";
@@ -322,6 +324,110 @@ export function stillMoving(document: Record<string, unknown>): boolean {
 
   const judgeable = simulations.filter((one) => gradable.includes(text(one.status))).length;
   return graded < judgeable;
+}
+
+/**
+ * How long to give the graders after the last conversation ends.
+ *
+ * Judging one conversation takes a second or two, but a grader looks for
+ * finished conversations on a sweep, and a suite that ends just after one sweep
+ * waits out the whole of the next. Bounded, so a grader that never answers
+ * costs a wait rather than a hang — the files are written either way, and a
+ * judgment that lands after this is on the results page and in the next read.
+ */
+export const DEFAULT_SETTLE_MS = 120_000;
+
+/** How often the run is asked about, while waiting for that. */
+const SETTLE_EVERY_MS = 500;
+
+function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  if (signal?.aborted === true) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", stop);
+      resolve();
+    }, ms);
+    function stop(): void {
+      clearTimeout(timer);
+      resolve();
+    }
+    signal?.addEventListener("abort", stop, { once: true });
+  });
+}
+
+/** How many of a run's conversations have been judged, off the document. */
+export type CapturedTally = {
+  readonly graded: number;
+  readonly total: number;
+};
+
+/** How capturing a run ended. Never an exception: the run itself is over. */
+export type Captured =
+  | {
+      readonly kind: "written";
+      readonly written: WrittenArtifacts;
+      /**
+       * What the platform said at the moment the files were written.
+       *
+       * Carried out because it is newer than anything the caller holds: a
+       * follower stopped watching when the run finished, and grading lands
+       * after that. Reporting the follower's count beside these files would
+       * have the terminal say "none graded yet" directly above a summary
+       * holding every verdict.
+       */
+      readonly tally: CapturedTally;
+    }
+  /** This key can no longer see that run, so there was nothing to write. */
+  | { readonly kind: "gone" }
+  | { readonly kind: "failed"; readonly reason: string };
+
+/**
+ * Wait for the graders, then write the run into the repository.
+ *
+ * One capture for both surfaces that finish a run — the verb and the wizard —
+ * because what they owe the developer afterwards is identical, and two copies
+ * of it would be two chances for one of them to write a different folder.
+ *
+ * Nothing here throws. A platform that stopped answering, a folder somebody
+ * made read-only, a run this key can no longer see: each is an answer, and none
+ * of them may turn a finished run into a failed one.
+ */
+export async function captureRun(options: {
+  readonly signedIn: SignedIn;
+  readonly runId: string;
+  readonly paths: FolderPaths;
+  /** Wait for grading to finish. False after a stop: nobody is watching. */
+  readonly waitForGrading?: boolean;
+  readonly settleMs?: number;
+  readonly signal?: AbortSignal;
+}): Promise<Captured> {
+  try {
+    const until = Date.now() + (options.settleMs ?? DEFAULT_SETTLE_MS);
+    let document = await readRunDocument(options.signedIn, options.runId);
+    while (
+      options.waitForGrading !== false &&
+      document !== null &&
+      stillMoving(document) &&
+      Date.now() < until &&
+      options.signal?.aborted !== true
+    ) {
+      await pause(SETTLE_EVERY_MS, options.signal);
+      document = await readRunDocument(options.signedIn, options.runId);
+    }
+
+    if (document === null) return { kind: "gone" };
+    const simulations = records(document.simulations);
+    return {
+      kind: "written",
+      written: await writeRunArtifacts({ paths: options.paths, document }),
+      tally: {
+        graded: simulations.filter((one) => text(one.grading) === "graded").length,
+        total: count(document.expected_simulation_count) ?? simulations.length,
+      },
+    };
+  } catch (cause) {
+    return { kind: "failed", reason: cause instanceof Error ? cause.message : String(cause) };
+  }
 }
 
 /**

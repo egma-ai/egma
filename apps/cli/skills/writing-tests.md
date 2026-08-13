@@ -1,6 +1,6 @@
 ---
 name: writing-tests-for-a-voice-agent
-description: Write egma tests for a voice agent as markdown files in the developer's repository — the file format, what makes an expected behavior worth having, and the marker lines egma reads progress from.
+description: Write egma tests for a voice agent as YAML files in the developer's repository — the file format, what makes an expected behavior worth having, and the marker lines egma reads progress from.
 ---
 
 # Write tests for this voice agent
@@ -15,24 +15,24 @@ Your job is to write those tests as files. One test, one file.
 ## The file format
 
 Each file goes in `egma/tests/` and is named after the test:
-`egma/tests/missed-appointment-reschedule.md`.
+`egma/tests/missed-appointment-reschedule.yaml`.
 
-```markdown
----
+```yaml
 name: missed-appointment-reschedule
 personas: [impatient-regular]
----
-## Scenario
-The person missed yesterday's appointment and wants another one this
-week. They are short of time and already annoyed.
-## Expected behaviors
-1. The agent acknowledges the missed appointment without blaming anyone.
-2. The agent offers at least two other times.
-3. The agent repeats the new time back before it ends.
+scenario: |
+  The person missed yesterday's appointment and wants another one this
+  week. They are short of time and already annoyed.
+expected_behaviors:
+  - The agent acknowledges the missed appointment without blaming anyone.
+  - The agent offers at least two other times.
+  - The agent repeats the new time back before it ends.
 ```
 
 Rules for the file, and none of them is optional:
 
+- **The file is YAML.** Nothing else. No frontmatter fences, no markdown
+  headings, no prose outside a value.
 - **`name`** is lower case, with hyphens between words, and it says what the
   situation is. It matches the file name.
 - **`personas`** is a list, and you usually leave the whole line out. egma has
@@ -44,27 +44,28 @@ Rules for the file, and none of them is optional:
   does not know is a test it throws away.
 - **Never write a `version:` line.** egma writes that itself when the file and
   the platform are next put in step.
-- **`## Scenario`** is prose. Two or three sentences: what the person wants,
-  and the circumstances that make it interesting.
-- **`## Expected behaviors`** is a numbered list, and **there is always at
-  least one**. A test with none can never fail, so egma refuses it and the
-  developer is told a file was thrown away. Two to four is a good number.
-- **`## Mock tools`** is optional, comes last, and you leave it out unless the
-  task below names the tools egma answers for. It is how one test asks for a
+- **`scenario`** is prose, written as a block with `|`. Two or three sentences:
+  what the person wants, and the circumstances that make it interesting.
+- **`expected_behaviors`** is a list, and **there is always at least one**.
+  This list is what judges the conversation: every entry is graded on its own
+  and comes back with its own verdict and a written reason. A test with none can
+  never fail, so egma refuses it and the developer is told a file was thrown
+  away. Two to four is a good number.
+- **`mock_tools`** is optional, comes last, and you leave it out unless the task
+  below names the tools egma answers for. It is how one test asks for a
   different answer from one of the agent's tools — an empty calendar, a booking
   service that is down — and it looks like this:
 
-  ````markdown
-  ## Mock tools
-  ### check_availability
-  ```json
-  { "answer": { "slots": [] } }
+  ```yaml
+  mock_tools:
+    check_availability:
+      answer:
+        slots: []
   ```
-  ````
 
-  The heading is the tool's name, exactly as the agent registers it. The block
-  holds `answer` with what the tool returns, or `error` with the failure it
-  raises — one of the two, never both.
+  The key is the tool's name, exactly as the agent registers it. Under it goes
+  `answer` with what the tool returns, or `error` with the failure it raises —
+  one of the two, never both.
 
 ## What makes an expected behavior worth having
 
@@ -123,10 +124,10 @@ same line as a marker.**
 - **Write only inside `egma/tests/`.** Change nothing else in the repository —
   no source file, no configuration, no `egma/config.yaml`, and not
   `egma/mock-tools.md`: a test that needs a different answer says so in its own
-  file, under its own `## Mock tools` heading.
+  file, under its own `mock_tools` key.
 - **Do not reuse a name** that is already taken by a file in that folder.
-- **Never write a file with an empty `## Expected behaviors` list.** If you
-  cannot say what should happen, do not write the test at all.
+- **Never write a file with an empty `expected_behaviors` list.** If you cannot
+  say what should happen, do not write the test at all.
 - Any file whose name starts with `.env` is fenced off. Asking for one is
   refused; work from what you were given.
 - Do not run a command that reaches the network, and install nothing.

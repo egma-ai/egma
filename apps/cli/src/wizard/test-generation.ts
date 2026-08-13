@@ -21,8 +21,17 @@
 import { instructionsWith } from "../skills/index.ts";
 import { FACTS, LABEL_WIDTH } from "./facts.ts";
 
-/** The number of tests a first suite is generated with. */
-export const DEFAULT_TEST_COUNT = 12;
+/**
+ * The number of tests a first suite is generated with.
+ *
+ * Four rather than a dozen, and the number is not arbitrary: every test is a
+ * real conversation with the developer's agent, one simulator conducts four at
+ * once, and so a first suite of four is a suite that runs all at the same time
+ * rather than one that queues behind itself. It is also a list somebody reads
+ * at the gate without scrolling. `--tests` moves it, and a bigger number is a
+ * longer wait rather than a worse suite.
+ */
+export const DEFAULT_TEST_COUNT = 4;
 
 /** What the walk knows about the agent by the time tests are written. */
 export type GenerationContext = {
@@ -130,7 +139,7 @@ function personaBlock(personas: readonly string[]): readonly string[] {
       "",
       "egma has no personas of its own on this project yet, only the default one",
       "every project is given. So **leave the `personas` line out of every file**.",
-      "Say what kind of person is on the other end under `## Scenario` instead.",
+      "Say what kind of person is on the other end in the `scenario` instead.",
     ];
   }
   return [

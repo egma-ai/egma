@@ -38,8 +38,10 @@ import { readdir } from "node:fs/promises";
 import {
   createEgmaFolder,
   DEFAULT_SUITE_NAME,
+  isTestFileName,
   readConfig,
   readFolder,
+  testNameFromFileName,
   updateConfig,
   type FolderPaths,
   type FolderTest,
@@ -283,9 +285,7 @@ function namesOf(found: readonly FolderTest[]): readonly string[] {
  */
 async function namesInFolder(paths: FolderPaths): Promise<readonly string[]> {
   try {
-    return (await readdir(paths.tests))
-      .filter((name) => name.endsWith(".md"))
-      .map((name) => name.slice(0, -".md".length));
+    return (await readdir(paths.tests)).filter(isTestFileName).map(testNameFromFileName);
   } catch {
     return [];
   }

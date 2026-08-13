@@ -2,18 +2,23 @@
  * The wizard's last step: start the run, show the first verdicts, offer the
  * skill, and leave.
  *
- * **The wizard does not wait for the suite.** It waits for the first verdict
- * and nothing more. That is the moment the whole walk is timed against — a
- * developer who has watched egma find their voice agent, reach it and write
- * tests for it has still only been told things until a verdict lands, and
- * then they have been shown one. Everything after that is the suite finishing,
- * which happens on the platform whether a terminal is open or not.
+ * **The wizard waits for the suite, and `--no-wait` is how it does not.**
+ * Somebody who started a suite is watching it, and a screen taken away at the
+ * first verdict is taken away at the part they came for. The suite is small by
+ * construction — a first one is four conversations, sized so they run at once —
+ * so waiting is a couple of minutes rather than the ten a dozen tests would
+ * have cost, which is what made leaving early the right default before.
  *
- * So the follow keeps going in the background while the developer answers the
- * last question, and the counts in the exit line are the counts at the moment
- * the wizard closed. "Three of twelve graded so far" is a true sentence and a
- * useful one; waiting nine more minutes to be able to say twelve of twelve
- * would be the wizard holding a terminal open for its own tidiness.
+ * Either way the follow keeps going in the background while the developer
+ * answers the last question, and the run carries on on the platform whether a
+ * terminal is open or not.
+ *
+ * **The counts in the exit line come off the document the files were written
+ * from, not off the follower.** Execution and grading settle separately: the
+ * follow ends when the run finishes and verdicts land after that, so the
+ * follower's own count is stale by the time there is anything to say. Reporting
+ * it would have the wizard close on "none graded yet" directly above the path
+ * of a summary holding every verdict.
  *
  * The skill offer is here rather than anywhere else for the same reason it is
  * a question rather than a default: it is the only thing in the walk that
@@ -27,11 +32,13 @@
  * run in their scrollback. The counts are whatever they were at that moment.
  */
 
+import { folderPathsIn } from "../folder/egma-folder.ts";
 import {
   startRun,
   type PlatformRun,
 } from "../platform/runs.ts";
 import type { SignedIn } from "../platform/signed-in.ts";
+import { captureRun, type CapturedTally } from "../run/artifacts.ts";
 import { followRun, RunFollower } from "../run/follow.ts";
 import type { RunView } from "../run/view.ts";
 import {
@@ -64,6 +71,15 @@ export type RunStepOptions = {
   readonly signal: AbortSignal;
   /** How long between asks while following. egma's own default when omitted. */
   readonly everyMs?: number;
+  /**
+   * Hold the run screen until every simulation has been judged.
+   *
+   * The default is off, and the paragraph at the top of this file is why. This
+   * is for the case that reasoning does not cover: somebody who came to watch
+   * the whole suite, and for whom leaving at the first verdict would be the
+   * wizard closing on the thing they came for.
+   */
+  readonly waitForSuite?: boolean;
 };
 
 function viewOf(follower: RunFollower): RunView {
@@ -120,6 +136,49 @@ async function offerTheSkill(
   };
 }
 
+/**
+ * Write the run into the repository, and say on screen that it is there.
+ *
+ * The same capture the verb makes, for the same reason: the walk ends and the
+ * screen it ended on is thrown away, so a developer who watched four verdicts
+ * land has nothing afterwards but a URL. The files are what they keep, and what
+ * their reviewer reads.
+ *
+ * Never an ending. Every promise the walk made was kept the moment the run
+ * existed, and a folder that could not be written into does not take that back.
+ */
+async function writeTheRunDown(
+  options: RunStepOptions,
+  follower: RunFollower,
+  stopped: boolean,
+): Promise<CapturedTally | null> {
+  const paths = folderPathsIn(options.cwd);
+  const captured = await captureRun({
+    signedIn: options.signedIn,
+    runId: follower.runId,
+    paths,
+    // Somebody who stopped watching is not waiting for graders. What has been
+    // decided by now is written, and the rest is on the results page.
+    waitForGrading: !stopped,
+  });
+
+  if (captured.kind === "written") {
+    options.ui.pushStatus(`${ACTION_MARK} The run is written into ${paths.runs}`);
+    for (const file of captured.written.shown) {
+      options.ui.pushStatus(`${DETAIL_MARK} ${file}`);
+    }
+    return captured.tally;
+  }
+  options.ui.pushStatus(
+    `${FAILURE_MARK} ${
+      captured.kind === "gone"
+        ? "egma no longer has this run, so there was nothing to write into the repository."
+        : `The run finished. egma could not write it into ${paths.runs}: ${captured.reason}`
+    }`,
+  );
+  return null;
+}
+
 /** Everything the run screen says while it is being started. */
 function announce(ui: WizardUI, run: PlatformRun, tests: number): void {
   ui.pushStatus(
@@ -169,6 +228,7 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
     follower,
     signal: watching.signal,
     ...(options.everyMs === undefined ? {} : { everyMs: options.everyMs }),
+    ...(options.waitForSuite === true ? { untilGraded: true } : {}),
     onChange: (change) => {
       ui.setRun(viewOf(follower));
       if (change.first) firstLanded();
@@ -189,7 +249,13 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
     })
     .finally(() => firstLanded());
 
-  await untilAborted(firstVerdict, signal);
+  // Whichever the developer came for: the moment they stop taking egma's word
+  // for it, or the whole suite. `following` has already resolved by the time it
+  // is awaited in the second case, so nothing after this has to know which.
+  await untilAborted(
+    options.waitForSuite === true ? following.then(() => undefined) : firstVerdict,
+    signal,
+  );
 
   // From here the walk has done what it set out to do, and it says so however
   // it ends. The tests are on egma, the run is live, and the screen the
@@ -206,16 +272,22 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
     signal.removeEventListener("abort", stopWatching);
     await following;
     ui.setRun(viewOf(follower));
+    const written = await writeTheRunDown(options, follower, true);
     const stopped = follower.tally;
     return {
       kind: "run-started",
       resultsUrl: follower.resultsUrl,
-      graded: stopped.graded,
-      total: stopped.total,
+      graded: written?.graded ?? stopped.graded,
+      total: written?.total ?? stopped.total,
       // Never asked, so there is no answer to report.
       skill: { kind: "not-offered" },
     };
   }
+
+  // Written before the last question rather than after it. The run is over by
+  // now, and a developer who answers "skip" and walks away should already have
+  // the files — the offer is about their coding agent, not about this run.
+  const written = await writeTheRunDown(options, follower, false);
 
   const places = skillPlacesFor(options.drivenAgentId, {
     repository: options.cwd,
@@ -237,8 +309,12 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
   return {
     kind: "run-started",
     resultsUrl: follower.resultsUrl,
-    graded: tally.graded,
-    total: tally.total,
+    // The count that came back with the files, which is newer than the
+    // follower's: grading lands after the run finishes, and a closing line
+    // saying "none graded yet" above a summary full of verdicts is a terminal
+    // contradicting a file it just wrote.
+    graded: written?.graded ?? tally.graded,
+    total: written?.total ?? tally.total,
     skill,
   };
 }

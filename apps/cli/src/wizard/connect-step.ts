@@ -11,11 +11,14 @@
  * provider, once for a body to egma. Nothing here writes it anywhere.
  */
 
+import process from "node:process";
+
 import { bindRepositoryPlatform } from "../folder/egma-folder.ts";
 import type { Registered } from "../platform/agents.ts";
 import { readCredentials } from "../platform/credentials.ts";
 import type { RetellConfig } from "../retell/client.ts";
 import { RetellKey } from "../retell/key.ts";
+import { KEY_VARIABLES } from "../commands/connect.ts";
 import {
   connect,
   CUSTODY_LINE,
@@ -45,7 +48,28 @@ export type ConnectStepOptions = {
   /** Where Retell is. Retell's own address when omitted. */
   readonly retell?: ConnectOptions["retell"];
   readonly fetchImpl?: ConnectOptions["fetchImpl"];
+  /** Where a key already handed over is looked for. This process's when omitted. */
+  readonly env?: NodeJS.ProcessEnv;
 };
+
+/**
+ * The Retell key this shell already holds, and which variable it came from.
+ *
+ * A developer who exported a key has handed it over already, and a wizard that
+ * asked for it again would be asking a question it had the answer to. The
+ * variable is named on screen rather than the key: what is worth saying is
+ * where it came from, so somebody who did not mean to use that one can see
+ * which it was.
+ */
+function keyInEnvironment(
+  env: NodeJS.ProcessEnv,
+): { readonly key: RetellKey; readonly variable: string } | null {
+  for (const variable of KEY_VARIABLES) {
+    const key = RetellKey.from(env[variable]);
+    if (key !== null) return { key, variable };
+  }
+  return null;
+}
 
 /** The two words a reach screen may answer with, and nothing else. */
 function reachFrom(answer: string | null): Reach | null {
@@ -156,6 +180,19 @@ export async function connectStep(options: ConnectStepOptions): Promise<Connecte
     // wizard can hang forever, and Ctrl-C at the key box is exactly where a
     // developer who has decided not to hand a key over presses it.
     askForKey: async () => {
+      // A key already in this shell is a key the developer has already handed
+      // over, so the box is not put in front of them a second time. Only on the
+      // first ask: if Retell turned that key away, `problem` is set and asking
+      // again from the same environment would be asking the same question and
+      // getting the same answer forever.
+      if (problem === null) {
+        const held = keyInEnvironment(options.env ?? process.env);
+        if (held !== null) {
+          ui.pushStatus(`${DETAIL_MARK} Using the Retell key from ${held.variable}.`);
+          return held.key;
+        }
+      }
+
       ui.setKeyAsk({ asking: KEY_ASK_LINE, custody: CUSTODY_LINE, problem });
       const typed = await untilAborted(ui.waitForAnswer("retell-key"), signal);
       ui.setKeyAsk(null);

@@ -56,6 +56,7 @@ import {
   PlatformOriginMismatchError,
 } from "./platform/identity.ts";
 import { RETELL_API } from "./retell/client.ts";
+import { DEFAULT_TEST_COUNT } from "./wizard/test-generation.ts";
 import { HeadlessUI } from "./ui/headless-ui.ts";
 import { buildExitNotice, exitLines, type ExitReport } from "./wizard/exit-line.ts";
 import type { PlatformAccess as WizardPlatformAccess } from "./wizard/login-step.ts";
@@ -134,6 +135,17 @@ export type Invocation = {
   readonly repoPrompt: string | null;
   /** `--existing-tests`: the test cases the developer already had written down. */
   readonly existingTests: string | null;
+  /** `--tests`: how many tests a first suite holds. egma's own when unset. */
+  readonly testCount: number | null;
+  /**
+   * Stay on the run screen until every simulation has been judged.
+   *
+   * On by default. A developer who started a suite is watching it, and a
+   * wizard that closed on them at the first verdict would be taking the screen
+   * away from the one part they came to see. `--no-wait` is the old behaviour,
+   * for somebody who wants the run going and will read the results page later.
+   */
+  readonly waitForSuite: boolean;
   /** What `egma init` should write into the folder's config file. */
   readonly agentName: string | null;
   readonly connectionName: string | null;
@@ -166,6 +178,8 @@ export function parseArgs(argv: readonly string[]): Invocation {
   let phoneNumber: string | null = null;
   let repoPrompt: string | null = null;
   let existingTests: string | null = null;
+  let testCount: number | null = null;
+  let waitForSuite = true;
   let agentName: string | null = null;
   let connectionName: string | null = null;
   let suiteName: string | null = null;
@@ -192,11 +206,23 @@ export function parseArgs(argv: readonly string[]): Invocation {
     else if (argument === "--url") url = argv[(index += 1)] ?? null;
     else if (argument === "--force") force = true;
     else if (argument === "--no-follow") noFollow = true;
+    // Waiting is what the wizard does, so `--wait` asks for what it was going
+    // to do anyway. It is accepted rather than refused: somebody who types it
+    // has said what they want, and answering "no such option" to a request the
+    // command is already honouring would be pedantry.
+    else if (argument === "--wait") waitForSuite = true;
+    else if (argument === "--no-wait") waitForSuite = false;
     else if (argument === "--retell-agent") retellAgentId = argv[(index += 1)] ?? null;
     else if (argument === "--reach") reach = argv[(index += 1)] ?? null;
     else if (argument === "--phone-number") phoneNumber = argv[(index += 1)] ?? null;
     else if (argument === "--repo-prompt") repoPrompt = argv[(index += 1)] ?? null;
     else if (argument === "--existing-tests") existingTests = argv[(index += 1)] ?? null;
+    else if (argument === "--tests") {
+      // A count egma cannot use is left unset rather than guessed at, and the
+      // default stands. Nothing here is worth ending a walk over.
+      const said = Number(argv[(index += 1)] ?? "");
+      testCount = Number.isInteger(said) && said > 0 ? said : null;
+    }
     else if (argument === "--agent") agentName = argv[(index += 1)] ?? null;
     else if (argument === "--connection") connectionName = argv[(index += 1)] ?? null;
     else if (argument === "--suite") suiteName = argv[(index += 1)] ?? null;
@@ -220,6 +246,8 @@ export function parseArgs(argv: readonly string[]): Invocation {
     phoneNumber,
     repoPrompt,
     existingTests,
+    testCount,
+    waitForSuite,
     agentName,
     connectionName,
     suiteName,
@@ -274,6 +302,11 @@ export function helpText(): string {
     "                       already holds a key.",
     "  --no-follow          With run: start the run and return at once, without",
     "                       waiting for a verdict. The run carries on on egma.",
+    "  --tests <n>          With the wizard: how many tests a first suite holds.",
+    `                       Default: ${DEFAULT_TEST_COUNT}. Every one of them is a real conversation.`,
+    "  --no-wait            With the wizard: leave as soon as the first verdict",
+    "                       has landed, instead of staying until every simulation",
+    "                       has been judged. The run carries on on egma either way.",
     "  --retell-agent <id>  With connect: which agent, when the Retell account",
     "                       holds more than one.",
     "  --reach <text|phone> With connect and a headless wizard: how egma should",
@@ -517,6 +550,8 @@ async function runHeadless(
       signal: controller.signal,
       platform,
       retell: retellReach(process.env),
+      ...(invocation.testCount === null ? {} : { howManyTests: invocation.testCount }),
+      waitForSuite: invocation.waitForSuite,
     });
     const notice = buildExitNotice(report);
     if (notice !== null) process.stdout.write(`${notice}\n\n`);
@@ -529,6 +564,7 @@ async function runHeadless(
 }
 
 async function runWizard(
+  invocation: Invocation,
   launch: DrivenAgentLaunch,
   cwd: string,
   platform: WizardPlatformAccess,
@@ -551,6 +587,8 @@ async function runWizard(
       signal: controller.signal,
       platform,
       retell: retellReach(process.env),
+      ...(invocation.testCount === null ? {} : { howManyTests: invocation.testCount }),
+      waitForSuite: invocation.waitForSuite,
     });
     tui.close(report);
     return walkExitCode(report);
@@ -775,7 +813,7 @@ export async function main(argv: readonly string[]): Promise<void> {
     theWizard = async (access) =>
       invocation.headless
         ? runHeadless(invocation, launch, cwd, access)
-        : runWizard(launch, cwd, access);
+        : runWizard(invocation, launch, cwd, access);
   }
 
   // Which egma, resolved once for every path below, and refused here when the

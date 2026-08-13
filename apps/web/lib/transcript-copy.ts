@@ -111,6 +111,11 @@ export const DETAIL = {
   nextProblem: "Next problem",
   inspector: "Selected step details",
   nothingSelected: "Select a turn or step to read its details.",
+  graders: "What the graders decided",
+  gradersLead:
+    "One judgment per check, each with the turns it read. The exchange is on " +
+    "the left; nothing here is mixed into it.",
+  nothingJudged: "Nothing has judged this conversation.",
   notReported: "Not reported",
   toolWork: "Tool work",
   openAudio: "Open recorded audio",

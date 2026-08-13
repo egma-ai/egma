@@ -25,7 +25,7 @@ import type { Fetch } from "./device-flow.ts";
 import { overrideFrom } from "./mock-tools.ts";
 import { PlatformRefusedError } from "./refused.ts";
 import type { SignedIn } from "./signed-in.ts";
-import { ask, saidBy, text, textList } from "./wire.ts";
+import { ask, prose, saidBy, text, textList } from "./wire.ts";
 
 /** A test as the platform currently has it. */
 export type PlatformTest = {
@@ -95,7 +95,7 @@ function testFrom(body: Record<string, unknown>): PlatformTest {
     name: text(body.name),
     versionId: text(body.version_id),
     version: typeof body.version === "number" ? body.version : 0,
-    scenario: text(body.scenario),
+    scenario: prose(body.scenario),
     expectedBehaviors: textList(body.expected_behaviors),
     personas: personaNames(body.personas),
     mockTools: mockToolsIn(body.mock_tools),

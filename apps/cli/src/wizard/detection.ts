@@ -14,7 +14,11 @@
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
-import { FOLDER_NAME, TESTS_FOLDER_NAME } from "../folder/egma-folder.ts";
+import {
+  FOLDER_NAME,
+  isTestFileName,
+  TESTS_FOLDER_NAME,
+} from "../folder/egma-folder.ts";
 
 export type Detection = {
   /** The coding agent egma will drive, or `null` when there is none yet. */
@@ -64,7 +68,7 @@ export async function detect(options: {
     drivenAgentName: options.drivenAgentName,
     gitRepository,
     egmaFolder,
-    testsAlreadyHere: names.filter((name) => name.endsWith(".md")).length,
+    testsAlreadyHere: names.filter(isTestFileName).length,
   };
 }
 

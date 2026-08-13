@@ -31,6 +31,38 @@ export function text(value: unknown): string {
   return typeof value === "string" ? value.replaceAll(/[\p{Cc}\p{Cf}]/gu, "").trim() : "";
 }
 
+/**
+ * Prose off the wire: a value that is written into a file and read by a person,
+ * rather than printed as one fact on one line.
+ *
+ * The rule above takes a line break off with everything else, because a line
+ * break in a *printed fact* turns one line into two and a reader cannot tell
+ * which. That reasoning does not reach a paragraph. Taking the breaks out of a
+ * scenario does not make it one line — it welds the last word of each line to
+ * the first word of the next, so "they have\nbeen before" comes back as "they
+ * havebeen before", and that is what gets written into the developer's
+ * repository and read out to their agent.
+ *
+ * So the line breaks stay and everything else a terminal would obey still goes,
+ * which is the whole of what the rule was protecting against here: this value
+ * is never a printed fact. Carriage returns are folded into the break they
+ * belong to rather than deleted, so a file written on Windows does not come
+ * back a line short.
+ */
+export function prose(value: unknown): string {
+  if (typeof value !== "string") return "";
+  // Split on the break, clean each line, put the breaks back. The same rule as
+  // above is applied to every line, and it cannot reach a break because there
+  // is none left inside a line to reach.
+  return value
+    .replaceAll("\r\n", "\n")
+    .replaceAll("\r", "\n")
+    .split("\n")
+    .map((line) => line.replaceAll(/[\p{Cc}\p{Cf}]/gu, "").trimEnd())
+    .join("\n")
+    .trim();
+}
+
 /** A list of such strings, with anything that read as nothing left out. */
 export function textList(value: unknown): readonly string[] {
   if (!Array.isArray(value)) return [];

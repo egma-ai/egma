@@ -29,7 +29,8 @@ the work; `--help` is the current detail.
 egma/
   config.yaml     what this folder points at — names and ids
   mock-tools.md   what egma answers for the agent's tools with
-  tests/          one markdown file per test
+  tests/          one YAML file per test
+  runs/           what each finished run decided
 ```
 
 Read `egma/config.yaml` first. It names the **agent** — the developer's voice
@@ -39,27 +40,27 @@ egma uses. Nothing in the folder is secret, so all of it is committed.
 
 One test is one file:
 
-```markdown
----
+```yaml
 name: missed-appointment-reschedule
 personas: [impatient-regular]
 version: tstv_01K…
----
-## Scenario
-The person missed yesterday's appointment and wants another one this
-week. They are short of time and already annoyed.
-## Expected behaviors
-1. The agent acknowledges the missed appointment without blaming anyone.
-2. The agent offers at least two other times.
-3. The agent repeats the new time back before it ends.
+scenario: |
+  The person missed yesterday's appointment and wants another one this
+  week. They are short of time and already annoyed.
+expected_behaviors:
+  - The agent acknowledges the missed appointment without blaming anyone.
+  - The agent offers at least two other times.
+  - The agent repeats the new time back before it ends.
 ```
 
 - **`name`** is lower case with hyphens, and matches the file name.
 - **`personas`** names who speaks to the agent. Leave the line out and the
   project's default persona applies — which is right for most tests. Name one
   only when the situation is about a particular kind of person.
-- **`expected behaviors`** is an ordered list, and there is always at least
-  one. A test with none can never be red, so egma will not store it.
+- **`scenario`** is prose, written as a block with `|`.
+- **`expected_behaviors`** is the grader. Every entry is judged on its own and
+  comes back with its own verdict and the judge's reason, so there is always at
+  least one. A test with none can never be red, so egma will not store it.
 - **`version:`** is egma's. `pull` and `push` write it. Never write or edit
   that line yourself: it is how egma knows what this file is a draft of.
 

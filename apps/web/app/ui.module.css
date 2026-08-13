@@ -147,7 +147,7 @@
 .issueNavigator button { display: grid; width: 28px; height: 28px; padding: 0; place-items: center; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--foreground); cursor: pointer; }
 .issueNavigator button:hover { border-color: var(--border-strong); background: var(--surface-soft); }
 .traceToolbar + .notice { margin-top: 22px; }
-.traceLayout { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) 330px; gap: 34px; margin-top: 30px; align-items: start; }
+.traceLayout { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) 390px; gap: 30px; margin-top: 30px; align-items: start; }
 .traceViews { min-width: 0; }
 .traceViewHeading { display: flex; align-items: baseline; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
 .traceViewHeading h2 { flex: 0 0 auto; margin: 0; font-size: 24px; font-weight: 520; letter-spacing: -.025em; }
@@ -262,6 +262,11 @@
 .otherSteps > summary { cursor: pointer; font-weight: 550; }
 .otherSteps > p { margin: 8px 0 16px; font-size: 13px; }
 
+.graderPanel { min-width: 0; padding: 20px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.graderPanelHeading { min-width: 0; margin-bottom: 15px; padding-bottom: 13px; border-bottom: 1px solid var(--border); }
+.graderPanelHeading h2 { margin: 0; overflow-wrap: anywhere; font-size: 15px; font-weight: 560; letter-spacing: -.01em; }
+.graderPanelHeading p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.judgmentStack { display: grid; min-width: 0; gap: 10px; }
 .traceInspector { position: sticky; top: 24px; min-width: 0; max-height: calc(100svh - 48px); overflow: auto; padding: 20px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .inspectorHeader { min-width: 0; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
 .inspectorHeader h2 { margin: 0; overflow-wrap: anywhere; font-size: 19px; font-weight: 540; line-height: 1.3; }

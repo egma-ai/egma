@@ -247,6 +247,18 @@ export type FollowOptions = {
   readonly until?: (follower: RunFollower) => boolean;
   /** How long between asks. */
   readonly everyMs?: number;
+  /**
+   * Keep asking after the run itself has finished, until every simulation has
+   * been judged.
+   *
+   * Execution and grading settle separately and the run finishes on the first
+   * of them, so a follow that stopped at `done` would stop with verdicts still
+   * being written. Bounded by `gradingGraceMs`, because a grader that never
+   * answers must cost a wait and not a terminal that will not come back.
+   */
+  readonly untilGraded?: boolean;
+  /** How long to keep asking for verdicts after the run finished. */
+  readonly gradingGraceMs?: number;
   readonly signal?: AbortSignal;
   readonly fetchImpl?: Fetch;
 };
@@ -259,6 +271,16 @@ export type FollowOptions = {
  * requests a second against one small answer.
  */
 export const DEFAULT_POLL_MS = 300;
+
+/**
+ * How long a follow waiting on the graders keeps asking after the run itself
+ * has finished.
+ *
+ * Long enough that an ordinary suite is watched all the way to its last
+ * verdict, and short enough that a grader that fell over is a wait somebody
+ * sits through rather than a screen that never moves again.
+ */
+export const DEFAULT_GRADING_GRACE_MS = 90_000;
 
 function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
   // A signal that has already aborted never fires again, so waiting on it
@@ -292,6 +314,9 @@ export async function followRun(options: FollowOptions): Promise<FollowEnding> {
   /** Asked, never remembered: a signal fires while this function is waiting. */
   const stopped = (): boolean => signal?.aborted === true;
 
+  /** When the run first said it had finished, for the graders' grace. */
+  let finishedAt: number | null = null;
+
   for (;;) {
     if (stopped()) return "interrupted";
 
@@ -312,9 +337,21 @@ export async function followRun(options: FollowOptions): Promise<FollowEnding> {
     for (const change of follower.take(page.events, page.next)) onChange(change);
 
     if (options.until?.(follower) === true) return "enough";
-    // A finished run has nothing left to say, however many simulations it left
-    // ungraded — the header is the authority on that, not the count.
-    if (page.done) return "finished";
+
+    if (page.done) {
+      // A finished run has nothing left to *conduct*. Whether it has anything
+      // left to *say* is a different question, and only a caller waiting on the
+      // graders is asking it.
+      if (options.untilGraded !== true || follower.everythingGraded) return "finished";
+
+      // The clock starts the first time the run reports itself finished, not
+      // when the follow began: a suite that took ten minutes to conduct has not
+      // spent any of the graders' grace on conducting it.
+      finishedAt ??= Date.now();
+      if (Date.now() - finishedAt >= (options.gradingGraceMs ?? DEFAULT_GRADING_GRACE_MS)) {
+        return "finished";
+      }
+    }
 
     // Stopping is checked at the top of the loop and nowhere else, so there is
     // one place it can happen; the pause above returns at once on a signal that

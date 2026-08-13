@@ -38,10 +38,10 @@
 
 import { readConfig, folderPathsIn, type FolderConfig, type FolderPaths } from "../folder/egma-folder.ts";
 import { PlatformUnreachableError } from "../platform/device-flow.ts";
-import { readRunDocument, startRun } from "../platform/runs.ts";
+import { startRun } from "../platform/runs.ts";
 import { PlatformRefusedError } from "../platform/refused.ts";
 import { notSignedInRefusal, signedInAt, type SignedIn } from "../platform/signed-in.ts";
-import { stillMoving, writeRunArtifacts } from "../run/artifacts.ts";
+import { captureRun } from "../run/artifacts.ts";
 import { followRun, RunFollower } from "../run/follow.ts";
 import { changeLines, tallyLines } from "../run/lines.ts";
 import {
@@ -92,35 +92,6 @@ export type RunCommandOptions = FolderCommandOptions & {
 };
 
 /**
- * How long egma waits for grading to finish before it writes the run down.
- *
- * Execution and grading settle separately, and the follow ends on the first of
- * them. Long enough that an ordinary suite is written down judged, and bounded
- * so that a grader that never answers costs a wait rather than a hang — the
- * files are written either way, and a judgment that lands later is on the
- * results page and in the next read.
- */
-const SETTLE_MS = 20_000;
-
-/** How often egma asks, while waiting for that. */
-const SETTLE_EVERY_MS = 500;
-
-function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
-  if (signal?.aborted === true) return Promise.resolve();
-  return new Promise<void>((resolve) => {
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", stop);
-      resolve();
-    }, ms);
-    function stop(): void {
-      clearTimeout(timer);
-      resolve();
-    }
-    signal?.addEventListener("abort", stop, { once: true });
-  });
-}
-
-/**
  * Write the run into the repository, and name every file it wrote.
  *
  * Nothing here can change what the run answered with. A platform that stopped
@@ -136,33 +107,25 @@ async function writeTheRunDown(
   runId: string,
   waitForGrading: boolean,
 ): Promise<void> {
-  try {
-    const until = Date.now() + (options.settleMs ?? SETTLE_MS);
-    let document = await readRunDocument(signedIn, runId);
-    while (
-      waitForGrading &&
-      document !== null &&
-      stillMoving(document) &&
-      Date.now() < until &&
-      options.signal?.aborted !== true
-    ) {
-      await pause(SETTLE_EVERY_MS, options.signal);
-      document = await readRunDocument(signedIn, runId);
-    }
+  const captured = await captureRun({
+    signedIn,
+    runId,
+    paths,
+    waitForGrading,
+    ...(options.settleMs === undefined ? {} : { settleMs: options.settleMs }),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
 
-    if (document === null) {
-      options.out("wrote: nothing");
-      options.fail(`egma no longer has a run with the id ${runId}, so there was nothing to write down.`);
-      return;
-    }
-
-    const written = await writeRunArtifacts({ paths, document });
-    for (const file of written.shown) options.out(`wrote: ${file}`);
-  } catch (cause) {
-    const why = cause instanceof Error ? cause.message : String(cause);
-    options.out("wrote: nothing");
-    options.fail(`The run finished. egma could not write it into ${paths.runs}: ${why}`);
+  if (captured.kind === "written") {
+    for (const file of captured.written.shown) options.out(`wrote: ${file}`);
+    return;
   }
+  options.out("wrote: nothing");
+  options.fail(
+    captured.kind === "gone"
+      ? `egma no longer has a run with the id ${runId}, so there was nothing to write down.`
+      : `The run finished. egma could not write it into ${paths.runs}: ${captured.reason}`,
+  );
 }
 
 /** What the folder says this run is against, or what is missing from it. */

@@ -47,7 +47,8 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.3.0",
     "ink": "^7.1.1",
-    "react": "^19.2.8"
+    "react": "^19.2.8",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@agentclientprotocol/claude-agent-acp": "^0.65.0",
