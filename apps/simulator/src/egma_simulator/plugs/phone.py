@@ -140,6 +140,16 @@ class PhoneCall:
                 f"trunk that backend needs, or set {BACKEND_VARIABLE} on this "
                 "container"
             )
+        # **The moment a carrier's own refusals belong.** The settings are
+        # assembled for every simulation and most of them never dial, so a
+        # half-configured phone must not fail the chat work beside it. Here
+        # a call is about to be placed, so here is where a missing trunk or
+        # a missing bridge is the honest reason this one cannot happen.
+        try:
+            settings = settings.checked()
+        except ValueError as cannot_dial:
+            raise PlugError(str(cannot_dial)) from cannot_dial
+
         backend_name = settings.backend
         factory = backend_for(backend_name)
         if factory is None:

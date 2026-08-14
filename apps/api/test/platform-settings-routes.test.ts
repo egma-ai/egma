@@ -324,8 +324,6 @@ describe("what the platform says about its own setup", () => {
         "the speech-to-text key",
         "the text-to-speech provider",
         "the text-to-speech key",
-        "the text-to-speech model",
-        "the text-to-speech voice",
         "the voice-activity provider",
         "the media backend",
         "the carrier trunk",
@@ -354,6 +352,44 @@ describe("what the platform says about its own setup", () => {
       state: "setup_required",
       missing: ["the persona's model key"],
     });
+  });
+
+  it("answers ready to a platform holding exactly what setup writes", async () => {
+    // **The two have to agree, and this is where they are held together.**
+    // Membership of the catalog with `required` means "setup is incomplete
+    // without it", so a setting marked required that the setup command never
+    // writes would leave an operator who followed the documentation to the end
+    // still reading `setup required`, with nothing sensible to type. These are
+    // the settings `egma self-host phone setup` really writes, and the two the
+    // simulator defaults for are deliberately not among them.
+    api = await createApi("platform_settings_ready_after_setup", {
+      singleOrganization: true,
+      platformSettings: {
+        persona_model_provider: "openai",
+        persona_model: "gpt-4o",
+        persona_model_key: A_REAL_KEY,
+        speech_to_text_provider: "openai",
+        speech_to_text_key: A_REAL_KEY,
+        text_to_speech_provider: "openai",
+        text_to_speech_key: A_REAL_KEY,
+        voice_activity_provider: "silero",
+        media_backend: "livekit",
+        carrier_trunk_address: "acme.pstn.twilio.com",
+        carrier_trunk_number: "+15550100",
+        carrier_trunk_username: "acme-trunk",
+        carrier_trunk_password: "the-carrier-issued-this-one",
+      },
+    });
+
+    expect(await readiness()).toEqual({ state: "ready", missing: [] });
+
+    // And the two it did not write are still settings the platform can hold
+    // and hand over — optional is not absent from the catalog.
+    expect(
+      PLATFORM_SETTINGS.filter((setting) => !setting.required).map(
+        (setting) => setting.name,
+      ),
+    ).toEqual(["text_to_speech_model", "text_to_speech_voice"]);
   });
 
   it("answers ready once nothing is missing", async () => {

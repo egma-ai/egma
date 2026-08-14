@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Protocol
 import aiohttp
 
 from .client import UNREACHABLE
+from .config import MODEL_PROVIDERS
 
 if TYPE_CHECKING:
     from .config import SimulatorConfig
@@ -186,6 +187,18 @@ def build_model_client(
     """
     said = spec.platform.model
     provider = said.provider or config.model_provider
+    if provider not in MODEL_PROVIDERS:
+        # **Refused rather than quietly downgraded to the stand-in.** This
+        # container's own provider name is checked when it starts, so a
+        # name that gets here is one the platform holds — and a typo on a
+        # settings page must not produce a completed, green simulation
+        # conducted by a canned robot. That is worse than a failure,
+        # because a failure tells the truth about what happened.
+        raise ModelFailure(
+            f"the platform's persona_model_provider is {provider!r}, which is "
+            "not a model client this simulator has; it thinks with "
+            f"{', '.join(MODEL_PROVIDERS)}"
+        )
     if provider != "openai":
         return ScriptedModel(spec.scenario_instructions)
 

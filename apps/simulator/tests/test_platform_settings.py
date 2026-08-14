@@ -379,3 +379,101 @@ def test_the_media_server_stays_this_containers_and_the_trunk_the_platforms():
     assert settled.livekit_url == "wss://this-containers-media-server"
     assert settled.livekit_api_secret == "this-containers-media-secret"
     assert settled.trunk_address == "the-platforms-trunk.pstn.twilio.com"
+
+
+# -- A typo must refuse, never conduct ----------------------------------------
+#
+# The worst failure this effort could ship: a platform whose provider name
+# has one letter wrong, and a simulation that completes green anyway because
+# every builder falls through to its scripted stand-in. On a product whose
+# whole purpose is trust in the agent somebody ships, a canned robot
+# reporting a pass is worse than any refusal — a refusal tells the truth.
+#
+# The container's own names are refused when it starts, by `_one_of`. These
+# are the platform's, and they had no equivalent until now.
+
+
+def test_a_model_provider_nobody_wrote_refuses_rather_than_conducting(
+    a_container, env
+):
+    from egma_simulator.model import ModelFailure
+
+    env.setenv("EGMA_SIMULATOR_MODEL_PROVIDER", "scripted")
+    config = SimulatorConfig.from_env()
+
+    with pytest.raises(ModelFailure) as refusal:
+        build_model_client(
+            config,
+            a_spec_with(
+                PlatformSettings(model=PlatformModel(provider="openaii"))
+            ),
+        )
+
+    told = str(refusal.value)
+    assert "persona_model_provider" in told
+    assert "openaii" in told
+    assert "scripted, openai" in told
+
+
+@pytest.mark.parametrize(
+    ("setting", "block", "wrong"),
+    [
+        ("speech_to_text_provider", "stt_provider", "deepgramm"),
+        ("text_to_speech_provider", "tts_provider", "elevenlabss"),
+        ("voice_activity_provider", "vad_provider", "silerro"),
+    ],
+)
+def test_a_speech_provider_nobody_wrote_refuses_rather_than_conducting(
+    a_container, setting, block, wrong
+):
+    from egma_simulator.speech import (
+        SpeechFault,
+        build_legs,
+        build_vad,
+        voice_from_traits,
+    )
+
+    providers = SpeechProviders.for_simulation(
+        SimulatorConfig.from_env(), PlatformSpeech(**{block: wrong})
+    )
+
+    # Both entry points, because a voice simulation goes through both and a
+    # refusal only one of them held would be a leg silently standing in.
+    for build in (
+        lambda: build_legs(
+            providers, voice=voice_from_traits({}), sample_rate_hz=8000
+        ),
+        lambda: build_vad(providers, sample_rate_hz=8000, window_samples=160),
+    ):
+        with pytest.raises(SpeechFault) as refusal:
+            build()
+        told = str(refusal.value)
+        assert setting in told
+        assert wrong in told
+
+
+def test_a_chat_simulation_is_not_broken_by_a_speech_provider_it_never_uses(
+    a_container, env
+):
+    """The refusal is where the leg is *built*, and a chat simulation builds
+    none. A platform mid-setup with a typo in its speaking leg still runs
+    every chat and text simulation it always did."""
+    config = SimulatorConfig.from_env()
+    client = build_model_client(
+        config,
+        a_spec_with(
+            PlatformSettings(speech=PlatformSpeech(tts_provider="elevenlabss"))
+        ),
+    )
+    assert client is not None
+
+
+def test_a_media_backend_nobody_wrote_refuses_at_the_moment_of_dialling():
+    settled = MediaSettings.for_simulation(
+        None, PlatformCarrier(media_backend="livekitt")
+    )
+    assert settled is not None
+
+    with pytest.raises(ValueError) as refusal:
+        settled.checked()
+    assert "livekitt" in str(refusal.value)

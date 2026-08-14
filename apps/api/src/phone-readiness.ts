@@ -1,6 +1,6 @@
 import type { PlatformFacts, PlatformSettingName } from "@egma/db";
 
-import { labelOf } from "./platform-readiness.ts";
+import { holds, labelOf } from "./platform-readiness.ts";
 
 /**
  * Whether this platform can place a phone call, and what is missing when it
@@ -77,10 +77,14 @@ export function phoneReadiness(held: PlatformFacts): PhoneReadiness {
     which: keyof typeof PHONE_SETUP_FACTS,
   ): string | null => held[PHONE_SETUP_FACTS[which]] ?? null;
 
+  // Asked with the same predicate the whole-platform answer asks, and never
+  // of the value: `platformFacts` answers `null` for every setting the catalog
+  // marks secret, so the day one of these three becomes a secret a value test
+  // would read it as absent forever. See `holds`.
   const missing = (
     Object.keys(PHONE_SETUP_FACTS) as (keyof typeof PHONE_SETUP_FACTS)[]
   )
-    .filter((which) => fact(which) === null)
+    .filter((which) => !holds(held, PHONE_SETUP_FACTS[which]))
     .map((which) => labelOf(PHONE_SETUP_FACTS[which]));
 
   return {

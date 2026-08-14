@@ -66,7 +66,14 @@ from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.utils.time import time_now_iso8601
 
-from .config import DEFAULT_STT_MODEL, DEFAULT_TTS_MODEL, DEFAULT_TTS_VOICE
+from .config import (
+    DEFAULT_STT_MODEL,
+    DEFAULT_TTS_MODEL,
+    DEFAULT_TTS_VOICE,
+    STT_PROVIDERS,
+    TTS_PROVIDERS,
+    VAD_PROVIDERS,
+)
 from .spec import PlatformSpeech
 
 if TYPE_CHECKING:
@@ -477,6 +484,40 @@ class SpeechProviders:
         )
 
 
+    def checked(self) -> SpeechProviders:
+        """These legs, or the refusal an unrecognised provider earns.
+
+        **Refused rather than quietly downgraded to the stand-in.** Every
+        builder below falls through to the scripted leg for a provider it
+        does not implement, which is exactly right when the choice was
+        `scripted` and exactly wrong when the choice was `elevenlabss`: a
+        typo on a settings page would otherwise produce a completed, green
+        simulation conducted by a canned robot, which is worse than a
+        failure because a failure tells the truth about what happened.
+
+        This container's own three names are checked when it starts, so a
+        name that reaches here is one the platform holds — and the refusal
+        names the platform's setting, the value, and what this simulator
+        really has.
+
+        Called where the legs are *built*, not where they are resolved: a
+        chat simulation has no mouth and no ears, and must not fail over a
+        speech provider it was never going to use.
+        """
+        for setting, chosen, allowed in (
+            ("speech_to_text_provider", self.stt, STT_PROVIDERS),
+            ("text_to_speech_provider", self.tts, TTS_PROVIDERS),
+            ("voice_activity_provider", self.vad, VAD_PROVIDERS),
+        ):
+            if chosen not in allowed:
+                raise SpeechFault(
+                    f"the platform's {setting} is {chosen!r}, which is not a "
+                    "speech leg this simulator has; it speaks and listens "
+                    f"with {', '.join(allowed)}"
+                )
+        return self
+
+
 SCRIPTED_PAIR = SpeechProviders()
 """The pair a pipeline is assembled with when nothing is configured."""
 
@@ -531,6 +572,7 @@ def build_legs(
     reaches the provider only once the exchange opens, so assembling a
     pipeline stays the validation step it has always been.
     """
+    providers = providers.checked()
     speaking, spoken_with, closers = _mouth(providers, voice, sample_rate_hz)
     listening_leg, listening = _ears(providers, sample_rate_hz)
     return SpeechLegs(
@@ -584,6 +626,7 @@ def build_vad(
     for by name because loading a model is a cost only a deployment that
     wants it should pay.
     """
+    providers = providers.checked()
     if providers.vad != "silero":
         return ScriptedVAD(
             sample_rate_hz=sample_rate_hz, window_samples=window_samples

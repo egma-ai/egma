@@ -24,8 +24,6 @@ const NOTHING_SET_UP = {
     "the speech-to-text key",
     "the text-to-speech provider",
     "the text-to-speech key",
-    "the text-to-speech model",
-    "the text-to-speech voice",
     "the voice-activity provider",
     "the media backend",
     "the carrier trunk",

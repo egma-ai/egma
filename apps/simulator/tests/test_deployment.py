@@ -53,6 +53,44 @@ DOCUMENTED_ELSEWHERE = {
 stated reason. Everything else must reach the container, because a
 variable a compose entry leaves out never arrives however it is set."""
 
+OWNED_BY_THE_PLATFORM = {
+    "EGMA_SIMULATOR_MODEL_PROVIDER",
+    "EGMA_SIMULATOR_MODEL_NAME",
+    "EGMA_SIMULATOR_MODEL_API_KEY",
+    "EGMA_SIMULATOR_STT_PROVIDER",
+    "EGMA_SIMULATOR_TTS_PROVIDER",
+    "EGMA_SIMULATOR_VAD_PROVIDER",
+    "EGMA_SIMULATOR_DEEPGRAM_API_KEY",
+    "EGMA_SIMULATOR_ELEVENLABS_API_KEY",
+    "EGMA_SIMULATOR_OPENAI_API_KEY",
+    "EGMA_SIMULATOR_TTS_MODEL",
+    "EGMA_SIMULATOR_TTS_VOICE",
+    "EGMA_SIMULATOR_MEDIA_BACKEND",
+    "EGMA_SIMULATOR_SIP_TRUNK_ID",
+    "EGMA_SIMULATOR_SIP_TRUNK_ADDRESS",
+    "EGMA_SIMULATOR_SIP_TRUNK_NUMBER",
+    "EGMA_SIMULATOR_SIP_TRUNK_USERNAME",
+    "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD",
+}
+"""Settings that belong to the platform, not to any container.
+
+Each of these is stored by the API, sealed, and handed to every simulator
+on the work order it claims — so no compose file passes one and
+`.env.example` names none of them. A compose entry for any of them would be
+a **second place the same setting is written down**, and the two would
+disagree the first time somebody changed one: the whole failure this effort
+exists to remove, arriving by a new route. It would also leave every one of
+them in the silent-empty `${VAR:-}` form that the bootstrap work has to be
+able to say no deployment variable uses.
+
+The code still reads them, and that is deliberate rather than left over: a
+bare `egma-simulator` process — the workbench story and every contributor's
+checkout — has no platform behind it and configures itself from its own
+environment. A work-order value replaces whatever it found. They stay in
+this app's README table for that reader, which is the reason
+`EGMA_SIMULATOR_BLOB_DIR` above is there too.
+"""
+
 
 def repository_root() -> Path:
     """The checkout this app lives in, found by what is at its top."""
@@ -82,7 +120,12 @@ def test_every_variable_the_code_reads_is_in_the_env_example():
     documented = set(
         VARIABLE.findall((ROOT / ".env.example").read_text(encoding="utf-8"))
     )
-    missing = variables_read_by_the_code() - documented - DOCUMENTED_ELSEWHERE
+    missing = (
+        variables_read_by_the_code()
+        - documented
+        - DOCUMENTED_ELSEWHERE
+        - OWNED_BY_THE_PLATFORM
+    )
     assert not missing, (
         f".env.example does not name {sorted(missing)}, which the simulator "
         "reads — a self-hoster cannot set a variable nobody told them about"
@@ -96,7 +139,12 @@ def test_every_variable_the_code_reads_is_passed_through_by_compose():
     passed: set[str] = set()
     for compose in COMPOSE_FILES:
         passed |= set(VARIABLE.findall(compose.read_text(encoding="utf-8")))
-    missing = variables_read_by_the_code() - passed - DOCUMENTED_ELSEWHERE
+    missing = (
+        variables_read_by_the_code()
+        - passed
+        - DOCUMENTED_ELSEWHERE
+        - OWNED_BY_THE_PLATFORM
+    )
     assert not missing, (
         f"no compose file passes {sorted(missing)} to the simulator, so a "
         "container never sees it however it is set"
@@ -200,20 +248,26 @@ def test_no_phone_overlay_is_left_to_ask_for_by_name():
     )
 
 
-def test_the_default_stack_dials_nothing_until_phone_setup_has_run():
-    """Platform readiness does not wait on carrier setup.
+@pytest.mark.parametrize("compose", COMPOSE_FILES, ids=lambda path: path.name)
+def test_no_compose_file_hands_a_simulator_a_setting_the_platform_owns(compose):
+    """Platform readiness does not wait on carrier setup, and a setting has
+    exactly one home.
 
-    A simulator whose media backend is named starts checking for a trunk
-    at startup and refuses to run without one — so a default that named a
-    backend would make `docker compose up` fail on a machine that has
-    never seen a carrier, which is every machine on its first run.
+    Both properties fall out of the same absence. Nothing in any compose file
+    tells a simulator which providers to use or whether it may dial: the
+    platform holds all of it and hands it over on the work order, so
+    `docker compose up` on a machine that has never seen a carrier starts
+    exactly as it always did, and there is no second copy of a setting for
+    the store's copy to disagree with.
     """
-    default = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    named = "EGMA_SIMULATOR_MEDIA_BACKEND: ${EGMA_SIMULATOR_MEDIA_BACKEND:-}"
-    assert named in default, (
-        "docker-compose.yml gives the simulator a media backend by default; a "
-        "simulator told to dial with no trunk refuses to start, so a first "
-        "`up` on a machine with no carrier would fail"
+    block = service_block(compose, "simulator")
+    if block is None:
+        return
+    handed = sorted(name for name in OWNED_BY_THE_PLATFORM if name in block)
+    assert not handed, (
+        f"{compose.name} hands the simulator {handed}, which the platform "
+        "stores and delivers on the work order — a second home for a setting "
+        "is two answers that disagree the first time one of them changes"
     )
 
 

@@ -362,11 +362,23 @@ class MediaSettings:
         neither names a backend, which is every deployment that has never
         been given a carrier and is the ordinary case.
 
+        **It never refuses.** This runs for every simulation, and most
+        simulations never dial: a platform whose carrier is half configured
+        still runs chat and text work perfectly well, and failing that work
+        over a trunk it was never going to use would be a broken phone
+        breaking the telephone-free half of the product. So what is
+        assembled here is whatever the two sides between them have, and
+        every refusal lives in :meth:`checked`, which the phone plug calls
+        when a call is really about to be placed.
+
         **The platform's inline trunk replaces the container's whole
         trunk, stored reference and all.** A container that still held
         ``EGMA_SIMULATOR_SIP_TRUNK_ID`` would otherwise keep dialling its
         own trunk while the platform's settings page showed another — the
-        exact shape of silent disagreement this effort exists to end.
+        exact shape of silent disagreement this effort exists to end. The
+        replacement is whole for the same reason: address, number,
+        username and password move together, so a platform trunk can never
+        be dialled with a leftover caller identity from this container.
         """
         backend = carrier.media_backend or (
             None if standing is None else standing.backend
@@ -381,44 +393,86 @@ class MediaSettings:
             # bridge it needs has not been read yet. Reading it here rather
             # than at startup is what lets a simulator be given a carrier
             # after it was started, which is the whole of "adding capacity
-            # is starting a container and nothing else".
-            else cls.for_backend(
-                backend, because="the platform's media backend is " + backend
-            )
+            # is starting a container and nothing else". Read without
+            # demanding: a missing one is the phone's problem to report,
+            # and it is reported by `checked` at the moment of dialling.
+            else cls._bridge_this_container_offers(backend)
         )
         if backend != "livekit":
             return cls(backend=backend)
 
         platform_named_a_trunk = carrier.trunk_address is not None
+        trunk = carrier if platform_named_a_trunk else bridge
         return cls(
             backend=backend,
             livekit_url=bridge.livekit_url,
             livekit_api_key=bridge.livekit_api_key,
             livekit_api_secret=bridge.livekit_api_secret,
             trunk_id=None if platform_named_a_trunk else bridge.trunk_id,
-            trunk_address=carrier.trunk_address or bridge.trunk_address,
-            trunk_number=carrier.trunk_number or bridge.trunk_number,
-            trunk_username=(
-                carrier.trunk_username
-                if platform_named_a_trunk
-                else bridge.trunk_username
-            ),
-            trunk_password=(
-                carrier.trunk_password
-                if platform_named_a_trunk
-                else bridge.trunk_password
-            ),
-        ).checked()
+            trunk_address=trunk.trunk_address,
+            trunk_number=trunk.trunk_number,
+            trunk_username=trunk.trunk_username,
+            trunk_password=trunk.trunk_password,
+        )
+
+    @classmethod
+    def _bridge_this_container_offers(cls, backend: str) -> MediaSettings:
+        """The media server this container reaches, read without demanding.
+
+        The bridge is bootstrap configuration — a third-party binary reads
+        its own key and secret when it is created — so it is this
+        container's whatever the platform says. What is different from
+        :meth:`for_backend` is only the silence: an absent variable is left
+        absent rather than refused, because this is read for every
+        simulation and most of them never dial.
+        """
+        return cls(
+            backend=backend,
+            livekit_url=_text("EGMA_SIMULATOR_LIVEKIT_URL"),
+            livekit_api_key=_text("EGMA_SIMULATOR_LIVEKIT_API_KEY"),
+            livekit_api_secret=_text("EGMA_SIMULATOR_LIVEKIT_API_SECRET"),
+            trunk_id=_text("EGMA_SIMULATOR_SIP_TRUNK_ID"),
+            trunk_address=_text("EGMA_SIMULATOR_SIP_TRUNK_ADDRESS"),
+            trunk_number=_text("EGMA_SIMULATOR_SIP_TRUNK_NUMBER"),
+            trunk_username=_text("EGMA_SIMULATOR_SIP_TRUNK_USERNAME"),
+            trunk_password=_text("EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"),
+        )
 
     def checked(self) -> MediaSettings:
         """These settings, or the refusal a deployment that cannot dial earns.
 
-        Run where both halves are in hand — the container's bridge and the
-        platform's trunk — because until then "there is no trunk" is not
-        yet true of anything.
+        **Every carrier refusal is here, and here is the moment a call is
+        about to be placed.** That is the whole of why it is a step of its
+        own: the same facts are assembled for every simulation, and only a
+        simulation that dials has any business failing over them.
         """
+        if self.backend not in MEDIA_BACKENDS:
+            raise ValueError(
+                f"this deployment's media backend is {self.backend!r}, which "
+                "is not a bridge this simulator has; it places calls through "
+                f"{', '.join(MEDIA_BACKENDS)}"
+            )
         if self.backend != "livekit":
             return self
+        absent = [
+            variable
+            for variable, value in (
+                ("EGMA_SIMULATOR_LIVEKIT_URL", self.livekit_url),
+                ("EGMA_SIMULATOR_LIVEKIT_API_KEY", self.livekit_api_key),
+                ("EGMA_SIMULATOR_LIVEKIT_API_SECRET", self.livekit_api_secret),
+            )
+            if value is None
+        ]
+        if absent:
+            # Named as variables rather than as settings, because that is
+            # what they are: the media server is a container of its own that
+            # reads its key and secret when it is created, so these can never
+            # come from the platform's store and this container is where they
+            # are missing from.
+            raise ValueError(
+                f"this deployment dials through livekit and this container is "
+                f"missing {' and '.join(absent)}"
+            )
         if self.trunk_id is None and self.trunk_address is None:
             raise ValueError(
                 "a phone call needs a trunk, and this deployment has none. "

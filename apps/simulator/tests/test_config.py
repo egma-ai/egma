@@ -453,9 +453,9 @@ def test_a_bridge_with_no_trunk_anywhere_starts_and_refuses_when_asked_to_dial(
     container waiting for one is an ordinary deployment — the whole
     of what "a second simulator on another host needs no settings" means.
 
-    What is *not* given up is the refusal. It moves to where both halves
-    are in hand, and it names both ways a trunk can be given, because
-    picking one for somebody is what a refusal must not do.
+    What is *not* given up is the refusal. It moves to the moment a call is
+    about to be placed, and it names both ways a trunk can be given,
+    because picking one for somebody is what a refusal must not do.
     """
     a_deployment_that_dials(env, EGMA_SIMULATOR_SIP_TRUNK_ADDRESS=None)
 
@@ -463,11 +463,58 @@ def test_a_bridge_with_no_trunk_anywhere_starts_and_refuses_when_asked_to_dial(
     assert standing is not None
     assert standing.trunk_address is None
 
+    # Assembling never refuses: this runs for every simulation, and a
+    # simulation that never dials must not fail over a trunk it was never
+    # going to use.
+    settled = MediaSettings.for_simulation(standing, PlatformCarrier())
+    assert settled is not None
+
     with pytest.raises(ValueError) as refusal:
-        MediaSettings.for_simulation(standing, PlatformCarrier())
+        settled.checked()
     told = str(refusal.value)
     assert "carrier trunk" in told
     assert "EGMA_SIMULATOR_SIP_TRUNK_ID" in told
+
+
+def test_a_half_configured_phone_does_not_break_the_work_that_never_dials(env):
+    """The rule the refusal's new home exists for.
+
+    A platform holding a media backend and no trunk, or a container with no
+    media server behind the backend the platform named, are both real
+    states somebody is in mid-setup. Neither may fail a chat simulation:
+    the telephone-free half of the product goes on working, and the phone
+    says what is wrong when somebody asks it to dial.
+    """
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+
+    for carrier in (
+        PlatformCarrier(media_backend="livekit"),
+        PlatformCarrier(media_backend="livekit", trunk_address="a.example.com"),
+        PlatformCarrier(media_backend="a-bridge-nobody-wrote"),
+    ):
+        settled = MediaSettings.for_simulation(None, carrier)
+        assert settled is not None, carrier
+        # And each of them still refuses at the moment of dialling.
+        with pytest.raises(ValueError):
+            settled.checked()
+
+
+def test_a_bridge_this_container_cannot_reach_is_named_when_a_call_is_placed(env):
+    """The media server is bootstrap configuration and can never come from
+    the store, so a container missing it is where the refusal points."""
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+
+    settled = MediaSettings.for_simulation(
+        None,
+        PlatformCarrier(media_backend="livekit", trunk_address="a.example.com"),
+    )
+    assert settled is not None
+
+    with pytest.raises(ValueError) as refusal:
+        settled.checked()
+    told = str(refusal.value)
+    assert "EGMA_SIMULATOR_LIVEKIT_URL" in told
+    assert "EGMA_SIMULATOR_LIVEKIT_API_SECRET" in told
 
 
 def test_the_platforms_trunk_is_what_a_simulator_holding_none_dials_over(env):

@@ -59,16 +59,37 @@ export function labelOf(name: PlatformSettingName): string {
 }
 
 /**
+ * Whether this platform holds a setting at all.
+ *
+ * **One predicate, and both readiness answers ask it.** The question is
+ * *presence*, and `platformFacts` answers `null` for every setting the catalog
+ * marks secret — so a reader that tested the value instead would read every
+ * secret as absent forever, and would start doing it to a phone fact the day
+ * one of those three becomes a secret. Asking about the key rather than the
+ * value is what makes that impossible rather than merely unlikely.
+ */
+export function holds(held: PlatformFacts, name: PlatformSettingName): boolean {
+  return Object.hasOwn(held, name);
+}
+
+/**
  * The platform's answer, from what its store holds.
  *
  * The carrier is among the settings now, so this is one list over one source
  * rather than a composition of two. That is what closes the gap the effort
  * started from: there is no half of this answer left that a container could
  * hold and lose.
+ *
+ * **Only the settings setup has to supply are waited for.** The catalog says
+ * which, and two of them are not: the simulator has a working default for the
+ * text-to-speech model and voice, so a platform that has never named one still
+ * speaks. Demanding them would tell an operator who finished the whole
+ * documented setup that they had not, which is this effort's own failure
+ * wearing the opposite face.
  */
 export function platformReadiness(held: PlatformFacts): PlatformReadiness {
   const missing = PLATFORM_SETTINGS.filter(
-    (setting) => !Object.hasOwn(held, setting.name),
+    (setting) => setting.required && !holds(held, setting.name),
   ).map((setting) => setting.label);
 
   return {

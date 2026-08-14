@@ -118,70 +118,106 @@ export const platformSetting = pgTable(
  * with a sentence naming the ones it has. A second list here would be a list
  * that can disagree with that one, and the disagreement would be a setting an
  * operator could store and never use.
+ *
+ * **`required` is what setup has to supply and what readiness waits for.** Two
+ * entries are not: the simulator has a working default for the text-to-speech
+ * model and voice, so a platform that never names one still speaks. Marking
+ * them required would leave an operator who finished the whole documented setup
+ * still reading `setup required` with nothing sensible to type — which is the
+ * same silent-mismatch failure this effort exists to remove, wearing the
+ * opposite face. They are settings somebody may change, not settings they must
+ * supply, and the interview treats them the same way.
  */
 export const PLATFORM_SETTINGS = [
   {
     name: "persona_model_provider",
     label: "the persona's model provider",
     secret: false,
+    required: true,
   },
-  { name: "persona_model", label: "the persona's model", secret: false },
-  { name: "persona_model_key", label: "the persona's model key", secret: true },
+  {
+    name: "persona_model",
+    label: "the persona's model",
+    secret: false,
+    required: true,
+  },
+  {
+    name: "persona_model_key",
+    label: "the persona's model key",
+    secret: true,
+    required: true,
+  },
   {
     name: "speech_to_text_provider",
     label: "the speech-to-text provider",
     secret: false,
+    required: true,
   },
   {
     name: "speech_to_text_key",
     label: "the speech-to-text key",
     secret: true,
+    required: true,
   },
   {
     name: "text_to_speech_provider",
     label: "the text-to-speech provider",
     secret: false,
+    required: true,
   },
   {
     name: "text_to_speech_key",
     label: "the text-to-speech key",
     secret: true,
+    required: true,
   },
   {
     name: "text_to_speech_model",
     label: "the text-to-speech model",
     secret: false,
+    required: false,
   },
   {
     name: "text_to_speech_voice",
     label: "the text-to-speech voice",
     secret: false,
+    required: false,
   },
   {
     name: "voice_activity_provider",
     label: "the voice-activity provider",
     secret: false,
+    required: true,
   },
-  { name: "media_backend", label: "the media backend", secret: false },
+  {
+    name: "media_backend",
+    label: "the media backend",
+    secret: false,
+    required: true,
+  },
   {
     name: "carrier_trunk_address",
     label: "the carrier trunk",
     secret: false,
+    required: true,
   },
   {
     name: "carrier_trunk_number",
     label: "the source number",
     secret: false,
+    required: true,
   },
   {
     name: "carrier_trunk_username",
     label: "the carrier trunk username",
     secret: false,
+    required: true,
   },
   {
     name: "carrier_trunk_password",
     label: "the carrier trunk password",
     secret: true,
+    required: true,
   },
 ] as const satisfies readonly {
   readonly name: string;
@@ -193,6 +229,14 @@ export const PLATFORM_SETTINGS = [
    * handed out; anything else hints with itself.
    */
   readonly secret: boolean;
+  /**
+   * Whether setup is incomplete without it, and therefore whether readiness
+   * waits for it. `false` where the simulator has a default that works, so a
+   * platform that never names one still conducts a simulation — see the
+   * catalog's own note above for why that difference has to be written down
+   * rather than left to whoever writes the interview.
+   */
+  readonly required: boolean;
 }[];
 
 /**
