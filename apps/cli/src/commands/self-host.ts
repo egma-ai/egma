@@ -37,9 +37,9 @@ import path from "node:path";
 
 import { compose, DockerMissingError, type ComposeOptions } from "../self-host/compose.ts";
 import {
-  mediaCredential,
-  recorded,
+  recordMediaCredential,
   MEDIA_SECRET_VARIABLE,
+  type MediaCredential,
 } from "../self-host/media-credential.ts";
 import {
   askPlainly,
@@ -332,26 +332,20 @@ async function runUp(
   options.out(`url: ${address}`);
 
   // The media credential: whatever this workspace or its operator already has,
-  // and a fresh one where neither has any.
-  //
-  // **Written down whenever the file does not already say it**, which covers
-  // one more case than generating does. A pair only exported into a shell is a
-  // pair the next start cannot find, and the start after that would mint a
-  // third one and lock the deployment out of itself. The file is the record of
-  // what this deployment runs on, however the value first arrived.
-  const media = mediaCredential(options.env, stored);
-  if (!recorded(media, stored)) {
-    try {
-      writePlatformConfig(workspace, { ...stored, ...media.values });
-    } catch (cause) {
-      options.out("status: failed");
-      options.out(
-        `reason: this workspace has no media-server credential and egma could not write one: ${
-          (cause as Error).message
-        }`,
-      );
-      return SELF_HOST_EXIT.refused;
-    }
+  // and a fresh one where neither has any. Recorded before anything is started,
+  // and read back off the disk, so what the containers are handed below is what
+  // the next start will find.
+  let media: MediaCredential;
+  try {
+    media = await recordMediaCredential(workspace, options.env);
+  } catch (cause) {
+    options.out("status: failed");
+    options.out(
+      `reason: this workspace has no media-server credential and egma could not write one: ${
+        (cause as Error).message
+      }`,
+    );
+    return SELF_HOST_EXIT.refused;
   }
   options.out(`media_credential: ${media.generated ? "generated" : "existing"}`);
   if (media.generated) for (const line of MEDIA_CREDENTIAL_NOTICE) options.fail(line);
@@ -637,8 +631,12 @@ async function runPhoneSetup(
   // made it: this command waits on a running platform, and a running platform
   // was started by `up`. What this covers is a deployment brought up before
   // egma generated the pair at all, whose first act after upgrading is carrier
-  // setup. The write below records it either way.
-  const media = mediaCredential(options.env, stored);
+  // setup.
+  //
+  // It goes through the same one-winner step `up` does, so a setup racing a
+  // start cannot leave the two of them running on different pairs. The write
+  // further down then re-states the same pair beside the carrier settings.
+  const media = await recordMediaCredential(workspace, options.env);
 
   const configuration: Record<string, string> = {
     ...stored,

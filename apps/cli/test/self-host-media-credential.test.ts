@@ -24,6 +24,7 @@
  *    its containers are recreated underneath it.
  */
 
+import { existsSync } from "node:fs";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -192,6 +193,56 @@ describe("the media server's credential", () => {
       const stored = await workspace.storedConfig();
       expect(stored[KEY_VARIABLE]).toBe("a-key-the-operator-chose");
       expect(stored[SECRET_VARIABLE]).toBe("a-secret-the-operator-chose-that-is-long-enough");
+    } finally {
+      await platform.close();
+    }
+  });
+
+  it("mints one pair when two commands prepare the same workspace at once", async () => {
+    // Two preparations racing on a workspace with no pair is reachable without
+    // anybody doing anything strange: `up` and `phone setup` both mint, so the
+    // racers need not even be the same command. Unguarded, each generates its
+    // own pair, each writes the file, and each hands *its* pair to Compose — so
+    // the recorded pair and the running containers' pair differ. That passes
+    // every health check and surfaces minutes later as an authentication
+    // refusal naming nothing about configuration, which is the exact failure
+    // this whole effort exists to remove.
+    const platform = await startPlatform();
+    const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
+    try {
+      const [first, second] = await Promise.all([
+        runUp(workspace, platform),
+        runUp(workspace, platform),
+      ]);
+
+      expect(first.code).toBe(0);
+      expect(second.code).toBe(0);
+
+      // Exactly one winner. The loser adopted what the winner recorded rather
+      // than writing over it, which is the whole property.
+      const runs = [first, second];
+      expect(runs.filter((run) => run.stdout.includes("media_credential: generated"))).toHaveLength(1);
+      expect(runs.filter((run) => run.stdout.includes("media_credential: existing"))).toHaveLength(1);
+
+      // One pair on disk, and every pair either command handed to Compose is
+      // that pair. Read from what the docker stand-in wrote down, so this is
+      // what the containers would really have been created with.
+      const stored = await workspace.storedConfig();
+      const calls = await workspace.dockerCalls();
+      for (const variable of [KEY_VARIABLE, SECRET_VARIABLE]) {
+        const onDisk = stored[variable] ?? "";
+        expect(onDisk).not.toBe("");
+        const handed = [...calls.matchAll(new RegExp(`^${variable}=(.*)$`, "gmu"))].map(
+          (line) => line[1] as string,
+        );
+        expect(handed).toHaveLength(2);
+        expect(new Set(handed)).toEqual(new Set([onDisk]));
+      }
+
+      // And nothing is left holding the workspace once both have finished.
+      expect(
+        existsSync(path.join(path.dirname(workspace.configFile), ".media-credential.lock")),
+      ).toBe(false);
     } finally {
       await platform.close();
     }
