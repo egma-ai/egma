@@ -43,6 +43,31 @@ export const PLATFORM_DIRECTORY = ".egma-platform";
  */
 export const PLATFORM_CONFIG_FILE = "platform.env";
 
+/**
+ * What is written at the top of that file, whichever command wrote it.
+ *
+ * One header rather than one per writer: the file is the same file, read by
+ * every `self-host` command and rewritten by more than one of them, and a
+ * header that changed depending on which command last touched it would tell a
+ * person the wrong story about what is in it.
+ */
+export const PLATFORM_CONFIG_HEADER = [
+  "egma platform configuration — written by `egma self-host`.",
+  "",
+  "This file holds credentials. It is created readable by you and nobody",
+  "else, it belongs wherever the rest of this deployment's secrets do, and",
+  "it belongs in no repository.",
+  "",
+  "The media server's key and secret are egma's own. They are generated when",
+  "this workspace is prepared and never regenerated, because the three",
+  "containers that authenticate each other with them hold whatever they were",
+  "created with. Nobody chooses them and nobody types them.",
+  "",
+  "The Twilio Auth Token is deliberately not here. It was used once, to do",
+  "the carrier paperwork, and never kept: what a running egma holds is the",
+  "SIP credential, which can authenticate one trunk and nothing else.",
+] as const;
+
 /** Owner read and write, and nothing for anybody else. */
 const PRIVATE_FILE_MODE = 0o600;
 const PRIVATE_DIRECTORY_MODE = 0o700;
@@ -127,12 +152,11 @@ export function platformDirectory(workspace: string): string {
 export function writePlatformConfig(
   workspace: string,
   values: Record<string, string>,
-  { header }: { readonly header: readonly string[] },
 ): string {
   platformDirectory(workspace);
   const file = platformConfigPath(workspace);
   const body = [
-    ...header.map((line) => (line === "" ? "#" : `# ${line}`)),
+    ...PLATFORM_CONFIG_HEADER.map((line) => (line === "" ? "#" : `# ${line}`)),
     "",
     ...Object.entries(values).map(([name, value]) => `${name}=${value}`),
     "",

@@ -15,7 +15,10 @@
  * - **`up`** starts the whole platform and prints the address an agent
  *   repository points at. Everything: the API, the web application, both
  *   stores, the simulator, the grader, LiveKit, its SIP gateway and their
- *   Redis. There is no phone overlay to ask for by name any more.
+ *   Redis. There is no phone overlay to ask for by name any more. It also
+ *   prepares the workspace: a workspace with no media-server credential is
+ *   given one, generated here and written beside the other bootstrap
+ *   variables, so that no deployment runs on a pair anyone can read.
  * - **`phone setup`** makes that deployment able to place a call. It asks for a
  *   Twilio account, a number that account already owns, and one OpenAI key;
  *   shows a plan; and on approval does the carrier paperwork, activates the
@@ -33,6 +36,11 @@
 import path from "node:path";
 
 import { compose, DockerMissingError, type ComposeOptions } from "../self-host/compose.ts";
+import {
+  recordMediaCredential,
+  MEDIA_SECRET_VARIABLE,
+  type MediaCredential,
+} from "../self-host/media-credential.ts";
 import {
   askPlainly,
   askSecret,
@@ -127,6 +135,17 @@ const STARTED = [
 
 /** Which services phone configuration reaches, and therefore what is recreated. */
 const PHONE_SERVICES = ["api", "simulator", "grader"] as const;
+
+/**
+ * The three that authenticate each other with the media credential.
+ *
+ * Recreated together whenever that pair is minted, because a container keeps
+ * the environment it was created with: replacing one of the three and not the
+ * others leaves a deployment where two halves of one password disagree, and
+ * every phone simulation fails to authenticate with nothing on screen to say
+ * why.
+ */
+const MEDIA_SERVICES = ["livekit", "livekit-sip", "simulator"] as const;
 
 export type SelfHostOptions = {
   readonly cwd: string;
@@ -309,16 +328,39 @@ async function runUp(
     stored.EGMA_BASE_URL?.trim() ||
     DEFAULT_PLATFORM_ADDRESS;
 
-  const environment: Record<string, string> = { ...stored, EGMA_BASE_URL: address };
+  options.out(`workspace: ${workspace}`);
+  options.out(`url: ${address}`);
+
+  // The media credential: whatever this workspace or its operator already has,
+  // and a fresh one where neither has any. Recorded before anything is started,
+  // and read back off the disk, so what the containers are handed below is what
+  // the next start will find.
+  let media: MediaCredential;
+  try {
+    media = await recordMediaCredential(workspace, options.env);
+  } catch (cause) {
+    options.out("status: failed");
+    options.out(
+      `reason: this workspace has no media-server credential and egma could not write one: ${
+        (cause as Error).message
+      }`,
+    );
+    return SELF_HOST_EXIT.refused;
+  }
+  options.out(`media_credential: ${media.generated ? "generated" : "existing"}`);
+  if (media.generated) for (const line of MEDIA_CREDENTIAL_NOTICE) options.fail(line);
+
+  const environment: Record<string, string> = {
+    ...stored,
+    ...media.values,
+    EGMA_BASE_URL: address,
+  };
   const composeOptions: ComposeOptions = {
     workspace,
     environment,
     signal: options.signal,
     onLine: (line) => options.fail(line),
   };
-
-  options.out(`workspace: ${workspace}`);
-  options.out(`url: ${address}`);
 
   // Twice, on a workspace that has never been started. ClickHouse's own
   // entrypoint starts a server, creates the database, stops it and starts the
@@ -390,6 +432,28 @@ async function runUp(
   options.fail(`  npx @egma/cli --url ${address}`);
   return SELF_HOST_EXIT.ok;
 }
+
+/**
+ * What the operator is told when a media credential was minted for them.
+ *
+ * **The second half is the part that has to be said.** A deployment that was
+ * already running was running on a pair published in egma's own repository,
+ * and this start replaces its media containers. That is a security fact its
+ * operator is entitled to hear plainly rather than infer from containers
+ * restarting — and it is written as a condition the reader resolves rather
+ * than as a guess made here, because nothing in this workspace reliably says
+ * whether a deployment has been up before.
+ */
+const MEDIA_CREDENTIAL_NOTICE = [
+  "A media-server credential was generated for this workspace and written to " +
+    ".egma-platform/platform.env. It is egma's own password between its media " +
+    "server, its simulator and its SIP gateway: you never choose it and never " +
+    "type it, and a pair that exists is never replaced. Keep that file wherever " +
+    "the rest of this deployment's secrets live.",
+  "Until this, all three fell back to a pair published in egma's own repository. " +
+    "If this deployment was already running, that is what it was using, and its " +
+    "media containers are replaced by this start.",
+] as const;
 
 type PlatformFacts = {
   readonly instanceId: string;
@@ -562,8 +626,21 @@ async function runPhoneSetup(
     stored.EGMA_BASE_URL?.trim() ||
     DEFAULT_PLATFORM_ADDRESS;
 
+  // The media credential, made here only if neither this command's environment
+  // nor the workspace already has one. In the ordinary order `up` has already
+  // made it: this command waits on a running platform, and a running platform
+  // was started by `up`. What this covers is a deployment brought up before
+  // egma generated the pair at all, whose first act after upgrading is carrier
+  // setup.
+  //
+  // It goes through the same one-winner step `up` does, so a setup racing a
+  // start cannot leave the two of them running on different pairs. The write
+  // further down then re-states the same pair beside the carrier settings.
+  const media = await recordMediaCredential(workspace, options.env);
+
   const configuration: Record<string, string> = {
     ...stored,
+    ...media.values,
     EGMA_BASE_URL: address,
 
     // What the API knows about the carrier: three non-secret facts, and it
@@ -612,19 +689,7 @@ async function runPhoneSetup(
   // together, which is the whole repair.
   let configFile: string;
   try {
-    configFile = writePlatformConfig(workspace, configuration, {
-    header: [
-      "egma platform configuration — written by `egma self-host phone setup`.",
-      "",
-      "This file holds credentials. It is created readable by you and nobody",
-      "else, it belongs wherever the rest of this deployment's secrets do, and",
-      "it belongs in no repository.",
-      "",
-      "The Twilio Auth Token is deliberately not here. It was used once, to do",
-      "the carrier paperwork, and never kept: what a running egma holds is the",
-      "SIP credential below, which can authenticate one trunk and nothing else.",
-      ],
-    });
+    configFile = writePlatformConfig(workspace, configuration);
   } catch (cause) {
     throw new CarrierError(
       `Twilio accepted a new SIP password for ${applied.sipUsername}, and this machine could not write it down: ${(cause as Error).message}. The carrier now accepts only a password that is not saved here, so calls would fail to authenticate. Run \`egma self-host phone setup\` again — it mints another password and writes both ends together. Nothing was charged and no call was placed.`,
@@ -641,8 +706,16 @@ async function runPhoneSetup(
   // Activate it. Recreating rather than restarting, because a container keeps
   // the environment it was created with and a restart would come back with the
   // configuration it did not have.
+  //
+  // The media three join the phone three when this run minted the media
+  // credential, for exactly the same reason one step down: recreating the
+  // simulator on a new pair while the media server keeps the old one is a
+  // deployment whose parts no longer authenticate each other.
+  const recreating = media.generated
+    ? [...new Set([...PHONE_SERVICES, ...MEDIA_SERVICES])]
+    : [...PHONE_SERVICES];
   const recreated = await compose(
-    ["up", "-d", "--wait", "--wait-timeout", "300", "--force-recreate", ...PHONE_SERVICES],
+    ["up", "-d", "--wait", "--wait-timeout", "300", "--force-recreate", ...recreating],
     composeOptions,
   );
 
@@ -667,10 +740,19 @@ async function runPhoneSetup(
       configuration_file: path.relative(workspace, configFile),
       platform_url: address,
       phone_state: readiness ?? "unknown",
+      // Said and never shown, exactly like the SIP password above.
+      media_credential: media.generated ? "generated" : "existing",
     },
     steps: applied.steps.map((step) => `${step.action}: ${step.detail}`),
   };
-  const allSecrets = [...secrets, applied.sipPassword];
+  // The media secret joins the swept set even though nothing prints it. The
+  // sweep is a guard rather than a review habit, and a guard that covers only
+  // the secrets somebody remembered is the wrong half of one.
+  const allSecrets = [
+    ...secrets,
+    applied.sipPassword,
+    media.values[MEDIA_SECRET_VARIABLE] as string,
+  ];
   const receiptFile = fileReceipt(workspace, receipt, allSecrets);
 
   const done = {
@@ -683,6 +765,7 @@ async function runPhoneSetup(
     receipt: path.relative(workspace, receiptFile),
     platform_url: address,
     phone: readiness ?? "unknown",
+    media_credential: media.generated ? "generated" : "existing",
   } as const;
 
   if (readiness !== "ready") {
@@ -704,6 +787,7 @@ async function runPhoneSetup(
 
   answer(options, mode, { ...done, status: "ready" }, allSecrets);
   options.fail("");
+  if (media.generated) for (const line of MEDIA_CREDENTIAL_NOTICE) options.fail(line);
   options.fail("This egma can place phone calls.");
   options.fail(
     `The Twilio Auth Token was used once and kept nowhere. What is running holds a SIP credential for the trunk ${applied.trunkSid} and nothing else on that account.`,
