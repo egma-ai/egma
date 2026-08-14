@@ -22,7 +22,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { rmSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -112,7 +112,7 @@ function recorded(
 }
 
 /** What holds the workspace while one command decides its media credential. */
-const MINTING_LOCK_FILE = ".media-credential.lock";
+export const MINTING_LOCK_FILE = ".media-credential.lock";
 
 /** Owner read and write, like everything else in the platform directory. */
 const PRIVATE_FILE_MODE = 0o600;
@@ -128,6 +128,16 @@ const PRIVATE_FILE_MODE = 0o600;
  */
 const LOCK_IS_ABANDONED_AFTER_MS = 30_000;
 const LOCK_POLL_MS = 25;
+
+/**
+ * How many times a displaced holder starts over.
+ *
+ * Displacement takes a stall longer than the window above, so a second one in
+ * the same command is already beyond anything this can reason about. The
+ * attempts are bounded rather than unbounded because a loop that cannot end is
+ * worse than a refusal that says what happened.
+ */
+const ATTEMPTS = 3;
 
 /**
  * The pair this workspace uses, written down if it was not already, with
@@ -152,61 +162,135 @@ const LOCK_POLL_MS = 25;
  * that file legitimately already exists on the deployment this most matters to
  * — one upgraded from a release that wrote carrier settings and no media pair
  * — so creating it exclusively would decide nothing there.
+ *
+ * **A holder that was displaced starts over rather than trusting itself.** A
+ * lock old enough to look abandoned is taken from whoever left it, and a
+ * process that stalled past that window — a closed lid, a machine deep in swap
+ * — wakes to find its turn was given away, possibly after it had already
+ * written a pair. What it decided is then worth nothing, so it goes back to
+ * the top and reads the disk again like any other latecomer.
  */
 export async function recordMediaCredential(
   workspace: string,
   environment: Readonly<Record<string, string | undefined>>,
 ): Promise<MediaCredential> {
-  // The ordinary path, and the only one on every start after the first: what
-  // is on disk is already what this command would use. Nothing is written and
-  // no lock is taken, so a plain start neither creates a lock file nor
-  // contends for one.
-  const held = readPlatformConfig(workspace);
-  if (recorded(mediaCredential(environment, held), held)) {
-    return mediaCredential(environment, held);
+  for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
+    // The ordinary path, and the only one on every start after the first: what
+    // is on disk is already what this command would use. Nothing is written and
+    // no lock is taken, so a plain start neither creates a lock file nor
+    // contends for one.
+    const held = readPlatformConfig(workspace);
+    const already = mediaCredential(environment, held);
+    if (recorded(already, held)) return already;
+
+    const lock = await takeMintingLock(workspace);
+    let landed: MediaCredential;
+    try {
+      // Read again inside the lock. Whoever held it before us may have been
+      // recording the very pair we were about to generate, and this is the read
+      // that sees it.
+      const stored = readPlatformConfig(workspace);
+      const decided = mediaCredential(environment, stored);
+      if (!recorded(decided, stored)) {
+        writePlatformConfig(workspace, { ...stored, ...decided.values });
+      }
+      // What actually landed, rather than what was decided in memory.
+      landed = {
+        ...mediaCredential(readPlatformConfig(workspace)),
+        generated: decided.generated,
+      };
+    } catch (cause) {
+      lock.release();
+      throw cause;
+    }
+    // Only now is the answer worth anything: a holder still holding its own
+    // lock did this step alone, and a displaced one did not.
+    if (lock.release()) return landed;
   }
 
-  const release = await takeMintingLock(workspace);
-  try {
-    // Read again inside the lock. Whoever held it before us may have been
-    // recording the very pair we were about to generate, and this is the read
-    // that sees it.
-    const stored = readPlatformConfig(workspace);
-    const decided = mediaCredential(environment, stored);
-    if (!recorded(decided, stored)) {
-      writePlatformConfig(workspace, { ...stored, ...decided.values });
-    }
-    // What actually landed, rather than what was decided in memory.
-    return { ...mediaCredential(readPlatformConfig(workspace)), generated: decided.generated };
-  } finally {
-    release();
+  // Displaced every time. Nothing more is written — whatever is on the disk is
+  // what the deployment runs on, and this command uses that or says it cannot.
+  const settled = readPlatformConfig(workspace);
+  const onDisk = mediaCredential(settled);
+  if (onDisk.generated) {
+    throw new Error(
+      "another command held this workspace's media-server credential for the whole of " +
+        `${ATTEMPTS} attempts and left none behind. Run this again.`,
+    );
   }
+  return onDisk;
 }
 
+/** A held minting lock, and the only thing that may give it back. */
+export type MintingLock = {
+  /**
+   * Give the lock back, and say whether it was still ours to give.
+   *
+   * `false` means this holder was displaced while it worked: the file now
+   * carries somebody else's token, and **it is not removed**. Removing it
+   * would put the displacer and the next command inside the step together,
+   * which is the state the lock exists to prevent.
+   */
+  release(): boolean;
+};
+
 /**
- * Hold the workspace until the returned function gives it back.
+ * Hold the workspace until the returned lock is released.
  *
  * `wx` is the whole mechanism: creating a file that must not already exist is
  * one atomic operation, so of any number of commands asking at once exactly
  * one succeeds and the rest see `EEXIST`.
+ *
+ * **The file carries a token naming this holder**, because a lock file's
+ * existence does not say whose it is. Without one, a holder that stalled past
+ * the takeover window would come back and delete its successor's lock, and a
+ * third command would then walk straight into the step beside that successor.
+ * So every removal — a release, and a takeover — first reads the token and
+ * acts only on the lock it meant to act on.
+ *
+ * Exported so the ownership contract can be checked directly. The alternative
+ * is a test that stalls a real process for longer than the takeover window,
+ * which is half a minute of waiting to assert one comparison.
  */
-async function takeMintingLock(workspace: string): Promise<() => void> {
+export async function takeMintingLock(workspace: string): Promise<MintingLock> {
   const file = path.join(platformDirectory(workspace), MINTING_LOCK_FILE);
+  const ours = `${process.pid}:${randomBytes(12).toString("base64url")}\n`;
   for (;;) {
     try {
-      writeFileSync(file, `${process.pid}\n`, { mode: PRIVATE_FILE_MODE, flag: "wx" });
-      return () => rmSync(file, { force: true });
+      writeFileSync(file, ours, { mode: PRIVATE_FILE_MODE, flag: "wx" });
+      return {
+        release: () => {
+          if (lockToken(file) !== ours) return false;
+          rmSync(file, { force: true });
+          return true;
+        },
+      };
     } catch (cause) {
       if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
     }
+
+    const holder = lockToken(file);
     const heldSince = statSync(file, { throwIfNoEntry: false })?.mtimeMs;
-    // Either it was released between the failed create and this look, or it
-    // was left behind by a process that is not coming back. Both end the same
-    // way: try again, and this time there is nothing in the way.
-    if (heldSince === undefined || Date.now() - heldSince > LOCK_IS_ABANDONED_AFTER_MS) {
-      rmSync(file, { force: true });
+    // Released between the failed create and this look. Go straight round.
+    if (holder === null || heldSince === undefined) continue;
+
+    if (Date.now() - heldSince > LOCK_IS_ABANDONED_AFTER_MS) {
+      // Displace that holder, and only that one. Reading the token again
+      // before removing keeps a lock somebody took in the meantime — after
+      // the old one was released — from being thrown away by this branch.
+      if (lockToken(file) === holder) rmSync(file, { force: true });
       continue;
     }
     await new Promise((wake) => setTimeout(wake, LOCK_POLL_MS));
+  }
+}
+
+/** Whose lock this is, or `null` where there is no lock to read. */
+function lockToken(file: string): string | null {
+  try {
+    return readFileSync(file, "utf8");
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw cause;
   }
 }

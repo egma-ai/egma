@@ -24,12 +24,17 @@
  *    its containers are recreated underneath it.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import {
+  MINTING_LOCK_FILE,
+  recordMediaCredential,
+  takeMintingLock,
+} from "../src/self-host/media-credential.ts";
 import {
   makePlatformWorkspace,
   runSelfHost,
@@ -264,5 +269,70 @@ describe("the media server's credential", () => {
     } finally {
       await platform.close();
     }
+  });
+});
+
+/**
+ * Who owns the lock that decides the pair.
+ *
+ * A lock old enough to look abandoned is taken from whoever left it, which is
+ * right — a process that died holding it must not stop every later start. But
+ * it makes a second failure possible, and it is the one this describes: a
+ * holder that merely *stalled* past the window, on a closed lid or a machine
+ * deep in swap, wakes up and finishes. If releasing means "delete the lock
+ * file", it deletes its successor's lock, and the next command then walks into
+ * the step beside that successor. Two commands inside the section is the exact
+ * state the lock exists to prevent.
+ *
+ * These run against the lock rather than against two stalled processes,
+ * because reproducing the stall honestly means waiting out the takeover window
+ * to assert one comparison.
+ */
+describe("the minting lock", () => {
+  function lockPath(workspace: PlatformWorkspace): string {
+    return path.join(path.dirname(workspace.configFile), MINTING_LOCK_FILE);
+  }
+
+  it("removes its own lock, and says it did", async () => {
+    const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
+    const lock = await takeMintingLock(workspace.dir);
+
+    expect(existsSync(lockPath(workspace))).toBe(true);
+    expect(lock.release()).toBe(true);
+    expect(existsSync(lockPath(workspace))).toBe(false);
+  });
+
+  it("leaves a lock that was taken over from it alone", async () => {
+    const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
+    const stalled = await takeMintingLock(workspace.dir);
+
+    // What a displaced holder wakes up to: its turn was given away, and the
+    // file now carries the token of whoever is inside the step right now.
+    const successor = "12345:a-token-that-is-not-ours\n";
+    writeFileSync(lockPath(workspace), successor);
+
+    expect(stalled.release()).toBe(false);
+    expect(existsSync(lockPath(workspace))).toBe(true);
+    expect(readFileSync(lockPath(workspace), "utf8")).toBe(successor);
+  });
+
+  it("takes over a lock nobody is coming back for, and mints under it", async () => {
+    // The other half of the same decision. A crashed holder must not stop a
+    // deployment from ever starting again, so a lock older than the window is
+    // displaced and the work goes ahead.
+    const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
+    await mkdir(path.dirname(workspace.configFile), { recursive: true });
+    writeFileSync(lockPath(workspace), "999999:left-behind-by-a-dead-process\n");
+    const longAgo = new Date(Date.now() - 10 * 60_000);
+    utimesSync(lockPath(workspace), longAgo, longAgo);
+
+    const credential = await recordMediaCredential(workspace.dir, {});
+
+    expect(credential.generated).toBe(true);
+    expect(credential.values[KEY_VARIABLE]).not.toBe("");
+    // The pair is on disk, and the abandoned lock is gone rather than
+    // inherited.
+    expect(await workspace.storedConfig()).toMatchObject(credential.values);
+    expect(existsSync(lockPath(workspace))).toBe(false);
   });
 });
