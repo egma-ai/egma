@@ -1,5 +1,5 @@
 /**
- * A local server shaped like the two Twilio APIs phone setup drives.
+ * A local server shaped like the two Twilio APIs the setup command drives.
  *
  * Trunks and their attachments on one, credential lists, credentials and
  * numbers on the other. It exists so that proving setup makes the right things

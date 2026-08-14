@@ -245,12 +245,13 @@ already stored in LiveKit or the inline fields below — and the same three
 LiveKit variables serve a self-hosted server and LiveKit Cloud.
 
 If your carrier is Twilio, none of this is yours to build by hand.
-`egma self-host phone setup`, in the platform workspace, reads your
-account, shows a plan, and on approval creates the Elastic SIP Trunk, the
+`egma self-host setup`, in the platform workspace, reads your account,
+shows a plan, and on approval creates the Elastic SIP Trunk, the
 credential list and its credential, attaches both and the number to the
-trunk, and writes every variable below into that workspace's own private
-configuration. It is safe to run again and safe to run again after a run
-that stopped half way. **The account token is used by that command and
+trunk, and writes what that produced into the **platform's own store**,
+sealed — from where every simulator is handed it on the work order it
+claims. It is safe to run again and safe to run again after a run that
+stopped half way. **The account token is used by that command and
 nothing else** — what a deployment keeps afterwards is a SIP credential
 that can do nothing but place calls over one trunk. See the root README.
 

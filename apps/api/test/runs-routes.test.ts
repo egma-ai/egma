@@ -115,7 +115,7 @@ const PHONE = {
 } as const;
 
 /**
- * A deployment `egma self-host phone setup` has finished with: a carrier
+ * A deployment `egma self-host setup` has finished with: a carrier
  * trunk, a number its calls come from, and a voice to speak with.
  *
  * Non-secret, all three of it — see `phone-readiness.ts`. What it stands for
@@ -570,7 +570,7 @@ describe("starting a run", () => {
         "and the source number and the text-to-speech provider. Whoever runs " +
         "this platform makes it ready with one command in the platform " +
         "workspace: " +
-        "egma self-host phone setup.",
+        "egma self-host setup.",
     });
 
     // Nothing was written: no run, and so nothing for a simulator to claim.
@@ -582,7 +582,7 @@ describe("starting a run", () => {
     expect(simulations).toEqual([]);
   });
 
-  it("says which half of phone setup is missing, so a partly-configured platform is not told to start again", async () => {
+  it("says which half of the phone configuration is missing, so a partly-configured platform is not told to start again", async () => {
     api = await createApi("runs_phone_half_set", {
       platformSettings: {
         carrier_trunk_address: PHONE_IS_SET_UP.carrier_trunk_address,

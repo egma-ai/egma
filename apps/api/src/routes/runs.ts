@@ -103,7 +103,7 @@ export type RunRoutesOptions = {
  * carrier-backed type is a line here instead of a condition somebody has to
  * find. What makes a type belong is not that it is telephony-shaped: it is that
  * conducting it spends the platform's *own* carrier, which is the thing
- * `egma self-host phone setup` provides.
+ * `egma self-host setup` provides.
  */
 const NEEDS_THE_PLATFORMS_CARRIER: readonly string[] = ["phone"];
 

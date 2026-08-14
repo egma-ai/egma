@@ -19,12 +19,21 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { PLATFORM_SETTINGS } from "@egma/db";
+
 import { CLI_ENTRY } from "./workspace.ts";
+
+/** The key this stand-in accepts, and the only one it accepts. */
+export const OWNER_KEY = "egma_ak_the-owner-of-this-fake-platform";
 
 export type FakePlatform = {
   readonly url: string;
   /** Every path asked for, so a test can prove what a command did *not* do. */
   readonly asked: readonly string[];
+  /** What it holds now, by setting name, in the clear. */
+  held(): Record<string, string>;
+  /** Every settings write it was sent, in order. */
+  readonly written: readonly Readonly<Record<string, string>>[];
   close(): Promise<void>;
 };
 
@@ -38,26 +47,121 @@ export type FakePlatformOptions = {
    * directory away from anything that could explain it.
    */
   readonly reports?: (own: string) => string;
-  /** Phone readiness, which is reported separately from platform readiness. */
-  readonly phone?: { readonly state: string; readonly missing: readonly string[] };
+  /**
+   * The settings this platform already holds, by name.
+   *
+   * Readiness is computed from these rather than declared beside them, so this
+   * stand-in cannot report itself ready while holding nothing — which is the
+   * exact failure the whole effort is about, and a fixture that could fake its
+   * way past it would hide it here too.
+   */
+  readonly holds?: Readonly<Record<string, string>>;
+  /** Refuse the settings door, as a platform serving several organizations does. */
+  readonly refuses?: { readonly status: number; readonly message: string };
 };
 
-/** A stand-in for a running platform, answering only what `self-host` reads. */
+/** What a person may be shown of a stored value, exactly as the platform does. */
+function hintOf(name: string, value: string): string {
+  const definition = PLATFORM_SETTINGS.find((setting) => setting.name === name);
+  return definition?.secret === true ? value.slice(-4) : value;
+}
+
+function readinessOf(holds: Readonly<Record<string, string>>): {
+  setup: { state: string; missing: string[] };
+  phone: { state: string; missing: string[] };
+} {
+  const missing = PLATFORM_SETTINGS.filter(
+    (setting) => setting.required && holds[setting.name] === undefined,
+  ).map((setting) => setting.label);
+  const phoneMissing = (
+    ["carrier_trunk_address", "carrier_trunk_number", "text_to_speech_provider"] as const
+  )
+    .filter((name) => holds[name] === undefined)
+    .map(
+      (name) =>
+        PLATFORM_SETTINGS.find((setting) => setting.name === name)?.label ?? name,
+    );
+  return {
+    setup: { state: missing.length === 0 ? "ready" : "setup_required", missing },
+    phone: {
+      state: phoneMissing.length === 0 ? "ready" : "setup_required",
+      missing: phoneMissing,
+    },
+  };
+}
+
+/**
+ * A stand-in for a running platform, answering what `self-host` reads and
+ * accepting what it writes.
+ *
+ * **The settings door is a real door here, not a recorder.** A write lands, and
+ * the next read and the next readiness answer are built from what landed — so a
+ * check that setup asks only for what is missing is checked against a platform
+ * that really stopped missing it, rather than against a fixture told to say so.
+ */
 export async function startPlatform(
   options: FakePlatformOptions = {},
 ): Promise<FakePlatform> {
-  const phone = options.phone ?? { state: "setup_required", missing: ["the carrier trunk"] };
+  const holds: Record<string, string> = { ...options.holds };
+  const written: Record<string, string>[] = [];
   const asked: string[] = [];
   const server: Server = createServer((request, answer) => {
     asked.push(`${request.method ?? ""} ${request.url ?? ""}`);
-    answer.writeHead(200, { "content-type": "application/json" });
-    answer.end(
-      JSON.stringify({
-        instance_id: "pf_00000000000000000000000001",
-        origin: options.reports === undefined ? url : options.reports(url),
-        phone: { state: phone.state, missing: phone.missing },
-      }),
-    );
+    const send = (status: number, body: unknown): void => {
+      answer.writeHead(status, { "content-type": "application/json" });
+      answer.end(JSON.stringify(body));
+    };
+
+    if ((request.url ?? "").startsWith("/api/platform/settings")) {
+      if (request.headers.authorization !== `Bearer ${OWNER_KEY}`) {
+        send(401, { error: "not_authenticated", message: "no key" });
+        return;
+      }
+      if (options.refuses !== undefined) {
+        send(options.refuses.status, {
+          error: "not_permitted",
+          message: options.refuses.message,
+        });
+        return;
+      }
+      const settings = (): unknown => ({
+        settings: PLATFORM_SETTINGS.map((setting) => ({
+          name: setting.name,
+          label: setting.label,
+          secret: setting.secret,
+          hint:
+            holds[setting.name] === undefined
+              ? null
+              : hintOf(setting.name, holds[setting.name] as string),
+          updated_at: holds[setting.name] === undefined ? null : new Date().toISOString(),
+        })),
+      });
+      if (request.method === "GET") {
+        send(200, settings());
+        return;
+      }
+      let body = "";
+      request.on("data", (chunk: Buffer) => (body += chunk.toString("utf8")));
+      request.on("end", () => {
+        const values = JSON.parse(body === "" ? "{}" : body) as Record<string, string>;
+        if (Object.keys(values).length === 0) {
+          send(422, { error: "unprocessable", message: "a write names at least one setting" });
+          return;
+        }
+        written.push(values);
+        Object.assign(holds, values);
+        send(200, settings());
+      });
+      return;
+    }
+
+    const readiness = readinessOf(holds);
+    send(200, {
+      instance_id: "pf_00000000000000000000000001",
+      origin: options.reports === undefined ? url : options.reports(url),
+      setup: readiness.setup,
+      phone: readiness.phone,
+    });
   });
   await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
   const { port } = server.address() as AddressInfo;
@@ -65,6 +169,8 @@ export async function startPlatform(
   return {
     url,
     asked,
+    written,
+    held: () => ({ ...holds }),
     close: () =>
       new Promise<void>((closed) => {
         server.close(() => closed());
@@ -86,6 +192,12 @@ const RECORDED_VARIABLES = [
   "EGMA_BASE_URL",
   "EGMA_LIVEKIT_API_KEY",
   "EGMA_LIVEKIT_API_SECRET",
+  // Two settings, recorded so that a check can prove the *absence* of one. A
+  // workspace upgraded from the release that kept settings beside the
+  // deployment still has these lines in its file, and handing them to Compose
+  // would seed the platform from that file all over again.
+  "EGMA_PHONE_SOURCE_NUMBER",
+  "EGMA_PERSONA_MODEL_API_KEY",
 ] as const;
 
 export type PlatformWorkspace = {
@@ -96,10 +208,17 @@ export type PlatformWorkspace = {
   /** Where that stand-in appends what it was asked for. */
   readonly callsFile: string;
   dockerCalls(): Promise<string>;
-  /** The platform's own configuration file, whether or not it exists yet. */
+  /** The workspace's bootstrap variables, whether or not the file exists yet. */
   readonly configFile: string;
   /** What egma wrote there, as names and values. */
   storedConfig(): Promise<Record<string, string>>;
+  /**
+   * Where this run's keys live, so that a check never reads or writes the
+   * credentials of whoever is running the suite.
+   */
+  readonly egmaHome: string;
+  /** Hand this machine an owner's key for a platform, as `egma login` would. */
+  signIn(platform: { readonly url: string }): Promise<void>;
 };
 
 /**
@@ -128,12 +247,21 @@ export async function makePlatformWorkspace(prefix: string): Promise<PlatformWor
   await chmod(dockerShim, 0o755);
 
   const configFile = path.join(dir, ".egma-platform", "platform.env");
+  const egmaHome = path.join(dir, "egma-home");
+  await mkdir(egmaHome, { recursive: true });
   return {
     dir,
     binDir,
     dockerShim,
     callsFile,
     configFile,
+    egmaHome,
+    signIn: async (platform) => {
+      await writeFile(
+        path.join(egmaHome, "credentials"),
+        JSON.stringify({ platforms: { [platform.url]: { key: OWNER_KEY } } }),
+      );
+    },
     dockerCalls: () => readFile(callsFile, "utf8"),
     storedConfig: async () => {
       const found: Record<string, string> = {};
@@ -163,14 +291,25 @@ export type SelfHostRun = {
  * deliberately *not* a platform workspace.
  */
 export async function runSelfHost(
-  workspace: { readonly dir: string; readonly binDir: string },
+  workspace: {
+    readonly dir: string;
+    readonly binDir: string;
+    readonly egmaHome?: string;
+  },
   argv: readonly string[],
   env: NodeJS.ProcessEnv = {},
 ): Promise<SelfHostRun> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [CLI_ENTRY, "self-host", ...argv], {
       cwd: workspace.dir,
-      env: { ...process.env, PATH: `${workspace.binDir}:${process.env.PATH ?? ""}`, ...env },
+      env: {
+        ...process.env,
+        PATH: `${workspace.binDir}:${process.env.PATH ?? ""}`,
+        // Named outright rather than by moving HOME, so a check can be certain
+        // it neither reads nor writes the keys of whoever is running the suite.
+        ...(workspace.egmaHome === undefined ? {} : { EGMA_HOME: workspace.egmaHome }),
+        ...env,
+      },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";

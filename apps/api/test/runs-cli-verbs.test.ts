@@ -97,7 +97,7 @@ async function signedInAs(person: Customer): Promise<SignedIn> {
 }
 
 /**
- * A deployment `egma self-host phone setup` has finished with: somewhere to
+ * A deployment `egma self-host setup` has finished with: somewhere to
  * route a call, a number it comes from, and a voice to speak with. Non-secret,
  * all three — see `phone-readiness.ts`.
  */
@@ -313,7 +313,7 @@ describe("starting a run from the terminal's own code", () => {
         "and the source number and the text-to-speech provider. Whoever runs " +
         "this platform makes it ready with one command in the platform " +
         "workspace: " +
-        "egma self-host phone setup.",
+        "egma self-host setup.",
     );
   });
 

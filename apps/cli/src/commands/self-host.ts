@@ -19,10 +19,19 @@
  *   prepares the workspace: a workspace with no media-server credential is
  *   given one, generated here and written beside the other bootstrap
  *   variables, so that no deployment runs on a pair anyone can read.
- * - **`phone setup`** makes that deployment able to place a call. It asks for a
- *   Twilio account, a number that account already owns, and one OpenAI key;
- *   shows a plan; and on approval does the carrier paperwork, activates the
- *   configuration and waits for the platform to report phone readiness.
+ * - **`setup`** configures that deployment. One command for the whole platform
+ *   rather than two with different state: it asks the platform what it is
+ *   missing, asks the operator for each of those in a fixed order, does the
+ *   carrier paperwork where the phone half is among them, and **writes every
+ *   answer through the platform's own API**. There is no second setup command
+ *   and no file of settings beside the deployment.
+ *
+ * **Nothing here seals anything, and nothing here keeps a setting.** The
+ * platform owns its settings: they live sealed in its store, they survive a
+ * restart and an upgrade and a move to another machine, and each simulator is
+ * handed them on the work order it claims. What this CLI still writes to the
+ * workspace is the bootstrap variables a container reads when it is created —
+ * see `BOOTSTRAP_VARIABLES` — and nothing else.
  *
  * **The address `up` prints is the address the platform reports.** They are one
  * value, not two that happen to agree: the CLI refuses to send a repository's
@@ -35,6 +44,9 @@
 
 import path from "node:path";
 
+import { credentialsFileIn } from "../platform/credentials.ts";
+import { PlatformUnreachableError } from "../platform/device-flow.ts";
+import { signedInAt } from "../platform/signed-in.ts";
 import { compose, DockerMissingError, type ComposeOptions } from "../self-host/compose.ts";
 import {
   recordMediaCredential,
@@ -42,15 +54,15 @@ import {
   type MediaCredential,
 } from "../self-host/media-credential.ts";
 import {
+  askOptionally,
   askPlainly,
   askSecret,
   asStop,
   keyHint,
+  CARRIER_VARIABLES,
   NoAnswerError,
   StoppedError,
-  PLAIN_VARIABLES,
   REFUSED_SECRET_ARGUMENTS,
-  SECRET_VARIABLES,
   secretArgumentRefusal,
   type AskOptions,
 } from "../self-host/protected-input.ts";
@@ -61,6 +73,14 @@ import {
   type Receipt,
 } from "../self-host/receipt.ts";
 import {
+  inputFor,
+  NotSignedInError,
+  PlatformRefusedError,
+  readSettings,
+  writeSettings,
+  type PlatformSettingsAccess,
+} from "../self-host/settings.ts";
+import {
   applyCarrier,
   ARTIFACT_NAME,
   CarrierError,
@@ -68,11 +88,16 @@ import {
   TWILIO_API_ROOT,
   TWILIO_TRUNKING_ROOT,
   type CarrierPlan,
+  type CarrierResult,
   type CarrierStep,
+  type TwilioAccess,
 } from "../self-host/twilio.ts";
 import {
+  bootstrapVariables,
   findWorkspace,
   NoPlatformWorkspaceError,
+  PLATFORM_CONFIG_FILE,
+  PLATFORM_DIRECTORY,
   readPlatformConfig,
   writePlatformConfig,
 } from "../self-host/workspace.ts";
@@ -85,6 +110,15 @@ export const SELF_HOST_EXIT = {
   noWorkspace: 1,
   /** An input was missing and there was nobody to ask. */
   noAnswer: 2,
+  /**
+   * This machine holds no key for the platform being set up.
+   *
+   * Its own ending because the move it asks for is its own: `egma login`, once,
+   * against this platform. Every answer setup collects is written through the
+   * platform's API — which is what keeps the API the only thing that seals —
+   * and that door opens for an organization owner and for nobody else.
+   */
+  notSignedIn: 3,
   /** The carrier or the platform refused, and said why. */
   refused: 4,
   /** A plan was shown and nothing was approved, so nothing was written. */
@@ -132,9 +166,6 @@ const STARTED = [
   "livekit-sip",
   "livekit-redis",
 ] as const;
-
-/** Which services phone configuration reaches, and therefore what is recreated. */
-const PHONE_SERVICES = ["api", "simulator", "grader"] as const;
 
 /**
  * The three that authenticate each other with the media credential.
@@ -263,7 +294,19 @@ export async function runSelfHostCommand(options: SelfHostOptions): Promise<numb
 
   try {
     if (verb === "up") return await runUp(options, invocation);
-    if (verb === "phone setup") return await runPhoneSetup(options, invocation);
+    if (verb === "setup") return await runSetup(options, invocation);
+    // The command this one replaced, answered by name rather than by the
+    // general "does not know" below. Somebody typing it is following
+    // documentation or a shell history from before the settings moved into the
+    // platform, and the one useful thing to say is which words do it now.
+    if (verb === "phone setup") {
+      options.fail(
+        "egma self-host phone setup is gone. There is one setup command now, and it " +
+          "covers the whole platform rather than the phone alone:\n" +
+          "  egma self-host setup",
+      );
+      return SELF_HOST_EXIT.noWorkspace;
+    }
   } catch (error) {
     if (error instanceof NoPlatformWorkspaceError || error instanceof DockerMissingError) {
       options.out(`status: refused\nreason: ${error.message}`);
@@ -274,6 +317,20 @@ export async function runSelfHostCommand(options: SelfHostOptions): Promise<numb
       options.out(`status: refused\nreason: ${error.message}`);
       options.fail(error.message);
       return SELF_HOST_EXIT.noAnswer;
+    }
+    if (error instanceof NotSignedInError) {
+      options.out(`status: refused\nreason: ${error.message}`);
+      options.fail(error.message);
+      return SELF_HOST_EXIT.notSignedIn;
+    }
+    // Not answering and answering "no" are different problems with different
+    // next moves — start your platform, against you are signed in as somebody
+    // who may not do this — so both are named rather than collapsed into one
+    // sentence about setup failing.
+    if (error instanceof PlatformUnreachableError || error instanceof PlatformRefusedError) {
+      options.out(`status: refused\nreason: ${error.message}`);
+      options.fail(error.message);
+      return SELF_HOST_EXIT.refused;
     }
     if (error instanceof CarrierError) {
       options.out(`status: refused\nreason: ${error.message}`);
@@ -305,8 +362,8 @@ export async function runSelfHostCommand(options: SelfHostOptions): Promise<numb
 
   options.fail(
     `egma self-host does not know ${verb === "" ? "that" : `"${verb}"`}. It knows:\n` +
-      "  egma self-host up            Start the whole platform.\n" +
-      "  egma self-host phone setup   Make it able to place phone calls.",
+      "  egma self-host up      Start the whole platform.\n" +
+      "  egma self-host setup   Configure it: the persona's providers and the carrier.",
   );
   return SELF_HOST_EXIT.noWorkspace;
 }
@@ -319,14 +376,17 @@ async function runUp(
 ): Promise<number> {
   const workspace = findWorkspace(invocation.cwd ?? options.cwd);
   const stored = readPlatformConfig(workspace);
+  // Everything that reaches a container comes through this one door, so a
+  // settings line an older egma left in that file is inert by construction
+  // rather than by anybody remembering. See `BOOTSTRAP_VARIABLES`.
+  const boot = bootstrapVariables(stored);
 
   // One address, decided here. The environment wins because a deployment
-  // reached on a LAN address says so there; the stored configuration is next,
-  // so a platform set up once keeps its address; the compose default is last.
+  // reached on a LAN address says so there; what the workspace recorded is
+  // next, so a platform set up once keeps its address; the compose default is
+  // last.
   const address =
-    options.env.EGMA_BASE_URL?.trim() ||
-    stored.EGMA_BASE_URL?.trim() ||
-    DEFAULT_PLATFORM_ADDRESS;
+    options.env.EGMA_BASE_URL?.trim() || boot.EGMA_BASE_URL?.trim() || DEFAULT_PLATFORM_ADDRESS;
 
   options.out(`workspace: ${workspace}`);
   options.out(`url: ${address}`);
@@ -351,7 +411,7 @@ async function runUp(
   if (media.generated) for (const line of MEDIA_CREDENTIAL_NOTICE) options.fail(line);
 
   const environment: Record<string, string> = {
-    ...stored,
+    ...boot,
     ...media.values,
     EGMA_BASE_URL: address,
   };
@@ -413,6 +473,15 @@ async function runUp(
 
   options.out(`platform: ${platform.instanceId}`);
   options.out(`services: ${STARTED.join(" ")}`);
+  // Two facts about one deployment. The platform answers for its whole
+  // configuration now — the persona's providers as much as the carrier — and it
+  // answers for the phone separately, because a platform with no carrier runs
+  // chat and text simulations perfectly well and calling that unhealthy would
+  // be a lie that stops a first run dead.
+  options.out(`setup: ${platform.setupState}`);
+  if (platform.setupMissing.length > 0) {
+    options.out(`setup_missing: ${platform.setupMissing.join(", ")}`);
+  }
   options.out(`phone: ${platform.phoneState}`);
   if (platform.phoneMissing.length > 0) {
     options.out(`phone_missing: ${platform.phoneMissing.join(", ")}`);
@@ -423,9 +492,11 @@ async function runUp(
   options.fail("");
   options.fail(`egma is running at ${address}`);
   options.fail(
-    platform.phoneState === "ready"
-      ? "Phone simulations are set up."
-      : "Phone simulations need one more command here: egma self-host phone setup",
+    platform.setupState === "ready"
+      ? "It is configured, and it keeps that configuration through a restart, an upgrade and a move to another machine."
+      : `It still needs ${
+          platform.setupMissing.length === 0 ? "setting up" : platform.setupMissing.join(", ")
+        }. One more command here: egma self-host setup`,
   );
   options.fail("");
   options.fail("In your agent repository, once:");
@@ -458,9 +529,25 @@ const MEDIA_CREDENTIAL_NOTICE = [
 type PlatformFacts = {
   readonly instanceId: string;
   readonly origin: string;
+  /** Whether the whole platform has been configured, carrier included. */
+  readonly setupState: string;
+  readonly setupMissing: readonly string[];
   readonly phoneState: string;
   readonly phoneMissing: readonly string[];
 };
+
+type Readiness = { readonly state?: unknown; readonly missing?: unknown };
+
+function readinessIn(reported: Readiness | undefined): {
+  state: string;
+  missing: readonly string[];
+} {
+  const missing = reported?.missing;
+  return {
+    state: typeof reported?.state === "string" ? reported.state : "unknown",
+    missing: Array.isArray(missing) ? missing.map(String) : [],
+  };
+}
 
 async function readPlatform(address: string): Promise<PlatformFacts | null> {
   try {
@@ -471,15 +558,19 @@ async function readPlatform(address: string): Promise<PlatformFacts | null> {
     const body = (await answer.json()) as {
       instance_id?: unknown;
       origin?: unknown;
-      phone?: { state?: unknown; missing?: unknown };
+      setup?: Readiness;
+      phone?: Readiness;
     };
     if (typeof body.instance_id !== "string" || typeof body.origin !== "string") return null;
-    const missing = body.phone?.missing;
+    const setup = readinessIn(body.setup);
+    const phone = readinessIn(body.phone);
     return {
       instanceId: body.instance_id,
       origin: body.origin,
-      phoneState: typeof body.phone?.state === "string" ? body.phone.state : "unknown",
-      phoneMissing: Array.isArray(missing) ? missing.map(String) : [],
+      setupState: setup.state,
+      setupMissing: setup.missing,
+      phoneState: phone.state,
+      phoneMissing: phone.missing,
     };
   } catch {
     return null;
@@ -499,15 +590,45 @@ async function waitForPlatform(
   }
 }
 
-// -- phone setup --------------------------------------------------------------
+// -- setup --------------------------------------------------------------------
 
-async function runPhoneSetup(
+/**
+ * `egma self-host setup`: one command for the whole platform's configuration.
+ *
+ * **It asks the platform what it is missing, and asks the operator for exactly
+ * that.** Which settings exist, what each is called and what order they come in
+ * are the platform's answers, not this command's opinion — so a setting added
+ * to the platform's catalog is a setting the interview asks for with nothing
+ * kept in step by hand. A setting the platform already holds is never asked for
+ * again, which is what makes running this twice cost nothing.
+ *
+ * **Every answer is written through the API.** Nothing here seals, nothing here
+ * holds an encryption key, and nothing here writes a setting to a file. That is
+ * the reversal this whole effort is: the settings used to live in a file only
+ * this CLI read, so a platform started any other way had none of them, every
+ * health check still passed, and the failure arrived minutes later as a carrier
+ * or provider refusal naming nothing about configuration.
+ *
+ * **Everything is asked before anything is written.** An operator can gather
+ * what they need before they start — `--plan` prints exactly that list — and a
+ * decline or a Ctrl-C part way through leaves both the platform and the carrier
+ * exactly as they were.
+ *
+ * The carrier half is the part that is not typed: a trunk hostname and a SIP
+ * credential are what the paperwork with Twilio *produces*, so this asks for
+ * the account, a number that account already owns and the Auth Token, shows a
+ * plan, and derives the four carrier settings from what came back. The Auth
+ * Token opens the whole account and is kept nowhere.
+ */
+async function runSetup(
   options: SelfHostOptions,
   invocation: SelfHostInvocation,
 ): Promise<number> {
   const workspace = findWorkspace(invocation.cwd ?? options.cwd);
   const mode = invocation;
   const stored = readPlatformConfig(workspace);
+  // The one door between that file and a container. See `BOOTSTRAP_VARIABLES`.
+  const boot = bootstrapVariables(stored);
   const ask: AskOptions = {
     env: options.env,
     input: options.stdin,
@@ -515,272 +636,339 @@ async function runPhoneSetup(
     signal: options.signal,
   };
 
-  // The two that are not secrets, asked for plainly. An account SID is printed
-  // on Twilio's own dashboard and a source number is on every caller's handset.
-  const accountSid = await askPlainly(
-    PLAIN_VARIABLES.accountSid,
-    "Twilio Account SID",
-    ask,
+  const address =
+    options.env.EGMA_BASE_URL?.trim() || boot.EGMA_BASE_URL?.trim() || DEFAULT_PLATFORM_ADDRESS;
+
+  // Where this is happening, for the person reading. Not in JSON mode: standard
+  // output carries exactly one document there and nothing else, and two lines
+  // in front of it would put a coding agent back to parsing terminal text.
+  if (!mode.asJson) {
+    options.out(`workspace: ${workspace}`);
+    options.out(`url: ${address}`);
+  }
+
+  // Who is asking. The settings door opens for an organization owner and for
+  // nobody else — they are the deployment's own provider credentials, which is
+  // a decision of the same kind as billing — so setup is a signed-in command.
+  // It says which command mints that key rather than failing on a 401 nobody
+  // can act on.
+  const signedIn = await signedInAt({
+    url: address,
+    credentialsFile: credentialsFileIn(options.env),
+  });
+  if (signedIn === null) throw new NotSignedInError(address);
+  const access: PlatformSettingsAccess = { url: address, key: signedIn.key };
+
+  const held = await readSettings(access);
+  const missing = held.filter((setting) => !setting.held);
+  const toAsk = missing.filter((setting) => inputFor(setting.name)?.supply === "asked");
+  // The carrier is wanted when either half the phone stands on is absent. Its
+  // username and password are not: a trunk a carrier authenticates by the
+  // address it came from is a real deployment, and demanding them would make
+  // the phone unreachable for the people whose carrier works that way.
+  const carrierWanted = missing.some(
+    (setting) =>
+      inputFor(setting.name)?.supply === "carrier" &&
+      inputFor(setting.name)?.required === true,
   );
-  const sourceNumber = normalizeNumber(
-    await askPlainly(
-      PLAIN_VARIABLES.sourceNumber,
-      "A voice number this Twilio account already owns, in E.164 (egma never buys one)",
-      ask,
-    ),
-  );
-  // The three that are. Never an argument, never echoed, never written to a
-  // receipt, and the first of them never written anywhere at all.
-  const authAnswer = await askSecret(
-    "twilio-auth-token",
-    "Twilio Auth Token (used by this command only, never kept)",
-    ask,
-  );
-  const openaiAnswer = await askSecret(
-    "openai-api-key",
-    "OpenAI API key (the persona's voice, its ears, its words and the default judge)",
-    ask,
-  );
-  const authToken = authAnswer.value;
-  const openaiKey = openaiAnswer.value;
 
-  // Which key this is about to configure the whole platform with, and where it
-  // came from. `OPENAI_API_KEY` is a variable most developers already export,
-  // so a run that reads it asks nothing and looks exactly like a run that was
-  // told — and a stale exported key surfaces an hour later as a provider
-  // refusing every turn rather than as a mistake anybody could see being made.
-  const credentialSources = {
-    twilio_auth_token_from: authAnswer.from,
-    openai_key_from: openaiAnswer.from,
-    openai_key_hint: keyHint(openaiKey),
-  } as const;
-
-  const secrets = [authToken, openaiKey] as const;
-  const access = {
-    accountSid,
-    authToken,
-    apiRoot: options.env.EGMA_TWILIO_API_ROOT?.trim() || TWILIO_API_ROOT,
-    trunkingRoot: options.env.EGMA_TWILIO_TRUNKING_ROOT?.trim() || TWILIO_TRUNKING_ROOT,
-  };
-
-  // Planning reads the account and changes nothing, here or there.
-  const plan = await planCarrier(access, { number: sourceNumber, name: ARTIFACT_NAME });
-  const planDocument = planLines(plan, workspace);
-  sweptOf(planDocument.join("\n"), secrets);
-
-  // In JSON mode the plan is not printed yet: standard output carries exactly
-  // one document, at the end, so that a coding agent can parse the whole answer
-  // rather than pick a document out of a stream of lines. In the plain mode a
-  // person is reading, so the plan goes up as soon as it is known — they are
-  // about to be asked to approve it.
-  if (!mode.asJson) for (const line of planDocument) options.out(line);
-
-  const planFacts = {
-    command: "self-host phone setup",
-    ...credentialSources,
-    account_sid: plan.accountSid,
-    source_number: plan.sourceNumber,
-    source_number_sid: plan.sourceNumberSid,
-    trunk_name: plan.trunkName,
-    trunk_sid: plan.trunkSid,
-    trunk_address: plan.trunkAddress,
-    buys_a_number: false,
-    steps: plan.steps,
-  } as const;
+  /**
+   * Whether there is anything left for setup to do at all.
+   *
+   * **Decided on the settings readiness waits for, and on no others.** Four
+   * settings are ones an operator *may* supply rather than must: the
+   * text-to-speech model and voice, which the simulator has a working default
+   * for, and the carrier trunk's username and password, which a carrier that
+   * authenticates a trunk by the address it came from never issues. Counting
+   * those as work outstanding would ask two questions on every run of a
+   * platform that has been ready for a month, which is the opposite of
+   * "running setup on a configured platform changes nothing".
+   *
+   * They are still offered — while there is anything else to ask, the interview
+   * walks every setting the platform does not hold, so somebody setting up gets
+   * the chance to name a voice. Changing one afterwards is the settings form's
+   * job, not a reason to reopen the interview.
+   */
+  const configured =
+    !carrierWanted &&
+    !toAsk.some((setting) => inputFor(setting.name)?.required === true);
 
   if (mode.planOnly) {
-    // **No receipt, and no file of any kind.** Planning reads provider state
-    // and changes neither provider nor local state — a receipt is local state,
-    // and one written here made `"changed": "nothing"` and a path to a file
-    // that had just been created two fields of the same answer. It was also
-    // what created `.egma-platform` at the default mode, before the write that
-    // makes it private ever ran.
-    answer(
-      options,
-      mode,
-      { ...planFacts, mode: "plan", status: "planned", changed: "nothing" },
-      secrets,
+    // What setup would ask for, in the order it would ask, and nothing else. No
+    // question, no read of anybody's carrier account and no file: this mode
+    // exists so that an operator gathers what they need *before* they start,
+    // rather than discovering a missing key one setting at a time.
+    answer(options, mode, {
+      command: "self-host setup",
+      mode: "plan",
+      status: configured ? "ready" : "planned",
+      asks: [
+        ...toAsk.map((setting) => setting.label),
+        ...(carrierWanted
+          ? ["your Twilio account, a voice number it already owns, and its Auth Token"]
+          : []),
+      ],
+      holds: held.filter((setting) => setting.held).map((setting) => setting.name),
+      platform_url: address,
+      changed: "nothing",
+    });
+    return SELF_HOST_EXIT.ok;
+  }
+
+  if (configured) {
+    // Already configured. Nothing is asked, nobody's carrier is read and no
+    // setting is written — and that is said rather than left to be inferred
+    // from a command that appeared to do something.
+    //
+    // The media credential is still seen to, because it is the workspace's
+    // rather than the platform's: a deployment upgraded from before egma
+    // generated the pair at all can be perfectly configured and still be
+    // running on a credential published in this repository.
+    const media = await settleMediaCredential(options, workspace, stored, boot, address);
+    answer(options, mode, {
+      command: "self-host setup",
+      mode: "apply",
+      status: "ready",
+      settings_written: [],
+      media_credential: media.generated ? "generated" : "existing",
+      changed: media.generated ? "the media-server credential" : "nothing",
+      platform_url: address,
+    });
+    options.fail("");
+    options.fail(
+      "This egma already holds every setting it needs. Nothing was asked and nothing was written.",
     );
     return SELF_HOST_EXIT.ok;
   }
 
-  if (!mode.approved) {
-    const approved = await askApproval(options, ask);
-    if (!approved) {
+  // -- the interview ----------------------------------------------------------
+  //
+  // Everything, before anything is written. What each answer may arrive in is
+  // the same environment variable the platform seeds that setting from, so a
+  // script that already exports them drives this with nobody watching.
+  const answers: Record<string, string> = {};
+  const keySources: Record<string, string> = {};
+  const secrets: string[] = [];
+
+  for (const setting of toAsk) {
+    const input = inputFor(setting.name);
+    if (input === null || input.supply !== "asked") continue;
+
+    if (input.secret) {
+      const exported = options.env[input.variable]?.trim() ?? "";
+      // A secret egma can do without is never demanded of a run with nobody
+      // watching: there is nothing to type and no default worth inventing.
+      if (exported === "" && options.stdin.isTTY !== true && !input.required) continue;
+      const answered = await askSecret(
+        input.variable,
+        `${setting.label} (not shown as you type)`,
+        ask,
+      );
+      answers[setting.name] = answered.value;
+      // Where a key came from, said out loud. A variable most developers
+      // already export makes a run that reads one look exactly like a run that
+      // was told, and a stale exported key surfaces an hour later as a provider
+      // refusing every turn rather than as a mistake anybody saw being made.
+      keySources[`${setting.name}_from`] = answered.from;
+      keySources[`${setting.name}_hint`] = keyHint(answered.value);
+      secrets.push(answered.value);
+      continue;
+    }
+
+    const typed = await askOptionally(input.variable, setting.label, ask, input.suggested);
+    if (typed === null || typed === "") {
+      if (input.required) throw new NoAnswerError(setting.label, input.variable);
+      continue;
+    }
+    answers[setting.name] = typed;
+  }
+
+  // -- the carrier ------------------------------------------------------------
+  let carrier: TwilioAccess | null = null;
+  let sourceNumber = "";
+  if (carrierWanted) {
+    // Declining is an ordinary answer. A platform with no carrier runs chat and
+    // text simulations perfectly well, and a run with nobody watching that was
+    // given no Twilio account has said the same thing — so neither is refused.
+    // The readiness answer at the end names the phone half as still missing.
+    const accountSid =
+      (await askOptionally(
+        CARRIER_VARIABLES.accountSid,
+        "Twilio Account SID (Enter to leave the phone half for later)",
+        ask,
+        null,
+      )) ?? "";
+    if (accountSid !== "") {
+      sourceNumber = normalizeNumber(
+        await askPlainly(
+          CARRIER_VARIABLES.sourceNumber,
+          "A voice number this Twilio account already owns, in E.164 (egma never buys one)",
+          ask,
+        ),
+      );
+      const authAnswer = await askSecret(
+        CARRIER_VARIABLES.authToken,
+        "Twilio Auth Token (used by this command only, never kept)",
+        ask,
+      );
+      secrets.push(authAnswer.value);
+      carrier = {
+        accountSid,
+        authToken: authAnswer.value,
+        apiRoot: options.env.EGMA_TWILIO_API_ROOT?.trim() || TWILIO_API_ROOT,
+        trunkingRoot: options.env.EGMA_TWILIO_TRUNKING_ROOT?.trim() || TWILIO_TRUNKING_ROOT,
+      };
+    }
+  }
+
+  let plan: CarrierPlan | null = null;
+  let applied: CarrierResult | null = null;
+  if (carrier !== null) {
+    // Planning reads the account and changes nothing, here or there.
+    plan = await planCarrier(carrier, { number: sourceNumber, name: ARTIFACT_NAME });
+    const planDocument = planLines(plan, workspace);
+    sweptOf(planDocument.join("\n"), secrets);
+    // In JSON mode the plan is not printed yet: standard output carries exactly
+    // one document, at the end, so that a coding agent parses the whole answer
+    // rather than picking one out of a stream of lines. In the plain mode a
+    // person is reading and is about to be asked to approve it.
+    if (!mode.asJson) for (const line of planDocument) options.out(line);
+
+    if (!mode.approved && !(await askApproval(options, ask))) {
       answer(
         options,
         mode,
-        { ...planFacts, mode: "apply", status: "not_approved", changed: "nothing" },
+        {
+          command: "self-host setup",
+          mode: "apply",
+          status: "not_approved",
+          // Nothing at all, and that is why every question came first: the
+          // settings already answered are not written either, so declining
+          // leaves the platform and the carrier exactly as they were.
+          changed: "nothing",
+          account_sid: plan.accountSid,
+          source_number: plan.sourceNumber,
+          steps: plan.steps,
+          platform_url: address,
+        },
         secrets,
       );
       return SELF_HOST_EXIT.notApproved;
     }
+
+    applied = await applyCarrier(carrier, { number: sourceNumber, name: ARTIFACT_NAME });
+    secrets.push(applied.sipPassword);
+    // The four the paperwork produced, under the names the platform stores
+    // them by. The SIP credential authenticates one trunk and can do nothing
+    // else on the account; that is the whole reason the Auth Token is a
+    // setup-time input rather than anybody's variable at all.
+    answers.carrier_trunk_address = applied.trunkAddress;
+    answers.carrier_trunk_number = applied.sourceNumber;
+    answers.carrier_trunk_username = applied.sipUsername;
+    answers.carrier_trunk_password = applied.sipPassword;
   }
 
-  const applied = await applyCarrier(access, { number: sourceNumber, name: ARTIFACT_NAME });
-
-  // The address the platform is reached at survives phone setup untouched: the
-  // agreement `up` established is not this command's to move.
-  const address =
-    options.env.EGMA_BASE_URL?.trim() ||
-    stored.EGMA_BASE_URL?.trim() ||
-    DEFAULT_PLATFORM_ADDRESS;
-
-  // The media credential, made here only if neither this command's environment
-  // nor the workspace already has one. In the ordinary order `up` has already
-  // made it: this command waits on a running platform, and a running platform
-  // was started by `up`. What this covers is a deployment brought up before
-  // egma generated the pair at all, whose first act after upgrading is carrier
-  // setup.
+  // -- the write --------------------------------------------------------------
   //
-  // It goes through the same one-winner step `up` does, so a setup racing a
-  // start cannot leave the two of them running on different pairs. The write
-  // further down then re-states the same pair beside the carrier settings.
-  const media = await recordMediaCredential(workspace, options.env);
-
-  const configuration: Record<string, string> = {
-    ...stored,
-    ...media.values,
-    EGMA_BASE_URL: address,
-
-    // The carrier, written under the names the API seeds the platform's own
-    // settings from. **These reach no simulator container.** The API seals
-    // them into the platform's store on start, and each simulator is handed
-    // them on the work order it claims — which is why the SIP credential is
-    // here once rather than twice, and why a second simulator on another
-    // machine needs nothing copied to it. The SIP credential authenticates
-    // one trunk and can do nothing else on the account; that is the whole
-    // reason the Auth Token is a setup-time input rather than anybody's
-    // variable at all.
-    EGMA_MEDIA_BACKEND: "livekit",
-    EGMA_PHONE_TRUNK_ADDRESS: applied.trunkAddress,
-    EGMA_PHONE_SOURCE_NUMBER: applied.sourceNumber,
-    EGMA_PHONE_TRUNK_USERNAME: applied.sipUsername,
-    EGMA_PHONE_TRUNK_PASSWORD: applied.sipPassword,
-
-    // One key, four jobs: the persona's words, its voice, its ears, and the
-    // judge a project is given when it has configured none. Pipecat's own
-    // OpenAI integrations and its Silero detector; egma configures them and
-    // implements no speech provider of its own. The first three are the
-    // platform's settings too, and travel the same way the carrier does.
-    EGMA_PERSONA_MODEL_PROVIDER: "openai",
-    EGMA_PERSONA_MODEL: options.env.EGMA_PERSONA_MODEL?.trim() || "gpt-4o",
-    EGMA_PERSONA_MODEL_API_KEY: openaiKey,
-    EGMA_PERSONA_STT_PROVIDER: "openai",
-    EGMA_PERSONA_STT_API_KEY: openaiKey,
-    EGMA_PERSONA_TTS_PROVIDER: "openai",
-    EGMA_PERSONA_TTS_API_KEY: openaiKey,
-    EGMA_PERSONA_VAD_PROVIDER: "silero",
-    EGMA_JUDGE_PROVIDER: "openai",
-    EGMA_JUDGE_MODEL: options.env.EGMA_JUDGE_MODEL?.trim() || "gpt-4o",
-    EGMA_JUDGE_API_KEY: openaiKey,
-  };
-
   // **The one window this command cannot make atomic, made legible instead.**
   //
-  // Twilio has already accepted a new SIP password by the time this runs, and
-  // it accepts only that one — the old password stopped working the moment the
-  // rotation landed. If this write fails, the carrier and this machine disagree
-  // about the credential, and the symptom is every outbound call failing
-  // authentication with nothing on screen to explain it.
-  //
-  // There is no transaction across a carrier's API and a local file, and
-  // reordering does not help: writing first would leave a password here that
-  // Twilio never accepted. So the failure is caught and named, and the recovery
-  // is stated — running setup again mints another password and writes both ends
-  // together, which is the whole repair.
-  let configFile: string;
-  try {
-    configFile = writePlatformConfig(workspace, configuration);
-  } catch (cause) {
-    throw new CarrierError(
-      `Twilio accepted a new SIP password for ${applied.sipUsername}, and this machine could not write it down: ${(cause as Error).message}. The carrier now accepts only a password that is not saved here, so calls would fail to authenticate. Run \`egma self-host phone setup\` again — it mints another password and writes both ends together. Nothing was charged and no call was placed.`,
-    );
+  // Twilio has already accepted a new SIP password by the time this runs, and it
+  // accepts only that one. If the platform will not take it, the carrier and
+  // this deployment disagree about the credential, and the symptom is every
+  // outbound call failing authentication with nothing on screen to explain it.
+  // There is no transaction across a carrier's API and a platform's store, and
+  // reordering does not help: writing first would store a password Twilio never
+  // accepted. So the failure is caught and named, and the recovery is stated.
+  const names = Object.keys(answers);
+  if (names.length > 0) {
+    try {
+      await writeSettings(access, answers);
+    } catch (cause) {
+      if (applied === null) throw cause;
+      throw new CarrierError(
+        `Twilio accepted a new SIP password for ${applied.sipUsername}, and this platform would not take it: ${
+          (cause as Error).message
+        }. The carrier now accepts only a password egma could not store, so calls would fail to authenticate. Run \`egma self-host setup\` again — it mints another password and writes both ends together. Nothing was charged and no call was placed.`,
+      );
+    }
   }
 
-  const composeOptions: ComposeOptions = {
-    workspace,
-    environment: configuration,
-    signal: options.signal,
-    onLine: (line) => options.fail(line),
-  };
-
-  // Activate it. Recreating rather than restarting, because a container keeps
-  // the environment it was created with and a restart would come back with the
-  // configuration it did not have.
+  // The workspace's own credential, seen to only now — after the last question
+  // and after the approval, so that a decline or a Ctrl-C really does leave
+  // this machine exactly as it was.
   //
-  // The media three join the phone three when this run minted the media
-  // credential, for exactly the same reason one step down: recreating the
-  // simulator on a new pair while the media server keeps the old one is a
-  // deployment whose parts no longer authenticate each other.
-  const recreating = media.generated
-    ? [...new Set([...PHONE_SERVICES, ...MEDIA_SERVICES])]
-    : [...PHONE_SERVICES];
-  const recreated = await compose(
-    ["up", "-d", "--wait", "--wait-timeout", "300", "--force-recreate", ...recreating],
-    composeOptions,
-  );
+  // A setting needs no restart at all any more: the platform reads its settings
+  // from its own store for each simulation, so a key supplied here applies to
+  // the next simulation with nothing recreated. Only a freshly minted media
+  // pair replaces a container.
+  const media = await settleMediaCredential(options, workspace, stored, boot, address);
 
-  const readiness =
-    recreated.code === 0 ? await waitForPhone(address, options.signal) : null;
+  // Read once rather than waited for. Readiness is built from the store on
+  // every request, so the answer is already true the moment the write lands.
+  const platform = await readPlatform(address);
 
+  const configFile = path.join(PLATFORM_DIRECTORY, PLATFORM_CONFIG_FILE);
   const receipt: Receipt = {
-    command: "self-host phone setup",
+    command: "self-host setup",
     at: new Date().toISOString(),
-    result: readiness === "ready" ? "applied" : "failed",
+    result: platform?.setupState === "ready" ? "applied" : "failed",
     facts: {
-      ...nonSecretFacts(plan),
-      trunk_sid: applied.trunkSid,
-      trunk_address: applied.trunkAddress,
-      sip_username: applied.sipUsername,
+      settings_written: names.join(", "),
+      account_sid: plan?.accountSid ?? null,
+      source_number: applied?.sourceNumber ?? plan?.sourceNumber ?? null,
+      trunk_sid: applied?.trunkSid ?? null,
+      trunk_address: applied?.trunkAddress ?? null,
+      sip_username: applied?.sipUsername ?? null,
       // Said rather than shown, so that a receipt records that a credential
       // exists without being the second place it exists.
-      sip_password: "minted, not recorded",
-      speech_provider: "openai",
-      openai_key_hint: credentialSources.openai_key_hint,
-      openai_key_from: credentialSources.openai_key_from,
-      configuration_file: path.relative(workspace, configFile),
+      sip_password: applied === null ? null : "minted, not recorded",
+      configuration_file: configFile,
       platform_url: address,
-      phone_state: readiness ?? "unknown",
-      // Said and never shown, exactly like the SIP password above.
+      setup: platform?.setupState ?? "unknown",
+      phone: platform?.phoneState ?? "unknown",
       media_credential: media.generated ? "generated" : "existing",
     },
-    steps: applied.steps.map((step) => `${step.action}: ${step.detail}`),
+    steps: (applied?.steps ?? []).map((step) => `${step.action}: ${step.detail}`),
   };
   // The media secret joins the swept set even though nothing prints it. The
   // sweep is a guard rather than a review habit, and a guard that covers only
   // the secrets somebody remembered is the wrong half of one.
-  const allSecrets = [
-    ...secrets,
-    applied.sipPassword,
-    media.values[MEDIA_SECRET_VARIABLE] as string,
-  ];
+  const allSecrets = [...secrets, media.values[MEDIA_SECRET_VARIABLE] as string];
   const receiptFile = fileReceipt(workspace, receipt, allSecrets);
 
   const done = {
-    ...planFacts,
+    command: "self-host setup",
     mode: "apply",
-    trunk_sid: applied.trunkSid,
-    trunk_address: applied.trunkAddress,
-    steps: applied.steps,
-    configuration: path.relative(workspace, configFile),
+    ...keySources,
+    // Names only, never values. What was written is the fact; what it was
+    // written as is the platform's, sealed, and never comes back out here.
+    settings_written: names,
+    still_missing: platform?.setupMissing ?? [],
+    account_sid: plan?.accountSid ?? null,
+    trunk_sid: applied?.trunkSid ?? null,
+    trunk_address: applied?.trunkAddress ?? null,
+    buys_a_number: false,
+    steps: applied?.steps ?? [],
     receipt: path.relative(workspace, receiptFile),
     platform_url: address,
-    phone: readiness ?? "unknown",
+    setup: platform?.setupState ?? "unknown",
+    phone: platform?.phoneState ?? "unknown",
     media_credential: media.generated ? "generated" : "existing",
   } as const;
 
-  if (readiness !== "ready") {
+  if (platform === null || platform.setupState !== "ready") {
     answer(
       options,
       mode,
       {
-      ...done,
-      status: "failed",
-      reason:
-        "the carrier is set up and the configuration is written, but this " +
-        "platform did not come back reporting phone readiness. Run the same command " +
-        "again — it reuses everything it made and creates no second copy of anything.",
+        ...done,
+        status: "incomplete",
+        reason:
+          platform === null
+            ? `the settings were written but ${address} stopped answering, so egma cannot say whether this platform is configured`
+            : `every answer was written and this platform still reports setup required. It is missing ${platform.setupMissing.join(
+                ", ",
+              )}. Run the same command again — it asks only for what is still absent.`,
       },
       allSecrets,
     );
@@ -789,27 +977,69 @@ async function runPhoneSetup(
 
   answer(options, mode, { ...done, status: "ready" }, allSecrets);
   options.fail("");
-  if (media.generated) for (const line of MEDIA_CREDENTIAL_NOTICE) options.fail(line);
-  options.fail("This egma can place phone calls.");
+  options.fail("This egma is configured.");
   options.fail(
-    `The Twilio Auth Token was used once and kept nowhere. What is running holds a SIP credential for the trunk ${applied.trunkSid} and nothing else on that account.`,
+    "Its settings live in the platform's own store, sealed, so they survive a restart, an upgrade and a move to another machine — and every simulator is handed them on the work order it claims.",
   );
+  if (applied !== null) {
+    options.fail(
+      `The Twilio Auth Token was used once and kept nowhere. What is running holds a SIP credential for the trunk ${applied.trunkSid} and nothing else on that account.`,
+    );
+  }
   return SELF_HOST_EXIT.ok;
 }
 
-async function waitForPhone(
+/**
+ * See to this workspace's media-server credential: decide it, write it down,
+ * and replace the three containers that hold it when this run is what made it.
+ *
+ * **In the ordinary order `up` has already done all of this.** Setup talks to a
+ * running platform, and a running platform was started by `up`. What this
+ * covers is a deployment brought up before egma generated the pair at all,
+ * whose first act after upgrading is setup — and it goes through the same
+ * one-winner step `up` does, so a setup racing a start cannot leave the two of
+ * them running on different pairs.
+ *
+ * **The whole file is carried forward.** A workspace upgraded from the release
+ * that kept settings there still holds a provider key in it; nothing reads that
+ * line any more, and deleting it would throw away somebody's only copy of a key
+ * a provider shows exactly once. See `BOOTSTRAP_VARIABLES`.
+ *
+ * The three are recreated together rather than restarted, because a container
+ * keeps the environment it was created with — and replacing one of them and not
+ * the others leaves a deployment where two halves of one password disagree and
+ * every phone simulation fails to authenticate with nothing on screen to say
+ * why.
+ */
+async function settleMediaCredential(
+  options: SelfHostOptions,
+  workspace: string,
+  stored: Readonly<Record<string, string>>,
+  boot: Readonly<Record<string, string>>,
   address: string,
-  signal: AbortSignal | undefined,
-): Promise<string | null> {
-  const deadline = Date.now() + READY_TIMEOUT_MS;
-  for (;;) {
-    const facts = await readPlatform(address);
-    if (facts !== null && facts.phoneState === "ready") return facts.phoneState;
-    if (Date.now() >= deadline || signal?.aborted === true) {
-      return facts === null ? null : facts.phoneState;
-    }
-    await new Promise((wake) => setTimeout(wake, READY_POLL_MS));
+): Promise<MediaCredential> {
+  const media = await recordMediaCredential(workspace, options.env);
+  writePlatformConfig(workspace, {
+    ...stored,
+    ...media.values,
+    EGMA_BASE_URL: address,
+  });
+  if (!media.generated) return media;
+
+  const recreated = await compose(
+    ["up", "-d", "--wait", "--wait-timeout", "300", "--force-recreate", ...MEDIA_SERVICES],
+    {
+      workspace,
+      environment: { ...boot, ...media.values, EGMA_BASE_URL: address },
+      signal: options.signal,
+      onLine: (line) => options.fail(line),
+    } satisfies ComposeOptions,
+  );
+  for (const line of MEDIA_CREDENTIAL_NOTICE) options.fail(line);
+  if (recreated.code !== 0) {
+    options.fail("Its media containers did not come back. Run egma self-host up.");
   }
+  return media;
 }
 
 async function askApproval(
@@ -883,6 +1113,16 @@ function answer(
       continue;
     }
     if (name === "command" || name === "mode") continue;
+    // A list stays a list in JSON and becomes one line per entry here, because
+    // the entries are what a person reads down: the settings that were written,
+    // the ones still missing, the questions setup would ask. An empty one is
+    // said rather than skipped — "nothing was written" is an answer, and a
+    // missing line is not.
+    if (Array.isArray(value)) {
+      if (value.length === 0) options.out(`${name}: none`);
+      for (const entry of value) options.out(`${name}: ${String(entry)}`);
+      continue;
+    }
     options.out(`${name}: ${String(value)}`);
   }
 }
@@ -898,15 +1138,6 @@ function planLines(plan: CarrierPlan, workspace: string): readonly string[] {
     "buys_a_number: no",
     ...plan.steps.map((step) => `plan: ${step.action} ${step.detail}`),
   ];
-}
-
-function nonSecretFacts(plan: CarrierPlan): Record<string, string | null> {
-  return {
-    account_sid: plan.accountSid,
-    source_number: plan.sourceNumber,
-    source_number_sid: plan.sourceNumberSid,
-    trunk_name: plan.trunkName,
-  };
 }
 
 /**

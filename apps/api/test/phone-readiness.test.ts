@@ -60,7 +60,7 @@ describe("phone readiness", () => {
     expect(phoneSetupRequiredMessage(readiness)).toContain(
       "the text-to-speech provider",
     );
-    expect(phoneSetupRequiredMessage(readiness)).toContain("egma self-host phone setup");
+    expect(phoneSetupRequiredMessage(readiness)).toContain("egma self-host setup");
     // Said plainly, because a developer reading it is not the person who runs
     // the platform on a hosted deployment and needs to know nothing was spent.
     expect(phoneSetupRequiredMessage(readiness)).toContain("nothing was charged");
@@ -107,7 +107,7 @@ describe("phone readiness", () => {
   });
 
   it("seeds the carrier out of the environment, and never holds it after", () => {
-    // The variables phone setup already wrote, read once at start as settings
+    // The variables the old phone setup wrote, read once at start as settings
     // to seed rather than as this process's own configuration. What the API
     // then holds about the carrier is nothing at all: the store holds it.
     const config = loadConfig({

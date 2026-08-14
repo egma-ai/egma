@@ -53,7 +53,7 @@ export type TestApiOptions = {
   readonly singleOrganization?: boolean;
   /**
    * The judge this deployment gives a project that has configured none, as
-   * `egma self-host phone setup` supplies one. Absent by default, because most
+   * `egma self-host setup` supplies one. Absent by default, because most
    * tests are not about grading configuration at all.
    */
   readonly defaultJudge?: Config["defaultJudge"];

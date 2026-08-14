@@ -358,7 +358,7 @@ describe("what the platform says about its own setup", () => {
     // without it", so a setting marked required that the setup command never
     // writes would leave an operator who followed the documentation to the end
     // still reading `setup required`, with nothing sensible to type. These are
-    // the settings `egma self-host phone setup` really writes, and the two the
+    // the settings `egma self-host setup` really writes, and the two the
     // simulator defaults for are deliberately not among them.
     api = await createApi("platform_settings_ready_after_setup", {
       singleOrganization: true,
