@@ -43,8 +43,10 @@ platform back with its carrier, speech and judge configuration empty: the
 containers are recreated, phone readiness goes back to `setup required`, and
 the simulator has no trunk to dial through. Its media server refuses to start
 at all, because that pair has no default and a bare compose run does not read
-the file holding yours. Nothing is lost and nothing has to be set up again;
-`egma self-host up` restores it.
+the file holding yours. **That takes the simulator with it** — the simulator
+waits for a healthy media server, so a bare `docker compose up` leaves you with
+no simulator at all, not merely no phone. Nothing is lost and nothing has to be
+set up again; `egma self-host up` restores it.
 
 There is a second, smaller difference. `egma self-host up` waits for the
 platform to answer for itself, tells you what to type next, and tries once more

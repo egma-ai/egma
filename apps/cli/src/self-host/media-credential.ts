@@ -1,5 +1,5 @@
 /**
- * The credential the media server, the simulator and the SIP bridge
+ * The credential the media server, the simulator and the SIP gateway
  * authenticate each other with.
  *
  * **It is a password between egma's own parts**, in the same class as the

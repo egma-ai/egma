@@ -453,7 +453,7 @@ async function runUp(
 const MEDIA_CREDENTIAL_NOTICE = [
   "A media-server credential was generated for this workspace and written to " +
     ".egma-platform/platform.env. It is egma's own password between its media " +
-    "server, its simulator and its SIP bridge: you never choose it and never " +
+    "server, its simulator and its SIP gateway: you never choose it and never " +
     "type it, and a pair that exists is never replaced. Keep that file wherever " +
     "the rest of this deployment's secrets live.",
   "Until this, all three fell back to a pair published in egma's own repository. " +
