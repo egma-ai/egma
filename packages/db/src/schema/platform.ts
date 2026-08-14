@@ -98,32 +98,17 @@ export const platformSetting = pgTable(
 );
 
 /**
- * A setting this platform can hold, as a person meets it.
- *
- * The label is the words a readiness answer names it in — "the persona's model
- * key" rather than `persona_model_key` — because "setup required" with a column
- * name after it sends a self-hoster to read source.
- */
-export type PlatformSettingDefinition = {
-  readonly name: PlatformSettingName;
-  /** What a person calls it, in a refusal and in a setup interview alike. */
-  readonly label: string;
-  /**
-   * Whether the stored value may ever be shown back. A secret's hint is its
-   * last few characters, so two keys can be told apart without either being
-   * handed out; anything else hints with itself.
-   */
-  readonly secret: boolean;
-};
-
-/**
  * Every setting this platform knows about, in the order a person is asked for
- * them.
+ * them. **This list is the only place a setting's name is written.**
  *
  * The list grows as the effort moves the rest of the deployment's settings in:
  * the carrier trunk and the media backend, the speech providers and their keys.
- * Adding one here is an insert at run time and nothing else — no migration, and
- * no check constraint to widen.
+ * Adding one here is an insert at run time and nothing else — no migration, no
+ * check constraint to widen, and no second list to remember.
+ *
+ * A label is the words a readiness answer names the setting in — "the persona's
+ * model key" rather than `persona_model_key` — because "setup required" with a
+ * column name after it sends a self-hoster to read source.
  */
 export const PLATFORM_SETTINGS = [
   {
@@ -133,13 +118,27 @@ export const PLATFORM_SETTINGS = [
   },
   { name: "persona_model", label: "the persona's model", secret: false },
   { name: "persona_model_key", label: "the persona's model key", secret: true },
-] as const satisfies readonly PlatformSettingDefinition[];
+] as const satisfies readonly {
+  readonly name: string;
+  /** What a person calls it, in a refusal and in a setup interview alike. */
+  readonly label: string;
+  /**
+   * Whether the stored value may ever be shown back. A secret's hint is its
+   * last few characters, so two keys can be told apart without either being
+   * handed out; anything else hints with itself.
+   */
+  readonly secret: boolean;
+}[];
+
+/**
+ * A setting this platform can hold, as a person meets it — one entry of the
+ * catalog above, read off it rather than restated. `graders.ts`'s shape for
+ * every closed vocabulary in this schema, applied to a list of records.
+ */
+export type PlatformSettingDefinition = (typeof PLATFORM_SETTINGS)[number];
 
 /** The name of one setting. A write that names anything else is refused. */
-export type PlatformSettingName =
-  | "persona_model_provider"
-  | "persona_model"
-  | "persona_model_key";
+export type PlatformSettingName = PlatformSettingDefinition["name"];
 
 /** The settings a caller is changing or seeding, by name. */
 export type PlatformSettingValues = Readonly<

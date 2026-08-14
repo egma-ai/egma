@@ -74,9 +74,17 @@ async function readiness(): Promise<{
     .setup;
 }
 
-/** An owner, which is what a self-hoster is on the platform they run. */
+/**
+ * An owner, which is what a self-hoster is on the platform they run.
+ *
+ * **Single-organization, always, and that is a precondition rather than a
+ * convenience.** These settings are the deployment's own provider credentials,
+ * so they are only anybody's to read or change while that anybody is the whole
+ * deployment; on a platform serving several customers the whole group is
+ * refused, which the last block in this file is about.
+ */
 async function owner(label: string): Promise<Customer> {
-  api = await createApi(label);
+  api = await createApi(label, { singleOrganization: true });
   return signUp(api.app, "ada@acme.example", "Acme");
 }
 
@@ -193,10 +201,13 @@ describe("who may read and change them", () => {
       expect(refused.statusCode).toBe(403);
       expect(refused.body.message).toBe(
         "the settings of this platform are read and changed by an " +
-          "organization owner. They are the deployment's own provider " +
-          "credentials — whose account every simulation is conducted on — " +
-          "which is a decision of the same kind as billing rather than of the " +
-          "same kind as writing a test.",
+          "organization owner, and only while this egma serves one " +
+          "organization. They are the deployment's own provider credentials — " +
+          "whose account every simulation is conducted on — which is a " +
+          "decision of the same kind as billing rather than of the same kind " +
+          "as writing a test; and where several organizations share a platform " +
+          "they belong to none of them, so egma refuses everybody rather than " +
+          "picking one.",
       );
     }
   });
@@ -246,9 +257,12 @@ describe("a write that cannot be acted on", () => {
       persona_moddel: "gpt-4o",
     });
 
-    expect(refused.statusCode).toBe(400);
+    // One condition, one answer. The factory owns this refusal and the door
+    // does not check the same thing a second time — two answers for one
+    // condition would be a contract with two faces.
+    expect(refused.statusCode).toBe(422);
     expect(refused.body.message).toBe(
-      'this egma has no platform setting "persona_moddel"; it holds ' +
+      '"persona_moddel" is not a platform setting egma knows; it holds ' +
         "persona_model_provider, persona_model, persona_model_key",
     );
   });
@@ -296,6 +310,7 @@ describe("what the platform says about its own setup", () => {
 
   it("stops naming a setting the moment somebody supplies it", async () => {
     api = await createApi("platform_settings_readiness_narrows", {
+      singleOrganization: true,
       phone: { ...A_CARRIER },
     });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
@@ -315,6 +330,7 @@ describe("what the platform says about its own setup", () => {
 
   it("answers ready once nothing is missing", async () => {
     api = await createApi("platform_settings_readiness_ready", {
+      singleOrganization: true,
       phone: { ...A_CARRIER },
     });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
@@ -330,6 +346,7 @@ describe("what the platform says about its own setup", () => {
 
   it("carries no secret, at a door that asks for no credential", async () => {
     api = await createApi("platform_settings_readiness_is_public", {
+      singleOrganization: true,
       phone: { ...A_CARRIER },
     });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
@@ -403,7 +420,9 @@ describe("a deployment that answers no questions", () => {
     // What `index.ts` does at start, with the values `loadConfig` read out of
     // the environment: an automated deployment configures itself and nobody
     // types anything.
-    api = await createApi("platform_settings_seeded_from_environment");
+    api = await createApi("platform_settings_seeded_from_environment", {
+      singleOrganization: true,
+    });
     const written = await seedPlatformSettings(
       loadConfig({
         ...A_CONTAINERS_ENVIRONMENT,
@@ -428,7 +447,9 @@ describe("a deployment that answers no questions", () => {
   });
 
   it("leaves a setting somebody changed exactly as they left it", async () => {
-    api = await createApi("platform_settings_seed_never_replaces");
+    api = await createApi("platform_settings_seed_never_replaces", {
+      singleOrganization: true,
+    });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     await request("PATCH", ada.secret, { persona_model_key: A_SECOND_KEY });
 
@@ -444,5 +465,50 @@ describe("a deployment that answers no questions", () => {
     expect(settingsIn(read.body).persona_model_key).toMatchObject({
       hint: "WXYZ",
     });
+  });
+});
+
+describe("a platform that serves more than one organization", () => {
+  /**
+   * **Nobody's, rather than everybody's.** These settings are the deployment's
+   * own provider credentials. On a platform holding several customers, one
+   * organization's owner reading them would be reading the hints of a key the
+   * others depend on, and writing them would point everybody else's simulations
+   * at an account nobody else agreed to. Whose they are there is a real
+   * question and is deliberately unanswered, so egma refuses everybody rather
+   * than picking one — the guard the platform's own judge already stands
+   * behind, which is only ever given away on a single-organization deployment.
+   */
+  it("refuses every owner both doors", async () => {
+    api = await createApi("platform_settings_several_customers", {
+      singleOrganization: false,
+    });
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const grace = await signUp(api.app, "grace@globex.example", "Globex");
+
+    for (const person of [ada, grace]) {
+      const read = await request("GET", person.secret);
+      const write = await request("PATCH", person.secret, {
+        persona_model: "gpt-4o",
+      });
+
+      expect(read.statusCode).toBe(403);
+      expect(write.statusCode).toBe(403);
+      expect(read.body.message).toContain(
+        "only while this egma serves one organization",
+      );
+    }
+  });
+
+  it("still says what it is missing, because that answer carries nothing", async () => {
+    api = await createApi("platform_settings_several_customers_readiness", {
+      singleOrganization: false,
+    });
+
+    // Readiness is not a permission question: it names absent settings in the
+    // words a person would use and carries no value that any secret holds, so
+    // the door that asks for no credential answers here exactly as it does on
+    // a deployment that is one team.
+    expect((await readiness()).state).toBe("setup_required");
   });
 });

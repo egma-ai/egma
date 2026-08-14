@@ -1,7 +1,6 @@
 import {
   authorize,
   NotPermittedError,
-  PLATFORM_SETTINGS,
   readPlatformSettings,
   UnprocessableInputError,
   writePlatformSettings,
@@ -12,7 +11,7 @@ import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
-import { invalid, notPermitted, unprocessable } from "../http/refusals.ts";
+import { notPermitted, unprocessable } from "../http/refusals.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 
 /**
@@ -35,16 +34,19 @@ import type { RateLimit } from "../http/rate-limit.ts";
  * shape in which one could be edited in place, because the envelope is sealed
  * over the whole value.
  *
- * **Only an owner may knock, on both doors.** These are the deployment's own
- * provider credentials, which is the row of the permission table that already
- * names provider credentials. A `member` and a `viewer` are refused the read as
- * firmly as the write: reading is how you learn whose account this platform
- * spends from.
+ * **Only a single organization's owner may knock, on both doors.** These are
+ * the deployment's own provider credentials, which is the row of the permission
+ * table that already names provider credentials — so a `member` and a `viewer`
+ * are refused the read as firmly as the write, because reading is how you learn
+ * whose account this platform spends from. And the whole group is refused on a
+ * deployment serving more than one organization, where these settings belong to
+ * none of them; the factory holds both halves and says why.
  *
- * **Unknown keys are refused by name.** The body is small and every key in it
- * changes what the platform will speak with, so a typo quietly ignored would be
- * an operator believing they had set something they had not. The agent group's
- * gate, for the agent group's reason.
+ * **Unknown keys are refused by name, once.** The body is small and every key
+ * in it changes what the platform will speak with, so a typo quietly ignored
+ * would be an operator believing they had set something they had not. That
+ * refusal is the factory's — this door does not check the same thing a second
+ * time, because one condition answered two ways is a contract with two faces.
  *
  * The address follows the standing rule: nothing is rooted at a project and the
  * organization is never in a path. Neither appears here at all, because these
@@ -54,6 +56,12 @@ import type { RateLimit } from "../http/rate-limit.ts";
 export type PlatformSettingsRoutesOptions = {
   readonly provider: SessionIdentityProvider;
   readonly rateLimit: RateLimit;
+  /**
+   * Whether this deployment serves one organization. Handed to the factory on
+   * every call: it is what decides whether anybody at all may be here, and the
+   * flag lives in this process's configuration rather than in the store.
+   */
+  readonly singleOrganization: boolean;
 };
 
 export const PLATFORM_SETTINGS_PATH = "/api/platform/settings";
@@ -78,24 +86,6 @@ function answer(held: readonly PlatformSetting[]): Record<string, unknown> {
   return { settings: held.map(described) };
 }
 
-/**
- * The unknown-key gate. Refusing by name rather than ignoring is what turns a
- * typo into an answer a person can act on: a misspelled setting that was
- * silently dropped would leave the platform reporting `setup required` for
- * something its operator is certain they supplied.
- */
-function unknownKeyIn(body: Body): string | undefined {
-  const known = PLATFORM_SETTINGS.map((setting) => setting.name);
-  for (const key of Object.keys(body)) {
-    if ((known as readonly string[]).includes(key)) continue;
-    return (
-      `this egma has no platform setting "${key}"; it holds ` +
-      `${known.join(", ")}`
-    );
-  }
-  return undefined;
-}
-
 export async function platformSettingsRoutes(
   app: FastifyInstance,
   options: PlatformSettingsRoutesOptions,
@@ -115,17 +105,21 @@ export async function platformSettingsRoutes(
    */
   app.get(PLATFORM_SETTINGS_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
-    return reply.send(answer(await readPlatformSettings(auth)));
+    const held = await readPlatformSettings(auth, {
+      singleOrganization: options.singleOrganization,
+    });
+    return reply.send(answer(held));
   });
 
   /**
    * A setting written, or several.
    *
    * The role is checked before anything in the body is looked at, which is the
-   * stance every write in this API takes and which matters here for a reason of
-   * its own: the unknown-key refusal below names every setting this platform
-   * holds, and somebody who may not read the settings must not learn their
-   * names by misspelling one.
+   * stance every write in this API takes: somebody who may not do this is
+   * refused for who they are, rather than after a refusal that has read what
+   * they sent. The factory checks it again — and checks the deployment's mode
+   * with it — because a factory that trusted its callers would be one route
+   * away from not being checked at all.
    */
   app.patch(PLATFORM_SETTINGS_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -136,11 +130,9 @@ export async function platformSettingsRoutes(
       projectId: auth.projectId,
     });
 
-    const unknown = unknownKeyIn(body);
-    if (unknown !== undefined) return invalid(reply, unknown);
-
     const written = await writePlatformSettings(
       auth,
+      { singleOrganization: options.singleOrganization },
       body as PlatformSettingValues,
     );
     return reply.send(answer(written));
@@ -155,9 +147,10 @@ export async function platformSettingsRoutes(
    * other group relays `NotPermittedError`'s own message, which reads "a member
    * may not manage_organization" — the name of a row in the permission table,
    * written for whoever is reading the code rather than for the colleague who
-   * just tried to look at the platform's settings. There is one action behind
-   * this whole group, so there is exactly one thing that sentence could ever be
-   * about, and it is worth saying in words.
+   * just tried to look at the platform's settings. One action stands behind
+   * this whole group, so the sentence names both of the ways a caller can meet
+   * it — the role they hold, and the kind of deployment this is — and lets them
+   * see which of the two is theirs.
    */
   app.setErrorHandler(async (error, _request, reply) => {
     if (error instanceof UnprocessableInputError) {
@@ -168,10 +161,13 @@ export async function platformSettingsRoutes(
       return notPermitted(
         reply,
         "the settings of this platform are read and changed by an " +
-          "organization owner. They are the deployment's own provider " +
-          "credentials — whose account every simulation is conducted on — " +
-          "which is a decision of the same kind as billing rather than of the " +
-          "same kind as writing a test.",
+          "organization owner, and only while this egma serves one " +
+          "organization. They are the deployment's own provider credentials — " +
+          "whose account every simulation is conducted on — which is a " +
+          "decision of the same kind as billing rather than of the same kind " +
+          "as writing a test; and where several organizations share a platform " +
+          "they belong to none of them, so egma refuses everybody rather than " +
+          "picking one.",
       );
     }
 

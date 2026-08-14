@@ -65,11 +65,21 @@ function member(role: "member" | "viewer"): AuthContext {
   };
 }
 
+/**
+ * A deployment that is one team, which is what every self-host is and what the
+ * default flag says. It is the precondition on being here at all, so it is
+ * written out at every call rather than hidden in a helper's default.
+ */
+const ONE_TEAM = { singleOrganization: true } as const;
+
+/** And a platform serving several customers, where these settings are nobody's. */
+const SEVERAL_CUSTOMERS = { singleOrganization: false } as const;
+
 /** One setting as it stands, by name — the shape every read here asserts on. */
 async function settingsByName(
   auth: AuthContext = owner(),
 ): Promise<Record<string, { hint: string | null; secret: boolean }>> {
-  const held = await readPlatformSettings(auth);
+  const held = await readPlatformSettings(auth, ONE_TEAM);
   return Object.fromEntries(
     held.map((setting) => [
       setting.name,
@@ -113,7 +123,7 @@ describe("a platform that has been given no settings", () => {
 
 describe("writing a platform setting", () => {
   it("seals the value rather than storing it", async () => {
-    await writePlatformSettings(owner(), {
+    await writePlatformSettings(owner(), ONE_TEAM, {
       persona_model_provider: "openai",
       persona_model: "gpt-4o",
       persona_model_key: THEIR_OWN_KEY,
@@ -142,7 +152,7 @@ describe("writing a platform setting", () => {
     // Enough to tell two keys apart, and nothing anybody could spend with.
     expect(held.persona_model_key).toEqual({ hint: "QRST", secret: true });
 
-    expect(JSON.stringify(await readPlatformSettings(owner()))).not.toContain(
+    expect(JSON.stringify(await readPlatformSettings(owner(), ONE_TEAM))).not.toContain(
       THEIR_OWN_KEY,
     );
   });
@@ -158,7 +168,7 @@ describe("writing a platform setting", () => {
   });
 
   it("changes one setting and leaves the rest alone", async () => {
-    await writePlatformSettings(owner(), { persona_model: "gpt-4.1-mini" });
+    await writePlatformSettings(owner(), ONE_TEAM, { persona_model: "gpt-4.1-mini" });
 
     const held = await settingsByName();
     expect(held.persona_model?.hint).toBe("gpt-4.1-mini");
@@ -170,7 +180,7 @@ describe("writing a platform setting", () => {
       "select value from platform_setting where name = $1",
       ["persona_model_key"],
     );
-    await writePlatformSettings(owner(), { persona_model_key: THEIR_OWN_KEY });
+    await writePlatformSettings(owner(), ONE_TEAM, { persona_model_key: THEIR_OWN_KEY });
     const after = await database.sql<{ value: string }>(
       "select value from platform_setting where name = $1",
       ["persona_model_key"],
@@ -198,45 +208,86 @@ describe("writing a platform setting", () => {
     ]);
   });
 
-  it("is one deployment's answer, whichever customer asked", async () => {
-    // There is one platform and one set of settings on it. An owner in another
-    // organization reads the same answer, because there is no other answer to
-    // read — which is what "owned by the deployment" means when it is written
-    // down as behaviour rather than as a column that is absent.
-    const elsewhere = await readPlatformSettings({
+});
+
+describe("a deployment that serves more than one organization", () => {
+  /** An owner, and of a second organization on the same platform. */
+  function ownerAtGlobex(): AuthContext {
+    return {
       userId: newId("usr"),
       organizationId: globex.organization,
       projectId: globex.project,
       role: "admin",
       via: "session",
-    });
+    };
+  }
 
-    expect(
-      elsewhere.find((setting) => setting.name === "persona_model")?.hint,
-    ).toBe("gpt-4.1-mini");
+  /**
+   * **There is one platform and one set of settings on it, and that is exactly
+   * why nobody may have them here.** These are the deployment's own provider
+   * credentials: on a platform holding several customers, letting one
+   * organization's owner read them would show them the hints of a key the
+   * others depend on, and letting them write would point everybody else's
+   * simulations at an account nobody else agreed to.
+   *
+   * Whose settings these are on such a deployment is a real question and it is
+   * deliberately not answered yet. Until it is, egma refuses everybody rather
+   * than picking one of them — the same guard the platform's own judge is
+   * behind, which is only ever given away on a single-organization deployment.
+   */
+  it("refuses an owner of a second organization both the read and the write", async () => {
+    await expect(
+      readPlatformSettings(ownerAtGlobex(), SEVERAL_CUSTOMERS),
+    ).rejects.toThrow(NotPermittedError);
+    await expect(
+      writePlatformSettings(ownerAtGlobex(), SEVERAL_CUSTOMERS, {
+        persona_model: "gpt-4o",
+      }),
+    ).rejects.toThrow(NotPermittedError);
+  });
+
+  it("refuses the first organization's owner too, so it is the deployment and not the customer", async () => {
+    await expect(
+      readPlatformSettings(owner(), SEVERAL_CUSTOMERS),
+    ).rejects.toThrow(NotPermittedError);
+  });
+
+  it("changed nothing: the settings are as the single-organization owner left them", async () => {
+    expect((await settingsByName()).persona_model?.hint).toBe("gpt-4.1-mini");
   });
 });
 
 describe("who may read and change them", () => {
+  it("lets an owner read them while this deployment is one team", async () => {
+    // The passing side of the precondition above, kept beside it: the default
+    // deployment, and the self-hoster who is both its operator and its only
+    // organization's admin.
+    const held = await readPlatformSettings(owner(), ONE_TEAM);
+
+    expect(held.find((setting) => setting.name === "persona_model")?.hint).toBe(
+      "gpt-4.1-mini",
+    );
+  });
+
   it("refuses a member the read and the write alike", async () => {
     // These are the deployment's own provider credentials. Everybody in the
     // organization can start a run with them; being able to see whose account
     // is spent, or point it at another, is the organization-settings decision
     // rather than the authoring one.
-    await expect(readPlatformSettings(member("member"))).rejects.toThrow(
+    await expect(readPlatformSettings(member("member"), ONE_TEAM)).rejects.toThrow(
       NotPermittedError,
     );
     await expect(
-      writePlatformSettings(member("member"), { persona_model: "gpt-4o" }),
+      writePlatformSettings(member("member"), ONE_TEAM, { persona_model: "gpt-4o" }),
     ).rejects.toThrow(NotPermittedError);
   });
 
   it("refuses a viewer the same two", async () => {
-    await expect(readPlatformSettings(member("viewer"))).rejects.toThrow(
+    await expect(readPlatformSettings(member("viewer"), ONE_TEAM)).rejects.toThrow(
       NotPermittedError,
     );
     await expect(
-      writePlatformSettings(member("viewer"), { persona_model: "gpt-4o" }),
+      writePlatformSettings(member("viewer"), ONE_TEAM, { persona_model: "gpt-4o" }),
     ).rejects.toThrow(NotPermittedError);
   });
 
@@ -250,6 +301,7 @@ describe("a write that cannot be acted on", () => {
     await expect(
       writePlatformSettings(
         owner(),
+        ONE_TEAM,
         // A name nobody reads is a row nothing ever uses, so it is refused
         // here rather than written and forgotten.
         { not_a_setting: "anything" } as unknown as PlatformSettingValues,
@@ -259,13 +311,13 @@ describe("a write that cannot be acted on", () => {
 
   it("refuses an empty value, because clearing a setting is not writing one", async () => {
     await expect(
-      writePlatformSettings(owner(), { persona_model: "   " }),
+      writePlatformSettings(owner(), ONE_TEAM, { persona_model: "   " }),
     ).rejects.toThrow(/needs a value/u);
   });
 
   it("refuses a secret too short for any provider to have issued it", async () => {
     await expect(
-      writePlatformSettings(owner(), { persona_model_key: "sk-abc" }),
+      writePlatformSettings(owner(), ONE_TEAM, { persona_model_key: "sk-abc" }),
     ).rejects.toThrow(/shorter than any provider issues/u);
   });
 });

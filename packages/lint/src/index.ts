@@ -93,6 +93,13 @@ const CONTEXT_ESTABLISHING = [
  * A parameter or a wider return would make either an ordinary read wearing an
  * exemption, so the rule refuses both changes.
  *
+ * **The answer is pinned as a reader sees it, alias body and all.** Where the
+ * declared type names an alias from the same file, the pin carries that alias's
+ * whole declaration — otherwise the pin would hold only the spelling of a name,
+ * and a shape behind it could be widened to hand out a secret with this rule
+ * still green. That is `asWritten`'s rule for parameters, applied to the answer
+ * by `answerAsWritten`.
+ *
  * `platformFacts` was added on 2026-08-14 with the platform's own settings,
  * deliberately and on the same two terms. It is asked by the readiness answer
  * the CLI reads in front of every command — before login and before any
@@ -100,11 +107,18 @@ const CONTEXT_ESTABLISHING = [
  * there is no credential to build a context from. It takes nothing, and its
  * `PlatformFacts` is a map of non-secret values in which every secret the
  * platform holds is `null`: enough to say a key is there, and no part of one.
+ * The settings behind it are the whole effort's — the carrier trunk and the
+ * speech keys arrive there next — so the pin holds the value type it may
+ * answer, and a hint added to it stops the build.
  */
 const INSTANCE_SCOPED: ReadonlyMap<string, string> = new Map([
   ["instanceIsClaimed", "Promise<boolean>"],
   ["platformInstanceId", "Promise<string>"],
-  ["platformFacts", "Promise<PlatformFacts>"],
+  [
+    "platformFacts",
+    "Promise<PlatformFacts> export type PlatformFacts = " +
+      "Readonly<Partial<Record<PlatformSettingName, string | null>>>;",
+  ],
 ]);
 
 /**
@@ -507,6 +521,51 @@ function asWritten(tree: ts.SourceFile, parameter: ts.ParameterDeclaration): str
   return written;
 }
 
+/** The body of a type alias declared in this file, or nothing. */
+function aliasBody(tree: ts.SourceFile, named: string): string | undefined {
+  for (const statement of tree.statements) {
+    if (ts.isTypeAliasDeclaration(statement) && statement.name.text === named) {
+      return statement.getText(tree);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * An answer as a reader of the call sees it: what is written after the
+ * signature, plus the body of every type alias declared in the same file that
+ * it names — including one nested inside `Promise<…>`, which is where every
+ * answer on this surface lives.
+ *
+ * **This is `asWritten`'s rule applied to the answer, and it is what makes the
+ * instance-scoped pin a pin.** Comparing `Promise<Something>` as text pins only
+ * the spelling of a name: the alias behind it could be widened to hand out a
+ * secret with the rule still green, which is the one thing that exemption
+ * exists to prevent. One level, same file, exactly as the parameter rule —
+ * a name from another module is somebody else's vocabulary, and following it
+ * would pin a file this one does not own.
+ */
+function answerAsWritten(
+  tree: ts.SourceFile,
+  declaration: ts.FunctionDeclaration,
+): string {
+  const type = declaration.type;
+  if (type === undefined) return "no declared return type";
+
+  const named: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isTypeReferenceNode(node)) named.push(node.typeName.getText(tree));
+    ts.forEachChild(node, visit);
+  };
+  visit(type);
+
+  const bodies = [...new Set(named)]
+    .map((name) => aliasBody(tree, name))
+    .filter((body): body is string => body !== undefined);
+
+  return [type.getText(tree), ...bodies].join(" ");
+}
+
 /**
  * Every function the module exports either takes an `AuthContext` first, or is
  * one of the named exceptions: the seven that produce a context, the one that
@@ -594,20 +653,21 @@ async function checkExportedCallShapes(root: string): Promise<Violation[]> {
         });
       }
 
-      if (
-        instanceScopedReturn !== undefined &&
-        declaration.type?.getText(declaring) !== instanceScopedReturn
-      ) {
-        const declared = declaration.type?.getText(declaring) ?? "no declared return type";
-        violations.push({
-          file,
-          line: line(declaration),
-          rule: "every-exported-call-carries-an-auth-context",
-          detail:
-            `${name} skips the ${AUTH_CONTEXT} only because its public ` +
-            `instance fact is ${instanceScopedReturn}. It declares ${declared}; ` +
-            `a wider return would make this an ordinary read wearing an exemption.`,
-        });
+      if (instanceScopedReturn !== undefined) {
+        // The answer *and* the body of any alias it names, so widening the
+        // shape behind a name is as loud as widening the name.
+        const declared = answerAsWritten(declaring, declaration);
+        if (declared !== instanceScopedReturn) {
+          violations.push({
+            file,
+            line: line(declaration),
+            rule: "every-exported-call-carries-an-auth-context",
+            detail:
+              `${name} skips the ${AUTH_CONTEXT} only because its public ` +
+              `instance fact is ${instanceScopedReturn}. It declares ${declared}; ` +
+              `a wider return would make this an ordinary read wearing an exemption.`,
+          });
+        }
       }
 
       if (

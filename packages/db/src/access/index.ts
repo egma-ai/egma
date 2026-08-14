@@ -174,12 +174,17 @@ export { instanceIsClaimed, platformInstanceId } from "./instance.ts";
  * chose. `platformFacts` is the third instance-scoped export: it takes nothing,
  * so there is no customer to name, and it answers only what is not secret,
  * because the readiness answer it feeds is read before anybody has logged in.
+ *
+ * The read and the write take the deployment's own tenancy beside the context,
+ * because who may be here depends on it: an organization owner may, and only
+ * while this deployment serves one organization.
  */
 export {
   platformFacts,
   readPlatformSettings,
   seedPlatformSettings,
   writePlatformSettings,
+  type DeploymentTenancy,
   type PlatformFacts,
   type PlatformSetting,
 } from "./platform-settings.ts";

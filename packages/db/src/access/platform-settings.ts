@@ -11,7 +11,7 @@ import {
 } from "../schema/platform.ts";
 import { sealCredentials } from "../sealing.ts";
 import type { AuthContext } from "./context.ts";
-import { UnprocessableInputError } from "./errors.ts";
+import { NotPermittedError, UnprocessableInputError } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
 
 /**
@@ -80,13 +80,61 @@ export type PlatformSetting = {
  * entirely. That is the whole of what the unauthenticated readiness answer is
  * built from, which is why a secret's *hint* is not in it either — enough to
  * say a key is there, and never any part of the key.
+ *
+ * Written on one line and keyed by the settings egma knows, both deliberately:
+ * the build rule pins this alias's whole body as the text of what
+ * `platformFacts` may answer, so widening it to carry a hint or a secret stops
+ * the build rather than quietly widening an exemption.
  */
-export type PlatformFacts = Readonly<Record<string, string | null>>;
+export type PlatformFacts = Readonly<Partial<Record<PlatformSettingName, string | null>>>;
+
+/**
+ * What kind of deployment this is, for the one decision that turns on it.
+ *
+ * It is the existing `EGMA_SINGLE_ORGANIZATION` flag, which already means "this
+ * deployment is one team", handed in rather than read here: the flag belongs to
+ * the process's configuration and this module reads no environment. The judge
+ * gates on the same flag in the same way, one scope down.
+ */
+export type DeploymentTenancy = {
+  /** Whether this deployment serves exactly one organization. */
+  readonly singleOrganization: boolean;
+};
+
+/**
+ * Who may read and change the settings of this whole platform.
+ *
+ * **Two conditions, and both are refusals of the same kind.** An organization
+ * owner may, on the row of the permission table that already names provider
+ * credentials — these are the deployment's own accounts, and which provider it
+ * speaks with and whose key it spends is the same kind of decision as retention
+ * and billing rather than the same kind as writing a test.
+ *
+ * **And only while this deployment serves one organization.** That mode is what
+ * makes an owner and the platform's operator the same person; without it, every
+ * organization's owner would read the hints of a key the others depend on and
+ * could point the platform at an account nobody else agreed to. When a
+ * deployment serves several customers this becomes a real permission question —
+ * whose settings these are, and who is allowed to answer for the deployment —
+ * and that question is deliberately not answered here. Until it is, egma
+ * refuses everybody rather than picking one of them.
+ *
+ * The judge's guard is the same guard: the platform's own model credential is
+ * given away only on a single-organization deployment, and for the same reason.
+ */
+function onlyASingleOrganizationsOwner(
+  auth: AuthContext,
+  deployment: DeploymentTenancy,
+): void {
+  authorize(auth, "manage_organization", here(auth));
+  if (deployment.singleOrganization) return;
+  throw new NotPermittedError(auth, "manage_organization", here(auth));
+}
 
 function definitionOf(name: string): PlatformSettingDefinition {
   const known = PLATFORM_SETTINGS.find(
     (candidate) => candidate.name === name,
-  ) as PlatformSettingDefinition | undefined;
+  );
   if (known === undefined) {
     throw new UnprocessableInputError(
       `"${name}" is not a platform setting egma knows; it holds ${PLATFORM_SETTINGS.map(
@@ -200,24 +248,15 @@ async function heldSettings(): Promise<
 }
 
 /**
- * What this platform holds, and what it is missing.
- *
- * **Only an organization owner may ask**, on the row of the permission table
- * that already names provider credentials. These are the deployment's own
- * accounts: which provider it speaks with and whose key it spends is the same
- * kind of decision as retention and billing, rather than the same kind as
- * writing a test — and a `viewer` who could read them would be reading the
- * hints of the platform's secrets.
- *
- * While a deployment serves one organization, which it does by default and does
- * on every self-host, its owner and the platform's operator are the same
- * person. A deployment serving several organizations makes this a real
- * permission question, and that question is deliberately not answered here.
+ * What this platform holds, and what it is missing. Refused to anybody but a
+ * single organization's owner — see `onlyASingleOrganizationsOwner`, which is
+ * the whole of who may be here and why.
  */
 export async function readPlatformSettings(
   auth: AuthContext,
+  deployment: DeploymentTenancy,
 ): Promise<readonly PlatformSetting[]> {
-  authorize(auth, "manage_organization", here(auth));
+  onlyASingleOrganizationsOwner(auth, deployment);
   return answer(await heldSettings());
 }
 
@@ -233,9 +272,10 @@ export async function readPlatformSettings(
  */
 export async function writePlatformSettings(
   auth: AuthContext,
+  deployment: DeploymentTenancy,
   values: PlatformSettingValues,
 ): Promise<readonly PlatformSetting[]> {
-  authorize(auth, "manage_organization", here(auth));
+  onlyASingleOrganizationsOwner(auth, deployment);
 
   // One statement for however many settings were named, so a form that changes
   // three of them cannot land one and then fail: each row carries its own new
@@ -270,7 +310,7 @@ export async function writePlatformSettings(
  */
 export async function platformFacts(): Promise<PlatformFacts> {
   const held = await heldSettings();
-  const facts: Record<string, string | null> = {};
+  const facts: Partial<Record<PlatformSettingName, string | null>> = {};
   for (const definition of PLATFORM_SETTINGS) {
     const row = held.find((candidate) => candidate.name === definition.name);
     if (row === undefined) continue;

@@ -240,6 +240,12 @@ export function buildApi(options: ServerOptions): Api {
   void app.register(platformSettingsRoutes, {
     provider: identity.provider,
     rateLimit,
+    // The same flag the platform's own judge is gated on a few lines above, and
+    // for the same reason: what a deployment holds for itself is an owner's to
+    // read and to change only while that owner is the whole deployment. On one
+    // serving several customers these settings belong to none of them, and the
+    // question of whose they are is not answered yet.
+    singleOrganization: config.singleOrganization,
   });
 
   // What a developer's folder syncs against. Its own scope, like every other

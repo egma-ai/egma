@@ -326,6 +326,47 @@ describe("an exported call that could reach the database without a customer", ()
   });
 
   /**
+   * The widening that a pin on the *name* would have missed, which is the whole
+   * reason the pin carries the alias's body.
+   *
+   * `platformFacts` answers what this deployment was configured with, at the
+   * one door that asks for no credential, and what keeps that safe is the shape
+   * behind the name: non-secret values, with every secret reduced to null. A
+   * rule comparing `Promise<PlatformFacts>` as text would stay green while
+   * somebody put a key's hint — or a key — inside it, so the alias declared
+   * beside the function is pinned with it.
+   */
+  it("refuses an instance exception whose answer is widened behind its own name", async () => {
+    const widened =
+      "export type PlatformFacts = Readonly<Record<string, string>>;\n" +
+      "export async function platformFacts(): Promise<PlatformFacts> {\n  return {};\n}\n";
+    await withSurface(
+      'export { platformFacts } from "./things.ts";\n',
+      widened,
+    );
+
+    const violations = await check(root);
+    expect(rules(violations)).toEqual([
+      "every-exported-call-carries-an-auth-context",
+    ]);
+    expect(violations[0]?.detail).toContain("PlatformFacts");
+    expect(violations[0]?.detail).toContain("wearing an exemption");
+  });
+
+  it("passes the same exception while its answer is the shape that was pinned", async () => {
+    const pinned =
+      "export type PlatformSettingName = 'persona_model';\n" +
+      "export type PlatformFacts = Readonly<Partial<Record<PlatformSettingName, string | null>>>;\n" +
+      "export async function platformFacts(): Promise<PlatformFacts> {\n  return {};\n}\n";
+    await withSurface('export { platformFacts } from "./things.ts";\n', pinned);
+
+    // One level of alias, and one file: `PlatformSettingName` is followed here
+    // because it is declared beside it, and the settings this platform holds
+    // may grow — what may never grow is the value beside them.
+    expect(await check(root)).toEqual([]);
+  });
+
+  /**
    * The engine's own work, which is the one thing on this surface that
    * legitimately spans customers: the grader service holds no credential
    * because there is nobody for it to be, so it is handed work instead. What
