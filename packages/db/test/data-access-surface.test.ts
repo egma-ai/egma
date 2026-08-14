@@ -246,6 +246,12 @@ const CONTEXT_REQUIRING = [
   // Names off a reviewed file turned into the identity a version names. It
   // reads personas and nothing else, and only ones the context already reaches.
   "resolvePersonaNames",
+  // The dispatch path's door to the deployment's own settings in the clear —
+  // the third secret egma holds, and the same door the connection's
+  // credentials below come through. It takes the context like everything else
+  // and then refuses every one that did not come from a simulation claim,
+  // because conducting is the only thing egma does with these.
+  "resolvePlatformSettings",
   // The dispatch path's door to a connection's plaintext. It takes the context
   // like everything else — and then refuses every one that did not come from a
   // simulation claim, because conducting is the only thing egma does with a

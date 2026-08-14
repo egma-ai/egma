@@ -308,14 +308,6 @@ services:
       # prerequisite for anything, including adding a second person.
       EGMA_SMTP_URL: ${EGMA_SMTP_URL:-}
       EGMA_MAIL_FROM: ${EGMA_MAIL_FROM:-}
-      # What this process knows about the carrier: three non-secret facts,
-      # written by `egma self-host phone setup`, from which it reports the
-      # platform's phone state. No token, no password, no provider key — the
-      # API neither dials nor speaks, and phone authority lives in the
-      # container that uses it.
-      EGMA_PHONE_TRUNK_ADDRESS: ${EGMA_PHONE_TRUNK_ADDRESS:-}
-      EGMA_PHONE_SOURCE_NUMBER: ${EGMA_PHONE_SOURCE_NUMBER:-}
-      EGMA_PHONE_SPEECH_PROVIDER: ${EGMA_PHONE_SPEECH_PROVIDER:-}
       # The judge a project is given when it has configured none, from the one
       # OpenAI key phone setup asked for. Written into each project's own
       # sealed row on boot and never over one that is already there. It is here
@@ -325,17 +317,41 @@ services:
       EGMA_JUDGE_PROVIDER: ${EGMA_JUDGE_PROVIDER:-}
       EGMA_JUDGE_MODEL: ${EGMA_JUDGE_MODEL:-}
       EGMA_JUDGE_API_KEY: ${EGMA_JUDGE_API_KEY:-}
-      # What the persona thinks with, and the platform's own setting rather
-      # than the simulator's. It is written into the platform's store on boot,
-      # sealed, for anything the store does not already hold — and never over a
-      # value somebody changed, so a redeploy carrying an old key in a script
-      # cannot undo a new one. Setting these is one of the two ways in and is
-      # for a deployment that answers no questions; the other is
+      # What this deployment has been configured with — the persona's model,
+      # its speech legs, and the carrier a phone call goes over. The
+      # platform's own settings rather than any one container's: they are
+      # written into the platform's store on boot, sealed, for anything the
+      # store does not already hold — and never over a value somebody
+      # changed, so a redeploy carrying an old key in a script cannot undo a
+      # new one. They then reach the simulator on the work order it claims,
+      # which is why no simulator container names any of them.
+      #
+      # Setting them here is one of the two ways in, and it is for a
+      # deployment that answers no questions; the other is
       # `egma self-host setup`, which asks. Leave them empty and the platform
-      # reports `setup required` naming each one until somebody supplies it.
+      # reports `setup required` naming each one until somebody supplies it —
+      # which is the whole difference from the file this replaced, where an
+      # absent setting was an empty setting and nothing said so.
       EGMA_PERSONA_MODEL_PROVIDER: ${EGMA_PERSONA_MODEL_PROVIDER:-}
       EGMA_PERSONA_MODEL: ${EGMA_PERSONA_MODEL:-}
       EGMA_PERSONA_MODEL_API_KEY: ${EGMA_PERSONA_MODEL_API_KEY:-}
+      EGMA_PERSONA_STT_PROVIDER: ${EGMA_PERSONA_STT_PROVIDER:-}
+      EGMA_PERSONA_STT_API_KEY: ${EGMA_PERSONA_STT_API_KEY:-}
+      EGMA_PERSONA_TTS_PROVIDER: ${EGMA_PERSONA_TTS_PROVIDER:-}
+      EGMA_PERSONA_TTS_API_KEY: ${EGMA_PERSONA_TTS_API_KEY:-}
+      EGMA_PERSONA_TTS_MODEL: ${EGMA_PERSONA_TTS_MODEL:-}
+      EGMA_PERSONA_TTS_VOICE: ${EGMA_PERSONA_TTS_VOICE:-}
+      EGMA_PERSONA_VAD_PROVIDER: ${EGMA_PERSONA_VAD_PROVIDER:-}
+      # The carrier, under the names phone setup already wrote, so an
+      # operator upgrading meets the words they were given before. The API
+      # holds the trunk password only long enough to seal it — exactly as it
+      # already holds a judge's key and a connection's credentials — and it
+      # neither dials nor speaks with any of it.
+      EGMA_MEDIA_BACKEND: ${EGMA_MEDIA_BACKEND:-}
+      EGMA_PHONE_TRUNK_ADDRESS: ${EGMA_PHONE_TRUNK_ADDRESS:-}
+      EGMA_PHONE_SOURCE_NUMBER: ${EGMA_PHONE_SOURCE_NUMBER:-}
+      EGMA_PHONE_TRUNK_USERNAME: ${EGMA_PHONE_TRUNK_USERNAME:-}
+      EGMA_PHONE_TRUNK_PASSWORD: ${EGMA_PHONE_TRUNK_PASSWORD:-}
     ports:
       # Published on the host, so that a self-hoster who already runs
       # something on these can move egma rather than move the other thing —
@@ -416,70 +432,43 @@ services:
       # to overload — raise this, or start a second simulator, and they
       # distribute between themselves with nothing in front of them.
       EGMA_SIMULATOR_CAPACITY: ${EGMA_SIMULATOR_CAPACITY:-4}
-      # Where the persona's words come from. `scripted` walks the scenario
-      # deterministically and needs no account, which is why it is the
-      # default; `openai` speaks to any provider using that shape and makes
-      # the next two required.
-      EGMA_SIMULATOR_MODEL_PROVIDER: ${EGMA_SIMULATOR_MODEL_PROVIDER:-scripted}
-      EGMA_SIMULATOR_MODEL_NAME: ${EGMA_SIMULATOR_MODEL_NAME:-}
-      EGMA_SIMULATOR_MODEL_API_KEY: ${EGMA_SIMULATOR_MODEL_API_KEY:-}
-      EGMA_SIMULATOR_MODEL_BASE_URL: ${EGMA_SIMULATOR_MODEL_BASE_URL:-}
-      # What the persona hears and speaks with in a voice simulation. Both
-      # default to `scripted`, which needs no account and no network — a
-      # first voice simulation costs nothing — and each is chosen on its
-      # own. Naming `deepgram` or `elevenlabs` makes that provider's key
-      # required, and the simulator says so at startup rather than failing
-      # every voice simulation it later claims.
-      EGMA_SIMULATOR_STT_PROVIDER: ${EGMA_SIMULATOR_STT_PROVIDER:-scripted}
-      EGMA_SIMULATOR_DEEPGRAM_API_KEY: ${EGMA_SIMULATOR_DEEPGRAM_API_KEY:-}
-      EGMA_SIMULATOR_TTS_PROVIDER: ${EGMA_SIMULATOR_TTS_PROVIDER:-scripted}
-      EGMA_SIMULATOR_ELEVENLABS_API_KEY: ${EGMA_SIMULATOR_ELEVENLABS_API_KEY:-}
-      # One key for both legs when either names `openai`, because one
-      # account speaks and listens. It is what `egma self-host phone
-      # setup` asks for once, and the same key the persona's brain reads
-      # through EGMA_SIMULATOR_MODEL_API_KEY above.
-      EGMA_SIMULATOR_OPENAI_API_KEY: ${EGMA_SIMULATOR_OPENAI_API_KEY:-}
-      # Which models those legs ask for, and which voice the persona
-      # speaks with when its own traits name none. Models are the
-      # provider's to retire and add, so they are configuration rather
-      # than a constant of the product.
-      EGMA_SIMULATOR_STT_MODEL: ${EGMA_SIMULATOR_STT_MODEL:-}
-      EGMA_SIMULATOR_TTS_MODEL: ${EGMA_SIMULATOR_TTS_MODEL:-}
-      EGMA_SIMULATOR_TTS_VOICE: ${EGMA_SIMULATOR_TTS_VOICE:-}
-      # What hears the agent start and stop speaking. Bundled in the image
-      # either way, so this downloads nothing at run time.
-      EGMA_SIMULATOR_VAD_PROVIDER: ${EGMA_SIMULATOR_VAD_PROVIDER:-scripted}
-      # How a phone call's audio travels, for a simulation whose connection
-      # names a number. Naming a backend is what makes the rest required
-      # and what makes this simulator able to dial at all; unset, it starts
-      # in silence and refuses such a simulation with the variable to set.
-      # The simulator's own posture is unchanged either way: it joins a
-      # LiveKit room outbound and is never dialled into. `scripted` places
-      # no call at all and is what the local story and CI use. A LiveKit
-      # and a SIP trunk are what make a real call possible; the trunk is
-      # yours, from any carrier, either one already stored in LiveKit or
-      # the inline fields below. Standing the LiveKit and SIP containers up
-      # beside this one is a separate, opt-in overlay: those need a public
-      # IP, which this file never assumes.
+      # **No provider setting reaches this container.** Which model the
+      # persona thinks with, what it speaks and hears with, what tells it
+      # the agent has stopped talking, which bridge places a call and which
+      # carrier trunk it goes over are all the *platform's* settings now:
+      # the API seals them into its own store and hands them to this
+      # container on the work order it claims, read afresh for every
+      # simulation. So there is nothing here to set, nothing to keep in
+      # step with the api service above, and nothing that can go missing
+      # when this container is recreated. A second simulator is started and
+      # nothing is copied to it.
       #
-      # The LiveKit beside it is the default, filled in from the same pair
-      # the two containers below authenticate each other with, so the
-      # three halves can never disagree. That pair has no default here:
-      # `egma self-host` generates one for the workspace and hands it to
-      # all three, so a deployment never runs on a credential published in
-      # this repository. The backend itself stays unset until
-      # `egma self-host phone setup` has run: a simulator told to dial
-      # with no trunk refuses to start, and platform readiness must not
-      # wait on carrier setup.
-      EGMA_SIMULATOR_MEDIA_BACKEND: ${EGMA_SIMULATOR_MEDIA_BACKEND:-}
+      # Two per-container exceptions stay, and each is here because it
+      # cannot be anywhere else. This is the address this container reaches
+      # a model provider at — a property of the network it is on rather
+      # than of the deployment's account:
+      EGMA_SIMULATOR_MODEL_BASE_URL: ${EGMA_SIMULATOR_MODEL_BASE_URL:-}
+      # And this is which model the listening leg asks for, which the
+      # platform's settings do not carry:
+      EGMA_SIMULATOR_STT_MODEL: ${EGMA_SIMULATOR_STT_MODEL:-}
+      # The media server this container talks to. It is a third-party
+      # binary that reads its own key and secret when it is *created*, so
+      # it can never reach the platform's database and its address and
+      # credential stay bootstrap configuration on both sides. The default
+      # is the LiveKit beside it, filled in from the same pair the two
+      # containers below authenticate each other with, so the three halves
+      # can never disagree. That pair has no default here: `egma self-host`
+      # generates one for the workspace and hands it to all three, so a
+      # deployment never runs on a credential published in this repository.
+      #
+      # Nothing here makes this simulator dial. Whether it may, and what
+      # trunk it goes over, is the platform's `media_backend` and carrier
+      # trunk — so `docker compose up` on a machine that has never seen a
+      # carrier starts exactly as it always did, and platform readiness
+      # never waits on carrier setup.
       EGMA_SIMULATOR_LIVEKIT_URL: ${EGMA_SIMULATOR_LIVEKIT_URL:-ws://livekit:7880}
       EGMA_SIMULATOR_LIVEKIT_API_KEY: ${EGMA_SIMULATOR_LIVEKIT_API_KEY:-${EGMA_LIVEKIT_API_KEY:-}}
       EGMA_SIMULATOR_LIVEKIT_API_SECRET: ${EGMA_SIMULATOR_LIVEKIT_API_SECRET:-${EGMA_LIVEKIT_API_SECRET:-}}
-      EGMA_SIMULATOR_SIP_TRUNK_ID: ${EGMA_SIMULATOR_SIP_TRUNK_ID:-}
-      EGMA_SIMULATOR_SIP_TRUNK_ADDRESS: ${EGMA_SIMULATOR_SIP_TRUNK_ADDRESS:-}
-      EGMA_SIMULATOR_SIP_TRUNK_NUMBER: ${EGMA_SIMULATOR_SIP_TRUNK_NUMBER:-}
-      EGMA_SIMULATOR_SIP_TRUNK_USERNAME: ${EGMA_SIMULATOR_SIP_TRUNK_USERNAME:-}
-      EGMA_SIMULATOR_SIP_TRUNK_PASSWORD: ${EGMA_SIMULATOR_SIP_TRUNK_PASSWORD:-}
       # Where recordings go. Naming an endpoint is the whole of what sends
       # them to object storage; naming none keeps them in a directory on
       # whatever disk the process is running on, which is what a bare

@@ -2,7 +2,6 @@ import type { PlatformSettingValues } from "@egma/db";
 
 import { SERVICE_TOKEN_PREFIX } from "./auth/service-token.ts";
 import type { SmtpSettings } from "./auth/email.ts";
-import type { PhoneSettings } from "./phone-readiness.ts";
 import type { BlobStore } from "./recordings/signed-link.ts";
 
 /** A judge the platform hands to projects that have configured none. */
@@ -80,14 +79,6 @@ export type Config = {
    * pattern, so `docker compose up` still works with zero setup.
    */
   readonly simulatorServiceToken: string;
-  /**
-   * The non-secret facts `egma self-host phone setup` leaves behind, and the
-   * whole of what this process knows about the carrier. It never holds the
-   * Twilio Auth Token, the SIP password or the OpenAI key that the simulator
-   * dials and speaks with — the platform's phone authority lives in the
-   * container that uses it, and this side only says whether it exists.
-   */
-  readonly phone: PhoneSettings;
   /**
    * The judge a project is given when it has configured none, from the one
    * OpenAI key a self-hoster supplied at phone setup.
@@ -347,11 +338,6 @@ export function loadConfig(
     trustProxy: flag(environment, "EGMA_TRUST_PROXY", false),
     rateLimitPerMinute,
     simulatorServiceToken,
-    phone: {
-      trunkAddress: environment.EGMA_PHONE_TRUNK_ADDRESS?.trim() || null,
-      sourceNumber: environment.EGMA_PHONE_SOURCE_NUMBER?.trim() || null,
-      speechProvider: environment.EGMA_PHONE_SPEECH_PROVIDER?.trim() || null,
-    },
     defaultJudge: defaultJudge(environment),
     platformSettings: platformSettings(environment),
     blob: blobStore(environment, parsedBaseUrl),
@@ -361,6 +347,17 @@ export function loadConfig(
 /**
  * The settings this environment offers the platform, by the name the platform
  * stores each one under.
+ *
+ * **The carrier is in here now, and that is the point of the whole effort.**
+ * This process used to hold three non-secret phone facts as its own
+ * configuration and hold nothing else about the deployment, so a platform
+ * started without them reported `setup required` with no way to fix it but a
+ * restart. They are settings like the rest now: seeded from here once, stored
+ * sealed, changed through the settings form, and read from the store on every
+ * answer that depends on them. This process therefore does hold the trunk
+ * password long enough to seal it — the same way it already holds a judge's key
+ * and a connection's credentials long enough to seal those — and it never
+ * dials, speaks or listens with any of them.
  *
  * **Each variable is read here, literally and by name, on purpose.** A loop
  * over the settings catalog would be shorter and would defeat the check that
@@ -385,6 +382,20 @@ function platformSettings(
     persona_model_provider: environment.EGMA_PERSONA_MODEL_PROVIDER?.trim(),
     persona_model: environment.EGMA_PERSONA_MODEL?.trim(),
     persona_model_key: environment.EGMA_PERSONA_MODEL_API_KEY?.trim(),
+    speech_to_text_provider: environment.EGMA_PERSONA_STT_PROVIDER?.trim(),
+    speech_to_text_key: environment.EGMA_PERSONA_STT_API_KEY?.trim(),
+    text_to_speech_provider: environment.EGMA_PERSONA_TTS_PROVIDER?.trim(),
+    text_to_speech_key: environment.EGMA_PERSONA_TTS_API_KEY?.trim(),
+    text_to_speech_model: environment.EGMA_PERSONA_TTS_MODEL?.trim(),
+    text_to_speech_voice: environment.EGMA_PERSONA_TTS_VOICE?.trim(),
+    voice_activity_provider: environment.EGMA_PERSONA_VAD_PROVIDER?.trim(),
+    media_backend: environment.EGMA_MEDIA_BACKEND?.trim(),
+    // The carrier keeps the variable names phone setup already wrote, so an
+    // operator upgrading meets the same three words they were given before.
+    carrier_trunk_address: environment.EGMA_PHONE_TRUNK_ADDRESS?.trim(),
+    carrier_trunk_number: environment.EGMA_PHONE_SOURCE_NUMBER?.trim(),
+    carrier_trunk_username: environment.EGMA_PHONE_TRUNK_USERNAME?.trim(),
+    carrier_trunk_password: environment.EGMA_PHONE_TRUNK_PASSWORD?.trim(),
   };
 
   // Compose passes an unset optional through as an empty string rather than

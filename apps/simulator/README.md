@@ -304,6 +304,17 @@ one.
 
 Everything arrives as environment variables.
 
+**The provider settings in this table are a fallback, and a deployment does
+not use them.** Which model the persona thinks with, what it speaks and hears
+with, which bridge places a call and which carrier trunk it goes over are the
+*platform's* settings: the control plane stores them sealed and hands them to
+this process on the work order it claims, read afresh for every simulation. A
+work-order value replaces whatever this environment said, and no compose file
+passes any of them — so on a real deployment there is nothing here to set and
+nothing to keep in step. They stay readable for the one reader who has no
+platform behind them: a bare `egma-simulator` process, which is what the
+workbench story and every contributor's checkout run.
+
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `EGMA_SIMULATOR_CONTROL_PLANE_URL` | (required) | Where to claim, heartbeat, and report. |

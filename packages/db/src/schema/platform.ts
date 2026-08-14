@@ -101,23 +101,139 @@ export const platformSetting = pgTable(
  * Every setting this platform knows about, in the order a person is asked for
  * them. **This list is the only place a setting's name is written.**
  *
- * The list grows as the effort moves the rest of the deployment's settings in:
- * the carrier trunk and the media backend, the speech providers and their keys.
  * Adding one here is an insert at run time and nothing else — no migration, no
- * check constraint to widen, and no second list to remember.
+ * check constraint to widen, and no second list to remember. The order is the
+ * order a setup interview walks: who the persona thinks with, then what it
+ * speaks and hears with, then how a call reaches the telephone network — so
+ * that an operator gathers one provider's paperwork at a time rather than
+ * jumping between accounts.
  *
  * A label is the words a readiness answer names the setting in — "the persona's
  * model key" rather than `persona_model_key` — because "setup required" with a
  * column name after it sends a self-hoster to read source.
+ *
+ * **Nothing here is checked against a closed list of providers.** Which model a
+ * deployment thinks with and which company transcribes for it are the
+ * simulator's vocabulary, and it already refuses a provider it holds no leg for
+ * with a sentence naming the ones it has. A second list here would be a list
+ * that can disagree with that one, and the disagreement would be a setting an
+ * operator could store and never use.
+ *
+ * **`required` is what setup has to supply and what readiness waits for.** Four
+ * entries are not, and each is not for a stated reason.
+ *
+ * The text-to-speech model and voice have a working default in the simulator,
+ * so a platform that never names one still speaks. The carrier trunk's username
+ * and password are a pair a carrier may not use at all: a trunk authenticated
+ * by the address it came from is a real deployment, which is what the
+ * simulator's own carrier check says in as many words, so demanding them would
+ * be readiness calling a working platform unconfigured forever.
+ *
+ * Marking any of the four required would leave an operator who finished the
+ * whole documented setup still reading `setup required` with nothing sensible
+ * to type — the same silent-mismatch failure this effort exists to remove,
+ * wearing the opposite face. They are settings somebody may supply, not
+ * settings they must, and the interview treats them the same way.
+ *
+ * **The keys, by contrast, are required and stay required.** A platform holding
+ * a provider and a model and no key is precisely the hollow start this whole
+ * effort removes: it would report `ready` and then fail every simulation at the
+ * provider, minutes later, with a refusal naming nothing about configuration.
+ * The `scripted` providers need no key, but a platform running scripted is not
+ * a platform anybody configured — it is what a simulator with no settings at
+ * all already does.
  */
 export const PLATFORM_SETTINGS = [
   {
     name: "persona_model_provider",
     label: "the persona's model provider",
     secret: false,
+    required: true,
   },
-  { name: "persona_model", label: "the persona's model", secret: false },
-  { name: "persona_model_key", label: "the persona's model key", secret: true },
+  {
+    name: "persona_model",
+    label: "the persona's model",
+    secret: false,
+    required: true,
+  },
+  {
+    name: "persona_model_key",
+    label: "the persona's model key",
+    secret: true,
+    required: true,
+  },
+  {
+    name: "speech_to_text_provider",
+    label: "the speech-to-text provider",
+    secret: false,
+    required: true,
+  },
+  {
+    name: "speech_to_text_key",
+    label: "the speech-to-text key",
+    secret: true,
+    required: true,
+  },
+  {
+    name: "text_to_speech_provider",
+    label: "the text-to-speech provider",
+    secret: false,
+    required: true,
+  },
+  {
+    name: "text_to_speech_key",
+    label: "the text-to-speech key",
+    secret: true,
+    required: true,
+  },
+  {
+    name: "text_to_speech_model",
+    label: "the text-to-speech model",
+    secret: false,
+    required: false,
+  },
+  {
+    name: "text_to_speech_voice",
+    label: "the text-to-speech voice",
+    secret: false,
+    required: false,
+  },
+  {
+    name: "voice_activity_provider",
+    label: "the voice-activity provider",
+    secret: false,
+    required: true,
+  },
+  {
+    name: "media_backend",
+    label: "the media backend",
+    secret: false,
+    required: true,
+  },
+  {
+    name: "carrier_trunk_address",
+    label: "the carrier trunk",
+    secret: false,
+    required: true,
+  },
+  {
+    name: "carrier_trunk_number",
+    label: "the source number",
+    secret: false,
+    required: true,
+  },
+  {
+    name: "carrier_trunk_username",
+    label: "the carrier trunk username",
+    secret: false,
+    required: false,
+  },
+  {
+    name: "carrier_trunk_password",
+    label: "the carrier trunk password",
+    secret: true,
+    required: false,
+  },
 ] as const satisfies readonly {
   readonly name: string;
   /** What a person calls it, in a refusal and in a setup interview alike. */
@@ -128,6 +244,14 @@ export const PLATFORM_SETTINGS = [
    * handed out; anything else hints with itself.
    */
   readonly secret: boolean;
+  /**
+   * Whether setup is incomplete without it, and therefore whether readiness
+   * waits for it. `false` where the simulator has a default that works, so a
+   * platform that never names one still conducts a simulation — see the
+   * catalog's own note above for why that difference has to be written down
+   * rather than left to whoever writes the interview.
+   */
+  readonly required: boolean;
 }[];
 
 /**
@@ -140,7 +264,14 @@ export type PlatformSettingDefinition = (typeof PLATFORM_SETTINGS)[number];
 /** The name of one setting. A write that names anything else is refused. */
 export type PlatformSettingName = PlatformSettingDefinition["name"];
 
-/** The settings a caller is changing or seeding, by name. */
+/**
+ * Settings by name, in the clear.
+ *
+ * One shape for the three journeys a plain value makes: what a caller is
+ * changing, what an environment is seeding, and what the platform hands the
+ * simulator on a work order. They are the same thing said three times, and a
+ * second alias for the third would be a second vocabulary for one map.
+ */
 export type PlatformSettingValues = Readonly<
   Partial<Record<PlatformSettingName, string>>
 >;

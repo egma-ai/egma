@@ -112,9 +112,9 @@ describe("the API's deployment story", () => {
     ).toEqual([]);
   });
 
-  it("keeps the judge's key off the grader, and the carrier's secrets off the API", () => {
-    // The two halves of one decision, held here because each is one line away
-    // from being undone and neither would fail anything else.
+  it("keeps the judge's key off the grader, and every setting off the simulator", () => {
+    // Three halves of one decision, held here because each is one line away
+    // from being undone and none would fail anything else.
     //
     // A judge configured per container is a judge no project chose, spent on
     // conversations belonging to customers who agreed to neither — so the key
@@ -122,15 +122,36 @@ describe("the API's deployment story", () => {
     // never the grader, which opens that row.
     expect(serviceBlock("grader")).not.toContain("EGMA_JUDGE_API_KEY");
 
-    // And the API holds nothing it would dial or speak with. Its whole
-    // knowledge of the carrier is three non-secret facts.
+    // The API *does* hold the carrier's secrets now, and that is the effort's
+    // whole point: it seals them into the platform's own store, exactly as it
+    // already seals a judge's key and a connection's credentials, and it
+    // neither dials nor speaks with any of them. What it must still never
+    // hold is the one credential that opens the whole Twilio account.
     const api = serviceBlock("api");
-    for (const secret of [
-      "TWILIO_AUTH_TOKEN",
-      "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD",
-      "EGMA_SIMULATOR_OPENAI_API_KEY",
+    expect(api).not.toContain("TWILIO_AUTH_TOKEN");
+    expect(api).toContain("EGMA_PHONE_TRUNK_PASSWORD");
+
+    // And the variables the platform's settings are *seeded from* reach the
+    // API and no simulator. They are what the API seals into the store, and
+    // every simulator is then handed the values on the work order it claims;
+    // a compose entry for one of them on the simulator would be a second
+    // place the same setting is written down, and the two would disagree the
+    // first time somebody changed one. Which is this effort's own failure,
+    // arriving by a new route.
+    //
+    // The simulator's own `EGMA_SIMULATOR_*` provider variables are a
+    // different thing and stay: they are what a bare simulator falls back to
+    // when the platform holds nothing — the workbench story and every
+    // contributor's checkout — and a work-order value replaces each of them.
+    const simulator = serviceBlock("simulator");
+    for (const owned of [
+      "EGMA_PERSONA_MODEL_API_KEY",
+      "EGMA_PERSONA_STT_API_KEY",
+      "EGMA_PERSONA_TTS_API_KEY",
+      "EGMA_PHONE_TRUNK_PASSWORD",
+      "EGMA_MEDIA_BACKEND:",
     ]) {
-      expect(api).not.toContain(secret);
+      expect(simulator, `the simulator is handed ${owned}`).not.toContain(owned);
     }
   });
 

@@ -20,9 +20,28 @@ const NOTHING_SET_UP = {
     "the persona's model provider",
     "the persona's model",
     "the persona's model key",
+    "the speech-to-text provider",
+    "the speech-to-text key",
+    "the text-to-speech provider",
+    "the text-to-speech key",
+    "the voice-activity provider",
+    "the media backend",
     "the carrier trunk",
     "the source number",
-    "the speech provider",
+  ],
+};
+
+/**
+ * And what its phone half answers: the three non-secret facts the carrier
+ * stands on, named separately because a platform with no carrier still runs
+ * text and chat simulations perfectly well.
+ */
+const NO_CARRIER = {
+  state: "setup_required",
+  missing: [
+    "the carrier trunk",
+    "the source number",
+    "the text-to-speech provider",
   ],
 };
 
@@ -66,10 +85,7 @@ it("keeps one public platform identity across an API restart", async () => {
       // A platform with no carrier is ready — it runs text simulations
       // perfectly well — and saying otherwise would make the first-run story
       // impossible to tell. What it says instead is what setup still needs.
-      phone: {
-      state: "setup_required",
-      missing: ["the carrier trunk", "the source number", "the speech provider"],
-    },
+      phone: NO_CARRIER,
     });
 
     await app.close();
@@ -127,10 +143,7 @@ it("reads its identity rather than writing on every public request", async () =>
         // A platform nobody has set a carrier up on says so here rather than
         // anywhere a developer has to go looking, and says it separately from
         // being ready — it runs text simulations perfectly well.
-        phone: {
-          state: "setup_required",
-          missing: ["the carrier trunk", "the source number", "the speech provider"],
-        },
+        phone: NO_CARRIER,
       });
     }
     expect(
@@ -168,10 +181,7 @@ it("reads its identity rather than writing on every public request", async () =>
       instance_id: minted.instance_id,
       origin: config.baseUrl,
       setup: NOTHING_SET_UP,
-      phone: {
-      state: "setup_required",
-      missing: ["the carrier trunk", "the source number", "the speech provider"],
-    },
+      phone: NO_CARRIER,
     });
   } finally {
     await app?.close();

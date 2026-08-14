@@ -1,4 +1,4 @@
-import { seedPlatformSettings } from "@egma/db";
+import { PLATFORM_SETTINGS, seedPlatformSettings } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { loadConfig } from "../src/config.ts";
@@ -42,11 +42,26 @@ afterEach(async () => {
 const A_REAL_KEY = "sk-the-operator-pasted-this-one-QRST";
 const A_SECOND_KEY = "sk-and-then-replaced-it-with-this-WXYZ";
 
-/** What a fully configured phone half looks like, for the `ready` case. */
-const A_CARRIER = {
-  trunkAddress: "acme.pstn.twilio.com",
-  sourceNumber: "+15550100",
-  speechProvider: "openai",
+/**
+ * Everything but the persona's model, so a test about one group of settings can
+ * reach `ready` without typing the other fourteen.
+ *
+ * Seeded the way an automated deployment seeds them, sealed like every other
+ * row — there is no shortcut into this table and this suite does not invent one.
+ */
+const EVERYTHING_ELSE = {
+  speech_to_text_provider: "openai",
+  speech_to_text_key: "sk-the-listening-leg-uses-this-one",
+  text_to_speech_provider: "openai",
+  text_to_speech_key: "sk-the-speaking-leg-uses-this-one",
+  text_to_speech_model: "gpt-4o-mini-tts",
+  text_to_speech_voice: "alloy",
+  voice_activity_provider: "silero",
+  media_backend: "livekit",
+  carrier_trunk_address: "acme.pstn.twilio.com",
+  carrier_trunk_number: "+15550100",
+  carrier_trunk_username: "acme-trunk",
+  carrier_trunk_password: "the-carrier-issued-this-one",
 } as const;
 
 function request(
@@ -261,10 +276,14 @@ describe("a write that cannot be acted on", () => {
     // does not check the same thing a second time — two answers for one
     // condition would be a contract with two faces.
     expect(refused.statusCode).toBe(422);
+    // The names read off the catalog rather than listed again: the list grows
+    // as settings move in, and what has to hold is that the refusal names the
+    // typo and then every setting the platform really has.
     expect(refused.body.message).toBe(
       '"persona_moddel" is not a platform setting egma knows; it holds ' +
-        "persona_model_provider, persona_model, persona_model_key",
+        PLATFORM_SETTINGS.map((setting) => setting.name).join(", "),
     );
+    expect(String(refused.body.message)).toContain("carrier_trunk_address");
   });
 
   it("refuses a secret too short for any provider to have issued it", async () => {
@@ -301,9 +320,14 @@ describe("what the platform says about its own setup", () => {
         "the persona's model provider",
         "the persona's model",
         "the persona's model key",
+        "the speech-to-text provider",
+        "the speech-to-text key",
+        "the text-to-speech provider",
+        "the text-to-speech key",
+        "the voice-activity provider",
+        "the media backend",
         "the carrier trunk",
         "the source number",
-        "the speech provider",
       ],
     });
   });
@@ -311,7 +335,7 @@ describe("what the platform says about its own setup", () => {
   it("stops naming a setting the moment somebody supplies it", async () => {
     api = await createApi("platform_settings_readiness_narrows", {
       singleOrganization: true,
-      phone: { ...A_CARRIER },
+      platformSettings: { ...EVERYTHING_ELSE },
     });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
@@ -328,10 +352,85 @@ describe("what the platform says about its own setup", () => {
     });
   });
 
+  it("answers ready to a platform holding exactly what setup writes", async () => {
+    // **The two have to agree, and this is where they are held together.**
+    // Membership of the catalog with `required` means "setup is incomplete
+    // without it", so a setting marked required that the setup command never
+    // writes would leave an operator who followed the documentation to the end
+    // still reading `setup required`, with nothing sensible to type. These are
+    // the settings `egma self-host phone setup` really writes, and the two the
+    // simulator defaults for are deliberately not among them.
+    api = await createApi("platform_settings_ready_after_setup", {
+      singleOrganization: true,
+      platformSettings: {
+        persona_model_provider: "openai",
+        persona_model: "gpt-4o",
+        persona_model_key: A_REAL_KEY,
+        speech_to_text_provider: "openai",
+        speech_to_text_key: A_REAL_KEY,
+        text_to_speech_provider: "openai",
+        text_to_speech_key: A_REAL_KEY,
+        voice_activity_provider: "silero",
+        media_backend: "livekit",
+        carrier_trunk_address: "acme.pstn.twilio.com",
+        carrier_trunk_number: "+15550100",
+        carrier_trunk_username: "acme-trunk",
+        carrier_trunk_password: "the-carrier-issued-this-one",
+      },
+    });
+
+    expect(await readiness()).toEqual({ state: "ready", missing: [] });
+
+
+    // And the two it did not write are still settings the platform can hold
+    // and hand over — optional is not absent from the catalog.
+    expect(
+      PLATFORM_SETTINGS.filter((setting) => !setting.required).map(
+        (setting) => setting.name,
+      ),
+    ).toEqual([
+      "text_to_speech_model",
+      "text_to_speech_voice",
+      // A trunk the carrier authenticates by the address it came from is a
+      // real deployment and needs neither of these — which is what the
+      // simulator's own carrier check says too, so readiness must not call
+      // such a platform unconfigured forever.
+      "carrier_trunk_username",
+      "carrier_trunk_password",
+    ]);
+  });
+
+  it("answers ready to a carrier that authenticates its trunk by address", async () => {
+    // A trunk a carrier authenticates by the address it came from needs
+    // neither a username nor a password, and that is a real deployment — the
+    // simulator's own carrier check says so in as many words, and refuses
+    // *half* a credential precisely because neither half is the honest shape.
+    // Readiness demanding a username a carrier does not use would call a
+    // working platform unconfigured with no way out of it.
+    api = await createApi("platform_settings_ready_trunk_by_address", {
+      singleOrganization: true,
+      platformSettings: {
+        persona_model_provider: "openai",
+        persona_model: "gpt-4o",
+        persona_model_key: A_REAL_KEY,
+        speech_to_text_provider: "openai",
+        speech_to_text_key: A_REAL_KEY,
+        text_to_speech_provider: "openai",
+        text_to_speech_key: A_REAL_KEY,
+        voice_activity_provider: "silero",
+        media_backend: "livekit",
+        carrier_trunk_address: "acme.pstn.twilio.com",
+        carrier_trunk_number: "+15550100",
+      },
+    });
+
+    expect(await readiness()).toEqual({ state: "ready", missing: [] });
+  });
+
   it("answers ready once nothing is missing", async () => {
     api = await createApi("platform_settings_readiness_ready", {
       singleOrganization: true,
-      phone: { ...A_CARRIER },
+      platformSettings: { ...EVERYTHING_ELSE },
     });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
@@ -347,7 +446,7 @@ describe("what the platform says about its own setup", () => {
   it("carries no secret, at a door that asks for no credential", async () => {
     api = await createApi("platform_settings_readiness_is_public", {
       singleOrganization: true,
-      phone: { ...A_CARRIER },
+      platformSettings: { ...EVERYTHING_ELSE },
     });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     await request("PATCH", ada.secret, {

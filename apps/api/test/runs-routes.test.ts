@@ -123,9 +123,9 @@ const PHONE = {
  * been given a carrier, which is the only thing the run door asks about.
  */
 const PHONE_IS_SET_UP = {
-  trunkAddress: "egma-simulator-106e37f8.pstn.twilio.com",
-  sourceNumber: "+18885550123",
-  speechProvider: "openai",
+  carrier_trunk_address: "egma-simulator-106e37f8.pstn.twilio.com",
+  carrier_trunk_number: "+18885550123",
+  text_to_speech_provider: "openai",
 } as const;
 
 /** Somebody with a key, an agent to check, and a test to check it against. */
@@ -142,7 +142,9 @@ async function aCustomerReadyToRun(
 }> {
   api = await createApi(
     label,
-    options.phoneIsSetUp === true ? { phone: PHONE_IS_SET_UP } : {},
+    options.phoneIsSetUp === true
+      ? { platformSettings: PHONE_IS_SET_UP }
+      : {},
   );
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
@@ -565,8 +567,9 @@ describe("starting a run", () => {
       message:
         "this egma has not been set up to place phone calls, so nothing was " +
         "dialled and nothing was charged. It is missing the carrier trunk " +
-        "and the source number and the speech provider. Whoever runs this " +
-        "platform makes it ready with one command in the platform workspace: " +
+        "and the source number and the text-to-speech provider. Whoever runs " +
+        "this platform makes it ready with one command in the platform " +
+        "workspace: " +
         "egma self-host phone setup.",
     });
 
@@ -581,7 +584,10 @@ describe("starting a run", () => {
 
   it("says which half of phone setup is missing, so a partly-configured platform is not told to start again", async () => {
     api = await createApi("runs_phone_half_set", {
-      phone: { ...PHONE_IS_SET_UP, sourceNumber: null },
+      platformSettings: {
+        carrier_trunk_address: PHONE_IS_SET_UP.carrier_trunk_address,
+        text_to_speech_provider: PHONE_IS_SET_UP.text_to_speech_provider,
+      },
     });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);

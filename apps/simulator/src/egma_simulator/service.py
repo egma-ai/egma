@@ -37,7 +37,7 @@ from typing import Protocol
 
 from .blob import BlobStore, FilesystemBlobStore, S3BlobStore
 from .client import ClaimFailure, ControlPlaneClient, HeartbeatFailure
-from .config import SimulatorConfig
+from .config import MediaSettings, SimulatorConfig
 from .contract import ContractViolation
 from .model import build_model_client
 from .persona import Persona
@@ -258,7 +258,18 @@ class RunningSimulation:
             assembled = assemble(
                 self._spec,
                 blobs=self._blobs,
-                speech=SpeechProviders.from_config(self._config),
+                # This container's configuration with the platform's own
+                # settings laid over it, resolved here — once, for this
+                # simulation, from the work order that claimed it. Which is
+                # what makes a key an operator replaced apply to the next
+                # simulation with nothing restarted, and what lets a second
+                # simulator on another machine hold no settings at all.
+                speech=SpeechProviders.for_simulation(
+                    self._config, self._spec.platform.speech
+                ),
+                media=MediaSettings.for_simulation(
+                    self._config.media, self._spec.platform.carrier
+                ),
             )
             self._assembled = assembled
             persona = Persona(
@@ -634,7 +645,13 @@ class SimulatorService:
                 )
                 continue
 
+            # The connection's credentials and the platform's own keys, both
+            # registered before anything is conducted with either. A key that
+            # arrived on a work order is exactly as much a secret as one that
+            # arrived in this container's environment, and the filter that
+            # keeps it out of the log has to know about it either way.
             self._secrets.register(spec.credentials)
+            self._secrets.register(list(spec.platform.secrets))
             executor.submit(spec)
 
     async def _conduct_one(
