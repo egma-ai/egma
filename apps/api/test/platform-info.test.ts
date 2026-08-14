@@ -11,6 +11,22 @@ import {
 import { testConfig } from "./support/api.ts";
 
 /**
+ * What a platform nobody has configured answers about its own setup: every
+ * setting it needs, named in the words a person would use, and nothing else.
+ */
+const NOTHING_SET_UP = {
+  state: "setup_required",
+  missing: [
+    "the persona's model provider",
+    "the persona's model",
+    "the persona's model key",
+    "the carrier trunk",
+    "the source number",
+    "the speech provider",
+  ],
+};
+
+/**
  * The public identity survives the API object that first read it.
  *
  * Both objects use the same real Postgres database. Closing the first object
@@ -33,10 +49,19 @@ it("keeps one public platform identity across an API restart", async () => {
     const first = await app.inject({ method: "GET", url: "/api/platform" });
     expect(first.statusCode).toBe(200);
     const identity = first.json<Record<string, unknown>>();
-    expect(Object.keys(identity).sort()).toEqual(["instance_id", "origin", "phone"]);
+    expect(Object.keys(identity).sort()).toEqual([
+      "instance_id",
+      "origin",
+      "phone",
+      "setup",
+    ]);
     expect(identity).toEqual({
       instance_id: expect.stringMatching(/^pf_[0-9A-HJKMNP-TV-Z]{26}$/u),
       origin: config.baseUrl,
+      // What the whole platform is still missing, read from the platform's own
+      // store rather than from this process's environment — which is why it
+      // survives a restart with nothing carried across but the database.
+      setup: NOTHING_SET_UP,
       // Phone readiness is a second fact and never a component of the first.
       // A platform with no carrier is ready — it runs text simulations
       // perfectly well — and saying otherwise would make the first-run story
@@ -98,6 +123,7 @@ it("reads its identity rather than writing on every public request", async () =>
       expect(again.json()).toEqual({
         instance_id: minted.instance_id,
         origin: config.baseUrl,
+        setup: NOTHING_SET_UP,
         // A platform nobody has set a carrier up on says so here rather than
         // anywhere a developer has to go looking, and says it separately from
         // being ready — it runs text simulations perfectly well.
@@ -141,6 +167,7 @@ it("reads its identity rather than writing on every public request", async () =>
     expect(cold.json()).toEqual({
       instance_id: minted.instance_id,
       origin: config.baseUrl,
+      setup: NOTHING_SET_UP,
       phone: {
       state: "setup_required",
       missing: ["the carrier trunk", "the source number", "the speech provider"],

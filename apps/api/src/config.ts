@@ -1,3 +1,5 @@
+import type { PlatformSettingValues } from "@egma/db";
+
 import { SERVICE_TOKEN_PREFIX } from "./auth/service-token.ts";
 import type { SmtpSettings } from "./auth/email.ts";
 import type { PhoneSettings } from "./phone-readiness.ts";
@@ -100,6 +102,26 @@ export type Config = {
    * verdicts and says so, exactly as before.
    */
   readonly defaultJudge: DefaultJudge | undefined;
+  /**
+   * The settings this environment offers the platform on start, for anything
+   * the platform does not already hold.
+   *
+   * **This is the second of the two ways a setting gets in, and the operator
+   * chooses which.** One is an interview — `egma self-host setup` asks for each
+   * setting and writes it through the API. The other is this: an automated
+   * deployment answers no questions, so it puts the settings in its environment
+   * and the platform seeds itself from them at start. It is the behaviour the
+   * default judge already has, extended rather than reinvented.
+   *
+   * Empty is the ordinary case and is never an error. A setting absent here is
+   * one somebody supplies through the interface or the setup command, and the
+   * platform says so in its readiness answer until they do.
+   *
+   * Nothing here is ever *replaced* from the environment. See
+   * `seedPlatformSettings`: a redeploy carrying a script's copy of the old key
+   * must not undo a key the operator changed.
+   */
+  readonly platformSettings: PlatformSettingValues;
   /**
    * The object store voice simulations' recordings live in, or `undefined` on a
    * deployment that has named none.
@@ -331,8 +353,47 @@ export function loadConfig(
       speechProvider: environment.EGMA_PHONE_SPEECH_PROVIDER?.trim() || null,
     },
     defaultJudge: defaultJudge(environment),
+    platformSettings: platformSettings(environment),
     blob: blobStore(environment, parsedBaseUrl),
   };
+}
+
+/**
+ * The settings this environment offers the platform, by the name the platform
+ * stores each one under.
+ *
+ * **Each variable is read here, literally and by name, on purpose.** A loop
+ * over the settings catalog would be shorter and would defeat the check that
+ * every variable the API reads is passed to the api container and documented
+ * in `.env.example` — which is a check that exists because that exact gap
+ * happened once already: phone readiness was written, documented and tested,
+ * and then reported `setup required` against a real carrier because the compose
+ * entry never passed the variables through.
+ *
+ * **Unlike the judge's three, these are not all-or-nothing.** Half a judge is a
+ * judge that errors every verdict it is given, so half is refused at startup.
+ * Half of these is an ordinary platform mid-setup: a deployment that supplied
+ * the provider and the model from a script and means to type the key into the
+ * settings form is exactly the case the readiness answer is for, and refusing
+ * to start on it would make seeding an all-or-nothing act rather than a
+ * gap-filling one.
+ */
+function platformSettings(
+  environment: NodeJS.ProcessEnv,
+): PlatformSettingValues {
+  const offered = {
+    persona_model_provider: environment.EGMA_PERSONA_MODEL_PROVIDER?.trim(),
+    persona_model: environment.EGMA_PERSONA_MODEL?.trim(),
+    persona_model_key: environment.EGMA_PERSONA_MODEL_API_KEY?.trim(),
+  };
+
+  // Compose passes an unset optional through as an empty string rather than
+  // leaving it out, so "" and "never set" have to mean the same thing: a blank
+  // model name seeded as a model name would be a platform reporting itself
+  // configured with nothing to ask.
+  return Object.fromEntries(
+    Object.entries(offered).filter(([, value]) => (value ?? "") !== ""),
+  ) as PlatformSettingValues;
 }
 
 /**

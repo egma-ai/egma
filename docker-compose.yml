@@ -325,6 +325,17 @@ services:
       EGMA_JUDGE_PROVIDER: ${EGMA_JUDGE_PROVIDER:-}
       EGMA_JUDGE_MODEL: ${EGMA_JUDGE_MODEL:-}
       EGMA_JUDGE_API_KEY: ${EGMA_JUDGE_API_KEY:-}
+      # What the persona thinks with, and the platform's own setting rather
+      # than the simulator's. It is written into the platform's store on boot,
+      # sealed, for anything the store does not already hold — and never over a
+      # value somebody changed, so a redeploy carrying an old key in a script
+      # cannot undo a new one. Setting these is one of the two ways in and is
+      # for a deployment that answers no questions; the other is
+      # `egma self-host setup`, which asks. Leave them empty and the platform
+      # reports `setup required` naming each one until somebody supplies it.
+      EGMA_PERSONA_MODEL_PROVIDER: ${EGMA_PERSONA_MODEL_PROVIDER:-}
+      EGMA_PERSONA_MODEL: ${EGMA_PERSONA_MODEL:-}
+      EGMA_PERSONA_MODEL_API_KEY: ${EGMA_PERSONA_MODEL_API_KEY:-}
     ports:
       # Published on the host, so that a self-hoster who already runs
       # something on these can move egma rather than move the other thing —
