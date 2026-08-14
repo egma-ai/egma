@@ -14,30 +14,16 @@ no network at all.
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import pytest
 
-from egma_simulator.config import ObjectStoreSettings, SimulatorConfig
+from egma_simulator.config import (
+    MediaSettings,
+    ObjectStoreSettings,
+    SimulatorConfig,
+)
+from egma_simulator.spec import PlatformCarrier
 
 A_URL = "http://control-plane.internal:3100"
-
-
-@pytest.fixture
-def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """A clean environment, and somewhere harmless for the two directories.
-
-    Whatever this machine has set is cleared first, so a developer with
-    their own ``EGMA_SIMULATOR_*`` exported cannot make these pass or fail
-    differently from anybody else's.
-    """
-    for name in list(os.environ):
-        if name.startswith("EGMA_SIMULATOR_"):
-            monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("EGMA_SIMULATOR_WAL_DIR", str(tmp_path / "wal"))
-    monkeypatch.setenv("EGMA_SIMULATOR_BLOB_DIR", str(tmp_path / "blobs"))
-    return monkeypatch
 
 
 def test_one_variable_is_enough(env, tmp_path):
@@ -457,15 +443,125 @@ def test_a_livekit_deployment_missing_a_variable_is_refused_by_name(env, missing
     assert missing in str(refusal.value)
 
 
-def test_a_deployment_with_no_trunk_at_all_is_refused_naming_both_ways(env):
-    """A call needs a trunk, and there are two ways to give one — so the
-    refusal names both rather than picking one for somebody."""
+def test_a_bridge_with_no_trunk_anywhere_starts_and_refuses_when_asked_to_dial(
+    env,
+):
+    """The trunk is the platform's now, so its absence is not a startup fault.
+
+    A simulator that names a bridge and holds no trunk used to refuse to
+    start. It cannot any more: the trunk arrives on each work order, so a
+    container waiting for one is an ordinary deployment — the whole
+    of what "a second simulator on another host needs no settings" means.
+
+    What is *not* given up is the refusal. It moves to where both halves
+    are in hand, and it names both ways a trunk can be given, because
+    picking one for somebody is what a refusal must not do.
+    """
     a_deployment_that_dials(env, EGMA_SIMULATOR_SIP_TRUNK_ADDRESS=None)
+
+    standing = SimulatorConfig.from_env().media
+    assert standing is not None
+    assert standing.trunk_address is None
+
     with pytest.raises(ValueError) as refusal:
-        SimulatorConfig.from_env()
+        MediaSettings.for_simulation(standing, PlatformCarrier())
     told = str(refusal.value)
+    assert "carrier trunk" in told
     assert "EGMA_SIMULATOR_SIP_TRUNK_ID" in told
-    assert "EGMA_SIMULATOR_SIP_TRUNK_ADDRESS" in told
+
+
+def test_the_platforms_trunk_is_what_a_simulator_holding_none_dials_over(env):
+    """The proof of the whole ticket, at the seam the carrier passes through.
+
+    This container knows a bridge and nothing else — no trunk address, no
+    number, no credential. Everything a call is authenticated with rides
+    the work order, and what comes out is a deployment able to dial.
+    """
+    a_deployment_that_dials(
+        env,
+        EGMA_SIMULATOR_SIP_TRUNK_ADDRESS=None,
+        EGMA_SIMULATOR_SIP_TRUNK_NUMBER=None,
+        EGMA_SIMULATOR_SIP_TRUNK_USERNAME=None,
+        EGMA_SIMULATOR_SIP_TRUNK_PASSWORD=None,
+    )
+
+    settled = MediaSettings.for_simulation(
+        SimulatorConfig.from_env().media,
+        PlatformCarrier(
+            trunk_address="the-platform-holds-this.pstn.twilio.com",
+            trunk_number="+15551110000",
+            trunk_username="platform-trunk-user",
+            trunk_password="SENTINEL-platform-trunk-password",
+        ),
+    )
+
+    assert settled is not None
+    assert settled.trunk_address == "the-platform-holds-this.pstn.twilio.com"
+    assert settled.trunk_number == "+15551110000"
+    assert settled.trunk_username == "platform-trunk-user"
+    assert settled.trunk_password == "SENTINEL-platform-trunk-password"
+    # And the bridge is still this container's, which is the other half of
+    # the split: the media server's key and secret are read by a
+    # third-party binary at creation and can never come from the store.
+    assert settled.livekit_url == "wss://livekit.internal"
+    assert settled.livekit_api_secret == "SENTINEL-livekit-secret-4c81"
+
+
+def test_the_platforms_trunk_wins_over_the_one_in_this_environment(env):
+    """One value here, a different value for the same setting on the work
+    order, and the call goes over the second. The stored reference goes
+    with it: a container quietly dialling its own trunk while the
+    platform's settings page showed another is the disagreement this
+    whole effort exists to end."""
+    a_deployment_that_dials(env, EGMA_SIMULATOR_SIP_TRUNK_ID="ST_left_behind")
+
+    settled = MediaSettings.for_simulation(
+        SimulatorConfig.from_env().media,
+        PlatformCarrier(
+            trunk_address="the-platform-holds-this.pstn.twilio.com",
+            trunk_number="+15551110000",
+            trunk_username="platform-trunk-user",
+            trunk_password="SENTINEL-platform-trunk-password",
+        ),
+    )
+
+    assert settled is not None
+    assert settled.trunk_id is None
+    assert settled.trunk_address == "the-platform-holds-this.pstn.twilio.com"
+    assert settled.trunk_username == "platform-trunk-user"
+
+
+def test_a_container_that_names_no_bridge_dials_over_the_platforms(env):
+    """Adding capacity is starting a container and nothing else.
+
+    Nothing here says this simulator may dial; the platform's own media
+    backend does. What the container still supplies is the media server it
+    reaches — bootstrap configuration, never a setting.
+    """
+    a_deployment_that_dials(env, EGMA_SIMULATOR_MEDIA_BACKEND=None)
+    assert SimulatorConfig.from_env().media is None
+
+    settled = MediaSettings.for_simulation(
+        None,
+        PlatformCarrier(
+            media_backend="livekit",
+            trunk_address="the-platform-holds-this.pstn.twilio.com",
+            trunk_number="+15551110000",
+        ),
+    )
+
+    assert settled is not None
+    assert settled.backend == "livekit"
+    assert settled.livekit_url == "wss://livekit.internal"
+    assert settled.trunk_address == "the-platform-holds-this.pstn.twilio.com"
+
+
+def test_a_deployment_nobody_gave_a_carrier_dials_nothing_and_says_nothing(env):
+    """Neither side names a backend, which is every platform before
+    somebody has done the carrier paperwork. It is an ordinary state, not
+    a fault, and a simulator in it simply places no calls."""
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    assert MediaSettings.for_simulation(None, PlatformCarrier()) is None
 
 
 def test_a_bring_your_own_trunk_arrives_whole(env):

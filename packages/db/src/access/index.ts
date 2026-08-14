@@ -178,10 +178,17 @@ export { instanceIsClaimed, platformInstanceId } from "./instance.ts";
  * The read and the write take the deployment's own tenancy beside the context,
  * because who may be here depends on it: an organization owner may, and only
  * while this deployment serves one organization.
+ *
+ * `resolvePlatformSettings` is the one door to the plaintext, and it takes the
+ * context like everything else — and then refuses every context that did not
+ * come from a simulation claim, because conducting is the only thing egma does
+ * with these. It is `resolveSimulationConnection`'s guard, word for word, over
+ * the settings that ride the same work order.
  */
 export {
   platformFacts,
   readPlatformSettings,
+  resolvePlatformSettings,
   seedPlatformSettings,
   writePlatformSettings,
   type DeploymentTenancy,

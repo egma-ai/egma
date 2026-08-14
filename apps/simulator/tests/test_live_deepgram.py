@@ -129,7 +129,7 @@ async def test_a_real_transcriber_reads_a_real_sentence(tmp_path: Path):
         blobs=FilesystemBlobStore(tmp_path),
         recording_key="sim-live-deepgram/dual-channel.wav",
         speech=SpeechProviders(
-            stt="deepgram", vad="silero", deepgram_api_key=DEEPGRAM_API_KEY
+            stt="deepgram", vad="silero", stt_key=DEEPGRAM_API_KEY
         ),
     )
     heard: list[tuple[str, str]] = []

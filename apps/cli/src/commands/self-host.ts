@@ -566,32 +566,34 @@ async function runPhoneSetup(
     ...stored,
     EGMA_BASE_URL: address,
 
-    // What the API knows about the carrier: three non-secret facts, and it
-    // reports readiness from them. No token, no password, no key.
+    // The carrier, written under the names the API seeds the platform's own
+    // settings from. **These reach no simulator container.** The API seals
+    // them into the platform's store on start, and each simulator is handed
+    // them on the work order it claims — which is why the SIP credential is
+    // here once rather than twice, and why a second simulator on another
+    // machine needs nothing copied to it. The SIP credential authenticates
+    // one trunk and can do nothing else on the account; that is the whole
+    // reason the Auth Token is a setup-time input rather than anybody's
+    // variable at all.
+    EGMA_MEDIA_BACKEND: "livekit",
     EGMA_PHONE_TRUNK_ADDRESS: applied.trunkAddress,
     EGMA_PHONE_SOURCE_NUMBER: applied.sourceNumber,
-    EGMA_PHONE_SPEECH_PROVIDER: "openai",
-
-    // What the simulator dials with. The SIP credential authenticates one
-    // trunk and can do nothing else on the account — that is the whole reason
-    // the Auth Token is a setup-time input rather than a container's variable.
-    EGMA_SIMULATOR_MEDIA_BACKEND: "livekit",
-    EGMA_SIMULATOR_SIP_TRUNK_ADDRESS: applied.trunkAddress,
-    EGMA_SIMULATOR_SIP_TRUNK_NUMBER: applied.sourceNumber,
-    EGMA_SIMULATOR_SIP_TRUNK_USERNAME: applied.sipUsername,
-    EGMA_SIMULATOR_SIP_TRUNK_PASSWORD: applied.sipPassword,
+    EGMA_PHONE_TRUNK_USERNAME: applied.sipUsername,
+    EGMA_PHONE_TRUNK_PASSWORD: applied.sipPassword,
 
     // One key, four jobs: the persona's words, its voice, its ears, and the
     // judge a project is given when it has configured none. Pipecat's own
     // OpenAI integrations and its Silero detector; egma configures them and
-    // implements no speech provider of its own.
-    EGMA_SIMULATOR_MODEL_PROVIDER: "openai",
-    EGMA_SIMULATOR_MODEL_NAME: options.env.EGMA_PERSONA_MODEL?.trim() || "gpt-4o",
-    EGMA_SIMULATOR_MODEL_API_KEY: openaiKey,
-    EGMA_SIMULATOR_STT_PROVIDER: "openai",
-    EGMA_SIMULATOR_TTS_PROVIDER: "openai",
-    EGMA_SIMULATOR_VAD_PROVIDER: "silero",
-    EGMA_SIMULATOR_OPENAI_API_KEY: openaiKey,
+    // implements no speech provider of its own. The first three are the
+    // platform's settings too, and travel the same way the carrier does.
+    EGMA_PERSONA_MODEL_PROVIDER: "openai",
+    EGMA_PERSONA_MODEL: options.env.EGMA_PERSONA_MODEL?.trim() || "gpt-4o",
+    EGMA_PERSONA_MODEL_API_KEY: openaiKey,
+    EGMA_PERSONA_STT_PROVIDER: "openai",
+    EGMA_PERSONA_STT_API_KEY: openaiKey,
+    EGMA_PERSONA_TTS_PROVIDER: "openai",
+    EGMA_PERSONA_TTS_API_KEY: openaiKey,
+    EGMA_PERSONA_VAD_PROVIDER: "silero",
     EGMA_JUDGE_PROVIDER: "openai",
     EGMA_JUDGE_MODEL: options.env.EGMA_JUDGE_MODEL?.trim() || "gpt-4o",
     EGMA_JUDGE_API_KEY: openaiKey,

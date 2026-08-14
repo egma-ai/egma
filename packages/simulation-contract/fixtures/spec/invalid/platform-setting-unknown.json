@@ -1,0 +1,35 @@
+{
+  "contract_version": 1,
+  "simulation_id": "sim_01K4QW7M4E8YB2FVN0H9TZQWEU",
+  "modality": "chat",
+  "connection": {
+    "type": "retell",
+    "config": {
+      "retellAgentId": "agent_2f6c9e8d7b5a4c3e2f1d0a9b8c"
+    },
+    "credentials": {
+      "apiKey": "fixture-not-a-real-secret-0000000000000000"
+    }
+  },
+  "persona": {
+    "traits": {
+      "personality": "Margaret, 68, retired schoolteacher.",
+      "language": "en-US"
+    }
+  },
+  "scenario": {
+    "instructions": "Move a dental cleaning from Tuesday to Thursday."
+  },
+  "limits": {
+    "max_duration_seconds": 600,
+    "max_turns": 60
+  },
+  "platform": {
+    "model": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "key": "fixture-not-a-real-secret-persona-model-0001",
+      "base_url": "https://api.openai.example/v1"
+    }
+  }
+}

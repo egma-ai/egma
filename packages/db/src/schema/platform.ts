@@ -101,14 +101,23 @@ export const platformSetting = pgTable(
  * Every setting this platform knows about, in the order a person is asked for
  * them. **This list is the only place a setting's name is written.**
  *
- * The list grows as the effort moves the rest of the deployment's settings in:
- * the carrier trunk and the media backend, the speech providers and their keys.
  * Adding one here is an insert at run time and nothing else — no migration, no
- * check constraint to widen, and no second list to remember.
+ * check constraint to widen, and no second list to remember. The order is the
+ * order a setup interview walks: who the persona thinks with, then what it
+ * speaks and hears with, then how a call reaches the telephone network — so
+ * that an operator gathers one provider's paperwork at a time rather than
+ * jumping between accounts.
  *
  * A label is the words a readiness answer names the setting in — "the persona's
  * model key" rather than `persona_model_key` — because "setup required" with a
  * column name after it sends a self-hoster to read source.
+ *
+ * **Nothing here is checked against a closed list of providers.** Which model a
+ * deployment thinks with and which company transcribes for it are the
+ * simulator's vocabulary, and it already refuses a provider it holds no leg for
+ * with a sentence naming the ones it has. A second list here would be a list
+ * that can disagree with that one, and the disagreement would be a setting an
+ * operator could store and never use.
  */
 export const PLATFORM_SETTINGS = [
   {
@@ -118,6 +127,62 @@ export const PLATFORM_SETTINGS = [
   },
   { name: "persona_model", label: "the persona's model", secret: false },
   { name: "persona_model_key", label: "the persona's model key", secret: true },
+  {
+    name: "speech_to_text_provider",
+    label: "the speech-to-text provider",
+    secret: false,
+  },
+  {
+    name: "speech_to_text_key",
+    label: "the speech-to-text key",
+    secret: true,
+  },
+  {
+    name: "text_to_speech_provider",
+    label: "the text-to-speech provider",
+    secret: false,
+  },
+  {
+    name: "text_to_speech_key",
+    label: "the text-to-speech key",
+    secret: true,
+  },
+  {
+    name: "text_to_speech_model",
+    label: "the text-to-speech model",
+    secret: false,
+  },
+  {
+    name: "text_to_speech_voice",
+    label: "the text-to-speech voice",
+    secret: false,
+  },
+  {
+    name: "voice_activity_provider",
+    label: "the voice-activity provider",
+    secret: false,
+  },
+  { name: "media_backend", label: "the media backend", secret: false },
+  {
+    name: "carrier_trunk_address",
+    label: "the carrier trunk",
+    secret: false,
+  },
+  {
+    name: "carrier_trunk_number",
+    label: "the source number",
+    secret: false,
+  },
+  {
+    name: "carrier_trunk_username",
+    label: "the carrier trunk username",
+    secret: false,
+  },
+  {
+    name: "carrier_trunk_password",
+    label: "the carrier trunk password",
+    secret: true,
+  },
 ] as const satisfies readonly {
   readonly name: string;
   /** What a person calls it, in a refusal and in a setup interview alike. */
@@ -140,7 +205,14 @@ export type PlatformSettingDefinition = (typeof PLATFORM_SETTINGS)[number];
 /** The name of one setting. A write that names anything else is refused. */
 export type PlatformSettingName = PlatformSettingDefinition["name"];
 
-/** The settings a caller is changing or seeding, by name. */
+/**
+ * Settings by name, in the clear.
+ *
+ * One shape for the three journeys a plain value makes: what a caller is
+ * changing, what an environment is seeding, and what the platform hands the
+ * simulator on a work order. They are the same thing said three times, and a
+ * second alias for the third would be a second vocabulary for one map.
+ */
 export type PlatformSettingValues = Readonly<
   Partial<Record<PlatformSettingName, string>>
 >;

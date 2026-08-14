@@ -1,6 +1,8 @@
-import { PLATFORM_SETTINGS, type PlatformFacts } from "@egma/db";
-
-import type { PhoneReadiness } from "./phone-readiness.ts";
+import {
+  PLATFORM_SETTINGS,
+  type PlatformFacts,
+  type PlatformSettingName,
+} from "@egma/db";
 
 /**
  * Whether this platform has been set up, and what it is still missing.
@@ -24,7 +26,9 @@ import type { PhoneReadiness } from "./phone-readiness.ts";
  * carrier still runs chat and text simulations perfectly well, so `phone` keeps
  * answering separately and the run door keeps gating on it alone. What this
  * adds is the whole-platform answer beside it: `setup required` while anything
- * at all is missing, the carrier included.
+ * at all is missing, the carrier included. Both now read the same store, so
+ * they can no longer be a fact about the deployment and a fact about one
+ * container that quietly disagree.
  */
 
 export type PlatformSetupState = "ready" | "setup_required";
@@ -40,23 +44,32 @@ export type PlatformReadiness = {
 };
 
 /**
- * The platform's answer, from what its store holds and what its carrier facts
- * say.
+ * The words one setting is named in, read off the catalog rather than restated.
  *
- * The phone half is still read from this process's configuration rather than
- * from the store; moving it is the next ticket's, and this composes the two so
- * that the answer is already whole while that move happens underneath it.
+ * One place, because two readiness answers name the same settings and a second
+ * copy of the words is a second copy to drift.
  */
-export function platformReadiness(
-  held: PlatformFacts,
-  phone: PhoneReadiness,
-): PlatformReadiness {
-  const missing = [
-    ...PLATFORM_SETTINGS.filter(
-      (setting) => !Object.hasOwn(held, setting.name),
-    ).map((setting) => setting.label),
-    ...phone.missing,
-  ];
+export function labelOf(name: PlatformSettingName): string {
+  const definition = PLATFORM_SETTINGS.find(
+    (setting) => setting.name === name,
+  );
+  // Unreachable while the argument is a `PlatformSettingName`, and kept because
+  // the alternative is a readiness answer naming `undefined` to a self-hoster.
+  return definition?.label ?? name;
+}
+
+/**
+ * The platform's answer, from what its store holds.
+ *
+ * The carrier is among the settings now, so this is one list over one source
+ * rather than a composition of two. That is what closes the gap the effort
+ * started from: there is no half of this answer left that a container could
+ * hold and lose.
+ */
+export function platformReadiness(held: PlatformFacts): PlatformReadiness {
+  const missing = PLATFORM_SETTINGS.filter(
+    (setting) => !Object.hasOwn(held, setting.name),
+  ).map((setting) => setting.label);
 
   return {
     state: missing.length === 0 ? "ready" : "setup_required",

@@ -4,7 +4,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   NotPermittedError,
   platformFacts,
+  PLATFORM_SETTINGS,
   readPlatformSettings,
+  resolvePlatformSettings,
   seedPlatformSettings,
   writePlatformSettings,
   type AuthContext,
@@ -109,11 +111,47 @@ describe("a platform that has been given no settings", () => {
     // Naming the settings it does not have is the whole readiness answer: a
     // platform that said only "setup required" would send whoever runs it to
     // read source to find out what is missing.
-    expect(await settingsByName()).toEqual({
-      persona_model_provider: { hint: null, secret: false },
-      persona_model: { hint: null, secret: false },
-      persona_model_key: { hint: null, secret: true },
-    });
+    //
+    // Every name in the catalog, read off the catalog rather than listed
+    // again: the list grows as settings move in, and a second copy of it here
+    // would be a copy that goes stale rather than a claim that goes wrong.
+    // What is asserted is the property — one answer per setting, and every
+    // one of them absent.
+    const held = await settingsByName();
+    expect(Object.keys(held)).toEqual(
+      PLATFORM_SETTINGS.map((setting) => setting.name),
+    );
+    for (const setting of PLATFORM_SETTINGS) {
+      expect(held[setting.name]).toEqual({
+        hint: null,
+        secret: setting.secret,
+      });
+    }
+  });
+
+  it("knows the persona's model, its speech legs and its carrier", async () => {
+    // The catalog written out once, because the loop above proves a shape and
+    // this proves the contents — that the settings this effort moved really
+    // are the ones the platform holds, and which of them may be shown back.
+    expect(
+      PLATFORM_SETTINGS.map((setting) => [setting.name, setting.secret]),
+    ).toEqual([
+      ["persona_model_provider", false],
+      ["persona_model", false],
+      ["persona_model_key", true],
+      ["speech_to_text_provider", false],
+      ["speech_to_text_key", true],
+      ["text_to_speech_provider", false],
+      ["text_to_speech_key", true],
+      ["text_to_speech_model", false],
+      ["text_to_speech_voice", false],
+      ["voice_activity_provider", false],
+      ["media_backend", false],
+      ["carrier_trunk_address", false],
+      ["carrier_trunk_number", false],
+      ["carrier_trunk_username", false],
+      ["carrier_trunk_password", true],
+    ]);
   });
 
   it("holds nothing anybody could be shown", async () => {
@@ -358,11 +396,16 @@ describe("seeding a platform that holds nothing", () => {
       "persona_model_key",
       "persona_model_provider",
     ]);
-    expect(await settingsByName()).toEqual({
-      persona_model_provider: { hint: "openai", secret: false },
-      persona_model: { hint: "gpt-4o-mini", secret: false },
-      persona_model_key: { hint: "WXYZ", secret: true },
+    const held = await settingsByName();
+    expect(held.persona_model_provider).toEqual({
+      hint: "openai",
+      secret: false,
     });
+    expect(held.persona_model).toEqual({ hint: "gpt-4o-mini", secret: false });
+    expect(held.persona_model_key).toEqual({ hint: "WXYZ", secret: true });
+    // And nothing this environment did not name: a seed writes what it was
+    // given and never fills a gap with a guess.
+    expect(held.carrier_trunk_address).toEqual({ hint: null, secret: false });
   });
 
   it("seals what it wrote, exactly as a person's own write is sealed", async () => {
@@ -396,5 +439,84 @@ describe("seeding a platform that holds nothing", () => {
         persona_model_key: FROM_THE_ENVIRONMENT,
       }),
     ).toEqual(["persona_model"]);
+  });
+});
+
+describe("the one door to the plaintext", () => {
+  /**
+   * The context a simulation claim mints, and the only kind that may be here.
+   *
+   * A claim carries no user: the simulator stands behind every organization at
+   * once and holds no credential, so the context arrives narrowed to the row it
+   * was handed rather than resolved from anybody's key. `via` is what says
+   * where it came from, and it is what this door reads.
+   */
+  function claimed(): AuthContext {
+    return {
+      // Not an identifier and deliberately not shaped like one: the claim
+      // machinery writes the same word, because the conversations a simulator
+      // conducts were asked for by whoever started the run rather than by it.
+      userId: "simulator",
+      organizationId: acme.organization,
+      projectId: acme.project,
+      role: "member",
+      via: "simulator",
+    };
+  }
+
+  it("answers a claim with the values in the clear, and nothing it does not hold", async () => {
+    await database.sql("delete from platform_setting");
+    await seedPlatformSettings({
+      persona_model_provider: "openai",
+      persona_model_key: THEIR_OWN_KEY,
+      carrier_trunk_password: "the-carrier-issued-this-one",
+    });
+
+    // In the clear: this is the one caller that has to replay a key to a
+    // provider, so a hint would be four characters of a credential and the
+    // sealed envelope would be an envelope.
+    expect(await resolvePlatformSettings(claimed())).toEqual({
+      persona_model_provider: "openai",
+      persona_model_key: THEIR_OWN_KEY,
+      carrier_trunk_password: "the-carrier-issued-this-one",
+    });
+  });
+
+  it("refuses every context a claim did not mint", async () => {
+    // The guard is on the kind of context rather than on anything a caller
+    // passes, so there is no argument by which a person's session, an API key
+    // or the grading engine could reach a stored key. It is
+    // `resolveSimulationConnection`'s guard word for word, over the settings
+    // that ride the same work order.
+    for (const auth of [
+      owner(),
+      member("member"),
+      { ...claimed(), via: "api_key" } as AuthContext,
+      { ...claimed(), via: "engine" } as AuthContext,
+    ]) {
+      await expect(resolvePlatformSettings(auth)).rejects.toThrow(
+        /egma's own simulator/u,
+      );
+    }
+  });
+
+  it("answers nothing at all on a platform nobody has configured", async () => {
+    await database.sql("delete from platform_setting");
+    expect(await resolvePlatformSettings(claimed())).toEqual({});
+  });
+
+  it("refuses a row that will not unseal rather than conducting with it", async () => {
+    await database.sql("delete from platform_setting");
+    await seedPlatformSettings({ persona_model_provider: "openai" });
+    // What a lost encryption key or a hand-edited row leaves behind. Handing
+    // the simulator whatever came out would be a provider call with garbage
+    // in the authorization header; the row is named instead, so whoever reads
+    // the log knows which one needs repairing.
+    await database.sql(
+      "update platform_setting set value = 'not-an-envelope-at-all' where name = $1",
+      ["persona_model_provider"],
+    );
+
+    await expect(resolvePlatformSettings(claimed())).rejects.toThrow();
   });
 });

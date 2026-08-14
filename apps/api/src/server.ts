@@ -17,7 +17,6 @@ import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
 import { mockToolRoutes } from "./routes/mock-tools.ts";
-import { phoneReadiness } from "./phone-readiness.ts";
 import { platformRoutes } from "./routes/platform.ts";
 import { platformSettingsRoutes } from "./routes/platform-settings.ts";
 import { recordingRoutes } from "./routes/recordings.ts";
@@ -174,15 +173,16 @@ export function buildApi(options: ServerOptions): Api {
       .send({ status: healthy ? "ok" : "unavailable", postgres, clickhouse });
   });
 
-  // Whether this deployment can dial, worked out once and handed to both the
-  // door that reports it and the door that enforces it. One value rather than
-  // two calls, so what `GET /api/platform` tells a developer and what run
-  // creation does to them can never be two different answers.
-  const phone = phoneReadiness(config.phone);
-
   // Read before login and before any repository identifier is sent. It is
   // public because the CLI uses it to decide whether login is safe to start.
-  void app.register(platformRoutes, { origin: config.baseUrl, phone });
+  //
+  // Whether this deployment can dial is no longer worked out here and handed
+  // down: the carrier is one of the platform's own settings now, so the door
+  // that reports it and the door that enforces it each read the store when
+  // they are asked. That is what stops them being one answer from start-up
+  // that an operator finishing setup cannot change without a restart, and they
+  // still cannot disagree — one store, one `phoneReadiness`, two callers.
+  void app.register(platformRoutes, { origin: config.baseUrl });
 
   // Registered without `fastify-plugin` on purpose: the adapter replaces every
   // body parser inside its own scope so the provider sees the bytes that were
@@ -269,7 +269,6 @@ export function buildApi(options: ServerOptions): Api {
     provider: identity.provider,
     rateLimit,
     baseUrl: config.baseUrl,
-    phone,
   });
 
   // Where a recording's reference becomes something a browser can play. Its own

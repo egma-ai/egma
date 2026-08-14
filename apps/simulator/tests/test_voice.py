@@ -1265,8 +1265,8 @@ def test_a_counterpart_cannot_both_echo_and_read_a_script(tmp_path: Path):
 REAL_PAIR = SpeechProviders(
     stt="deepgram",
     tts="elevenlabs",
-    deepgram_api_key="deepgram-key-for-assembly-only",
-    elevenlabs_api_key="elevenlabs-key-for-assembly-only",
+    stt_key="deepgram-key-for-assembly-only",
+    tts_key="elevenlabs-key-for-assembly-only",
 )
 """Both providers named. Building legs is not connecting to them, so an
 assembled pipeline can be inspected here without a network or an account."""
@@ -1338,7 +1338,7 @@ async def test_each_leg_is_chosen_on_its_own(tmp_path: Path):
     from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
 
     providers = SpeechProviders(
-        tts="elevenlabs", elevenlabs_api_key="elevenlabs-key-for-assembly-only"
+        tts="elevenlabs", tts_key="elevenlabs-key-for-assembly-only"
     )
     async with assembled_with(providers, tmp_path) as assembled:
         legs = assembled.conductor.legs

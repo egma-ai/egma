@@ -2,6 +2,11 @@
  * Phone readiness: a second fact about a platform, never a component of the
  * first.
  *
+ * Read from the platform's own store now, rather than from this container's
+ * environment. That is the whole recoverability of it: the facts survive a
+ * restart, a rebuild and a move to another machine, and an operator who
+ * supplies a missing one is ready on the next request with nothing restarted.
+ *
  * A deployment with no carrier runs text and chat simulations perfectly well.
  * Folding that into one `ready` would either call a working platform broken or
  * call a platform that cannot dial ready — and the first makes the first-run
@@ -31,17 +36,13 @@ const BASE = {
 
 describe("phone readiness", () => {
   it("is setup_required on a platform nobody has given a carrier, and names all three", () => {
-    const readiness = phoneReadiness({
-      trunkAddress: null,
-      sourceNumber: null,
-      speechProvider: null,
-    });
+    const readiness = phoneReadiness({});
 
     expect(readiness.state).toBe("setup_required");
     expect(readiness.missing).toEqual([
       "the carrier trunk",
       "the source number",
-      "the speech provider",
+      "the text-to-speech provider",
     ]);
   });
 
@@ -50,14 +51,15 @@ describe("phone readiness", () => {
     // can talk on, and charges for it — so half a setup is a refusal, and the
     // refusal has to say which half so somebody can act on it.
     const readiness = phoneReadiness({
-      trunkAddress: "egma-simulator-abc.pstn.twilio.com",
-      sourceNumber: "+15550100100",
-      speechProvider: null,
+      carrier_trunk_address: "egma-simulator-abc.pstn.twilio.com",
+      carrier_trunk_number: "+15550100100",
     });
 
     expect(readiness.state).toBe("setup_required");
-    expect(readiness.missing).toEqual(["the speech provider"]);
-    expect(phoneSetupRequiredMessage(readiness)).toContain("the speech provider");
+    expect(readiness.missing).toEqual(["the text-to-speech provider"]);
+    expect(phoneSetupRequiredMessage(readiness)).toContain(
+      "the text-to-speech provider",
+    );
     expect(phoneSetupRequiredMessage(readiness)).toContain("egma self-host phone setup");
     // Said plainly, because a developer reading it is not the person who runs
     // the platform on a hosted deployment and needs to know nothing was spent.
@@ -66,31 +68,65 @@ describe("phone readiness", () => {
 
   it("is ready once all three are there", () => {
     const readiness = phoneReadiness({
-      trunkAddress: "egma-simulator-abc.pstn.twilio.com",
-      sourceNumber: "+15550100100",
-      speechProvider: "openai",
+      carrier_trunk_address: "egma-simulator-abc.pstn.twilio.com",
+      carrier_trunk_number: "+15550100100",
+      text_to_speech_provider: "openai",
     });
 
     expect(readiness.state).toBe("ready");
     expect(readiness.missing).toEqual([]);
+    expect(readiness.trunkAddress).toBe("egma-simulator-abc.pstn.twilio.com");
+    expect(readiness.sourceNumber).toBe("+15550100100");
+    expect(readiness.speechProvider).toBe("openai");
   });
 
-  it("reads the three non-secret facts from the environment, and holds no credential", () => {
+  it("answers from what a secret-free view of the store can say, and no more", () => {
+    // `platformFacts` is the only thing this reads, and it answers `null` for
+    // every setting the catalog marks secret. So a carrier that is fully
+    // configured — trunk password and all — still reports itself missing
+    // nothing more than these three, and there is no argument by which a key
+    // could reach this answer.
+    const readiness = phoneReadiness({
+      carrier_trunk_address: "egma-simulator-abc.pstn.twilio.com",
+      carrier_trunk_number: "+15550100100",
+      carrier_trunk_username: "egma-trunk",
+      carrier_trunk_password: null,
+      text_to_speech_provider: "openai",
+      text_to_speech_key: null,
+    });
+
+    expect(readiness.state).toBe("ready");
+    expect(JSON.stringify(readiness)).not.toContain("null,");
+    expect(Object.keys(readiness).sort()).toEqual([
+      "missing",
+      "sourceNumber",
+      "speechProvider",
+      "state",
+      "trunkAddress",
+    ]);
+  });
+
+  it("seeds the carrier out of the environment, and never holds it after", () => {
+    // The variables phone setup already wrote, read once at start as settings
+    // to seed rather than as this process's own configuration. What the API
+    // then holds about the carrier is nothing at all: the store holds it.
     const config = loadConfig({
       ...BASE,
       EGMA_PHONE_TRUNK_ADDRESS: "egma-simulator-abc.pstn.twilio.com",
       EGMA_PHONE_SOURCE_NUMBER: "+15550100100",
-      EGMA_PHONE_SPEECH_PROVIDER: "openai",
+      EGMA_PHONE_TRUNK_USERNAME: "egma-trunk",
+      EGMA_PHONE_TRUNK_PASSWORD: "the-carrier-issued-this-one",
+      EGMA_PERSONA_TTS_PROVIDER: "openai",
     });
 
-    expect(phoneReadiness(config.phone).state).toBe("ready");
-    // Everything the API holds about the carrier, written out, so that a field
-    // carrying a credential could not be added without this line changing.
-    expect(Object.keys(config.phone).sort()).toEqual([
-      "sourceNumber",
-      "speechProvider",
-      "trunkAddress",
-    ]);
+    expect(config.platformSettings).toEqual({
+      carrier_trunk_address: "egma-simulator-abc.pstn.twilio.com",
+      carrier_trunk_number: "+15550100100",
+      carrier_trunk_username: "egma-trunk",
+      carrier_trunk_password: "the-carrier-issued-this-one",
+      text_to_speech_provider: "openai",
+    });
+    expect(Object.keys(config)).not.toContain("phone");
   });
 });
 

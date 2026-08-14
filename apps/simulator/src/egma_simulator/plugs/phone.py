@@ -108,11 +108,13 @@ class PhoneCall:
         # stand in front of its tools.
         del simulation_id, mock_tools
 
-        # Which bridge and which trunk were checked at startup; this reads
-        # the result rather than the environment, so nothing here can be
-        # the first to discover a deployment cannot dial. The keyword is
-        # for tests, which build settings rather than an environment.
-        settings = media if media is not None else MediaSettings.from_env()
+        # Which bridge and which trunk this call goes over, resolved by
+        # assembly from this container's own configuration and the
+        # platform's carrier on the work order. Read here rather than
+        # worked out here: a plug that reached for an environment variable
+        # would be a second answer to a question the deployment already
+        # answered, and the two could disagree.
+        settings = media
 
         if modality != "voice":
             raise PlugError(
@@ -133,9 +135,10 @@ class PhoneCall:
 
         if settings is None:
             raise PlugError(
-                "this simulator places no phone calls: set "
-                f"{BACKEND_VARIABLE} to one of {sorted(BACKENDS)}, with the "
-                "server and trunk that backend needs"
+                "this deployment places no phone calls: give the platform a "
+                f"media backend — one of {sorted(BACKENDS)} — with the carrier "
+                f"trunk that backend needs, or set {BACKEND_VARIABLE} on this "
+                "container"
             )
         backend_name = settings.backend
         factory = backend_for(backend_name)

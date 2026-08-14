@@ -308,14 +308,6 @@ services:
       # prerequisite for anything, including adding a second person.
       EGMA_SMTP_URL: ${EGMA_SMTP_URL:-}
       EGMA_MAIL_FROM: ${EGMA_MAIL_FROM:-}
-      # What this process knows about the carrier: three non-secret facts,
-      # written by `egma self-host phone setup`, from which it reports the
-      # platform's phone state. No token, no password, no provider key — the
-      # API neither dials nor speaks, and phone authority lives in the
-      # container that uses it.
-      EGMA_PHONE_TRUNK_ADDRESS: ${EGMA_PHONE_TRUNK_ADDRESS:-}
-      EGMA_PHONE_SOURCE_NUMBER: ${EGMA_PHONE_SOURCE_NUMBER:-}
-      EGMA_PHONE_SPEECH_PROVIDER: ${EGMA_PHONE_SPEECH_PROVIDER:-}
       # The judge a project is given when it has configured none, from the one
       # OpenAI key phone setup asked for. Written into each project's own
       # sealed row on boot and never over one that is already there. It is here
@@ -325,17 +317,41 @@ services:
       EGMA_JUDGE_PROVIDER: ${EGMA_JUDGE_PROVIDER:-}
       EGMA_JUDGE_MODEL: ${EGMA_JUDGE_MODEL:-}
       EGMA_JUDGE_API_KEY: ${EGMA_JUDGE_API_KEY:-}
-      # What the persona thinks with, and the platform's own setting rather
-      # than the simulator's. It is written into the platform's store on boot,
-      # sealed, for anything the store does not already hold — and never over a
-      # value somebody changed, so a redeploy carrying an old key in a script
-      # cannot undo a new one. Setting these is one of the two ways in and is
-      # for a deployment that answers no questions; the other is
+      # What this deployment has been configured with — the persona's model,
+      # its speech legs, and the carrier a phone call goes over. The
+      # platform's own settings rather than any one container's: they are
+      # written into the platform's store on boot, sealed, for anything the
+      # store does not already hold — and never over a value somebody
+      # changed, so a redeploy carrying an old key in a script cannot undo a
+      # new one. They then reach the simulator on the work order it claims,
+      # which is why no simulator container names any of them.
+      #
+      # Setting them here is one of the two ways in, and it is for a
+      # deployment that answers no questions; the other is
       # `egma self-host setup`, which asks. Leave them empty and the platform
-      # reports `setup required` naming each one until somebody supplies it.
+      # reports `setup required` naming each one until somebody supplies it —
+      # which is the whole difference from the file this replaced, where an
+      # absent setting was an empty setting and nothing said so.
       EGMA_PERSONA_MODEL_PROVIDER: ${EGMA_PERSONA_MODEL_PROVIDER:-}
       EGMA_PERSONA_MODEL: ${EGMA_PERSONA_MODEL:-}
       EGMA_PERSONA_MODEL_API_KEY: ${EGMA_PERSONA_MODEL_API_KEY:-}
+      EGMA_PERSONA_STT_PROVIDER: ${EGMA_PERSONA_STT_PROVIDER:-}
+      EGMA_PERSONA_STT_API_KEY: ${EGMA_PERSONA_STT_API_KEY:-}
+      EGMA_PERSONA_TTS_PROVIDER: ${EGMA_PERSONA_TTS_PROVIDER:-}
+      EGMA_PERSONA_TTS_API_KEY: ${EGMA_PERSONA_TTS_API_KEY:-}
+      EGMA_PERSONA_TTS_MODEL: ${EGMA_PERSONA_TTS_MODEL:-}
+      EGMA_PERSONA_TTS_VOICE: ${EGMA_PERSONA_TTS_VOICE:-}
+      EGMA_PERSONA_VAD_PROVIDER: ${EGMA_PERSONA_VAD_PROVIDER:-}
+      # The carrier, under the names phone setup already wrote, so an
+      # operator upgrading meets the words they were given before. The API
+      # holds the trunk password only long enough to seal it — exactly as it
+      # already holds a judge's key and a connection's credentials — and it
+      # neither dials nor speaks with any of it.
+      EGMA_MEDIA_BACKEND: ${EGMA_MEDIA_BACKEND:-}
+      EGMA_PHONE_TRUNK_ADDRESS: ${EGMA_PHONE_TRUNK_ADDRESS:-}
+      EGMA_PHONE_SOURCE_NUMBER: ${EGMA_PHONE_SOURCE_NUMBER:-}
+      EGMA_PHONE_TRUNK_USERNAME: ${EGMA_PHONE_TRUNK_USERNAME:-}
+      EGMA_PHONE_TRUNK_PASSWORD: ${EGMA_PHONE_TRUNK_PASSWORD:-}
     ports:
       # Published on the host, so that a self-hoster who already runs
       # something on these can move egma rather than move the other thing —

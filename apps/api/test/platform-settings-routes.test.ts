@@ -1,4 +1,4 @@
-import { seedPlatformSettings } from "@egma/db";
+import { PLATFORM_SETTINGS, seedPlatformSettings } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { loadConfig } from "../src/config.ts";
@@ -42,11 +42,26 @@ afterEach(async () => {
 const A_REAL_KEY = "sk-the-operator-pasted-this-one-QRST";
 const A_SECOND_KEY = "sk-and-then-replaced-it-with-this-WXYZ";
 
-/** What a fully configured phone half looks like, for the `ready` case. */
-const A_CARRIER = {
-  trunkAddress: "acme.pstn.twilio.com",
-  sourceNumber: "+15550100",
-  speechProvider: "openai",
+/**
+ * Everything but the persona's model, so a test about one group of settings can
+ * reach `ready` without typing the other fourteen.
+ *
+ * Seeded the way an automated deployment seeds them, sealed like every other
+ * row — there is no shortcut into this table and this suite does not invent one.
+ */
+const EVERYTHING_ELSE = {
+  speech_to_text_provider: "openai",
+  speech_to_text_key: "sk-the-listening-leg-uses-this-one",
+  text_to_speech_provider: "openai",
+  text_to_speech_key: "sk-the-speaking-leg-uses-this-one",
+  text_to_speech_model: "gpt-4o-mini-tts",
+  text_to_speech_voice: "alloy",
+  voice_activity_provider: "silero",
+  media_backend: "livekit",
+  carrier_trunk_address: "acme.pstn.twilio.com",
+  carrier_trunk_number: "+15550100",
+  carrier_trunk_username: "acme-trunk",
+  carrier_trunk_password: "the-carrier-issued-this-one",
 } as const;
 
 function request(
@@ -261,10 +276,14 @@ describe("a write that cannot be acted on", () => {
     // does not check the same thing a second time — two answers for one
     // condition would be a contract with two faces.
     expect(refused.statusCode).toBe(422);
+    // The names read off the catalog rather than listed again: the list grows
+    // as settings move in, and what has to hold is that the refusal names the
+    // typo and then every setting the platform really has.
     expect(refused.body.message).toBe(
       '"persona_moddel" is not a platform setting egma knows; it holds ' +
-        "persona_model_provider, persona_model, persona_model_key",
+        PLATFORM_SETTINGS.map((setting) => setting.name).join(", "),
     );
+    expect(String(refused.body.message)).toContain("carrier_trunk_address");
   });
 
   it("refuses a secret too short for any provider to have issued it", async () => {
@@ -301,9 +320,18 @@ describe("what the platform says about its own setup", () => {
         "the persona's model provider",
         "the persona's model",
         "the persona's model key",
+        "the speech-to-text provider",
+        "the speech-to-text key",
+        "the text-to-speech provider",
+        "the text-to-speech key",
+        "the text-to-speech model",
+        "the text-to-speech voice",
+        "the voice-activity provider",
+        "the media backend",
         "the carrier trunk",
         "the source number",
-        "the speech provider",
+        "the carrier trunk username",
+        "the carrier trunk password",
       ],
     });
   });
@@ -311,7 +339,7 @@ describe("what the platform says about its own setup", () => {
   it("stops naming a setting the moment somebody supplies it", async () => {
     api = await createApi("platform_settings_readiness_narrows", {
       singleOrganization: true,
-      phone: { ...A_CARRIER },
+      platformSettings: { ...EVERYTHING_ELSE },
     });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
@@ -331,7 +359,7 @@ describe("what the platform says about its own setup", () => {
   it("answers ready once nothing is missing", async () => {
     api = await createApi("platform_settings_readiness_ready", {
       singleOrganization: true,
-      phone: { ...A_CARRIER },
+      platformSettings: { ...EVERYTHING_ELSE },
     });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
@@ -347,7 +375,7 @@ describe("what the platform says about its own setup", () => {
   it("carries no secret, at a door that asks for no credential", async () => {
     api = await createApi("platform_settings_readiness_is_public", {
       singleOrganization: true,
-      phone: { ...A_CARRIER },
+      platformSettings: { ...EVERYTHING_ELSE },
     });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     await request("PATCH", ada.secret, {

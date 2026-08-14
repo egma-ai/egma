@@ -1,18 +1,12 @@
 import { platformFacts, platformInstanceId } from "@egma/db";
 import type { FastifyPluginAsync } from "fastify";
 
-import type { PhoneReadiness } from "../phone-readiness.ts";
+import { phoneReadiness } from "../phone-readiness.ts";
 import { platformReadiness } from "../platform-readiness.ts";
 
 export type PlatformRouteOptions = {
   /** The one browser/API origin configured for this platform. */
   readonly origin: string;
-  /**
-   * Whether this platform can place a phone call, and what is missing when it
-   * cannot. Everything in it is non-secret — see `phone-readiness.ts` — which
-   * is what lets it answer here, at the one door that asks for no credential.
-   */
-  readonly phone: PhoneReadiness;
 };
 
 /**
@@ -37,7 +31,12 @@ export const platformRoutes: FastifyPluginAsync<PlatformRouteOptions> = async (
     // It is a select and never an insert, on the identity read's own reasoning
     // — this door is public and anybody who can reach the platform may knock as
     // often as they like.
-    const setup = platformReadiness(await platformFacts(), options.phone);
+    //
+    // One read for both answers. They are two facts about one deployment, and
+    // reading twice would let them be two facts about two moments.
+    const held = await platformFacts();
+    const setup = platformReadiness(held);
+    const phone = phoneReadiness(held);
 
     return reply.send({
       instance_id: await platformInstanceId(),
@@ -48,10 +47,7 @@ export const platformRoutes: FastifyPluginAsync<PlatformRouteOptions> = async (
       // Two facts, never one: a platform is ready for text work long before
       // anybody has given it a carrier, and a single "ready" that waited for
       // the carrier would make the first-run story impossible to tell.
-      phone: {
-        state: options.phone.state,
-        missing: options.phone.missing,
-      },
+      phone: { state: phone.state, missing: phone.missing },
     });
   });
 };

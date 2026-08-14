@@ -9,7 +9,7 @@ import {
   type PlatformSettingName,
   type PlatformSettingValues,
 } from "../schema/platform.ts";
-import { sealCredentials } from "../sealing.ts";
+import { openCredentials, sealCredentials } from "../sealing.ts";
 import type { AuthContext } from "./context.ts";
 import { NotPermittedError, UnprocessableInputError } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
@@ -37,10 +37,9 @@ import { authorize, here } from "./permissions.ts";
  *   the ones it selects.
  * - **Seeding** is the deployment configuring itself at start, from its own
  *   environment. It writes only where the platform holds nothing.
- *
- * There is deliberately **no door to the plaintext here yet**. The one caller
- * that needs it is the work order a simulator claims, and opening that door
- * before something goes through it would be a way out with nothing watching it.
+ * - **Resolving** is the one door to the plaintext, and it opens for the work
+ *   order a simulator claims and for nothing else. See
+ *   `resolvePlatformSettings`, which is where that argument is written out.
  */
 
 /**
@@ -294,6 +293,69 @@ export async function writePlatformSettings(
     });
 
   return answer(await heldSettings());
+}
+
+/**
+ * What this deployment has been configured with, in the clear, for the work
+ * order a simulator claims.
+ *
+ * **This is the same door a connection's credentials come through, and it is
+ * guarded the same way.** `resolveSimulationConnection` unseals for egma's own
+ * simulator and refuses every other kind of context; so does this, on the same
+ * sentence and for the same reason. The settings and the connection's
+ * credentials then ride one answer, with one authority behind it, which is what
+ * keeps the simulator's arrows all pointing outward: it talks to the API and to
+ * nothing else, and never to Postgres.
+ *
+ * **A claim's context is the only one that can be here**, and a claim mints it
+ * — `auth.via` is `simulator` on a context nothing but `claimSimulations`
+ * produces. There is no argument by which a person's session, an API key or a
+ * grading claim could reach these values, because the refusal is on the kind of
+ * context rather than on anything a caller passes.
+ *
+ * **It takes the context and reads nothing from it**, which is not the loophole
+ * it looks like: these settings belong to the deployment and to no customer, so
+ * there is no tenancy to narrow by and no row here a narrowing could hide. The
+ * context is what says *who is asking*, and that is the whole question this door
+ * has to answer.
+ *
+ * Read for each simulation, deliberately, and not cached. A key an operator
+ * changes applies to the next simulation with no restart, and one more small
+ * select is nothing beside conducting a conversation over a telephone
+ * connection. A measurement may ask for caching later; nothing has yet.
+ */
+export async function resolvePlatformSettings(
+  auth: AuthContext,
+): Promise<PlatformSettingValues> {
+  authorize(auth, "read", here(auth));
+
+  if (auth.via !== "simulator") {
+    throw new Error(
+      "the platform's settings are unsealed for egma's own simulator and for nothing else, because conducting is the only thing egma does with them",
+    );
+  }
+
+  const held = await db()
+    .select({ name: platformSetting.name, value: platformSetting.value })
+    .from(platformSetting)
+    .where(
+      inArray(
+        platformSetting.name,
+        PLATFORM_SETTINGS.map((setting) => setting.name),
+      ),
+    );
+
+  const resolved: Partial<Record<PlatformSettingName, string>> = {};
+  for (const row of held) {
+    const opened = openCredentials(row.value);
+    if (typeof opened !== "string" || opened === "") {
+      throw new Error(
+        `the platform setting ${row.name} holds a value in a shape egma never writes; the row needs repairing before anybody can conduct with it`,
+      );
+    }
+    resolved[row.name as PlatformSettingName] = opened;
+  }
+  return resolved;
 }
 
 /**
