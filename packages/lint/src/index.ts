@@ -92,10 +92,19 @@ const CONTEXT_ESTABLISHING = [
  * boolean. `platformInstanceId` returns the platform's public, non-secret id.
  * A parameter or a wider return would make either an ordinary read wearing an
  * exemption, so the rule refuses both changes.
+ *
+ * `platformFacts` was added on 2026-08-14 with the platform's own settings,
+ * deliberately and on the same two terms. It is asked by the readiness answer
+ * the CLI reads in front of every command — before login and before any
+ * repository identifier is sent, exactly as the platform's identity is — so
+ * there is no credential to build a context from. It takes nothing, and its
+ * `PlatformFacts` is a map of non-secret values in which every secret the
+ * platform holds is `null`: enough to say a key is there, and no part of one.
  */
 const INSTANCE_SCOPED: ReadonlyMap<string, string> = new Map([
   ["instanceIsClaimed", "Promise<boolean>"],
   ["platformInstanceId", "Promise<string>"],
+  ["platformFacts", "Promise<PlatformFacts>"],
 ]);
 
 /**
@@ -170,14 +179,21 @@ const WORK_DISPATCHING = [
  * the same breath as applying migrations, on the deployment's own
  * configuration, and it names no customer.
  *
+ * `seedPlatformSettings` was added on 2026-08-14 and is the same act one scope
+ * up: the settings the deployment itself owns — the persona's model provider,
+ * its model and its key to begin with — written from the environment on start
+ * for anything the platform does not already hold, and never over a value
+ * somebody chose. It names no customer because there is none to name: these
+ * belong to the platform and to nobody on it.
+ *
  * The rule enforces the second half of that the same way it does for work
  * dispatch: nothing here may be handed an `organizationId` or a `projectId`. A
  * function here that grew one would be an ordinary cross-tenant *write* wearing
  * an exemption, which is worse than the read work dispatch guards against.
  *
- * A second name here is a decision somebody has to make on purpose.
+ * A third name here is a decision somebody has to make on purpose.
  */
-const DEPLOYMENT_CONFIGURING = ["seedDefaultJudge"];
+const DEPLOYMENT_CONFIGURING = ["seedDefaultJudge", "seedPlatformSettings"];
 
 /**
  * What a work-dispatching or deployment-configuring export may not be handed,

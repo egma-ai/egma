@@ -1,0 +1,65 @@
+import { PLATFORM_SETTINGS, type PlatformFacts } from "@egma/db";
+
+import type { PhoneReadiness } from "./phone-readiness.ts";
+
+/**
+ * Whether this platform has been set up, and what it is still missing.
+ *
+ * **Readiness stopped being a fact about the phone alone.** The settings a
+ * deployment needs used to live in a file beside it that only the CLI read, and
+ * a platform started any other way had none of them — the phone, the persona's
+ * model, the speech providers, all absent at once, and each absence surfacing
+ * minutes later as a failure naming nothing about configuration. So the
+ * platform answers for its whole configuration here, reading what it holds from
+ * its own store rather than from this process's environment.
+ *
+ * **Everything in the answer is non-secret, and that is what lets it be
+ * answered at the one door that asks for no credential.** It names which
+ * settings are absent, in the words a person would use — "the persona's model
+ * key" rather than a column name — and it never carries a value that any
+ * setting marked secret holds. The one door to a stored secret is the work
+ * order a simulator claims, and it is nowhere near this.
+ *
+ * **This and phone readiness are two facts, not one.** A platform with no
+ * carrier still runs chat and text simulations perfectly well, so `phone` keeps
+ * answering separately and the run door keeps gating on it alone. What this
+ * adds is the whole-platform answer beside it: `setup required` while anything
+ * at all is missing, the carrier included.
+ */
+
+export type PlatformSetupState = "ready" | "setup_required";
+
+export type PlatformReadiness = {
+  readonly state: PlatformSetupState;
+  /**
+   * What setup has not supplied yet, by the name a person would use. Empty when
+   * the state is `ready`. Named rather than counted, because "setup required"
+   * with nothing after it sends a self-hoster to read source.
+   */
+  readonly missing: readonly string[];
+};
+
+/**
+ * The platform's answer, from what its store holds and what its carrier facts
+ * say.
+ *
+ * The phone half is still read from this process's configuration rather than
+ * from the store; moving it is the next ticket's, and this composes the two so
+ * that the answer is already whole while that move happens underneath it.
+ */
+export function platformReadiness(
+  held: PlatformFacts,
+  phone: PhoneReadiness,
+): PlatformReadiness {
+  const missing = [
+    ...PLATFORM_SETTINGS.filter(
+      (setting) => !Object.hasOwn(held, setting.name),
+    ).map((setting) => setting.label),
+    ...phone.missing,
+  ];
+
+  return {
+    state: missing.length === 0 ? "ready" : "setup_required",
+    missing,
+  };
+}

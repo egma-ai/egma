@@ -32,6 +32,11 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   organization: "org",
   organization_settings: "org",
   platform_instance: "pf",
+  // One row for each setting the deployment holds. Its identity is its own
+  // rather than somebody's key, because it belongs to the platform and to no
+  // customer — the one table below the tenancy tables that names neither an
+  // organization nor a project.
+  platform_setting: "pfs",
   project: "prj",
   membership: "mbr",
   invitation: "inv",

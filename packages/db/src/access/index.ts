@@ -167,6 +167,29 @@ export {
 } from "./provisioning.ts";
 export { instanceIsClaimed, platformInstanceId } from "./instance.ts";
 
+/**
+ * The settings this deployment holds — the judge configuration's idiom, one
+ * scope up. Sealed with the deployment's own key, hinted rather than handed
+ * back, seeded from the environment at start and never over a value somebody
+ * chose. `platformFacts` is the third instance-scoped export: it takes nothing,
+ * so there is no customer to name, and it answers only what is not secret,
+ * because the readiness answer it feeds is read before anybody has logged in.
+ */
+export {
+  platformFacts,
+  readPlatformSettings,
+  seedPlatformSettings,
+  writePlatformSettings,
+  type PlatformFacts,
+  type PlatformSetting,
+} from "./platform-settings.ts";
+export {
+  PLATFORM_SETTINGS,
+  type PlatformSettingDefinition,
+  type PlatformSettingName,
+  type PlatformSettingValues,
+} from "../schema/platform.ts";
+
 export {
   readOrganization,
   readOrganizationSettings,

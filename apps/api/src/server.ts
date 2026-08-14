@@ -19,6 +19,7 @@ import { memberRoutes } from "./routes/members.ts";
 import { mockToolRoutes } from "./routes/mock-tools.ts";
 import { phoneReadiness } from "./phone-readiness.ts";
 import { platformRoutes } from "./routes/platform.ts";
+import { platformSettingsRoutes } from "./routes/platform-settings.ts";
 import { recordingRoutes } from "./routes/recordings.ts";
 import { reportRoutes } from "./routes/reports.ts";
 import { runRoutes } from "./routes/runs.ts";
@@ -227,6 +228,18 @@ export function buildApi(options: ServerOptions): Api {
     rateLimit,
     emailSender,
     baseUrl: config.baseUrl,
+  });
+
+  // What this deployment has been configured with, as an owner reads and
+  // changes it. Its own credentialed scope, like every other group, so its one
+  // refusal — the settings of a platform are not everybody's to see — never
+  // reaches another group's error handler. It sits beside the public platform
+  // route rather than inside it: they answer at addresses that share a prefix
+  // and share nothing else, one asking for no credential and one refusing
+  // anybody but an owner.
+  void app.register(platformSettingsRoutes, {
+    provider: identity.provider,
+    rateLimit,
   });
 
   // What a developer's folder syncs against. Its own scope, like every other

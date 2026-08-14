@@ -30,6 +30,18 @@ const config: NextConfig = {
         // API's own port. Without this rule a bound repository could never
         // verify the platform it is bound to.
         { source: "/api/platform", destination: `${api}/api/platform` },
+        // What this deployment has been configured with, as its owner reads and
+        // changes it. Forwarded because the point of holding these on the
+        // platform is that nobody needs shell access to change one: the person
+        // who does it is signed in to this origin, and this is the only origin
+        // their session is valid for. It is its own rule rather than a
+        // `:path*` under the identity above, because that identity is public
+        // and this refuses anybody but an owner — two different doors that
+        // happen to share a prefix.
+        {
+          source: "/api/platform/settings",
+          destination: `${api}/api/platform/settings`,
+        },
         { source: "/api/auth/:path*", destination: `${api}/api/auth/:path*` },
         { source: "/api/signup", destination: `${api}/api/signup` },
         {
