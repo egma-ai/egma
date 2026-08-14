@@ -24,6 +24,15 @@ That starts the whole platform and prints the address an agent repository
 points at. Nobody runs a migration step, because there isn't one — the API
 applies its migrations while it boots.
 
+The first `up` in a workspace also **generates the credential egma's media
+server, its simulator and its SIP gateway authenticate each other with**, and
+writes it to `.egma-platform/platform.env`. You never choose it and never type
+it: it is a password between egma's own parts, in the same class as the
+Postgres password. A pair that is already there is left exactly as it is, so
+starting the platform again never locks a running deployment out of itself.
+There is deliberately no default for it anywhere in this repository — a
+deployment must not run on a credential every reader of this repository holds.
+
 `docker compose up` starts the same containers, and is not the same thing.
 
 **Once you have run `egma self-host phone setup`, use `egma self-host up` to
@@ -32,8 +41,10 @@ nothing points compose at it — the self-host commands read it back and hand it
 to the containers themselves. A bare `docker compose up` therefore brings the
 platform back with its carrier, speech and judge configuration empty: the
 containers are recreated, phone readiness goes back to `setup required`, and
-the simulator has no trunk to dial through. Nothing is lost and nothing has to
-be set up again; `egma self-host up` restores it.
+the simulator has no trunk to dial through. Its media server refuses to start
+at all, because that pair has no default and a bare compose run does not read
+the file holding yours. Nothing is lost and nothing has to be set up again;
+`egma self-host up` restores it.
 
 There is a second, smaller difference. `egma self-host up` waits for the
 platform to answer for itself, tells you what to type next, and tries once more
