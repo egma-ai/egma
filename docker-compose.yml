@@ -480,14 +480,17 @@ services:
       #
       # The LiveKit beside it is the default, filled in from the same pair
       # the two containers below authenticate each other with, so the
-      # three halves can never disagree. The backend itself stays unset
-      # until `egma self-host phone setup` has run: a simulator told to
-      # dial with no trunk refuses to start, and platform readiness must
-      # not wait on carrier setup.
+      # three halves can never disagree. That pair has no default here:
+      # `egma self-host` generates one for the workspace and hands it to
+      # all three, so a deployment never runs on a credential published in
+      # this repository. The backend itself stays unset until
+      # `egma self-host phone setup` has run: a simulator told to dial
+      # with no trunk refuses to start, and platform readiness must not
+      # wait on carrier setup.
       EGMA_SIMULATOR_MEDIA_BACKEND: ${EGMA_SIMULATOR_MEDIA_BACKEND:-}
       EGMA_SIMULATOR_LIVEKIT_URL: ${EGMA_SIMULATOR_LIVEKIT_URL:-ws://livekit:7880}
-      EGMA_SIMULATOR_LIVEKIT_API_KEY: ${EGMA_SIMULATOR_LIVEKIT_API_KEY:-${EGMA_LIVEKIT_API_KEY:-egma-devkey}}
-      EGMA_SIMULATOR_LIVEKIT_API_SECRET: ${EGMA_SIMULATOR_LIVEKIT_API_SECRET:-${EGMA_LIVEKIT_API_SECRET:-egma-development-only-livekit-secret-change-it}}
+      EGMA_SIMULATOR_LIVEKIT_API_KEY: ${EGMA_SIMULATOR_LIVEKIT_API_KEY:-${EGMA_LIVEKIT_API_KEY:-}}
+      EGMA_SIMULATOR_LIVEKIT_API_SECRET: ${EGMA_SIMULATOR_LIVEKIT_API_SECRET:-${EGMA_LIVEKIT_API_SECRET:-}}
       EGMA_SIMULATOR_SIP_TRUNK_ID: ${EGMA_SIMULATOR_SIP_TRUNK_ID:-}
       EGMA_SIMULATOR_SIP_TRUNK_ADDRESS: ${EGMA_SIMULATOR_SIP_TRUNK_ADDRESS:-}
       EGMA_SIMULATOR_SIP_TRUNK_NUMBER: ${EGMA_SIMULATOR_SIP_TRUNK_NUMBER:-}
@@ -711,15 +714,19 @@ services:
   # Its ports are published to this machine's loopback and no further —
   # the workbench's idiom, for the same reason: a person at this machine
   # may want to reach it, and nobody else has any business doing so. The
-  # simulator does not come through here; it uses the compose network. That
-  # is also what makes the development key below harmless — it
-  # authenticates traffic that cannot arrive from off this host. Change
-  # `EGMA_LIVEKIT_BIND` and it stops being harmless, so if you ever do,
-  # change the key pair first.
+  # simulator does not come through here; it uses the compose network.
+  #
+  # The pair below has **no default**, and that is a fix rather than an
+  # omission. It used to fall back to a key and a secret written in this
+  # file, in a public repository, and nothing ever replaced them — so a
+  # deployment that widened `EGMA_LIVEKIT_BIND` for testing from another
+  # machine was accepting anyone who had read the repository. `egma
+  # self-host` now generates a pair for the workspace and hands the same
+  # one to this server, the simulator and the gateway below.
   livekit:
     image: livekit/livekit-server:v1.13.5
     environment:
-      LIVEKIT_KEYS: "${EGMA_LIVEKIT_API_KEY:-egma-devkey}: ${EGMA_LIVEKIT_API_SECRET:-egma-development-only-livekit-secret-change-it}"
+      LIVEKIT_KEYS: "${EGMA_LIVEKIT_API_KEY:-}: ${EGMA_LIVEKIT_API_SECRET:-}"
       LIVEKIT_CONFIG: |
         port: 7880
         rtc:
@@ -773,8 +780,10 @@ services:
     entrypoint: ["livekit-sip"]
     environment:
       SIP_CONFIG_BODY: |
-        api_key: ${EGMA_LIVEKIT_API_KEY:-egma-devkey}
-        api_secret: ${EGMA_LIVEKIT_API_SECRET:-egma-development-only-livekit-secret-change-it}
+        # The generated pair, the same one the media server and the
+        # simulator hold. No default, for the reason stated above it.
+        api_key: ${EGMA_LIVEKIT_API_KEY:-}
+        api_secret: ${EGMA_LIVEKIT_API_SECRET:-}
         ws_url: ws://livekit:7880
         redis:
           address: livekit-redis:6379

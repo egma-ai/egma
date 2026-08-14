@@ -337,8 +337,13 @@ describe("an exported call that could reach the database without a customer", ()
    * beside the function is pinned with it.
    */
   it("refuses an instance exception whose answer is widened behind its own name", async () => {
+    // Only the *value* is widened, and the keys beside it are left exactly as
+    // they were. That is the leak this pin exists to catch, isolated: the
+    // secret a caller may be handed lives in the value, and it is written
+    // inside the pinned alias's own body.
     const widened =
-      "export type PlatformFacts = Readonly<Record<string, string>>;\n" +
+      "export type PlatformSettingName = 'persona_model';\n" +
+      "export type PlatformFacts = Readonly<Partial<Record<PlatformSettingName, { value: string | null; hint: string }>>>;\n" +
       "export async function platformFacts(): Promise<PlatformFacts> {\n  return {};\n}\n";
     await withSurface(
       'export { platformFacts } from "./things.ts";\n',
@@ -360,9 +365,15 @@ describe("an exported call that could reach the database without a customer", ()
       "export async function platformFacts(): Promise<PlatformFacts> {\n  return {};\n}\n";
     await withSurface('export { platformFacts } from "./things.ts";\n', pinned);
 
-    // One level of alias, and one file: `PlatformSettingName` is followed here
-    // because it is declared beside it, and the settings this platform holds
-    // may grow — what may never grow is the value beside them.
+    // **One level, and `PlatformSettingName` is deliberately not one of them.**
+    // The walk collects the aliases named in the *signature* — here
+    // `PlatformFacts` — and appends their declarations; it does not recurse
+    // into what those declarations then name. That is the point rather than a
+    // gap: the settings this platform holds are meant to grow, one per ticket
+    // of this effort, and a pin that followed their names would stop the build
+    // on every setting added. What may never grow is the *value* beside them,
+    // and that is written inside the body this pin does carry — the test above
+    // widens exactly that and is refused.
     expect(await check(root)).toEqual([]);
   });
 

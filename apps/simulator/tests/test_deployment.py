@@ -217,6 +217,64 @@ def test_the_default_stack_dials_nothing_until_phone_setup_has_run():
     )
 
 
+MEDIA_CREDENTIAL = ("EGMA_LIVEKIT_API_KEY", "EGMA_LIVEKIT_API_SECRET")
+"""The pair the media server, the simulator and the SIP gateway
+authenticate each other with."""
+
+PUBLISHED_MEDIA_CREDENTIAL = (
+    "egma-devkey",
+    "egma-development-only-livekit-secret-change-it",
+)
+"""What that pair used to fall back to, in this file, in a public
+repository. Named here so the test can say *these exact values* are gone
+rather than merely that some default is absent."""
+
+
+def test_no_development_media_credential_is_left_in_the_deployment_description():
+    """The media server does not run on a credential anyone can read.
+
+    This is a finding rather than a precaution. A running deployment was
+    checked and found using the pair below: all three containers fell back
+    to it, and nothing in the CLI, the skills or the documentation ever
+    replaced them. Published to loopback the exposure is small — and the
+    deployment description invites a wider bind for testing from another
+    machine, at which point the media server accepts anyone who read the
+    repository.
+
+    `egma self-host` generates a pair for the workspace instead. What is
+    asserted here is the half a behavioural test cannot reach: that no
+    default is left in the files a self-hoster copies, and that all three
+    containers read the same two variables, so no two of them can end up
+    holding different halves of one password.
+    """
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    example = (ROOT / ".env.example").read_text(encoding="utf-8")
+
+    for published in PUBLISHED_MEDIA_CREDENTIAL:
+        assert published not in compose, (
+            f"docker-compose.yml still carries {published!r}; a deployment "
+            "started from this file authenticates its media server with a "
+            "value every reader of this repository holds"
+        )
+        assert published not in example, (
+            f".env.example still carries {published!r}; a self-hoster who "
+            "copies it to .env is back on the published pair"
+        )
+
+    for name in MEDIA_CREDENTIAL:
+        read = re.findall(rf"\$\{{{name}(:-[^}}]*)?\}}", compose)
+        assert len(read) == 3, (
+            f"docker-compose.yml reads {name} {len(read)} time(s); the media "
+            "server, the simulator and the SIP gateway all read it, and one "
+            "of them left out is one container holding a different password"
+        )
+        assert set(read) == {":-"}, (
+            f"{name} has a default in docker-compose.yml: {sorted(set(read))}. "
+            "This pair is generated per workspace and has no default; any "
+            "value written here is a credential the whole world already has"
+        )
+
+
 OVERLAY_VARIABLE = re.compile(r"\$\{(EGMA_(?:LIVEKIT|WORKBENCH)_[A-Z0-9_]+)")
 
 

@@ -534,16 +534,26 @@ function aliasBody(tree: ts.SourceFile, named: string): string | undefined {
 /**
  * An answer as a reader of the call sees it: what is written after the
  * signature, plus the body of every type alias declared in the same file that
- * it names — including one nested inside `Promise<…>`, which is where every
- * answer on this surface lives.
+ * the signature names — including one nested inside `Promise<…>`, which is
+ * where every answer on this surface lives.
  *
  * **This is `asWritten`'s rule applied to the answer, and it is what makes the
  * instance-scoped pin a pin.** Comparing `Promise<Something>` as text pins only
  * the spelling of a name: the alias behind it could be widened to hand out a
  * secret with the rule still green, which is the one thing that exemption
- * exists to prevent. One level, same file, exactly as the parameter rule —
- * a name from another module is somebody else's vocabulary, and following it
- * would pin a file this one does not own.
+ * exists to prevent.
+ *
+ * **One level, and the level is the signature's.** What the *alias body* then
+ * names is not followed, and that is the design rather than a gap. Two reasons,
+ * and they point the same way. A name from another module is somebody else's
+ * vocabulary, and following it would pin a file this one does not own — the
+ * parameter rule's reasoning, unchanged. And the one such name in practice is
+ * a key type that is *meant* to grow: `PlatformFacts` is keyed by the settings
+ * this platform holds, a list that gains an entry with every ticket of the
+ * settings effort, and a pin that followed it would stop the build on each one.
+ * What may never grow is the value beside the key, and that is written inside
+ * the body this does carry — so the widening that would leak a secret is caught
+ * and the widening that adds a setting is not.
  */
 function answerAsWritten(
   tree: ts.SourceFile,
