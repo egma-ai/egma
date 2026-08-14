@@ -328,8 +328,6 @@ describe("what the platform says about its own setup", () => {
         "the media backend",
         "the carrier trunk",
         "the source number",
-        "the carrier trunk username",
-        "the carrier trunk password",
       ],
     });
   });
@@ -383,13 +381,50 @@ describe("what the platform says about its own setup", () => {
 
     expect(await readiness()).toEqual({ state: "ready", missing: [] });
 
+
     // And the two it did not write are still settings the platform can hold
     // and hand over — optional is not absent from the catalog.
     expect(
       PLATFORM_SETTINGS.filter((setting) => !setting.required).map(
         (setting) => setting.name,
       ),
-    ).toEqual(["text_to_speech_model", "text_to_speech_voice"]);
+    ).toEqual([
+      "text_to_speech_model",
+      "text_to_speech_voice",
+      // A trunk the carrier authenticates by the address it came from is a
+      // real deployment and needs neither of these — which is what the
+      // simulator's own carrier check says too, so readiness must not call
+      // such a platform unconfigured forever.
+      "carrier_trunk_username",
+      "carrier_trunk_password",
+    ]);
+  });
+
+  it("answers ready to a carrier that authenticates its trunk by address", async () => {
+    // A trunk a carrier authenticates by the address it came from needs
+    // neither a username nor a password, and that is a real deployment — the
+    // simulator's own carrier check says so in as many words, and refuses
+    // *half* a credential precisely because neither half is the honest shape.
+    // Readiness demanding a username a carrier does not use would call a
+    // working platform unconfigured with no way out of it.
+    api = await createApi("platform_settings_ready_trunk_by_address", {
+      singleOrganization: true,
+      platformSettings: {
+        persona_model_provider: "openai",
+        persona_model: "gpt-4o",
+        persona_model_key: A_REAL_KEY,
+        speech_to_text_provider: "openai",
+        speech_to_text_key: A_REAL_KEY,
+        text_to_speech_provider: "openai",
+        text_to_speech_key: A_REAL_KEY,
+        voice_activity_provider: "silero",
+        media_backend: "livekit",
+        carrier_trunk_address: "acme.pstn.twilio.com",
+        carrier_trunk_number: "+15550100",
+      },
+    });
+
+    expect(await readiness()).toEqual({ state: "ready", missing: [] });
   });
 
   it("answers ready once nothing is missing", async () => {

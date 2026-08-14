@@ -119,14 +119,29 @@ export const platformSetting = pgTable(
  * that can disagree with that one, and the disagreement would be a setting an
  * operator could store and never use.
  *
- * **`required` is what setup has to supply and what readiness waits for.** Two
- * entries are not: the simulator has a working default for the text-to-speech
- * model and voice, so a platform that never names one still speaks. Marking
- * them required would leave an operator who finished the whole documented setup
- * still reading `setup required` with nothing sensible to type — which is the
- * same silent-mismatch failure this effort exists to remove, wearing the
- * opposite face. They are settings somebody may change, not settings they must
- * supply, and the interview treats them the same way.
+ * **`required` is what setup has to supply and what readiness waits for.** Four
+ * entries are not, and each is not for a stated reason.
+ *
+ * The text-to-speech model and voice have a working default in the simulator,
+ * so a platform that never names one still speaks. The carrier trunk's username
+ * and password are a pair a carrier may not use at all: a trunk authenticated
+ * by the address it came from is a real deployment, which is what the
+ * simulator's own carrier check says in as many words, so demanding them would
+ * be readiness calling a working platform unconfigured forever.
+ *
+ * Marking any of the four required would leave an operator who finished the
+ * whole documented setup still reading `setup required` with nothing sensible
+ * to type — the same silent-mismatch failure this effort exists to remove,
+ * wearing the opposite face. They are settings somebody may supply, not
+ * settings they must, and the interview treats them the same way.
+ *
+ * **The keys, by contrast, are required and stay required.** A platform holding
+ * a provider and a model and no key is precisely the hollow start this whole
+ * effort removes: it would report `ready` and then fail every simulation at the
+ * provider, minutes later, with a refusal naming nothing about configuration.
+ * The `scripted` providers need no key, but a platform running scripted is not
+ * a platform anybody configured — it is what a simulator with no settings at
+ * all already does.
  */
 export const PLATFORM_SETTINGS = [
   {
@@ -211,13 +226,13 @@ export const PLATFORM_SETTINGS = [
     name: "carrier_trunk_username",
     label: "the carrier trunk username",
     secret: false,
-    required: true,
+    required: false,
   },
   {
     name: "carrier_trunk_password",
     label: "the carrier trunk password",
     secret: true,
-    required: true,
+    required: false,
   },
 ] as const satisfies readonly {
   readonly name: string;

@@ -28,8 +28,6 @@ const NOTHING_SET_UP = {
     "the media backend",
     "the carrier trunk",
     "the source number",
-    "the carrier trunk username",
-    "the carrier trunk password",
   ],
 };
 
