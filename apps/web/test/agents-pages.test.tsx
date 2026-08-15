@@ -278,7 +278,7 @@ describe("finding an agent in a long list", () => {
     render(<AgentsPage />);
     await screen.findAllByText("Front desk");
 
-    fireEvent.click(screen.getByLabelText("Archived"));
+    fireEvent.click(screen.getByRole("radio", { name: "Archived" }));
 
     await waitFor(() => {
       const asked = vi

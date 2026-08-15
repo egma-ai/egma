@@ -7,11 +7,12 @@ import { connect, disconnect, db } from "../client.ts";
 import {
   clonePersona,
   createPersona,
-  deletePersona,
+  archivePersona,
   editPersona,
   getPersona,
   getPersonaVersion,
   listPersonas,
+  restorePersona,
   VOICE_PROVIDERS,
   type VoiceProvider,
 } from "../access/personas.ts";
@@ -35,7 +36,8 @@ import { organization, user } from "../schema/index.ts";
  *   node packages/db/dist/scripts/persona.js get prs_…
  *   node packages/db/dist/scripts/persona.js list [--limit 50] [--cursor prs_…]
  *   node packages/db/dist/scripts/persona.js clone prs_…
- *   node packages/db/dist/scripts/persona.js delete prs_…
+ *   node packages/db/dist/scripts/persona.js archive prs_… [--replacement prs_…]
+ *   node packages/db/dist/scripts/persona.js restore prs_…
  */
 
 const DATABASE_URL =
@@ -100,7 +102,8 @@ function usage(): never {
       "  persona.js get-version <prsv_id>",
       "  persona.js list [--limit <n>] [--cursor <prs_id>]",
       "  persona.js clone <prs_id>",
-      "  persona.js delete <prs_id>",
+      "  persona.js archive <prs_id> [--replacement <prs_id>]",
+      "  persona.js restore <prs_id>",
     ].join("\n"),
   );
   process.exit(1);
@@ -241,9 +244,24 @@ async function main(): Promise<void> {
   } else if (command === "clone") {
     const id = requiredId(rest);
     printPersona(id, await clonePersona(auth, id));
-  } else if (command === "delete") {
+  } else if (command === "archive") {
+    const [id, ...flags] = rest;
+    if (id === undefined) usage();
+    const { values } = parseArgs({
+      args: flags,
+      options: { replacement: { type: "string" } },
+    });
+    printPersona(
+      id,
+      await archivePersona(auth, id, {
+        ...(values.replacement === undefined
+          ? {}
+          : { replacementPersonaId: values.replacement }),
+      }),
+    );
+  } else if (command === "restore") {
     const id = requiredId(rest);
-    printPersona(id, await deletePersona(auth, id));
+    printPersona(id, await restorePersona(auth, id));
   } else {
     usage();
   }

@@ -2,7 +2,7 @@ import {
   createPersona,
   createProject,
   createTest,
-  deletePersona,
+  archivePersona,
   editTest,
   type AuthContext,
   type PersonaTraits,
@@ -206,12 +206,12 @@ describe("creating a test", () => {
     expect(rows).toEqual([]);
   });
 
-  it("refuses a persona who has been deleted, in the factory's own words", async () => {
+  it("refuses a persona who has been archived, in the factory's own words", async () => {
     api = await createApi("tests_persona_deleted");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
     const leaving = await personaFor(ada, "Leaving Soon");
-    await deletePersona(contextFor(ada, "admin"), leaving);
+    await archivePersona(contextFor(ada, "admin"), leaving);
 
     const byName = await createTestThrough(key, {
       ...RESCHEDULING,
@@ -221,7 +221,7 @@ describe("creating a test", () => {
     expect(byName.statusCode).toBe(422);
     expect(byName.body).toEqual({
       error: "unprocessable",
-      message: `persona ${leaving} is deleted, and a test cannot name a deleted persona`,
+      message: `persona ${leaving} is archived, and a test cannot name an archived persona`,
     });
 
     // Their identifier reads the same way, because it is the same problem.

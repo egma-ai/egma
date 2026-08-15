@@ -152,14 +152,14 @@ export type NewTest = {
 
 /**
  * A persona as a test names them: by identity, with their current name, and
- * saying plainly whether they have since been deleted. A read that hid that
+ * saying plainly whether they have since been archived. A read that hid that
  * would show a test whose simulations cannot all run and give no sign.
  */
 export type TestPersona = {
   readonly id: string;
   readonly name: string;
-  /** Set once they are deleted; the test goes on naming them either way. */
-  readonly deletedAt: Date | null;
+  /** Set once they are archived; the test goes on naming them either way. */
+  readonly archivedAt: Date | null;
 };
 
 /**
@@ -660,7 +660,7 @@ async function validateNamedPersonas(
   const found = new Map(
     (
       await on
-        .select({ id: persona.id, deletedAt: persona.deletedAt })
+        .select({ id: persona.id, archivedAt: persona.archivedAt })
         .from(persona)
         .where(
           within(
@@ -673,7 +673,7 @@ async function validateNamedPersonas(
           ),
         )
         .for("share")
-    ).map((row) => [row.id, row.deletedAt] as const),
+    ).map((row) => [row.id, row.archivedAt] as const),
   );
 
   for (const id of ids) {
@@ -684,7 +684,7 @@ async function validateNamedPersonas(
     }
     if (found.get(id) !== null) {
       throw new UnprocessableInputError(
-        `persona ${id} is deleted, and a test cannot name a deleted persona`,
+        `persona ${id} is archived, and a test cannot name an archived persona`,
       );
     }
   }
@@ -785,11 +785,11 @@ async function projectDefaultPersona(
 
   // The shared lock a named persona is read under, for the same reason and on
   // the same terms: the pointer resolves to a persona this write is about to
-  // name, so a delete of that row must either land before this read and refuse
-  // the write, or wait behind it and be refused itself. A default resolved
-  // without the lock would be the one way past the rule.
+  // name, so an Archive of that row must either land before this read and
+  // refuse the write, or wait behind it and be refused itself. A default
+  // resolved without the lock would be the one way past the rule.
   const [pointed] = await on
-    .select({ id: persona.id, deletedAt: persona.deletedAt })
+    .select({ id: persona.id, archivedAt: persona.archivedAt })
     .from(persona)
     .where(
       within(
@@ -809,9 +809,9 @@ async function projectDefaultPersona(
       `this test names no persona and the project's default points at ${id}, and there is no persona ${id} in this project; name one on the test, or point the project's default at a living persona of this project`,
     );
   }
-  if (pointed.deletedAt !== null) {
+  if (pointed.archivedAt !== null) {
     throw new Error(
-      `this test names no persona and the project's default persona ${id} is deleted; name one on the test, or point the project's default at a living persona`,
+      `this test names no persona and the project's default persona ${id} is archived; name one on the test, or point the project's default at an active persona`,
     );
   }
 
@@ -989,7 +989,7 @@ async function personasOfVersions(
       versionId: testPersona.testVersionId,
       id: persona.id,
       name: persona.name,
-      deletedAt: persona.deletedAt,
+      archivedAt: persona.archivedAt,
     })
     .from(testPersona)
     .innerJoin(

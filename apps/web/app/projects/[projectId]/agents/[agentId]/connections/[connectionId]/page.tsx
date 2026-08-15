@@ -31,7 +31,6 @@ import {
   Button,
   ButtonLink,
   Choice,
-  Fact,
   Facts,
   Field,
   Help,
@@ -304,7 +303,6 @@ function ConnectionDetail({
           />
         ) : null}
 
-        {role !== null && !mayAuthor ? <Problem>{whyNot}</Problem> : null}
         {acted === null ? null : <Problem>{acted.message}</Problem>}
 
         {typesRefused === null ? null : (
@@ -315,35 +313,34 @@ function ConnectionDetail({
           />
         )}
 
-        <Facts label="What this connection is">
-          <Fact name="Identifier" mono>
-            {one.id}
-          </Fact>
-          <Fact name="Type" mono>
-            {one.type}
-          </Fact>
-          <Fact name="Shape" mono>
-            {variant?.label ?? one.variant_id}
-          </Fact>
-          <Fact name="Topology" mono>
-            {one.topology}
-          </Fact>
-          <Fact name="State">
-            {one.archived ? <Badge tone="warn">Archived</Badge> : <Badge>Active</Badge>}
-          </Fact>
-          <Fact name="Added" mono>
-            {asDay(one.created_at)}
-          </Fact>
-        </Facts>
+        <Facts
+          facts={[
+            { label: "Identifier", value: <code>{one.id}</code> },
+            { label: "Type", value: <code>{one.type}</code> },
+            {
+              label: "Shape",
+              value: <code>{variant?.label ?? one.variant_id}</code>,
+            },
+            { label: "Topology", value: <code>{one.topology}</code> },
+            {
+              label: "State",
+              value: one.archived ? (
+                <Badge tone="warn">Archived</Badge>
+              ) : (
+                <Badge>Active</Badge>
+              ),
+            },
+            { label: "Added", value: <code>{asDay(one.created_at)}</code> },
+          ]}
+        />
 
         <Section title="Where it points">
-          <Facts label="Connection configuration">
-            {Object.entries(one.config).map(([key, value]) => (
-              <Fact key={key} name={key} mono>
-                {value}
-              </Fact>
-            ))}
-          </Facts>
+          <Facts
+            facts={Object.entries(one.config).map(([key, value]) => ({
+              label: key,
+              value: <code>{value}</code>,
+            }))}
+          />
           {Object.keys(one.config).length === 0 ? (
             <Help>This shape holds no configuration of its own.</Help>
           ) : null}
@@ -375,21 +372,26 @@ function ConnectionDetail({
             )
           }
         >
-          <Facts label="Credential state">
-            <Fact name="Stored">
-              {one.credential_present ? (
-                <Badge tone="good">Present</Badge>
-              ) : (
-                <Badge>None</Badge>
-              )}
-            </Fact>
-            <Fact name="Hint" mono>
-              {one.credentials_hint ?? "—"}
-            </Fact>
-            <Fact name="Rule" mono>
-              {variant?.credential_rule ?? "—"}
-            </Fact>
-          </Facts>
+          <Facts
+            facts={[
+              {
+                label: "Stored",
+                value: one.credential_present ? (
+                  <Badge tone="good">Present</Badge>
+                ) : (
+                  <Badge>None</Badge>
+                ),
+              },
+              {
+                label: "Hint",
+                value: <code>{one.credentials_hint ?? "—"}</code>,
+              },
+              {
+                label: "Rule",
+                value: <code>{variant?.credential_rule ?? "—"}</code>,
+              },
+            ]}
+          />
           {variant === undefined ? null : <Help>{variant.credential_help}</Help>}
         </Section>
 
@@ -425,14 +427,18 @@ function ConnectionDetail({
         >
           {one.capabilities.state === "known" ? (
             <>
-              <Facts label="Measured capabilities">
-                <Fact name="Checked" mono>
-                  {asDay(one.capabilities.checked_at ?? "")}
-                </Fact>
-                <Fact name="Measured by" mono>
-                  {one.capabilities.source ?? "—"}
-                </Fact>
-              </Facts>
+              <Facts
+                facts={[
+                  {
+                    label: "Checked",
+                    value: <code>{asDay(one.capabilities.checked_at ?? "")}</code>,
+                  },
+                  {
+                    label: "Measured by",
+                    value: <code>{one.capabilities.source ?? "—"}</code>,
+                  },
+                ]}
+              />
 
               {/*
                 * Three groups, because the record has three answers and a
@@ -441,47 +447,39 @@ function ConnectionDetail({
                 * looked at used to be drawn as absent, which reads as a fact
                 * about the target and is a fact about egma.
                 */}
-              <Facts label="What this target supports">
-                <Fact name="Supported">
-                  {standingIn(one.capabilities, "supported").length === 0 ? (
-                    "None"
-                  ) : (
-                    <Actions>
-                      {standingIn(one.capabilities, "supported").map((key) => (
-                        <Badge key={key} tone="good">
-                          {capabilityLabel(capabilities, key)}
-                        </Badge>
-                      ))}
-                    </Actions>
-                  )}
-                </Fact>
-                <Fact name="Not supported">
-                  {standingIn(one.capabilities, "unsupported").length === 0 ? (
-                    "None"
-                  ) : (
-                    <Actions>
-                      {standingIn(one.capabilities, "unsupported").map((key) => (
-                        <Badge key={key} tone="bad">
-                          {capabilityLabel(capabilities, key)}
-                        </Badge>
-                      ))}
-                    </Actions>
-                  )}
-                </Fact>
-                <Fact name="Not measured">
-                  {standingIn(one.capabilities, "not_measured").length === 0 ? (
-                    "None"
-                  ) : (
-                    <Actions>
-                      {standingIn(one.capabilities, "not_measured").map((key) => (
-                        <Badge key={key} tone="warn">
-                          {capabilityLabel(capabilities, key)}
-                        </Badge>
-                      ))}
-                    </Actions>
-                  )}
-                </Fact>
-              </Facts>
+              <Facts
+                facts={(
+                  [
+                    { label: "Supported", standing: "supported", tone: "good" },
+                    {
+                      label: "Not supported",
+                      standing: "unsupported",
+                      tone: "bad",
+                    },
+                    {
+                      label: "Not measured",
+                      standing: "not_measured",
+                      tone: "warn",
+                    },
+                  ] as const
+                ).map((group) => ({
+                  label: group.label,
+                  value:
+                    standingIn(one.capabilities, group.standing).length === 0 ? (
+                      "None"
+                    ) : (
+                      <Actions>
+                        {standingIn(one.capabilities, group.standing).map(
+                          (key) => (
+                            <Badge key={key} tone={group.tone}>
+                              {capabilityLabel(capabilities, key)}
+                            </Badge>
+                          ),
+                        )}
+                      </Actions>
+                    ),
+                }))}
+              />
 
               {standingIn(one.capabilities, "not_measured").length === 0 ? null : (
                 <Help>

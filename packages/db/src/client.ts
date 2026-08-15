@@ -40,6 +40,14 @@ export function connect(options: ConnectOptions): void {
     connectionString: options.databaseUrl,
     max: options.maxConnections ?? 10,
   });
+  // An idle pooled connection can die between checkouts — Postgres restarted,
+  // a failover, or a test database force-dropped under it. pg reports that by
+  // emitting `error` on the pool, and an unlistened `error` event brings the
+  // whole process down for a connection nothing was even using. The pool
+  // already discards the broken client and mints a fresh one on the next
+  // checkout; a query in flight on that client still gets its own rejection.
+  // So the listener's whole job is to exist.
+  pool.on("error", () => undefined);
   databaseUrl = options.databaseUrl;
   database = drizzle(pool, { schema, casing: "snake_case" });
 }

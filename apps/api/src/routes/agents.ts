@@ -42,7 +42,11 @@ import {
 } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { CODES, type RefusalCode } from "../http/refusals.ts";
+import {
+  CODES,
+  identityConflict,
+  type RefusalCode,
+} from "../http/refusals.ts";
 
 /**
  * Registering an agent, reading it back, and attaching another way to reach it.
@@ -1175,11 +1179,14 @@ export async function agentRoutes(
       return refused(reply, projectOutsideOrganization(error.projectId));
     }
 
+    // The one refusal here whose sentence is not the layer below's. Two route
+    // groups answer it and each names its own resource word, so the error
+    // carries the data and `identityConflict` writes the sentence.
     if (error instanceof IdentityConflictError) {
       return refused(reply, {
         refused: true,
         error: "identity_conflict",
-        message: error.message,
+        message: identityConflict(error.resource, error.resourceId),
       });
     }
 

@@ -1038,7 +1038,7 @@ async function resolvePersonaVersions(
       await on
         .select({
           id: persona.id,
-          deletedAt: persona.deletedAt,
+          archivedAt: persona.archivedAt,
           currentVersionId: persona.currentVersionId,
         })
         .from(persona)
@@ -1066,11 +1066,11 @@ async function resolvePersonaVersions(
           `to name somebody who is.`,
       );
     }
-    if (row.deletedAt !== null) {
+    if (row.archivedAt !== null) {
       refuseRun(
         "not_admitted",
-        `persona ${id} is deleted, and a run cannot conduct a simulation ` +
-          `with a deleted persona. Edit the tests that name them, then pin ` +
+        `persona ${id} is archived, and a run cannot conduct a simulation ` +
+          `with an archived persona. Edit the tests that name them, then pin ` +
           `the versions those edits mint.`,
       );
     }

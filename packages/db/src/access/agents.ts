@@ -1105,7 +1105,10 @@ async function refuseOrVanish(
         )[0];
 
   if (current === undefined) return undefined;
-  throw new IdentityConflictError(resource, id, expected, current.revision);
+  throw new IdentityConflictError(resource, id, {
+    expected,
+    current: current.revision,
+  });
 }
 
 /**

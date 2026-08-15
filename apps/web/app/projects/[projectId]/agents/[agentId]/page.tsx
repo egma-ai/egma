@@ -26,7 +26,6 @@ import {
   Button,
   ButtonLink,
   Choice,
-  Fact,
   Facts,
   Field,
   Problem,
@@ -257,26 +256,27 @@ function AgentDetailView({
           />
         ) : null}
 
-        {role !== null && !mayAuthor ? <Problem>{whyNot}</Problem> : null}
-
-        <Facts label="What egma knows about this agent">
-          <Fact name="Identifier" mono>
-            {agent.id}
-          </Fact>
-          <Fact name="State">
-            {agent.archived ? (
-              <Badge tone="warn">Archived</Badge>
-            ) : (
-              <Badge>Active</Badge>
-            )}
-          </Fact>
-          <Fact name="Registered" mono>
-            {asDay(agent.created_at)}
-          </Fact>
-          <Fact name="Last changed" mono>
-            {asDay(agent.updated_at)}
-          </Fact>
-        </Facts>
+        <Facts
+          facts={[
+            { label: "Identifier", value: <code>{agent.id}</code> },
+            {
+              label: "State",
+              value: agent.archived ? (
+                <Badge tone="warn">Archived</Badge>
+              ) : (
+                <Badge>Active</Badge>
+              ),
+            },
+            {
+              label: "Registered",
+              value: <code>{asDay(agent.created_at)}</code>,
+            },
+            {
+              label: "Last changed",
+              value: <code>{asDay(agent.updated_at)}</code>,
+            },
+          ]}
+        />
 
         <Section
           title="Connections"

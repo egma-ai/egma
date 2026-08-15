@@ -392,8 +392,8 @@ describe("the persona rename (0005)", () => {
   it("pins the new prefixes: a dh_ id no longer fits the check", async () => {
     await expect(
       client.query(
-        `insert into persona (id, organization_id, project_id, name, current_version_id)
-         values ($1, $2, $3, 'Old Format', $4)`,
+        `insert into persona (id, organization_id, project_id, name, current_version_id, revision)
+         values ($1, $2, $3, 'Old Format', $4, 'a-revision')`,
         [
           `dh_${newId("prs").slice("prs_".length)}`,
           organizationId,
@@ -1851,7 +1851,7 @@ describe("the connection type leaving the simulation row (0019)", () => {
 
 /**
  * Archive, live revisions, the stored variant and the capability record, over a
- * database that already holds agents and connections (0024).
+ * database that already holds agents and connections (0025).
  *
  * Four changes in one migration because they are one change to what an agent
  * and a connection *are*, and every one of them has to land without changing
@@ -1860,7 +1860,7 @@ describe("the connection type leaving the simulation row (0019)", () => {
  * that has to be the shape the code would have derived from that row's config
  * the moment before the upgrade ran.
  */
-describe("the agent and connection lifecycle over installed data (0024)", () => {
+describe("the agent and connection lifecycle over installed data (0025)", () => {
   let database: EmptyDatabase;
   let before: string;
   let client: pg.Client;
@@ -1887,9 +1887,9 @@ describe("the agent and connection lifecycle over installed data (0024)", () => 
   beforeAll(async () => {
     database = await createEmptyDatabase("agent_lifecycle");
 
-    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0024-"));
+    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0025-"));
     for (const migration of await readMigrations()) {
-      if (migration.name < "0024") {
+      if (migration.name < "0025") {
         await writeFile(path.join(before, migration.name), migration.sql);
       }
     }
@@ -1985,9 +1985,9 @@ describe("the agent and connection lifecycle over installed data (0024)", () => 
 
   it("is what is still pending on a database that already holds agents", async () => {
     const upgrade = (await readMigrations()).find((migration) =>
-      migration.name.startsWith("0024_"),
+      migration.name.startsWith("0025_"),
     );
-    if (upgrade === undefined) throw new Error("0024 is missing");
+    if (upgrade === undefined) throw new Error("0025 is missing");
     await writeFile(path.join(before, upgrade.name), upgrade.sql);
 
     const { applied } = await runMigrations(database.url, before);

@@ -142,6 +142,10 @@ const WORK_DISPATCHING = [
 const CONTEXT_REQUIRING = [
   "addConnection",
   "advanceProductionSampling",
+  // Taking a persona out of a project's authoring lists, and putting them
+  // back. Neither removes a row: a run that pinned a version stays
+  // interpretable, and a removal somebody regrets stays undoable.
+  "archivePersona",
   "appendSpans",
   "appendVerdicts",
   "cancelRun",
@@ -170,7 +174,6 @@ const CONTEXT_REQUIRING = [
   "deactivateUser",
   "deleteGrader",
   "deleteMockTool",
-  "deletePersona",
   "deleteTest",
   "editGrader",
   "editMockTool",
@@ -208,6 +211,7 @@ const CONTEXT_REQUIRING = [
   "listMockTools",
   "listPendingInvitations",
   "listPersonas",
+  "listPersonaVersions",
   "listProjects",
   // Everything that has changed about one run since a point, in the order it
   // changed. The read a follower resumes from after a crash, and the reason
@@ -257,6 +261,10 @@ const CONTEXT_REQUIRING = [
   // Names off a reviewed file turned into the identity a version names. It
   // reads personas and nothing else, and only ones the context already reaches.
   "resolvePersonaNames",
+  "restorePersona",
+  // Which active tests currently name a persona — the same question their
+  // Archive asks, so a page and a refusal can never disagree about it.
+  "testsUsingPersona",
   // The dispatch path's door to the deployment's own settings in the clear —
   // the third secret egma holds, and the same door the connection's
   // credentials below come through. It takes the context like everything else
@@ -320,16 +328,20 @@ const VALUES = [
   // The grader factory's one refusal, beside the persona factory's: a delete
   // that would leave a live test checking one thing fewer than it says it does.
   "GraderNamedByTestsError",
-  // The live twin of TestMovedOnError: an edit named the revision it was
-  // written against and the thing has moved. There is no merge that could be
-  // right, so both revisions travel and the caller reads it again.
-  "IdentityConflictError",
   "LastAdminError",
   // A second answer for a tool this project already answers for. Its own class
   // because nothing about the body is wrong and something is already there,
   // which is a different answer in kind.
   "MockToolTakenError",
   "NotPermittedError",
+  // The persona factory's other refusal: archiving the persona a project
+  // points at, without saying who takes the pointer. A project always has a
+  // default persona, and this is what keeps that true.
+  "DefaultPersonaReplacementError",
+  // An identity write that named the revision it was written against, after
+  // somebody else moved the row. `TestMovedOnError` below is the same refusal
+  // one level down, about content rather than identity.
+  "IdentityConflictError",
   "PersonaNamedByTestsError",
   "ProjectOutsideOrganizationError",
   // A run turned away, carrying which rule turned it away: a connection
@@ -346,6 +358,13 @@ const VALUES = [
   // A write refused for what it says, told apart from a fault so that a layer
   // above can relay the factory's sentence instead of answering with a stack.
   "UnprocessableInputError",
+  // A versioned write that named the version it was written against, for every
+  // versioned resource reached by identifier rather than by filename.
+  "VersionConflictError",
+  // The store rolling a write back because another one got in its way. Its own
+  // class because it is the one refusal about nothing the caller did: the
+  // request was valid, nothing was written, and sending it again is the fix.
+  "WriteAbortedError",
   // The store's answer to a batch it will never take, told apart from a store
   // that is merely unreachable — a door has to answer those two differently,
   // and only the module that owns the client can tell them apart.

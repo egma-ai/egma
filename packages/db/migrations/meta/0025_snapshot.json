@@ -1,6 +1,6 @@
 {
-  "id": "5f00167c-b37a-440e-8374-d319ba7f54c6",
-  "prevId": "831abe2d-7970-4ad5-94eb-032b2019c330",
+  "id": "dd2273f5-aaa9-44a5-b272-d9fb2d46ddbe",
+  "prevId": "5f00167c-b37a-440e-8374-d319ba7f54c6",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1744,8 +1744,14 @@
           "primaryKey": false,
           "notNull": false
         },
-        "deleted_at": {
-          "name": "deleted_at",
+        "revision": {
+          "name": "revision",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "archived_at": {
+          "name": "archived_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -1789,7 +1795,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"agent\".\"deleted_at\" is null",
+          "where": "\"agent\".\"archived_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1811,7 +1817,7 @@
             }
           ],
           "isUnique": false,
-          "where": "\"agent\".\"deleted_at\" is null",
+          "where": "\"agent\".\"archived_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1932,6 +1938,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "variant_id": {
+          "name": "variant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "environment": {
           "name": "environment",
           "type": "text",
@@ -1956,14 +1968,45 @@
           "primaryKey": false,
           "notNull": false
         },
-        "capabilities": {
-          "name": "capabilities",
+        "capability_state": {
+          "name": "capability_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'unknown'"
+        },
+        "capabilities_measured": {
+          "name": "capabilities_measured",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },
-        "deleted_at": {
-          "name": "deleted_at",
+        "capabilities_supported": {
+          "name": "capabilities_supported",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "capabilities_checked_at": {
+          "name": "capabilities_checked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "capability_source": {
+          "name": "capability_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "archived_at": {
+          "name": "archived_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -2007,7 +2050,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"connection\".\"deleted_at\" is null",
+          "where": "\"connection\".\"archived_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2023,7 +2066,7 @@
             }
           ],
           "isUnique": false,
-          "where": "\"connection\".\"deleted_at\" is null",
+          "where": "\"connection\".\"archived_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2129,9 +2172,21 @@
           "name": "connection_topology_allowed",
           "value": "\"connection\".\"topology\" in ('agent-dials-out', 'hosted-broker', 'egma-dials-in')"
         },
+        "connection_capability_state_allowed": {
+          "name": "connection_capability_state_allowed",
+          "value": "\"connection\".\"capability_state\" in ('unknown', 'known')"
+        },
         "connection_credentials_hint_agrees": {
           "name": "connection_credentials_hint_agrees",
           "value": "(\"connection\".\"credentials\" is null) = (\"connection\".\"credentials_hint\" is null)"
+        },
+        "connection_capability_evidence_agrees": {
+          "name": "connection_capability_evidence_agrees",
+          "value": "(\"connection\".\"capability_state\" = 'known') = (\"connection\".\"capabilities_measured\" is not null and \"connection\".\"capabilities_supported\" is not null and \"connection\".\"capabilities_checked_at\" is not null and \"connection\".\"capability_source\" is not null)"
+        },
+        "connection_capabilities_supported_were_measured": {
+          "name": "connection_capabilities_supported_were_measured",
+          "value": "\"connection\".\"capabilities_supported\" is null or \"connection\".\"capabilities_supported\" <@ \"connection\".\"capabilities_measured\""
         }
       },
       "isRLSEnabled": false

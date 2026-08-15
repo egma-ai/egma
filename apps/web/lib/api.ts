@@ -117,6 +117,10 @@ export async function readJson<T>(
  * be a page where a stale edit looks like a successful one. The refusal's own
  * sentence is kept and never paraphrased: it names the next move, and the
  * conflict refusals name the revision to retry against.
+ *
+ * A write says where it lands, and the route decides where it reads that from:
+ * a caller that names `project` here gets it in the query, and a caller whose
+ * route reads it from the body puts it there itself.
  */
 export async function writeJson<T>(
   path: string,
