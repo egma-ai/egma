@@ -25,7 +25,7 @@ Here is the development flow:
 10. Once that is done, move on to the next ticket and keep on recording the issues if there are any leftover issues.
 11. Meanwhile, you, as a coordinator, need to see and judge whether some issues, or reviewer flags, are actually worth solving or not, because each run takes time.
 12. We do this work for all the tickets and keep on doing and repeating the loop until one final integration branch is ready to create a PR on main. 
-13. After all tickets have landed, pull the latest from main into the integration branch and run the full suite once. Raise the final PR, review and fix its comments, and rerun the full suite if the commit changes.
+13. After all tickets have landed, pull the latest from main into the integration branch and raise the final PR. Review and fix its comments. Once all the reviews have been adressed, run the full suite once. If the full run catches issues, fix and run again. Continue until all done.
 14. That is when you will actually call your work done.
 
 You MUST keep your context protected. Your sole goal is to land all the tickets to the finish line.
