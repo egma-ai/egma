@@ -43,7 +43,6 @@ function grader(overrides: Record<string, unknown> = {}): Grader {
     projectId: "prj_01JQZ0000000000000000000AA",
     name: "Answers inside two seconds",
     description: null,
-    priority: "P0",
     scope: "simulations",
     productionSampleRate: 100,
     version: 1,
@@ -106,7 +105,7 @@ describe("a grader whose execution falls over", () => {
     );
 
     expect(only).toMatchObject({
-      dimension: "metric_threshold",
+      assertion: "metric_threshold",
       verdict: "errored",
       score: 0,
       citedSpanIds: [],

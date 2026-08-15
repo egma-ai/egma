@@ -69,7 +69,7 @@ export async function execute(
   if (executor === undefined) {
     return [
       {
-        dimension: theOneCheck(type),
+        assertion: theOneCheck(type),
         verdict: "errored",
         score: 0,
         rationale: `egma does not execute ${type} graders yet, so this check was not made.`,

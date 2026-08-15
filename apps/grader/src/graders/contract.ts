@@ -17,28 +17,27 @@ import type { JudgeMakers, JudgeResolution } from "../judge/index.ts";
  */
 
 /**
- * One judged dimension, as the grader that judged it decided — before egma
- * stamps whose it was, how loudly it speaks, and when.
+ * One judged assertion, as the grader that judged it decided — before egma
+ * stamps whose it was and when.
  *
- * The priority is not here on purpose. What the grader decides is whether the
- * check passed; how much that matters is a live setting on the grader, read at
- * judging time and snapshotted onto the row, and an executor that could see it
- * would be an executor that could be tempted to judge differently because of it.
+ * Nothing about how loudly it speaks is here, and there is nothing left to put
+ * here: scoring is binary, so every assertion of every applicable grader has to
+ * pass and no judgment can be worth less than another.
  */
 export type Judgment = {
   /**
-   * What inside the grader was judged. One expected behavior, or the single
-   * check a one-check grader makes.
+   * Which 0-or-1 check inside the grader was judged, as its **key**: one
+   * expected behavior's position, or the single check a one-check grader makes.
    *
    * **It must be stable across the grader's versions**, and that is a hard
-   * constraint rather than a preference: the fold counts one dimension once,
+   * constraint rather than a preference: the fold counts one assertion once,
    * keyed by the conversation, the grader and this name, and prefers the latest
-   * grading of it. A dimension name that changed when the config changed would
-   * make a re-grade at a tightened threshold a *second* dimension, counted
+   * grading of it. An assertion name that changed when the config changed would
+   * make a re-grade at a tightened threshold a *second* assertion, counted
    * beside the first forever, with both of them speaking. So nothing derived
    * from the config may appear here.
    */
-  readonly dimension: string;
+  readonly assertion: string;
   readonly verdict: Verdict;
   /** Between 0 and 1. A one-check grader answers 1 or 0. */
   readonly score: number;
@@ -46,22 +45,6 @@ export type Judgment = {
   readonly rationale: string;
   /** The spans this judgment is about, by their own ids. */
   readonly citedSpanIds: readonly string[];
-  /**
-   * Who decided it, when it was not egma's own engine — `provider/model` for a
-   * judged type, and absent for a deterministic one.
-   *
-   * Absent means `engine`, and the engine fills that in, so a type that needs no
-   * model never has to say so. It is per judgment rather than per grader because
-   * that is the granularity the verdict row has: `judged_by` is part of a row's
-   * identity, which is what lets a person's disagreement sit beside the
-   * machine's word instead of replacing it, and a grader that one day decides
-   * one dimension in-process and asks a model about another must be able to say
-   * so honestly.
-   *
-   * Never a key, and there is nowhere here one could come from: what a grader
-   * module holds is a way to ask and a name to record.
-   */
-  readonly judgedBy?: string | undefined;
 };
 
 /**
@@ -102,9 +85,8 @@ export type Judging = {
 
 /**
  * What a grader is handed, and all it is handed: what it judges by, the
- * conversation, and a way to reach a judge. Not the grader's name, not its
- * priority, not whose it is — an executor that could see any of those could be
- * written to answer with them.
+ * conversation, and a way to reach a judge. Not the grader's name and not whose
+ * it is — an executor that could see either could be written to answer with it.
  *
  * Narrowed by the type, so a `metric_threshold` executor is handed a
  * `MetricThresholdConfig` and cannot be handed anything else. The pair travels
@@ -129,13 +111,13 @@ export type ExecutorFor<Type extends GraderType> = (
 ) => readonly Judgment[] | Promise<readonly Judgment[]>;
 
 /**
- * What a grader that makes exactly one check names its one dimension: its own
+ * What a grader that makes exactly one check names its one assertion: its own
  * type.
  *
  * Stable across every version of the grader, because a grader's type is set at
  * creation and can never be edited — which is precisely the property the fold's
- * dimension key needs, and the reason nothing from the config is allowed near
- * it. A grader that judges several things at once names its dimensions itself
+ * assertion key needs, and the reason nothing from the config is allowed near
+ * it. A grader that judges several things at once names its assertions itself
  * and never comes here.
  */
 export function theOneCheck(type: GraderType): string {

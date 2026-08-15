@@ -388,13 +388,11 @@ export async function traceReadRoutes(
           : null,
       verdicts: (judged?.verdicts ?? []).map((its) => ({
         grader_id: its.graderId,
-        dimension: its.dimension,
+        assertion: its.assertion,
         verdict: its.verdict,
         score: its.score,
-        priority: its.priority,
         rationale: its.rationale,
         cited_turns: [...its.citedSpanIds],
-        judged_by: its.judgedBy,
         judged_at: its.judgedAt,
       })),
       outcome:

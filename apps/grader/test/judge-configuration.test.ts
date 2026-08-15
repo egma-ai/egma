@@ -91,7 +91,6 @@ describe("a project that configured no judge", () => {
       // configured is the exact false trust this product exists to kill.
       expect(row.verdict).toBe("errored");
       expect(row.rationale).toContain("configured no judge");
-      expect(row.judgedBy).toBe("engine");
     }
     expect(judge.asked).toEqual([]);
 
@@ -120,7 +119,6 @@ describe("the project's default judge", () => {
     const judge = scriptedJudge({ answers: {} });
     const asked = resolved.judging(null, judge.makers);
 
-    expect(asked.name).toBe("openai/gpt-4.1-mini");
     expect(judge.configured.at(-1)).toEqual({
       provider: "openai",
       model: "gpt-4.1-mini",
@@ -154,10 +152,8 @@ describe("the project's default judge", () => {
     const judge = scriptedJudge({ answers: {} });
     const overridden = resolved.judging(grader?.judgeModel ?? null, judge.makers);
 
-    // The name a verdict row would carry is the grader's model, not the
-    // project's — which is how "decided by this model" stays readable after the
-    // project's default moves on.
-    expect(overridden.name).toBe("openai/gpt-4.1");
+    // The model that reached the seam is the grader's, not the project's —
+    // which is the whole of what an override does.
     expect(judge.configured.at(-1)).toEqual({
       provider: "openai",
       // The grader's, not the project's.
@@ -168,13 +164,17 @@ describe("the project's default judge", () => {
       key: THE_JUDGE_KEY,
     });
 
-    // A grader with no override of its own judges on the project's judge.
-    expect(resolved.judging(null, judge.makers).name).toBe(
-      "openai/gpt-4.1-mini",
-    );
+    // A grader with no override of its own judges on the project's judge, and
+    // the seam is again where that is observable.
+    resolved.judging(null, judge.makers);
+    expect(judge.configured.at(-1)).toEqual({
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      key: THE_JUDGE_KEY,
+    });
   });
 
-  it("names itself on every row it judged, and never the account behind it", async () => {
+  it("spends the key at the provider seam and nowhere a reader can see", async () => {
     const judge = scriptedJudge({
       answers: { [BEHAVIOR]: met("the new time was read back at turn 5.", [5]) },
     });
@@ -199,11 +199,12 @@ describe("the project's default judge", () => {
 
     expect(verdicts[0]).toMatchObject({
       graderId: "expected_behaviors",
-      dimension: "behavior_1",
-      judgedBy: "openai/gpt-4.1-mini",
+      assertion: "behavior_1",
       verdict: "passed",
-      priority: "P0",
     });
+    // Which judge answered is the resolution's own answer and is deliberately
+    // on no row: `judged_by` retired with the human corrections it existed for.
+    expect(judge.configured.at(-1)?.model).toBe("gpt-4.1-mini");
 
     /**
      * The acceptance box: **the key never appears in any verdict, log, or

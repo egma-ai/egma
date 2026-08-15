@@ -42,13 +42,13 @@ export function executeMetricThreshold(
   execution: ExecutionOf<"metric_threshold">,
 ): readonly Judgment[] {
   const { config } = execution.judgment;
-  const dimension = theOneCheck("metric_threshold");
+  const assertion = theOneCheck("metric_threshold");
   const read = samplesOf(execution.conversation.metrics, config.measure);
 
   if (read.kind === "unreadable") {
     return [
       {
-        dimension,
+        assertion,
         verdict: "errored",
         score: 0,
         rationale: `${config.measure} is recorded in a shape egma never writes, so it could not be read.`,
@@ -60,7 +60,7 @@ export function executeMetricThreshold(
   if (read.kind === "absent") {
     return [
       {
-        dimension,
+        assertion,
         verdict: "skipped",
         score: 0,
         rationale: `this conversation measured no ${config.measure}, so there was nothing to hold to a threshold.`,
@@ -74,7 +74,7 @@ export function executeMetricThreshold(
 
   return [
     {
-      dimension,
+      assertion,
       verdict: passed ? "passed" : "failed",
       score: passed ? 1 : 0,
       rationale: `${config.aggregation} of ${config.measure} was ${round(measured)}, which is ${passed ? "" : "not "}${inWords(config.comparator)} ${config.threshold}.`,

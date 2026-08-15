@@ -72,10 +72,10 @@ describe("a conversation reaching its terminal transition", () => {
     expect(verdicts[0]?.runId).toBe(runId);
   });
 
-  it("lands the whole verdict row — the word, the number, the reason, the priority", async () => {
+  it("lands the whole verdict row — the word, the number, the reason", async () => {
     const graderId = await seedGrader(
       world,
-      aThreshold({ name: "P1 latency", priority: "P1" }),
+      aThreshold({ name: "Latency in a run" }),
     );
     const { simulationId, runId } = await conductSimulation(world, {
       spans: { measured: { turn_response_latency: [900, 9_100] } },
@@ -87,12 +87,10 @@ describe("a conversation reaching its terminal transition", () => {
     expect(mine).toMatchObject({
       traceId: simulationId,
       graderId,
-      dimension: "metric_threshold",
+      assertion: "metric_threshold",
       source: "simulation",
-      judgedBy: "engine",
       verdict: "failed",
       score: 0,
-      priority: "P1",
       runId,
       agentId: world.agentId,
       citedSpanIds: [],

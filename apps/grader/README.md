@@ -5,7 +5,7 @@ A simulation reaching its terminal transition becomes claimable work in the same
 commit that lands it; a production conversation becomes claimable when its
 telemetry says it is over. This service takes the work, reads the conversation,
 resolves the graders that apply to it, executes each one, and writes a verdict
-row per judged dimension.
+row per judged assertion.
 
 It claims its work rather than being sent it, so it has no inbound surface at
 all: no port, no route, nothing to authenticate, nothing to expose. Scaling it
@@ -38,11 +38,10 @@ fan-out, no judge latency on a request path.
 4. **Execute.** One function per grader type, behind one seam. Three of the four
    are deterministic and one asks the project's judge; what each one does is
    the section below.
-5. **Write.** One row per judged dimension: the verdict word, a score, a
-   one-line rationale, the turns it cites, and the priority as it stood at that
-   moment. **No overall row is written anywhere** — a conversation's answer and
-   a run's are folded from these rows at read time, so a headline can never
-   disagree with the evidence under it.
+5. **Write.** One row per judged assertion: the verdict word, a score, a
+   one-line rationale, and the turns it cites. **No overall row is written
+   anywhere** — a conversation's answer and a run's are folded from these rows
+   at read time, so a headline can never disagree with the evidence under it.
 
 Two rules run through all of it. **A simulation that never ran is `errored` for
 every grader and never `failed`** — a broken test is not a broken agent. And **a
@@ -60,14 +59,14 @@ are different facts.
 | `phrase_match` | the transcript, per speaker | no | whether the required phrases were said and the banned ones were not |
 | `llm_rubric` | the declared set a judge reads | yes | what a judge decided about the team's own criteria |
 
-**Each of them names one dimension: its own type.** A `tool_calls` grader
+**Each of them names one assertion: its own type.** A `tool_calls` grader
 holding three rules writes one row, not three, and the rationale names every
 rule that was broken.
 
-That is a deliberate decision with two halves. A dimension name must be stable
+That is a deliberate decision with two halves. An assertion key must be stable
 across a grader's versions and may derive nothing from its config, because the
-fold counts one dimension once per grader and prefers the latest grading of it —
-a per-rule dimension could only be named by the rule's text or by its position,
+fold counts one assertion once per grader and prefers the latest grading of it —
+a per-rule key could only be named by the rule's text or by its position,
 so a grader edited from three rules to two would leave the third rule's row
 behind, speaking forever, with no later grading able to supersede it. And a rule
 shelf is one policy: "these tools must fire and this one must never" is one thing
@@ -102,8 +101,7 @@ thing a test product must never do.
 criteria text, so it asks one question; a grader that wants two things decided
 separately is two graders, which gives two rows a developer can read apart.
 Splitting one rubric's text on whatever punctuation looked like a list would
-invent criteria nobody wrote. Its row carries the judge's `provider/model` in
-`judged_by` rather than `engine`, because a model decided it.
+invent criteria nobody wrote.
 
 ## The measure catalog
 
@@ -128,9 +126,10 @@ made unfalsifiable.
 own verdict row. The alternative — one call that reads the whole list — gives a
 developer one blurred explanation and lets a judge trade a failed behavior off
 against a passed one. Here each row names the behavior's position
-(`behavior_1`, `behavior_2`, …) in the order the author wrote them, and carries
-**the behavior's own priority**, so a nice-to-have cannot block a release and a
-must-have always can.
+(`behavior_1`, `behavior_2`, …) in the order the author wrote them — the
+key, never the sentence. Resolving a key back into the sentence somebody
+wrote is display-time work that is not built yet: what a reader sees today
+is the position, and the pinned test version is where the words still live.
 
 The isolation is structural: a judge is handed one criterion and the
 conversation's evidence, and the evidence has nowhere for a second criterion to
@@ -280,7 +279,6 @@ if (resolved instanceof NoJudge) return errored(resolved.message);
 
 const judge = resolved.judging(execution.judging.model, execution.judging.makers);
 const answer = await judge.ask({ criterion, evidence: judgeInputOf(conversation) });
-// …and `judge.name` goes on the row as its `judged_by`.
 ```
 
 `judge` reads the project's configuration and unseals its key at most once per
@@ -288,14 +286,16 @@ conversation, however many graders ask. `model` is this grader version's own
 `judge_model` — its override, or `null` for the project's default; the built-in
 behaviors grader passes `null`, because it is nobody's to configure.
 
-What `judging(…)` answers with is two things and no more: **`ask`**, a function
-that decides one criterion, and **`name`**, the `provider/model` string a verdict
-row carries as its `judged_by`. The key is not on that pair, and that is the
-point: nothing under `src/graders/` can reach one, so no grader type — today's or
+What `judging(…)` answers with is one thing and no more: **`ask`**, a function
+that decides one criterion. The key is not on it, and that is the point:
+nothing under `src/graders/` can reach one, so no grader type — today's or
 tomorrow's — can put a key in a rationale, a row or a log.
 
-A judgment that names no `judgedBy` is recorded as `engine`, which is what every
-deterministic type answers with by saying nothing.
+**The verdict row does not record which judge answered**, and nothing hands out
+a name for it to record. `judged_by` retired with the human corrections it
+existed for: a person's word returns as the reserved `human` grader type,
+writing its own rows under its own grader id, so the column had nothing left to
+keep apart.
 
 ## Adding a judge provider
 

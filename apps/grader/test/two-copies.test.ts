@@ -105,7 +105,7 @@ describe("two copies running at once", () => {
       const job = await jobFor(world, { simulationId }, "graded", 30_000);
       held.add(job.claimedBy ?? "");
 
-      // One grader, one dimension, one row — and asked of the store directly,
+      // One grader, one assertion, one row — and asked of the store directly,
       // so a second copy having written the same judgment would show up here as
       // two rows rather than being collapsed out of sight by a read.
       expect(await rowsStoredFor(simulationId)).toBe(1);

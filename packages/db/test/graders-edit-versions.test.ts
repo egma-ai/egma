@@ -216,18 +216,16 @@ describe("editing what a grader judges by", () => {
   });
 });
 
-describe("changing where a grader applies and how loudly", () => {
+describe("changing where a grader applies", () => {
   it("creates no version and reads back immediately", async () => {
     const created = await createGrader(actingAsAcme(), latency);
     const before = await rowCounts();
 
     const settled = await editGrader(actingAsAcme(), created.id, {
-      priority: "P2",
       scope: "both",
       productionSampleRate: 5,
     });
 
-    expect(settled?.priority).toBe("P2");
     expect(settled?.scope).toBe("both");
     expect(settled?.productionSampleRate).toBe(5);
     expect(settled?.version).toBe(1);
@@ -235,7 +233,6 @@ describe("changing where a grader applies and how loudly", () => {
     expect(await rowCounts()).toEqual(before);
 
     const fetched = await getGrader(actingAsAcme(), created.id);
-    expect(fetched?.priority).toBe("P2");
     expect(fetched?.scope).toBe("both");
     expect(fetched?.productionSampleRate).toBe(5);
     expect(fetched?.version).toBe(1);
@@ -268,12 +265,12 @@ describe("changing where a grader applies and how loudly", () => {
 
     const edited = await editGrader(actingAsAcme(), created.id, {
       name: "Answers fast",
-      priority: "P1",
+      scope: "both",
       config: { ...latency.config, threshold: 1000 },
     });
 
     expect(edited?.name).toBe("Answers fast");
-    expect(edited?.priority).toBe("P1");
+    expect(edited?.scope).toBe("both");
     expect(edited?.version).toBe(2);
   });
 
@@ -281,8 +278,8 @@ describe("changing where a grader applies and how loudly", () => {
     const created = await createGrader(actingAsAcme(), latency);
 
     await expect(
-      editGrader(actingAsAcme(), created.id, { priority: "P9" as never }),
-    ).rejects.toThrow(/priority/);
+      editGrader(actingAsAcme(), created.id, { scope: "everywhere" as never }),
+    ).rejects.toThrow(/scope/);
     await expect(
       editGrader(actingAsAcme(), created.id, { productionSampleRate: -1 }),
     ).rejects.toThrow(/percentage/);
@@ -291,7 +288,7 @@ describe("changing where a grader applies and how loudly", () => {
     ).rejects.toThrow(/name/);
 
     const fetched = await getGrader(actingAsAcme(), created.id);
-    expect(fetched?.priority).toBe("P0");
+    expect(fetched?.scope).toBe("simulations");
     expect(fetched?.name).toBe(latency.name);
   });
 });
@@ -379,13 +376,13 @@ describe("tenancy", () => {
 
     const stolen = await editGrader(actingAsGlobex("admin"), created.id, {
       name: "Globex's now",
-      priority: "P2",
+      scope: "both",
     });
     expect(stolen).toBeUndefined();
 
     const untouched = await getGrader(actingAsAcme(), created.id);
     expect(untouched?.name).toBe(latency.name);
-    expect(untouched?.priority).toBe("P0");
+    expect(untouched?.scope).toBe("simulations");
 
     expect(
       await getGraderVersion(actingAsGlobex(), created.versionId),

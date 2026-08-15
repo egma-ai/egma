@@ -83,23 +83,10 @@ function describedPersona(named: TestPersona): Record<string, unknown> {
   return { id: named.id, name: named.name };
 }
 
-/**
- * What the wire says about one expected behavior: the statement, and nothing
- * else.
- *
- * The store carries a priority beside each statement — P0 blocks a release, P1
- * warns, P2 informs — and the graders judge by it. This door does not carry one
- * in either direction, and that is a stated position rather than an oversight:
- * a file is a list of statements, every statement a test file can write is a
- * P0, and there is no way through here to say otherwise. So the answer says
- * exactly what a caller could have written, and the day this door can set a
- * priority is the day it answers with one.
- */
-function describedBehaviors(
-  behaviors: readonly { readonly behavior: string }[],
-): readonly string[] {
-  return behaviors.map((one) => one.behavior);
-}
+/** The behaviors a body carries, or the reason it carries none egma can read. */
+type WrittenBehaviors =
+  | { readonly entries: readonly string[] }
+  | { readonly refusal: string };
 
 /** The keys one entry of `mock_tools` holds, and no others. */
 const OVERRIDE_KEYS = ["tool", "answer", "error", "delay_ms"] as const;
@@ -176,7 +163,7 @@ function described(test: Test): Record<string, unknown> {
     version: test.version,
     version_id: test.versionId,
     scenario: test.scenario,
-    expected_behaviors: describedBehaviors(test.expectedBehaviors),
+    expected_behaviors: [...test.expectedBehaviors],
     personas: test.personas.map(describedPersona),
     mock_tools: test.mockOverrides.map(describedMockTool),
     created_at: test.createdAt.toISOString(),
@@ -193,7 +180,7 @@ function describedVersion(version: TestVersion): Record<string, unknown> {
     version: version.version,
     current: version.current,
     scenario: version.scenario,
-    expected_behaviors: describedBehaviors(version.expectedBehaviors),
+    expected_behaviors: [...version.expectedBehaviors],
     personas: version.personas.map(describedPersona),
     mock_tools: version.mockOverrides.map(describedMockTool),
     created_at: version.createdAt.toISOString(),
@@ -239,6 +226,39 @@ function personaEntries(value: unknown): NamedPersonas {
     entries.push(named);
   }
   return { entries };
+}
+
+/**
+ * The behaviors a body carries, as the factory takes them: plain sentences, in
+ * the order they were written.
+ *
+ * It exists to name one refusal rather than to add a rule. `textList` turns
+ * anything that is not text into an empty string, so a body still sending the
+ * retired `{"behavior", "priority"}` shape would otherwise arrive at the factory
+ * as a list of blanks and be refused for saying nothing — which sends a writer
+ * looking at their sentences for a problem that is in their envelope.
+ */
+function behaviorEntries(value: unknown): WrittenBehaviors {
+  if (!Array.isArray(value)) {
+    return {
+      refusal:
+        "expected_behaviors is what should happen, as a list of sentences, " +
+        'like ["confirms the new time back before finishing"].',
+    };
+  }
+
+  for (const entry of value) {
+    if (typeof entry === "object" && entry !== null && "behavior" in entry) {
+      return {
+        refusal:
+          "an expected behavior is a plain sentence now; the " +
+          '{"behavior", "priority"} shape retired with the P0/P1/P2 ladder. ' +
+          "Send each sentence on its own.",
+      };
+    }
+  }
+
+  return { entries: textList(value) };
 }
 
 export async function testRoutes(
@@ -337,6 +357,9 @@ export async function testRoutes(
       "mock_tools" in body ? overrideEntries(body.mock_tools) : { entries: [] };
     if ("refusal" in overrides) return unprocessable(reply, overrides.refusal);
 
+    const behaviors = behaviorEntries(body.expected_behaviors);
+    if ("refusal" in behaviors) return unprocessable(reply, behaviors.refusal);
+
     const acting = await actingIn(auth, given(text(body.project)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
@@ -345,7 +368,7 @@ export async function testRoutes(
     const created = await createTest(acting.auth, {
       name: text(body.name),
       scenario: text(body.scenario),
-      expectedBehaviors: textList(body.expected_behaviors),
+      expectedBehaviors: behaviors.entries,
       personaIds,
       mockOverrides: overrides.entries,
     });
@@ -406,6 +429,14 @@ export async function testRoutes(
       return unprocessable(reply, overrides.refusal);
     }
 
+    const behaviors =
+      "expected_behaviors" in body
+        ? behaviorEntries(body.expected_behaviors)
+        : undefined;
+    if (behaviors !== undefined && "refusal" in behaviors) {
+      return unprocessable(reply, behaviors.refusal);
+    }
+
     const acting = await actingIn(auth, given(text(body.project)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
@@ -418,9 +449,9 @@ export async function testRoutes(
       expectedVersionId,
       ...("name" in body ? { name: text(body.name) } : {}),
       ...("scenario" in body ? { scenario: text(body.scenario) } : {}),
-      ...("expected_behaviors" in body
-        ? { expectedBehaviors: textList(body.expected_behaviors) }
-        : {}),
+      ...(behaviors === undefined
+        ? {}
+        : { expectedBehaviors: behaviors.entries }),
       ...(personaIds === undefined ? {} : { personaIds }),
       ...(overrides === undefined ? {} : { mockOverrides: overrides.entries }),
     });

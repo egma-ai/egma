@@ -9,7 +9,6 @@ import {
   type GradingClaim,
   type GradingSource,
   type NewVerdict,
-  type Priority,
   type Simulation,
   type TimeWindow,
   type TraceDetail,
@@ -184,7 +183,6 @@ export async function gradeClaim(
               // decided by is frozen behind this id, and a re-grade at the next
               // version writes beside rather than over.
               graderVersionId: grader.versionId,
-              priority: grader.priority,
             },
             conversation,
             judgment,
@@ -225,13 +223,9 @@ export async function gradeClaim(
               // list changing is exactly when a verdict written under it stops
               // meaning what it meant.
               graderVersionId: builtIn.versionId,
-              judgedBy: builtIn.judgedBy,
-              // Each behavior's own, not one grader's: a nice-to-have behavior
-              // cannot block a release and a must-have one always can.
-              priority: judged.priority,
             },
             conversation,
-            judged.judgment,
+            judged,
           ),
         );
 
@@ -412,11 +406,11 @@ async function theProductionTrace(claim: GradingClaim): Promise<Resolved> {
  *
  * It answers with one row per grader, named by the grader's own one check —
  * which is the honest shape while every *authored* type executed makes one. The
- * question this used to ask, of the first type to name several dimensions, is
+ * question this used to ask, of the first type to name several assertions, is
  * answered: the built-in expected-behaviors grader names one per behavior and
  * writes one `errored` row per behavior when the conversation never happened, so
  * a page shows the same list whether it happened or not. An authored type that
- * grows several dimensions follows it, in its own module, on the same terms.
+ * grows several assertions follows it, in its own module, on the same terms.
  */
 export async function judgmentsOf(
   grader: Grader,
@@ -451,7 +445,7 @@ export async function judgmentsOf(
 /** egma could not judge this. Never `failed`: nothing is being said about the agent. */
 function couldNotJudge(grader: Grader, rationale: string): Judgment {
   return {
-    dimension: theOneCheck(grader.type),
+    assertion: theOneCheck(grader.type),
     verdict: "errored",
     score: 0,
     rationale,
@@ -460,29 +454,23 @@ function couldNotJudge(grader: Grader, rationale: string): Judgment {
 }
 
 /**
- * Whose judgment this is, and how loudly it speaks — everything a verdict row
- * needs that the judgment itself deliberately does not carry.
+ * Whose judgment this is — everything a verdict row needs that the judgment
+ * itself deliberately does not carry.
  *
- * The priority is **snapshotted, never referenced**: it is a live setting, read
- * at the moment of judging and written onto the row, so promoting a check to P0
- * tomorrow cannot reinterpret what today's warning meant.
+ * Two fields and no third. How loudly a judgment speaks is not one of them any
+ * more: scoring is binary, so every assertion of every applicable grader has to
+ * pass. Who judged is not one either — `judged_by` retired with the human
+ * corrections it existed for, and a human word returns as a grader of its own,
+ * which is a `graderId` like any other.
  */
-type JudgedBy = {
+type JudgedFor = {
   readonly graderId: string;
   readonly graderVersionId: string;
-  /**
-   * Who judged, when the judgment did not say. The built-in names its own —
-   * one judge for the whole list — and an authored grader's is per judgment,
-   * because a judged type records the model that answered and a deterministic
-   * one records nothing at all.
-   */
-  readonly judgedBy?: string | undefined;
-  readonly priority: Priority;
 };
 
 /** One judgment, as the row that records it. */
 function verdictRow(
-  by: JudgedBy,
+  by: JudgedFor,
   conversation: Conversation,
   judgment: Judgment,
 ): NewVerdict {
@@ -490,17 +478,12 @@ function verdictRow(
     traceId: conversation.traceId,
     graderId: by.graderId,
     graderVersionId: by.graderVersionId,
-    dimension: judgment.dimension,
+    assertion: judgment.assertion,
     source: conversation.source,
-    // The judge that answered, or `engine` when no model was asked anything —
-    // and `human` on the day a person disagrees, which is a row of their own
-    // rather than an edit to this one.
-    judgedBy: judgment.judgedBy ?? by.judgedBy ?? "engine",
     verdict: judgment.verdict,
     score: judgment.score,
     rationale: judgment.rationale,
     citedSpanIds: judgment.citedSpanIds,
-    priority: by.priority,
     runId: conversation.runId,
     agentId: conversation.agentId,
     // Empty, and honestly so: egma does not version agents yet, and a made-up

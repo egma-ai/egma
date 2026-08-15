@@ -25,7 +25,7 @@ import { asJudgeReads } from "./input.ts";
 const OPENAI_CHAT_COMPLETIONS = "https://api.openai.com/v1/chat/completions";
 
 /**
- * How many times a call is made before the dimension is `errored`.
+ * How many times a call is made before the assertion is `errored`.
  *
  * Three, for the reason the grading job's own attempt count is three: the
  * failures worth retrying are the transient ones — a rate limit, a gateway that
@@ -138,7 +138,7 @@ export class JudgeRefused extends Error {
 /**
  * Which refusals are worth a second ask. A rate limit and a gateway error pass;
  * a rejected key and a model name that does not exist do not — asking again
- * would spend the same seconds to be told the same thing, and the dimension is
+ * would spend the same seconds to be told the same thing, and the assertion is
  * `errored` either way with the provider's own words on it.
  */
 function retryable(status: number): boolean {

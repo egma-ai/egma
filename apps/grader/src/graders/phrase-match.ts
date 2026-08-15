@@ -28,14 +28,14 @@ import { heldRationale } from "./rule-shelf.ts";
  * agent under test and its own word for the other side, and a speaker this
  * grader is not scoped to is simply not searched.
  *
- * ## One grader, one dimension
+ * ## One grader, one assertion
  *
- * A `phrase_match` grader names one dimension — its own type — however many
+ * A `phrase_match` grader names one assertion — its own type — however many
  * phrases it holds, and the rationale names every phrase that broke the rule,
  * with the turns it was found in cited. Here the rule that could not be a
- * dimension is a phrase's own text, which an edit changes, or its position in
+ * assertion is a phrase's own text, which an edit changes, or its position in
  * the list, which a reorder changes; `rule-shelf.ts` carries why that rules out
- * a per-rule dimension for either shelf, and why one shelf is one policy rather
+ * a per-rule assertion for either shelf, and why one shelf is one policy rather
  * than a proportion of one.
  *
  * ## A pattern that will not compile, and one that will not finish
@@ -58,7 +58,7 @@ export async function executePhraseMatch(
   execution: ExecutionOf<"phrase_match">,
 ): Promise<readonly Judgment[]> {
   const { config } = execution.judgment;
-  const dimension = theOneCheck("phrase_match");
+  const assertion = theOneCheck("phrase_match");
   // The transcript as the judge reads it, so this grader and a judge looking at
   // one conversation see one list of turns, numbered identically. A citation
   // here and a citation on a rubric's verdict then point at the same turn.
@@ -75,7 +75,7 @@ export async function executePhraseMatch(
   if (uncompilable !== undefined) {
     return [
       {
-        dimension,
+        assertion,
         verdict: "errored",
         score: 0,
         rationale: `"${uncompilable.text}" is not a regular expression egma can compile, so this check was not made.`,
@@ -89,7 +89,7 @@ export async function executePhraseMatch(
   if (matched === undefined) {
     return [
       {
-        dimension,
+        assertion,
         verdict: "errored",
         score: 0,
         rationale: `a pattern on this grader took longer than ${PATTERN_DEADLINE_MILLISECONDS}ms against this transcript, so this check was not made.`,
@@ -131,7 +131,7 @@ export async function executePhraseMatch(
 
   return [
     {
-      dimension,
+      assertion,
       verdict: passed ? "passed" : "failed",
       score: passed ? 1 : 0,
       rationale: passed

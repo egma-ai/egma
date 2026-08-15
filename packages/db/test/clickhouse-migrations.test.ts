@@ -24,12 +24,22 @@ const PARTITION_KEY = "toYYYYMM(started_at)";
 /**
  * The verdicts table's identity, which is what a `ReplacingMergeTree` collapses
  * on: the customer, the conversation, the grader, the version of it, the
- * dimension, where the conversation came from, and who judged. Every part after
- * the third is there so that a re-grade adds a row rather than losing one.
+ * assertion, and where the conversation came from. Every part after the third is
+ * there so that a re-grade adds a row rather than losing one.
+ *
+ * **It ends at `source`.** There is no `judged_by`: a human judgment returns as
+ * a grader of its own — the reserved `human` type — and a grader of its own is
+ * already in the key.
  */
 const VERDICT_IDENTITY =
   "organization_id, project_id, trace_id, grader_id, grader_version_id, " +
-  "dimension, source, judged_by";
+  "assertion, source";
+
+/**
+ * The one migration allowed to drop a table: the verdict store's rebuild, taken
+ * pre-launch because the sorting key changed and no `ALTER` reaches one.
+ */
+const THE_ONE_FILE_THAT_DROPS_A_TABLE = "0003_verdicts_speak_the_redesign.sql";
 
 type Table = {
   readonly name: string;
@@ -103,6 +113,13 @@ describe("the trace store's migration files", () => {
    * the same rows again, and two instances racing would both move them — so a
    * migration file may create shape and never touch data. Moving rows belongs
    * to ingest, or to a tool a person runs once on purpose.
+   *
+   * **One file may drop a table, and it is named here.** A ClickHouse sorting
+   * key is fixed at creation, so the verdict store's new identity had no
+   * `ALTER` that could reach it and the table was rebuilt instead. What that
+   * costs is the rows, which was affordable exactly once, pre-launch — so the
+   * exception is a filename rather than a rule, and the next file that drops a
+   * table fails here and has to argue for itself.
    */
   it("move no rows, ever", async () => {
     for (const migration of await readMigrations(
@@ -111,6 +128,9 @@ describe("the trace store's migration files", () => {
       for (const statement of statementsOf(migration.sql)) {
         expect(statement).not.toMatch(/^INSERT\b/i);
         expect(statement).not.toMatch(/^ALTER TABLE .*\b(?:UPDATE|DELETE)\b/i);
+        if (migration.name !== THE_ONE_FILE_THAT_DROPS_A_TABLE) {
+          expect(statement, migration.name).not.toMatch(/^DROP TABLE\b/i);
+        }
       }
     }
   });
@@ -369,6 +389,12 @@ describe("the schema a boot leaves behind", () => {
 
     expect(verdicts?.engine).toBe("ReplacingMergeTree");
     expect(verdicts?.sorting_key).toBe(VERDICT_IDENTITY);
+    // The retired columns are gone from the row as well as from the key: one
+    // word at every layer, and no ladder left for a failure to hide behind.
+    const typeOf = await typesOf("verdicts");
+    for (const name of ["dimension", "priority", "judged_by"]) {
+      expect(typeOf(name)).toBeUndefined();
+    }
 
     // The later judgment wins, which is what makes a re-run after a transient
     // error a correction rather than a second opinion.
@@ -409,7 +435,6 @@ describe("the schema a boot leaves behind", () => {
     expect(typeOf("verdict")).toBe(
       "Enum8('passed' = 1, 'failed' = 2, 'skipped' = 3, 'errored' = 4)",
     );
-    expect(typeOf("priority")).toBe("Enum8('P0' = 0, 'P1' = 1, 'P2' = 2)");
 
     // Tenancy takes the shape it has on `spans`, and so does `source`: the two
     // tables are read together and a word that meant two things would make that
@@ -417,12 +442,11 @@ describe("the schema a boot leaves behind", () => {
     expect(typeOf("organization_id")).toBe("LowCardinality(String)");
     expect(typeOf("project_id")).toBe("LowCardinality(String)");
     expect(typeOf("source")).toBe("LowCardinality(String)");
-    expect(typeOf("judged_by")).toBe("LowCardinality(String)");
 
     expect(typeOf("trace_id")).toBe("String");
     expect(typeOf("grader_id")).toBe("String");
     expect(typeOf("grader_version_id")).toBe("String");
-    expect(typeOf("dimension")).toBe("String");
+    expect(typeOf("assertion")).toBe("String");
     expect(typeOf("score")).toBe("Float64");
     expect(typeOf("rationale")).toBe("String");
     expect(typeOf("cited_span_ids")).toBe("Array(String)");
@@ -443,11 +467,9 @@ describe("the schema a boot leaves behind", () => {
       trace_id: "cccccccccccccccccccccccccccccccc",
       grader_id: "grd_01JQZ0000000000000000000AA",
       grader_version_id: "grv_01JQZ00000000000000000000AA",
-      dimension: "confirms the appointment time",
+      assertion: "behavior_1",
       source: "simulation",
-      judged_by: "engine",
       verdict: "passed",
-      priority: "P0",
       event_ts: "2026-08-07 09:00:00.000000",
     };
 
@@ -470,12 +492,10 @@ describe("the schema a boot leaves behind", () => {
           trace_id: "dddddddddddddddddddddddddddddddd",
           grader_id: "grd_01JQZ0000000000000000000AA",
           grader_version_id: "grv_01JQZ00000000000000000000AA",
-          dimension: "confirms the appointment time",
+          assertion: "behavior_1",
           source: "simulation",
-          judged_by: "engine",
           verdict: "inconclusive",
           score: 0.5,
-          priority: "P0",
           event_ts: "2026-08-07 09:00:00.000000",
         },
       ]),

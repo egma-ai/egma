@@ -759,9 +759,9 @@ describe("the shipped simulator against the real API", () => {
         spans.filter((span) => span.name.endsWith("_turn"))[2]?.text,
       ).toContain(THE_PHRASE);
 
-      // The dimension is the behavior's position in the test, which is how a
+      // The assertion is the behavior's position in the test, which is how a
       // page lines a run's checks up whatever each one says.
-      expect(behavior).toMatchObject({ verdict: "passed", dimension: "behavior_1" });
+      expect(behavior).toMatchObject({ verdict: "passed", assertion: "behavior_1" });
       // The judge was shown the conversation egma assembled, not a report:
       // four turns, the ending the row records, and no tool call, because the
       // counterpart made none.

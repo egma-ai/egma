@@ -345,7 +345,7 @@ function TranscriptView({
               .filter((judgment) => turnsCited(judgment).includes(position + 1))
               .map((judgment) => (
                 <JudgmentCard
-                  key={`${judgment.grader_id}:${judgment.dimension}:${judgment.judged_at}`}
+                  key={`${judgment.grader_id}:${judgment.assertion}:${judgment.judged_at}`}
                   judgment={judgment}
                 />
               ))}

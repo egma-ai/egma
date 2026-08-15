@@ -9,14 +9,14 @@
  * half of it — which tools, which phrases — rather than the whole reasoning
  * twice, where two copies could come to disagree.
  *
- * ## One grader, one dimension
+ * ## One grader, one assertion
  *
- * A shelf names one dimension — its own type — however many rules it holds, and
+ * A shelf names one assertion — its own type — however many rules it holds, and
  * the rationale names every rule that was broken.
  *
- * **Because a dimension name may derive nothing from the config.** The fold
- * counts one dimension once, keyed by the conversation, the grader and the name,
- * and prefers the latest grading of it. A per-rule dimension could only be named
+ * **Because an assertion name may derive nothing from the config.** The fold
+ * counts one assertion once, keyed by the conversation, the grader and the name,
+ * and prefers the latest grading of it. A per-rule assertion could only be named
  * out of the config — by the rule's own words, which an edit changes, or by its
  * position, which a reorder changes — so a grader edited from three rules to two
  * would leave the third rule's row behind, speaking forever about a rule nobody

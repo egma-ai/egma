@@ -105,7 +105,6 @@ describe("the process the image runs", () => {
       traceId: simulationId,
       runId,
       source: "simulation",
-      judgedBy: "engine",
       verdict: "passed",
     });
   });

@@ -64,11 +64,10 @@ async function aMoment(): Promise<void> {
 
 beforeAll(async () => {
   world = await makeWorld("grader_regrade");
-  // P1 and two seconds, so that tightening it later changes both what the
-  // grader says and how loudly it says it.
+  // Two seconds, so that tightening it later changes what the grader says.
   graderId = await seedGrader(
     world,
-    aThreshold({ name: "Answers inside two seconds", priority: "P1" }),
+    aThreshold({ name: "Answers inside two seconds" }),
   );
   service = runService(testConfig());
 });
@@ -91,12 +90,11 @@ describe("editing a grader", () => {
 
     before = await verdictsOn(world, judged.simulationId, 1);
     alsoBefore = await verdictsOn(world, alsoJudged.simulationId, 1);
-    expect(before[0]).toMatchObject({ verdict: "passed", priority: "P1" });
+    expect(before[0]).toMatchObject({ verdict: "passed" });
 
-    // The edit: a tighter threshold, and the warning promoted to a blocker.
-    // Both of them are what somebody does after deciding the grader was wrong.
+    // The edit: a tighter threshold, which is what somebody does after deciding
+    // the grader was wrong.
     const edited = await editGrader(world.auth, graderId, {
-      priority: "P0",
       config: {
         measure: "turn_response_latency",
         aggregation: "p90",
@@ -105,13 +103,12 @@ describe("editing a grader", () => {
       },
     });
     expect(edited?.version).toBe(2);
-    expect(edited?.priority).toBe("P0");
 
     await aMoment();
 
     // Row for row, byte for byte: the version that decided them, the word, the
-    // priority they were made under, the moment they were stamped at. A
-    // tightened grader reaches yesterday through one call and this is not it.
+    // moment they were stamped at. A tightened grader reaches yesterday through
+    // one call and this is not it.
     expect((await readVerdicts(world.auth, judged.simulationId)).verdicts).toEqual(
       before,
     );
@@ -151,10 +148,9 @@ describe("editing a grader", () => {
       // And the new one beside it, at the version that decided it.
       expect(newer).toMatchObject({
         graderId,
-        dimension: "metric_threshold",
+        assertion: "metric_threshold",
         verdict: "failed",
         source: "simulation",
-        judgedBy: "engine",
       });
       expect(newer?.graderVersionId).not.toBe(first?.graderVersionId);
     });
@@ -172,24 +168,6 @@ describe("editing a grader", () => {
       expect(read.outcome.verdict).toBe("failed");
       expect(read.outcome.counts).toMatchObject({ passed: 0, failed: 1, total: 1 });
       expect(read.verdicts).toHaveLength(2);
-    });
-
-    it("snapshots today's priority on the new rows and leaves yesterday's alone", async () => {
-      const rows = await readVerdicts(world.auth, judged.simulationId);
-      const first = before[0];
-
-      const older = rows.verdicts.find(
-        (row) => row.graderVersionId === first?.graderVersionId,
-      );
-      const newer = rows.verdicts.find(
-        (row) => row.graderVersionId !== first?.graderVersionId,
-      );
-
-      // The priority is a live setting, snapshotted at the moment of judging.
-      // Yesterday's row was made when this check was a warning and still says
-      // so; today's was made after it became a blocker.
-      expect(older?.priority).toBe("P1");
-      expect(newer?.priority).toBe("P0");
     });
 
     it("reopened the conversation's one job rather than filing a second", async () => {
@@ -292,7 +270,6 @@ describe("a re-grade that names one grader", () => {
       world,
       aThreshold({
         name: "Answers inside five seconds",
-        priority: "P2",
         config: {
           measure: "turn_response_latency",
           aggregation: "p90",
@@ -316,10 +293,8 @@ describe("a re-grade that names one grader", () => {
     // what makes it a row this re-grade could have rewritten and did not.
     expect(rowsFrom(before, "expected_behaviors")).toHaveLength(1);
 
-    // The fix somebody made, on one grader: a tighter threshold, and the
-    // informational check promoted to a blocker.
+    // The fix somebody made, on one grader: a tighter threshold.
     const edited = await editGrader(world.auth, alsoJudging, {
-      priority: "P0",
       config: {
         measure: "turn_response_latency",
         aggregation: "p90",
@@ -353,7 +328,7 @@ describe("a re-grade that names one grader", () => {
       rowsFrom(after, alsoJudging).find(
         (row) => row.graderVersionId === tightened,
       ),
-    ).toMatchObject({ verdict: "failed", dimension: "metric_threshold" });
+    ).toMatchObject({ verdict: "failed", assertion: "metric_threshold" });
 
     // And nothing else was asked anything. Row for row, byte for byte — the
     // moment each was stamped at included, which is what tells "not judged
@@ -362,19 +337,6 @@ describe("a re-grade that names one grader", () => {
     expect(rowsFrom(after, "expected_behaviors")).toEqual(
       rowsFrom(before, "expected_behaviors"),
     );
-  });
-
-  it("snapshots today's priority on the row it wrote and leaves yesterday's alone", async () => {
-    const rows = rowsFrom(await judgedAndSettled(), alsoJudging);
-
-    const older = rows.find((row) => row.graderVersionId !== tightened);
-    const newer = rows.find((row) => row.graderVersionId === tightened);
-
-    // A narrowed re-grade is a judgment made today, exactly as a whole one is,
-    // so it snapshots the priority the grader carries today. Yesterday's row
-    // was made when this check only informed and still says so.
-    expect(older?.priority).toBe("P2");
-    expect(newer?.priority).toBe("P0");
   });
 
   it("rewrites that grader's own row when nothing about the grader changed", async () => {
@@ -404,7 +366,7 @@ describe("a re-grade that names one grader", () => {
     );
 
     // Still two rows for this grader, not three: the same grader at the same
-    // version saying something about the same dimension again replaces itself,
+    // version saying something about the same assertion again replaces itself,
     // which is why re-judging one grader and re-judging the conversation
     // accumulate identically and the narrowing is only ever about spend.
     expect(rowsFrom(after, alsoJudging)).toHaveLength(2);
