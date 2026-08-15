@@ -148,8 +148,8 @@ describe("the platform's default judge", () => {
     // of one: a project made later gets a judge at the next start.
     const later = newId("prj");
     await database.sql(
-      "insert into project (id, organization_id, name, slug) values ($1, $2, $3, $3)",
-      [later, acme.organization, "made-later"],
+      "insert into project (id, organization_id, name, slug, revision) values ($1, $2, $3, $3, $4)",
+      [later, acme.organization, "made-later", newId("rev")],
     );
 
     const given = await seedDefaultJudge({

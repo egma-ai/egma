@@ -18,7 +18,9 @@ import { invitationRoutes } from "./routes/invitations.ts";
 import { judgeRoutes } from "./routes/judge.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
+import { organizationRoutes } from "./routes/organization.ts";
 import { personaRoutes } from "./routes/personas.ts";
+import { projectRoutes } from "./routes/projects.ts";
 import { mockToolRoutes } from "./routes/mock-tools.ts";
 import { passwordResetRoutes } from "./routes/password-reset.ts";
 import { platformRoutes } from "./routes/platform.ts";
@@ -245,6 +247,26 @@ export function buildApi(options: ServerOptions): Api {
     rateLimit,
     emailSender,
     baseUrl: config.baseUrl,
+  });
+
+  // The customer itself, and the product areas inside it. Two groups rather
+  // than one because they answer different questions — which organization am I
+  // in, and which projects does it hold — and because a project is addressed in
+  // the path here while every product resource names one beside itself.
+  void app.register(organizationRoutes, {
+    provider: identity.provider,
+    rateLimit,
+  });
+
+  void app.register(projectRoutes, {
+    provider: identity.provider,
+    rateLimit,
+    // A project made from Settings is born on the same terms as the one signup
+    // makes: with this deployment's judge where there is one, and in the
+    // explicit `needs_setup` state where there is not.
+    ...(config.defaultJudge === undefined
+      ? {}
+      : { defaultJudge: config.defaultJudge }),
   });
 
   // What this deployment has been configured with, as an owner reads and

@@ -120,9 +120,13 @@ describe("judge keys moving to the organization (0026)", () => {
       );
     }
 
-    // Then the upgrade.
+    // Then the upgrade: 0026 and everything shipped after it, because this
+    // database was left standing at the release before 0026 and the upgrade a
+    // self-hoster runs is the whole of what is pending, not one file of it.
     const upgraded = await runMigrations(database.url);
-    expect(upgraded.applied).toEqual([migrations[subject]?.name]);
+    expect(upgraded.applied).toEqual(
+      migrations.slice(subject).map((migration) => migration.name),
+    );
 
     const { rows: credentials } = await client.sql<{
       id: string;

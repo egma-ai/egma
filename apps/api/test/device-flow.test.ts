@@ -304,8 +304,9 @@ describe("approving", () => {
       `with o as (
          insert into organization (id, name, slug)
          values ('org_00000000000000000000000001', 'Globex', 'globex') returning id)
-       insert into project (id, organization_id, name, slug)
-       select 'prj_00000000000000000000000001', o.id, 'Theirs', 'theirs' from o
+       insert into project (id, organization_id, name, slug, revision)
+       select 'prj_00000000000000000000000001', o.id, 'Theirs', 'theirs',
+              'rev_00000000000000000000000001' from o
        returning id`,
     );
 

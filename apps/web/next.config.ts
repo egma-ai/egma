@@ -59,6 +59,33 @@ const config: NextConfig = {
           source: "/api/agents/:path*",
           destination: `${api}/api/agents/:path*`,
         },
+        // What a connection can be, and what one turned out to be able to do.
+        // Both are read by the connection forms rather than posted to.
+        {
+          source: "/api/connection-types",
+          destination: `${api}/api/connection-types`,
+        },
+        {
+          source: "/api/capabilities",
+          destination: `${api}/api/capabilities`,
+        },
+        { source: "/api/personas", destination: `${api}/api/personas` },
+        {
+          source: "/api/personas/:path*",
+          destination: `${api}/api/personas/:path*`,
+        },
+        // The shape of the persona editor, which the server owns so a field can
+        // be added without shipping the browser again.
+        { source: "/api/persona-form", destination: `${api}/api/persona-form` },
+        { source: "/api/graders", destination: `${api}/api/graders` },
+        {
+          source: "/api/graders/:path*",
+          destination: `${api}/api/graders/:path*`,
+        },
+        {
+          source: "/api/grader-registry",
+          destination: `${api}/api/grader-registry`,
+        },
         { source: "/api/keys", destination: `${api}/api/keys` },
         { source: "/api/keys/:path*", destination: `${api}/api/keys/:path*` },
         { source: "/api/members", destination: `${api}/api/members` },
@@ -82,6 +109,27 @@ const config: NextConfig = {
         {
           source: "/api/password-reset/:path*",
           destination: `${api}/api/password-reset/:path*`,
+        },
+        // The Settings surface: the customer itself, and the product areas
+        // inside it. Without these the pages would post at Next, which has no
+        // such route, and read its 404 page as egma's refusal.
+        { source: "/api/organization", destination: `${api}/api/organization` },
+        { source: "/api/projects", destination: `${api}/api/projects` },
+        {
+          source: "/api/projects/:path*",
+          destination: `${api}/api/projects/:path*`,
+        },
+        // Which model judges a project, and the organization keys behind it.
+        // Both halves are reached from Settings, and neither is served here.
+        { source: "/api/judge", destination: `${api}/api/judge` },
+        { source: "/api/judge/:path*", destination: `${api}/api/judge/:path*` },
+        {
+          source: "/api/judge-credentials",
+          destination: `${api}/api/judge-credentials`,
+        },
+        {
+          source: "/api/judge-credentials/:path*",
+          destination: `${api}/api/judge-credentials/:path*`,
         },
         { source: "/api/tests", destination: `${api}/api/tests` },
         { source: "/api/tests/:path*", destination: `${api}/api/tests/:path*` },
