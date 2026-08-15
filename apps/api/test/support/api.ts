@@ -3,6 +3,7 @@ import {
   connectClickHouse,
   disconnect,
   disconnectClickHouse,
+  seedGraderLibrary,
   seedPlatformSettings,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
@@ -162,6 +163,13 @@ export async function createApi(
   if (options.platformSettings !== undefined) {
     await seedPlatformSettings(options.platformSettings);
   }
+
+  // egma's own graders, unconditionally — no option and no default, because
+  // there is none in a real deployment either: the library is written from
+  // egma's catalog on every boot, before the first request, with nothing for an
+  // operator to configure. A test instance whose shelf were empty would be a
+  // shape no egma is ever in.
+  await seedGraderLibrary();
 
   const { app, identity } = buildApi({
     config,
