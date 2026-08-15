@@ -128,6 +128,31 @@ describe("somebody with no account", () => {
     );
     expect(rows[0]?.count).toBe("0");
   });
+
+  /**
+   * And an address that is not one is refused **in words about the address**.
+   *
+   * The auth provider's own sentence for this is `[body.email] Invalid email
+   * address`, which names a field in its body schema — code rather than the
+   * situation a person is in, and exactly what ADR-0007 says a refusal must not
+   * be generated from. None of it reaches a caller: the sentence is egma's, and
+   * it says what to look at.
+   */
+  it("is refused for an address that is not one, in egma's own words", async () => {
+    api = await createApi("signup_bad_address");
+
+    const response = await signUp({
+      email: "not-an-email",
+      password: "a-long-enough-password",
+      organizationName: "Acme",
+    });
+
+    expect(response.statusCode).toBe(400);
+    const said = response.json() as { error: string; message: string };
+    expect(said.error).toBe("signup_failed");
+    expect(said.message).not.toContain("body.email");
+    expect(said.message).toMatch(/email address/i);
+  });
 });
 
 describe("the organization and its first project", () => {
