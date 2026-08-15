@@ -16,6 +16,10 @@ import {
   createMigratedTraceStore,
   type MigratedTraceStore,
 } from "./support/clickhouse.ts";
+import {
+  createConnectedDatabase,
+  type MigratedDatabase,
+} from "./support/database.ts";
 
 /**
  * The one way anything writes a verdict, and the one way anything reads one.
@@ -27,9 +31,17 @@ import {
  * assertion stands on its own. A substitute would confirm the strings egma sends
  * and nothing about what they do — and what they do is the entire point of the
  * table's identity.
+ *
+ * **Postgres is here too, and only for one question.** A read folds the required
+ * copies apart from the diagnostic ones, and which is which is a live setting on
+ * the copy — so the read asks the control plane at the moment of asking rather
+ * than trusting a flag frozen into a row months ago. Every grader id below that
+ * names no copy is therefore one this cannot resolve, and it counts as required,
+ * which is the safe direction and what these cases assert without saying so.
  */
 
 let store: MigratedTraceStore;
+let database: MigratedDatabase;
 
 const acme = {
   organizationId: newId("org"),
@@ -89,11 +101,13 @@ function verdict(overrides: Partial<NewVerdict> = {}): NewVerdict {
 beforeAll(async () => {
   store = await createMigratedTraceStore("verdicts");
   connectClickHouse({ clickhouseUrl: store.url, maxOpenConnections: 4 });
+  database = await createConnectedDatabase("verdicts");
 });
 
 afterAll(async () => {
   await disconnectClickHouse();
   await store.drop();
+  await database.drop();
 });
 
 describe("a judgment written and read back", () => {
@@ -143,8 +157,10 @@ describe("a judgment written and read back", () => {
       score: 1,
       counts: { passed: 1, failed: 0, skipped: 0, errored: 0, total: 1 },
     });
+    // `required: true` because nothing here is a running copy this read can
+    // resolve, and a grader it cannot resolve decides — the safe direction.
     expect(read.byGrader).toEqual([
-      { graderId: GRADER, outcome: read.outcome },
+      { graderId: GRADER, required: true, outcome: read.outcome },
     ]);
   });
 
@@ -508,6 +524,7 @@ describe("a whole simulation's worth of judgments", () => {
       [
         {
           graderId: behaviors,
+          required: true,
           outcome: {
             verdict: "failed",
             score: 2 / 3,
@@ -516,6 +533,7 @@ describe("a whole simulation's worth of judgments", () => {
         },
         {
           graderId: latency,
+          required: true,
           outcome: {
             verdict: "passed",
             score: 1,
@@ -731,6 +749,7 @@ describe("a whole run's worth of judgments", () => {
       [
         {
           graderId: behaviors,
+          required: true,
           outcome: {
             verdict: "errored",
             score: 2 / 3,
@@ -739,6 +758,7 @@ describe("a whole run's worth of judgments", () => {
         },
         {
           graderId: latency,
+          required: true,
           outcome: {
             verdict: "passed",
             score: 1,

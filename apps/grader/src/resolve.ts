@@ -1,37 +1,34 @@
 import {
   advanceProductionSampling,
-  getGrader,
-  getSimulationTestVersion,
   listGraders,
   type AuthContext,
   type Grader,
-  type Simulation,
 } from "@egma/db";
 
 /**
  * Which graders judge this simulation.
  *
- * Two sources add up, and the addition is the product's own promise: **every
- * grader in the project applies to every test by default**, so writing a policy
- * check once makes it judge everything without touching a test file, and **a
- * test's own grader array adds scenario-specific ones on top**, so "the refund
- * tool must fire" judges the refund test and nothing else.
+ * **One source, and it is the project's running copies.** Every active copy
+ * whose scope covers simulations judges every simulation in the project. There
+ * is no second list to add to it and no test content to consult: a test names no
+ * graders, and the junction that let one is gone.
  *
- * A grader named by both is one grader and produces one row per assertion: the
- * set is by identity, so naming a project grader in a test's array is redundant
- * rather than doubling.
+ * That is the product's promise said once instead of twice. Pressing **Use** on
+ * a library entry makes a check that judges everything inside its scope, so
+ * writing a policy check once makes it judge everything without touching a
+ * single test — and nobody has to remember to attach it to the next test
+ * somebody writes.
  *
- * **The scope decides where a project grader applies**, and today the answer for
- * a simulation is `simulations` or `both`. A grader scoped to production alone
- * is not a grader that failed to run here; it is a grader that was never about
- * this conversation, and there is no verdict row for it at all. A grader a test
- * names is applied whatever its scope says: naming it *is* the scoping decision,
- * made per test rather than per project.
+ * **The scope is the whole of the decision.** A copy scoped to production alone
+ * is not a grader that failed to run here; it was never about this conversation,
+ * and there is no verdict row for it at all — not a `skipped` one, which would
+ * mean the check applied and could not be made. Scenario-specific grading
+ * returns as filters on the copy, decided grader-side, when custom authoring
+ * arrives.
  *
- * **A deleted grader judges nothing from now on.** It is refused deletion while
- * a live test names it, so a test's array cannot come to point at nothing behind
- * anybody's back; a grader deleted after a run keeps its versions, so what it
- * already said stays readable, and it simply stops appearing here.
+ * **A deleted copy judges nothing from now on.** Deleting it is exactly how a
+ * project stops being judged by it; its versions stay, so the verdicts it
+ * already wrote remain interpretable, and it simply stops appearing here.
  *
  * **The expected-behaviors grader is resolved here like everything else.** It
  * used to be absent — never a row, never attachable, applied because running a
@@ -41,6 +38,13 @@ import {
  * expectations. It is simulations-only because its scope says so rather than
  * because a branch somewhere leaves it out.
  *
+ * **`required` is not consulted here, deliberately.** A diagnostic copy is
+ * judged exactly like a blocking one and writes exactly the same rows — that is
+ * what makes its fraction worth reading. Whether it can fail anything is decided
+ * by the fold, at read time, from the flag as it stands: a check quietly not run
+ * because somebody made it a diagnostic would be a diagnostic that diagnoses
+ * nothing.
+ *
  * **Sampling never happens here.** A simulation is a conversation somebody asked
  * for, one at a time, and judging nine of ten of them would mean a suite whose
  * report is missing a test for no reason anybody chose. Sampling is about
@@ -48,45 +52,31 @@ import {
  */
 export async function applicableGraders(
   auth: AuthContext,
-  simulation: Simulation,
 ): Promise<readonly Grader[]> {
-  const applicable = new Map<string, Grader>();
-
-  for (const grader of await everyGraderInTheProject(auth)) {
-    if (grader.scope === "simulations" || grader.scope === "both") {
-      applicable.set(grader.id, grader);
-    }
-  }
-
-  for (const grader of await theTestVersionsGraders(auth, simulation)) {
-    applicable.set(grader.id, grader);
-  }
-
-  return inAStableOrder(applicable.values());
+  return [...(await everyGraderInTheProject(auth))]
+    .filter((grader) => grader.scope === "simulations" || grader.scope === "both")
+    .sort(byId);
 }
 
 /**
  * Which graders judge this production trace, and whose turn it is.
  *
- * **The project's graders scoped to production, and nothing else at all.** Two
- * absences do the work here, and both are the same fact said twice: a production
- * trace has no test.
+ * **The project's copies scoped to production, and nothing else at all.** The
+ * simulation side reads the same one list through the same one filter, so the
+ * two paths differ by a word rather than by a shape — which is what stops
+ * "where does this grader apply" from being answered twice.
  *
- * - **No test-attached grader.** A test's grader array says "this grader judges
- *   this scenario", and a real caller phoning a real agent is not in anybody's
- *   scenario. There is no test version to read an array off, and inventing one
- *   would mean a customer's monitoring bill quietly depending on which tests
- *   somebody happened to write.
+ * Two absences remain worth saying out loud here, and both are the same fact: a
+ * production trace has no test.
+ *
  * - **No `expected_behaviors`.** Its copy is scoped to simulations, which is the
  *   setting saying this: it judges a test against the behaviors that test wrote
  *   down, and there is no test here to have written any. A copy of it pointed at
  *   production by hand would find no simulation and answer nothing, which is the
  *   honest reply, but the scope is where the decision belongs.
- *
- * So the scope setting is the *whole* of the decision on this side, which is why
- * `production` and `both` are the only two words that reach here — a grader
- * scoped to simulations is not a grader that failed on this conversation, it was
- * never about it, and there is no verdict row for it at all.
+ * - **Nothing arrives from a scenario.** A real caller phoning a real agent is
+ *   in nobody's scenario, and there is no test content anywhere in this
+ *   resolution to have said otherwise.
  *
  * **Then sampling, per grader, deterministically.** Each applicable grader is
  * asked whether this trace is its turn; the accumulator behind that answer lives
@@ -129,10 +119,6 @@ export async function applicableProductionGraders(
  * By id, which is the mint order: an arbitrary order, but the same one every
  * time, so two gradings of one conversation walk the same list.
  */
-function inAStableOrder(graders: Iterable<Grader>): readonly Grader[] {
-  return [...graders].sort(byId);
-}
-
 function byId(left: Grader, right: Grader): number {
   return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
 }
@@ -159,38 +145,4 @@ async function everyGraderInTheProject(
   } while (cursor !== undefined);
 
   return found;
-}
-
-/**
- * The graders the test named, resolved through the version this conversation was
- * *executed against* rather than through the test as it is now.
- *
- * That is what the pin is for. A test that gained a grader this morning does not
- * retroactively judge last night's conversation, and a test that lost one does
- * not retroactively unjudge it — the array is read off the frozen version the
- * run stamped on every simulation it started.
- *
- * A simulation born from no test names no graders here, and that is an ordinary
- * case rather than a gap: somebody proving a connection with a smoke call wrote
- * down no expectations, and the project's own graders still judge it.
- */
-async function theTestVersionsGraders(
-  auth: AuthContext,
-  simulation: Simulation,
-): Promise<readonly Grader[]> {
-  if (simulation.testVersionId === null) return [];
-
-  const version = await getSimulationTestVersion(auth, simulation.id);
-  if (version === undefined) return [];
-
-  const named: Grader[] = [];
-  for (const { id } of version.graders) {
-    // By identity, never by version: the array names which grader judges, and
-    // which version of it judges is always the current one, exactly as an edit
-    // to a grader applies from now on. A grader deleted since resolves to
-    // nothing and judges nothing further.
-    const grader = await getGrader(auth, id);
-    if (grader !== undefined) named.push(grader);
-  }
-  return named;
 }

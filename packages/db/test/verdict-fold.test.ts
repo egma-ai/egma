@@ -2,6 +2,7 @@ import {
   foldVerdicts,
   foldVerdictsByGrader,
   speakingVerdicts,
+  verdictLanes,
   VERDICTS,
   type FoldableVerdict,
   type Verdict,
@@ -532,6 +533,177 @@ describe("whatever pile of rows it is handed", () => {
             : counts.errored > 0
               ? "errored"
               : "passed",
+        );
+      }
+    }
+  });
+});
+
+/* ------------------------------------------------------------------- *
+ * The two lanes: what decides, and what only reports.
+ * ------------------------------------------------------------------- */
+
+/**
+ * A `required: false` copy is a diagnostic. Its rows exist, its fraction is
+ * reported, and nothing it says can reach an outcome.
+ *
+ * The split is a function of its own rather than a branch inside the fold, so
+ * what is asserted here are properties of the split and of the fold over each
+ * half — which is exactly how the read path uses them.
+ */
+describe("the lane a verdict is in", () => {
+  const REQUIRED = "grader-1";
+  const DIAGNOSTIC = "grader-2";
+  const onlyReports = new Set([DIAGNOSTIC]);
+
+  /** Everything decides when nothing was named a diagnostic. */
+  it("is required for every grader when no diagnostic is named", () => {
+    const draw = randomly(0x5b11);
+    for (let sweep = 0; sweep < 200; sweep += 1) {
+      const rows = someRows(draw, 1 + Math.floor(draw() * 20));
+      const lanes = verdictLanes(rows);
+
+      expect(lanes.required).toEqual(rows);
+      expect(lanes.diagnostic).toEqual([]);
+      // And the default keeps `foldVerdicts` meaning exactly what it meant.
+      expect(foldVerdicts(lanes.required)).toEqual(foldVerdicts(rows));
+    }
+  });
+
+  /** Every row lands in exactly one lane, and neither lane is reordered. */
+  it("puts every row in exactly one lane, in the order it arrived", () => {
+    const draw = randomly(0x2f7c);
+    for (let sweep = 0; sweep < 200; sweep += 1) {
+      const rows = someRows(draw, 1 + Math.floor(draw() * 20));
+      const lanes = verdictLanes(rows, onlyReports);
+
+      expect(lanes.required.length + lanes.diagnostic.length).toBe(rows.length);
+      expect(lanes.required).toEqual(
+        rows.filter((one) => one.graderId !== DIAGNOSTIC),
+      );
+      expect(lanes.diagnostic).toEqual(
+        rows.filter((one) => one.graderId === DIAGNOSTIC),
+      );
+    }
+  });
+
+  /**
+   * The rule the whole flag exists for. A diagnostic failing every assertion it
+   * has cannot move the answer by one word or one digit.
+   */
+  it("lets nothing a diagnostic said reach the outcome", () => {
+    const decided = [
+      row({ graderId: REQUIRED, assertion: "behavior_1", verdict: "passed" }),
+      row({ graderId: REQUIRED, assertion: "behavior_2", verdict: "passed" }),
+    ];
+    const reported = [
+      row({ graderId: DIAGNOSTIC, assertion: "behavior_1", verdict: "failed" }),
+      row({ graderId: DIAGNOSTIC, assertion: "behavior_2", verdict: "errored" }),
+    ];
+
+    const alone = foldVerdicts(decided);
+    const beside = foldVerdicts(
+      verdictLanes([...decided, ...reported], onlyReports).required,
+    );
+
+    expect(beside).toEqual(alone);
+    expect(beside.verdict).toBe("passed");
+
+    // And folded together — which is what would happen if the lane were
+    // forgotten — the same rows say the opposite.
+    expect(foldVerdicts([...decided, ...reported]).verdict).toBe("failed");
+  });
+
+  /** The other way round: a required failure is not softened by a green diagnostic. */
+  it("lets a required failure fail, whatever the diagnostics say", () => {
+    const rows = [
+      row({ graderId: REQUIRED, assertion: "behavior_1", verdict: "failed" }),
+      row({ graderId: DIAGNOSTIC, assertion: "behavior_1", verdict: "passed" }),
+      row({ graderId: DIAGNOSTIC, assertion: "behavior_2", verdict: "passed" }),
+    ];
+
+    const lanes = verdictLanes(rows, onlyReports);
+    expect(foldVerdicts(lanes.required).verdict).toBe("failed");
+    expect(foldVerdicts(lanes.diagnostic).verdict).toBe("passed");
+  });
+
+  /**
+   * A conversation judged by diagnostics alone has earned no green tick: there
+   * was nothing that decides, so the required lane is empty and `skipped` is
+   * precisely what happened.
+   */
+  it("answers skipped where only diagnostics judged", () => {
+    const rows = [
+      row({ graderId: DIAGNOSTIC, assertion: "behavior_1", verdict: "passed" }),
+    ];
+    const lanes = verdictLanes(rows, onlyReports);
+
+    expect(foldVerdicts(lanes.required).verdict).toBe("skipped");
+    expect(foldVerdicts(lanes.required).score).toBeUndefined();
+    expect(foldVerdicts(lanes.diagnostic).score).toBe(1);
+  });
+
+  /**
+   * The per-grader fold keeps every grader, both lanes, and says which lane each
+   * is in — because a diagnostic's fraction is the whole reason it was switched
+   * on, and a list that dropped it would make it judge in silence.
+   */
+  it("reports every grader's fraction, marking which of them only report", () => {
+    const rows = [
+      row({ graderId: REQUIRED, assertion: "behavior_1", verdict: "passed" }),
+      row({ graderId: DIAGNOSTIC, assertion: "behavior_1", verdict: "failed" }),
+      row({ graderId: DIAGNOSTIC, assertion: "behavior_2", verdict: "passed" }),
+    ];
+
+    expect(foldVerdictsByGrader(rows, onlyReports)).toEqual([
+      {
+        graderId: REQUIRED,
+        required: true,
+        outcome: foldVerdicts([rows[0] as FoldableVerdict]),
+      },
+      {
+        graderId: DIAGNOSTIC,
+        required: false,
+        outcome: foldVerdicts(rows.slice(1)),
+      },
+    ]);
+  });
+
+  /** A grader nobody named a diagnostic decides — the safe direction. */
+  it("treats a grader it has never heard of as one that decides", () => {
+    const rows = [row({ graderId: "grader-nobody-knows", verdict: "failed" })];
+
+    expect(verdictLanes(rows, onlyReports).required).toEqual(rows);
+    expect(foldVerdicts(verdictLanes(rows, onlyReports).required).verdict).toBe(
+      "failed",
+    );
+    expect(foldVerdictsByGrader(rows, onlyReports)[0]?.required).toBe(true);
+  });
+
+  /**
+   * Splitting first and folding each half is the same arithmetic as folding the
+   * whole: the two lanes' counts add up to the counts over everything, on any
+   * pile the sweep produces. That is what makes a page's two headings incapable
+   * of disagreeing with the rows under them.
+   */
+  it("loses and invents nothing: the two lanes' counts are the whole", () => {
+    const draw = randomly(0x11ac);
+    for (let sweep = 0; sweep < 300; sweep += 1) {
+      const rows = someRows(draw, 1 + Math.floor(draw() * 30));
+      const lanes = verdictLanes(rows, onlyReports);
+      const whole = foldVerdicts(rows);
+      const decided = foldVerdicts(lanes.required);
+      const reported = foldVerdicts(lanes.diagnostic);
+
+      for (const word of [
+        "passed",
+        "failed",
+        "skipped",
+        "errored",
+        "total",
+      ] as const) {
+        expect(whole.counts[word]).toBe(
+          decided.counts[word] + reported.counts[word],
         );
       }
     }

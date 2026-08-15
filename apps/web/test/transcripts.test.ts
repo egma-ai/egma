@@ -4,7 +4,9 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import * as copy from "../lib/transcript-copy.ts";
+import * as gradingCopy from "../lib/grading-copy.ts";
 import {
+  assertionHeading,
   everyStep,
   howFarIn,
   howLong,
@@ -20,6 +22,7 @@ import {
   windowChoiceOf,
   WINDOW_PARAMETER,
   type Facts,
+  type Judgment,
   type Step,
 } from "../lib/transcripts.ts";
 
@@ -293,6 +296,47 @@ describe("what a stored kind is called where somebody reads it", () => {
 });
 
 /**
+ * What a judgment is headed with.
+ *
+ * A verdict row keeps a **key**, and the read resolves the words behind it from
+ * the version the conversation was executed against. So the heading is the
+ * sentence somebody wrote wherever there is one — and the key itself wherever
+ * there is not, because a key that could not be placed says exactly as much as
+ * egma knows, and a plausible wrong sentence would say more than it knows.
+ */
+describe("the heading a judgment carries", () => {
+  function judged(overrides: Partial<Judgment> = {}): Judgment {
+    return {
+      grader_id: "grd_01JQZ0000000000000000000AA",
+      assertion: "behavior_3",
+      verdict: "passed",
+      score: 1,
+      rationale: "the agent named the new time back.",
+      cited_turns: ["turn:5"],
+      judged_at: "2026-08-14T09:00:00.000000Z",
+      ...overrides,
+    };
+  }
+
+  it("is the sentence the read resolved, word for word", () => {
+    expect(
+      assertionHeading(
+        judged({ assertion_text: "confirms the new time back before finishing" }),
+      ),
+    ).toBe("confirms the new time back before finishing");
+  });
+
+  it("is the key itself where nothing could place it", () => {
+    expect(assertionHeading(judged({ assertion_text: null }))).toBe("Behavior 3");
+    // And on an answer that never carried the field at all, which is the same
+    // absence said a different way.
+    expect(assertionHeading(judged())).toBe("Behavior 3");
+    // A resolved sentence of nothing but spaces is nothing resolved.
+    expect(assertionHeading(judged({ assertion_text: "   " }))).toBe("Behavior 3");
+  });
+});
+
+/**
  * Two different things with one word between them.
  *
  * A step on this page can carry audio the agent's **own telemetry** attached to
@@ -388,10 +432,21 @@ function everySentence(said: unknown): string[] {
   return [];
 }
 
+/**
+ * Everything under the discipline: the transcript pages' own words, and the
+ * judgment card's.
+ *
+ * The card is drawn on this page and on a run's results, so its words live in a
+ * file of their own rather than in either page's — and they are held to the same
+ * list here, because the surface that renders them is this one.
+ */
+const EVERY_WORD = [copy, gradingCopy];
+
 describe("what the pages say out loud", () => {
   it("is gathered in one place, so it can be held against the list", () => {
     const said = everySentence(copy);
     expect(said.length).toBeGreaterThan(40);
+    expect(everySentence(gradingCopy).length).toBeGreaterThan(3);
   });
 
   /**
@@ -400,7 +455,7 @@ describe("what the pages say out loud", () => {
    * keeps the first out of the second.
    */
   it("uses no storage word and no banned one", () => {
-    for (const sentence of everySentence(copy)) {
+    for (const sentence of everySentence(EVERY_WORD)) {
       for (const banned of NEVER_SAID) {
         expect(
           new RegExp(`\\b${banned}`, "iu").test(sentence),
@@ -416,7 +471,7 @@ describe("what the pages say out loud", () => {
    * about either, so they say it about neither.
    */
   it("does not borrow `session` for an exchange", () => {
-    for (const sentence of everySentence(copy)) {
+    for (const sentence of everySentence(EVERY_WORD)) {
       expect(/\bsession/iu.test(sentence), sentence).toBe(false);
     }
   });
@@ -433,6 +488,18 @@ describe("what the pages say out loud", () => {
     ]) {
       const source = await readFile(path.join(WEB, page), "utf8");
       expect(source, page).toContain("transcript-copy.ts");
+    }
+
+    // And everything that says one of the two lanes out loud, which is words of
+    // its own and therefore a copy file of its own: the card both surfaces draw
+    // a judgment with, and the summary above it that reports the lane the
+    // outcome was folded without.
+    for (const page of [
+      "app/judgment-card.tsx",
+      "app/traces/[traceId]/page.tsx",
+    ]) {
+      const source = await readFile(path.join(WEB, page), "utf8");
+      expect(source, page).toContain("grading-copy.ts");
     }
   });
 });

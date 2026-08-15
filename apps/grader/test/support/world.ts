@@ -843,15 +843,21 @@ function productionSpan(traceId: string, over: Partial<NewSpan>): NewSpan {
 }
 
 /**
- * A test with expected behaviors, and the graders its array names.
+ * A test with expected behaviors, and nothing else that decides how it is
+ * judged.
  *
- * The behaviors are the caller's when it has an opinion, because the built-in
- * grader judges exactly this list and most of what is worth asserting about it
- * is a question of how many there are and what order they are in.
+ * **It names no graders, because a test cannot.** Which copies judge a
+ * simulation is the project's business — every active copy whose scope covers
+ * simulations — so a case that wants a second grader on this conversation makes
+ * one with `seedGrader` rather than attaching one here.
+ *
+ * The behaviors are the caller's when it has an opinion, because the
+ * expected-behaviors grader judges exactly this list and most of what is worth
+ * asserting about it is a question of how many there are and what order they are
+ * in.
  */
 export async function seedTest(
   world: World,
-  graderIds: readonly string[],
   expectedBehaviors: readonly ExpectedBehavior[] = [
     "confirms the new time back before finishing",
   ],
@@ -861,7 +867,6 @@ export async function seedTest(
     scenario: "Their cleaning has to move to any afternoon next week.",
     expectedBehaviors: [...expectedBehaviors],
     personaIds: [world.personaId],
-    graderIds: [...graderIds],
   });
   return test.id;
 }

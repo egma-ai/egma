@@ -1,8 +1,6 @@
 import { newId } from "@egma/ids";
 import {
   createPersona,
-  PREDEFINED_GRADERS,
-  useLibraryEntry,
   type AuthContext,
   type NewTest,
   type Role,
@@ -92,29 +90,6 @@ export async function seedPersona(
   return created.id;
 }
 
-/**
- * A grader for a test to name. Made the one way a grader is ever made — by
- * pressing Use on a library entry — and cheap to state, because what the grader
- * judges by is the grader factory's business; here it is only something a
- * test's array can point at.
- *
- * The `latency` entry rather than the judged one, so that each call makes a
- * grader with values of its own: two copies differing only in their name would
- * still be two rows, but a bound a caller can vary is what lets a file put two
- * distinguishable graders on one project.
- */
-export async function seedGrader(
-  auth: AuthContext,
-  name: string,
-): Promise<string> {
-  const created = await useLibraryEntry(auth, {
-    libraryId: PREDEFINED_GRADERS.latency,
-    name,
-    params: { metric: "turn_response_latency", bound: 2_000 },
-  });
-  return created.id;
-}
-
 /** What provisioning does when it seeds a project's starter persona. */
 export async function pointProjectAt(
   projectId: string,
@@ -135,7 +110,6 @@ export async function rowCounts(): Promise<{
   tests: number;
   versions: number;
   named: number;
-  namedGraders: number;
   graders: number;
   graderVersions: number;
 }> {
@@ -149,7 +123,6 @@ export async function rowCounts(): Promise<{
     tests: await count("test"),
     versions: await count("test_version"),
     named: await count("test_persona"),
-    namedGraders: await count("test_grader"),
     graders: await count("grader"),
     graderVersions: await count("grader_version"),
   };

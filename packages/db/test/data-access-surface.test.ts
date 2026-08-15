@@ -229,6 +229,11 @@ const CONTEXT_REQUIRING = [
   // an owner writes them, a read answers a hint and never a stored secret, and
   // the environment seeds what the platform does not already hold.
   "readPlatformSettings",
+  // The other half of a key-only verdict row: what a page shows a person, read
+  // from the versions the conversation was pinned to rather than from the live
+  // test.
+  "readAssertionShelf",
+  "readAssertionWords",
   "readProject",
   "readRunVerdicts",
   "readTrace",
@@ -347,9 +352,9 @@ const VALUES = [
   // taken away underneath one would leave a grader that judges nothing while
   // still appearing on screen — refusal, never `set null`, never orphaned.
   "GraderLibraryEntryInUseError",
-  // The grader factory's one refusal, beside the persona factory's: a delete
-  // that would leave a live test checking one thing fewer than it says it does.
-  "GraderNamedByTestsError",
+  // The grader factory has no refusal of its own any more. A copy's delete used
+  // to be turned away while a live test named it; a test names no graders, so
+  // switching one off is a decision about the project with nothing in its way.
   "LastAdminError",
   // A second answer for a tool this project already answers for. Its own class
   // because nothing about the body is wrong and something is already there,
@@ -440,9 +445,18 @@ const THE_MOCKED_WORLD = [
  * against.
  */
 const THE_FOLD = [
+  // The two halves of one assertion key's round trip: the engine writes a
+  // verdict row with the first, a page reads the words back with the second.
+  // Here for the fold's own reason — they reach nothing — and together, because
+  // a format known in two packages is a format free to fork in one of them.
+  "behaviorAssertionAt",
+  "behaviorAssertionKey",
   "foldVerdicts",
   "foldVerdictsByGrader",
   "speakingVerdicts",
+  // Which rows decide and which only report, split before anything is folded so
+  // that the one algebra never has to ask whose rows it was handed.
+  "verdictLanes",
   "VERDICTS",
 ];
 

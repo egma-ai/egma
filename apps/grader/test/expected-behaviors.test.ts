@@ -95,7 +95,7 @@ async function judgedWith(
 }> {
   const judge = await service.judgingWith(answers);
 
-  const testId = await seedTest(world, [], THREE);
+  const testId = await seedTest(world, THREE);
   const { simulationId } = await conductSimulation(world, {
     testId,
     spans: aConversation(),
@@ -349,7 +349,7 @@ describe("a grading that fell over before it could ask anything", () => {
       },
     });
 
-    const testId = await seedTest(world, [], THREE);
+    const testId = await seedTest(world, THREE);
     const { simulationId, runId } = await conductSimulation(world, {
       testId,
       spans: aConversation(),

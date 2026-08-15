@@ -121,7 +121,6 @@ describe("the provider's footprint on the schema", () => {
     "session",
     "simulation",
     "test",
-    "test_grader",
     "test_persona",
     "test_version",
     "user",

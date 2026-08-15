@@ -78,7 +78,7 @@ const A_CONVERSATION = [
 describe("a simulation whose spans arrived complete", () => {
   it("is graded end to end, its verdicts citing turns assembled from spans", async () => {
     const judge = await judgingWith([4]);
-    const testId = await seedTest(world, [], [THE_BEHAVIOR]);
+    const testId = await seedTest(world, [THE_BEHAVIOR]);
 
     const conducted = await conductSimulation(world, {
       testId,
@@ -122,7 +122,7 @@ describe("a simulation whose spans arrived complete", () => {
 
   it("files its verdicts under the simulation id, exactly as before", async () => {
     await judgingWith();
-    const testId = await seedTest(world, [], [THE_BEHAVIOR]);
+    const testId = await seedTest(world, [THE_BEHAVIOR]);
 
     const conducted = await conductSimulation(world, {
       testId,
@@ -229,7 +229,7 @@ describe("a simulation whose spans arrived complete", () => {
     // Two turns in one answer, so what is proved is the order of the citations
     // rather than there being one.
     await judgingWith([2, 4]);
-    const testId = await seedTest(world, [], [THE_BEHAVIOR]);
+    const testId = await seedTest(world, [THE_BEHAVIOR]);
 
     const conducted = await conductSimulation(world, {
       testId,
@@ -316,7 +316,7 @@ describe("a simulation whose spans arrived complete", () => {
 describe("what the simulator measured", () => {
   it("is the timing span's own duration, and never a value beside it", async () => {
     const judge = await judgingWith();
-    const testId = await seedTest(world, [], [THE_BEHAVIOR]);
+    const testId = await seedTest(world, [THE_BEHAVIOR]);
 
     const conducted = await conductSimulation(world, {
       testId,
@@ -333,7 +333,7 @@ describe("what the simulator measured", () => {
 
   it("leaves a voice measure absent on a chat simulation rather than inventing one", async () => {
     const judge = await judgingWith();
-    const testId = await seedTest(world, [], [THE_BEHAVIOR]);
+    const testId = await seedTest(world, [THE_BEHAVIOR]);
 
     const conducted = await conductSimulation(world, {
       testId,
@@ -358,7 +358,7 @@ describe("a simulation whose trace never closed", () => {
       world,
       aLatencyCopy({ name: "Asked about a conversation egma holds half of" }),
     );
-    const testId = await seedTest(world, [], [THE_BEHAVIOR]);
+    const testId = await seedTest(world, [THE_BEHAVIOR]);
 
     const conducted = await conductSimulation(world, {
       testId,
@@ -421,7 +421,7 @@ describe("a simulation with no spans at all", () => {
       world,
       aLatencyCopy({ name: "Asked about a conversation egma has no record of" }),
     );
-    const testId = await seedTest(world, [], [
+    const testId = await seedTest(world, [
       "confirms the new time back before finishing",
       "never quotes a price",
     ]);

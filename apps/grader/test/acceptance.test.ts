@@ -37,8 +37,12 @@ import { cannotDetermine, met, notMet } from "./support/scripted-judge.ts";
  * are.** A project is created holding an active copy of `expected_behaviors`,
  * so the conversation below is judged against its test's own sentences with
  * nothing set up at all; a copy of `latency` is what a second grader on the
- * project looks like, and until egma computes it from spans a copy of it says
- * `errored` out loud rather than passing.
+ * project looks like, and it is computed from the conversation's own spans with
+ * no model asked anything.
+ *
+ * **And a test names no graders**, because there is nowhere for it to. The
+ * junction is gone: which copies judge a conversation is each copy's own scope
+ * and nothing about the test in front of it.
  *
  * **The judge is scripted and no key is present anywhere in this file.** What
  * is under test here is egma's side of the seam — which graders applied, what
@@ -72,7 +76,7 @@ describe("a conversation reaching its terminal transition", () => {
     await service.judgingWith({
       [THE_BEHAVIOR]: met("the agent named the new time back."),
     });
-    const testId = await seedTest(world, []);
+    const testId = await seedTest(world);
 
     const started = Date.now();
     const { simulationId, runId } = await conductSimulation(world, {
@@ -100,7 +104,7 @@ describe("a conversation reaching its terminal transition", () => {
     await service.judgingWith({
       [THE_BEHAVIOR]: notMet("the agent finished without repeating the time.", [3]),
     });
-    const testId = await seedTest(world, []);
+    const testId = await seedTest(world);
 
     const { simulationId, runId } = await conductSimulation(world, { testId });
     const [only] = await verdictsOn(world, simulationId);
@@ -136,7 +140,7 @@ describe("a conversation reaching its terminal transition", () => {
       aLatencyCopy({ name: "Production only", scope: "production" }),
     );
 
-    const testId = await seedTest(world, []);
+    const testId = await seedTest(world);
     const { simulationId } = await conductSimulation(world, { testId });
     const verdicts = await verdictsOn(world, simulationId, 2);
     const graders = new Set(verdicts.map((verdict) => verdict.graderId));
@@ -147,35 +151,31 @@ describe("a conversation reaching its terminal transition", () => {
     expect(graders.has(elsewhere)).toBe(false);
   });
 
-  it("is judged by the graders its pinned test version names", async () => {
+  /**
+   * The whole of the resolution, said as the absence it now is.
+   *
+   * A test names no graders and there is nowhere it could: the junction is gone
+   * from the schema and no code path reads test content to decide what judges. A
+   * copy scoped away from simulations therefore cannot be dragged back in by the
+   * test in front of it, which is exactly what an attached grader used to do —
+   * and the run is judged by precisely the copies the project switched on.
+   */
+  it("is judged by nothing its test says, because a test names no graders", async () => {
     await service.judgingWith({ [THE_BEHAVIOR]: met("it did.") });
-    const attached = await seedGrader(
+    const elsewhere = await seedGrader(
       world,
-      aLatencyCopy({ name: "This scenario only", scope: "production" }),
+      aLatencyCopy({ name: "Production only, whatever a test wanted", scope: "production" }),
     );
-    const testId = await seedTest(world, [attached]);
 
+    const testId = await seedTest(world);
     const { simulationId } = await conductSimulation(world, { testId });
-    const verdicts = await verdictsOn(world, simulationId, 2);
+    const verdicts = await verdictsOn(world, simulationId);
+    const graders = new Set(verdicts.map((verdict) => verdict.graderId));
 
-    // Named by the test, so it judges this conversation whatever its project
-    // scope says: naming it is the scoping decision, made per test.
-    expect(
-      verdicts.some((verdict) => verdict.graderId === attached),
-    ).toBe(true);
-  });
-
-  it("counts a grader named by both the project and the test exactly once", async () => {
-    await service.judgingWith({ [THE_BEHAVIOR]: met("it did.") });
-    const both = await seedGrader(world, aLatencyCopy({ name: "Named twice" }));
-    const testId = await seedTest(world, [both]);
-
-    const { simulationId } = await conductSimulation(world, { testId });
-    const verdicts = await verdictsOn(world, simulationId, 2);
-
-    expect(
-      verdicts.filter((verdict) => verdict.graderId === both),
-    ).toHaveLength(1);
+    expect(graders.has(await theSeededGrader(world))).toBe(true);
+    // No row at all — not skipped, not errored. Its scope excludes this source,
+    // and nothing about the test can widen it.
+    expect(graders.has(elsewhere)).toBe(false);
   });
 });
 
@@ -196,7 +196,7 @@ describe("a latency copy", () => {
       aLatencyCopy({ name: "Answers inside two seconds" }),
     );
 
-    const testId = await seedTest(world, []);
+    const testId = await seedTest(world);
     const { simulationId, runId } = await conductSimulation(world, {
       testId,
       spans: { measured: { turn_response_latency: [900, 1_100] } },
@@ -254,7 +254,7 @@ describe("a latency copy", () => {
       }),
     );
 
-    const testId = await seedTest(world, []);
+    const testId = await seedTest(world);
     const { simulationId } = await conductSimulation(world, {
       testId,
       spans: { measured: { turn_response_latency: [900, 1_100] } },
@@ -287,7 +287,7 @@ describe("a latency copy", () => {
       }),
     );
 
-    const testId = await seedTest(world, []);
+    const testId = await seedTest(world);
     const { simulationId } = await conductSimulation(world, {
       testId,
       // A chat conversation: it measured its turn latency and no audio at all.
@@ -326,7 +326,7 @@ describe("a latency copy", () => {
       }),
     );
 
-    const testId = await seedTest(world, []);
+    const testId = await seedTest(world);
     const { simulationId } = await conductSimulation(world, {
       testId,
       spans: { measured: { turn_response_latency: [900] } },
@@ -363,7 +363,7 @@ describe("a simulation that never ran", () => {
     await service.judgingWith({ [THE_BEHAVIOR]: met("it did.") });
     await seedGrader(world, aLatencyCopy({ name: "On a broken test" }));
 
-    const testId = await seedTest(world, []);
+    const testId = await seedTest(world);
     const { simulationId } = await conductSimulation(world, {
       testId,
       failedBecause: "agent_never_joined",
@@ -381,7 +381,7 @@ describe("a simulation that never ran", () => {
 
   it("folds to errored rather than to failed, all the way up to the headline", async () => {
     await service.judgingWith({ [THE_BEHAVIOR]: met("it did.") });
-    const testId = await seedTest(world, []);
+    const testId = await seedTest(world);
     const { simulationId } = await conductSimulation(world, {
       testId,
       failedBecause: "not_answered",
@@ -407,7 +407,7 @@ describe("a conversation the judge cannot settle", () => {
       ),
     });
 
-    const testId = await seedTest(world, []);
+    const testId = await seedTest(world);
     const { simulationId } = await conductSimulation(world, { testId });
     await verdictsOn(world, simulationId);
 
@@ -430,7 +430,7 @@ describe("a conversation the judge cannot settle", () => {
 describe("the job behind it", () => {
   it("is finished once the verdicts are written, and never handed out again", async () => {
     await service.judgingWith({ [THE_BEHAVIOR]: met("it did.") }, testConfig());
-    const testId = await seedTest(world, []);
+    const testId = await seedTest(world);
     const { simulationId } = await conductSimulation(world, { testId });
     await verdictsOn(world, simulationId);
 

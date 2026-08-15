@@ -4,9 +4,11 @@ import {
   worstSampleOf,
   MAXIMUM_LIST_LIMIT,
   NotPermittedError,
+  readAssertionWords,
   readTrace,
   readVerdicts,
   UnreadableTraceQueryError,
+  type AssertionWords,
   type TimeWindow,
   type TraceDetail,
   type TraceFacts,
@@ -20,6 +22,11 @@ import { simulationIdOfTrace } from "@egma/simulation-contract";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given } from "../http/reading.ts";
+import {
+  describedOutcome,
+  describedVerdict,
+  onlyReporting,
+} from "../http/verdicts.ts";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 
 /**
@@ -428,6 +435,27 @@ export async function traceReadRoutes(
       () => undefined,
     );
 
+    // The words behind the assertion keys, from the version this conversation
+    // was pinned to. Only a simulation has one — a production trace is in
+    // nobody's scenario — and this is the same resolution a run's results make,
+    // through the same call, so the one judgment card cannot read two ways
+    // depending on which page it is drawn on.
+    const words: AssertionWords | undefined =
+      detail.source === "simulation" && (judged?.verdicts.length ?? 0) > 0
+        ? await readAssertionWords(
+            auth,
+            filedUnder,
+            (judged?.verdicts ?? []).map((its) => its.graderId),
+          ).catch(() => undefined)
+        : undefined;
+
+    // Which of the copies that judged this conversation only report, off the
+    // same per-grader fold the outcome above was split by — so a row's marking
+    // and the header it sits under cannot disagree. This is the other half of
+    // that promise: the fold already left the diagnostics out of `outcome`, and
+    // without this the page would show their failures as if they had counted.
+    const diagnostic = onlyReporting(judged?.byGrader);
+
     return reply.send({
       ...describedDetail(detail),
       // The same derivation again, and this time as an answer rather than as a
@@ -451,23 +479,19 @@ export async function traceReadRoutes(
         detail.source === "simulation"
           ? simulationIdOfTrace(traceId) ?? null
           : null,
-      verdicts: (judged?.verdicts ?? []).map((its) => ({
-        grader_id: its.graderId,
-        assertion: its.assertion,
-        verdict: its.verdict,
-        score: its.score,
-        rationale: its.rationale,
-        cited_turns: [...its.citedSpanIds],
-        judged_at: its.judgedAt,
-      })),
-      outcome:
-        judged === undefined
-          ? null
-          : {
-              verdict: judged.outcome.verdict,
-              score: judged.outcome.score ?? null,
-              counts: judged.outcome.counts,
-            },
+      // The one shape both surfaces that draw a judgment send, decided in
+      // `http/verdicts.ts` rather than here and again there — including
+      // `required`, without which a diagnostic's failure would render on this
+      // page as an unmarked red card under a header folded without it.
+      verdicts: (judged?.verdicts ?? []).map((its) =>
+        describedVerdict(its, words, diagnostic),
+      ),
+      // The required lane, as everywhere: a diagnostic copy reports and never
+      // decides.
+      outcome: describedOutcome(judged?.outcome),
+      // And the lane that only reports, beside it rather than inside it. Null
+      // where nothing diagnostic judged this conversation.
+      diagnostics: describedOutcome(judged?.diagnostics),
     });
   });
 
