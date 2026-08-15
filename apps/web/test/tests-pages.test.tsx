@@ -588,6 +588,66 @@ describe("one test's page", () => {
     );
   });
 
+  it("carries nothing from one test to another: not the typing, not the refusal", async () => {
+    routed.pathname = "/projects/prj_1/tests/tst_1";
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/tests/tst_1": [
+        { status: 200, body: testRow() },
+        {
+          status: 409,
+          body: { error: "identity_conflict", message: "Test tst_1 moved." },
+        },
+      ],
+      "/api/tests/tst_2": {
+        status: 200,
+        body: testRow({ id: "tst_2", name: "A different test", revision: "rev_2" }),
+      },
+      "/api/tests/tst_1/versions": {
+        status: 200,
+        body: { items: [], next_cursor: null },
+      },
+      "/api/tests/tst_2/versions": {
+        status: 200,
+        body: { items: [], next_cursor: null },
+      },
+      "/api/agents": {
+        status: 200,
+        body: { items: [agentRow()], next_cursor: null },
+      },
+      "/api/personas": { status: 200, body: { items: [], next_cursor: null } },
+      "/api/graders": { status: 200, body: { items: [], next_cursor: null } },
+      "/api/capabilities": { status: 200, body: CAPABILITIES },
+    });
+    const view = render(<TestDetailPage />);
+    await screen.findByLabelText("Name");
+
+    // Type into one test and have the save refused, which leaves a retry.
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Typed for the first test" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(await screen.findByText("Test tst_1 moved.")).toBeTruthy();
+
+    // Then open another one. Everything that meant "for the test on screen"
+    // has to go with it — a retry left behind would send this typing against
+    // the other test's revision and report success for a test nobody was
+    // looking at.
+    routed.testId = "tst_2";
+    routed.pathname = "/projects/prj_1/tests/tst_2";
+    view.rerender(<TestDetailPage />);
+
+    await waitFor(() => {
+      expect(
+        (screen.getByLabelText("Name") as HTMLInputElement).value,
+      ).toBe("A different test");
+    });
+    expect(screen.queryByText("Test tst_1 moved.")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Read the test again" }),
+    ).toBeNull();
+  });
+
   it("reads an older version without offering to make it current", async () => {
     routed.pathname = "/projects/prj_1/tests/tst_1";
     apiAnswers({

@@ -72,6 +72,21 @@ it("reaches a real local platform with nothing configured anywhere", async () =>
     expect(env.EGMA_URL).toBeUndefined();
     const paths = folderPathsIn(workspace.dir);
 
+    // A test always applies to at least one active agent, so the project needs
+    // one before a folder can push anything into it. This folder names no
+    // platform, so it may hold no platform identifier either — which is the
+    // rule this whole test is about — and a push from it therefore names no
+    // agent and is given the project's active ones, exactly as the upgrade gave
+    // installed tests theirs. Registering one here is what makes that set
+    // non-empty; `egma connect` is what does it for a person.
+    const registered = await platform.api.inject({
+      method: "POST",
+      url: "/api/agents",
+      headers: { authorization: `Bearer ${customer.secret}` },
+      payload: { name: "Receptionist" },
+    });
+    expect(registered.statusCode, registered.body).toBe(201);
+
     const started = await egma(
       ["init", "--agent", "Receptionist", "--connection", "retell-1", "--cwd", workspace.dir],
       { cwd: workspace.dir, env },
