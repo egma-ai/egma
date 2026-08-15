@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -53,6 +53,13 @@ import path from "node:path";
  *    lock. So clearing happens behind a second, briefly-held file, and
  *    `release` removes the lock only when the token in it is still the token it
  *    wrote.
+ * 4. **A process id is not an identity.** Operating systems reuse them. A
+ *    holder that was killed leaves its lock behind, and the moment something
+ *    unrelated is given its number the lock reads as held by a living process
+ *    and every later build and browser test is refused until somebody deletes
+ *    the file by hand. So the lock records *when* the holder started as well as
+ *    which number it had, and a number wearing a different start time is a
+ *    different process — see `processIdentity`.
  */
 
 /** The two holders, named once so both sides say the same words. */
@@ -85,7 +92,19 @@ type Holder = {
   readonly since: string;
   /** This holding, told apart from every other. Checked before release. */
   readonly token: string;
+  /**
+   * What the operating system says about when process {@link pid} started.
+   * Empty where this machine would not say — see `processIdentity`.
+   */
+  readonly startedAt: string;
 };
+
+/**
+ * How long a process that was asked to stop is given before it is made to.
+ * A Next development server takes a moment to close its watchers; a wedged one
+ * must not hold a suite open for longer than a person will wait.
+ */
+export const STOP_MILLISECONDS = 10_000;
 
 /** A pause without a promise, because taking the lock is a synchronous act. */
 function pause(milliseconds: number): void {
@@ -118,7 +137,7 @@ function read(lockPath: string): Reading {
     if (typeof found !== "object" || found === null) {
       return { state: "unreadable" };
     }
-    const { pid, who, since, token } = found as Partial<Holder>;
+    const { pid, who, since, token, startedAt } = found as Partial<Holder>;
     if (typeof pid !== "number" || typeof who !== "string") {
       return { state: "unreadable" };
     }
@@ -129,6 +148,7 @@ function read(lockPath: string): Reading {
         who,
         since: typeof since === "string" ? since : "",
         token: typeof token === "string" ? token : "",
+        startedAt: typeof startedAt === "string" ? startedAt : "",
       },
     };
   } catch {
@@ -136,8 +156,8 @@ function read(lockPath: string): Reading {
   }
 }
 
-/** Whether the process that wrote the lock is still there to release it. */
-function stillRunning(pid: number): boolean {
+/** Whether anything at all answers to this number. */
+function numberInUse(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -145,6 +165,58 @@ function stillRunning(pid: number): boolean {
     // EPERM means somebody else's process, which is still a running one.
     return (whyNot as NodeJS.ErrnoException).code === "EPERM";
   }
+}
+
+/**
+ * When a process started, as the machine reports it — the half of a process's
+ * identity that a recycled number cannot bring with it.
+ *
+ * `/proc` first, which is Linux, every container and all of CI, and costs a
+ * file read. `ps` second, which is what a developer's macOS answers, and costs
+ * one short-lived process — paid only when a lock file is already there, so
+ * never on the path that simply takes the lock.
+ *
+ * `undefined` means this machine would not say. That is read as "still the
+ * holder" everywhere below, because refusing a build is a smaller harm than
+ * two processes writing one directory.
+ */
+function processIdentity(pid: number): string | undefined {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    // The command's own name sits in brackets and may hold spaces and
+    // brackets of its own, so the fields are counted from after the last one.
+    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    // `state` is the third field of the line, so `starttime`, the
+    // twenty-second, is nineteen along from there.
+    const startedAt = fields[19];
+    if (startedAt !== undefined && startedAt !== "") return startedAt;
+  } catch {
+    // No /proc on this machine, or no such process any more.
+  }
+
+  const asked = spawnSync("ps", ["-p", String(pid), "-o", "lstart="], {
+    encoding: "utf8",
+    timeout: 5_000,
+  });
+  if (asked.status !== 0) return undefined;
+  const said = (asked.stdout ?? "").trim();
+  return said === "" ? undefined : said;
+}
+
+/**
+ * Whether the process that wrote the lock is still there to release it.
+ *
+ * Both halves have to agree. A number nothing answers to is gone; a number
+ * something else has been given since is gone too, and that second case is the
+ * one that used to strand a lock forever.
+ */
+function stillHolding(holder: Holder): boolean {
+  if (!numberInUse(holder.pid)) return false;
+  if (holder.startedAt === "") return true; // Written before this was recorded.
+
+  const nowRunning = processIdentity(holder.pid);
+  if (nowRunning === undefined) return true; // This machine would not say.
+  return nowRunning === holder.startedAt;
 }
 
 /**
@@ -201,7 +273,7 @@ function clearAbandoned(lockPath: string, abandoned: Holder): boolean {
       now.state === "held" &&
       now.holder.token === abandoned.token &&
       now.holder.pid === abandoned.pid &&
-      !stillRunning(now.holder.pid)
+      !stillHolding(now.holder)
     ) {
       unlinkSync(lockPath);
     }
@@ -237,6 +309,7 @@ export function holdWebOutputLock(
     who,
     since: new Date().toISOString(),
     token,
+    startedAt: processIdentity(process.pid) ?? "",
   };
 
   for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
@@ -273,7 +346,7 @@ export function holdWebOutputLock(
       );
     }
 
-    if (stillRunning(now.holder.pid)) {
+    if (stillHolding(now.holder)) {
       throw refusal(
         who,
         lockPath,
@@ -293,6 +366,68 @@ export function holdWebOutputLock(
       "another process has been clearing an abandoned lock for far longer " +
       "than that takes.",
   );
+}
+
+/** Whether something finished before the clock ran out. */
+function before(finished: Promise<void>, milliseconds: number): Promise<boolean> {
+  return new Promise((answered) => {
+    const clock = setTimeout(() => {
+      answered(false);
+    }, milliseconds);
+    const stop = (): void => {
+      clearTimeout(clock);
+      answered(true);
+    };
+    finished.then(stop, stop);
+  });
+}
+
+/**
+ * Ask a process to stop, and wait until it really has.
+ *
+ * `kill` only sends a signal. A Next development server given `SIGTERM` keeps
+ * writing `apps/web/.next` while it closes its watchers, so a caller that
+ * signalled and moved on would hand the output directory to the next holder
+ * while the last one was still writing it — the exact corruption the lock
+ * exists to prevent, arrived at through the lock.
+ *
+ * Bounded, and then insistent: a process that ignores `SIGTERM` must not hold a
+ * suite open for as long as it likes.
+ */
+export async function stopped(
+  child: ChildProcess,
+  within: number = STOP_MILLISECONDS,
+): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+
+  const gone = new Promise<void>((exited) => {
+    child.once("exit", () => {
+      exited();
+    });
+  });
+
+  child.kill("SIGTERM");
+  if (await before(gone, within)) return;
+
+  child.kill("SIGKILL");
+  await before(gone, within);
+}
+
+/**
+ * Give the output directory back — but not before whoever was writing it has
+ * gone.
+ *
+ * This is the whole of a holder's shutdown, in one call, because the order is
+ * the thing being promised and an order kept in two places is an order half
+ * kept.
+ */
+export async function releaseAfter(
+  child: ChildProcess | undefined,
+  lock: WebOutputLock | undefined,
+  within: number = STOP_MILLISECONDS,
+): Promise<void> {
+  if (child !== undefined) await stopped(child, within);
+  lock?.release();
 }
 
 export type GuardedRun = {

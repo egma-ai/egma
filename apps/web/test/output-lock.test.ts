@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   A_PRODUCTION_WEB_BUILD,
   holdWebOutputLock,
+  releaseAfter,
   runHoldingWebOutputLock,
   THE_REAL_BROWSER_TEST,
 } from "../tools/output-lock.ts";
@@ -129,6 +130,108 @@ describe("several processes racing for it at once", () => {
     ).toBeGreaterThan(RACERS);
     expect(existsSync(lockPath)).toBe(false);
   }, 60_000);
+});
+
+describe("a process id the operating system has given to somebody else", () => {
+  /**
+   * The way a lock used to become permanent.
+   *
+   * A holder that is killed leaves its file behind. Operating systems reuse
+   * process numbers, so sooner or later something unrelated is given that
+   * number, `kill(pid, 0)` answers yes, and every build and browser test after
+   * that is refused by a process that never held anything. The lock records
+   * when its holder started as well as which number it had, so a number
+   * wearing a different start time is a different process.
+   *
+   * The number below is this very process, so it is genuinely running — which
+   * is the whole point. Only the start time says it is not the holder.
+   */
+  it("is not mistaken for the holder that has gone", async () => {
+    const lockPath = await aLockPath();
+    await writeFile(
+      lockPath,
+      JSON.stringify({
+        pid: process.pid,
+        who: THE_REAL_BROWSER_TEST,
+        since: new Date().toISOString(),
+        token: "the-killed-holder",
+        startedAt: "17", // Long before this process, whatever the machine says.
+      }),
+    );
+
+    const build = holdWebOutputLock(A_PRODUCTION_WEB_BUILD, lockPath);
+
+    expect(JSON.parse(await readFile(lockPath, "utf8")).who).toBe(
+      A_PRODUCTION_WEB_BUILD,
+    );
+    build.release();
+  });
+
+  it("still refuses a holder that really is this process", async () => {
+    const lockPath = await aLockPath();
+    const held = holdWebOutputLock(THE_REAL_BROWSER_TEST, lockPath);
+
+    expect(() => holdWebOutputLock(A_PRODUCTION_WEB_BUILD, lockPath)).toThrow(
+      new RegExp(THE_REAL_BROWSER_TEST),
+    );
+
+    held.release();
+  });
+});
+
+describe("handing the directory back", () => {
+  /**
+   * `kill` is a signal, not a departure.
+   *
+   * The child below takes a moment to go after it is asked to, which is what a
+   * Next development server closing its watchers does — and it is still writing
+   * `apps/web/.next` for all of that moment. So the question is not whether the
+   * lock is eventually released; it is whether the lock was still held at the
+   * instant the child died. That is read off the file system from inside the
+   * child's own `exit` event, not inferred afterwards.
+   */
+  it("keeps the lock until the process writing the directory has gone", async () => {
+    const lockPath = await aLockPath();
+    const lock = holdWebOutputLock(THE_REAL_BROWSER_TEST, lockPath);
+
+    const child = spawn(process.execPath, [
+      "-e",
+      // Polite, but not quick: exactly the shape that made this a defect.
+      "process.on('SIGTERM', () => setTimeout(() => process.exit(0), 400));" +
+        "setInterval(() => {}, 1000);",
+    ]);
+    await new Promise((running) => child.once("spawn", running));
+
+    let heldWhenItDied: boolean | undefined;
+    child.once("exit", () => {
+      heldWhenItDied = existsSync(lockPath);
+    });
+
+    await releaseAfter(child, lock);
+
+    expect(heldWhenItDied, "the lock was already free when the child died").toBe(
+      true,
+    );
+    expect(existsSync(lockPath)).toBe(false);
+  }, 20_000);
+
+  it("stops insisting on politeness, so one wedged process cannot hold a suite open", async () => {
+    const lockPath = await aLockPath();
+    const lock = holdWebOutputLock(THE_REAL_BROWSER_TEST, lockPath);
+
+    const deaf = spawn(process.execPath, [
+      "-e",
+      "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);",
+    ]);
+    await new Promise((running) => deaf.once("spawn", running));
+
+    const started = Date.now();
+    await releaseAfter(deaf, lock, 300);
+
+    expect(deaf.exitCode !== null || deaf.signalCode !== null).toBe(true);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(existsSync(lockPath)).toBe(false);
+  }, 20_000);
 });
 
 describe("running a command under the lock", () => {

@@ -14,6 +14,7 @@ import { loadConfig, type Config } from "../../src/config.ts";
 import { buildApi } from "../../src/server.ts";
 import {
   holdWebOutputLock,
+  releaseAfter,
   THE_REAL_BROWSER_TEST,
   type WebOutputLock,
 } from "../../../web/tools/output-lock.ts";
@@ -267,8 +268,11 @@ export async function startInstance(
     // `create database` gets slower as the count climbs and the next run is
     // then likelier to fail the same way. See
     // `packages/db/test/support/sweep-stale-databases.ts`.
-    web?.kill("SIGTERM");
-    webOutput?.release();
+    // The lock goes back only once the development server has actually gone —
+    // `kill` is a signal, not a departure, and a Next process still writing
+    // `apps/web/.next` while the next holder starts is the corruption the lock
+    // exists to prevent.
+    await releaseAfter(web, webOutput);
     await Promise.allSettled([
       app.close(),
       disconnect(),
@@ -284,8 +288,9 @@ export async function startInstance(
     database,
     traceStore,
     async close() {
-      web?.kill("SIGTERM");
-      webOutput?.release();
+      // Waits for the development server to be gone before the output
+      // directory is anybody else's. See `releaseAfter`.
+      await releaseAfter(web, webOutput);
       await app.close();
       await disconnect();
       await disconnectClickHouse();

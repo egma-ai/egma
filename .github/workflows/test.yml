@@ -22,6 +22,12 @@ name: Tests
 # `tools/test-lanes.ts` owns what each lane selects, and every run prints the
 # lane it chose before it starts, so a green tick can always be read back to
 # the proof it stands for.
+#
+# Every job runs on a Blacksmith runner, which the organization already pays
+# for and which carries GitHub's own runner image — so docker, the compose
+# services and the official cache actions all behave as they did. The release
+# workflow beside this one stays on `ubuntu-latest` on purpose: it holds npm
+# publishing authority, and moving that is a separate decision.
 
 on:
   pull_request:
@@ -37,7 +43,7 @@ permissions:
 jobs:
   checks:
     name: Lint and typecheck
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Say which lanes this pull request runs
         # So the tick on a pull request can be read back to the proof it stands
@@ -79,7 +85,7 @@ jobs:
 
   fast:
     name: Fast lane
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -91,6 +97,19 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      - name: Install uv and sync the simulator
+        # The fast lane is not all TypeScript. `apps/api/test/simulator-walk.
+        # test.ts` spawns the real shipped simulator — `uv run --frozen
+        # egma-simulator`, in `apps/simulator` — and walks a run through it to a
+        # verdict. Without uv that child never starts, and the walk waits sixty
+        # seconds for a simulation nothing was ever going to conduct.
+        #
+        # The sync is separate so the Python install is paid here rather than
+        # inside that sixty-second window. It is the same pair of steps
+        # `egma-dev-setup` runs on a developer's machine.
+        run: pipx install uv && uv sync --frozen
+        working-directory: apps/simulator
 
       - name: Warm the object-store image
         # Only where a skip is not allowed. The recording suites start a MinIO
@@ -118,7 +137,7 @@ jobs:
     # `apps/api/test/support/instance.ts` and `apps/web/tools/output-lock.ts`.
     name: Browser lane (one job, never sharded)
     if: github.base_ref == 'main'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -156,7 +175,7 @@ jobs:
   simulator:
     name: Simulator tests
     if: github.base_ref == 'main'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -181,7 +200,7 @@ jobs:
   sdk:
     name: Python SDK tests
     if: github.base_ref == 'main'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -203,7 +222,7 @@ jobs:
   fixture:
     name: Fixture agent tests
     if: github.base_ref == 'main'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
