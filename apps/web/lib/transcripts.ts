@@ -128,8 +128,21 @@ export type Detail = {
   readonly simulation_id?: string | null;
   /** Absent on a trace nothing has judged, and on one whose store is down. */
   readonly verdicts?: readonly Judgment[];
-  /** The result folded over every judgment, or null before grading finishes. */
+  /**
+   * The result folded over the **required** graders, or null before grading
+   * finishes. What a diagnostic said is never in here — see below.
+   */
   readonly outcome: Outcome | null;
+  /**
+   * The same fold over the graders that only report, or null where none of them
+   * judged this exchange.
+   *
+   * It is carried on the model rather than left to the page to reach for,
+   * because the two are one answer: the outcome above was folded *without*
+   * these, so a page that showed one and not the other would be showing a
+   * headline with a piece of its own arithmetic missing.
+   */
+  readonly diagnostics?: Outcome | null;
 };
 
 /**

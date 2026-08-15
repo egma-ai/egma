@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Fragment, use, useEffect, useState, type CSSProperties } from "react";
 
+import { GRADING } from "../../../lib/grading-copy.ts";
 import {
   DETAIL,
   FACTS,
@@ -194,7 +195,12 @@ export default function TranscriptPage({
         </header>
 
         <Summary facts={detail.trace} />
-        {detail.outcome ? <OutcomeSummary outcome={detail.outcome} /> : null}
+        {detail.outcome ? (
+          <OutcomeSummary
+            outcome={detail.outcome}
+            diagnostics={detail.diagnostics ?? null}
+          />
+        ) : null}
 
         {/*
           The audio of this exchange, where egma is the one who had it.
@@ -289,12 +295,38 @@ function Summary({ facts }: { facts: TraceFacts }) {
   );
 }
 
-function OutcomeSummary({ outcome }: { outcome: Outcome }) {
-  const checks = [`${outcome.counts.passed}/${outcome.counts.total} passed`];
-  if (outcome.counts.failed > 0) checks.push(`${outcome.counts.failed} failed`);
-  if (outcome.counts.skipped > 0) checks.push(`${outcome.counts.skipped} skipped`);
-  if (outcome.counts.errored > 0) checks.push(`${outcome.counts.errored} errored`);
+/** What was judged, in the words a tally is read in. Written once, so the two
+ * lanes below cannot come to count the same rows two ways. */
+function tallyOf(counts: Outcome["counts"]): string {
+  const said = [`${counts.passed}/${counts.total} passed`];
+  if (counts.failed > 0) said.push(`${counts.failed} failed`);
+  if (counts.skipped > 0) said.push(`${counts.skipped} skipped`);
+  if (counts.errored > 0) said.push(`${counts.errored} errored`);
+  return said.join(" · ");
+}
 
+/**
+ * What egma made of this exchange: the verdict, the number, and what was
+ * counted — over the graders that can fail something.
+ *
+ * **The diagnostics sit beside it and never in it**, which is the same
+ * arrangement a run's results make and for the same reason. A grader carrying
+ * `required: false` is judged exactly as a blocking one is and reports the same
+ * fraction, and it can never change the word to its left. Folded in, it would
+ * move a verdict it is not allowed to move; left out altogether, it would be a
+ * grader somebody switched on that judges in silence — and the failures on the
+ * cards further down the page would have nothing up here to belong to.
+ *
+ * One figure rather than the run page's grid, because this page is one exchange:
+ * three cards of one row each would be furniture around a single number.
+ */
+function OutcomeSummary({
+  outcome,
+  diagnostics,
+}: {
+  outcome: Outcome;
+  diagnostics: Outcome | null;
+}) {
   return (
     <section className={`${styles.runFacts} ${styles.traceOutcome}`} aria-label="Grading outcome">
       <div className={styles.contextFact} data-verdict={outcome.verdict}>
@@ -307,8 +339,21 @@ function OutcomeSummary({ outcome }: { outcome: Outcome }) {
       </div>
       <div className={styles.contextFact}>
         <span>Checks</span>
-        <strong>{checks.join(" · ")}</strong>
+        <strong>{tallyOf(outcome.counts)}</strong>
       </div>
+      {/*
+        Deliberately uncoloured, whatever it says. `data-verdict` is what paints
+        a fact red, and a red diagnostic here would read as a reason the verdict
+        to its left is red — which is the one thing it can never be.
+      */}
+      {diagnostics === null ? null : (
+        <div className={styles.contextFact} title={GRADING.diagnosticAside}>
+          <span>{GRADING.diagnosticLane}</span>
+          <strong>
+            {diagnostics.verdict} · {tallyOf(diagnostics.counts)}
+          </strong>
+        </div>
+      )}
     </section>
   );
 }

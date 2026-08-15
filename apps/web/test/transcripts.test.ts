@@ -490,10 +490,17 @@ describe("what the pages say out loud", () => {
       expect(source, page).toContain("transcript-copy.ts");
     }
 
-    // And the card those pages draw a judgment with, which carries words of its
-    // own and therefore a copy file of its own.
-    const card = await readFile(path.join(WEB, "app/judgment-card.tsx"), "utf8");
-    expect(card).toContain("grading-copy.ts");
+    // And everything that says one of the two lanes out loud, which is words of
+    // its own and therefore a copy file of its own: the card both surfaces draw
+    // a judgment with, and the summary above it that reports the lane the
+    // outcome was folded without.
+    for (const page of [
+      "app/judgment-card.tsx",
+      "app/traces/[traceId]/page.tsx",
+    ]) {
+      const source = await readFile(path.join(WEB, page), "utf8");
+      expect(source, page).toContain("grading-copy.ts");
+    }
   });
 });
 

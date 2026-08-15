@@ -25,4 +25,10 @@ export const GRADING = {
   /** The heading over the lane, where a whole run's worth is shown together. */
   diagnosticLane: "Diagnostics",
   diagnosticLaneLead: "Judged and reported. Nothing here can fail this run.",
+  /**
+   * The same lane on a page showing one exchange, where a grid would be three
+   * cards of one row each. A figure beside the verdict, and one line saying why
+   * it is beside it rather than in it.
+   */
+  diagnosticAside: "Judged and reported. Nothing here changed the verdict.",
 } as const;

@@ -354,8 +354,39 @@ describe("the pages", () => {
     );
 
     expect(contract).toContain("readonly outcome: Outcome | null");
-    expect(transcript).toContain("<OutcomeSummary outcome={detail.outcome}");
+    expect(transcript).toContain("<OutcomeSummary");
+    expect(transcript).toContain("outcome={detail.outcome}");
     expect(transcript).toContain('aria-label="Grading outcome"');
+  });
+
+  /**
+   * The outcome above is folded over the graders that can fail something, so
+   * the lane it was folded *without* has to be on the same page — otherwise the
+   * failures on the cards below have nothing up here to belong to, and a reader
+   * is left to work out for themselves why a red judgment sits under a green
+   * verdict.
+   *
+   * It is carried on the model rather than reached for off a loose response,
+   * which is what stops the read sending a field the page quietly drops.
+   */
+  it("shows the diagnostic lane beside that outcome, from the model", async () => {
+    const transcript = await readFile(
+      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      "utf8",
+    );
+    const contract = await readFile(
+      path.join(WEB, "lib/transcripts.ts"),
+      "utf8",
+    );
+
+    expect(contract).toContain("readonly diagnostics?: Outcome | null");
+    expect(transcript).toContain("diagnostics={detail.diagnostics");
+    expect(transcript).toContain("GRADING.diagnosticLane");
+    // Never coloured by what it says: `data-verdict` is what paints a fact red,
+    // and a red diagnostic would read as a reason the verdict beside it is red.
+    expect(transcript).not.toMatch(
+      /diagnostics\.verdict[^\n]*data-verdict/u,
+    );
   });
 
   it("reach the API for the device flow at paths this instance rewrites", async () => {
