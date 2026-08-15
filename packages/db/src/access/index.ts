@@ -115,7 +115,10 @@ export {
   ConnectionRestoreRefusedError,
   DefaultPersonaReplacementError,
   GraderNamedByTestsError,
+  IdempotencyConflictError,
   IdentityConflictError,
+  JudgeCredentialInUseError,
+  JudgeNotConfiguredError,
   JudgeProviderMismatchError,
   LastAdminError,
   MockToolTakenError,
@@ -138,6 +141,7 @@ export {
   type AgentWriteRefusal,
   type ArchivedDependency,
   type ConnectionRestoreRefusal,
+  type JudgeCredentialUse,
   type RunWriteRefusal,
   type TestAgentRefusal,
   type TestNamingGrader,
@@ -503,9 +507,11 @@ export {
  * one lives behind the grading engine's own context.
  */
 export {
+  archiveJudgeCredential,
   createJudgeCredential,
   editJudgeCredential,
   getJudgeCredential,
+  judgeCredentialUses,
   listJudgeCredentials,
   type JudgeCredential,
   type JudgeCredentialChanges,
@@ -559,9 +565,36 @@ export type {
   RunStatus,
   RunTrigger,
   SimulationEndingReason,
+  SimulationSkipReason,
   SimulationStatus,
   Verdict,
 } from "../schema/runs.ts";
+
+/**
+ * What a run would freeze, and what one already froze.
+ *
+ * `planRun` is the review step's read and `startRun`'s own resolver, which is
+ * the whole point of it being one function: what the review showed is what
+ * starts. `getGradingPlan` answers with what a run actually froze, including
+ * the honest `not_recorded` state for history that predates plans.
+ */
+export {
+  getGradingPlan,
+  planRun,
+  EXPECTED_BEHAVIORS_ENGINE_VERSION,
+  type AuthoredPlanItem,
+  type BuiltInPlanItem,
+  type CapabilityDecision,
+  type GradingPlan,
+  type JudgeChoice,
+  type PlanGroup,
+  type PlanItem,
+  type PlanJudge,
+  type PlannedSimulationGroup,
+  type RunPlan,
+  type RunPlanRequest,
+} from "./run-plans.ts";
+export type { GradingPlanState } from "../schema/plans.ts";
 
 export {
   claimGradingJobs,

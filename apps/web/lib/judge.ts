@@ -90,6 +90,20 @@ export function judgeCredentialPath(credentialId: string): string {
 }
 
 /**
+ * Taking a credential out of use.
+ *
+ * Its own address rather than a field on the edit, because it is a different
+ * kind of decision: a relabel or a rotation always succeeds, and this is
+ * refused while a project points at the credential, while a run whose frozen
+ * grading plan names it still has a conversation moving, or while a grading job
+ * is waiting to be judged or already claimed. The refusal names every blocking
+ * use and the page shows it word for word.
+ */
+export function judgeCredentialArchivePath(credentialId: string): string {
+  return `${judgeCredentialPath(credentialId)}/archive`;
+}
+
+/**
  * The credentials an answer actually carried, and none at all when it carried
  * something this page cannot read.
  *

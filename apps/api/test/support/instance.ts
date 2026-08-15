@@ -189,6 +189,13 @@ export async function startInstance(
         EGMA_SIMULATOR_SERVICE_TOKEN: "egma_st_held-by-this-test-suite-alone",
         EGMA_BASE_URL: origin,
         EGMA_SINGLE_ORGANIZATION: "false",
+        // A deployment set up the way `egma self-host setup` sets one up. Runs
+        // need a judge — every run carries the judge-backed expected-behaviors
+        // built-in — so an instance without one could start no run at all. The
+        // key is nonsense and never reaches a provider; nothing here judges.
+        EGMA_JUDGE_PROVIDER: "openai",
+        EGMA_JUDGE_MODEL: "gpt-4o-mini",
+        EGMA_JUDGE_API_KEY: "sk-test-instance-judge",
       }),
       ...(options.blob === undefined ? {} : { blob: options.blob }),
     },

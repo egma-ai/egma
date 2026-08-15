@@ -33,7 +33,7 @@ import {
   createConnectedDatabase,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedOrganization, seedUser } from "./support/tenancy.ts";
+import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
  * The simulator's claim, instance-wide, and the door its credentials come
@@ -172,6 +172,8 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, grace, "grace@globex.example");
+  await seedJudge({ ...actingAsAcme(), role: "admin" });
+  await seedJudge({ ...actingAsGlobex(), role: "admin" });
 
   acmeSeed = await seedCustomer(actingAsAcme(), "retell-secret-A1B2C3D4WXYZ");
   globexSeed = await seedCustomer(actingAsGlobex(), "retell-secret-E5F6G7H8UVWX");

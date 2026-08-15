@@ -30,7 +30,7 @@ import {
   POSTGRES_ERROR,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedOrganization, seedUser } from "./support/tenancy.ts";
+import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
  * The grading queue: how a finished conversation becomes work, and how the
@@ -137,6 +137,8 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, gene, "gene@globex.example");
+  await seedJudge({ ...actingAsAcme(), role: "admin" });
+  await seedJudge({ ...actingAsGlobex(), role: "admin" });
 
   const created = await createAgent(auth, {
     name: "Front desk",

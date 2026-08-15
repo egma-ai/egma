@@ -2510,3 +2510,322 @@ describe("tests gaining applicable agents over installed data (0028)", () => {
     ).rejects.toThrow(/test_archive_reason_needs_an_archive/u);
   });
 });
+
+/**
+ * Runs written before egma froze a grading plan, and what the upgrade may say
+ * about them.
+ *
+ * **The rule is that nothing is invented.** A run with work still outstanding
+ * has a plan captured during the upgrade, because that work is about to be
+ * judged and has to be judged against something written down. Every other old
+ * run says `not_recorded` and holds nothing at all — reconstructing a plan from
+ * today's graders would put a sentence on a run from March claiming it was
+ * judged by things that may not have existed when it ran, and a page would
+ * present that as a pin.
+ *
+ * The second claim is the shape of a captured plan on history that predates
+ * stored tests: a simulation with no test version falls into the one testless
+ * group, which carries the project's default authored graders and neither a
+ * scenario grader nor the expected-behaviors built-in.
+ */
+describe("grading plans over installed runs (0029)", () => {
+  let database: EmptyDatabase;
+  let before: string;
+  let client: pg.Client;
+
+  const organizationId = newId("org");
+  const projectId = newId("prj");
+  const agentId = newId("agt");
+  const connectionId = newId("con");
+  const personaId = newId("prs");
+  const personaVersionId = newId("prsv");
+  const testId = newId("tst");
+  const testVersionId = newId("tstv");
+  const graderId = newId("grd");
+  const graderVersionId = newId("grv");
+
+  /** Still conducting when the upgrade landed. */
+  const movingRun = newId("run");
+  const movingSimulation = newId("sim");
+  /** Finished long ago, with nothing left to judge. */
+  const settledRun = newId("run");
+  const settledSimulation = newId("sim");
+  /** Conducted before a simulation could pin a test at all. */
+  const testlessRun = newId("run");
+  const testlessSimulation = newId("sim");
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("grading_plans");
+
+    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0029-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0029") {
+        await writeFile(path.join(before, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, before);
+
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query(
+      "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
+      [organizationId],
+    );
+    await client.query(
+      `insert into project (id, organization_id, name, slug, revision)
+       values ($1, $2, 'Default', 'default', $3)`,
+      [projectId, organizationId, newId("rev")],
+    );
+    await client.query(
+      `insert into agent (id, organization_id, project_id, name, revision)
+       values ($1, $2, $3, 'Front desk', $4)`,
+      [agentId, organizationId, projectId, newId("rev")],
+    );
+    await client.query(
+      `insert into connection
+         (id, organization_id, project_id, agent_id, name, type, modality, topology, variant_id, config, revision)
+       values ($1, $2, $3, $4, 'retell-1', 'retell', 'chat', 'hosted-broker', 'retell', '{"retellAgentId":"agent_abc"}'::jsonb, $5)`,
+      [connectionId, organizationId, projectId, agentId, newId("rev")],
+    );
+
+    // The project's judge, migrated into its own credential by 0026 — which is
+    // what a plan may point at, and the reason this migration comes after it.
+    const credentialId = newId("jcr");
+    await client.query(
+      `insert into judge_credential
+         (id, organization_id, label, provider, credentials, credentials_hint, revision)
+       values ($1, $2, 'Acme default', 'openai', 'sealed', 'WXYZ', $3)`,
+      [credentialId, organizationId, newId("rev")],
+    );
+    await client.query(
+      `insert into judge_configuration
+         (project_id, organization_id, provider, model, source, credential_id)
+       values ($1, $2, 'openai', 'gpt-4.1-mini', 'credential', $3)`,
+      [projectId, organizationId, credentialId],
+    );
+
+    await client.query("begin");
+    await client.query(
+      `insert into persona (id, organization_id, project_id, name, current_version_id, revision)
+       values ($1, $2, $3, 'Impatient Rita', $4, $5)`,
+      [personaId, organizationId, projectId, personaVersionId, newId("rev")],
+    );
+    await client.query(
+      `insert into persona_version (id, persona_id, version, traits)
+       values ($1, $2, 1, '{"personality":"Plain","language":"en-US"}'::jsonb)`,
+      [personaVersionId, personaId],
+    );
+    await client.query("commit");
+
+    await client.query("begin");
+    await client.query(
+      `insert into test (id, organization_id, project_id, name, current_version_id, revision, applicability_revision)
+       values ($1, $2, $3, 'Reschedules', $4, $5, $6)`,
+      [testId, organizationId, projectId, testVersionId, newId("rev"), newId("rev")],
+    );
+    await client.query(
+      `insert into test_version (id, test_id, version, content)
+       values ($1, $2, 1, '{"scenario":"Moves a booking","expectedBehaviors":["confirms the new time"]}'::jsonb)`,
+      [testVersionId, testId],
+    );
+    await client.query("commit");
+
+    // A project-default grader, which every captured group has to carry.
+    await client.query("begin");
+    await client.query(
+      `insert into grader
+         (id, organization_id, project_id, name, type, priority, scope, current_version_id, revision)
+       values ($1, $2, $3, 'Never promises a price', 'phrase_match', 'P1', 'simulations', $4, $5)`,
+      [graderId, organizationId, projectId, graderVersionId, newId("rev")],
+    );
+    await client.query(
+      `insert into grader_version (id, grader_id, version, config, reads, modalities)
+       values ($1, $2, 1, '{"required":[],"banned":[],"speaker":"agent"}'::jsonb,
+               array['transcript']::text[], array['voice','chat']::text[])`,
+      [graderVersionId, graderId],
+    );
+    await client.query("commit");
+
+    const run = async (
+      id: string,
+      status: string,
+      finished: boolean,
+    ): Promise<void> => {
+      await client.query(
+        `insert into run
+           (id, organization_id, project_id, agent_id, connection_id, status, triggered_via,
+            pinned_test_versions, requested_personas, connection_snapshot, mock_tool_snapshot,
+            expected_simulation_count, completed_count, failed_count, canceled_count,
+            started_at, finished_at)
+         values ($1, $2, $3, $4, $5, $6, 'manual',
+                 '{"testVersionIds":[]}'::jsonb, '{"personaIds":[]}'::jsonb,
+                 '{"type":"retell","modality":"chat","topology":"hosted-broker","environment":null,"config":{}}'::jsonb,
+                 '{"defaults":[],"overrides":{}}'::jsonb,
+                 1, ${finished ? "1" : "null"}, ${finished ? "0" : "null"},
+                 ${finished ? "0" : "null"}, now(), ${finished ? "now()" : "null"})`,
+        [id, organizationId, projectId, agentId, connectionId, status],
+      );
+    };
+
+    const simulation = async (
+      id: string,
+      runId: string,
+      status: string,
+      pinned: boolean,
+    ): Promise<void> => {
+      await client.query(
+        `insert into simulation
+           (id, run_id, organization_id, project_id, agent_id, connection_id,
+            persona_id, persona_version_id, test_id, test_version_id,
+            position, modality, status, started_at, ended_at, ending_reason)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9::text, $10::text,
+                 1, 'chat', $11,
+                 ${status === "queued" ? "null" : "now()"},
+                 ${status === "completed" ? "now()" : "null"},
+                 ${status === "completed" ? "'persona_concluded'" : "null"})`,
+        [
+          id,
+          runId,
+          organizationId,
+          projectId,
+          agentId,
+          connectionId,
+          personaId,
+          personaVersionId,
+          // A conversation written before a simulation could pin a test at all
+          // carries neither half of the pin, which is the row the testless
+          // group exists for.
+          pinned ? testId : null,
+          pinned ? testVersionId : null,
+          status,
+        ],
+      );
+    };
+
+    await run(movingRun, "running", false);
+    await simulation(movingSimulation, movingRun, "queued", true);
+
+    await run(settledRun, "completed", true);
+    await simulation(settledSimulation, settledRun, "completed", true);
+
+    await run(testlessRun, "running", false);
+    await simulation(testlessSimulation, testlessRun, "queued", false);
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(before, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("is what is still pending on a database that already holds runs", async () => {
+    const upgrade = (await readMigrations()).find((migration) =>
+      migration.name.startsWith("0029_"),
+    );
+    if (upgrade === undefined) throw new Error("0029 is missing");
+    await writeFile(path.join(before, upgrade.name), upgrade.sql);
+
+    const { applied } = await runMigrations(database.url, before);
+    expect(applied).toEqual([upgrade.name]);
+  });
+
+  it("captures a plan only for the run that still has work outstanding", async () => {
+    const { rows } = await client.query<{ run_id: string; state: string }>(
+      "select run_id, state from grading_plan order by run_id",
+    );
+    const byRun = new Map(rows.map((row) => [row.run_id, row.state]));
+
+    expect(byRun.get(movingRun)).toBe("migration_snapshot");
+    expect(byRun.get(testlessRun)).toBe("migration_snapshot");
+    // Nothing outstanding, so nothing is claimed about what judged it.
+    expect(byRun.get(settledRun)).toBe("not_recorded");
+  });
+
+  it("leaves an unrecorded plan holding nothing at all", async () => {
+    const { rows } = await client.query<{
+      groups: unknown;
+      credentials: unknown;
+      captured_at: string | null;
+    }>(
+      `select groups, judge_credential_ids as credentials, captured_at
+       from grading_plan where run_id = $1`,
+      [settledRun],
+    );
+    expect(rows[0]?.groups).toEqual([]);
+    expect(rows[0]?.credentials).toEqual([]);
+    // No plan, and therefore no moment: the two are one fact.
+    expect(rows[0]?.captured_at).toBeNull();
+  });
+
+  it("gives a pinned simulation a version group carrying the built-in and the project's graders", async () => {
+    const { rows } = await client.query<{ groups: PlanShape[] }>(
+      "select groups from grading_plan where run_id = $1",
+      [movingRun],
+    );
+    const [group] = rows[0]?.groups ?? [];
+
+    expect(group?.tag).toBe("version");
+    expect(group?.testVersionId).toBe(testVersionId);
+    expect(group?.items.map((item) => item.kind).sort()).toEqual([
+      "authored",
+      "built_in",
+    ]);
+
+    const builtIn = group?.items.find((item) => item.kind === "built_in");
+    expect(builtIn?.graderKey).toBe("expected_behaviors_v1");
+    // Judged, so it names the migrated credential — and never the secret.
+    expect(builtIn?.judge).toMatchObject({ tag: "configured", provider: "openai" });
+
+    const authored = group?.items.find((item) => item.kind === "authored");
+    expect(authored?.graderId).toBe(graderId);
+    expect(authored?.graderVersionId).toBe(graderVersionId);
+    // A phrase match asks no model, so naming one would be a bill nobody incurs.
+    expect(authored?.judge).toEqual({ tag: "not_required" });
+  });
+
+  it("gives a simulation with no test version the testless group, and nothing it cannot support", async () => {
+    const { rows } = await client.query<{ groups: PlanShape[] }>(
+      "select groups from grading_plan where run_id = $1",
+      [testlessRun],
+    );
+    const [group] = rows[0]?.groups ?? [];
+
+    expect(group?.tag).toBe("legacy_testless");
+    // Only the project's default authored graders. No scenario grader and no
+    // expected-behaviors built-in, because there is no stored test content to
+    // support either — and inventing one would be a claim about a conversation
+    // nobody can check.
+    expect(group?.items.map((item) => item.kind)).toEqual(["authored"]);
+    expect(group?.items[0]?.graderId).toBe(graderId);
+  });
+
+  it("indexes the credentials a captured plan needs, so an archive can refuse", async () => {
+    const { rows } = await client.query<{ credentials: string[] }>(
+      "select judge_credential_ids as credentials from grading_plan where run_id = $1",
+      [movingRun],
+    );
+    expect(rows[0]?.credentials).toHaveLength(1);
+    expect(rows[0]?.credentials[0]).toMatch(/^jcr_/u);
+  });
+
+  it("gives every finished run a skipped count of zero, because nothing was skipped before it could be", async () => {
+    const { rows } = await client.query<{ skipped_count: number | null }>(
+      "select skipped_count from run where id = $1",
+      [settledRun],
+    );
+    expect(rows[0]?.skipped_count).toBe(0);
+  });
+});
+
+/** A captured plan's stored shape, as this file reads it back. */
+type PlanShape = {
+  readonly tag: string;
+  readonly testVersionId?: string;
+  readonly items: readonly {
+    readonly kind: string;
+    readonly graderKey?: string;
+    readonly graderId?: string;
+    readonly graderVersionId?: string;
+    readonly judge: Record<string, unknown>;
+  }[];
+};

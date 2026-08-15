@@ -25,7 +25,7 @@ import {
   createConnectedDatabase,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedOrganization, seedUser } from "./support/tenancy.ts";
+import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
  * The run events record, at the seam the rest of egma reaches it through.
@@ -151,6 +151,8 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, grace, "grace@globex.example");
+  await seedJudge({ ...actingAsAcme(), role: "admin" });
+  await seedJudge({ ...actingAsGlobex(), role: "admin" });
 
   const created = await createAgent(actingAsAcme(), {
     name: "Front desk",

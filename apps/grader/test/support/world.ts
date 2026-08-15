@@ -156,6 +156,20 @@ export async function makeWorld(label: string): Promise<World> {
     },
   });
 
+  /**
+   * A judge, because a run cannot start without one.
+   *
+   * Every run carries the judge-backed expected-behaviors built-in, so a
+   * project in `needs_setup` is refused before anything is conducted — which
+   * makes "a provisioned project" and "a project with a judge" the same thing.
+   * A test about the *absence* of a judge clears the row after its run exists,
+   * which is also the only way that state can arise now.
+   */
+  await setJudgeConfiguration(
+    { ...auth, role: "admin" },
+    { provider: "openai", model: "gpt-4.1-mini", key: THE_JUDGE_KEY },
+  );
+
   const bare = await createTest(auth, {
     name: "A conversation with nothing named about it",
     scenario: "Their cleaning has to move to any afternoon next week.",

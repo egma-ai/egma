@@ -138,6 +138,10 @@ const config: NextConfig = {
           destination: `${api}/api/test-versions/:path*`,
         },
         { source: "/api/runs", destination: `${api}/api/runs` },
+        // What a run would freeze, read by the builder's review step before
+        // anybody starts one. Its own rule because it is not under
+        // `/api/runs` — nothing is created and nothing is reserved by asking.
+        { source: "/api/run-plan", destination: `${api}/api/run-plan` },
         { source: "/api/runs/:path*", destination: `${api}/api/runs/:path*` },
         // One conversation's own paths — today, resolving its recording into a
         // link the browser then fetches from the object store directly. Without

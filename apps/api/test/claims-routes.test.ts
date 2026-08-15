@@ -1,3 +1,4 @@
+import { newId } from "@egma/ids";
 import {
   createPersona,
   getSimulation,
@@ -159,6 +160,7 @@ async function aQueuedRun(
   const started = await ask(api.app, "POST", "/api/runs", key, {
     connection: connectionId,
     test_versions: [versionId],
+    idempotency_key: newId("run"),
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
   const simulations = started.body.simulations as { id: string }[];

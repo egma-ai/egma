@@ -1,3 +1,4 @@
+import { newId } from "@egma/ids";
 import { createPersona, type AuthContext } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -77,7 +78,11 @@ async function aQueuedRun(): Promise<void> {
     "POST",
     "/api/runs",
     { authorization: `Bearer ${key}` },
-    { connection: connectionId, test_versions: [versionId] },
+    {
+      connection: connectionId,
+      test_versions: [versionId],
+      idempotency_key: newId("run"),
+    },
   );
   expect(started.status, JSON.stringify(started.body)).toBe(201);
 }

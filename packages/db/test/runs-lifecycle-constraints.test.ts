@@ -624,6 +624,7 @@ describe("the run header", () => {
       completed_count: 0,
       failed_count: 0,
       canceled_count: 1,
+      skipped_count: 0,
     });
 
     await expect(

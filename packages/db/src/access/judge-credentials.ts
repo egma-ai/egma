@@ -1,16 +1,27 @@
 import { newId } from "@egma/ids";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 
-import { db } from "../client.ts";
+import { db, type Queryable } from "../client.ts";
 import {
+  judgeConfiguration,
   judgeCredential,
   JUDGE_PROVIDERS,
   type JudgeProvider,
 } from "../schema/graders.ts";
+import { gradingJob } from "../schema/grading.ts";
+import { gradingPlan } from "../schema/plans.ts";
+import { run, simulation } from "../schema/runs.ts";
+import { project } from "../schema/tenancy.ts";
 import { sealCredentials } from "../sealing.ts";
 import type { AuthContext } from "./context.ts";
-import { IdentityConflictError, UnprocessableInputError } from "./errors.ts";
+import {
+  IdentityConflictError,
+  JudgeCredentialInUseError,
+  UnprocessableInputError,
+  type JudgeCredentialUse,
+} from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
+import { plansNeedingCredential } from "./run-plans.ts";
 import { within } from "./within.ts";
 
 /**
@@ -346,4 +357,168 @@ export async function editJudgeCredential(
     }
     return answer(row);
   });
+}
+
+
+/**
+ * Every reason this credential cannot go away yet, read in one place so a
+ * refusal and a page can never disagree about what is blocking.
+ *
+ * **Three questions, and each is asked of a different thing.** A project
+ * pointing at the credential would lose its judge outright. A run whose frozen
+ * plan names it while a conversation is still moving will be graded the moment
+ * that conversation lands, against a plan whose key has gone. And a grading job
+ * that is `pending` or `claimed` is the work already in flight — the service
+ * resolves the current secret when it claims, so archiving under it turns a
+ * whole run's judgments into errors nobody can act on.
+ *
+ * They are asked inside the caller's own transaction, under the lock the
+ * credential is already held by, so nothing can start needing it between the
+ * question and the write.
+ */
+async function usesOf(
+  on: Queryable,
+  auth: AuthContext,
+  credentialId: string,
+): Promise<readonly JudgeCredentialUse[]> {
+  const uses: JudgeCredentialUse[] = [];
+
+  for (const row of await on
+    .select({ projectId: judgeConfiguration.projectId })
+    .from(judgeConfiguration)
+    .innerJoin(project, eq(judgeConfiguration.projectId, project.id))
+    .where(
+      and(
+        eq(judgeConfiguration.organizationId, auth.organizationId),
+        eq(judgeConfiguration.credentialId, credentialId),
+        isNull(project.deletedAt),
+      ),
+    )
+    .orderBy(asc(judgeConfiguration.projectId))) {
+    uses.push({ kind: "project", id: row.projectId });
+  }
+
+  // A plan is needed while anything under its run is still moving. Terminal
+  // rows have been judged or will never be, and a `skipped` one was never
+  // enqueued at all — so a run made entirely of them blocks nothing.
+  for (const row of await on
+    .selectDistinct({ runId: gradingPlan.runId })
+    .from(gradingPlan)
+    .innerJoin(simulation, eq(simulation.runId, gradingPlan.runId))
+    .where(
+      and(
+        eq(gradingPlan.organizationId, auth.organizationId),
+        plansNeedingCredential(credentialId),
+        inArray(simulation.status, ["queued", "claimed", "running"]),
+      ),
+    )
+    .orderBy(asc(gradingPlan.runId))) {
+    uses.push({ kind: "run", id: row.runId });
+  }
+
+  for (const row of await on
+    .selectDistinct({ jobId: gradingJob.id })
+    .from(gradingJob)
+    .innerJoin(simulation, eq(gradingJob.simulationId, simulation.id))
+    .innerJoin(gradingPlan, eq(gradingPlan.runId, simulation.runId))
+    .where(
+      and(
+        eq(gradingJob.organizationId, auth.organizationId),
+        inArray(gradingJob.status, ["pending", "claimed"]),
+        plansNeedingCredential(credentialId),
+      ),
+    )
+    .orderBy(asc(gradingJob.id))) {
+    uses.push({ kind: "grading_job", id: row.jobId });
+  }
+
+  return uses;
+}
+
+/**
+ * Take a credential out of use, once nothing needs it.
+ *
+ * **Archive rather than delete, and refused rather than cascading.** The row
+ * stays, so every frozen plan that ever named it keeps naming something
+ * readable and a run from March remains interpretable. What Archive means is
+ * only *stop choosing this from now on*: a project settings page will no longer
+ * offer it, and `listJudgeCredentials` no longer answers with it.
+ *
+ * The three blocking uses are `usesOf` above, and the refusal carries them
+ * whole. A door with none of that behind it would strand work mid-flight, which
+ * is exactly why this verb did not exist until frozen grading plans did — there
+ * was no way to ask the second and third questions.
+ *
+ * Archiving an archived credential is nothing to do and answers with it. A
+ * credential this caller cannot see answers `undefined`, the same as one that
+ * never existed.
+ */
+export async function archiveJudgeCredential(
+  auth: AuthContext,
+  id: string,
+  expected: { readonly expectedRevision?: string | undefined } = {},
+): Promise<JudgeCredential | undefined> {
+  authorize(auth, "manage_organization", here(auth));
+
+  return db().transaction(async (tx) => {
+    const [locked] = await tx
+      .select({ id: judgeCredential.id, revision: judgeCredential.revision })
+      .from(judgeCredential)
+      .where(theCredential(auth, id))
+      .limit(1)
+      .for("update");
+
+    if (locked === undefined) return undefined;
+
+    if (
+      expected.expectedRevision !== undefined &&
+      expected.expectedRevision !== locked.revision
+    ) {
+      throw new IdentityConflictError("Judge credential", locked.id, {
+        expected: expected.expectedRevision,
+        current: locked.revision,
+      });
+    }
+
+    const uses = await usesOf(tx, auth, locked.id);
+    if (uses.length > 0) throw new JudgeCredentialInUseError(locked.id, uses);
+
+    const [row] = await tx
+      .update(judgeCredential)
+      .set({
+        archivedAt: new Date(),
+        revision: newId("rev"),
+        updatedAt: new Date(),
+      })
+      .where(eq(judgeCredential.id, locked.id))
+      .returning(COLUMNS);
+
+    if (row === undefined) {
+      throw new Error("the judge credential was not written");
+    }
+    return answer(row);
+  });
+}
+
+/**
+ * What is blocking a credential's Archive, asked without attempting one.
+ *
+ * The same read the refusal is built from, offered on its own so a settings
+ * page can say *why* the button will not work before somebody presses it —
+ * and so the page and the refusal can never give two different answers.
+ */
+export async function judgeCredentialUses(
+  auth: AuthContext,
+  id: string,
+): Promise<readonly JudgeCredentialUse[] | undefined> {
+  authorize(auth, "read", here(auth));
+
+  const [found] = await db()
+    .select({ id: judgeCredential.id })
+    .from(judgeCredential)
+    .where(theCredential(auth, id))
+    .limit(1);
+
+  if (found === undefined) return undefined;
+  return usesOf(db(), auth, found.id);
 }

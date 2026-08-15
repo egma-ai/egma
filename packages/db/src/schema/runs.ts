@@ -68,6 +68,15 @@ export type RunTrigger = (typeof RUN_TRIGGERS)[number];
  *
  * `queued → canceled` is the cancel-before-claim path, and a canceled row can
  * never be claimed. A terminal row is frozen entirely.
+ *
+ * `skipped` is outside that lifecycle entirely and is the one status a row can
+ * be **born** in. It is written by run creation, terminal from its first
+ * moment, for a conversation egma decided in advance it could not honestly
+ * conduct — a test requiring something the connection was measured not to have,
+ * or something nobody has measured. It never enters the claim queue, no
+ * simulator ever sees it, and it produces no grading job, because there is no
+ * conversation to judge. It is emphatically not `failed`: nothing about the
+ * agent under test is being said.
  */
 export const SIMULATION_STATUSES = [
   "queued",
@@ -76,8 +85,26 @@ export const SIMULATION_STATUSES = [
   "completed",
   "failed",
   "canceled",
+  "skipped",
 ] as const;
 export type SimulationStatus = (typeof SIMULATION_STATUSES)[number];
+
+/**
+ * Why run creation wrote a conversation off before it began. Two, and they must
+ * never collapse into one, because they are a settled fact and an unasked
+ * question and their fixes are in different places: one means this test cannot
+ * be meaningfully run over this connection at all, the other means nobody has
+ * measured the connection yet and a Refresh may change the answer.
+ *
+ * They are the catalog's own two standings said in the run's vocabulary — see
+ * `capabilityStanding` in `access/capabilities.ts`, which is the one place the
+ * three answers are told apart.
+ */
+export const SIMULATION_SKIP_REASONS = [
+  "required_capability_unsupported",
+  "required_capability_unknown",
+] as const;
+export type SimulationSkipReason = (typeof SIMULATION_SKIP_REASONS)[number];
 
 /**
  * How a completed conversation ended — a fact about the conversation, not a
@@ -219,6 +246,18 @@ export const run = pgTable(
     completedCount: integer("completed_count"),
     failedCount: integer("failed_count"),
     canceledCount: integer("canceled_count"),
+    /**
+     * How many conversations this run never attempted, because a test required
+     * something the connection could not be shown to do.
+     *
+     * Its own count beside the other three rather than folded into any of them.
+     * Folding it into `failed` would report an agent broken by egma's own
+     * capability gap; folding it into `canceled` would say somebody stopped
+     * this work, and nobody did. A run whose every conversation is skipped
+     * completes with this number and three zeroes, which is exactly the shape
+     * a headline has to read as "nothing was judged" rather than as a pass.
+     */
+    skippedCount: integer("skipped_count"),
     /** A new run, retrying an old one — never the old run reopened. */
     retryOfRunId: idText("retry_of_run_id").references(
       (): AnyPgColumn => run.id,
@@ -242,12 +281,14 @@ export const run = pgTable(
       "run_counts_written_together",
       sql`((${table.completedCount} is null) = (${table.failedCount} is null))
         and ((${table.failedCount} is null) = (${table.canceledCount} is null))
+        and ((${table.canceledCount} is null) = (${table.skippedCount} is null))
         and ((${table.canceledCount} is null) = (${table.finishedAt} is null))`,
     ),
     check(
       "run_counts_are_counts",
       sql`(${table.completedCount} is null)
-        or (${table.completedCount} >= 0 and ${table.failedCount} >= 0 and ${table.canceledCount} >= 0)`,
+        or (${table.completedCount} >= 0 and ${table.failedCount} >= 0
+          and ${table.canceledCount} >= 0 and ${table.skippedCount} >= 0)`,
     ),
     // Finished means terminal, and completed means finished; only a canceled
     // run may hold its terminal status while stragglers land.
@@ -428,6 +469,24 @@ export const simulation = pgTable(
      * came back.
      */
     mockToolCoverage: jsonb("mock_tool_coverage"),
+    /**
+     * Why this conversation was never attempted, on the one status that is
+     * written terminal at birth. Null on every other row, including a `failed`
+     * one — a failure has an ending reason, and the two vocabularies are kept
+     * apart because they answer different questions: *the test never ran* and
+     * *the test never started*.
+     */
+    skipReason: text("skip_reason"),
+    /**
+     * Which required capabilities produced the skip, as catalog keys.
+     *
+     * On the row rather than left to be worked out from the pinned version and
+     * the connection, because both of those move: a Refresh tomorrow changes
+     * what the connection is known to do, and the reason this conversation was
+     * written off has to stay readable exactly as it was decided. It is the
+     * same reason the connection snapshot sits on the run.
+     */
+    skippedCapabilities: jsonb("skipped_capabilities"),
     createdAt: createdAt(),
   },
   (table) => [
@@ -509,6 +568,30 @@ export const simulation = pgTable(
       "simulation_canceled_shape",
       sql`${table.status} <> 'canceled'
         or (${table.endedAt} is not null and ${table.cancelRequestedAt} is not null)`,
+    ),
+    // A skipped row is terminal from birth and carries its whole explanation:
+    // it ended when it was written, it was never claimed and never started,
+    // and it names both why and which capabilities decided it. Nothing else
+    // may carry either field — a reason on a conversation that actually
+    // happened would be a sentence about a decision nobody made.
+    check(
+      "simulation_skipped_shape",
+      sql`${table.status} <> 'skipped'
+        or (${table.endedAt} is not null and ${table.claimedAt} is null
+          and ${table.startedAt} is null and ${table.cancelRequestedAt} is null
+          and ${table.skipReason} is not null
+          and ${table.skippedCapabilities} is not null)`,
+    ),
+    check(
+      "simulation_skip_reason_belongs_to_a_skip",
+      sql`${table.status} = 'skipped'
+        or (${table.skipReason} is null and ${table.skippedCapabilities} is null)`,
+    ),
+    check(
+      "simulation_skip_reason_allowed",
+      sql`${table.skipReason} is null or ${table.skipReason} in ${quoted(
+        SIMULATION_SKIP_REASONS,
+      )}`,
     ),
     // The audio facts are terminal facts; nothing running holds one yet.
     // The check keeps its name across the migration that reduced it to
@@ -724,15 +807,17 @@ export const runEvent = pgTable(
     ),
     // The pairing, held by the database: a conversation that ran is passed,
     // failed or skipped; one that never ran errored; one somebody stopped was
-    // never judged and is skipped. `skipped` and `errored` can therefore never
-    // be written as `failed`, which is the one normalisation a test product
-    // cannot get wrong.
+    // never judged and is skipped; and one egma declined to start in the first
+    // place is skipped too. `skipped` and `errored` can therefore never be
+    // written as `failed`, which is the one normalisation a test product cannot
+    // get wrong.
     check(
       "run_event_verdict_agrees",
       sql`${table.verdict} is null
         or (${table.status} = 'completed' and ${table.verdict} in ('passed', 'failed', 'skipped'))
         or (${table.status} = 'failed' and ${table.verdict} = 'errored')
-        or (${table.status} = 'canceled' and ${table.verdict} = 'skipped')`,
+        or (${table.status} = 'canceled' and ${table.verdict} = 'skipped')
+        or (${table.status} = 'skipped' and ${table.verdict} = 'skipped')`,
     ),
     // And the ending reason keeps to its own class, exactly as it does on the
     // simulation row it came from.

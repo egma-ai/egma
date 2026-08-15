@@ -122,6 +122,30 @@ export const CODES = {
    * settings simply cannot both be true — so it is its own answer.
    */
   judge_credential_provider_mismatch: 422,
+  /**
+   * A run refused because its project has no LLM judge. Its own code beside
+   * the run refusals because nothing about the selection is wrong: the fix is
+   * one page away, and a run builder shows it as a state rather than as a
+   * mistake somebody made.
+   */
+  judge_not_configured: 409,
+  /**
+   * A judge credential that something still needs. Its own code so a settings
+   * page can list the blocking projects, runs and jobs rather than showing one
+   * general sentence about a key.
+   */
+  judge_credential_in_use: 409,
+  /**
+   * A start action that named no idempotency key. 422 rather than 409: nothing
+   * conflicts, something required is missing, and the fix is to send one.
+   */
+  idempotency_key_required: 422,
+  /**
+   * A key reused over a different request. Answering the original run would
+   * tell somebody their new selection had started when it had not, so the
+   * third answer is the only honest one.
+   */
+  idempotency_conflict: 409,
   unsignable_reference: 422,
   no_adapter: 422,
   phone_setup_required: 422,
@@ -311,6 +335,24 @@ export const REFUSALS = {
   projectSlugTaken: (slug: string): string =>
     `Project slug ${slug} is already in use in this organization. Choose a ` +
     "different slug and save the project again.",
+
+  judgeNotConfigured: (projectId: string): string =>
+    `This run needs an LLM judge, but project ${projectId} has no judge ` +
+    "configured. Open project Settings, configure the judge, and start the " +
+    "run again.",
+
+  judgeCredentialInUse: (credentialId: string, uses: string): string =>
+    `Judge credential ${credentialId} is used by ${uses}. Point those ` +
+    "projects at another credential and let pending grading finish, then " +
+    "archive this credential.",
+
+  idempotencyKeyRequired:
+    "Starting a run requires an idempotency key. Send one stable key for " +
+    "this start action and try again.",
+
+  idempotencyConflict: (key: string): string =>
+    `Idempotency key ${key} already started a different run. Reuse the ` +
+    "original request, or send a new key for this run.",
 
   judgeCredentialProviderMismatch: (
     credentialId: string,
