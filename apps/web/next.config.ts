@@ -59,6 +59,18 @@ const config: NextConfig = {
           source: "/api/invitations/:path*",
           destination: `${api}/api/invitations/:path*`,
         },
+        // Both halves of getting back in after forgetting a password: asking
+        // for a link, and setting the password behind one. Neither is served by
+        // this process, and without these rules the pages would post at Next
+        // and read its 404 page as egma's refusal.
+        {
+          source: "/api/password-reset",
+          destination: `${api}/api/password-reset`,
+        },
+        {
+          source: "/api/password-reset/:path*",
+          destination: `${api}/api/password-reset/:path*`,
+        },
         { source: "/api/tests", destination: `${api}/api/tests` },
         { source: "/api/tests/:path*", destination: `${api}/api/tests/:path*` },
         {

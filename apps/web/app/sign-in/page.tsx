@@ -94,6 +94,10 @@ export default function SignInPage() {
       </form>
 
       <p className={styles.linkLine}>
+        <a href="/forgot-password">Forgot your password?</a>
+      </p>
+
+      <p className={styles.linkLine}>
         No account yet?{" "}
         <a href={returnTo === null ? "/signup" : withReturnTo("/signup", returnTo)}>
           Set up egma

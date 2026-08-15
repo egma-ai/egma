@@ -7,6 +7,12 @@ import { DEVICE_CLIENT_ID } from "./device.ts";
 import type { EmailSender } from "./email.ts";
 import { currentIntent } from "./intent.ts";
 import {
+  passwordResetLink,
+  sealResetLink,
+  PASSWORD_RESET_LIFETIME_MINUTES,
+  PASSWORD_RESET_PROVIDER_LIFETIME_SECONDS,
+} from "./password-reset.ts";
+import {
   SignupRefusedError,
   type DeviceGrant,
   type DevicePollOutcome,
@@ -264,6 +270,54 @@ export function createIdentity(options: IdentityOptions): Identity {
       // configured, signup completes and verification is not a step.
       requireEmailVerification: options.emailSender.delivers,
       autoSignIn: true,
+
+      // The provider's own copy of the deadline, and always the later of the
+      // two. Egma's travels inside the link and is the one that decides, so a
+      // link past its time is refused by name rather than coming back from here
+      // as `Invalid token` — which is also the word for a link already spent.
+      // See `password-reset.ts`.
+      resetPasswordTokenExpiresIn: PASSWORD_RESET_PROVIDER_LIFETIME_SECONDS,
+
+      /**
+       * The reset message, through the one email seam.
+       *
+       * It sits beside the verification message on purpose: **nothing here
+       * decides whether mail is delivered**, because `delivers` on the sender
+       * already does. On a platform with SMTP the link is posted; on one
+       * without, the same message is written to the log and a self-hoster reads
+       * it there. There is no second setting for the two to disagree over.
+       *
+       * The provider's `url` is not used. It points at the provider's own
+       * callback, which would redirect a browser to a page with the raw token
+       * on it; egma sends a link to its own page carrying the token and the
+       * deadline sealed together, so the refusals behind it can say which of
+       * the two things happened.
+       */
+      sendResetPassword: async ({ user, token }) => {
+        const link = passwordResetLink(
+          options.baseUrl,
+          sealResetLink(
+            {
+              token,
+              expiresAt: new Date(
+                Date.now() + PASSWORD_RESET_LIFETIME_MINUTES * 60_000,
+              ),
+            },
+            options.secret,
+          ),
+        );
+
+        await options.emailSender.send({
+          to: user.email,
+          subject: "Reset your egma password",
+          body:
+            `Somebody asked to set a new password for your egma account. ` +
+            `Set one here: ${link}\n\n` +
+            `The link works once, and runs out ${PASSWORD_RESET_LIFETIME_MINUTES} ` +
+            `minutes after it was asked for. If it was not you, nothing has ` +
+            `changed and there is nothing to do.`,
+        });
+      },
     },
 
     emailVerification: {

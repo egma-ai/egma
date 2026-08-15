@@ -251,6 +251,57 @@ describe("the pages", () => {
     expect(invite).toContain("already been accepted");
   });
 
+  /**
+   * The way back in for somebody who cannot sign in to ask for one.
+   *
+   * Two pages, because there are two moments: naming the address, and choosing
+   * the password behind the link. The first has to be reachable from the sign-in
+   * page — a way back in nobody can find is not a way back in.
+   */
+  it("offer somewhere to ask for a reset, reachable from the sign-in page", async () => {
+    const files = (await pageSources()).map(([file]) => file);
+    expect(files).toContain("app/forgot-password/page.tsx");
+    expect(files).toContain("app/reset-password/page.tsx");
+
+    const signIn = await readFile(path.join(WEB, "app/sign-in/page.tsx"), "utf8");
+    expect(signIn).toContain('href="/forgot-password"');
+  });
+
+  /**
+   * Spent, expired and never-minted are three different things and each says so.
+   * A spent link means you already did this — sign in; an expired one means
+   * nothing happened at all — ask for another. Sharing a sentence would send
+   * half the people holding one exactly the wrong way.
+   */
+  it("say which of the three a dead reset link is", async () => {
+    const reset = await readFile(
+      path.join(WEB, "app/reset-password/page.tsx"),
+      "utf8",
+    );
+
+    expect(reset).toContain("reset_link_expired");
+    expect(reset).toContain("reset_link_already_used");
+    expect(reset).toContain("no_such_reset_link");
+    expect(reset).toContain("has run out of time");
+    expect(reset).toContain("has already been used");
+  });
+
+  it("reach the API for a password reset at paths this instance rewrites", async () => {
+    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
+    const forgot = await readFile(
+      path.join(WEB, "app/forgot-password/page.tsx"),
+      "utf8",
+    );
+    const reset = await readFile(
+      path.join(WEB, "app/reset-password/page.tsx"),
+      "utf8",
+    );
+
+    expect(rewrites).toContain("/api/password-reset/:path*");
+    expect(forgot).toContain('fetch("/api/password-reset"');
+    expect(reset).toContain('fetch("/api/password-reset/complete"');
+  });
+
   it("reach the API for invitations at paths this instance rewrites", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
     const invite = await readFile(path.join(WEB, "app/invite/page.tsx"), "utf8");

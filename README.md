@@ -886,10 +886,29 @@ EGMA_SMTP_URL=smtp://user:password@smtp.example.com:587
 EGMA_MAIL_FROM='egma <egma@example.com>'   # optional
 ```
 
-Setting it changes two things at once, by itself: invitations are emailed rather
-than handed back, and signup asks for email verification. There is no second
-setting to keep in step, because there is no configuration in which egma should
-wait for a message it never sent.
+Setting it changes three things at once, by itself: invitations are emailed
+rather than handed back, signup asks for email verification, and a password
+reset link is posted to the person who asked for it. There is no second setting
+to keep in step, because there is no configuration in which egma should wait for
+a message it never sent.
+
+## Forgetting a password
+
+**Sign in, "Forgot your password?", and name your address.** Egma sends a link
+that opens one page asking for a new password, and nothing else. Set it, sign in
+with it, and the old password stops working.
+
+Nothing about this needs SMTP either. With no mail transport configured the
+whole message — link included — is written to the platform's log, exactly where
+an invitation's link comes back to whoever sent it, so a solo install still lets
+you back in.
+
+- The link works **once**, and runs out an hour after you asked for it.
+- A link already used and a link out of time are refused with **different**
+  messages, because one means you already did this and the other means nothing
+  happened at all.
+- Asking about an address with no account here is answered exactly as one with
+  an account, so the form never says who holds an account on this egma.
 
 ## Reading and writing data
 
