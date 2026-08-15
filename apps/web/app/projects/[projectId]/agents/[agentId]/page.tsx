@@ -17,6 +17,11 @@ import {
   type ListedConnection,
 } from "../../../../../lib/agents.ts";
 import { asDay } from "../../../../../lib/instants.ts";
+import {
+  testsPath,
+  type ListedTest,
+  type TestPage,
+} from "../../../../../lib/tests.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
@@ -331,6 +336,8 @@ function AgentDetailView({
             />
           )}
         </Section>
+
+        <ApplicableTests projectId={projectId} agentId={agentId} />
       </PageBody>
 
       {editing ? (
@@ -559,5 +566,93 @@ function ConfirmLifecycle({
         <Button onClick={onClose}>Cancel</Button>
       </Actions>
     </Dialog>
+  );
+}
+
+/**
+ * The tests somebody has said are worth running against this agent.
+ *
+ * **Coverage is a fact about the agent, so it belongs on the agent's page.**
+ * The relation is edited on the test — one test applies to several agents, and
+ * a set of checkboxes there is the honest place to change it — but the question
+ * "what does egma actually check about this agent" is asked here, and a page
+ * that could not answer it would send somebody through every test in the
+ * project to find out.
+ *
+ * A run may only pair this agent with a test on this list, so an empty one is
+ * the reason a run builder would offer nothing.
+ */
+function ApplicableTests({
+  projectId,
+  agentId,
+}: {
+  readonly projectId: string;
+  readonly agentId: string;
+}) {
+  const { answer, reload } = useProjectRead<TestPage>(
+    testsPath({ agent: agentId }),
+    projectId,
+  );
+
+  const columns: readonly Column<ListedTest>[] = [
+    {
+      key: "name",
+      header: "Test",
+      primary: true,
+      cell: (test) => (
+        <Link href={projectPath(projectId, "tests", test.id)}>{test.name}</Link>
+      ),
+    },
+    {
+      key: "behaviors",
+      header: "Expects",
+      width: "120px",
+      cell: (test) =>
+        `${String(test.expected_behaviors.length)} ${
+          test.expected_behaviors.length === 1 ? "behavior" : "behaviors"
+        }`,
+    },
+    {
+      key: "version",
+      header: "Version",
+      mono: true,
+      width: "90px",
+      cell: (test) => `v${test.version}`,
+    },
+  ];
+
+  return (
+    <Section
+      title="Applicable tests"
+      lead="What egma checks about this agent. A run may only use a test that applies to it."
+      action={
+        <ButtonLink href={projectPath(projectId, "tests")}>All tests</ButtonLink>
+      }
+    >
+      {answer === null || answer.status === "signed-out" ? (
+        <Loading what="the tests that apply to this agent" />
+      ) : answer.status === "ready" ? (
+        answer.value.items.length === 0 ? (
+          <Empty
+            title="No test applies to this agent yet"
+            lead="Link one on its own page, or write a test and select this agent."
+            action={
+              <ButtonLink href={projectPath(projectId, "tests", "new")}>
+                Write a test
+              </ButtonLink>
+            }
+          />
+        ) : (
+          <DataTable
+            label="Tests that apply to this agent"
+            columns={columns}
+            rows={answer.value.items}
+            keyOf={(test) => test.id}
+          />
+        )
+      ) : (
+        <Failure message={answer.refusal.message} onRetry={reload} />
+      )}
+    </Section>
   );
 }
