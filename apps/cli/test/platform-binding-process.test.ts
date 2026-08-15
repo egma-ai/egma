@@ -1,6 +1,7 @@
 /**
  * Every later headless command, as a real CLI process, follows the committed
- * repository binding with no flag or environment URL to help it.
+ * repository binding with no flag or environment URL to help it — and the
+ * refusal that keeps it there arrives whole in a real terminal.
  */
 
 import { spawn } from "node:child_process";
@@ -32,6 +33,31 @@ type CommandResult = {
 };
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
+
+/** The built CLI as its own process, ended rather than thrown. */
+async function runEgma(
+  where: { readonly cwd: string; readonly env: NodeJS.ProcessEnv },
+  args: readonly string[],
+): Promise<CommandResult> {
+  const child = spawn(process.execPath, [CLI_ENTRY, ...args], where);
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+  // `connect` checks standard input before its environment. End the pipe so
+  // the real process sees the same promptless EOF a coding agent sends.
+  child.stdin.end();
+  const code = await new Promise<number>((resolve) => {
+    child.on("close", (value) => resolve(value ?? 1));
+  });
+  return { stdout, stderr, code };
+}
 
 describe("commands after a repository is bound", () => {
   let bound: Platform;
@@ -91,27 +117,7 @@ describe("commands after a repository is bound", () => {
     const env = workspace.env({ EGMA_RETELL_URL: retell.url, ...extra });
     expect(args).not.toContain("--url");
     expect(env.EGMA_URL).toBeUndefined();
-    const child = spawn(process.execPath, [CLI_ENTRY, ...args], {
-      cwd: workspace.dir,
-      env,
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    // `connect` checks standard input before its environment. End the pipe so
-    // the real process sees the same promptless EOF a coding agent sends.
-    child.stdin.end();
-    const code = await new Promise<number>((resolve) => {
-      child.on("close", (value) => resolve(value ?? 1));
-    });
-    return { stdout, stderr, code };
+    return runEgma({ cwd: workspace.dir, env }, args);
   }
 
   async function reachesBound(
@@ -212,5 +218,89 @@ describe("commands after a repository is bound", () => {
     }
     expect(bound.running.runs).toHaveLength(beforeRuns + 1);
     expect(other.records).toEqual([]);
+  });
+});
+
+/**
+ * The refusal a developer meets when they really are moving, in the terminal
+ * they meet it in.
+ *
+ * Now that an unbound repository falls back to egma's own platform, the first
+ * thing somebody moving off their own deployment types is the address they want
+ * — and this is what answers. It has to arrive whole: one sentence saying egma
+ * will not do it, then every line to delete, then what moving costs. A refusal
+ * that named the first step and stopped is what left a developer deleting the
+ * platform block, running again, and meeting a stranger failure about
+ * identifiers the new platform never issued.
+ *
+ * Checked here as one real process, because a coding agent reads this out of a
+ * terminal and acts on it. Whether the lines say the right thing is
+ * `egma-folder.test.ts`; whether they survive the trip is this.
+ */
+describe("moving a bound repository to another platform", () => {
+  let here: Platform;
+  let there: Platform;
+  let workspace: Workspace;
+
+  beforeAll(async () => {
+    [here, there, workspace] = await Promise.all([
+      startPlatform(),
+      startPlatform(),
+      makeWorkspace(),
+    ]);
+    here.signedInWith(BOUND_KEY);
+    there.signedInWith(OTHER_KEY);
+    await workspace.signIn(here.url, BOUND_KEY);
+    await workspace.signIn(there.url, OTHER_KEY);
+    await createEgmaFolder({
+      repository: workspace.dir,
+      config: {
+        platform: { origin: here.url, instance: here.instanceId },
+        agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
+        connection: { name: "retell-1", id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES" },
+        suite: { name: "first-suite", id: "sui_01K3XQ7M4E8YB2FVN0H9TZQWET" },
+      },
+    });
+  });
+
+  afterAll(async () => {
+    await Promise.all([here.close(), there.close(), workspace.remove()]);
+  });
+
+  it("refuses, and teaches the whole move in plain lines", async () => {
+    const refused = await runEgma(
+      { cwd: workspace.dir, env: workspace.env() },
+      ["push", "--url", there.url],
+    );
+
+    expect(refused.code).toBe(4);
+    expect(refused.stdout).toContain("status: refused");
+    expect(refused.stderr).toContain("egma does not move a repository between platforms");
+    expect(refused.stderr).toContain("no repository identifiers were sent");
+
+    // Every line to delete, in the terminal, as a block that starts on its own
+    // line rather than trailing off the end of a sentence.
+    const said = refused.stderr.split("\n").map((line) => line.trimEnd());
+    const opens = said.indexOf(
+      "To move this repository to another platform, delete these and run egma again:",
+    );
+    expect(opens).toBeGreaterThan(0);
+    expect(said[opens - 1]).toBe("");
+    expect(said.slice(opens + 1, opens + 6)).toEqual([
+      "  - the whole platform: block in egma/config.yaml",
+      "  - the id: line under agent: in egma/config.yaml",
+      "  - the id: line under connection: in egma/config.yaml",
+      "  - the id: line under suite: in egma/config.yaml",
+      "  - the version: line at the top of every file in egma/tests/",
+    ]);
+    expect(said[opens + 6]).toContain("Your tests move with you");
+    expect(said[opens + 6]).toContain("stay on the platform that ran them");
+
+    // No command performs the move, so none is offered.
+    expect(refused.stderr).not.toMatch(/egma rebind|--rebind|egma move/u);
+
+    // And nothing was sent: neither platform was asked so much as who it is.
+    expect(here.records).toEqual([]);
+    expect(there.records).toEqual([]);
   });
 });

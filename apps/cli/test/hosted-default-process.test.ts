@@ -332,6 +332,24 @@ describe("a repository that names no platform", () => {
       expect(byFlag.code, byFlag.stderr).toBe(0);
       expect(byFlag.stdout).toContain(`url: ${elsewhere.url}`);
 
+      // And the committed file, with neither of those in play. This is the step
+      // directly above the built-in address, so it is the one whose win the new
+      // last step could have taken away.
+      await createEgmaFolder({
+        repository: workspace.dir,
+        config: {
+          platform: { origin: elsewhere.url, instance: elsewhere.instanceId },
+          agent: null,
+          connection: null,
+          suite: null,
+        },
+      });
+      const byBinding = await egma(workspace, ["login"], {
+        EGMA_TEST_DEFAULT_URL: own.url,
+      });
+      expect(byBinding.code, byBinding.stderr).toBe(0);
+      expect(byBinding.stdout).toContain(`url: ${elsewhere.url}`);
+
       expect(own.records.slice(before)).toEqual([]);
     } finally {
       await workspace.remove();

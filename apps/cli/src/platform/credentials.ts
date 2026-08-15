@@ -16,7 +16,12 @@ import { homedir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 
-import { folderPathsIn, readConfig, type PlatformBinding } from "../folder/egma-folder.ts";
+import {
+  folderPathsIn,
+  readConfig,
+  teachingTheMove,
+  type PlatformBinding,
+} from "../folder/egma-folder.ts";
 import {
   normalizePlatformOrigin,
   readPlatformIdentity,
@@ -431,11 +436,22 @@ export type VerifiedPlatformAccess = PlatformAccess & {
   readonly instanceId: string;
 };
 
-/** A selected instance is not the platform committed in this repository. */
+/**
+ * A selected instance is not the platform committed in this repository.
+ *
+ * This and the address refusal below are the two a developer meets when they
+ * really are moving a repository — they point egma at the platform they want
+ * and are told no — so both end with the whole move rather than its first step.
+ * Naming one deletion and stopping is what leaves somebody deleting a line,
+ * running again, and meeting a stranger failure about identifiers the new
+ * platform never issued.
+ */
 export class PlatformBindingMismatchError extends Error {
   constructor(binding: PlatformBinding, selected: PlatformIdentity) {
     super(
-      `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, but the selected address identifies platform ${selected.instanceId} at ${selected.origin}. Remove --url or EGMA_URL to use the bound platform. Rebinding is not supported yet. No repository identifiers were sent.`,
+      teachingTheMove(
+        `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, but the selected address identifies platform ${selected.instanceId} at ${selected.origin}. Remove --url or EGMA_URL to use the bound platform. egma does not move a repository between platforms, and no repository identifiers were sent.`,
+      ),
     );
     this.name = "PlatformBindingMismatchError";
   }
@@ -446,24 +462,29 @@ export class PlatformBindingMismatchError extends Error {
  * recorded, whoever is answering there.
  *
  * Separate from the instance mismatch above because it is refused before
- * anybody answers: rebinding is out of this effort either way, and the same
+ * anybody answers: the move is out of this effort either way, and the same
  * instance served at a new address is still a change to a committed file that
- * a developer has to make on purpose rather than have made for them.
+ * a developer has to make on purpose rather than have made for them. That case
+ * keeps its own sentence, because editing one address is not the move and
+ * treating it as one would have somebody throw away identifiers that are still
+ * good.
  */
 export class BoundPlatformAddressError extends Error {
   constructor(binding: PlatformBinding, source: PlatformSource, selected: string) {
     super(
-      `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and ${SOURCE_NAMES[source]} names ${selected} instead. Drop it to use the bound platform. If the platform really has moved, edit the platform origin in egma/config.yaml on purpose — rebinding is not supported yet. No repository identifiers were sent.`,
+      teachingTheMove(
+        `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and ${SOURCE_NAMES[source]} names ${selected} instead. Drop it to use the bound platform. If that platform has only changed address, edit the platform origin in egma/config.yaml on purpose. egma does not move a repository between platforms, and no repository identifiers were sent.`,
+      ),
     );
     this.name = "BoundPlatformAddressError";
   }
 }
 
-/** The bound platform did not answer, and Cloud was deliberately not tried. */
+/** The bound platform did not answer, and egma's own was deliberately not tried. */
 export class BoundPlatformUnavailableError extends Error {
   constructor(binding: PlatformBinding, cause: unknown) {
     super(
-      `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and it did not answer. Start the bound platform and run this again. Egma Cloud was not used, and no repository identifiers were sent.`,
+      `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and it did not answer. Start the bound platform and run this again. egma did not fall back to its own platform, and no repository identifiers were sent.`,
       { cause },
     );
     this.name = "BoundPlatformUnavailableError";
@@ -494,7 +515,7 @@ export class DefaultPlatformUnusableError extends Error {
 export class RepositoryPlatformConfigError extends Error {
   constructor(cause: unknown) {
     super(
-      "Egma could not read this repository's egma/config.yaml, so it did not select a platform. Fix that file and run this again. Egma Cloud was not used.",
+      "Egma could not read this repository's egma/config.yaml, so it did not select a platform. Fix that file and run this again. egma did not fall back to its own platform.",
       { cause },
     );
     this.name = "RepositoryPlatformConfigError";

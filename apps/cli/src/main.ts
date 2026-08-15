@@ -481,9 +481,23 @@ function platformRefusal(error: unknown): "refused" | "unreachable" | null {
   return null;
 }
 
-/** Says the refusal both ways — machine-readable, and to a person — and answers 4. */
+/**
+ * Says the refusal both ways — machine-readable, and to a person — and answers 4.
+ *
+ * A refusal that teaches something is more than one line now: the one that
+ * keeps a bound repository where it belongs ends with every line a developer
+ * deletes to move it. Those lines go to the error stream, whole, where every
+ * other block egma teaches with already goes — the refusal of a piped wizard
+ * and the refusal of a key in an argument are both written that way.
+ *
+ * What goes on the output stream is the sentence alone. That stream is one fact
+ * per line, which is what makes it readable by the thing that started the
+ * command, and a `reason:` running to eight lines would break that reading to
+ * repeat what is already on the other stream.
+ */
 function sayPlatformRefusal(status: "refused" | "unreachable", message: string): void {
-  process.stdout.write(`status: ${status}\nreason: ${message}\n`);
+  const sentence = message.split("\n")[0] as string;
+  process.stdout.write(`status: ${status}\nreason: ${sentence}\n`);
   process.stderr.write(`${message}\n`);
   process.exitCode = 4;
 }

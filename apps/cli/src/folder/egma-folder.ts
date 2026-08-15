@@ -241,6 +241,20 @@ export const MOVE_TO_ANOTHER_PLATFORM: readonly string[] = [
 ];
 
 /**
+ * A refusal with the whole move under it, one blank line apart.
+ *
+ * Every refusal that stands between a developer and another platform ends the
+ * same way, because they are not different problems to the person who has one:
+ * whichever of them fires, the next thing they need is the same list. One
+ * function so that the list cannot drift into three versions of itself, and so
+ * that the blank line before it is always there — it is what makes the block
+ * below it a block rather than the tail of a paragraph.
+ */
+export function teachingTheMove(refusal: string): string {
+  return [refusal, "", ...MOVE_TO_ANOTHER_PLATFORM].join("\n");
+}
+
+/**
  * Commit the verified platform before anything creates platform-owned resource
  * identifiers.
  *
@@ -272,11 +286,9 @@ export async function bindRepositoryPlatform(
   if (held.platform !== null) {
     if (held.platform.instance !== binding.instance) {
       throw new Error(
-        [
+        teachingTheMove(
           `This repository is already bound to Egma platform ${held.platform.instance} at ${held.platform.origin}, and this run reached Egma platform ${binding.instance} at ${binding.origin}. egma does not move a repository between platforms, and nothing was sent.`,
-          "",
-          ...MOVE_TO_ANOTHER_PLATFORM,
-        ].join("\n"),
+        ),
       );
     }
     if (held.platform.origin !== binding.origin) {
