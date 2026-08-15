@@ -22,6 +22,8 @@
  * make.
  */
 
+import { newId } from "@egma/ids";
+
 import type { Fetch } from "./device-flow.ts";
 import { PlatformRefusedError } from "./refused.ts";
 import type { SignedIn } from "./signed-in.ts";
@@ -132,6 +134,17 @@ export type NewRun = {
   readonly testVersionIds: readonly string[];
   /** Something to recognise this run by in a list. */
   readonly label?: string;
+  /**
+   * The word this attempt is remembered by, so a retried request starts one
+   * run.
+   *
+   * Left out, one is minted for this call. A terminal that dials a real agent
+   * and loses the answer on the way back must never produce a second
+   * conversation, and the platform can only prevent that if the client names
+   * the attempt — nothing on the server can tell a repeat from a new request.
+   * A caller that retries the same start itself passes the same word twice.
+   */
+  readonly idempotencyKey?: string;
 };
 
 /** A whole number off the wire, or zero for anything that is not one. */
@@ -234,6 +247,7 @@ export async function startRun(
       agent: input.agentId,
       connection: input.connectionId,
       test_versions: [...input.testVersionIds],
+      idempotency_key: input.idempotencyKey ?? newId("run"),
       ...(input.label === undefined ? {} : { label: input.label }),
     },
     ...(fetchImpl === undefined ? {} : { fetchImpl }),

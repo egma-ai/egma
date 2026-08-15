@@ -177,7 +177,7 @@ describe("a platform with a default judge and no projects yet", () => {
   it("leaves a project unjudged when the platform has no judge of its own", async () => {
     // A deployment that configured none is unchanged: its projects have no
     // judge, model-based grading says so, and nothing is invented.
-    api = await createApi("default_judge_absent");
+    api = await createApi("default_judge_absent", { defaultJudge: null });
 
     const { organizationId, projectId } = await signUpFor("ada");
 

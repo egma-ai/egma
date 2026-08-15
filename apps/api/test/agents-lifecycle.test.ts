@@ -1,3 +1,4 @@
+import { newId } from "@egma/ids";
 import {
   getSimulation,
   registerCapabilityDiscovery,
@@ -1423,6 +1424,7 @@ async function aQueuedRunFor(who: Customer): Promise<{
   const started = await browser("POST", "/api/runs", who, {
     connection: wiring.id,
     test_versions: [versionId],
+    idempotency_key: newId("run"),
   });
   expect(started.status, JSON.stringify(started.body)).toBe(201);
   const simulations = started.body.simulations as readonly { id: string }[];

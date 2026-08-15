@@ -1,0 +1,147 @@
+/*
+ * The parts a run builder needs and no other page has: a step whose heading
+ * says where it sits in an order, a panel drawn once under a table for
+ * whichever row is open, and a strip of counted facts about what a run would
+ * do.
+ *
+ * They live beside the builder rather than in the shared system module, because
+ * they are this page's and nothing else uses them. Every value is a token:
+ * density and colour are tuned once, in `tokens.css`, and nothing here decides
+ * either for itself.
+ */
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/*
+ * One step, numbered.
+ *
+ * The number is drawn rather than implied, because order is the whole of what a
+ * builder promises: an agent decides which connections exist, a connection
+ * decides which capabilities are measured, and both decide which tests can
+ * honestly run. Somebody who changes the first step has to be able to see that
+ * everything under it is downstream of that choice.
+ */
+.step {
+  display: grid;
+  grid-template-columns: var(--control-md) 1fr;
+  align-items: start;
+  gap: var(--space-3);
+}
+
+.stepNumber {
+  min-height: var(--control-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+}
+
+.stepNumberDone {
+  background: var(--surface);
+  color: var(--foreground);
+}
+
+.stepBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/*
+ * The panel drawn once, under the table, for whichever row is open.
+ *
+ * Once and never inside a cell: the table draws every row twice, once wide and
+ * once narrow, so a panel living in a cell would be two panels over one piece
+ * of state — and whichever the browser focused would be the one nobody could
+ * see.
+ */
+.openRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+}
+
+.openRowTitle {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.graders {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.grader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.graderName {
+  color: var(--foreground);
+}
+
+.graderNote {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+/* What a run would do, counted. */
+.tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.tallyItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.tallyNumber {
+  font-size: var(--text-lg);
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+}
+
+.tallyLabel {
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.selection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+@media (max-width: 40rem) {
+  .step {
+    grid-template-columns: 1fr;
+  }
+}

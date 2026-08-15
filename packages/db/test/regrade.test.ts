@@ -27,7 +27,7 @@ import {
   createConnectedDatabase,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedOrganization, seedUser } from "./support/tenancy.ts";
+import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
  * Asking for a conversation to be judged again.
@@ -175,6 +175,7 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, gene, "gene@globex.example");
+  await seedJudge(actingAsAcme("admin"));
 
   const created = await createAgent(auth, {
     name: "Front desk",

@@ -15,7 +15,7 @@ import {
   createConnectedDatabase,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedOrganization, seedUser } from "./support/tenancy.ts";
+import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
  * Two simulators, one queue — the deployment's whole queue, because the claim
@@ -62,6 +62,7 @@ beforeAll(async () => {
     { id: projectId, slug: "default" },
   ]);
   await seedUser(database, ada, "ada@acme.example");
+  await seedJudge({ ...auth, role: "admin" });
 
   const created = await createAgent(auth, {
     name: "Front desk",

@@ -3,6 +3,9 @@ import {
   cancelRun,
   connectionTypeOf,
   getRun,
+  IdempotencyConflictError,
+  JudgeNotConfiguredError,
+  planRun,
   listRunEvents,
   listSimulations,
   NotPermittedError,
@@ -19,6 +22,8 @@ import {
   type Run,
   type RecordedVerdict,
   type RunEvent,
+  type JudgeChoice,
+  type RunPlan,
   type RunVerdicts,
   type SimulationVerdicts,
 } from "@egma/db";
@@ -33,6 +38,7 @@ import { given, text } from "../http/reading.ts";
 import {
   conflict,
   invalid,
+  REFUSALS,
   noAdapter,
   notFound,
   notPermitted,
@@ -109,6 +115,16 @@ export type RunRoutesOptions = {
 const NEEDS_THE_PLATFORMS_CARRIER: readonly string[] = ["phone"];
 
 export const RUNS_PATH = "/api/runs";
+/**
+ * What a run would freeze, read before anybody starts one.
+ *
+ * A read rather than a dry-run write, and it is deliberately not under
+ * `/api/runs`: nothing is created and nothing is reserved. It answers the same
+ * resolution `POST /api/runs` performs, so a review step and the run it starts
+ * can never disagree about which tests would be skipped, which versions would
+ * be pinned, or which graders would judge.
+ */
+export const RUN_PLAN_PATH = "/api/run-plan";
 export const RUN_PATH = "/api/runs/:runId";
 export const RUN_EVENTS_PATH = "/api/runs/:runId/events";
 export const RUN_CANCEL_PATH = "/api/runs/:runId/cancel";
@@ -227,6 +243,14 @@ function describedSimulation(
       judged_at: its.judgedAt,
     })),
     reason: one.endingReason,
+    // Why egma never conducted this conversation, and which capabilities
+    // decided it. Null on every conversation that actually happened — the two
+    // vocabularies are separate because `reason` is how a conversation ended
+    // and this is why one never began.
+    skip_reason: one.skipReason,
+    skipped_capabilities: one.skippedCapabilities === null
+      ? null
+      : [...one.skippedCapabilities],
     mock_tool_coverage: describedMockToolCoverage(one.mockToolCoverage),
     // What this conversation was: the row's own modality rather than the run's,
     // because the row is what the database enforces the audio rule against.
@@ -292,6 +316,114 @@ function describedMockTools(
 }
 
 /**
+ * What a run would freeze, as the review step reads it.
+ *
+ * Every version, its personas at the exact versions the run would pin, its
+ * required capabilities and what this connection makes of them, and the plan
+ * items that would judge it — grader by grader, at the version each would be
+ * frozen at.
+ *
+ * **The judge is a state rather than a refusal here**, because a page has to
+ * draw it. `needs_setup` is what a project with no judge reads as, and starting
+ * from that state is what the run door refuses.
+ *
+ * **No secret travels.** A configured judge choice carries the provider, the
+ * model and the *reference* — a `jcr_` credential of this organization, or the
+ * `platform` sentinel — and there is no field here a key could ride in.
+ */
+function describedPlan(plan: RunPlan): Record<string, unknown> {
+  return {
+    agent_id: plan.agentId,
+    connection_id: plan.connectionId,
+    connection: {
+      type: plan.connection.type,
+      modality: plan.connection.modality,
+      environment: plan.connection.environment,
+      // Unknown and known-and-bare are different facts and read differently:
+      // one is a Refresh away from an answer, the other is settled.
+      capabilities:
+        plan.connection.capabilities.state === "unknown"
+          ? { state: "unknown" }
+          : {
+              state: "known",
+              measured: [...plan.connection.capabilities.measured],
+              supported: [...plan.connection.capabilities.supported],
+              checked_at: plan.connection.capabilities.checkedAt.toISOString(),
+              source: plan.connection.capabilities.source,
+            },
+    },
+    judge:
+      plan.judge.state === "needs_setup"
+        ? { state: "needs_setup" }
+        : {
+            state: "configured",
+            provider: plan.judge.provider,
+            model: plan.judge.model,
+            source: plan.judge.source,
+          },
+    runnable_simulation_count: plan.runnableSimulationCount,
+    skipped_simulation_count: plan.skippedSimulationCount,
+    tests: plan.groups.map((group) => ({
+      test_id: group.testId,
+      test_version_id: group.testVersionId,
+      test_name: group.testName,
+      personas: group.personas.map((one) => ({
+        persona_id: one.personaId,
+        persona_version_id: one.personaVersionId,
+        name: one.name,
+      })),
+      required_capabilities: [...group.requiredCapabilities],
+      // Runnable, or the structured reason and the keys that decided it. The
+      // two skip reasons are never folded together: one means write a
+      // different test, the other means measure this connection.
+      skip: group.capability.runnable
+        ? null
+        : {
+            reason: group.capability.reason,
+            capabilities: [...group.capability.capabilities],
+          },
+      graders: group.items.map((item) =>
+        item.kind === "built_in"
+          ? {
+              kind: "built_in",
+              grader_key: item.graderKey,
+              engine_version: item.engineVersion,
+              reads: [...item.reads],
+              modalities: [...item.modalities],
+              judge: describedJudgeChoice(item.judge),
+            }
+          : {
+              kind: "authored",
+              grader_id: item.graderId,
+              grader_version_id: item.graderVersionId,
+              name: item.graderName,
+              origin: item.origin,
+              priority: item.priority,
+              scope: item.scope,
+              reads: [...item.reads],
+              modalities: [...item.modalities],
+              judge: describedJudgeChoice(item.judge),
+            },
+      ),
+    })),
+  };
+}
+
+/** A judge choice on the wire: tagged, and never carrying a secret. */
+function describedJudgeChoice(
+  choice: JudgeChoice,
+): Record<string, unknown> {
+  return choice.tag === "configured"
+    ? {
+        tag: "configured",
+        provider: choice.provider,
+        model: choice.model,
+        source: choice.source,
+      }
+    : { tag: choice.tag };
+}
+
+/**
  * The run and its conversations — one shape for starting, reading and stopping.
  *
  * `judged` is absent wherever the caller could not or need not pay for a
@@ -329,6 +461,10 @@ function describedRun(
     completed_count: one.completedCount,
     failed_count: one.failedCount,
     canceled_count: one.canceledCount,
+    // Its own number beside the three above, never folded into any of them.
+    // A conversation egma declined to conduct is not a failure of the agent,
+    // not something anybody canceled, and certainly not a pass.
+    skipped_count: one.skippedCount,
     // No token, no key, no query at all. A person opens it and the browser
     // they signed in with is already signed in — so the address is safe to
     // paste into a message, a ticket or a terminal somebody else can read.
@@ -441,6 +577,45 @@ export async function runRoutes(
    * folder and a selection, and the fields that matter each refuse for
    * themselves in words that say what to send instead.
    */
+  /**
+   * What a run would freeze, for whichever selection is on screen.
+   *
+   * **The same resolution the start does, and that is the whole point.** A
+   * review step that worked out the pins, the skips and the judge for itself
+   * would be a second opinion, and the moment the two disagreed a person would
+   * have approved one run and started another. So this calls `planRun`, and so
+   * does `startRun`.
+   *
+   * It answers rather than refuses wherever the answer is a state the page has
+   * to draw — a project with no judge, a test that would be skipped — and
+   * refuses only what could never be written at all.
+   */
+  app.get(RUN_PLAN_PATH, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const query = (request.query ?? {}) as Record<string, unknown>;
+
+    const acting = await actingIn(auth, given(text(query.project)));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+
+    const selected = given(text(query.test_versions));
+    const pinned = pinnedVersions(
+      selected === undefined ? [] : selected.split(","),
+    );
+    if ("refusal" in pinned) return unprocessable(reply, pinned.refusal);
+
+    const onAgent = given(text(query.agent));
+    // Every refusal `planRun` raises is one `startRun` raises for the same
+    // reason, so this group's own error handler answers both identically —
+    // which is what stops a review step and a start disagreeing about a
+    // selection that could never be written.
+    const plan = await planRun(acting.auth, {
+      connectionId: text(query.connection),
+      ...(onAgent === undefined ? {} : { agentId: onAgent }),
+      testVersionIds: pinned.entries,
+    });
+    return reply.send(describedPlan(plan));
+  });
+
   app.post(RUNS_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
@@ -487,10 +662,27 @@ export async function runRoutes(
     const onAgent = given(text(body.agent));
     const label = given(text(body.label));
 
+    /**
+     * **Required here, and optional one layer down.** A run dials real
+     * telephony and spends a real judge, so an answer lost on the way back must
+     * never become a second conversation with somebody's agent — and the only
+     * thing that can prevent it is a word the *client* chose, because only the
+     * client knows that its second request is its first one again.
+     *
+     * The seam beneath takes it optionally because egma's own fixtures start a
+     * run once inside a process they control. Every path a person or a client
+     * comes in on is this one.
+     */
+    const idempotencyKey = given(text(body.idempotency_key));
+    if (idempotencyKey === undefined) {
+      return unprocessable(reply, REFUSALS.idempotencyKeyRequired);
+    }
+
     const started = await startRun(acting.auth, {
       ...(onAgent === undefined ? {} : { agentId: onAgent }),
       connectionId: text(body.connection),
       testVersionIds: pinned.entries,
+      idempotencyKey,
       ...(label === undefined ? {} : { label }),
     });
 
@@ -606,7 +798,7 @@ export async function runRoutes(
    * and paraphrasing here would put a second, quieter copy of it in a file
    * nobody would think to check.
    */
-  app.setErrorHandler(async (error, _request, reply) => {
+  app.setErrorHandler(async (error: unknown, _request, reply) => {
     if (error instanceof RunWriteRefusedError) {
       // A map from the reason to the answer, and nothing else. The sentence is
       // written whole where the refusal was decided and travels untouched:
@@ -625,6 +817,28 @@ export async function runRoutes(
         default:
           return unprocessable(reply, error.message);
       }
+    }
+
+    // A project with no judge, refused before any conversation is dialed. Its
+    // own code and its own sentence, because the fix is one page away and
+    // nothing about the selection is wrong.
+    if (error instanceof JudgeNotConfiguredError) {
+      return sendRefusal(
+        reply,
+        "judge_not_configured",
+        REFUSALS.judgeNotConfigured(error.projectId),
+      );
+    }
+
+    // A key reused over a different request. Answering the original run would
+    // tell somebody their new selection had started when it had not, so this
+    // is refused out loud and names both moves that fix it.
+    if (error instanceof IdempotencyConflictError) {
+      return sendRefusal(
+        reply,
+        "idempotency_conflict",
+        REFUSALS.idempotencyConflict(error.idempotencyKey),
+      );
     }
 
     // Reachable only in a race — the project was checked before the write, and

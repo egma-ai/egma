@@ -1,9 +1,11 @@
 import {
+  archiveJudgeCredential,
   createJudgeCredential,
   editJudgeCredential,
   getJudgeCredential,
   getProjectJudge,
   IdentityConflictError,
+  JudgeCredentialInUseError,
   JudgeProviderMismatchError,
   listJudgeCredentials,
   NotPermittedError,
@@ -74,6 +76,16 @@ export type JudgeRoutesOptions = {
 
 export const JUDGE_CREDENTIALS_PATH = "/api/judge-credentials";
 export const JUDGE_CREDENTIAL_PATH = "/api/judge-credentials/:credentialId";
+/**
+ * Taking a credential out of use.
+ *
+ * Its own path rather than a field on the PATCH above, because it is a
+ * different kind of decision: a relabel or a rotation always succeeds, and this
+ * is refused while anything still needs the key behind it. A verb that
+ * sometimes refuses should not share a door with one that never does.
+ */
+export const JUDGE_CREDENTIAL_ARCHIVE_PATH =
+  "/api/judge-credentials/:credentialId/archive";
 export const PROJECT_JUDGE_PATH = "/api/judge";
 
 type Body = Record<string, unknown>;
@@ -253,6 +265,51 @@ export async function judgeRoutes(
   });
 
   /**
+   * Take a credential out of use, once nothing needs it.
+   *
+   * **Refused rather than cascading**, and the refusal names every blocking
+   * use. A project pointing at it would lose its judge outright; a run whose
+   * frozen plan names it while a conversation is still moving would be judged
+   * against a key that had gone; a grading job that is `pending` or `claimed`
+   * is about to resolve exactly this secret. Archiving under any of them turns
+   * a whole run's judgments into errors nobody can act on.
+   *
+   * The row stays, so every frozen plan that ever named it keeps naming
+   * something readable. Archive means only *stop choosing this from now on*.
+   */
+  app.post(JUDGE_CREDENTIAL_ARCHIVE_PATH, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const { credentialId } = request.params as { credentialId: string };
+    const body = (request.body ?? {}) as Body;
+
+    if (auth.role !== "admin") {
+      return refuseRole(reply, auth, "manage judge credentials");
+    }
+
+    const unknown = unknownKeyIn(
+      body,
+      ["expected_revision"],
+      "a judge credential archive",
+    );
+    if (unknown !== undefined) return invalid(reply, unknown);
+
+    const archived = await archiveJudgeCredential(auth, credentialId, {
+      ...(given(text(body.expected_revision)) === undefined
+        ? {}
+        : { expectedRevision: text(body.expected_revision) }),
+    });
+
+    if (archived === undefined) {
+      return sendRefusal(
+        reply,
+        "not_found",
+        REFUSALS.notFound("judge credential", credentialId),
+      );
+    }
+    return reply.send(described(archived));
+  });
+
+  /**
    * A single credential, by its id — a label and a hint, and never a key.
    *
    * It exists so that a page can name the credential a project spends from
@@ -358,6 +415,20 @@ export async function judgeRoutes(
   });
 
   app.setErrorHandler(async (error, request, reply) => {
+    // Every blocking use, spelled into the one sentence the product contract
+    // names — "used by {uses}" — so a page can show it word for word and a
+    // person can go and deal with each one.
+    if (error instanceof JudgeCredentialInUseError) {
+      return sendRefusal(
+        reply,
+        "judge_credential_in_use",
+        REFUSALS.judgeCredentialInUse(
+          error.credentialId,
+          error.uses.map((use) => `${use.kind} ${use.id}`).join(", "),
+        ),
+      );
+    }
+
     if (error instanceof JudgeProviderMismatchError) {
       return sendRefusal(
         reply,

@@ -1,3 +1,4 @@
+import { newId } from "@egma/ids";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -538,7 +539,11 @@ describe("the shipped simulator against the real API", () => {
       const startRunOver = async (connection: string) => {
         const started = await call("POST", "/api/runs", {
           key,
-          body: { connection, test_versions: [versionId] },
+          body: {
+            connection,
+            test_versions: [versionId],
+            idempotency_key: newId("run"),
+          },
         });
         expect(started.status, JSON.stringify(started.body)).toBe(201);
         const simulations = started.body.simulations as { id: string }[];

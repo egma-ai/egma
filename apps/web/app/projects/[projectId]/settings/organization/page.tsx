@@ -7,6 +7,7 @@ import { sendJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
 import {
   credentialsIn,
   JUDGE_CREDENTIALS_PATH,
+  judgeCredentialArchivePath,
   judgeCredentialPath,
   type JudgeCredential,
   type JudgeCredentialPage,
@@ -257,10 +258,14 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
  * identity survives, so every project pointing at this credential keeps
  * pointing at it and pending grading picks the new key up when it claims.
  *
- * There is no Archive here on purpose. Removing a credential has to be refused
- * while a project points at it and while frozen grading work still needs it,
- * and frozen grading plans arrive with run planning. A control with none of
- * that behind it would strand work mid-flight.
+ * **Archive is here now, and it is refused rather than cascading.** Removing a
+ * credential has to be refused while a project points at it, while a run whose
+ * frozen grading plan names it still has a conversation moving, and while a
+ * grading job is waiting to be judged or already claimed — and frozen grading
+ * plans arrived with run planning, which is what made the second and third
+ * questions askable at all. The refusal names every blocking use and this page
+ * shows that sentence unchanged, because it is the sentence that says what to
+ * go and do.
  */
 function Credentials({
   credentials,
@@ -326,6 +331,42 @@ function Credentials({
     onChanged();
   }
 
+  async function archive(credential: JudgeCredential): Promise<void> {
+    if (!mayAdminister || busy) return;
+    setFailed(null);
+    setBusy(true);
+    const written = await sendJson<JudgeCredential>(
+      judgeCredentialArchivePath(credential.id),
+      {
+        method: "POST",
+        body: { expected_revision: credential.revision },
+      },
+    );
+    setBusy(false);
+    if (written.status === "signed-out") {
+      window.location.replace("/sign-in");
+      return;
+    }
+    if (written.status !== "ready") {
+      setFailed({
+        what: `Egma did not archive ${credential.label}.`,
+        refusal: written.refusal,
+        // Bound to the credential that failed, and cleared the moment a
+        // different row opens — the same rule the replacement field is held
+        // to, and for the same reason.
+        again: () => void archive(credential),
+      });
+      return;
+    }
+    // The row leaves the list, so the form that was open on it must close with
+    // it rather than sit over a credential that is no longer there.
+    if (rotating === credential.id) {
+      setRotating(null);
+      setReplacement("");
+    }
+    onChanged();
+  }
+
   async function rotate(credential: JudgeCredential): Promise<void> {
     if (!mayAdminister || busy || replacement.trim() === "") return;
     setFailed(null);
@@ -382,6 +423,24 @@ function Credentials({
       mono: true,
       width: "90px",
       cell: (credential) => `…${credential.hint}`,
+    },
+    {
+      key: "archive",
+      header: "",
+      width: "110px",
+      cell: (credential) => (
+        <Button
+          disabled={!mayAdminister || busy}
+          onClick={() => {
+            // Archiving is not opening a row, so it does not change which row
+            // is open — but it does replace whatever failure was on screen
+            // with its own, bound to this credential.
+            void archive(credential);
+          }}
+        >
+          Archive
+        </Button>
+      ),
     },
     {
       key: "rotate",

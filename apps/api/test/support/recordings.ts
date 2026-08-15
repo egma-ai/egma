@@ -1,3 +1,4 @@
+import { newId } from "@egma/ids";
 import {
   claimSimulations,
   completeSimulation,
@@ -300,6 +301,7 @@ export async function aConductedRun(
   const started = await ask(app, "POST", "/api/runs", who.key, {
     connection: connectionId,
     test_versions: [String(pushed.body.version_id)],
+    idempotency_key: newId("run"),
     label: options.label ?? "the whole folder",
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);

@@ -474,7 +474,7 @@ describe("an organization's judge credentials", () => {
 
 describe("a project's judge", () => {
   it("is needs_setup when the deployment configured none, which is a state and not a failure", async () => {
-    api = await createApi("judge_needs_setup");
+    api = await createApi("judge_needs_setup", { defaultJudge: null });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const judge = await asBrowser(
@@ -633,7 +633,7 @@ describe("a project's judge", () => {
   });
 
   it("refuses the platform sentinel on a deployment that configured no judge", async () => {
-    api = await createApi("judge_no_platform_judge");
+    api = await createApi("judge_no_platform_judge", { defaultJudge: null });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await asBrowser(ada, "PUT", "/api/judge", {
