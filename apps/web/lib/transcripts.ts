@@ -67,14 +67,32 @@ export type Step = {
 /** One judge's answer about this exchange, as the read hands it over. */
 export type Judgment = {
   readonly grader_id: string;
-  readonly dimension: string;
+  /**
+   * Which 0-or-1 check inside the grader this answers, as its key — never the
+   * sentence, which is read from the pinned test version.
+   */
+  readonly assertion: string;
+  /**
+   * The words behind that key, resolved by the read from the version this
+   * conversation was executed against.
+   *
+   * `null` where nothing could place the key — a grader whose keys are its own
+   * business, a conversation with no test — and absent from an older answer that
+   * never resolved one. Both mean the same thing here and the key is shown
+   * instead: a bare `behavior_3` is terse, and an invented sentence would be
+   * unfalsifiable.
+   */
+  readonly assertion_text?: string | null;
+  /**
+   * Whether this judgment can fail anything — `false` for a diagnostic copy,
+   * which reports and never decides. Absent on a read that does not carry lanes.
+   */
+  readonly required?: boolean;
   readonly verdict: string;
   readonly score: number;
-  readonly priority: string;
   readonly rationale: string;
   /** Turn positions, as `turn:1`. What the judge read, in the judge's terms. */
   readonly cited_turns: readonly string[];
-  readonly judged_by: string;
   readonly judged_at: string;
 };
 
@@ -92,11 +110,54 @@ export type Outcome = {
   readonly counts: VerdictCounts;
 };
 
+/**
+ * One measure this exchange produced, as the read hands it over.
+ *
+ * **Computed by the platform, never here — the reduction included.** The
+ * samples arrive already worked out by egma's one shared measure module, and so
+ * does `worst`: the single number a grader holds against a bound. Both are the
+ * platform's arithmetic, so this page renders figures rather than deriving any.
+ *
+ * The reduction is the part that matters. Taking the maximum here would look
+ * harmless and would be a second implementation of the exact number a verdict
+ * rests on — right up to the day a grader reduces by p90 instead, when the page
+ * would go on showing the maximum with nothing failing anywhere. A developer who
+ * found this page and a verdict disagreeing would be right to stop believing
+ * both, so the page is not allowed to be capable of it.
+ *
+ * The unit rides each measure because the measure catalog owns it: a page that
+ * assumed milliseconds would be wrong the moment somebody bounds a measure
+ * counted in something else.
+ */
+export type Measured = {
+  readonly measure: string;
+  readonly unit: string;
+  /** One sample, or the series a per-turn measure produced. Never empty. */
+  readonly samples: readonly number[];
+  /** The span each sample came off, in the same order. */
+  readonly span_ids: readonly string[];
+  /**
+   * The measurement a bound is held against, reduced by the platform. Null
+   * only on an answer that carried no measurement at all.
+   */
+  readonly worst: { readonly value: number; readonly span_id: string } | null;
+  /**
+   * True when this reading is a prefix of the exchange, so the figure is the
+   * worst of what egma holds rather than the worst of the call.
+   */
+  readonly partial?: boolean;
+};
+
 export type Detail = {
   readonly trace: Facts;
   readonly turns: readonly Step[];
   readonly spans: readonly Step[];
   readonly spans_truncated: boolean;
+  /**
+   * What this exchange measured. Absent on an answer from an older platform,
+   * which is a page with no measures rather than a page that breaks.
+   */
+  readonly measures?: readonly Measured[];
   /**
    * The simulation this exchange is, when egma conducted it, and `null` when a
    * customer's own agent did.
@@ -110,8 +171,21 @@ export type Detail = {
   readonly simulation_id?: string | null;
   /** Absent on a trace nothing has judged, and on one whose store is down. */
   readonly verdicts?: readonly Judgment[];
-  /** The result folded over every judgment, or null before grading finishes. */
+  /**
+   * The result folded over the **required** graders, or null before grading
+   * finishes. What a diagnostic said is never in here — see below.
+   */
   readonly outcome: Outcome | null;
+  /**
+   * The same fold over the graders that only report, or null where none of them
+   * judged this exchange.
+   *
+   * It is carried on the model rather than left to the page to reach for,
+   * because the two are one answer: the outcome above was folded *without*
+   * these, so a page that showed one and not the other would be showing a
+   * headline with a piece of its own arithmetic missing.
+   */
+  readonly diagnostics?: Outcome | null;
 };
 
 /**
@@ -133,10 +207,27 @@ export function turnsCited(one: Judgment): readonly number[] {
   return at;
 }
 
-/** Turn a machine-written dimension into a label without hiding its meaning. */
+/** Turn a machine-written assertion key into a label without hiding its meaning. */
 export function humanizeIdentifier(value: string): string {
   const words = value.replaceAll(/[_-]+/g, " ").trim();
   return words === "" ? value : `${words.slice(0, 1).toUpperCase()}${words.slice(1)}`;
+}
+
+/**
+ * What to head a judgment with: the sentence somebody wrote, where the read
+ * resolved one, and the key itself where it did not.
+ *
+ * The fallback is the whole reason this is a function. A key that could not be
+ * placed is shown as the key — `Behavior 3` — which says exactly as much as egma
+ * actually knows. Putting the live test's third sentence there instead would be
+ * a plausible sentence that might be about a different check entirely, and
+ * nobody looking at the page could tell.
+ */
+export function assertionHeading(one: Judgment): string {
+  const said = one.assertion_text ?? null;
+  return said === null || said.trim() === ""
+    ? humanizeIdentifier(one.assertion)
+    : said;
 }
 
 export type Window = { readonly from: string; readonly to: string };

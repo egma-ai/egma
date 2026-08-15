@@ -4,7 +4,9 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import * as copy from "../lib/transcript-copy.ts";
+import * as gradingCopy from "../lib/grading-copy.ts";
 import {
+  assertionHeading,
   everyStep,
   howFarIn,
   howLong,
@@ -20,6 +22,7 @@ import {
   windowChoiceOf,
   WINDOW_PARAMETER,
   type Facts,
+  type Judgment,
   type Step,
 } from "../lib/transcripts.ts";
 
@@ -285,10 +288,51 @@ describe("what a stored kind is called where somebody reads it", () => {
     expect(copy.SPEAKERS).toEqual({ human: "human:", agent: "agent:" });
   });
 
-  it("makes a grader dimension readable without changing its words", () => {
+  it("makes a grader assertion key readable without changing its words", () => {
     expect(humanizeIdentifier("appointment_change_policy")).toBe(
       "Appointment change policy",
     );
+  });
+});
+
+/**
+ * What a judgment is headed with.
+ *
+ * A verdict row keeps a **key**, and the read resolves the words behind it from
+ * the version the conversation was executed against. So the heading is the
+ * sentence somebody wrote wherever there is one — and the key itself wherever
+ * there is not, because a key that could not be placed says exactly as much as
+ * egma knows, and a plausible wrong sentence would say more than it knows.
+ */
+describe("the heading a judgment carries", () => {
+  function judged(overrides: Partial<Judgment> = {}): Judgment {
+    return {
+      grader_id: "grd_01JQZ0000000000000000000AA",
+      assertion: "behavior_3",
+      verdict: "passed",
+      score: 1,
+      rationale: "the agent named the new time back.",
+      cited_turns: ["turn:5"],
+      judged_at: "2026-08-14T09:00:00.000000Z",
+      ...overrides,
+    };
+  }
+
+  it("is the sentence the read resolved, word for word", () => {
+    expect(
+      assertionHeading(
+        judged({ assertion_text: "confirms the new time back before finishing" }),
+      ),
+    ).toBe("confirms the new time back before finishing");
+  });
+
+  it("is the key itself where nothing could place it", () => {
+    expect(assertionHeading(judged({ assertion_text: null }))).toBe("Behavior 3");
+    // And on an answer that never carried the field at all, which is the same
+    // absence said a different way.
+    expect(assertionHeading(judged())).toBe("Behavior 3");
+    // A resolved sentence of nothing but spaces is nothing resolved.
+    expect(assertionHeading(judged({ assertion_text: "   " }))).toBe("Behavior 3");
   });
 });
 
@@ -388,10 +432,21 @@ function everySentence(said: unknown): string[] {
   return [];
 }
 
+/**
+ * Everything under the discipline: the transcript pages' own words, and the
+ * judgment card's.
+ *
+ * The card is drawn on this page and on a run's results, so its words live in a
+ * file of their own rather than in either page's — and they are held to the same
+ * list here, because the surface that renders them is this one.
+ */
+const EVERY_WORD = [copy, gradingCopy];
+
 describe("what the pages say out loud", () => {
   it("is gathered in one place, so it can be held against the list", () => {
     const said = everySentence(copy);
     expect(said.length).toBeGreaterThan(40);
+    expect(everySentence(gradingCopy).length).toBeGreaterThan(3);
   });
 
   /**
@@ -400,7 +455,7 @@ describe("what the pages say out loud", () => {
    * keeps the first out of the second.
    */
   it("uses no storage word and no banned one", () => {
-    for (const sentence of everySentence(copy)) {
+    for (const sentence of everySentence(EVERY_WORD)) {
       for (const banned of NEVER_SAID) {
         expect(
           new RegExp(`\\b${banned}`, "iu").test(sentence),
@@ -416,7 +471,7 @@ describe("what the pages say out loud", () => {
    * about either, so they say it about neither.
    */
   it("does not borrow `session` for an exchange", () => {
-    for (const sentence of everySentence(copy)) {
+    for (const sentence of everySentence(EVERY_WORD)) {
       expect(/\bsession/iu.test(sentence), sentence).toBe(false);
     }
   });
@@ -433,6 +488,18 @@ describe("what the pages say out loud", () => {
     ]) {
       const source = await readFile(path.join(WEB, page), "utf8");
       expect(source, page).toContain("transcript-copy.ts");
+    }
+
+    // And everything that says one of the two lanes out loud, which is words of
+    // its own and therefore a copy file of its own: the card both surfaces draw
+    // a judgment with, and the summary above it that reports the lane the
+    // outcome was folded without.
+    for (const page of [
+      "app/judgment-card.tsx",
+      "app/traces/[traceId]/page.tsx",
+    ]) {
+      const source = await readFile(path.join(WEB, page), "utf8");
+      expect(source, page).toContain("grading-copy.ts");
     }
   });
 });
@@ -478,5 +545,88 @@ describe("the transcript pages", () => {
       const source = await readFile(path.join(WEB, page), "utf8");
       expect(source, page).toContain("/v1/traces");
     }
+  });
+});
+
+/**
+ * The metrics display: what this exchange measured, shown beside the exchange.
+ *
+ * **The page derives no number.** Every figure it shows arrived already computed
+ * by the platform's one shared measure module — the same module a `latency`
+ * grader is judged through — so a duration worked out in a browser would be a
+ * second answer about one exchange and exactly what that module exists to
+ * prevent. What the page decides is which of the samples to lead with, and it
+ * says which one that is.
+ */
+describe("what the exchange measured", () => {
+  it("is read from the answer, and never worked out from the timings", async () => {
+    const page = await readFile(
+      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      "utf8",
+    );
+
+    // Rendered from the answer's own field.
+    expect(page).toContain("detail.measures");
+    // With the unit the answer carried, never one this page assumed — a page
+    // that said "ms" would be wrong the moment a measure is not a duration.
+    expect(page).toContain("one.unit");
+    // And separate from the verdicts, because a measure measures and a grader
+    // judges: nothing here is green or red.
+    expect(page).toContain("MEASURES.label");
+  });
+
+  /**
+   * **The reduction is the platform's, and this page must not be able to
+   * repeat it.**
+   *
+   * The one number a bound is held against arrives on the answer as `worst`.
+   * Taking the maximum here instead would look harmless and would be a second
+   * implementation of exactly that figure — correct while both happen to take
+   * the maximum, silently wrong the first day a grader reduces some other way,
+   * with nothing anywhere failing. The page held those four lines once; this is
+   * what stops them coming back.
+   *
+   * The rule that no source file outside the measure module reduces a series
+   * lives in `packages/db/test/one-measure-path.test.ts` and covers this file
+   * too. What is asserted here is the positive half: the page reads the reduced
+   * figure it was sent.
+   */
+  it("prints the reduction it was handed, and never computes one", async () => {
+    const page = await readFile(
+      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      "utf8",
+    );
+
+    expect(page).toContain("one.worst");
+    // The series is used for one thing, which is saying how many there were.
+    expect(page).toContain("one.samples.length");
+    expect(page).not.toContain("samples.reduce");
+    expect(page).not.toContain("samples[0]");
+  });
+
+  it("says which measurement it is showing, and how many there were", () => {
+    expect(copy.MEASURES.worst).toBe("worst");
+    expect(copy.MEASURES.counted(1)).toContain("1 measurement");
+    expect(copy.MEASURES.counted(11)).toContain("11 measurements");
+  });
+
+  /**
+   * A reading the store's span limit cut short holds the first part of a long
+   * exchange, so its worst measurement is the worst of that part — the slowest
+   * turn may be past the cut. Saying so is the difference between a figure a
+   * reader can use and one that quietly means something else.
+   */
+  it("qualifies the figure when the reading is only part of the exchange", async () => {
+    const page = await readFile(
+      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      "utf8",
+    );
+
+    expect(page).toContain("one.partial");
+    expect(copy.MEASURES.partialWorst).toContain("part egma holds");
+  });
+
+  it("says nothing was measured rather than showing a blank", () => {
+    expect(copy.MEASURES.none.length).toBeGreaterThan(40);
   });
 });

@@ -1,3 +1,4 @@
+import { GRADER_LIBRARY_CATALOG, PREDEFINED_GRADERS } from "@egma/db";
 import { describe, expect, it } from "vitest";
 
 import { openaiJudge } from "../src/judge/openai.ts";
@@ -27,6 +28,17 @@ import type { JudgeInput } from "../src/judge/index.ts";
 const API_KEY = process.env["TEST_OPENAI_API_KEY"]?.trim() ?? "";
 const MODEL = process.env["TEST_OPENAI_MODEL"]?.trim() ?? "gpt-4.1-mini";
 
+/**
+ * The words a real judge is told it is working under: the ones on the
+ * `expected_behaviors` library entry, which is where the only judge prompt egma
+ * ships lives. Asking a real model with anything else would be smoke-testing a
+ * prompt no deployment sends.
+ */
+const THE_PROMPT =
+  GRADER_LIBRARY_CATALOG.find(
+    (entry) => entry.id === PREDEFINED_GRADERS.expectedBehaviors,
+  )?.prompt ?? "";
+
 /** One short conversation, plainly settling one thing and plainly not another. */
 const EVIDENCE: JudgeInput = {
   transcript: [
@@ -48,6 +60,7 @@ describe.skipIf(API_KEY === "")(
 
     it("answers met, with a reason and a turn it rests on", async () => {
       const answer = await judge({
+        prompt: THE_PROMPT,
         criterion: "the agent confirms the new time back before finishing",
         evidence: EVIDENCE,
       });
@@ -69,6 +82,7 @@ describe.skipIf(API_KEY === "")(
      */
     it("does not call a criterion met when the conversation never touched it", async () => {
       const answer = await judge({
+        prompt: THE_PROMPT,
         criterion: "the agent quotes the price of the cleaning in dollars",
         evidence: EVIDENCE,
       });

@@ -7,6 +7,7 @@ import {
   connectClickHouse,
   disconnect,
   disconnectClickHouse,
+  seedGraderLibrary,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
@@ -167,6 +168,13 @@ export async function startInstance(
     encryptionKey: TEST_ENCRYPTION_KEY,
   });
   connectClickHouse({ clickhouseUrl: traceStore.url, maxOpenConnections: 4 });
+
+  // egma's own graders, on the shelf before anything can point at one — what
+  // the real entry point writes in the same breath as applying its migrations.
+  // Every project created afterwards is seeded with a copy of one, so an
+  // instance that skipped this would refuse the first signup that reached it,
+  // for a reason no test here is about.
+  await seedGraderLibrary();
 
   const withPages = options.web ?? true;
   const apiPort = await freePort();

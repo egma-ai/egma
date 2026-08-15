@@ -501,8 +501,63 @@ describe("the pages", () => {
     );
 
     expect(contract).toContain("readonly outcome: Outcome | null");
-    expect(transcript).toContain("<OutcomeSummary outcome={detail.outcome}");
+    expect(transcript).toContain("<OutcomeSummary");
+    expect(transcript).toContain("outcome={detail.outcome}");
     expect(transcript).toContain('aria-label="Grading outcome"');
+  });
+
+  /**
+   * The outcome above is folded over the graders that can fail something, so
+   * the lane it was folded *without* has to be on the same page — otherwise the
+   * failures on the cards below have nothing up here to belong to, and a reader
+   * is left to work out for themselves why a red judgment sits under a green
+   * verdict.
+   *
+   * It is carried on the model rather than reached for off a loose response,
+   * which is what stops the read sending a field the page quietly drops.
+   */
+  it("shows the diagnostic lane beside that outcome, from the model", async () => {
+    const transcript = await readFile(
+      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      "utf8",
+    );
+    const contract = await readFile(
+      path.join(WEB, "lib/transcripts.ts"),
+      "utf8",
+    );
+
+    expect(contract).toContain("readonly diagnostics?: Outcome | null");
+    expect(transcript).toContain("diagnostics={detail.diagnostics");
+    expect(transcript).toContain("GRADING.diagnosticLane");
+    // Never coloured by what it says: `data-verdict` is what paints a fact red,
+    // and a red diagnostic would read as a reason the verdict beside it is red.
+    expect(transcript).not.toMatch(
+      /diagnostics\.verdict[^\n]*data-verdict/u,
+    );
+  });
+
+  /**
+   * **The fraction, which is the whole reason a diagnostic exists.** A grader
+   * carrying `required: false` is switched on to be read rather than to decide,
+   * and passed ÷ counted is what that reading produces. Its counts are a
+   * different statement — a skipped assertion leaves the fraction's denominator
+   * and stays in the counts — so showing only the counts would report something
+   * true and not the thing that was asked for.
+   *
+   * Both lanes go through one formatter, so the day the required score learns to
+   * round differently the diagnostic's cannot be left behind.
+   */
+  it("reports the diagnostic fraction, not only its counts", async () => {
+    const transcript = await readFile(
+      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      "utf8",
+    );
+
+    expect(transcript).toContain("shownScore(diagnostics.score)");
+    expect(transcript).toContain("GRADING.diagnosticScore");
+    // One formatter, both lanes: a proportion of nothing is a dash in each.
+    expect(transcript).toContain("shownScore(outcome.score)");
+    expect(transcript).toMatch(/function shownScore\(/u);
   });
 
   it("reach the API for the device flow at paths this instance rewrites", async () => {

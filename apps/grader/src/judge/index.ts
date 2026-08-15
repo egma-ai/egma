@@ -6,12 +6,7 @@ import {
   type JudgeProvider,
 } from "@egma/db";
 
-import {
-  named,
-  type Judge,
-  type JudgeMaker,
-  type ResolvedJudge,
-} from "./contract.ts";
+import type { Judge, JudgeMaker, ResolvedJudge } from "./contract.ts";
 import { openaiJudge } from "./openai.ts";
 
 /**
@@ -54,19 +49,23 @@ function judgeFrom(resolved: ResolvedJudge, makers: JudgeMakers): Judge {
 export class NoJudge extends Error {}
 
 /**
- * One judge, ready to be asked — and the name that goes on whatever it decides.
+ * One judge, ready to be asked.
  *
- * **This pair is the whole of what anything outside this directory ever holds,
+ * **One field is the whole of what anything outside this directory ever holds,
  * and the key is deliberately not in it.** A grader module gets something it can
- * ask and something it can record; there is no field here through which a secret
- * could reach a rationale, a verdict row or a log line. That makes the key's
+ * ask and nothing else; there is no field here through which a secret could
+ * reach a rationale, a verdict row or a log line. That makes the key's
  * confinement a property of the shape rather than of everybody remembering, and
  * every grader type that judges with a model gets it for free.
+ *
+ * There is no name beside it either. Which judge answered was carried to the
+ * verdict row's `judged_by`, and that column retired with the human corrections
+ * it existed for — a human word returns as the reserved `human` grader type,
+ * under its own grader id. Nothing else ever wanted the name, so nothing hands
+ * it out.
  */
 export type AskableJudge = {
   readonly ask: Judge;
-  /** `provider/model`, for the verdict row's `judged_by`. Never the account. */
-  readonly name: string;
 };
 
 /**
@@ -163,7 +162,7 @@ export async function projectJudge(
           ? asConfigured
           : { provider: override.provider, model: override.model, key };
 
-      return { ask: judgeFrom(resolved, makers), name: named(resolved) };
+      return { ask: judgeFrom(resolved, makers) };
     },
   };
 }

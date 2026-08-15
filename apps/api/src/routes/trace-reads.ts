@@ -1,10 +1,14 @@
 import {
   listTraces,
+  measuresFromSpans,
+  worstSampleOf,
   MAXIMUM_LIST_LIMIT,
   NotPermittedError,
+  readAssertionWords,
   readTrace,
   readVerdicts,
   UnreadableTraceQueryError,
+  type AssertionWords,
   type TimeWindow,
   type TraceDetail,
   type TraceFacts,
@@ -18,6 +22,11 @@ import { simulationIdOfTrace } from "@egma/simulation-contract";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given } from "../http/reading.ts";
+import {
+  describedOutcome,
+  describedVerdict,
+  onlyReporting,
+} from "../http/verdicts.ts";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 
 /**
@@ -237,12 +246,75 @@ function describedSpan(span: TraceSpan): Record<string, unknown> {
   };
 }
 
+/**
+ * What this conversation measured — **the metrics display's read path, and it
+ * goes through the one shared measure module.**
+ *
+ * The numbers are not on the rows and are not stored anywhere: they are
+ * computed here from the spans this answer already carries, by the same
+ * function the latency grader computes with. So the figure on a page and the
+ * figure a verdict was decided by are one arithmetic, and the two cannot come to
+ * disagree — which is the whole reason the module exists rather than each
+ * surface reading timing spans for itself.
+ *
+ * **`worst` is on the wire because the reduction is part of that arithmetic.**
+ * A bound is held against one number, and which number that is — the worst
+ * measurement, today; whichever of the catalog's eight aggregations a grader
+ * asks for, tomorrow — is a decision the module makes. Sending only the series
+ * would leave every reader to reduce it, and a browser reducing it would be a
+ * second implementation of exactly the number a verdict rests on: correct while
+ * both happen to take the maximum, and silently wrong the first day they do
+ * not. So it is reduced once, here, by `worstSampleOf`.
+ *
+ * The series still rides along, because a reader wanting to plot the turns or
+ * count them needs it and because the reduced number should be checkable
+ * against what it was reduced from.
+ *
+ * **The same call for a simulation and for a real caller's trace.** Nothing here
+ * looks at `source`; a trace whose agent emits no timing spans simply carries no
+ * measures, which is a fact about the telemetry rather than a branch taken here.
+ *
+ * **`partial` says the reading is a prefix.** A trace over the store's span
+ * limit comes back as its first spans, so a worst measurement taken over it is
+ * the worst of the part egma holds and not of the call — the worst turn of a
+ * long conversation is as likely to be past the cut as before it. The grading
+ * engine refuses such a trace outright; a display is allowed to show what there
+ * is, and is not allowed to show it as though it were the whole call.
+ *
+ * The unit rides each measure because the catalog owns it — a client that named
+ * one of its own would be a second opinion about something already written
+ * down, and wrong the moment a measure is not a duration.
+ */
+function describedMeasures(
+  detail: TraceDetail,
+): readonly Record<string, unknown>[] {
+  return measuresFromSpans(detail).map((measured) => {
+    const worst = worstSampleOf(measured);
+    return {
+      measure: measured.measure,
+      unit: measured.unit,
+      samples: measured.samples.map((sample) => sample.value),
+      span_ids: measured.samples.map((sample) => sample.spanId),
+      // The one number a bound is held against, and where it happened. Null is
+      // unreachable — a measure with no measurements is absent from this list
+      // rather than present and empty — and it is sent rather than assumed
+      // away, because the alternative is a client inventing a figure.
+      worst:
+        worst === undefined
+          ? null
+          : { value: worst.value, span_id: worst.spanId },
+      partial: detail.truncated,
+    };
+  });
+}
+
 function describedDetail(detail: TraceDetail): Record<string, unknown> {
   return {
     trace: describedFacts(detail),
     turns: detail.turns.map(describedSpan),
     spans: detail.spans.map(describedSpan),
     spans_truncated: detail.truncated,
+    measures: describedMeasures(detail),
   };
 }
 
@@ -363,6 +435,27 @@ export async function traceReadRoutes(
       () => undefined,
     );
 
+    // The words behind the assertion keys, from the version this conversation
+    // was pinned to. Only a simulation has one — a production trace is in
+    // nobody's scenario — and this is the same resolution a run's results make,
+    // through the same call, so the one judgment card cannot read two ways
+    // depending on which page it is drawn on.
+    const words: AssertionWords | undefined =
+      detail.source === "simulation" && (judged?.verdicts.length ?? 0) > 0
+        ? await readAssertionWords(
+            auth,
+            filedUnder,
+            (judged?.verdicts ?? []).map((its) => its.graderId),
+          ).catch(() => undefined)
+        : undefined;
+
+    // Which of the copies that judged this conversation only report, off the
+    // same per-grader fold the outcome above was split by — so a row's marking
+    // and the header it sits under cannot disagree. This is the other half of
+    // that promise: the fold already left the diagnostics out of `outcome`, and
+    // without this the page would show their failures as if they had counted.
+    const diagnostic = onlyReporting(judged?.byGrader);
+
     return reply.send({
       ...describedDetail(detail),
       // The same derivation again, and this time as an answer rather than as a
@@ -386,25 +479,19 @@ export async function traceReadRoutes(
         detail.source === "simulation"
           ? simulationIdOfTrace(traceId) ?? null
           : null,
-      verdicts: (judged?.verdicts ?? []).map((its) => ({
-        grader_id: its.graderId,
-        dimension: its.dimension,
-        verdict: its.verdict,
-        score: its.score,
-        priority: its.priority,
-        rationale: its.rationale,
-        cited_turns: [...its.citedSpanIds],
-        judged_by: its.judgedBy,
-        judged_at: its.judgedAt,
-      })),
-      outcome:
-        judged === undefined
-          ? null
-          : {
-              verdict: judged.outcome.verdict,
-              score: judged.outcome.score ?? null,
-              counts: judged.outcome.counts,
-            },
+      // The one shape both surfaces that draw a judgment send, decided in
+      // `http/verdicts.ts` rather than here and again there — including
+      // `required`, without which a diagnostic's failure would render on this
+      // page as an unmarked red card under a header folded without it.
+      verdicts: (judged?.verdicts ?? []).map((its) =>
+        describedVerdict(its, words, diagnostic),
+      ),
+      // The required lane, as everywhere: a diagnostic copy reports and never
+      // decides.
+      outcome: describedOutcome(judged?.outcome),
+      // And the lane that only reports, beside it rather than inside it. Null
+      // where nothing diagnostic judged this conversation.
+      diagnostics: describedOutcome(judged?.diagnostics),
     });
   });
 

@@ -327,6 +327,24 @@ describe("creating a test", () => {
       error: "unprocessable",
       message: "an expected behavior needs to say something",
     });
+
+    // The shape that retired with the P0/P1/P2 ladder, named rather than
+    // reported as a sentence that says nothing: somebody sending last month's
+    // body is told what changed instead of being sent to look at their own
+    // words for a problem that is in the envelope.
+    const retired = await createTestThrough(key, {
+      ...RESCHEDULING,
+      expected_behaviors: [
+        { behavior: "confirms the new time back", priority: "P0" },
+      ],
+    });
+    expect(retired.body).toEqual({
+      error: "unprocessable",
+      message:
+        'an expected behavior is a plain sentence now; the {"behavior", ' +
+        '"priority"} shape retired with the P0/P1/P2 ladder. Send each ' +
+        "sentence on its own.",
+    });
   });
 });
 

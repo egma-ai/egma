@@ -169,6 +169,34 @@
       "when": 1786739000389,
       "tag": "0023_platform_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1786761736242,
+      "tag": "0024_grader_library",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1786765380759,
+      "tag": "0025_priorities_retire",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1786768990815,
+      "tag": "0026_running_copies",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1786770738934,
+      "tag": "0027_junction_dropped",
+      "breakpoints": true
     }
   ]
 }

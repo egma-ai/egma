@@ -34,7 +34,7 @@ import { TraceStoreRefusedError } from "./errors.ts";
  * `simulation` when a run produced it, `production` for everything else.
  * Explicit on the row rather than inferred from `run_id` being empty: comparing
  * a simulation against a production trace is the premise of the product, so the
- * two dimensions have to compose instead of sharing a slot.
+ * two facts have to compose instead of sharing a slot.
  */
 export type SpanSource = "simulation" | "production";
 

@@ -132,12 +132,11 @@ const WORK_DISPATCHING = [
  * resolved, so nothing on the judging side ever has to ask across customers what
  * has finished.
  *
- * `regrade`, `reopenGradingJob` and `correctVerdict` are the two ways a judgment
- * is ever revisited, and neither is an edit — one reopens the queue so the
- * engine judges again at today's grader versions, narrowed to one grader when
- * the ask names one, the other writes a person's disagreement as a row of its
- * own. There are no routes above them yet, so this surface is the altitude
- * re-grading and correcting are reachable at.
+ * `regrade` and `reopenGradingJob` are the one way a judgment is ever revisited,
+ * and neither is an edit: they reopen the queue so the engine judges again at
+ * today's grader versions, narrowed to one grader when the ask names one. There
+ * are no routes above them yet, so this surface is the altitude re-grading is
+ * reachable at.
  */
 const CONTEXT_REQUIRING = [
   "addConnection",
@@ -156,10 +155,8 @@ const CONTEXT_REQUIRING = [
   // and nothing else, so what this widening lets out is a word from a closed
   // set and never a config or a credential.
   "connectionTypeOf",
-  "correctVerdict",
   "createAgent",
   "createApiKey",
-  "createGrader",
   "createInvitation",
   "createMockTool",
   "createPersona",
@@ -168,6 +165,10 @@ const CONTEXT_REQUIRING = [
   "deactivateUser",
   "deleteAgent",
   "deleteGrader",
+  // The library's delete, which in v0 exists to refuse: every entry on the
+  // shelf is one egma ships, and egma's are undeletable because the next boot
+  // writes them again.
+  "deleteGraderLibraryEntry",
   "deleteMockTool",
   "deletePersona",
   "deleteTest",
@@ -187,6 +188,10 @@ const CONTEXT_REQUIRING = [
   "getAgent",
   "getConnection",
   "getGrader",
+  // The shelf: one entry, and one page of it. Both answer egma's entries
+  // beside the caller's own, with owner derived from tenancy rather than
+  // stored — which is the whole reason that one table's tenancy is nullable.
+  "getGraderLibraryEntry",
   "getGraderVersion",
   "getGradingJob",
   "getGradingJobForTrace",
@@ -201,6 +206,7 @@ const CONTEXT_REQUIRING = [
   "listAgents",
   "listApiKeys",
   "listConnections",
+  "listGraderLibrary",
   "listGraders",
   "listGradingJobsForSimulation",
   "listMembers",
@@ -223,6 +229,11 @@ const CONTEXT_REQUIRING = [
   // an owner writes them, a read answers a hint and never a stored secret, and
   // the environment seeds what the platform does not already hold.
   "readPlatformSettings",
+  // The other half of a key-only verdict row: what a page shows a person, read
+  // from the versions the conversation was pinned to rather than from the live
+  // test.
+  "readAssertionShelf",
+  "readAssertionWords",
   "readProject",
   "readRunVerdicts",
   "readTrace",
@@ -259,13 +270,26 @@ const CONTEXT_REQUIRING = [
   "resolveSimulationConnection",
   "revokeApiKey",
   "seedDefaultJudge",
+  // egma's own graders, written onto the shelf from egma's own catalog at
+  // start-up. The deployment configuring itself again, one table over: no
+  // user, no customer — a predefined entry belongs to none — and an upsert, so
+  // running it on every boot writes only what a release changed.
+  "seedGraderLibrary",
   "seedPlatformSettings",
+  // The other half of the library seeding, one table down: a shelf full of
+  // definitions judges nothing until a project is running a copy of one, so
+  // every project that has never had the expected-behaviors copy is given it.
+  // It names no customer and takes no argument at all.
+  "seedRunningGraders",
   "setJudgeConfiguration",
   "startRun",
   "startSimulation",
   "updateAgent",
   "updateConnection",
   "updateOrganizationSettings",
+  // The one door that makes a running grader: a pointer at a library entry
+  // and the answers to whatever that entry's form asked.
+  "useLibraryEntry",
   "writePlatformSettings",
 ];
 
@@ -290,6 +314,32 @@ const PERMISSION = [
  */
 const THE_PLATFORMS_SETTINGS = ["PLATFORM_SETTINGS"];
 
+/**
+ * What egma ships on the shelf, and the vocabulary a library entry is written
+ * in.
+ *
+ * The catalog is exported because it is the source of truth for what a
+ * predefined grader *is* — the seeding writes from it, and a test that wants to
+ * watch a version move hands in an edited copy of it. The two type lists are
+ * exported for the reason every closed vocabulary in this schema is: the words
+ * a refusal names have to be the words the constraint takes, and a list written
+ * twice is a list that will one day disagree with itself. `RESERVED_LIBRARY_TYPES`
+ * is the other half of that — the words that are spoken for and refused, so a
+ * refusal can say "not yet" rather than "never heard of it".
+ */
+const THE_GRADER_LIBRARY = [
+  "GRADER_LIBRARY_CATALOG",
+  "LARGEST_GRADER_SOURCE_CODE_BYTES",
+  "LIBRARY_TYPES",
+  // The identifiers of the entries egma ships, by the name a person calls
+  // them. Exported because three things outside this module point at one — the
+  // copy every project is seeded with, the engine's roster of what it can
+  // execute, and the tests that press Use — and a repeated literal is an
+  // identifier somebody can mistype into a pointer at nothing.
+  "PREDEFINED_GRADERS",
+  "RESERVED_LIBRARY_TYPES",
+];
+
 /** Vocabulary: the table definitions, how a caller proved who they are, and the refusals. */
 const VALUES = [
   // The agent factory's own refusal, carrying which of its three rules turned
@@ -297,9 +347,14 @@ const VALUES = [
   // have to read the sentence to tell them apart.
   "AgentWriteRefusedError",
   "AlreadyBelongsToAnOrganizationError",
-  // The grader factory's one refusal, beside the persona factory's: a delete
-  // that would leave a live test checking one thing fewer than it says it does.
-  "GraderNamedByTestsError",
+  // A library entry cannot leave the shelf while graders point at it. A copy
+  // reads its definition through that pointer every time it judges, so an entry
+  // taken away underneath one would leave a grader that judges nothing while
+  // still appearing on screen — refusal, never `set null`, never orphaned.
+  "GraderLibraryEntryInUseError",
+  // The grader factory has no refusal of its own any more. A copy's delete used
+  // to be turned away while a live test named it; a test names no graders, so
+  // switching one off is a decision about the project with nothing in its way.
   "LastAdminError",
   // A second answer for a tool this project already answers for. Its own class
   // because nothing about the body is wrong and something is already there,
@@ -307,6 +362,10 @@ const VALUES = [
   "MockToolTakenError",
   "NotPermittedError",
   "PersonaNamedByTestsError",
+  // A delete that named one of egma's own graders. Its own class because
+  // nothing about the request is wrong and nothing is in the way — the entry
+  // simply is not anybody's to remove.
+  "PredefinedGraderError",
   "ProjectOutsideOrganizationError",
   // A run turned away, carrying which rule turned it away: a connection
   // nobody can see, one that is not on the agent that was named, a type no
@@ -319,6 +378,10 @@ const VALUES = [
   // carries both versions and the test's identity, because the caller's next
   // move is to go and read the test as it now stands.
   "TestMovedOnError",
+  // Use named an entry this caller cannot see, or none at all. One refusal for
+  // both, because telling them apart would answer a question about somebody
+  // else's shelf.
+  "UnknownGraderLibraryEntryError",
   // A write refused for what it says, told apart from a fault so that a layer
   // above can relay the factory's sentence instead of answering with a stack.
   "UnprocessableInputError",
@@ -382,12 +445,40 @@ const THE_MOCKED_WORLD = [
  * against.
  */
 const THE_FOLD = [
+  // The two halves of one assertion key's round trip: the engine writes a
+  // verdict row with the first, a page reads the words back with the second.
+  // Here for the fold's own reason — they reach nothing — and together, because
+  // a format known in two packages is a format free to fork in one of them.
+  "behaviorAssertionAt",
+  "behaviorAssertionKey",
   "foldVerdicts",
   "foldVerdictsByGrader",
   "speakingVerdicts",
-  "JUDGED_BY_HUMAN",
-  "PRIORITIES",
+  // Which rows decide and which only report, split before anything is folded so
+  // that the one algebra never has to ask whose rows it was handed.
+  "verdictLanes",
   "VERDICTS",
+];
+
+/**
+ * The shared measure module, on the fold's exact terms: spans a caller already
+ * read go in, the measure catalog's numbers come out, and it reaches nothing.
+ *
+ * Exported for the fold's reason too. A measure has to be worked out in exactly
+ * one place — the metrics display reads through this and so does the grader that
+ * bounds one — because no number is stored anywhere that a disagreement between
+ * two readers could be settled against. `worstSampleOf` is on the surface for
+ * the same reason as the arithmetic above it: the reduction to the one number a
+ * bound is held against is part of the answer, not a caller's business.
+ *
+ * `everySpanIn` rides with them because the grading engine walks the same tree
+ * for a conversation's tool calls, and two implementations of "every span, once"
+ * is one of them quietly missing a list.
+ */
+const THE_MEASURES = [
+  "everySpanIn",
+  "measuresFromSpans",
+  "worstSampleOf",
 ];
 
 describe("the data-access module's surface", () => {
@@ -405,8 +496,10 @@ describe("the data-access module's surface", () => {
         ...VALUES,
         ...READ_LIMITS,
         ...THE_FOLD,
+        ...THE_MEASURES,
         ...THE_MOCKED_WORLD,
         ...THE_PLATFORMS_SETTINGS,
+        ...THE_GRADER_LIBRARY,
       ].sort(),
     );
   });

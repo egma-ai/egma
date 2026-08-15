@@ -382,7 +382,7 @@ ones a real caller had, with the same graders. A simulation reaching its end
 becomes claimable work in the same commit that ends it; a production
 conversation becomes claimable when its telemetry says it is over. The grader
 takes the work, reads the conversation, resolves the graders that apply to it,
-and writes one verdict row per judged dimension.
+and writes one verdict row per judged assertion.
 
 **It claims its work too**, on the same terms and for the same reasons: no
 `ports:`, no inbound surface, and more throughput is more copies —
@@ -881,6 +881,36 @@ written two ways, so this is derived rather than stored — and it is sent only
 for a trace egma conducted, because a production trace converts just as neatly
 into an id nothing ever minted. It is what lets a reader holding one transcript
 ask for that conversation's recording without looking anything else up.
+
+And it carries **`measures`**: what this exchange measured, computed from its
+own spans. Each entry is `{measure, unit, samples, span_ids, worst, partial}` —
+the measure's name from
+[the measure catalog](packages/simulation-contract/measure-catalog.md), the unit
+that catalog counts it in, one sample per measurement in the order they were
+taken, the span each sample came off, and **`worst`**: the single measurement a
+grader holds against a bound, as `{value, span_id}`. A measure this exchange did
+not produce is **absent** rather than present with nothing in it, so an empty
+list means nothing was measured — which is the ordinary answer for a production
+exchange, since egma files a timing span only for its own simulator's telemetry.
+
+**`worst` is on the wire because the reduction is part of the answer.** A bound
+is held against one number, and which number that is — the worst measurement
+today, whichever aggregation a grader asks for later — is egma's decision rather
+than yours to reproduce. Reducing the series yourself would be a second
+implementation of exactly the figure a verdict rests on: right for as long as
+both take the maximum, and wrong with nothing to warn you the day they differ.
+
+**`partial` is true when the reading is a prefix.** A trace over the 10,000-span
+limit comes back as its first spans, so a worst measurement taken over it is the
+worst of the part egma holds and not of the exchange — the slowest turn of a
+long call is as likely to be past the cut as before it. The grader refuses such a
+conversation outright and writes no verdict from it; this endpoint shows what
+there is and says what it is.
+
+All of it is computed at read time by the same code a `latency` grader is judged
+through, so the number you read here and the number a verdict rests on are one
+piece of arithmetic and can never disagree. Nothing stores them: they are the
+spans in this response, reduced.
 
 Five things about the contract are worth knowing before you build on it:
 

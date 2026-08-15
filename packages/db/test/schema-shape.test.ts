@@ -20,8 +20,8 @@ const IDENTIFIER_SQL_TYPE = 'text COLLATE "C"';
  * with the factory.
  *
  * A table whose identity is somebody else's key pins that key's prefix, which
- * is why `organization_settings` pins `org_` and both junctions naming what a
- * test version points at pin `tstv_`.
+ * is why `organization_settings` pins `org_` and the junction naming who calls
+ * about a test version pins `tstv_`.
  */
 const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   user: "usr",
@@ -46,17 +46,21 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   agent: "agt",
   connection: "con",
   grader: "grd",
+  // The shelf of grader definitions. The one table below the tenancy tables
+  // whose organization and project are both nullable — null means egma owns
+  // the entry — so its identity is its own rather than somebody's key, and the
+  // nullable pair is asserted on its own below.
+  grader_library: "grl",
   grader_version: "grv",
   // The project's default judge, keyed by the project it is the judge for.
   judge_configuration: "prj",
   mock_tool: "mck",
-  // The scope's junction, pinning the mock tool it narrows — the shape both
-  // test junctions have, for the same reason.
+  // The scope's junction, pinning the mock tool it narrows — the shape the
+  // persona junction has, for the same reason.
   mock_tool_agent: "mck",
   test: "tst",
   test_version: "tstv",
   test_persona: "tstv",
-  test_grader: "tstv",
   run: "run",
   run_event: "run",
   simulation: "sim",
@@ -279,6 +283,85 @@ describe("the simulation's test pin", () => {
   });
 });
 
+/**
+ * The schema's one deliberate exception to hard-required tenancy.
+ *
+ * Every other table below the tenancy tables carries a `not null`
+ * `organization_id`, because a row belonging to nobody is a row no permission
+ * can describe. On the grader library, belonging to nobody is a real state:
+ * **null tenancy means egma owns the entry**, which is what a predefined grader
+ * is, and it is where the Owner label is derived from. It is asserted here
+ * rather than only in that table's own tests because it is a structural claim
+ * about the whole schema — and because an exception nothing watches is an
+ * exception that spreads.
+ */
+describe("the grader library's nullable tenancy", () => {
+  const tenancy = (name: string): ColumnRow | undefined =>
+    columns.find(
+      (column) =>
+        column.table_name === "grader_library" && column.column_name === name,
+    );
+
+  it("is two identifier columns, both nullable, because egma owns entries too", () => {
+    for (const name of ["organization_id", "project_id"]) {
+      const live = tenancy(name);
+      expect(live, `grader_library.${name}`).toBeDefined();
+      expect(live?.type_name, `grader_library.${name} type`).toBe("text");
+      expect(live?.collation_name, `grader_library.${name} collation`).toBe("C");
+      expect(live?.not_null, `grader_library.${name} nullable`).toBe(false);
+    }
+  });
+
+  /**
+   * Two tables leave the customer null, and they mean opposite things by it.
+   *
+   * A device code's null is **not yet**: a terminal that has not been aimed at
+   * anything, filled in the moment somebody approves it. The library's is
+   * **never**, and permanently — the entry belongs to egma, and that is the
+   * state the Owner column reads. A third table appearing in this list is
+   * somebody choosing one of those two meanings, which is a decision worth
+   * making on purpose rather than by leaving a `notNull` off.
+   */
+  it("joins the one pending-authorization table and no others", () => {
+    const nullable = columns.filter(
+      (column) =>
+        column.column_name === "organization_id" && !column.not_null,
+    );
+    expect(nullable.map((column) => column.table_name).sort()).toEqual([
+      "device_code",
+      "grader_library",
+    ]);
+  });
+
+  it("arrives whole or not at all, held by a check rather than by convention", async () => {
+    const { rows } = await database.sql<{ definition: string }>(
+      `select pg_get_constraintdef(oid) as definition
+         from pg_constraint where conname = 'grader_library_tenancy_is_whole_or_egmas'`,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.definition).toContain("organization_id IS NULL");
+    expect(rows[0]?.definition).toContain("project_id IS NULL");
+  });
+
+  it("closes the tenancy pairing, so no raw write can name another customer's project", async () => {
+    const { rows } = await database.sql<{
+      conname: string;
+      definition: string;
+    }>(`
+      select con.conname, pg_get_constraintdef(con.oid) as definition
+      from pg_constraint con
+      join pg_class c     on c.oid = con.conrelid
+      join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public' and con.contype = 'f' and c.relname = 'grader_library'
+    `);
+    const byName = new Map(rows.map((row) => [row.conname, row.definition]));
+
+    expect(byName.get("grader_library_project_organization_fk")).toMatch(
+      /FOREIGN KEY \(project_id, organization_id\) REFERENCES project\(id, organization_id\)/,
+    );
+  });
+});
+
 describe("every timestamp", () => {
   it("is timezone-aware, because a simulation can cross midnight in two zones", () => {
     const naive = columns.filter((column) => column.type_name === "timestamp");
@@ -310,7 +393,7 @@ describe("every enumerated value", () => {
       { table: "connection", column: "modality" },
       { table: "connection", column: "topology" },
       { table: "grader", column: "type" },
-      { table: "grader", column: "priority" },
+      { table: "grader_library", column: "type" },
       { table: "grader", column: "scope" },
       { table: "judge_configuration", column: "provider" },
       { table: "run", column: "status" },

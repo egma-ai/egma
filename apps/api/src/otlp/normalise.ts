@@ -1,4 +1,5 @@
 import type { NewSpan, SpanEmitter, SpanSource } from "@egma/db";
+import { SPAN_DERIVED_MEASURES } from "@egma/simulation-contract";
 
 import type {
   OtlpAttribute,
@@ -170,24 +171,31 @@ const LIVEKIT_TOOL = {
  * what they land as.
  *
  * A timing span is named for the measure it takes and its duration *is* the
- * measurement, so the five names here are the measure catalog's own
- * timing-event entries. A measure joining the catalog adds a line here, or its
- * spans read `other` until it does — stored either way, payload intact.
+ * measurement, so the timing names here are **read out of the measure catalog**
+ * rather than listed again: every measure the catalog says comes off a span of
+ * its own lands as `timing`, and a measure joining the catalog is filed
+ * correctly by the release that adds it. A hand-kept copy of that list is how a
+ * measure comes to be emitted, stored as `other`, and then never computed —
+ * green, silent, and wrong, which is the exact failure the catalog exists to
+ * prevent.
  */
 const SIMULATOR_SCOPE = "egma-simulator";
 
 const SIMULATOR_KINDS: Readonly<Record<string, string>> = {
+  // **The catalog first, so the four structural names below win a collision.**
+  // A measure joining the catalog under one of their names — a measure called
+  // `agent_turn`, say — would otherwise re-file the span carrying what the agent
+  // said as a measurement, and a transcript would quietly lose its turns. The
+  // structural shapes are this vocabulary's own and are not a measure's to take.
+  ...Object.fromEntries(
+    SPAN_DERIVED_MEASURES.map((measure) => [measure, "timing"]),
+  ),
   // The one span the whole conversation happened inside, emitted last: when it
   // arrives, the conversation is over.
   simulation: "root",
   human_turn: "turn:human",
   agent_turn: "turn:agent",
   tool_call: "tool",
-  first_response_latency: "timing",
-  turn_response_latency: "timing",
-  time_to_first_word: "timing",
-  agent_speech_duration: "timing",
-  persona_speech_duration: "timing",
 };
 
 /** The two turn names, which are where the one text attribute is read. */

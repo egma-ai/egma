@@ -5,7 +5,7 @@ A simulation reaching its terminal transition becomes claimable work in the same
 commit that lands it; a production conversation becomes claimable when its
 telemetry says it is over. This service takes the work, reads the conversation,
 resolves the graders that apply to it, executes each one, and writes a verdict
-row per judged dimension.
+row per judged assertion.
 
 It claims its work rather than being sent it, so it has no inbound surface at
 all: no port, no route, nothing to authenticate, nothing to expose. Scaling it
@@ -26,23 +26,20 @@ fan-out, no judge latency on a request path.
    which is where a finished simulation already carries it. A production
    conversation has no row of its own and never will: it is read from the spans
    it arrived as, which are its whole record.
-3. **Resolve.** For a simulation: every grader in the project whose scope
-   includes simulations, plus the graders named by the test version the
-   conversation was executed against. A grader named by both is one grader —
-   and beside them, never among them, stands the built-in below. For
-   a production conversation: the project's graders whose scope includes
-   production, and nothing else — a real caller is in nobody's scenario, so no
-   test's grader array reaches here and the built-in has no expected behaviors
-   to judge against. Each of those graders is then asked whether this
-   conversation is its turn, which is what the sampling rate decides.
-4. **Execute.** One function per grader type, behind one seam. Three of the four
-   are deterministic and one asks the project's judge; what each one does is
-   the section below.
-5. **Write.** One row per judged dimension: the verdict word, a score, a
-   one-line rationale, the turns it cites, and the priority as it stood at that
-   moment. **No overall row is written anywhere** — a conversation's answer and
-   a run's are folded from these rows at read time, so a headline can never
-   disagree with the evidence under it.
+3. **Resolve.** One list through one filter, and no test is read: for a
+   simulation, every running copy in the project whose scope includes
+   simulations; for a production conversation, every copy whose scope includes
+   production, each then asked whether this conversation is its turn, which is
+   what the sampling rate decides. **A test names no graders** — where a copy
+   applies is the copy's own setting, so pressing **Use** once makes a check
+   that judges everything inside its scope and nobody has to remember to attach
+   it to the next test somebody writes.
+4. **Execute.** One function per library entry, behind one seam — what each one
+   does is the section below.
+5. **Write.** One row per judged assertion: the verdict word, a score, a
+   one-line rationale, and the turns it cites. **No overall row is written
+   anywhere** — a conversation's answer and a run's are folded from these rows
+   at read time, so a headline can never disagree with the evidence under it.
 
 Two rules run through all of it. **A simulation that never ran is `errored` for
 every grader and never `failed`** — a broken test is not a broken agent. And **a
@@ -51,86 +48,89 @@ have is `skipped` and leaves the score's denominator; a measure recorded in a
 shape egma never writes is `errored`, because a corrupted row and a missing one
 are different facts.
 
-## The four authored types
+## The two lanes a verdict lands in
 
-| Type | Reads | Asks a model | Says |
-| --- | --- | --- | --- |
-| `metric_threshold` | one measure off the conversation | no | whether an aggregation of it holds against a threshold |
-| `tool_calls` | the tool calls the simulator observed | no | whether the required tools fired and the forbidden ones did not |
-| `phrase_match` | the transcript, per speaker | no | whether the required phrases were said and the banned ones were not |
-| `llm_rubric` | the declared set a judge reads | yes | what a judge decided about the team's own criteria |
+Every running copy carries **`required`**, and it decides what a failure is
+allowed to do rather than whether the check is made at all.
 
-**Each of them names one dimension: its own type.** A `tool_calls` grader
-holding three rules writes one row, not three, and the rationale names every
-rule that was broken.
+- **`required: true`** — the default. The conversation cannot pass unless every
+  assertion of this copy passes. A grader somebody bothered to switch on is one
+  they expect to be believed.
+- **`required: false`** — a **diagnostic**. Resolved, judged and written exactly
+  like a blocking copy, its fraction reported beside the answer, and never able
+  to fail a test or a run.
 
-That is a deliberate decision with two halves. A dimension name must be stable
-across a grader's versions and may derive nothing from its config, because the
-fold counts one dimension once per grader and prefers the latest grading of it —
-a per-rule dimension could only be named by the rule's text or by its position,
-so a grader edited from three rules to two would leave the third rule's row
-behind, speaking forever, with no later grading able to supersede it. And a rule
-shelf is one policy: "these tools must fire and this one must never" is one thing
-a team decided, so two thirds of it is not a pass and a score of 0.67 would say
-it was. The granularity a developer needs lives where they will actually read it,
-in the rationale.
+The engine does not read the flag. Both lanes are judged identically here, and
+the split happens in the fold at read time, from the flag as it stands — a
+diagnostic whose rows were never written would diagnose nothing, and one that
+could redden a run would not be a diagnostic.
 
-The built-in behaviors grader is the exception, and it earns it: its rows are
-filed under the **frozen test version** the conversation was executed against,
-which never changes for that conversation, so a position means the same sentence
-forever.
+## The measure catalog, and the one module that computes it
 
-**`tool_calls` reads the observed calls and never the transcript.** An agent that
-*says* it looked up the booking and did not is exactly the failure this check
-exists to catch, and a check that read the sentence would agree with it. An
-argument constraint is a constraint on the call rather than a description of it:
-every named argument must be there with that value, and anything else the agent
-sent alongside is ignored. A platform that reports the invocation and not its
-arguments leaves a constraint unshown rather than unmet, and the rationale says
-which.
+A grader names the measure it reads as a string, and a string that names nothing
+produces a grader that reads nothing, judges nothing, and is `skipped` forever.
+The **measure catalog** — `packages/simulation-contract/measure-catalog.md`,
+beside the two schemas, with `src/measures.ts` as the same list in code — names
+every measure egma records, **and now pins each one's span-level definition
+beside its name**: the rule that says how it is computed from a conversation's
+spans, or that no span carries it at all.
 
-**`phrase_match` searches the agent's turns by default.** The agent is what is
-under test; the persona is egma's own synthetic caller, and judging what egma
-made it say would be judging egma. A grader may name `persona` or `either`
-deliberately. `contains` is looked for as written and case-insensitively — a
-disclosure read back in a different case is the disclosure — and `regex` means
-exactly what its author wrote. A pattern that will not compile is `errored` and
-never `failed`: marking an agent down for egma's own broken config is the one
-thing a test product must never do.
+One shared measure module implements exactly those definitions
+(`packages/db/src/measures/from-spans.ts`), and it is the **only** computation
+path for them. The metrics display reads through it and so does the `latency`
+grader, for a simulation and a production conversation alike — so the number on
+a screen and the number a verdict rests on are one piece of arithmetic and can
+never disagree. Nothing is stored: a measure is the spans, reduced, at read time.
 
-**`llm_rubric` is one rubric, one call, one row.** The config holds one block of
-criteria text, so it asks one question; a grader that wants two things decided
-separately is two graders, which gives two rows a developer can read apart.
-Splitting one rubric's text on whatever punctuation looked like a list would
-invent criteria nobody wrote. Its row carries the judge's `provider/model` in
-`judged_by` rather than `engine`, because a model decided it.
+**The reduction is part of that**, and it is the half that is easy to lose. A
+bound is held against one number — `worstSampleOf`, the strictest reading, until
+the catalog's aggregations become something a grader can ask for — so the module
+reduces and every surface reads the reduced figure. A page taking the maximum
+for itself would look harmless and would be a second implementation of exactly
+the number a verdict rests on, correct until the day the two reductions differ
+and silent when they do. `packages/db/test/one-measure-path.test.ts` is the
+drift alarm over all of it: it scans the source for a second reader of the timing
+kind, a second nanosecond conversion, and a hand-rolled reduction, and it names
+the files allowed to do each.
 
-## The measure catalog
+**A conversation egma holds only part of is judged by nobody.** A read over the
+store's span limit returns a prefix, and the worst measurement of a prefix is the
+worst of that part rather than of the call. Both sources refuse it with the same
+sentence; the read endpoint marks such measures `partial` rather than hiding
+them, because a display may show what there is and may not claim it is the whole.
 
-A `metric_threshold` grader names the measure it reads as a string, and a string
-that names nothing produces a grader that reads nothing, judges nothing, and is
-`skipped` forever. The **measure catalog** —
-`packages/simulation-contract/measure-catalog.md`, beside the two schemas, with
-`src/measures.ts` as the same list in code — names every measure a simulation
-produces and the aggregations a threshold may ask of them. The grader factory's
-write door refuses a measure that is not in it, naming the catalog, so a typo is
-a refusal at the moment it is written rather than a check that quietly never
-fires.
+The module knows nothing about where a conversation came from. Identical spans
+therefore produce identical numbers whether egma conducted the conversation or a
+real caller had it, which is what makes "passes in simulation, fails in
+production" a fact about the agent rather than about two readers.
 
-## The built-in: a test's expected behaviors, judged one at a time
+The grader factory's **write door refuses a measure a copy could not read** —
+one the catalog does not name, and one it names but no span carries, which is a
+real number arriving on the transition that ends a simulation and living on the
+simulation row instead. Both would be a check that is `skipped` forever, and the
+moment of writing is the only place anything can tell them from a measure a chat
+conversation simply did not produce. The **Use** form's dropdown is fed from the
+same list, so a developer is never offered something a write would refuse.
 
-Every test is judged against its own expected behaviors, always. The built-in
-grader that does it is never attached, never detached, and never a row in any
-table — applying it is part of what running a test means, so a test can never be
-made unfalsifiable.
+## The expected-behaviors grader: a test's own list, judged one at a time
+
+Every project is created running a copy of it, so a first run is judged with no
+setup at all, and deleting that copy is how a project stops being judged against
+what its tests say.
 
 **One independent judge call per behavior**, all in parallel, each producing its
 own verdict row. The alternative — one call that reads the whole list — gives a
 developer one blurred explanation and lets a judge trade a failed behavior off
 against a passed one. Here each row names the behavior's position
-(`behavior_1`, `behavior_2`, …) in the order the author wrote them, and carries
-**the behavior's own priority**, so a nice-to-have cannot block a release and a
-must-have always can.
+(`behavior_1`, `behavior_2`, …) in the order the author wrote them — the key,
+never the sentence.
+
+**The words behind that key are fetched at display time**, from the **frozen
+test version** the conversation was executed against, which never changes for
+that conversation — so a position means the same sentence forever, and reading
+against the test as it now stands is precisely what pinning exists to prevent.
+That is `readAssertionWords` in the data-access module; a key nothing can place
+is shown as itself rather than as a guess.
 
 The isolation is structural: a judge is handed one criterion and the
 conversation's evidence, and the evidence has nowhere for a second criterion to
@@ -256,19 +256,21 @@ a grader at production judges the next conversation and says nothing about the
 ones before it: no back-filling, and no deleting the verdicts a wider scope had
 already produced.
 
-## Adding a grader type
+## Adding an executor for a library entry
 
-One file, one line. `src/graders/contract.ts` says what every type is handed and
-what every one of them answers with; write a module that exports a function of
-that shape and name it in the roster in `src/graders/index.ts`. Nothing else
-changes — the claim, the read, the resolution, the verdict rows and the fold are
-all written once, in the grader's vocabulary rather than in any type's.
+One file, one line. `src/graders/contract.ts` says what every executor is handed
+and what every one of them answers with; write a module that exports one of that
+shape and name it in the roster in `src/graders/index.ts`, keyed by the entry's
+own identifier. Nothing else changes — the claim, the read, the resolution, the
+verdict rows and the fold are all written once, in the grader's vocabulary rather
+than in any entry's.
 
-A type that is named and has no executor yet answers `errored` rather than
-saying nothing, because a page that goes green because a check quietly judged
-nothing is the exact false trust this product exists to kill.
+An entry that is on the shelf and has no executor yet answers `errored` rather
+than saying nothing, because a page that goes green because a grader quietly
+judged nothing is the exact false trust this product exists to kill.
 
-A type that judges with a model asks for one through the `judging` it is handed.
+An executor that judges with a model asks for one through the `judging` it is
+handed.
 Every executor gets one, including the deterministic ones, and the deterministic
 ones simply never call it — resolving a judge is what unseals a project's key, so
 a conversation whose graders are all deterministic never opens the envelope
@@ -280,22 +282,22 @@ if (resolved instanceof NoJudge) return errored(resolved.message);
 
 const judge = resolved.judging(execution.judging.model, execution.judging.makers);
 const answer = await judge.ask({ criterion, evidence: judgeInputOf(conversation) });
-// …and `judge.name` goes on the row as its `judged_by`.
 ```
 
 `judge` reads the project's configuration and unseals its key at most once per
 conversation, however many graders ask. `model` is this grader version's own
-`judge_model` — its override, or `null` for the project's default; the built-in
-behaviors grader passes `null`, because it is nobody's to configure.
+`judge_model` — its override, or `null` for the project's default.
 
-What `judging(…)` answers with is two things and no more: **`ask`**, a function
-that decides one criterion, and **`name`**, the `provider/model` string a verdict
-row carries as its `judged_by`. The key is not on that pair, and that is the
-point: nothing under `src/graders/` can reach one, so no grader type — today's or
+What `judging(…)` answers with is one thing and no more: **`ask`**, a function
+that decides one criterion. The key is not on it, and that is the point:
+nothing under `src/graders/` can reach one, so no grader type — today's or
 tomorrow's — can put a key in a rationale, a row or a log.
 
-A judgment that names no `judgedBy` is recorded as `engine`, which is what every
-deterministic type answers with by saying nothing.
+**The verdict row does not record which judge answered**, and nothing hands out
+a name for it to record. `judged_by` retired with the human corrections it
+existed for: a person's word returns as the reserved `human` grader type,
+writing its own rows under its own grader id, so the column had nothing left to
+keep apart.
 
 ## Adding a judge provider
 

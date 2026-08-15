@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 
 import pg from "pg";
 
+import { seedGraderLibrary } from "../../src/access/grader-library.ts";
 import { connect, disconnect } from "../../src/client.ts";
 import { runMigrations } from "../../src/migrate.ts";
 import {
@@ -102,12 +103,27 @@ export const TEST_ENCRYPTION_KEY = "0123456789abcdef".repeat(4);
  * A migrated database that the data-access module is connected to, for the
  * tests that go through it. The raw `sql` handle stays available so a test can
  * check what actually landed in the table without asking the module to tell it.
+ *
+ * **egma's own graders are on the shelf before anything else happens**, exactly
+ * as they are on a real deployment: the API writes them from the catalog in the
+ * same breath as applying its migrations, and every project created afterwards
+ * is seeded with a copy of one — so a harness that skipped this would refuse the
+ * first project it made, and refuse it for a reason no test is about.
  */
 export async function createConnectedDatabase(
   label: string,
+  options: {
+    /**
+     * Off for the one file that is *about* the seeding, which needs the shelf
+     * empty to watch the first run fill it. Every other file wants what a
+     * deployment has.
+     */
+    readonly seedGraders?: boolean;
+  } = {},
 ): Promise<MigratedDatabase> {
   const database = await createMigratedDatabase(label);
   connect({ databaseUrl: database.url, encryptionKey: TEST_ENCRYPTION_KEY });
+  if (options.seedGraders !== false) await seedGraderLibrary();
 
   return {
     ...database,
@@ -161,6 +177,13 @@ export function errorCodeOf(error: unknown): string | undefined {
 export const POSTGRES_ERROR = {
   uniqueViolation: "23505",
   foreignKeyViolation: "23503",
+  /**
+   * What `on delete restrict` raises, and deliberately its own code rather
+   * than the foreign-key one above: a delete refused because something still
+   * points at the row is a different fact from a write naming a row that was
+   * never there, and a test asserting one must not pass on the other.
+   */
+  restrictViolation: "23001",
   checkViolation: "23514",
   /** What a lifecycle-guard trigger raises: `raise exception`'s own code. */
   raiseException: "P0001",

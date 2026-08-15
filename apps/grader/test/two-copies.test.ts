@@ -7,7 +7,7 @@ import {
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  aThreshold,
+  aLatencyCopy,
   conductSimulation,
   eventually,
   jobFor,
@@ -77,7 +77,7 @@ async function rowsStoredFor(simulationId: string): Promise<number> {
 
 beforeAll(async () => {
   world = await makeWorld("grader_two_copies");
-  await seedGrader(world, aThreshold());
+  await seedGrader(world, aLatencyCopy());
 });
 
 afterEach(async () => {
@@ -105,9 +105,12 @@ describe("two copies running at once", () => {
       const job = await jobFor(world, { simulationId }, "graded", 30_000);
       held.add(job.claimedBy ?? "");
 
-      // One grader, one dimension, one row — and asked of the store directly,
-      // so a second copy having written the same judgment would show up here as
-      // two rows rather than being collapsed out of sight by a read.
+      // One row, and asked of the store directly, so a second copy having
+      // written the same judgment would show up here as two rows rather than
+      // being collapsed out of sight by a read. These conversations name no
+      // test, so the project's expected-behaviors copy has nothing to judge
+      // them against and writes nothing; the latency copy above writes the one
+      // row each of them gets.
       expect(await rowsStoredFor(simulationId)).toBe(1);
       expect(job.attempts).toBe(1);
     }

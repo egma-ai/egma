@@ -5,6 +5,7 @@ import { use, useEffect, useState } from "react";
 
 import { runProgress } from "../../../lib/run-progress.ts";
 import type { Judgment } from "../../../lib/transcripts.ts";
+import { GRADING } from "../../../lib/grading-copy.ts";
 import { JudgmentCard } from "../../judgment-card.tsx";
 import {
   RecordingPlayer,
@@ -28,6 +29,17 @@ type Counts = {
   readonly total: number;
 };
 
+/**
+ * One lane's answer. The run and every conversation in it carry two: the
+ * required copies decide the outcome, and the diagnostic ones report beside it
+ * and never move it.
+ */
+type Outcome = {
+  readonly verdict: string;
+  readonly score: number | null;
+  readonly counts: Counts;
+};
+
 type Simulation = {
   readonly id: string;
   readonly position: number;
@@ -38,6 +50,8 @@ type Simulation = {
   readonly verdict: string | null;
   readonly score: number | null;
   readonly counts: Counts | null;
+  /** What only reported on this conversation; null where nothing did. */
+  readonly diagnostics: Outcome | null;
   readonly verdicts: readonly Judgment[];
   readonly reason: string | null;
   /** Voice or chat, as the row itself says rather than as the run does. */
@@ -65,8 +79,12 @@ type Run = {
   readonly verdict: string | null;
   readonly score: number | null;
   readonly counts: Counts | null;
+  /** The diagnostic lane across the whole run; null where nothing reported. */
+  readonly diagnostics: Outcome | null;
   readonly by_grader: readonly {
     readonly grader_id: string;
+    /** `false` for a diagnostic copy: judged, shown, never able to fail. */
+    readonly required: boolean;
     readonly verdict: string;
     readonly score: number | null;
     readonly counts: Counts;
@@ -177,6 +195,10 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
   const progress = runProgress(run);
   const moving = progress.moving;
   const executionFailed = progress.failed > 0;
+  // The two lanes, split once. Each section shows its own, and each empty state
+  // is about its own list rather than about how many graders judged in total.
+  const deciding = run.by_grader.filter((grader) => grader.required);
+  const reporting = run.by_grader.filter((grader) => !grader.required);
 
   return (
     <AppShell active="transcripts">
@@ -221,23 +243,55 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
             <p>{tally(run.counts)}</p>
           </div>
 
-          {run.by_grader.length === 0 ? (
-            <p className={styles.muted}>No grader has finished yet.</p>
+          {/*
+            The empty state is about *this* list, not about grading in general.
+            A project whose copies are all diagnostics has judged the run
+            perfectly well and has nothing that could fail it — so the heading
+            above must not stand over an empty grid, and the sentence under it
+            has to say which of the two silences this is.
+          */}
+          {deciding.length === 0 ? (
+            <p className={styles.muted}>
+              {run.diagnostics === null
+                ? "No grader has finished yet."
+                : "Nothing judging this run can fail it. Every grader that ran is a diagnostic."}
+            </p>
           ) : (
             <div className={styles.graderGrid}>
-              {run.by_grader.map((grader) => (
-                <article className={styles.graderCard} data-verdict={grader.verdict} key={grader.grader_id}>
-                  <div>
-                    <span className={styles.verdictChip}>{grader.verdict}</span>
-                    <strong className={styles.mono}>{grader.grader_id}</strong>
-                  </div>
-                  <p>{tally(grader.counts)}</p>
-                  <small>Score {shownScore(grader.score)}</small>
-                </article>
+              {deciding.map((grader) => (
+                <GraderResult key={grader.grader_id} grader={grader} />
               ))}
             </div>
           )}
         </section>
+
+        {/*
+          The other lane, and it is a section of its own rather than a marker on
+          a card in the one above.
+
+          A diagnostic is judged exactly as a blocking grader is and reports the
+          same fraction — that fraction is why somebody switched it on — and it
+          can never fail this run. Mixed into the grid above, a red diagnostic
+          would read as a reason the run is red. Below it, under a heading that
+          says what it is, the same rows say the true thing.
+        */}
+        {run.diagnostics === null ? null : (
+          <section className={styles.runSection}>
+            <div className={styles.runSectionHeading}>
+              <div>
+                <p className={styles.eyebrow}>{GRADING.diagnosticLane}</p>
+                <h2>{GRADING.diagnosticLaneLead}</h2>
+              </div>
+              <p>{tally(run.diagnostics.counts)}</p>
+            </div>
+
+            <div className={styles.graderGrid}>
+              {reporting.map((grader) => (
+                <GraderResult key={grader.grader_id} grader={grader} />
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className={styles.runSection}>
           <div className={styles.runSectionHeading}>
@@ -269,6 +323,34 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
         </details>
       </ProductPage>
     </AppShell>
+  );
+}
+
+/**
+ * One grader's own answer, in either lane.
+ *
+ * Written once so the two lanes cannot come to describe a grader differently.
+ * `data-lane` is what tells them apart on screen — a diagnostic keeps its
+ * verdict word and loses its colour, because nothing it said changed the run.
+ */
+function GraderResult({
+  grader,
+}: {
+  grader: Run["by_grader"][number];
+}) {
+  return (
+    <article
+      className={styles.graderCard}
+      data-verdict={grader.verdict}
+      data-lane={grader.required ? undefined : "diagnostic"}
+    >
+      <div>
+        <span className={styles.verdictChip}>{grader.verdict}</span>
+        <strong className={styles.mono}>{grader.grader_id}</strong>
+      </div>
+      <p>{tally(grader.counts)}</p>
+      <small>Score {shownScore(grader.score)}</small>
+    </article>
   );
 }
 
@@ -366,7 +448,12 @@ function SimulationResult({ simulation }: { simulation: Simulation }) {
           />
         ) : null}
 
-        <p className={styles.runTally}>{tally(simulation.counts)}</p>
+        <p className={styles.runTally}>
+          {tally(simulation.counts)}
+          {simulation.diagnostics === null
+            ? ""
+            : ` · ${GRADING.diagnosticLane.toLowerCase()} ${tally(simulation.diagnostics.counts)}`}
+        </p>
 
         {simulation.verdicts.length === 0 ? (
           <p className={styles.muted}>No written verdict has arrived yet.</p>
@@ -374,7 +461,7 @@ function SimulationResult({ simulation }: { simulation: Simulation }) {
           <div className={styles.runJudgments}>
             {simulation.verdicts.map((judgment) => (
               <JudgmentCard
-                key={`${judgment.grader_id}:${judgment.dimension}:${judgment.judged_at}`}
+                key={`${judgment.grader_id}:${judgment.assertion}:${judgment.judged_at}`}
                 judgment={judgment}
                 placement="result"
               />
