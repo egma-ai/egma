@@ -76,10 +76,8 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
   );
   const { answer: credentials, reload: reloadCredentials } =
     useProjectRead<JudgeCredentialPage>(JUDGE_CREDENTIALS_PATH, projectId);
-  const { answer: registry } = useProjectRead<JudgeRegistry>(
-    JUDGE_REGISTRY_PATH,
-    projectId,
-  );
+  const { answer: registry, reload: reloadRegistry } =
+    useProjectRead<JudgeRegistry>(JUDGE_REGISTRY_PATH, projectId);
 
   const held = credentialsIn(
     credentials?.status === "ready" ? credentials.value : undefined,
@@ -110,9 +108,29 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
   }, [judge]);
 
   const choosable = credentialsFor(held, provider);
+
+  /**
+   * What egma knows about the deployment's own judge — and **"could not ask" is
+   * not "asked, and there is none".**
+   *
+   * A read that failed is not a fact. This is the same refusal the product
+   * makes everywhere else: `skipped` is never collapsed into `failed`, and a
+   * connection whose capabilities egma could not check is `unknown` rather than
+   * unsupported. Treating a network blip as "this deployment has no judge"
+   * would quietly take the way back to the platform judge off the page, and
+   * take it off silently — the admin would see a select that looked complete
+   * and simply lacked the option they came for.
+   *
+   * So there are three answers and the page renders all three: it is there, it
+   * is not there, and egma could not ask.
+   */
+  const registryUnreadable =
+    registry !== null &&
+    (registry.status === "failed" || registry.status === "missing");
   const platformJudge =
     registry?.status === "ready" && registry.value.platform_judge_available;
-  const complete = isChoiceComplete({ provider, model, source });
+  const complete =
+    !registryUnreadable && isChoiceComplete({ provider, model, source });
 
   async function saveChoice(): Promise<void> {
     if (!mayAdminister || !complete || saving) return;
@@ -215,6 +233,25 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
             </p>
           )}
 
+          <Field label="Model" htmlFor="judge-model">
+            <TextInput id="judge-model" value={model} onChange={setModel} />
+          </Field>
+
+          {registryUnreadable ? (
+            /*
+             * Both remaining controls are the registry's — which providers egma
+             * can ask, and whether the deployment's own judge is one of the
+             * keys on offer — so neither is drawn while that answer is missing.
+             * A select rendered here would be a claim about what may be chosen,
+             * made out of a read that failed.
+             */
+            <Failure
+              title="Egma could not say which judges this project may use."
+              message={registry.refusal.message}
+              onRetry={reloadRegistry}
+            />
+          ) : (
+            <>
           <Field label="Provider" htmlFor="judge-provider">
             <select
               id="judge-provider"
@@ -236,10 +273,6 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
                 ),
               )}
             </select>
-          </Field>
-
-          <Field label="Model" htmlFor="judge-model">
-            <TextInput id="judge-model" value={model} onChange={setModel} />
           </Field>
 
           <Field label="Key" htmlFor="judge-source">
@@ -276,6 +309,8 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
               </small>
             ) : null}
           </Field>
+            </>
+          )}
 
           {refused === null ? null : (
             <Failure

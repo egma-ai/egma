@@ -1314,6 +1314,110 @@ describe("judge settings", () => {
     ).toBeTruthy();
   });
 
+  /**
+   * **A failed read is not a fact.**
+   *
+   * The same refusal the product makes everywhere else: `skipped` is never
+   * collapsed into `failed`, and a connection egma could not check is `unknown`
+   * rather than unsupported. A registry read that failed must not be rendered
+   * as "this deployment has no judge of its own" — that would take the way back
+   * to the platform judge off the page, silently, over a network blip.
+   */
+  it("says egma could not ask, rather than answering for it, when the registry read fails", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/judge": {
+        status: 200,
+        body: {
+          state: "configured",
+          project_id: "prj_1",
+          provider: "openai",
+          model: "gpt-4.1-mini",
+          source: "credential",
+          credential_id: "jcr_1",
+          hint: "1234",
+          updated_at: "2026-08-01T10:00:00.000Z",
+        },
+      },
+      "/api/judge/registry": {
+        status: 500,
+        body: { error: "unavailable", message: "Egma could not answer that." },
+      },
+      "/api/judge-credentials": { status: 200, body: { items: [] } },
+    });
+    render(<JudgeSettingsPage />);
+
+    // The failure is shown, with its own sentence and a deliberate retry.
+    expect(await screen.findByText("Egma could not answer that.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+
+    // And no claim either way about what may be chosen: the controls the
+    // registry answers for are not drawn at all, so absence is never shown as
+    // though it were known.
+    expect(screen.queryByLabelText("Key")).toBeNull();
+    expect(screen.queryByLabelText("Provider")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Save judge" }).hasAttribute("disabled"),
+    ).toBe(true);
+  });
+
+  it("restores the platform option when the retry succeeds", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/judge": {
+        status: 200,
+        body: {
+          state: "configured",
+          project_id: "prj_1",
+          provider: "openai",
+          model: "gpt-4.1-mini",
+          source: "credential",
+          credential_id: "jcr_1",
+          hint: "1234",
+          updated_at: "2026-08-01T10:00:00.000Z",
+        },
+      },
+      "/api/judge/registry": [
+        {
+          status: 500,
+          body: { error: "unavailable", message: "Egma could not answer that." },
+        },
+        {
+          status: 200,
+          body: {
+            providers: [{ provider: "openai", model_is_free_text: true }],
+            platform_sentinel: "platform",
+            platform_judge_available: true,
+          },
+        },
+      ],
+      "/api/judge-credentials": {
+        status: 200,
+        body: {
+          items: [
+            {
+              id: "jcr_1",
+              label: "Acme production",
+              provider: "openai",
+              hint: "1234",
+              revision: "rev_1",
+              created_at: "2026-08-01T10:00:00.000Z",
+              updated_at: "2026-08-01T10:00:00.000Z",
+            },
+          ],
+        },
+      },
+    });
+    render(<JudgeSettingsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+
+    const key = (await screen.findByLabelText("Key")) as HTMLSelectElement;
+    expect(
+      within(key).getByRole("option", { name: "This deployment's own judge" }),
+    ).toBeTruthy();
+  });
+
   it("says the deployment's own judge has nothing to rotate", async () => {
     settings("admin", {
       state: "configured",
