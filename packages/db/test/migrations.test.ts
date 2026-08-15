@@ -4,6 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { newId } from "@egma/ids";
+import { is } from "drizzle-orm";
+import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -13,6 +15,7 @@ import {
   readMigrations,
   runMigrations,
 } from "../src/migrate.ts";
+import * as schema from "../src/schema/index.ts";
 import { createEmptyDatabase, type EmptyDatabase } from "./support/database.ts";
 
 describe("the migration files", () => {
@@ -70,6 +73,103 @@ describe("the migration files", () => {
     expect(journal.entries.map((entry) => entry.idx)).toEqual(
       files.map((_, index) => index),
     );
+  });
+});
+
+/**
+ * The newest snapshot, held to the schema it claims to be a snapshot of.
+ *
+ * **The snapshot is the baseline every future `db:generate` diffs against, and
+ * a wrong baseline does not stay one wrong migration.** Whatever it
+ * misremembers is reported as still pending, so the next person to add a column
+ * gets a statement about somebody else's column bundled into their unrelated
+ * migration — and it travels forward with every generate after that.
+ *
+ * The journal test above holds the *files* to one story. This holds the
+ * *schema* to it, which is the half that had no check: the drift that produced
+ * this test was a column recorded as `text` where the schema says
+ * `text COLLATE "C"`, and nothing failed. Every migration ran correctly, every
+ * database ended up right, and only `drizzle-kit generate` knew.
+ *
+ * It reads files and nothing else, so it costs milliseconds and needs no
+ * database. `schema-shape.test.ts` asks the other question — whether a *live*
+ * migrated database matches the schema — and the two together are what make a
+ * hand-edited snapshot loud.
+ */
+describe("the newest snapshot", () => {
+  /** Every column the schema declares, by table, as its SQL type. */
+  const declared = new Map<string, Map<string, string>>(
+    (Object.values(schema) as unknown[])
+      .filter((value): value is PgTable => is(value, PgTable))
+      .map((table) => {
+        const config = getTableConfig(table);
+        return [
+          config.name,
+          new Map(
+            config.columns.map((column) => [column.name, column.getSQLType()]),
+          ),
+        ] as const;
+      }),
+  );
+
+  type Snapshot = {
+    readonly tables: Readonly<
+      Record<
+        string,
+        { readonly columns: Readonly<Record<string, { readonly type: string }>> }
+      >
+    >;
+  };
+
+  async function newest(): Promise<Snapshot> {
+    const journal = JSON.parse(
+      await readFile(
+        path.join(MIGRATIONS_DIRECTORY, "meta", "_journal.json"),
+        "utf8",
+      ),
+    ) as { entries: readonly { idx: number }[] };
+    const last = journal.entries.at(-1);
+    if (last === undefined) throw new Error("the journal holds no entries");
+
+    return JSON.parse(
+      await readFile(
+        path.join(
+          MIGRATIONS_DIRECTORY,
+          "meta",
+          `${String(last.idx).padStart(4, "0")}_snapshot.json`,
+        ),
+        "utf8",
+      ),
+    ) as Snapshot;
+  }
+
+  it("records every table the schema declares", async () => {
+    const snapshot = await newest();
+    expect(declared.size).toBeGreaterThan(0);
+    for (const table of declared.keys()) {
+      expect(snapshot.tables[`public.${table}`], table).toBeDefined();
+    }
+  });
+
+  it("records every column as the type the schema says it is", async () => {
+    const snapshot = await newest();
+    const disagreements: string[] = [];
+
+    for (const [table, columns] of declared) {
+      const recorded = snapshot.tables[`public.${table}`]?.columns ?? {};
+      for (const [column, type] of columns) {
+        const held = recorded[column]?.type;
+        if (held !== type) {
+          disagreements.push(
+            `${table}.${column}: the schema says ${type}, the snapshot says ${String(held)}`,
+          );
+        }
+      }
+    }
+
+    // Named rather than counted, because the fix is per column and a bare
+    // count would send somebody hunting through three thousand lines of JSON.
+    expect(disagreements).toEqual([]);
   });
 });
 

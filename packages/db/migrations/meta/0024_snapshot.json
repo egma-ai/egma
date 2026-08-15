@@ -1740,7 +1740,7 @@
         },
         "revision": {
           "name": "revision",
-          "type": "text",
+          "type": "text COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -1989,7 +1989,7 @@
         },
         "revision": {
           "name": "revision",
-          "type": "text",
+          "type": "text COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -2160,13 +2160,13 @@
           "name": "connection_topology_allowed",
           "value": "\"connection\".\"topology\" in ('agent-dials-out', 'hosted-broker', 'egma-dials-in')"
         },
-        "connection_credentials_hint_agrees": {
-          "name": "connection_credentials_hint_agrees",
-          "value": "(\"connection\".\"credentials\" is null) = (\"connection\".\"credentials_hint\" is null)"
-        },
         "connection_capability_state_allowed": {
           "name": "connection_capability_state_allowed",
           "value": "\"connection\".\"capability_state\" in ('unknown', 'known')"
+        },
+        "connection_credentials_hint_agrees": {
+          "name": "connection_credentials_hint_agrees",
+          "value": "(\"connection\".\"credentials\" is null) = (\"connection\".\"credentials_hint\" is null)"
         },
         "connection_capability_evidence_agrees": {
           "name": "connection_capability_evidence_agrees",
