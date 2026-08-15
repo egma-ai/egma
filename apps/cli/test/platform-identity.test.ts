@@ -4,7 +4,7 @@ import { createEgmaFolder } from "../src/folder/egma-folder.ts";
 import {
   BoundPlatformAddressError,
   BoundPlatformUnavailableError,
-  NoPlatformNamedError,
+  DefaultPlatformUnusableError,
   PlatformBindingMismatchError,
   resolvePlatformAccess,
 } from "../src/platform/credentials.ts";
@@ -14,7 +14,11 @@ import {
   readPlatformIdentity,
 } from "../src/platform/identity.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
-import { makeWorkspace, type Workspace } from "./support/workspace.ts";
+import {
+  makeWorkspace,
+  NO_DEFAULT_PLATFORM,
+  type Workspace,
+} from "./support/workspace.ts";
 
 /** The refusal a promise ended with, or a failure saying it did not refuse. */
 async function refusalFrom(work: Promise<unknown>): Promise<Error> {
@@ -240,30 +244,61 @@ describe("verifying an Egma platform", () => {
   });
 
   /**
-   * Nobody typed egma's built-in default address, nobody runs what is at it,
-   * and nobody can fix it — so the refusal points at the one move that belongs
-   * to the developer, and never sends them off to inspect a website that is
-   * not theirs.
+   * Nobody typed egma's built-in address, nobody but egma runs what is at it,
+   * and nobody outside egma can fix it — so the refusal says the two moves that
+   * do belong to the developer, waiting and naming a platform of their own, and
+   * never hands on advice about checking an address they did not choose or
+   * reconfiguring a deployment that is not theirs.
    */
-  it("does not send a developer to inspect its own built-in default address", async () => {
+  it("answers for its own built-in address rather than passing on its faults", async () => {
+    for (const answer of [
+      () => new Response(null, { status: 307, headers: { location: "/login" } }),
+      () => new Response("nope", { status: 502 }),
+      () => Response.json({ nothing: "useful" }),
+    ]) {
+      const refusal = await refusalFrom(
+        resolvePlatformAccess({
+          env: workspace.env({ EGMA_TEST_DEFAULT_URL: "https://built-in.example" }),
+          flag: null,
+          cwd: workspace.dir,
+          fetchImpl: async () => answer(),
+        }),
+      );
+
+      expect(refusal).toBeInstanceOf(DefaultPlatformUnusableError);
+      // The address egma tried, so "hosted egma is down" can be told apart from
+      // "I typed something wrong" — and there was nothing to type.
+      expect(refusal.message).toContain("https://built-in.example");
+      expect(refusal.message).toContain("--url <address>");
+      expect(refusal.message).toContain("EGMA_URL");
+      expect(refusal.message).toContain("Nothing was sent");
+      // Not the underlying complaint: none of it is the developer's to act on.
+      expect(refusal.message).not.toMatch(/sign-in page|proxy|this is where to look/u);
+      expect(refusal.message).not.toContain("Check the address");
+      expect(refusal.message).not.toContain("EGMA_BASE_URL");
+      // And the real fault is still there for whoever goes looking.
+      expect(refusal.cause).toBeInstanceOf(Error);
+    }
+  });
+
+  /**
+   * The same refusal for the way it will really happen: nobody answering at
+   * all. It is the one an unbound repository meets on a train.
+   */
+  it("names the built-in address it tried when nothing answers there", async () => {
     const refusal = await refusalFrom(
       resolvePlatformAccess({
+        // A closed port, which is what every workspace stands in for the real
+        // built-in address by default.
         env: workspace.env(),
         flag: null,
         cwd: workspace.dir,
-        fetchImpl: async () =>
-          new Response(null, { status: 307, headers: { location: "/login" } }),
       }),
     );
 
-    expect(refusal).toBeInstanceOf(NoPlatformNamedError);
-    expect(refusal.message).toContain("--url <address>");
-    expect(refusal.message).toContain("EGMA_URL");
+    expect(refusal).toBeInstanceOf(DefaultPlatformUnusableError);
+    expect(refusal.message).toContain(NO_DEFAULT_PLATFORM);
     expect(refusal.message).toContain("Nothing was sent");
-    // No address is named, because there is none to name — and nothing was
-    // asked of any host, so no deployment is described as broken.
-    expect(refusal.message).not.toMatch(/https?:\/\//u);
-    expect(refusal.message).not.toMatch(/sign-in page|proxy|this is where to look/u);
   });
 
   it("keeps the address it was given, whatever the platform calls itself", async () => {
@@ -313,27 +348,27 @@ describe("verifying an Egma platform", () => {
     await expect(stalled).rejects.toThrow("did not answer within");
   });
 
-  it("asks nothing at all when no platform is named", async () => {
+  it("asks egma's own platform, and only that, when nothing names another", async () => {
     const requested: string[] = [];
-    await expect(
-      resolvePlatformAccess({
-        env: workspace.env(),
-        flag: null,
-        cwd: workspace.dir,
-        fetchImpl: async (input) => {
-          requested.push(String(input));
-          return new Response(null, { status: 200 });
-        },
-      }),
-    ).rejects.toBeInstanceOf(NoPlatformNamedError);
+    const access = await resolvePlatformAccess({
+      env: workspace.env({ EGMA_TEST_DEFAULT_URL: platform.url }),
+      flag: null,
+      cwd: workspace.dir,
+      fetchImpl: async (input, init) => {
+        requested.push(String(input));
+        return fetch(input, init);
+      },
+    });
 
-    // The whole point of refusing here rather than falling back: with no
-    // hosted platform to reach for, an address invented at this moment would
-    // belong to somebody else, and probing it would report their server as a
-    // broken egma.
-    expect(requested).toEqual([]);
+    // The last step of the order, and the only one nobody typed: a repository
+    // with nothing configured reaches egma's own platform.
+    expect(access.url).toBe(platform.url);
+    expect(access.instanceId).toBe(platform.instanceId);
+
+    // One address asked, and it is that one. Nothing goes looking anywhere else
+    // for a repository that named nothing.
+    expect(requested).toEqual([`${platform.url}/api/platform`]);
   });
-
 
   /**
    * A refusal names the platform the developer asked about.

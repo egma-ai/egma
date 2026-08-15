@@ -25,18 +25,32 @@ import {
 import { PlatformUnreachableError, type Fetch } from "./device-flow.ts";
 
 /**
- * There is no fallback address, and that is the honest state of the world.
+ * The egma an agent repository uses when nothing else names one.
  *
- * egma has no hosted platform yet. A built-in default pointing at one that does
- * not exist would send an unbound repository to probe somebody else's website
- * and then report *their* server as a broken egma — which is the opposite of
- * useful. So a command that names no platform is refused here, before any
- * address is asked anything, and the refusal says the one move that is the
- * developer's: name theirs.
- *
- * When there is a hosted platform, this is where its address goes and
- * `NoPlatformNamedError` becomes the fallback again.
+ * It is the last step of resolution and the only one nobody typed: a flag, the
+ * environment and the repository's own binding all come first, and a bound
+ * repository never falls back to it. A developer with nothing configured
+ * reaches egma's own platform — and the wizard says which egma that is on its
+ * first screen, before it asks that address anything at all.
  */
+export const DEFAULT_PLATFORM_URL = "https://app.egma.ai";
+
+/**
+ * A test seam, not product surface: this stands in for the built-in address
+ * while a check runs, so the suite never signs in to the real hosted egma.
+ *
+ * It is not documented and it is not stable — the same treatment `main.ts`
+ * gives the `-- <command>` seam that starts a scripted coding agent in place of
+ * a real one. It is not a second way for a developer to select a platform:
+ * `EGMA_URL` is that, and it sits above the built-in address in the order.
+ */
+export const TEST_DEFAULT_URL_VARIABLE = "EGMA_TEST_DEFAULT_URL";
+
+/** Which built-in address this run uses: egma's own, or a check's stand-in. */
+export function defaultPlatformUrlIn(env: NodeJS.ProcessEnv): string {
+  const named = env[TEST_DEFAULT_URL_VARIABLE]?.trim();
+  return named === undefined || named === "" ? DEFAULT_PLATFORM_URL : named;
+}
 
 /** Owner only, on the file and on the folder that holds it. */
 const FILE_MODE = 0o600;
@@ -326,6 +340,14 @@ export type PlatformChoice = {
   readonly env?: string | undefined;
   /** The platform committed in this agent repository. */
   readonly binding?: string | null;
+  /**
+   * The built-in address, for a repository that names none.
+   *
+   * Passed in rather than reached for, so that the one place which decides
+   * *which* built-in address this run has — egma's own, or a check's stand-in —
+   * is the caller that also holds the environment.
+   */
+  readonly fallback: string;
 };
 
 /** What a developer is told when the address they named is not one. */
@@ -339,7 +361,7 @@ export class UnusableUrlError extends Error {
 }
 
 /** Where a selected address came from. It decides who a refusal names. */
-export type PlatformSource = "--url" | "EGMA_URL" | "binding";
+export type PlatformSource = "--url" | "EGMA_URL" | "binding" | "default";
 
 export type SelectedPlatform = {
   readonly url: string;
@@ -350,14 +372,15 @@ const SOURCE_NAMES: Record<PlatformSource, string> = {
   "--url": "--url",
   EGMA_URL: "EGMA_URL",
   binding: "the repository platform binding",
+  default: "egma's built-in address",
 };
 
 /**
  * Which egma this command talks to, and which of the four places said so.
  *
  * Deliberate beats ambient beats committed: a flag on the command, then the
- * environment, then the repository binding, then Egma Cloud for an unbound
- * repository. A machine-level login never chooses a repository target.
+ * environment, then the repository binding, then egma's own platform for an
+ * unbound repository. A machine-level login never chooses a repository target.
  *
  * The source travels with the address because a refusal that names the wrong
  * platform sends a developer to fix something they did not ask for: told to
@@ -372,6 +395,7 @@ export function selectPlatform(choice: PlatformChoice): SelectedPlatform {
     ["--url", choice.flag],
     ["EGMA_URL", choice.env],
     ["binding", choice.binding],
+    ["default", choice.fallback],
   ];
   for (const [source, candidate] of named) {
     const tidy = typeof candidate === "string" ? candidate.trim() : "";
@@ -384,7 +408,11 @@ export function selectPlatform(choice: PlatformChoice): SelectedPlatform {
       throw new UnusableUrlError(SOURCE_NAMES[source]);
     }
   }
-  throw new NoPlatformNamedError();
+  // The built-in address is always there, so nothing reaches this in a shipped
+  // copy. It is a sentence rather than an exhausted `switch` because the one
+  // way to get here is a stand-in address set to nothing, and a test seam that
+  // was set wrong should say so rather than resolve to something.
+  throw new UnusableUrlError(SOURCE_NAMES.default);
 }
 
 /** The address alone, for callers that do not have to say where it came from. */
@@ -443,20 +471,22 @@ export class BoundPlatformUnavailableError extends Error {
 }
 
 /**
- * Nothing named a platform, and the built-in default is not one.
+ * Nothing named a platform, so egma used its own, and its own is no use today.
  *
- * The developer never typed this address, does not run what is at it, and
- * cannot fix it — so the sentence points at the one move that is theirs: name
- * their own platform. Every other refusal in this file describes a deployment
- * somebody can go and look at, and saying that about this address would send a
- * developer off to inspect a website that is not theirs.
+ * One refusal for every way that address can fail, because the developer never
+ * typed it, does not run what is at it, and cannot fix any of them. Handing on
+ * the underlying sentence would send them to check an address they did not
+ * choose, or to reconfigure a deployment that is not theirs. So this says the
+ * two moves that are theirs — wait, or name a platform of their own — and keeps
+ * the real fault as the cause for anybody who goes looking.
  */
-export class NoPlatformNamedError extends Error {
-  constructor() {
+export class DefaultPlatformUnusableError extends Error {
+  constructor(url: string, cause: unknown) {
     super(
-      "This repository names no Egma platform, and egma has no hosted one to fall back to. Point egma at yours: run it again with --url <address>, or set EGMA_URL for this shell. Nothing was sent.",
+      `This repository names no Egma platform, so egma used its own at ${url}, and it did not answer. Try again in a moment, or point egma at another platform with --url <address> or EGMA_URL. Nothing was sent.`,
+      { cause },
     );
-    this.name = "NoPlatformNamedError";
+    this.name = "DefaultPlatformUnusableError";
   }
 }
 
@@ -480,9 +510,87 @@ async function bindingIn(repository: string): Promise<PlatformBinding | null> {
   }
 }
 
+/** Which egma a command will use, before anybody there has been asked anything. */
+export type ChosenPlatform = SelectedPlatform & {
+  /** The platform committed in this repository, when there is one. */
+  readonly binding: PlatformBinding | null;
+  readonly credentialsFile: string;
+};
+
+/**
+ * Which egma, chosen without asking anybody anything.
+ *
+ * Separate from the read that follows it because the wizard names the address
+ * on its first screen and takes the keystroke of consent there: a bare command
+ * asks nothing of any address until the developer has read which address it is.
+ * A verb has no screen and no keystroke to take, so it does both in one step.
+ *
+ * Everything refused here is refused on what is already on this machine — a bad
+ * address, an unreadable config, a bound repository pointed somewhere else — so
+ * none of it costs a request.
+ */
+export async function choosePlatform(choice: {
+  readonly env: NodeJS.ProcessEnv;
+  /** `--url`, when one was given. */
+  readonly flag: string | null;
+  /** The agent repository whose binding is part of resolution. */
+  readonly cwd: string;
+}): Promise<ChosenPlatform> {
+  const credentialsFile = credentialsFileIn(choice.env);
+  const binding = await bindingIn(choice.cwd);
+  const selected = selectPlatform({
+    flag: choice.flag,
+    env: choice.env.EGMA_URL,
+    binding: binding?.origin ?? null,
+    fallback: defaultPlatformUrlIn(choice.env),
+  });
+
+  // Refused before anybody is asked anything: a bound repository is reached at
+  // the address it recorded, and at no other.
+  if (binding !== null && selected.url !== binding.origin) {
+    throw new BoundPlatformAddressError(binding, selected.source, selected.url);
+  }
+
+  return { ...selected, binding, credentialsFile };
+}
+
+/** Who is answering there — the first thing a command asks of any address. */
+export async function verifyPlatform(
+  chosen: ChosenPlatform,
+  fetchImpl?: Fetch,
+): Promise<VerifiedPlatformAccess> {
+  const { binding } = chosen;
+  let identity: PlatformIdentity;
+  try {
+    identity = await readPlatformIdentity(chosen.url, fetchImpl);
+  } catch (cause) {
+    // Safe to name the binding here, and only here: any address that is not the
+    // bound one was already refused above, so a bound repository that got this
+    // far was reaching its own platform.
+    if (binding !== null && cause instanceof PlatformUnreachableError) {
+      throw new BoundPlatformUnavailableError(binding, cause);
+    }
+    // Nobody chose this address, so nobody can be sent to go and look at it.
+    if (chosen.source === "default") {
+      throw new DefaultPlatformUnusableError(chosen.url, cause);
+    }
+    throw cause;
+  }
+
+  if (binding !== null && binding.instance !== identity.instanceId) {
+    throw new PlatformBindingMismatchError(binding, identity);
+  }
+
+  return {
+    url: identity.origin,
+    instanceId: identity.instanceId,
+    credentialsFile: chosen.credentialsFile,
+  };
+}
+
 /**
  * Resolved once, in one place, so the wizard and every verb read the same
- * answer from the same three places in the same order. Two copies of this would
+ * answer from the same four places in the same order. Two copies of this would
  * be two answers to "which egma is this", and the one that is wrong would be
  * the one that wrote the key.
  */
@@ -494,41 +602,5 @@ export async function resolvePlatformAccess(choice: {
   readonly cwd: string;
   readonly fetchImpl?: Fetch;
 }): Promise<VerifiedPlatformAccess> {
-  const credentialsFile = credentialsFileIn(choice.env);
-  const binding = await bindingIn(choice.cwd);
-  const selected = selectPlatform({
-    flag: choice.flag,
-    env: choice.env.EGMA_URL,
-    binding: binding?.origin ?? null,
-  });
-
-  // Refused before anybody is asked anything: a bound repository is reached at
-  // the address it recorded, and at no other.
-  if (binding !== null && selected.url !== binding.origin) {
-    throw new BoundPlatformAddressError(binding, selected.source, selected.url);
-  }
-
-  let identity: PlatformIdentity;
-  try {
-    identity = await readPlatformIdentity(selected.url, choice.fetchImpl);
-  } catch (cause) {
-    // Safe to name the binding here, and only here: any address that is not the
-    // bound one was already refused above, so a bound repository that got this
-    // far was reaching its own platform.
-    if (binding !== null && cause instanceof PlatformUnreachableError) {
-      throw new BoundPlatformUnavailableError(binding, cause);
-    }
-    // Nobody chose this address, so nobody can be sent to go and look at it.
-    throw cause;
-  }
-
-  if (binding !== null && binding.instance !== identity.instanceId) {
-    throw new PlatformBindingMismatchError(binding, identity);
-  }
-
-  return {
-    url: identity.origin,
-    instanceId: identity.instanceId,
-    credentialsFile,
-  };
+  return verifyPlatform(await choosePlatform(choice), choice.fetchImpl);
 }

@@ -39,14 +39,16 @@ import {
 import {
   BoundPlatformAddressError,
   BoundPlatformUnavailableError,
+  choosePlatform,
   credentialsFileIn,
-  NoPlatformNamedError,
+  DefaultPlatformUnusableError,
   KEYS_UNUSABLE,
   KeysUnusableError,
   PlatformBindingMismatchError,
   RepositoryPlatformConfigError,
-  resolvePlatformAccess,
   UnusableUrlError,
+  verifyPlatform,
+  type ChosenPlatform,
   type PlatformAccess,
   type VerifiedPlatformAccess,
 } from "./platform/credentials.ts";
@@ -58,7 +60,7 @@ import {
 import { RETELL_API } from "./retell/client.ts";
 import { HeadlessUI } from "./ui/headless-ui.ts";
 import { buildExitNotice, exitLines, type ExitReport } from "./wizard/exit-line.ts";
-import type { PlatformAccess as WizardPlatformAccess } from "./wizard/login-step.ts";
+import type { WalkPlatform } from "./wizard/login-step.ts";
 import { pasteFallbackMessage } from "./wizard/no-coding-agent.ts";
 import type { StopReason } from "./wizard/stop.ts";
 
@@ -445,6 +447,48 @@ function retellReach(env: NodeJS.ProcessEnv): { readonly url: string } | undefin
 }
 
 /**
+ * egma declining to talk to an address, in the one shape every command answers
+ * it in.
+ *
+ * Two kinds, and the difference is whether anything is worth retrying.
+ * `unreachable` is nobody answering; `refused` is egma declining to send this
+ * repository's identifiers to the address on offer. `null` is anything else,
+ * which is not this function's to explain.
+ *
+ * It is one function because two surfaces raise these now. A verb asks the
+ * address who it is before it starts; the wizard asks after the keystroke of
+ * consent, so its refusal arrives out of the walk rather than in front of it.
+ * The developer must not be able to tell which of the two happened from the
+ * sentence or the number they get.
+ */
+function platformRefusal(error: unknown): "refused" | "unreachable" | null {
+  if (
+    error instanceof PlatformBindingMismatchError ||
+    error instanceof BoundPlatformAddressError ||
+    error instanceof PlatformOriginMismatchError ||
+    error instanceof RepositoryPlatformConfigError
+  ) {
+    return "refused";
+  }
+  if (
+    error instanceof PlatformUnreachableError ||
+    error instanceof PlatformIdentityError ||
+    error instanceof BoundPlatformUnavailableError ||
+    error instanceof DefaultPlatformUnusableError
+  ) {
+    return "unreachable";
+  }
+  return null;
+}
+
+/** Says the refusal both ways — machine-readable, and to a person — and answers 4. */
+function sayPlatformRefusal(status: "refused" | "unreachable", message: string): void {
+  process.stdout.write(`status: ${status}\nreason: ${message}\n`);
+  process.stderr.write(`${message}\n`);
+  process.exitCode = 4;
+}
+
+/**
  * What a headless walk would have been told, for the one question it cannot
  * ask: the key, which arrives from the environment because a run with nobody
  * watching has nobody to type it.
@@ -492,7 +536,7 @@ async function runHeadless(
   invocation: Invocation,
   launch: DrivenAgentLaunch,
   cwd: string,
-  platform: WizardPlatformAccess,
+  platform: WalkPlatform,
 ): Promise<number> {
   const controller = new AbortController();
   const stop = (reason: StopReason): void => controller.abort(reason);
@@ -527,7 +571,7 @@ async function runHeadless(
 async function runWizard(
   launch: DrivenAgentLaunch,
   cwd: string,
-  platform: WizardPlatformAccess,
+  platform: WalkPlatform,
 ): Promise<number> {
   const { startTui, walk } = await wizardMachinery();
   const controller = new AbortController();
@@ -551,6 +595,14 @@ async function runWizard(
     tui.close(report);
     return walkExitCode(report);
   } catch (error) {
+    // A platform refusal is not the walk failing. It is egma declining to talk
+    // to an address, and it is answered in plain lines with a number of its own
+    // — the same ones every verb answers with. So the screen comes down leaving
+    // nothing behind, and the sentence is written once, by the caller.
+    if (platformRefusal(error) !== null) {
+      tui.close(null);
+      throw error;
+    }
     const reason = error instanceof Error ? error.message : String(error);
     tui.close({ kind: "failed", reason });
     return 1;
@@ -747,7 +799,7 @@ export async function main(argv: readonly string[]): Promise<void> {
   // keystroke of consent, the coding agent it will drive — is settled here,
   // before a single network read, and what comes out is either the rest of the
   // walk or nothing at all.
-  let theWizard: ((access: VerifiedPlatformAccess) => Promise<number>) | null = null;
+  let theWizard: ((platform: WalkPlatform) => Promise<number>) | null = null;
   if (invocation.verb === null) {
     // Consent is checked before a network read. A piped bare command cannot
     // start either the wizard or platform selection.
@@ -768,48 +820,33 @@ export async function main(argv: readonly string[]): Promise<void> {
       }
       throw error;
     }
-    theWizard = async (access) =>
+    theWizard = async (platform) =>
       invocation.headless
-        ? runHeadless(invocation, launch, cwd, access)
-        : runWizard(launch, cwd, access);
+        ? runHeadless(invocation, launch, cwd, platform)
+        : runWizard(launch, cwd, platform);
   }
 
-  // Which egma, resolved once for every path below, and refused here when the
-  // address a developer named is not one. A bad address is turned away before
-  // anything is started on it rather than after.
-  let access: VerifiedPlatformAccess;
+  // Which egma, chosen once for every path below out of what is already on this
+  // machine, and refused here when the address a developer named is not one. A
+  // bad address is turned away before anything is started on it rather than
+  // after, and nothing has been asked of any address yet.
+  let chosen: ChosenPlatform;
+  let access: VerifiedPlatformAccess | null = null;
   try {
-    access = await resolvePlatformAccess({
-      env: process.env,
-      flag: invocation.url,
-      cwd,
-    });
+    chosen = await choosePlatform({ env: process.env, flag: invocation.url, cwd });
+    // A verb has no screen to say which egma this is on and no keystroke to
+    // take, so it asks the address who it is here, exactly as it always has.
+    // The wizard asks after its first screen — see below.
+    if (invocation.verb !== null) access = await verifyPlatform(chosen);
   } catch (error) {
     if (error instanceof UnusableUrlError) {
       process.stderr.write(`${error.message}\n`);
       process.exitCode = 1;
       return;
     }
-    // Two shapes, and the difference is whether anything is worth retrying.
-    // `unreachable` is nobody answering; `refused` is egma declining to send
-    // this repository's identifiers to the address on offer.
-    const refused =
-      error instanceof PlatformBindingMismatchError ||
-      error instanceof BoundPlatformAddressError ||
-      error instanceof PlatformOriginMismatchError ||
-      error instanceof RepositoryPlatformConfigError;
-    if (
-      refused ||
-      error instanceof PlatformUnreachableError ||
-      error instanceof PlatformIdentityError ||
-      error instanceof BoundPlatformUnavailableError ||
-      error instanceof NoPlatformNamedError
-    ) {
-      const status = refused ? "refused" : "unreachable";
-      const message = (error as Error).message;
-      process.stdout.write(`status: ${status}\nreason: ${message}\n`);
-      process.stderr.write(`${message}\n`);
-      process.exitCode = 4;
+    const status = platformRefusal(error);
+    if (status !== null) {
+      sayPlatformRefusal(status, (error as Error).message);
       return;
     }
     throw error;
@@ -818,27 +855,45 @@ export async function main(argv: readonly string[]): Promise<void> {
   try {
     // A verb needs no terminal and takes no keystroke: it drives no coding
     // agent, so there is nothing for a keystroke to agree to.
-    if (invocation.verb === "login") {
-      process.exitCode = await runLogin(invocation, access);
-      return;
-    }
-    if (invocation.verb === "connect") {
-      process.exitCode = await runConnect(invocation, access);
-      return;
-    }
-    if (
-      invocation.verb === "pull" ||
-      invocation.verb === "push" ||
-      invocation.verb === "run"
-    ) {
-      process.exitCode = await runFolderVerb(invocation.verb, invocation, access);
-      return;
+    if (access !== null) {
+      if (invocation.verb === "login") {
+        process.exitCode = await runLogin(invocation, access);
+        return;
+      }
+      if (invocation.verb === "connect") {
+        process.exitCode = await runConnect(invocation, access);
+        return;
+      }
+      if (
+        invocation.verb === "pull" ||
+        invocation.verb === "push" ||
+        invocation.verb === "run"
+      ) {
+        process.exitCode = await runFolderVerb(invocation.verb, invocation, access);
+        return;
+      }
     }
 
     // Every verb has returned by now, so what is left is the bare command, and
-    // the walk it needs was built above.
-    if (theWizard !== null) process.exitCode = await theWizard(access);
+    // the walk it needs was built above. It is handed the address and the way
+    // to ask who is there, and it asks only once the developer has read the
+    // address and pressed the key that agrees to the rest.
+    if (theWizard !== null) {
+      const selected = chosen;
+      process.exitCode = await theWizard({
+        url: selected.url,
+        verify: () => verifyPlatform(selected),
+      });
+    }
   } catch (error) {
+    // The wizard's platform read happens inside the walk, so its refusal
+    // arrives here rather than above. Same sentence, same number, whichever
+    // side of the keystroke it came from.
+    const status = platformRefusal(error);
+    if (status !== null) {
+      sayPlatformRefusal(status, (error as Error).message);
+      return;
+    }
     if (!(error instanceof KeysUnusableError)) throw error;
     // Whatever is wrong with this machine's keys file, egma decided not to
     // write over it — and a decision is a sentence, not a stack trace. Every

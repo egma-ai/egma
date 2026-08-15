@@ -217,6 +217,30 @@ export async function updateConfig(
 }
 
 /**
+ * Every line a developer deletes to move a repository to another platform, and
+ * what moving costs them.
+ *
+ * No command performs this move, and none is planned: every line of it is in a
+ * file they already commit, so the move is a diff their colleagues review like
+ * any other. What egma owes them is the whole list at once — a refusal naming
+ * one line at a time is a developer deleting it, running again, and meeting the
+ * next refusal.
+ *
+ * It is a block of plain lines rather than a paragraph because a coding agent
+ * reads this too, and it should be able to act on it without a person reading
+ * the message out to it.
+ */
+export const MOVE_TO_ANOTHER_PLATFORM: readonly string[] = [
+  "To move this repository to another platform, delete these and run egma again:",
+  `  - the whole platform: block in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
+  `  - the id: line under agent: in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
+  `  - the id: line under connection: in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
+  `  - the id: line under suite: in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
+  `  - the version: line at the top of every file in ${FOLDER_NAME}/${TESTS_FOLDER_NAME}/`,
+  "Keep every name. Your tests move with you and are created again on the new platform; the runs you have already done stay on the platform that ran them, because a run's numbers only mean anything against the versions that platform minted.",
+];
+
+/**
  * Commit the verified platform before anything creates platform-owned resource
  * identifiers.
  *
@@ -248,7 +272,11 @@ export async function bindRepositoryPlatform(
   if (held.platform !== null) {
     if (held.platform.instance !== binding.instance) {
       throw new Error(
-        `This repository is already bound to Egma platform ${held.platform.instance} at ${held.platform.origin}. Rebinding is not supported yet.`,
+        [
+          `This repository is already bound to Egma platform ${held.platform.instance} at ${held.platform.origin}, and this run reached Egma platform ${binding.instance} at ${binding.origin}. egma does not move a repository between platforms, and nothing was sent.`,
+          "",
+          ...MOVE_TO_ANOTHER_PLATFORM,
+        ].join("\n"),
       );
     }
     if (held.platform.origin !== binding.origin) {

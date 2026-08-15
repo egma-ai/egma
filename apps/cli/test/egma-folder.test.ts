@@ -390,13 +390,43 @@ describe("the egma folder", () => {
       }),
     ).rejects.toThrow("will not move a committed platform address");
 
-    // And another platform entirely is the refusal it always was.
-    await expect(
-      bindRepositoryPlatform(workspace.dir, {
-        origin: "https://old.example",
-        instance: "pf_01K3XQ7M4E8YB2FVN0H9TZQWEQ",
-      }),
-    ).rejects.toThrow("Rebinding is not supported yet");
+    // And another platform entirely is the refusal it always was — which now
+    // teaches the whole move, because nothing performs it.
+    const moving = await bindRepositoryPlatform(workspace.dir, {
+      origin: "https://old.example",
+      instance: "pf_01K3XQ7M4E8YB2FVN0H9TZQWEQ",
+    }).then(
+      () => null,
+      (refusal: Error) => refusal,
+    );
+
+    expect(moving).not.toBeNull();
+    const said = moving?.message ?? "";
+    expect(said).toContain("egma does not move a repository between platforms");
+    expect(said).toContain("nothing was sent");
+
+    // All four things a developer deletes, named at once. A refusal naming one
+    // at a time is a second failure after the first.
+    expect(said).toContain("the whole platform: block in egma/config.yaml");
+    expect(said).toContain("the id: line under agent: in egma/config.yaml");
+    expect(said).toContain("the id: line under connection: in egma/config.yaml");
+    expect(said).toContain("the id: line under suite: in egma/config.yaml");
+    expect(said).toContain("the version: line at the top of every file in egma/tests/");
+
+    // What moving costs, said plainly rather than found out afterwards.
+    expect(said).toContain("Your tests move with you");
+    expect(said).toContain("stay on the platform that ran them");
+
+    // One plain block of lines, so a coding agent can act on it without a
+    // person reading the message out to it.
+    const deletions = said
+      .split("\n")
+      .filter((line) => line.startsWith("  - "));
+    expect(deletions).toHaveLength(5);
+
+    // And no command that does it: the refusal teaches the move and nothing
+    // offers to perform it.
+    expect(said).not.toMatch(/egma rebind|--rebind|egma move/u);
 
     expect(await readFile(paths.config, "utf8")).toBe(asCommitted);
   });
