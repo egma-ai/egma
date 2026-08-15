@@ -262,6 +262,12 @@ export function whyNotStartable(plan: RunPlan): string | null {
  * page that has nothing red on it.
  */
 export function judgesNothing(plan: RunPlan): boolean {
+  // A plan with no tests in it judges nothing in the same trivial sense that an
+  // empty selection conducts nothing, and saying so would be answering a
+  // different question badly. The page happens to block that plan for another
+  // reason first, which is exactly the kind of correctness that stops being
+  // true when somebody reorders two lines.
+  if (plan.tests.length === 0) return false;
   return plan.tests.every((test) => test.graders.length === 0);
 }
 
