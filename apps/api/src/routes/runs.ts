@@ -169,7 +169,7 @@ const NO_SUCH_RUN =
  * executed and never moves, and `test_id` is what to go and edit.
  *
  * `verdict` is what the graders make of the conversation, folded over every
- * dimension judged against it. It is `null` for a conversation nobody has
+ * assertion judged against it. It is `null` for a conversation nobody has
  * judged **yet** — which is not the same as one judged and found wanting, and
  * the two must never read alike. `grading` carries that distinction: a
  * conversation with no rows says `pending`, and one with rows says `graded`
@@ -209,20 +209,19 @@ function describedSimulation(
     // failing agent, and a summary that hid either would say the opposite of
     // what happened.
     counts: judged === undefined ? null : judged.outcome.counts,
-    // Every judged behaviour, whole. The fold above says how many passed; this
+    // Every judged assertion, whole. The fold above says how many passed; this
     // says which ones and why, because "2 of 3 passed" without the rationale
     // sends somebody to read a transcript to work out what egma already knew.
-    // The judge is named on every row: a verdict nobody can attribute is a
-    // verdict nobody can argue with.
+    // Each row names its assertion by key rather than by sentence: what the
+    // sentence says is read from the pinned test version, which is the one place
+    // it cannot have drifted from what was judged.
     verdicts: rows.map((its) => ({
       grader_id: its.graderId,
-      dimension: its.dimension,
+      assertion: its.assertion,
       verdict: its.verdict,
       score: its.score,
-      priority: its.priority,
       rationale: its.rationale,
       cited_turns: [...its.citedSpanIds],
-      judged_by: its.judgedBy,
       judged_at: its.judgedAt,
     })),
     reason: one.endingReason,

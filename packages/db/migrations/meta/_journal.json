@@ -169,6 +169,13 @@
       "when": 1786739000389,
       "tag": "0023_platform_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1786761691811,
+      "tag": "0024_priorities_retire",
+      "breakpoints": true
     }
   ]
 }

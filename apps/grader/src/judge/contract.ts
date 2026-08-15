@@ -14,7 +14,7 @@ import type { JudgeInput } from "./input.ts";
 /**
  * One judge call: one criterion, decided against one conversation's evidence.
  *
- * **One criterion, singular, and the type is the guarantee.** Per-dimension
+ * **One criterion, singular, and the type is the guarantee.** Per-assertion
  * isolation is the whole shape of the built-in grader — each expected behavior
  * gets its own independent call — and a request that could carry two criteria
  * is a request somebody would eventually put two in. The evidence is assembled

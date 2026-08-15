@@ -17,7 +17,7 @@ import {
  * test's own grader array adds scenario-specific ones on top**, so "the refund
  * tool must fire" judges the refund test and nothing else.
  *
- * A grader named by both is one grader and produces one row per dimension: the
+ * A grader named by both is one grader and produces one row per assertion: the
  * set is by identity, so naming a project grader in a test's array is redundant
  * rather than doubling.
  *

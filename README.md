@@ -382,7 +382,7 @@ ones a real caller had, with the same graders. A simulation reaching its end
 becomes claimable work in the same commit that ends it; a production
 conversation becomes claimable when its telemetry says it is over. The grader
 takes the work, reads the conversation, resolves the graders that apply to it,
-and writes one verdict row per judged dimension.
+and writes one verdict row per judged assertion.
 
 **It claims its work too**, on the same terms and for the same reasons: no
 `ports:`, no inbound surface, and more throughput is more copies —

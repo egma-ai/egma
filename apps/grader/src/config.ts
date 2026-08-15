@@ -19,7 +19,7 @@ export type Config = {
    * A deployment whose projects configured no judge never opens an envelope, so
    * insisting on the key at boot would refuse to start a perfectly good grader
    * over a secret it will never use. A deployment that *has* configured one and
-   * forgot this gets the truth at the moment it matters: the judged dimensions
+   * forgot this gets the truth at the moment it matters: the judged assertions
    * come back `errored`, saying the key could not be read, which is the same
    * sentence a page shows and never a green tick.
    *

@@ -28,13 +28,13 @@ import { heldRationale } from "./rule-shelf.ts";
  * cannot be shown to have been called wrongly by one either. Both are said out
  * loud in the rationale rather than guessed at.
  *
- * ## One grader, one dimension
+ * ## One grader, one assertion
  *
- * A `tool_calls` grader names one dimension — its own type — however many rules
+ * A `tool_calls` grader names one assertion — its own type — however many rules
  * it holds, and the rationale names every rule that was broken. Here the rule
- * that could not be a dimension is a tool's name, which an edit changes, or its
+ * that could not be a assertion is a tool's name, which an edit changes, or its
  * position in the shelf, which a reorder changes; `rule-shelf.ts` carries why
- * that rules out a per-rule dimension for either shelf, and why one shelf is one
+ * that rules out a per-rule assertion for either shelf, and why one shelf is one
  * policy rather than a proportion of one.
  */
 export function executeToolCalls(
@@ -85,7 +85,7 @@ export function executeToolCalls(
 
   return [
     {
-      dimension: theOneCheck("tool_calls"),
+      assertion: theOneCheck("tool_calls"),
       verdict: passed ? "passed" : "failed",
       score: passed ? 1 : 0,
       rationale: passed

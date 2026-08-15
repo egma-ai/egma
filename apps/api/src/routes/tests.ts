@@ -83,24 +83,6 @@ function describedPersona(named: TestPersona): Record<string, unknown> {
   return { id: named.id, name: named.name };
 }
 
-/**
- * What the wire says about one expected behavior: the statement, and nothing
- * else.
- *
- * The store carries a priority beside each statement — P0 blocks a release, P1
- * warns, P2 informs — and the graders judge by it. This door does not carry one
- * in either direction, and that is a stated position rather than an oversight:
- * a file is a list of statements, every statement a test file can write is a
- * P0, and there is no way through here to say otherwise. So the answer says
- * exactly what a caller could have written, and the day this door can set a
- * priority is the day it answers with one.
- */
-function describedBehaviors(
-  behaviors: readonly { readonly behavior: string }[],
-): readonly string[] {
-  return behaviors.map((one) => one.behavior);
-}
-
 /** The keys one entry of `mock_tools` holds, and no others. */
 const OVERRIDE_KEYS = ["tool", "answer", "error", "delay_ms"] as const;
 
@@ -176,7 +158,7 @@ function described(test: Test): Record<string, unknown> {
     version: test.version,
     version_id: test.versionId,
     scenario: test.scenario,
-    expected_behaviors: describedBehaviors(test.expectedBehaviors),
+    expected_behaviors: [...test.expectedBehaviors],
     personas: test.personas.map(describedPersona),
     mock_tools: test.mockOverrides.map(describedMockTool),
     created_at: test.createdAt.toISOString(),
@@ -193,7 +175,7 @@ function describedVersion(version: TestVersion): Record<string, unknown> {
     version: version.version,
     current: version.current,
     scenario: version.scenario,
-    expected_behaviors: describedBehaviors(version.expectedBehaviors),
+    expected_behaviors: [...version.expectedBehaviors],
     personas: version.personas.map(describedPersona),
     mock_tools: version.mockOverrides.map(describedMockTool),
     created_at: version.createdAt.toISOString(),

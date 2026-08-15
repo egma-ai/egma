@@ -1,9 +1,4 @@
-import {
-  getSimulationTestVersion,
-  type AuthContext,
-  type ExpectedBehavior,
-  type Priority,
-} from "@egma/db";
+import { getSimulationTestVersion, type AuthContext } from "@egma/db";
 
 import type { Conversation } from "../conversation.ts";
 import {
@@ -43,17 +38,16 @@ import { judgmentOf } from "./judged.ts";
  *
  * ## What each row says
  *
- * The dimension is the behavior's **position**, one-based, in the order the
- * test's author wrote them. The priority is the behavior's own — a test carries
- * a priority per behavior, so a nice-to-have cannot block a release and a
- * must-have always can — snapshotted onto the row like every other priority.
+ * The assertion is the behavior's **position**, one-based, in the order the
+ * test's author wrote them — the key, never the sentence, which is read back
+ * from the pinned test version when somebody looks at the row.
  *
  * A position is stable exactly as far as it needs to be. The grader version on
  * these rows is the **frozen test version** the conversation was executed
  * against, so a test whose behaviors are reordered or rewritten judges under a
  * new version and lands rows beside the old ones rather than over them. Within
  * one version, position 3 is the same sentence forever, which is the property
- * the fold's dimension key actually needs.
+ * the fold's assertion key actually needs.
  *
  * ## What it says when it cannot say anything
  *
@@ -75,20 +69,6 @@ import { judgmentOf } from "./judged.ts";
 /** What every grader in this file is: the built-in, named once. */
 export const EXPECTED_BEHAVIORS = "expected_behaviors";
 
-/**
- * One behavior's judgment, and how loudly it speaks.
- *
- * The priority rides beside the judgment rather than inside it, on the same
- * terms it does for every other grader: what the judge decides is whether the
- * behavior was met, and how much that matters is read at judging time and
- * stamped on the row. A judge that could see the priority would be a judge that
- * could be tempted to answer differently because of it.
- */
-export type BehaviorJudgment = {
-  readonly judgment: Judgment;
-  readonly priority: Priority;
-};
-
 /** The built-in's whole answer about one conversation. */
 export type ExpectedBehaviorsJudgment = {
   /**
@@ -97,9 +77,7 @@ export type ExpectedBehaviorsJudgment = {
    * test is edited.
    */
   readonly versionId: string;
-  /** The judge that was on the hook, or `engine` when none was asked. */
-  readonly judgedBy: string;
-  readonly judged: readonly BehaviorJudgment[];
+  readonly judged: readonly Judgment[];
 };
 
 export type ExpectedBehaviorsExecution = {
@@ -142,10 +120,7 @@ export async function judgeExpectedBehaviors(
   if (nothingToJudge !== null) {
     return {
       versionId: version.id,
-      judgedBy: "engine",
-      judged: behaviors.map((behavior, at) =>
-        couldNotJudge(behavior, at, nothingToJudge),
-      ),
+      judged: behaviors.map((_behavior, at) => couldNotJudge(at, nothingToJudge)),
     };
   }
 
@@ -156,8 +131,7 @@ export async function judgeExpectedBehaviors(
     const why = configured.message;
     return {
       versionId: version.id,
-      judgedBy: "engine",
-      judged: behaviors.map((behavior, at) => couldNotJudge(behavior, at, why)),
+      judged: behaviors.map((_behavior, at) => couldNotJudge(at, why)),
     };
   }
 
@@ -175,27 +149,16 @@ export async function judgeExpectedBehaviors(
   // In parallel, because they are independent by construction: wall-clock for a
   // test with five behaviors is one judge call rather than five.
   const judged = await Promise.all(
-    behaviors.map(async (behavior, at): Promise<BehaviorJudgment> => {
-      const question: JudgeQuestion = {
-        criterion: behavior.behavior,
-        evidence,
-      };
+    behaviors.map(async (behavior, at): Promise<Judgment> => {
+      const question: JudgeQuestion = { criterion: behavior, evidence };
       try {
-        return {
-          priority: behavior.priority,
-          judgment: judgmentOf(
-            behaviorDimension(at),
-            await judge.ask(question),
-            turns,
-          ),
-        };
+        return judgmentOf(behaviorAssertion(at), await judge.ask(question), turns);
       } catch (error) {
         // One judge call falling over is one `errored` row. Every sibling's
         // answer still lands, and this one says out loud that egma could not
         // make the check — which is the whole reason `errored` is a word
         // separate from `failed`.
         return couldNotJudge(
-          behavior,
           at,
           `this behavior could not be judged: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -203,34 +166,27 @@ export async function judgeExpectedBehaviors(
     }),
   );
 
-  return { versionId: version.id, judgedBy: judge.name, judged };
+  return { versionId: version.id, judged };
 }
 
 /**
- * What the behaviors' dimension is called: the position, one-based, in the
+ * What the behaviors' assertion is called: the position, one-based, in the
  * order they were authored.
  *
  * Written as a function rather than as a template at each site so the string
  * every verdict row files a behavior under is decided in one place.
  */
-function behaviorDimension(at: number): string {
+function behaviorAssertion(at: number): string {
   return `behavior_${at + 1}`;
 }
 
 /** egma could not judge this. Never `failed`: nothing is said about the agent. */
-function couldNotJudge(
-  behavior: ExpectedBehavior,
-  at: number,
-  rationale: string,
-): BehaviorJudgment {
+function couldNotJudge(at: number, rationale: string): Judgment {
   return {
-    priority: behavior.priority,
-    judgment: {
-      dimension: behaviorDimension(at),
-      verdict: "errored",
-      score: 0,
-      rationale,
-      citedSpanIds: [],
-    },
+    assertion: behaviorAssertion(at),
+    verdict: "errored",
+    score: 0,
+    rationale,
+    citedSpanIds: [],
   };
 }

@@ -47,17 +47,13 @@ const PERMISSIONS = {
   start_and_cancel_runs:  [          "member", "admin"],
 
   /**
-   * Re-grade a run or a window; disagree with a verdict and correct it.
-   *
-   * One row for the two ways a verdict is ever revisited, because they are the
-   * same decision — that a judgment already made should be looked at again —
-   * and a table nobody can hold in their head is a table nobody audits.
+   * Re-grade a run or a window: ask for a judgment already made to be made
+   * again.
    *
    * A `viewer` is refused, and the reviewer of the user story holds `member`.
-   * Both halves change what a run *means*: a re-grade spends the judge over
-   * history, and a correction is preferred over the machine's word at read time,
-   * so either can turn a red release green. A credential that can do that is not
-   * a read-only credential, whatever it is called.
+   * A re-grade changes what a run *means* — it spends the judge over history and
+   * can turn a red release green — so a credential that can ask for one is not a
+   * read-only credential, whatever it is called.
    */
   revisit_verdicts:       [          "member", "admin"],
 

@@ -1217,7 +1217,7 @@ export type Regraded = {
  * What comes of it is rows **beside** the old ones rather than over them,
  * because the verdict's identity spans the grader version: the graders nobody
  * edited rewrite their own rows in place, the edited one writes a second row
- * against the same dimension, and the read prefers the newest grading with the
+ * against the same assertion, and the read prefers the newest grading with the
  * older still fetchable underneath. Nothing is deleted and nothing is edited,
  * here or anywhere.
  *

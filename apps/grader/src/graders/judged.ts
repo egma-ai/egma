@@ -6,7 +6,7 @@ import type { Judgment } from "./contract.ts";
  *
  * The built-in behaviors grader and the rubric type ask about different things —
  * one expectation a test's author wrote down, one criterion a team wrote down —
- * and they file the answers under different dimensions, different versions and
+ * and they file the answers under different assertions, different versions and
  * different priorities. What each does with the answer *itself* is identical,
  * and it is three decisions that must not be made twice:
  *
@@ -31,7 +31,7 @@ import type { Judgment } from "./contract.ts";
  * grader rather than about the answer.
  */
 export function judgmentOf(
-  dimension: string,
+  assertion: string,
   answer: JudgeAnswer,
   turns: number,
 ): Judgment {
@@ -43,7 +43,7 @@ export function judgmentOf(
         : "skipped";
 
   return {
-    dimension,
+    assertion,
     verdict,
     score: verdict === "passed" ? 1 : 0,
     rationale: answer.rationale,

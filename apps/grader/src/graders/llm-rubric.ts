@@ -14,15 +14,15 @@ import { judgmentOf } from "./judged.ts";
  * ## One rubric, one call, one row
  *
  * The config holds a `rubric` — singular, one block of criteria text — so this
- * asks one question and produces one dimension. A grader that wants two things
+ * asks one question and produces one assertion. A grader that wants two things
  * decided separately is two graders, which is one call each to create and gives
  * two rows a developer can read apart. Splitting one rubric's text here, on
  * whatever punctuation looked like a list, would invent criteria nobody wrote.
  *
- * The dimension is the grader's own type, like every other one-check type's.
- * Not the rubric's text: a dimension name may derive nothing from the config,
- * because the fold counts one dimension once per grader and prefers the latest
- * grading of it — a rubric reworded would otherwise become a *second* dimension
+ * The assertion is the grader's own type, like every other one-check type's.
+ * Not the rubric's text: a assertion name may derive nothing from the config,
+ * because the fold counts one assertion once per grader and prefers the latest
+ * grading of it — a rubric reworded would otherwise become a *second* assertion
  * counted beside the first forever, with both of them speaking.
  *
  * ## The judge is the project's, and the override is this version's
@@ -55,7 +55,7 @@ export async function executeLlmRubric(
   execution: ExecutionOf<"llm_rubric">,
 ): Promise<readonly Judgment[]> {
   const { config } = execution.judgment;
-  const dimension = theOneCheck("llm_rubric");
+  const assertion = theOneCheck("llm_rubric");
 
   // Only now, with a rubric to decide and a conversation that happened, is the
   // project's key worth unsealing. The engine has already refused to execute
@@ -64,7 +64,7 @@ export async function executeLlmRubric(
   if (resolved instanceof NoJudge) {
     return [
       {
-        dimension,
+        assertion,
         verdict: "errored",
         score: 0,
         rationale: resolved.message,
@@ -81,13 +81,5 @@ export async function executeLlmRubric(
   const evidence = judgeInputOf(execution.conversation);
   const answer = await judge.ask({ criterion: config.rubric, evidence });
 
-  const judged: Judgment = {
-    ...judgmentOf(dimension, answer, evidence.transcript.length),
-    // The judge that answered, on the row, and never the account: `judged_by`
-    // is part of a verdict's identity, so a project that changes its judge model
-    // gets rows beside the old ones rather than over them.
-    judgedBy: judge.name,
-  };
-
-  return [judged];
+  return [judgmentOf(assertion, answer, evidence.transcript.length)];
 }

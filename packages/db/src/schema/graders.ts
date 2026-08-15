@@ -36,13 +36,12 @@ import {
  *
  * Two tables, the persona's and the test's shape exactly, so that two different
  * things can be pointed at — and here the split carries more weight than
- * anywhere else in the schema. **What a grader judges by is versioned; where and
- * how loudly it applies is not.** Tightening a threshold changes what a verdict
- * means, so it mints an immutable version and takes effect from now on, leaving
- * last week's run saying exactly what it said. Promoting a grader from P1 to P0,
- * pointing it at production, or sampling it differently changes nothing about
- * any judgment already made, so those live on the identity row and take effect
- * everywhere the moment they are written.
+ * anywhere else in the schema. **What a grader judges by is versioned; where it
+ * applies is not.** Tightening a threshold changes what a verdict means, so it
+ * mints an immutable version and takes effect from now on, leaving last week's
+ * run saying exactly what it said. Pointing a grader at production, or sampling
+ * it differently, changes nothing about any judgment already made, so those live
+ * on the identity row and take effect everywhere the moment they are written.
  */
 
 /**
@@ -64,19 +63,6 @@ export const GRADER_TYPES = [
   "phrase_match",
 ] as const;
 export type GraderType = (typeof GRADER_TYPES)[number];
-
-/**
- * How loudly a judgment speaks: P0 blocks, P1 warns, P2 informs. A run's
- * headline reads "all P0 passed, two P1 warnings" rather than one
- * undifferentiated failure.
- *
- * The same three words carry the priority a test's expected behaviors each
- * carry, which is why they live here beside the grader rather than inside it —
- * one vocabulary for "how much does this matter", asked of authored logic and
- * of a written-down expectation alike.
- */
-export const PRIORITIES = ["P0", "P1", "P2"] as const;
-export type Priority = (typeof PRIORITIES)[number];
 
 /**
  * Which conversations a grader judges. The same grader judges simulations and
@@ -116,7 +102,6 @@ export const grader = pgTable(
      * a different grader wearing the old one's history.
      */
     type: text("type").notNull(),
-    priority: text("priority").notNull(),
     scope: text("scope").notNull().default("simulations"),
     /** Per cent of production conversations judged; simulations are all judged. */
     productionSampleRate: integer("production_sample_rate")
@@ -164,7 +149,6 @@ export const grader = pgTable(
   (table) => [
     prefixCheck("grader_id_prefix", table.id, "grd"),
     oneOf("grader_type_allowed", table.type, [...GRADER_TYPES]),
-    oneOf("grader_priority_allowed", table.priority, [...PRIORITIES]),
     oneOf("grader_scope_allowed", table.scope, [...GRADER_SCOPES]),
     // A sampling rate is a percentage of the traffic that arrives, so the two
     // ends are "none of it" and "all of it" and there is nothing outside them.

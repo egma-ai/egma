@@ -16,11 +16,9 @@ import {
   GRADER_SCOPES,
   GRADER_TYPES,
   JUDGE_PROVIDERS,
-  PRIORITIES,
   type GraderScope,
   type GraderType,
   type JudgeProvider,
-  type Priority,
 } from "../schema/graders.ts";
 import type { AuthContext } from "./context.ts";
 import {
@@ -47,12 +45,11 @@ import { within } from "./within.ts";
  * verdict was decided by and where the decision applies.** The rubric, the
  * threshold, the phrases, the judge model: those are what a judgment is made of,
  * so they live in immutable versions and an edit mints the next one, leaving
- * last week's run meaning exactly what it meant. The priority, the scope and the
- * sampling rate change nothing about any judgment already made, so they are
- * written in place and take effect everywhere at once. A developer tightening a
- * threshold and a developer promoting a warning to a blocker are doing two
- * different things, and only one of them is rewriting history if it is versioned
- * wrongly.
+ * last week's run meaning exactly what it meant. The scope and the sampling rate
+ * change nothing about any judgment already made, so they are written in place
+ * and take effect everywhere at once. A developer tightening a threshold and a
+ * developer pointing a grader at production are doing two different things, and
+ * only one of them is rewriting history if it is versioned wrongly.
  */
 
 /**
@@ -217,14 +214,13 @@ export type NewGraderJudgment =
 export type GraderConfigInput = NewGraderJudgment["config"];
 
 /**
- * The live settings: where the grader applies and how loudly, plus what to call
- * it. Every one of them is optional on a create, and every one of them takes
- * effect everywhere the moment it is written.
+ * The live settings: where the grader applies, plus what to call it. Every one
+ * of them is optional on a create, and every one of them takes effect everywhere
+ * the moment it is written.
  */
 type LiveSettings = {
   readonly name: string;
   readonly description?: string | undefined;
-  readonly priority?: Priority | undefined;
   readonly scope?: GraderScope | undefined;
   readonly productionSampleRate?: number | undefined;
 };
@@ -238,7 +234,6 @@ export type Grader = {
   readonly projectId: string;
   readonly name: string;
   readonly description: string | null;
-  readonly priority: Priority;
   readonly scope: GraderScope;
   readonly productionSampleRate: number;
   readonly version: number;
@@ -263,7 +258,6 @@ export type Grader = {
 export type GraderChanges = {
   readonly name?: string;
   readonly description?: string | null;
-  readonly priority?: Priority;
   readonly scope?: GraderScope;
   readonly productionSampleRate?: number;
   readonly config?: GraderConfigInput;
@@ -288,22 +282,11 @@ const COLUMNS = {
   name: grader.name,
   description: grader.description,
   type: grader.type,
-  priority: grader.priority,
   scope: grader.scope,
   productionSampleRate: grader.productionSampleRate,
   createdAt: grader.createdAt,
   updatedAt: grader.updatedAt,
 } as const;
-
-/**
- * What a grader is worth when its author said nothing about it.
- *
- * Blocking, because a check somebody bothered to write is a check they expect to
- * be believed, and a grader that quietly only warns is one whose failure a
- * release walks past. Demoting it is one word; noticing that it was never
- * blocking is a postmortem.
- */
-const DEFAULT_PRIORITY: Priority = "P0";
 
 /** All of production, if production is ever in scope at all. */
 const DEFAULT_PRODUCTION_SAMPLE_RATE = 100;
@@ -326,10 +309,6 @@ function knownWord<Value extends string>(
     );
   }
   return value as Value;
-}
-
-function validPriority(priority: string): Priority {
-  return knownWord(PRIORITIES, priority, "priority");
 }
 
 function validScope(scope: string): GraderScope {
@@ -833,7 +812,6 @@ function answer(row: {
   readonly name: string;
   readonly description: string | null;
   readonly type: string;
-  readonly priority: string;
   readonly scope: string;
   readonly productionSampleRate: number;
   readonly version: number;
@@ -843,12 +821,11 @@ function answer(row: {
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }): Grader {
-  const { type, config, judgeModel, priority, scope, ...rest } = row;
+  const { type, config, judgeModel, scope, ...rest } = row;
   return {
     ...rest,
     // The identity row's own enumerated columns are pinned by check
     // constraints, so what comes back is one of the words this module writes.
-    priority: priority as Priority,
     scope: scope as GraderScope,
     ...judgmentFromRow(type, config, row.versionId),
     judgeModel: judgeModelFromRow(judgeModel, row.versionId),
@@ -880,10 +857,6 @@ export async function createGrader(
   const judgment = validJudgment(input.type, input.config);
   const judgeModel =
     input.judgeModel === undefined ? null : validJudgeModel(input.judgeModel);
-  const priority =
-    input.priority === undefined
-      ? DEFAULT_PRIORITY
-      : validPriority(input.priority);
   const scope = input.scope === undefined ? "simulations" : validScope(input.scope);
   const productionSampleRate =
     input.productionSampleRate === undefined
@@ -907,7 +880,6 @@ export async function createGrader(
         name,
         description: input.description ?? null,
         type: judgment.type,
-        priority,
         scope,
         productionSampleRate,
         currentVersionId: versionId,
@@ -931,7 +903,6 @@ export async function createGrader(
 
   return {
     ...written,
-    priority,
     scope,
     version: 1,
     versionId,
@@ -1008,8 +979,6 @@ export async function editGrader(
   // The config is the one thing that cannot be judged yet: what it must hold
   // depends on the type of the row this edit has not read.
   const name = changes.name === undefined ? undefined : validName(changes.name);
-  const priority =
-    changes.priority === undefined ? undefined : validPriority(changes.priority);
   const scope =
     changes.scope === undefined ? undefined : validScope(changes.scope);
   const productionSampleRate =
@@ -1076,13 +1045,11 @@ export async function editGrader(
     const settingsChanged =
       changes.name !== undefined ||
       changes.description !== undefined ||
-      priority !== undefined ||
       scope !== undefined ||
       productionSampleRate !== undefined;
 
     const settled = {
       ...current,
-      priority: priority ?? (current.priority as Priority),
       scope: scope ?? (current.scope as GraderScope),
       productionSampleRate: productionSampleRate ?? current.productionSampleRate,
     };
@@ -1119,7 +1086,6 @@ export async function editGrader(
         ...(changes.description === undefined
           ? {}
           : { description: changes.description }),
-        ...(priority === undefined ? {} : { priority }),
         ...(scope === undefined ? {} : { scope }),
         ...(productionSampleRate === undefined ? {} : { productionSampleRate }),
         ...(mintsVersion ? { currentVersionId: versionId } : {}),
