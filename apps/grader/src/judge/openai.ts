@@ -50,8 +50,15 @@ const FIRST_BACKOFF_MILLISECONDS = 500;
  * conversation. And **`cannot_determine` is available** — a judge that believes
  * it must choose between met and not-met will guess, and a guess dressed as a
  * judgment is the false trust this product exists to kill.
+ *
+ * **These same words are on the `expected_behaviors` library entry**, which is
+ * where they are going to live once the engine reads its prompt through a
+ * running copy's `library_id`. Until then there are two copies, and they are
+ * held byte-for-byte to each other by a test — exported for that test and for
+ * nothing else, because a prompt that drifted from the one the Library screen
+ * shows would make the screen a lie about how conversations are judged.
  */
-const SYSTEM_PROMPT = [
+export const SYSTEM_PROMPT = [
   "You judge one criterion about one recorded conversation between a customer's",
   "agent and a synthetic caller. You are shown the transcript, how the",
   "conversation ended, the tools the agent called, and what was measured.",

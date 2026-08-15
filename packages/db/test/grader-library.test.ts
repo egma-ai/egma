@@ -163,9 +163,13 @@ describe("seeding egma's own graders", () => {
     // The words a developer reads on the Library screen, and the words their
     // conversations are judged by — one prompt, on the row.
     expect(behaviors?.prompt ?? "").toContain("Decide only the criterion you are given");
+    // The judge's **reply**, not the verdict row written from it: the prompt on
+    // this same row commands these three fields and the engine parses them, so
+    // all three statements about one exchange have to be the one statement.
     expect(behaviors?.output_definition).toMatchObject({
-      score: { type: "number" },
+      decision: { type: "string", oneOf: ["met", "not_met", "cannot_determine"] },
       rationale: { type: "string" },
+      cited_turns: { type: "number[]" },
     });
     // Its assertions are the test's own sentences, supplied at judging time,
     // so pressing Use asks for nothing at all.
@@ -354,6 +358,22 @@ describe("reading the shelf", () => {
       id: theirs,
       owner: "organization",
     });
+  });
+
+  it("reads oldest first, so the always-on grader is the first one met", async () => {
+    const page = await listGraderLibrary(actingIn(globex));
+
+    // A shelf is not a feed. The graders somebody meets first should be the
+    // ones that are always on, which on these identifiers is the order the
+    // catalog was written in.
+    expect(
+      page.items
+        .filter((entry) => entry.owner === "egma")
+        .map((entry) => entry.name),
+    ).toEqual(GRADER_LIBRARY_CATALOG.map((entry) => entry.name));
+    // And egma's come first outright, because they were minted before anything
+    // a customer could have written.
+    expect(page.items[0]?.name).toBe("expected_behaviors");
   });
 
   it("hands back the prompt, so a developer can read what judges them", async () => {

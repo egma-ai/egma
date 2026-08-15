@@ -410,7 +410,6 @@ export {
 } from "./grader-library.ts";
 export {
   GRADER_LIBRARY_CATALOG,
-  PREDEFINED_GRADERS,
   type LibraryParameterKind,
 } from "../grader-library/catalog.ts";
 export type { LibraryType, ReservedLibraryType } from "../schema/graders.ts";

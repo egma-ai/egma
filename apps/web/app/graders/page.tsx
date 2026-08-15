@@ -27,9 +27,13 @@ import { AppShell, Notice, PageHeader, ProductPage, StatePage, styles } from "..
  * `egma` and a row a team wrote can never be confused by anything this page
  * decides.
  *
- * One page of a list that holds two rows today, paged all the same, because the
- * shelf grows and a screen that never asked for a second page would be the one
- * that quietly stops showing the newest entry.
+ * **It reads the first page and stops there**, which is honest for a shelf that
+ * holds exactly what egma ships. The endpoint pages like every other list and
+ * hands back where it stopped; this screen ignores that, because a **Show more**
+ * button under two rows would be a control nobody could ever press. The day the
+ * shelf grows past a page — custom entries, which is the same change that gives
+ * this screen something to author — is the day it grows the button, and the
+ * answer already carries what that needs.
  *
  * Signed in with a browser session on the origin the page was served from, like
  * every other page here. There is no API key in a browser and there never will

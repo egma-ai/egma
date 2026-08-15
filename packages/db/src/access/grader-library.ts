@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, or, sql, type SQL } from "drizzle-orm";
 
 import { db } from "../client.ts";
 import {
@@ -15,6 +15,7 @@ import type { AuthContext } from "./context.ts";
 import { PredefinedGraderError } from "./errors.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
+import { inActingProject, within } from "./within.ts";
 
 /**
  * The grader library: the shelf of definitions, as it is seeded, read and
@@ -96,31 +97,48 @@ const COLUMNS = {
 } as const;
 
 /**
- * The definition fields the catalog owns, named once.
+ * **The definition: every field the catalog owns, and the one type all three
+ * writers are held to.**
  *
- * **Everything downstream is derived from this list**: what an upsert writes,
- * and what an upsert compares to decide whether anything changed. Written twice
- * by hand, the two would drift — and a comparison missing a field is the exact
- * failure the version number exists to rule out, because an edited entry would
- * refresh silently with its version standing still, leaving no way at all to
- * tell which words judged which verdict.
+ * Three things have to agree about this list, and each of them is a separate
+ * piece of SQL: what the insert writes, what the conflicting update writes, and
+ * what the update compares before it writes anything. Written out three times
+ * by hand they would drift — and the drift nobody would notice is the third
+ * one, because a field left out of the comparison is a field whose edit
+ * refreshes with the version standing still, which is precisely the thing the
+ * version exists to make answerable.
  *
- * The compiler holds the pair together: a field added here refuses to build
- * until it is also told where its value comes from.
+ * So none of the three is written by hand. `definitionOf` below is the insert's
+ * half and `FROM_THE_CATALOG` is the update's, both typed over this one shape
+ * so the compiler refuses either that is missing a field; and the comparison is
+ * read off the update's own keys, so it cannot be missing one at all.
  */
-const REFRESHED_FIELDS = [
-  "name",
-  "description",
-  "type",
-  "prompt",
-  "params",
-  "outputDefinition",
-] as const;
+type Definition = {
+  readonly name: string;
+  readonly description: string;
+  readonly type: LibraryType;
+  readonly prompt: string | null;
+  readonly params: readonly LibraryParameter[];
+  readonly outputDefinition: LibraryOutputDefinition | null;
+};
 
-type RefreshedField = (typeof REFRESHED_FIELDS)[number];
+/** What the insert writes, from the catalog entry — every field, or no build. */
+function definitionOf(entry: PredefinedGrader): Definition {
+  return {
+    name: entry.name,
+    description: entry.description,
+    type: entry.type,
+    prompt: entry.prompt,
+    params: entry.params,
+    outputDefinition: entry.outputDefinition,
+  };
+}
 
-/** Each field's incoming value, as `on conflict` names the row being inserted. */
-const FROM_THE_CATALOG: Readonly<Record<RefreshedField, SQL>> = {
+/**
+ * What the conflicting update writes, as `on conflict` names the row that was
+ * being inserted — every field again, held by the same type.
+ */
+const FROM_THE_CATALOG: Readonly<Record<keyof Definition, SQL>> = {
   name: sql`excluded.name`,
   description: sql`excluded.description`,
   type: sql`excluded.type`,
@@ -132,13 +150,16 @@ const FROM_THE_CATALOG: Readonly<Record<RefreshedField, SQL>> = {
 /**
  * Whether the catalog says anything different from what the row already holds.
  *
+ * Read off the map above rather than listed again, so the comparison covers
+ * exactly what the update writes and can never cover less.
+ *
  * `is distinct from` rather than `<>`, because half of these are nullable and
  * `null <> null` is null — which would make every boot look like a change on an
  * entry with no prompt, bumping a version for nothing. jsonb compares as a
  * value, so key order on the way in cannot mint a version either.
  */
 const THE_CATALOG_HAS_MOVED: SQL = sql.join(
-  REFRESHED_FIELDS.map(
+  (Object.keys(FROM_THE_CATALOG) as (keyof Definition)[]).map(
     (field) =>
       sql`${graderLibrary[field]} is distinct from ${FROM_THE_CATALOG[field]}`,
   ),
@@ -197,12 +218,7 @@ export async function seedGraderLibrary(
         // tenancy is visible at the site that takes it.
         organizationId: null,
         projectId: null,
-        name: entry.name,
-        description: entry.description,
-        type: entry.type,
-        prompt: entry.prompt,
-        params: entry.params,
-        outputDefinition: entry.outputDefinition,
+        ...definitionOf(entry),
         // The day egma shipped the entry, from the catalog — not the day this
         // container happened to boot. `updated_at` starts there too and moves
         // only when the words do.
@@ -235,34 +251,26 @@ export async function seedGraderLibrary(
 /**
  * The entries this caller can see: egma's own, and their own organization's.
  *
- * **Both halves are the tenancy, and the null half is not a hole.** An entry
- * with no organization belongs to egma and is on every customer's shelf by
- * design — that is what a predefined grader is. An entry with one belongs to
- * that customer and is reachable only by them, which is the ordinary rule this
- * module holds everywhere. There is no predicate here a caller can widen: the
- * organization it compares against is the context's own.
+ * **The customer half is `within`, unchanged**, which is what keeps this read
+ * under the same rule as every other one in the module: the organization it
+ * compares against is the context's own, and a caller has no argument by which
+ * to widen it. Acting in a project narrows to it; acting in none reaches the
+ * whole customer, exactly as everywhere else.
  *
- * `within` is deliberately not used, and this is the one place in the module
- * that says so out loud: it builds `organization_id = $me`, which would hide
- * every one of egma's rows. The predicate below is that one with egma's null
- * added beside it, and nothing else.
- *
- * A context acting in a project sees that project's entries; a credential for
- * the whole customer, acting in none, sees the customer's. Egma's are outside
- * both narrowings, because they belong to no project either.
+ * **The null half is beside it rather than inside it**, and it is not a hole in
+ * the tenancy: an entry with no organization belongs to egma and is on every
+ * customer's shelf by design — that is the whole of what a predefined grader
+ * is. Egma's rows sit outside the project narrowing too, because they belong to
+ * no project either.
  */
 function readable(auth: AuthContext): SQL {
-  const egmas = isNull(graderLibrary.organizationId);
-  const theirs =
-    auth.projectId === undefined
-      ? eq(graderLibrary.organizationId, auth.organizationId)
-      : and(
-          eq(graderLibrary.organizationId, auth.organizationId),
-          eq(graderLibrary.projectId, auth.projectId),
-        );
-
-  const either = or(egmas, theirs);
-  if (either === undefined) throw new Error("a tenancy predicate can never be empty");
+  const either = or(
+    isNull(graderLibrary.organizationId),
+    within(auth, graderLibrary, inActingProject(auth, graderLibrary)),
+  );
+  if (either === undefined) {
+    throw new Error("a tenancy predicate can never be empty");
+  }
   return either;
 }
 
@@ -316,10 +324,18 @@ function answer(row: {
 }
 
 /**
- * One page of the shelf, newest first on the id — which is the mint order, and
- * for the predefined pair the order they were written in the catalog.
+ * One page of the shelf, **oldest first** — which on these identifiers is the
+ * order the catalog was written in, so `expected_behaviors` reads before
+ * `latency`.
  *
- * The page rules are every other list's, written once in `pages.ts`.
+ * **The one list in this module that does not read newest first**, and
+ * deliberately: a shelf is not a feed. The graders somebody meets first should
+ * be the ones that are always on, and the newest entry on a shelf that grows
+ * once a release is the least interesting row on the page. The other lists
+ * answer "what happened lately" and are right to lead with it.
+ *
+ * The page rules are every other list's, written once in `pages.ts`; only the
+ * direction differs, and the cursor turns with it.
  */
 export async function listGraderLibrary(
   auth: AuthContext,
@@ -332,14 +348,14 @@ export async function listGraderLibrary(
     plural: "library entries",
     prefix: "grl",
   });
-  const olderThanCursor =
-    cursor === undefined ? undefined : lt(graderLibrary.id, cursor);
+  const afterCursor =
+    cursor === undefined ? undefined : gt(graderLibrary.id, cursor);
 
   const rows = await db()
     .select(COLUMNS)
     .from(graderLibrary)
-    .where(and(readable(auth), olderThanCursor))
-    .orderBy(desc(graderLibrary.id))
+    .where(and(readable(auth), afterCursor))
+    .orderBy(asc(graderLibrary.id))
     .limit(limit + 1);
 
   const { items, nextCursor } = pageOf(rows, limit);

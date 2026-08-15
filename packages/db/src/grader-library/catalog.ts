@@ -70,30 +70,51 @@ export type LibraryParameter = {
 };
 
 /**
- * The shape an `llm_as_judge` entry's judge must answer in.
+ * The shape an `llm_as_judge` entry's judge must **reply** in.
  *
- * A `score` between nought and one, and a `rationale` a person reads. It rides
- * the entry rather than living only in the engine so that the Library screen
- * can show what a judge is being asked to produce, and so the day a second
- * judged entry wants a different shape it says so in its own row instead of
- * silently getting this one.
+ * **This is the judge's answer, not the verdict row.** The two are different
+ * documents and the difference is load-bearing: a judge answers `decision`,
+ * `rationale` and `cited_turns`, and the engine turns that into a verdict row
+ * carrying a verdict, a score and cited spans. A row is written for an
+ * assertion nobody could judge at all, which no reply corresponds to; and
+ * `cannot_determine` is a real reply that becomes `skipped` rather than a
+ * number. Describing the row here would put a shape on the entry that the
+ * prompt beside it does not command and the engine does not parse — three
+ * statements about one exchange, two of them wrong.
+ *
+ * It rides the entry so the Library screen can show what a judge is asked to
+ * produce, and so the day a second judged entry wants a different reply it says
+ * so in its own row instead of silently getting this one.
  */
 export type LibraryOutputDefinition = {
-  readonly score: { readonly type: "number"; readonly means: string };
+  readonly decision: {
+    readonly type: "string";
+    /** The only three words an answer may be. */
+    readonly oneOf: readonly string[];
+    readonly means: string;
+  };
   readonly rationale: { readonly type: "string"; readonly means: string };
+  readonly cited_turns: { readonly type: "number[]"; readonly means: string };
 };
 
-/** The `{score, rationale}` shape, written once for every judged entry. */
-const SCORE_AND_RATIONALE: LibraryOutputDefinition = {
-  score: {
-    type: "number",
+/** The reply shape, written once for every judged entry. */
+const A_JUDGES_REPLY: LibraryOutputDefinition = {
+  decision: {
+    type: "string",
+    // The engine reads these three words and nothing else; a fourth is an
+    // answer egma refuses rather than guesses at.
+    oneOf: ["met", "not_met", "cannot_determine"],
     means:
-      "1 when the assertion held and 0 when it did not; there is nothing in between, because an assertion is one 0-or-1 check",
+      "whether the one criterion held. cannot_determine is a real answer for evidence that does not settle it, and never a polite way of saying no",
   },
   rationale: {
     type: "string",
+    means: "one sentence saying why, in the judge's own words",
+  },
+  cited_turns: {
+    type: "number[]",
     means:
-      "one sentence saying why, in the judge's own words, and on an errored row the plain-prose reason judging broke",
+      "the turns the rationale rests on, by their numbers in the transcript; empty where the criterion is about something nobody said",
   },
 };
 
@@ -149,7 +170,7 @@ export type PredefinedGrader = {
   readonly prompt: string | null;
   /** What Use asks for. Empty where Use asks nothing. */
   readonly params: readonly LibraryParameter[];
-  /** The answer shape a judge must produce; null for one nobody asks. */
+  /** The reply shape a judge must answer in; null for one nobody asks. */
   readonly outputDefinition: LibraryOutputDefinition | null;
   /** The day egma shipped this entry. See the file's note. */
   readonly createdAt: Date;
@@ -177,7 +198,7 @@ export const GRADER_LIBRARY_CATALOG: readonly PredefinedGrader[] = [
     // Nothing. Its assertions are the test's own sentences, supplied per test
     // at judging time, so pressing Use asks for nothing and there is no form.
     params: [],
-    outputDefinition: SCORE_AND_RATIONALE,
+    outputDefinition: A_JUDGES_REPLY,
     createdAt: SHIPPED,
   },
   {
@@ -206,7 +227,3 @@ export const GRADER_LIBRARY_CATALOG: readonly PredefinedGrader[] = [
     createdAt: SHIPPED,
   },
 ];
-
-/** Every predefined name, for a refusal that can say what the shelf holds. */
-export const PREDEFINED_GRADERS: readonly string[] =
-  GRADER_LIBRARY_CATALOG.map((entry) => entry.name);

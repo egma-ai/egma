@@ -23,6 +23,11 @@ export type OrganizationScoped = PgTable & {
   readonly organizationId: AnyPgColumn;
 };
 
+/** Any table that also labels its rows with the product area they belong to. */
+export type ProjectScoped = PgTable & {
+  readonly projectId: AnyPgColumn;
+};
+
 function all(...conditions: readonly SQL[]): SQL {
   const combined = and(...conditions);
   if (combined === undefined) {
@@ -55,6 +60,32 @@ export function within(
 ): SQL {
   const tenancy = eq(table.organizationId, auth.organizationId);
   return narrower === undefined ? tenancy : all(tenancy, narrower);
+}
+
+/**
+ * The narrowing that rides beside the tenancy one: acting in a project narrows
+ * to it, and acting in none reaches the whole customer.
+ *
+ * **It is `undefined` rather than a predicate for a context with no project**,
+ * because an organization-scoped credential names none and the honest answer is
+ * that there is nothing to narrow by — `and()` drops it, and the organization
+ * predicate still holds. That absence is the decision `AuthContext.projectId`
+ * being optional forces somebody to make out loud, and it is made here once.
+ *
+ * It is here beside `within` rather than copied into each factory because it is
+ * half of the same `where` clause and belongs to the same rule: nothing in
+ * `access/` composes a predicate without starting from this file. (Several
+ * factories still hold their own private copy from before this was lifted.
+ * Each is identical; they come here as their modules are next touched, rather
+ * than in one sweep across files other work is in the middle of.)
+ */
+export function inActingProject(
+  auth: AuthContext,
+  table: ProjectScoped,
+): SQL | undefined {
+  return auth.projectId === undefined
+    ? undefined
+    : eq(table.projectId, auth.projectId);
 }
 
 /** The caller's own customer row. */

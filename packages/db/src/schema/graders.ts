@@ -229,9 +229,15 @@ export const graderLibrary = pgTable(
      */
     params: jsonb("params").notNull(),
     /**
-     * The shape an `llm_as_judge` entry's judge must answer in — `{score,
-     * rationale}` — so that what the engine reads back and what the Library
-     * screen promises are one statement. Null for a `code` entry.
+     * The shape an `llm_as_judge` entry's judge must **reply** in — the
+     * decision, its one-sentence reason, and the turns it rests on — so that
+     * what the prompt above commands, what the engine parses, and what the
+     * Library screen promises are one statement. Null for a `code` entry.
+     *
+     * It describes the *judge's answer*, not the verdict row written from it:
+     * a row carries a verdict and a score, exists for assertions no judge was
+     * ever asked about, and turns `cannot_determine` into `skipped`. Two
+     * documents, and this column is the first one.
      */
     outputDefinition: jsonb("output_definition"),
     /**
