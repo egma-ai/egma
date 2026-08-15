@@ -54,32 +54,35 @@ export type SpannedConversation = {
   readonly spans: readonly TraceSpan[];
 };
 
+/**
+ * One measurement, and where it happened.
+ *
+ * The number and its span travel together rather than in two lists a caller
+ * indexes into in step. Two aligned arrays would put the alignment in every
+ * reader's hands — and the first thing an index type says about `spanIds[at]`
+ * is that it might not be there, which is a sentinel nobody wants and a
+ * question this shape cannot be asked.
+ */
+export type Sample = {
+  readonly value: number;
+  readonly spanId: string;
+};
+
 /** One measure, as this conversation's spans carried it. */
 export type MeasuredFromSpans = {
   readonly measure: string;
   /** The catalog's own unit, so nothing downstream has to look it up again. */
   readonly unit: CatalogedMeasure["unit"];
   /**
-   * One sample, or the whole series for a measure taken once a turn, in the
-   * order the measurements were taken.
+   * One measurement, or the whole series for a measure taken once a turn, in
+   * the order they were taken.
    *
    * Never empty: a measure this conversation did not take is **absent** from
    * the answer rather than present with nothing in it. That is what lets a
    * grader tell "measured, and here it is" from "not measured here", and the
    * second of those is a `skipped` check rather than a failed one.
    */
-  readonly samples: readonly number[];
-  /**
-   * The span each sample came off, by its own id, in the same order — so a
-   * judgment about the worst sample can cite the span it happened in.
-   */
-  readonly spanIds: readonly string[];
-};
-
-/** One sample, and where it happened. */
-export type Sample = {
-  readonly value: number;
-  readonly spanId: string;
+  readonly samples: readonly Sample[];
 };
 
 /**
@@ -118,31 +121,10 @@ export function measuresFromSpans(
     measured.push({
       measure: cataloged.measure,
       unit: cataloged.unit,
-      samples: found.map((sample) => sample.value),
-      spanIds: found.map((sample) => sample.spanId),
+      samples: found,
     });
   }
   return measured;
-}
-
-/**
- * One measure, or `undefined` where this conversation's spans do not carry it.
- *
- * `undefined` is the whole vocabulary of "not computable here" and it covers
- * two different facts on purpose, because a caller does the same thing with
- * both: a measure whose spans this conversation never produced — a voice
- * measure on a chat call, any measure on a trace whose agent emits no timing
- * spans — and a measure the catalog says no span carries at all. Both are a
- * check that did not apply, which is `skipped` and out of the score's
- * denominator, and neither is a failure or an error.
- */
-export function measureFromSpans(
-  conversation: SpannedConversation,
-  measure: string,
-): MeasuredFromSpans | undefined {
-  return measuresFromSpans(conversation).find(
-    (measured) => measured.measure === measure,
-  );
 }
 
 /**
@@ -169,10 +151,8 @@ export function measureFromSpans(
  */
 export function worstSampleOf(measured: MeasuredFromSpans): Sample | undefined {
   let worst: Sample | undefined;
-  for (const [at, value] of measured.samples.entries()) {
-    if (worst === undefined || value > worst.value) {
-      worst = { value, spanId: measured.spanIds[at] ?? "" };
-    }
+  for (const sample of measured.samples) {
+    if (worst === undefined || sample.value > worst.value) worst = sample;
   }
   return worst;
 }
@@ -257,8 +237,14 @@ function samplesOf(
  * whose root never came holds those same spans at the top. Walking both lists is
  * what makes the reading the same either way, and it is what makes a measurement
  * countable on a conversation egma holds only part of.
+ *
+ * **Exported because the grading engine walks the same tree** for the tool calls
+ * and for the span that closes a trace. It used to hold a copy of this,
+ * docstring and all, which is two implementations of "every span, once" — and
+ * the day one of them learned about a third list, the other would quietly stop
+ * seeing part of every conversation.
  */
-function* everySpanIn(
+export function* everySpanIn(
   conversation: SpannedConversation,
 ): Generator<TraceSpan> {
   const walk = function* (spans: readonly TraceSpan[]): Generator<TraceSpan> {

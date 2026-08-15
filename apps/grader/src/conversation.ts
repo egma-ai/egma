@@ -1,4 +1,5 @@
 import {
+  everySpanIn,
   measuresFromSpans,
   type MeasuredFromSpans,
   type Simulation,
@@ -210,9 +211,27 @@ function unreadable(
     return `egma holds no record of this conversation — ${ended}, and no telemetry for it ever arrived — so there was nothing to judge.`;
   }
   return trace.truncated
-    ? `egma holds more of this conversation than one reading returns — ${ended}, and its trace overran the reader's span limit — so judging the readable part would judge a different conversation.`
+    ? `${MORE_THAN_ONE_READING} — ${ended}, and ${OVERRAN}`
     : `egma holds only part of this conversation — ${ended}, and the span that closes its trace never arrived — so there was nothing complete to judge.`;
 }
+
+/**
+ * What a trace holding more than one reading returns is, said once and used by
+ * both sources.
+ *
+ * **It is one sentence because it is one fact**, and the fact belongs to the
+ * reader rather than to whoever conducted the conversation: a trace over the
+ * store's span limit comes back as a prefix, and every question a grader asks of
+ * a prefix is a question about a different conversation. It used to live only in
+ * the simulation branch, and reusing it is what stops the two sources getting
+ * different answers to the same problem.
+ */
+const MORE_THAN_ONE_READING =
+  "egma holds more of this conversation than one reading returns";
+
+const OVERRAN =
+  "its trace overran the reader's span limit — so judging the readable part " +
+  "would judge a different conversation.";
 
 /**
  * Whether the trace is the whole conversation, which the root span is the one
@@ -252,13 +271,39 @@ function rootArrivedIn(trace: TraceDetail): boolean {
  * the ingest path writes both columns empty rather than guessing. So a
  * production verdict carries no run id — which is what the verdicts table
  * already documents — and the fold reads it exactly as it reads a simulation's.
+ *
+ * **A trace egma holds only part of is judged by nobody, exactly as a
+ * simulation's is.** A read over the store's span limit comes back as a prefix,
+ * and the moment a grader computes a number from it that number is about a
+ * different conversation: the worst turn of a long call is as likely to be past
+ * the cut as before it, so a bound would pass or fail on an arbitrary slice. It
+ * did not matter while a production conversation measured nothing; it became
+ * load-bearing the day the measure module started answering for both sources,
+ * which is why the refusal is here now and phrased in the sentence the
+ * simulation branch already used.
  */
 export function conversationOfTrace(trace: TraceDetail): Conversation {
-  return {
+  const filedUnderTheTrace: Conversation = {
     source: "production",
     traceId: trace.traceId,
     nothingToJudgeBecause: null,
     endingReason: null,
+    transcript: [],
+    events: [],
+    measures: [],
+    runId: trace.runId,
+    agentId: trace.agentId,
+  };
+
+  if (trace.truncated) {
+    return {
+      ...filedUnderTheTrace,
+      nothingToJudgeBecause: `${MORE_THAN_ONE_READING} — ${OVERRAN}`,
+    };
+  }
+
+  return {
+    ...filedUnderTheTrace,
     transcript: transcriptOf(trace),
     events: toolCallsIn(trace),
     // The same call the simulation branch makes, on the same rows, with nothing
@@ -267,8 +312,6 @@ export function conversationOfTrace(trace: TraceDetail): Conversation {
     // measures and a grader asked for one answers `skipped`; that is a fact
     // about the telemetry rather than a branch taken here.
     measures: measuresFromSpans(trace),
-    runId: trace.runId,
-    agentId: trace.agentId,
   };
 }
 
@@ -368,29 +411,6 @@ type ToolCall = {
  * millisecond is.
  */
 const ROOT = "root";
-
-/**
- * Every span the trace holds, exactly once: the turns, whatever hangs inside
- * them, and everything filed beside them.
- *
- * A trace read hands back two lists — the turns lifted out for the transcript,
- * and the top-level spans with their children beneath — and every span is under
- * one of the two, once. Which of them a thing lands in depends on what its
- * parent was: the simulator hangs its tool calls and its measurements off the
- * root, so they arrive inside it, and a trace whose root never came holds those
- * same spans at the top. Walking both lists is what makes the reading the same
- * either way.
- */
-function* everySpanIn(trace: TraceDetail): Generator<TraceSpan> {
-  const walk = function* (spans: readonly TraceSpan[]): Generator<TraceSpan> {
-    for (const span of spans) {
-      yield span;
-      yield* walk(span.spans);
-    }
-  };
-  yield* walk(trace.turns);
-  yield* walk(trace.spans);
-}
 
 /**
  * By when it began, as the store wrote the instant — fixed-width RFC 3339 to

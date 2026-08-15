@@ -127,7 +127,10 @@ export function judgeInputOf(conversation: Conversation): JudgeInput {
     // opinion about one arithmetic.
     measures: conversation.measures.map(({ measure, samples }) => ({
       measure,
-      samples,
+      // The numbers alone: a judge reads what was measured, and the span each
+      // measurement happened in is a storage fact with nothing to say to a
+      // model that is being shown a transcript.
+      samples: samples.map((sample) => sample.value),
     })),
   };
 }

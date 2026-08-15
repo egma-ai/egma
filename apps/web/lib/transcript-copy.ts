@@ -213,9 +213,6 @@ export const FACTS = {
  */
 export const MEASURES = {
   label: "What was measured",
-  lead:
-    "Computed from this exchange's own timings — the same numbers a grader " +
-    "reads when it is asked to hold one to a bound.",
   /** Nothing measured is an ordinary answer, and it says which two ways. */
   none:
     "Nothing was measured here. egma's own simulations time their turns; an " +
@@ -225,6 +222,16 @@ export const MEASURES = {
   worst: "worst",
   counted: (howMany: number): string =>
     howMany === 1 ? "1 measurement" : `${howMany} measurements`,
+  /**
+   * Said instead of the count when the reading is a prefix of a long exchange.
+   *
+   * The worst measurement of the first part is not the worst measurement of the
+   * call — the slowest turn is as likely to be past the cut as before it — so
+   * the figure is qualified rather than shown as though it were the whole. A
+   * count would be worse than useless here: it would say how many measurements
+   * arrived, which is not how many there were.
+   */
+  partialWorst: "worst of the part egma holds",
 } as const;
 
 /**

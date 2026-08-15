@@ -497,14 +497,54 @@ describe("what the exchange measured", () => {
   });
 
   /**
-   * The worst sample, because that is the number a bound is held against. A mean
-   * shown here would be a different figure from the one a verdict was decided
-   * by, on the same page, about the same exchange.
+   * **The reduction is the platform's, and this page must not be able to
+   * repeat it.**
+   *
+   * The one number a bound is held against arrives on the answer as `worst`.
+   * Taking the maximum here instead would look harmless and would be a second
+   * implementation of exactly that figure — correct while both happen to take
+   * the maximum, silently wrong the first day a grader reduces some other way,
+   * with nothing anywhere failing. The page held those four lines once; this is
+   * what stops them coming back.
+   *
+   * The rule that no source file outside the measure module reduces a series
+   * lives in `packages/db/test/one-measure-path.test.ts` and covers this file
+   * too. What is asserted here is the positive half: the page reads the reduced
+   * figure it was sent.
    */
-  it("leads with the worst measurement, and says that is what it is", () => {
+  it("prints the reduction it was handed, and never computes one", async () => {
+    const page = await readFile(
+      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      "utf8",
+    );
+
+    expect(page).toContain("one.worst");
+    // The series is used for one thing, which is saying how many there were.
+    expect(page).toContain("one.samples.length");
+    expect(page).not.toContain("samples.reduce");
+    expect(page).not.toContain("samples[0]");
+  });
+
+  it("says which measurement it is showing, and how many there were", () => {
     expect(copy.MEASURES.worst).toBe("worst");
     expect(copy.MEASURES.counted(1)).toContain("1 measurement");
     expect(copy.MEASURES.counted(11)).toContain("11 measurements");
+  });
+
+  /**
+   * A reading the store's span limit cut short holds the first part of a long
+   * exchange, so its worst measurement is the worst of that part — the slowest
+   * turn may be past the cut. Saying so is the difference between a figure a
+   * reader can use and one that quietly means something else.
+   */
+  it("qualifies the figure when the reading is only part of the exchange", async () => {
+    const page = await readFile(
+      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      "utf8",
+    );
+
+    expect(page).toContain("one.partial");
+    expect(copy.MEASURES.partialWorst).toContain("part egma holds");
   });
 
   it("says nothing was measured rather than showing a blank", () => {

@@ -105,15 +105,24 @@ export function UseForm({
   const [refusal, setRefusal] = useState<string | null>(null);
 
   /**
-   * The unit the bound is counted in: the chosen measure's own.
+   * The unit a typed value is counted in: the unit of the option that was
+   * chosen.
    *
-   * Read off whichever parameter carries options rather than off a parameter
-   * called `metric`, because the name of the parameter is the entry's business
-   * and this component is not supposed to know it.
+   * **Only where exactly one parameter offers options**, and that restraint is
+   * the point. Nothing in an entry's declaration says which typed value belongs
+   * to which choice — an entry asking for two measures and two bounds would be
+   * four parameters with no link between them — so with more than one list to
+   * choose from there is no honest answer and this shows none. Matching any
+   * filled value against any parameter's options, which is what this did, is a
+   * guess that happens to be right while exactly one list exists and is wrong
+   * silently the day a second one arrives.
    */
-  const unit = params
-    .flatMap((parameter) => parameter.options ?? [])
-    .find((option) => Object.values(filled).includes(option.value))?.unit;
+  const listed = params.filter((parameter) => parameter.options !== undefined);
+  const only = listed.length === 1 ? listed[0] : undefined;
+  const unit =
+    only === undefined
+      ? undefined
+      : only.options?.find((option) => option.value === filled[only.name])?.unit;
 
   async function start(event: React.FormEvent): Promise<void> {
     event.preventDefault();
@@ -171,21 +180,29 @@ export function UseForm({
               htmlFor={control}
             >
               {parameter.options === undefined ? (
-                <input
-                  className={styles.input}
-                  id={control}
-                  // The kind decides the control exactly as it decides the check
-                  // behind it, so what a person can type and what a write will
-                  // take are one decision made in the entry.
-                  type={parameter.kind === "number" ? "number" : "text"}
-                  required
-                  value={chosen}
-                  // Shown rather than baked into the label: the unit belongs to
-                  // the measure beside it, and this one changes with the choice
-                  // above.
-                  placeholder={unit ?? ""}
-                  onChange={(event) => write(event.target.value)}
-                />
+                <>
+                  <input
+                    className={styles.input}
+                    id={control}
+                    // The kind decides the control exactly as it decides the
+                    // check behind it, so what a person can type and what a
+                    // write will take are one decision made in the entry.
+                    type={parameter.kind === "number" ? "number" : "text"}
+                    required
+                    value={chosen}
+                    onChange={(event) => write(event.target.value)}
+                  />
+                  {/*
+                    The unit, beside the control and not inside it. It used to
+                    be the placeholder, which meant it vanished the instant
+                    somebody typed — exactly when knowing whether the number
+                    is milliseconds or turns starts to matter. It changes with
+                    the choice above, because the unit belongs to the measure.
+                  */}
+                  {unit === undefined ? null : (
+                    <span className={styles.muted}>{unit}</span>
+                  )}
+                </>
               ) : (
                 <select
                   className={styles.select}

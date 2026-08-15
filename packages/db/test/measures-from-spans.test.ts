@@ -1,15 +1,12 @@
-import { readdir, readFile } from "node:fs/promises";
-import path from "node:path";
-
 import {
   appendSpans,
   connectClickHouse,
   disconnectClickHouse,
-  measureFromSpans,
   measuresFromSpans,
   readTrace,
   worstSampleOf,
   type AuthContext,
+  type MeasuredFromSpans,
   type NewSpan,
   type TraceDetail,
 } from "@egma/db";
@@ -42,20 +39,36 @@ import {
  * answers for that one and nothing else, and the loop is over the catalog rather
  * than over a list written here — so a measure added to the catalog is a measure
  * this file starts asking about.
+ *
+ * **Two customers, because one proves nothing about the filter.** Every measure
+ * here is computed from a trace a read handed back, and a read is where tenancy
+ * is enforced — so a file with one organization in it would pass identically
+ * whether the predicate existed or not. The second customer's spans sit in the
+ * same store, in the same window, and are asked for by the wrong credential.
+ *
+ * The drift alarm that keeps this module the only one is in
+ * `one-measure-path.test.ts`, deliberately apart: it is a filesystem scan and
+ * has no business waiting on a container.
  */
 
 let store: MigratedTraceStore;
 
 const acme = { organizationId: newId("org"), userId: newId("usr") };
+const globex = { organizationId: newId("org"), userId: newId("usr") };
 const PROJECT = newId("prj");
 
-const auth: AuthContext = {
-  userId: acme.userId,
-  organizationId: acme.organizationId,
-  projectId: PROJECT,
-  role: "admin",
-  via: "api_key",
-};
+function actingFor(customer: typeof acme): AuthContext {
+  return {
+    userId: customer.userId,
+    organizationId: customer.organizationId,
+    projectId: PROJECT,
+    role: "admin",
+    via: "api_key",
+  };
+}
+
+const auth = actingFor(acme);
+const elsewhere = actingFor(globex);
 
 /** The minute everything here happened in, and a window that holds it. */
 const WHEN = new Date("2026-05-04T12:00:00Z");
@@ -178,12 +191,28 @@ function aConversation(
 async function stored(
   measured: Measured,
   stamped: Partial<NewSpan> = {},
+  customer: AuthContext = auth,
 ): Promise<TraceDetail> {
   const conversation = aConversation(measured, stamped);
-  await appendSpans(auth, conversation.spans);
-  const read = await readTrace(auth, conversation.traceId, { window: WINDOW });
+  await appendSpans(customer, conversation.spans);
+  const read = await readTrace(customer, conversation.traceId, {
+    window: WINDOW,
+  });
   if (read === undefined) throw new Error("the trace store lost the spans");
   return read;
+}
+
+/** One measure, or nothing, the way every case here asks for one. */
+function measureIn(
+  trace: TraceDetail,
+  measure: string,
+): MeasuredFromSpans | undefined {
+  return measuresFromSpans(trace).find((one) => one.measure === measure);
+}
+
+/** The numbers alone, for a case comparing two conversations' arithmetic. */
+function valuesOf(measured: MeasuredFromSpans): readonly number[] {
+  return measured.samples.map((sample) => sample.value);
 }
 
 /** Everything a simulation's spans carry, which a production span does not. */
@@ -216,8 +245,7 @@ describe("one conversation's measures", () => {
       {
         measure: "first_response_latency",
         unit: "milliseconds",
-        samples: [1_214],
-        spanIds: [expect.any(String)],
+        samples: [{ value: 1_214, spanId: expect.any(String) }],
       },
       {
         measure: "turn_response_latency",
@@ -225,25 +253,27 @@ describe("one conversation's measures", () => {
         // In the order they were taken, so a per-turn series is the
         // conversation read forwards — and the half is still here, which a
         // whole-number division would have floored away.
-        samples: [862.5, 1_100],
-        spanIds: [expect.any(String), expect.any(String)],
+        samples: [
+          { value: 862.5, spanId: expect.any(String) },
+          { value: 1_100, spanId: expect.any(String) },
+        ],
       },
     ]);
   });
 
-  it("cites the span each sample came off, so a judgment can point at one", async () => {
+  it("cites the span each measurement came off, so a judgment can point at one", async () => {
     const trace = await stored({ turn_response_latency: [900, 2_400] });
-    const measured = measureFromSpans(trace, "turn_response_latency");
+    const measured = measureIn(trace, "turn_response_latency");
     if (measured === undefined) throw new Error("the measure went missing");
 
-    expect(measured.spanIds).toHaveLength(2);
-    expect(new Set(measured.spanIds).size).toBe(2);
+    // A measurement carries its own span, so there is no second list for an
+    // index to fall out of step with.
+    expect(measured.samples).toHaveLength(2);
+    expect(new Set(measured.samples.map((one) => one.spanId)).size).toBe(2);
 
     // The worst measurement, and the span it happened in — which is what a
     // bound is held against and what a verdict row cites.
-    const worst = worstSampleOf(measured);
-    expect(worst?.value).toBe(2_400);
-    expect(worst?.spanId).toBe(measured.spanIds[1]);
+    expect(worstSampleOf(measured)).toEqual(measured.samples[1]);
   });
 
   it("hands them back in the catalog's order, whatever order they were taken in", async () => {
@@ -307,17 +337,19 @@ describe("the same spans, filed as a simulation and as production", () => {
     expect(production.source).toBe("production");
     expect(simulated.traceId).not.toBe(production.traceId);
 
-    const withoutTheirSpans = (
+    // The span ids differ — they are different rows of different conversations
+    // — and the numbers must not, which is what this compares.
+    const numbersOnly = (
       trace: TraceDetail,
     ): readonly Record<string, unknown>[] =>
-      measuresFromSpans(trace).map(({ measure, unit, samples }) => ({
-        measure,
-        unit,
-        samples,
+      measuresFromSpans(trace).map((one) => ({
+        measure: one.measure,
+        unit: one.unit,
+        samples: valuesOf(one),
       }));
 
-    expect(withoutTheirSpans(simulated)).toEqual(withoutTheirSpans(production));
-    expect(withoutTheirSpans(simulated)).toEqual([
+    expect(numbersOnly(simulated)).toEqual(numbersOnly(production));
+    expect(numbersOnly(simulated)).toEqual([
       { measure: "first_response_latency", unit: "milliseconds", samples: [1_214] },
       {
         measure: "turn_response_latency",
@@ -333,12 +365,49 @@ describe("the same spans, filed as a simulation and as production", () => {
     const production = await stored(MEASURED);
 
     for (const measure of SPAN_DERIVED_MEASURES) {
-      const here = measureFromSpans(simulated, measure);
-      const there = measureFromSpans(production, measure);
+      const here = measureIn(simulated, measure);
+      const there = measureIn(production, measure);
       expect(here === undefined).toBe(there === undefined);
       if (here === undefined || there === undefined) continue;
       expect(worstSampleOf(here)?.value).toBe(worstSampleOf(there)?.value);
     }
+  });
+});
+
+/**
+ * **Another customer's conversation, in the same store and the same window.**
+ *
+ * Every number in this file comes off a trace a read handed back, and a read is
+ * where tenancy is enforced — so a file with one organization in it would pass
+ * exactly the same whether the predicate were there or not. This is the case
+ * that can tell.
+ */
+describe("a trace belonging to somebody else", () => {
+  it("is not readable, so its measures are not computable either", async () => {
+    const theirs = aConversation({ turn_response_latency: [900, 1_100] });
+    await appendSpans(elsewhere, theirs.spans);
+
+    // Their own credential finds it, so the spans really are in the store.
+    const toThem = await readTrace(elsewhere, theirs.traceId, { window: WINDOW });
+    expect(measuresFromSpans(toThem ?? { turns: [], spans: [] })).toHaveLength(1);
+
+    // And the other customer's finds nothing at all — not an empty trace, not a
+    // refusal that says a trace exists: nothing, exactly as an id nobody minted
+    // answers. There is no trace for the module to be handed.
+    expect(
+      await readTrace(auth, theirs.traceId, { window: WINDOW }),
+    ).toBeUndefined();
+  });
+
+  it("does not reach the measures of a conversation that is this customer's", async () => {
+    const ours = await stored({ first_response_latency: [1_214] });
+
+    expect(measuresFromSpans(ours).map((one) => one.measure)).toEqual([
+      "first_response_latency",
+    ]);
+    expect(
+      await readTrace(elsewhere, ours.traceId, { window: WINDOW }),
+    ).toBeUndefined();
   });
 });
 
@@ -363,7 +432,7 @@ describe("a conversation a measure cannot be computed for", () => {
 
       const trace = await stored(everythingElse);
 
-      expect(measureFromSpans(trace, cataloged.measure)).toBeUndefined();
+      expect(measureIn(trace, cataloged.measure)).toBeUndefined();
       expect(
         measuresFromSpans(trace).map((one) => one.measure),
       ).not.toContain(cataloged.measure);
@@ -379,7 +448,7 @@ describe("a conversation a measure cannot be computed for", () => {
     const trace = await stored({});
     expect(measuresFromSpans(trace)).toEqual([]);
     for (const measure of SPAN_DERIVED_MEASURES) {
-      expect(measureFromSpans(trace, measure)).toBeUndefined();
+      expect(measureIn(trace, measure)).toBeUndefined();
     }
   });
 
@@ -404,97 +473,7 @@ describe("a conversation a measure cannot be computed for", () => {
 
     expect(measuresFromSpans(trace)).toEqual([]);
     for (const each of notFromSpans) {
-      expect(measureFromSpans(trace, each.measure)).toBeUndefined();
+      expect(measureIn(trace, each.measure)).toBeUndefined();
     }
-  });
-});
-
-/**
- * **One computation path, asserted rather than believed.**
- *
- * Everything above proves this module computes the right numbers. What it
- * cannot prove is that nothing *else* computes them too — and a second reader
- * is precisely the failure the module exists to prevent: two answers about one
- * conversation, with no stored number to settle the disagreement, so a page and
- * a verdict row can quietly come to disagree about how fast an agent answered.
- *
- * The whole vocabulary of a measurement is the span kind the ingest door files
- * a timing span under. Two places in egma's source may name it, for two
- * different reasons, and a third is a drift alarm rather than a style
- * preference: whoever adds one has to come here and say why.
- */
-describe("the only place a measure is computed", () => {
-  const REPOSITORY = path.resolve(import.meta.dirname, "..", "..", "..");
-
-  /**
-   * The two files allowed to name the timing kind.
-   *
-   * - The **ingest door** writes it: a span arriving under egma's own emitting
-   *   scope, named for a measure the catalog says comes off a span, is filed as
-   *   `timing`. That is the one place the word is produced.
-   * - This **module** reads it, and is the one place a measurement becomes a
-   *   number.
-   */
-  const MAY_NAME_THE_TIMING_KIND = [
-    "apps/api/src/otlp/normalise.ts",
-    "packages/db/src/measures/from-spans.ts",
-  ];
-
-  async function everySourceFile(): Promise<readonly string[]> {
-    const found: string[] = [];
-
-    const walk = async (directory: string): Promise<void> => {
-      for (const entry of await readdir(directory, { withFileTypes: true })) {
-        if (entry.name === "node_modules" || entry.name === "dist") continue;
-        const here = path.join(directory, entry.name);
-        if (entry.isDirectory()) {
-          // Tests may say anything: what is being guarded is what egma runs.
-          if (entry.name === "test" || entry.name === "tests") continue;
-          await walk(here);
-          continue;
-        }
-        if (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) {
-          found.push(here);
-        }
-      }
-    };
-
-    for (const root of ["apps", "packages"]) {
-      await walk(path.join(REPOSITORY, root));
-    }
-    return found;
-  }
-
-  it("is the only source file that reads a timing span, and the door is the only one that writes one", async () => {
-    const naming: string[] = [];
-    for (const file of await everySourceFile()) {
-      const source = await readFile(file, "utf8");
-      if (!/(["'])timing\1/u.test(source)) continue;
-      naming.push(path.relative(REPOSITORY, file).replaceAll(path.sep, "/"));
-    }
-
-    // A guard on the reading itself: a scan finding nothing would make this
-    // assertion pass by looking in the wrong place.
-    expect(naming.length).toBeGreaterThan(0);
-    expect(naming.sort()).toEqual([...MAY_NAME_THE_TIMING_KIND].sort());
-  });
-
-  /**
-   * And the conversion itself lives here alone. Nanoseconds on the wire,
-   * milliseconds in the catalog: a second division somewhere else is a second
-   * opinion about what a measurement is, and the half-millisecond that a
-   * whole-number division floors away is exactly the kind of disagreement
-   * nobody notices until a bound is argued about.
-   */
-  it("holds the only nanosecond-to-millisecond conversion a measure goes through", async () => {
-    const source = await readFile(
-      path.join(REPOSITORY, "packages/db/src/measures/from-spans.ts"),
-      "utf8",
-    );
-    expect(source).toContain("NANOSECONDS_PER_MILLISECOND");
-    expect(
-      [...source.matchAll(/NANOSECONDS_PER_MILLISECOND/gu)],
-      "the conversion is declared once and used once",
-    ).toHaveLength(2);
   });
 });

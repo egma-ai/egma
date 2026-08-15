@@ -209,6 +209,30 @@ describe("pressing Use", () => {
   });
 
   /**
+   * **The unit is shown, and it stays shown.**
+   *
+   * It used to be the input's placeholder, which meant it disappeared the
+   * instant somebody typed — exactly the moment knowing whether the figure is
+   * milliseconds or turns starts to matter. It is now a sibling of the control.
+   *
+   * And it is only offered where exactly one parameter carries a list. Nothing
+   * in an entry's declaration links a typed value to a choice, so with two lists
+   * there is no honest answer; matching any filled value against any list is a
+   * guess that is right until an entry declares a second one.
+   */
+  it("shows the chosen option's unit beside the control, not inside it", async () => {
+    const form = await readFile(path.join(WEB, "app/graders/use-form.tsx"), "utf8");
+
+    // The code, not the prose: a comment saying why the unit is *not* a
+    // placeholder is the opposite of a placeholder.
+    const running = form.replaceAll(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/gu, "");
+    expect(running).not.toContain("placeholder");
+    expect(running).toContain("{unit}");
+    // One list, or none: the lookup is not a search across every parameter.
+    expect(running).toContain("listed.length === 1");
+  });
+
+  /**
    * `required` is v0's only loudness switch and neither reading is obvious from
    * the flag's name, so the form says both out loud beside the control.
    */

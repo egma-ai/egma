@@ -45,12 +45,22 @@ let world: World;
 let service: Service;
 let graderId: string;
 
-/** One judged conversation the agent answered quickly. */
+/**
+ * One judged conversation the agent answered quickly — **judged and settled.**
+ *
+ * The verdict row lands a moment before the job that produced it is marked
+ * `graded`, and a re-grade reopens *settled* jobs and nothing else. Waiting only
+ * for the row leaves a gap in which `regrade` finds nothing to reopen and
+ * answers an empty list, which is a correct answer to a question this file did
+ * not mean to ask. So the wait is for the job, which is the thing every case
+ * below actually depends on.
+ */
 async function aFastConversation(): Promise<ConductedSimulation> {
   const conducted = await conductSimulation(world, {
     spans: { measured: { turn_response_latency: [900, 1_100] } },
   });
   await verdictsOn(world, conducted.simulationId, 1);
+  await jobFor(world, { simulationId: conducted.simulationId }, "graded");
   return conducted;
 }
 

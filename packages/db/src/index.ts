@@ -76,7 +76,7 @@ export {
  * nothing stored to settle it against.
  */
 export {
-  measureFromSpans,
+  everySpanIn,
   measuresFromSpans,
   worstSampleOf,
   type MeasuredFromSpans,

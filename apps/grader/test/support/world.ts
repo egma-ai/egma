@@ -683,11 +683,16 @@ export async function conductProductionTrace(
      * What this conversation measured, in the milliseconds the catalog names —
      * each sample its own timing span, whose duration *is* the number.
      *
-     * **A real caller's telemetry can carry these**, and the only reason most of
-     * it does not is that most frameworks emit no timings. Egma reads whatever
-     * arrives with the same code either way, so a case can file the same
-     * measurements as a simulation and as production and hold the two answers
-     * against each other — which is the whole of "one source, both worlds".
+     * **Written straight into the store, which is what makes this a fair
+     * comparison and not a claim about the door.** The door files a span as
+     * `timing` only for the `egma-simulator` scope, so a customer's agent
+     * emitting a perfectly-named `turn_response_latency` span today lands it as
+     * `other` and it is not a measurement — the reason a real production trace
+     * carries no measures is the door's scope gate, not the frameworks. What is
+     * being exercised here is everything *after* the door: given identical rows
+     * from either source, egma computes identical numbers. Normalising a
+     * provider's own timing attribute into this kind is the ingest door's
+     * decision to take, and the day it does, these rows are what arrive.
      */
     readonly measured?: Readonly<Record<string, readonly number[]>> | undefined;
   } = {},

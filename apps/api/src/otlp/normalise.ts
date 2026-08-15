@@ -182,15 +182,20 @@ const LIVEKIT_TOOL = {
 const SIMULATOR_SCOPE = "egma-simulator";
 
 const SIMULATOR_KINDS: Readonly<Record<string, string>> = {
+  // **The catalog first, so the four structural names below win a collision.**
+  // A measure joining the catalog under one of their names — a measure called
+  // `agent_turn`, say — would otherwise re-file the span carrying what the agent
+  // said as a measurement, and a transcript would quietly lose its turns. The
+  // structural shapes are this vocabulary's own and are not a measure's to take.
+  ...Object.fromEntries(
+    SPAN_DERIVED_MEASURES.map((measure) => [measure, "timing"]),
+  ),
   // The one span the whole conversation happened inside, emitted last: when it
   // arrives, the conversation is over.
   simulation: "root",
   human_turn: "turn:human",
   agent_turn: "turn:agent",
   tool_call: "tool",
-  ...Object.fromEntries(
-    SPAN_DERIVED_MEASURES.map((measure) => [measure, "timing"]),
-  ),
 };
 
 /** The two turn names, which are where the one text attribute is read. */

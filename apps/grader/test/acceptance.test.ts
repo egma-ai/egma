@@ -2,6 +2,7 @@ import {
   claimGradingJobs,
   getGrader,
   getGradingJob,
+  readRunVerdicts,
   readVerdicts,
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -196,7 +197,7 @@ describe("a latency copy", () => {
     );
 
     const testId = await seedTest(world, []);
-    const { simulationId } = await conductSimulation(world, {
+    const { simulationId, runId } = await conductSimulation(world, {
       testId,
       spans: { measured: { turn_response_latency: [900, 1_100] } },
     });
@@ -217,6 +218,30 @@ describe("a latency copy", () => {
     // And it cites the span that measurement happened in, which is what the
     // column is for.
     expect(mine[0]?.citedSpanIds).toHaveLength(1);
+
+    /**
+     * **And the run read path shows it**, which is the grain a results page and
+     * a CI gate actually read. `readRunVerdicts` is the function behind
+     * `GET /api/runs/:runId`; asserting only the per-conversation read would
+     * leave the last join between a latency verdict and the page somebody looks
+     * at unexercised by anything but hand-written rows.
+     */
+    const run = await readRunVerdicts(world.auth, runId);
+    const its = run.byGrader.find((one) => one.graderId === quick);
+
+    expect(run.simulations.map((one) => one.simulationId)).toContain(
+      simulationId,
+    );
+    expect(its?.outcome).toMatchObject({ verdict: "passed", score: 1 });
+
+    // The run's own headline is folded over the same rows at read time, so the
+    // counts underneath it add up to it — a stored rollup is what could drift,
+    // and there is not one.
+    const beneath = run.simulations.reduce(
+      (total, one) => total + one.outcome.counts.total,
+      0,
+    );
+    expect(run.outcome.counts.total).toBe(beneath);
   });
 
   it("fails a conversation over its bound, and says by how much", async () => {

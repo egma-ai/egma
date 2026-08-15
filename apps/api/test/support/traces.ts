@@ -338,6 +338,13 @@ export type DetailMeasure = {
   readonly unit: string;
   readonly samples: readonly number[];
   readonly span_ids: readonly string[];
+  /**
+   * The one number a bound is held against, reduced by the platform rather than
+   * left for every reader to work out for itself.
+   */
+  readonly worst: { readonly value: number; readonly span_id: string } | null;
+  /** True when the reading is a prefix, so the figure is of the part held. */
+  readonly partial: boolean;
 };
 
 export type TraceDetailBody = {

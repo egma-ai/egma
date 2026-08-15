@@ -97,11 +97,17 @@ export type Outcome = {
 /**
  * One measure this exchange produced, as the read hands it over.
  *
- * **Computed by the platform, never here.** The samples arrive already worked
- * out by egma's one shared measure module — the same module a `latency` grader
- * reads through — so this page renders a number rather than deriving one. A
- * duration arithmetic done in a browser would be a second answer about one
- * exchange, and the whole point of the module is that there is not one.
+ * **Computed by the platform, never here — the reduction included.** The
+ * samples arrive already worked out by egma's one shared measure module, and so
+ * does `worst`: the single number a grader holds against a bound. Both are the
+ * platform's arithmetic, so this page renders figures rather than deriving any.
+ *
+ * The reduction is the part that matters. Taking the maximum here would look
+ * harmless and would be a second implementation of the exact number a verdict
+ * rests on — right up to the day a grader reduces by p90 instead, when the page
+ * would go on showing the maximum with nothing failing anywhere. A developer who
+ * found this page and a verdict disagreeing would be right to stop believing
+ * both, so the page is not allowed to be capable of it.
  *
  * The unit rides each measure because the measure catalog owns it: a page that
  * assumed milliseconds would be wrong the moment somebody bounds a measure
@@ -114,6 +120,16 @@ export type Measured = {
   readonly samples: readonly number[];
   /** The span each sample came off, in the same order. */
   readonly span_ids: readonly string[];
+  /**
+   * The measurement a bound is held against, reduced by the platform. Null
+   * only on an answer that carried no measurement at all.
+   */
+  readonly worst: { readonly value: number; readonly span_id: string } | null;
+  /**
+   * True when this reading is a prefix of the exchange, so the figure is the
+   * worst of what egma holds rather than the worst of the call.
+   */
+  readonly partial?: boolean;
 };
 
 export type Detail = {

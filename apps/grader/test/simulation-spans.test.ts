@@ -206,10 +206,10 @@ describe("a simulation whose spans arrived complete", () => {
     // the same answer the metrics display shows for this conversation and the
     // same one a latency grader is judged on.
     expect(
-      conversation.measures.map(({ measure, unit, samples }) => ({
-        measure,
-        unit,
-        samples,
+      conversation.measures.map((one) => ({
+        measure: one.measure,
+        unit: one.unit,
+        samples: one.samples.map((sample) => sample.value),
       })),
     ).toEqual([
       {

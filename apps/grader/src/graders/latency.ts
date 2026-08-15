@@ -132,9 +132,9 @@ export function executeLatency(execution: Execution): readonly Judgment[] {
       rationale: rationaleFor(asked, measured, worst.value, held),
       // Where the deciding measurement happened, by its own id — which is what
       // the verdict row's column is for, and what lets a reader open the one
-      // measurement this judgment is about. Cited only where there is one to
-      // cite: an empty string in the list would be a reference to nothing.
-      citedSpanIds: worst.spanId === "" ? [] : [worst.spanId],
+      // measurement this judgment is about. A sample carries its span with it,
+      // so there is no index to line up and no absent id to guard against.
+      citedSpanIds: [worst.spanId],
     };
   });
 }

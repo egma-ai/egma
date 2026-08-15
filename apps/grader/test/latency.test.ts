@@ -66,13 +66,17 @@ function theLatencyEntry(): LibraryEntry {
 /** One measured series, in the shape the measure module hands one over. */
 function measured(
   measure: string,
-  samples: readonly number[],
+  values: readonly number[],
 ): MeasuredFromSpans {
   return {
     measure,
     unit: "milliseconds",
-    samples,
-    spanIds: samples.map((_, at) => `span-${measure}-${at}`),
+    // Each measurement carries the span it happened in, which is what a
+    // judgment cites — one list, so nothing here has to keep two in step.
+    samples: values.map((value, at) => ({
+      value,
+      spanId: `span-${measure}-${at}`,
+    })),
   };
 }
 

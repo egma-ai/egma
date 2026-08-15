@@ -272,6 +272,55 @@ describe("a production trace whose root span closes", () => {
   });
 
   /**
+   * **A reading the span limit cut short is judged by nobody**, exactly as a
+   * simulation's is — and on this branch that stopped being a formality.
+   *
+   * A production conversation used to measure nothing at all, so a prefix could
+   * not move a number and the missing refusal cost nothing. Now the worst
+   * measurement is taken over whatever the reading returned, and the worst turn
+   * of a long call is as likely to be past the cut as before it: a bound would
+   * pass or fail on an arbitrary slice, and the verdict would say nothing about
+   * the conversation while looking exactly like a verdict that did.
+   *
+   * The sentence is the one the simulation branch already used, because it is
+   * the same fact about the same reader.
+   */
+  it("refuses to judge a reading the span limit cut short", async () => {
+    const { traceId, startedAt } = await conductProductionTrace(world, {
+      measured: { turn_response_latency: [900, 1_100] },
+    });
+    await jobFor(world, { traceId }, "graded");
+
+    const trace = await readTrace(world.auth, traceId, {
+      window: {
+        from: BigInt(startedAt.getTime() - 60_000) * 1_000n,
+        to: BigInt(startedAt.getTime() + 60_000) * 1_000n,
+      },
+    });
+    if (trace === undefined) throw new Error("the trace store lost the spans");
+
+    // Exactly what the trace read answers when a conversation overruns the
+    // reader's limit: the same rows, the flag up.
+    const whole = conversationOfTrace(trace);
+    const prefix = conversationOfTrace({ ...trace, truncated: true });
+
+    // Whole, it measures — which is what makes the refusal below a refusal
+    // rather than a conversation that had nothing in it anyway.
+    expect(whole.nothingToJudgeBecause).toBeNull();
+    expect(whole.measures.map((one) => one.measure)).toEqual([
+      "turn_response_latency",
+    ]);
+
+    expect(prefix.nothingToJudgeBecause).toContain("span limit");
+    // And nothing is handed to a grader off a prefix — not a measure, not a
+    // transcript. A number computed from part of a call is the quietly wrong
+    // answer this whole module exists to prevent.
+    expect(prefix.measures).toEqual([]);
+    expect(prefix.transcript).toEqual([]);
+    expect(prefix.events).toEqual([]);
+  });
+
+  /**
    * **One source, both worlds — asserted where a customer would feel it.**
    *
    * The same measurements are filed twice: once by egma's own simulator as a
