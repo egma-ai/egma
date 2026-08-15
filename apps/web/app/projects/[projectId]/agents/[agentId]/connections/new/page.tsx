@@ -168,7 +168,10 @@ function NewConnection({
       const written = draft.credentials[field.field]?.trim() ?? "";
       if (written !== "") credentials[field.field] = written;
     }
-    const sending =
+    // A shape that takes no credential, or one where nothing was typed. Both
+    // send none: for the shapes where a credential is optional, sending an
+    // empty object would be a credential nobody wrote.
+    const withoutCredential =
       variant.credential_rule === "forbidden" ||
       Object.keys(credentials).length === 0;
 
@@ -185,7 +188,7 @@ function NewConnection({
             ? {}
             : { environment: environment.trim() }),
           config,
-          ...(sending ? {} : { credentials }),
+          ...(withoutCredential ? {} : { credentials }),
         },
       },
     );
