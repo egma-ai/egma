@@ -511,8 +511,8 @@ describe("egma run", () => {
     await writeFile(
       file,
       held.replace(
-        "1. [P0] The agent says the workshop's name.",
-        "1. [P0] The agent says the workshop's name.\n2. [P0] The agent never quotes a price.",
+        "1. The agent says the workshop's name.",
+        "1. The agent says the workshop's name.\n2. The agent never quotes a price.",
       ),
       "utf8",
     );

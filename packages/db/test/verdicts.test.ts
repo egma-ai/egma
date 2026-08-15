@@ -146,11 +146,9 @@ describe("a judgment written and read back", () => {
       verdict: "passed",
       score: 0.75,
       rationale: "the agent repeated Tuesday at four before ending the call.",
-      // Empty, and honestly so: a check that was actually made has nothing to
-      // say beyond its rationale. The word is for a `skipped` row, where the
-      // difference between "never about this conversation" and "nothing to
-      // measure" sends a reader to two different places.
-      reason: "",
+      // No `reason` key at all, which is the assertion the note above makes
+      // concrete: `toEqual` fails on a field nothing sent, so this breaks the
+      // day the column comes back and nobody updates the note.
       citedSpanIds: ["00f067aa0ba902b7", "00f067aa0ba902b8"],
       runId: "run_01JQZ0000000000000000000AA",
       agentId: "agt_01JQZ0000000000000000000AA",

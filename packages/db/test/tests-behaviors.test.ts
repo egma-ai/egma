@@ -76,7 +76,17 @@ describe("a test version's content", () => {
    * silent write, so what has to hold at run time is only that nothing is
    * stored for it: the version's content is the three fields it says it is.
    */
-  it("stores the scenario, the behaviors and the overrides, and nothing else", async () => {
+  /**
+   * **Four keys, and `main`'s `0027` comment says three.** That comment —
+   * "a test version's content is the scenario, the expected behaviors and the
+   * mock overrides, and nothing else" — was written to say what the junction's
+   * removal took *out*: no grader array and no per-behavior metadata. The
+   * required capabilities went *in* separately, with the applicable-agent work,
+   * and are versioned for their own reason: a run pins a version and then asks
+   * whether the connection can do what that version needs, so the answer has to
+   * be frozen with the rest of what a run is judged against.
+   */
+  it("stores the scenario, the behaviors, the capabilities and the overrides, and nothing else", async () => {
     const created = await createTest(actingAsAcme(), rescheduling);
 
     const { rows } = await database.sql<{ keys: string[] }>(
@@ -88,6 +98,7 @@ describe("a test version's content", () => {
     expect(rows[0]?.keys).toEqual([
       "expectedBehaviors",
       "mockOverrides",
+      "requiredCapabilities",
       "scenario",
     ]);
   });

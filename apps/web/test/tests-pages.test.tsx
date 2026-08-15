@@ -96,11 +96,8 @@ function testRow(overrides: Record<string, unknown> = {}) {
     version: 1,
     version_id: "tstv_1",
     scenario: "Their cleaning has to move to next week.",
-    expected_behaviors: [
-      { behavior: "confirms the new time back", priority: "P0" },
-    ],
+    expected_behaviors: ["confirms the new time back"],
     personas: [{ id: "prs_1", name: "Impatient Rita", archived_at: null }],
-    graders: [],
     required_capabilities: [],
     override_count: 0,
     agents: [{ id: "agt_1", name: "Front desk", archived_at: null }],
@@ -355,35 +352,17 @@ describe("writing a test", () => {
     ).toBe(true);
   });
 
-  it("will not save a test whose every behavior has been demoted", async () => {
-    form();
-    await screen.findByLabelText("Name");
+  /**
+   * **A proof about demoting every behavior used to stand here.** It set the
+   * one behavior to `P2` and expected the form to refuse, because
+   * falsifiability could otherwise be downgraded away one edit at a time. The
+   * ladder retired with the grader redesign: a behavior is a plain sentence,
+   * every one of them has to hold, and there is no control left to demote one
+   * with. The rule it protected still stands and is proved directly by the
+   * test above — a test with no behavior at all cannot be saved.
+   */
 
-    fireEvent.change(screen.getByLabelText("Name"), {
-      target: { value: "All demoted" },
-    });
-    fireEvent.change(screen.getByLabelText("Scenario"), {
-      target: { value: "Anything at all." },
-    });
-    fireEvent.change(screen.getByLabelText("Expected behavior 1"), {
-      target: { value: "mentions the weather" },
-    });
-    fireEvent.click(await screen.findByLabelText("Front desk"));
-    fireEvent.change(
-      screen.getByLabelText("Priority of expected behavior 1"),
-      { target: { value: "P2" } },
-    );
-
-    // Falsifiability cannot be downgraded away one edit at a time.
-    expect(
-      await screen.findByText(/A test needs at least one P0 behavior/u),
-    ).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "Write the test" }).hasAttribute("disabled"),
-    ).toBe(true);
-  });
-
-  it("sends the behaviors in the order they are on screen, with their priorities", async () => {
+  it("sends the behaviors in the order they are on screen", async () => {
     form();
     await screen.findByLabelText("Name");
 
@@ -403,10 +382,6 @@ describe("writing a test", () => {
     fireEvent.change(await screen.findByLabelText("Expected behavior 2"), {
       target: { value: "second" },
     });
-    fireEvent.change(
-      screen.getByLabelText("Priority of expected behavior 2"),
-      { target: { value: "P1" } },
-    );
 
     // Order is content: a version that reorders the list says something the
     // version before it did not.
@@ -419,12 +394,11 @@ describe("writing a test", () => {
       expect(sentTo("/api/tests").at(-1)?.method).toBe("POST");
     });
     const body = sentTo("/api/tests").at(-1)?.body as {
-      expected_behaviors: { behavior: string; priority: string }[];
+      expected_behaviors: string[];
     };
-    expect(body.expected_behaviors).toEqual([
-      { behavior: "second", priority: "P1" },
-      { behavior: "first", priority: "P0" },
-    ]);
+    // Plain sentences, in the order the page shows them, and nothing beside
+    // them: the write door refuses the `{behavior, priority}` shape by name.
+    expect(body.expected_behaviors).toEqual(["second", "first"]);
   });
 });
 

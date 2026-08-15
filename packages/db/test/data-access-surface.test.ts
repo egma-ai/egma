@@ -288,11 +288,11 @@ const CONTEXT_REQUIRING = [
   // shape's terms.
   "restoreAgent",
   "restoreConnection",
-  // The second secret egma holds, on the first one's terms: the read answers a
-  // reference and a hint, and this is the one door to the plaintext behind it.
-  "listGraderVersions",
+  // No `listGraderVersions` and no `restoreGrader`, and both were here. A
+  // running copy has no version history a person browses and no archive to come
+  // back from: it is made by pressing **Use** and deleted whole, and what it
+  // judges by is read through its library entry at judging time.
   "listJudgeCredentials",
-  "restoreGrader",
   // The second secret egma holds, on the first one's terms: the read answers a
   // reference and a hint, and this is the one door to the plaintext behind it.
   "resolveJudgeKey",
@@ -354,7 +354,10 @@ const CONTEXT_REQUIRING = [
   // factory signup uses too, so a project made from Settings is born with the
   // same starter persona, default pointer and judge state.
   "updateProject",
-  "testsNamingGrader",
+  // No `testsNamingGrader`, and it was here. It counted the live tests naming a
+  // grader so an archive could be refused and the blocking tests named. A test
+  // names no graders now — the `test_grader` junction is dropped — so there is
+  // no such use to block on and nothing left for the verb to count.
   // The customer's own name, changed. The slug is deliberately not offered:
   // it is unique across the deployment, and invitation links were sent under
   // it, so it is a different decision with a different blast radius.
@@ -568,9 +571,9 @@ const VALUES = [
   "credentialRuleOf",
   "variantById",
   "variantIdOf",
-  // The settled vocabularies of a grader and of a project's judge, exported so
-  // that a form and a refusal read the same list the schema is checked against.
-  "GRADER_READS",
+  // The settled vocabulary of a running copy's scope, exported so that a form
+  // and a refusal read the same list the schema is checked against. `GRADER_READS`
+  // stood beside it and does not exist: a copy declares no evidence reads.
   "GRADER_SCOPES",
   // A run's four machinery words, exported so the door that filters a history
   // by one refuses anything else by name rather than from a second copy of the
@@ -579,11 +582,11 @@ const VALUES = [
   "JUDGE_PROVIDERS",
   "JUDGE_SOURCES",
   "PLATFORM_JUDGE",
-  // What each grader type reads and can score before its author says anything,
-  // and the built-in that is never a row. One server registry, so a form
-  // cannot hold a second copy that disagrees with the engine.
-  "GRADER_TYPE_REGISTRY",
-  "EXPECTED_BEHAVIORS_GRADER",
+  // No `GRADER_TYPE_REGISTRY` and no `EXPECTED_BEHAVIORS_GRADER`. The first
+  // held what each of four authorable grader types read and could score; the
+  // second described the built-in that was never a row. `GRADER_LIBRARY_CATALOG`
+  // above replaces both — the shelf egma ships, with the expected-behaviors
+  // grader an entry on it like any other and a real seeded copy per project.
   "schema",
 ];
 

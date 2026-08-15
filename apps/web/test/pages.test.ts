@@ -590,7 +590,9 @@ describe("the pages", () => {
     // reading for, wherever one is drawn.
     expect(judgment).toContain("judgment.rationale");
     expect(judgment).toContain("judgment.cited_turns");
-    expect(conversation).toContain("judgedDimensions(read.verdicts)");
+    // `assertion`, never `dimension`: the verdict store renamed its column
+    // with the grader redesign and the word is banned at every layer.
+    expect(conversation).toContain("judgedAssertions(read.verdicts)");
   });
 
   it("shows the aggregate trace outcome", async () => {

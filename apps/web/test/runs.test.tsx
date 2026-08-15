@@ -121,11 +121,8 @@ function testRow(overrides: Record<string, unknown> = {}) {
     version: 3,
     version_id: "tstv_1",
     scenario: "Their cleaning has to move to next week.",
-    expected_behaviors: [
-      { behavior: "confirms the new time back", priority: "P0" },
-    ],
+    expected_behaviors: ["confirms the new time back"],
     personas: [{ id: "prs_1", name: "Impatient Rita", archived_at: null }],
-    graders: [],
     required_capabilities: [],
     override_count: 0,
     agents: [{ id: "agt_1", name: "Front desk", archived_at: null }],
@@ -153,13 +150,19 @@ function plannedTest(overrides: Record<string, unknown> = {}) {
     ],
     required_capabilities: [],
     skip: null,
+    // Two running copies, and one shape for both. The expected-behaviors
+    // grader is a seeded copy of a predefined library entry now, not a rowless
+    // sentinel, so it arrives here like everything else: an id, a name, the
+    // entry it reads its definition through, and whether it can fail the run.
     graders: [
       {
-        kind: "built_in",
-        grader_key: "expected_behaviors_v1",
-        engine_version: "1",
-        reads: ["transcript", "outcome", "tool_calls", "measures"],
-        modalities: ["voice", "chat"],
+        kind: "authored",
+        grader_id: "grd_seeded",
+        grader_version_id: "grv_1",
+        name: "Expected behaviors",
+        library_id: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
+        required: true,
+        scope: "simulations",
         judge: {
           tag: "configured",
           provider: "openai",
@@ -172,11 +175,9 @@ function plannedTest(overrides: Record<string, unknown> = {}) {
         grader_id: "grd_1",
         grader_version_id: "grv_2",
         name: "Never promises a price",
-        origin: "project_default",
-        priority: "P1",
+        library_id: "grl_01M01MH8KBE00TESCGQHVH0T8G",
+        required: false,
         scope: "simulations",
-        reads: ["transcript"],
-        modalities: ["voice", "chat"],
         judge: { tag: "not_required" },
       },
     ],

@@ -95,13 +95,24 @@ describe("which project a tab is looking at", () => {
 });
 
 describe("the product navigation", () => {
-  it("offers Agents, Tests, Graders and Runs, in that order and no others", () => {
+  /**
+   * **Graders is not among them, and its absence is deliberate.** The grader
+   * screens `main` built are organization-wide: they sit at `/graders`, carry
+   * no project in the address, and this shell reads the project out of the
+   * path — so a navigation item pointing at one would land a person with three
+   * projects on whichever came first in their list, and pressing Use there
+   * would make a running copy in a project they were not looking at, with
+   * nothing saying so. The pages stay in the tree as the working reference for
+   * their copy and their Use form. Wave two rebuilds them under
+   * `/projects/:projectId/graders` and the item comes back with them.
+   */
+  it("offers Agents, Tests and Runs, in that order and no others", () => {
     expect(PRIMARY_NAVIGATION.map((item) => item.label)).toEqual([
       "Agents",
       "Tests",
-      "Graders",
       "Runs",
     ]);
+    expect(PRIMARY_NAVIGATION.map((item) => item.id)).not.toContain("graders");
   });
 
   /**

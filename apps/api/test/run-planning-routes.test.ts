@@ -1,4 +1,8 @@
-import { createPersona, refreshConnectionCapabilities } from "@egma/db";
+import {
+  createPersona,
+  PREDEFINED_GRADERS,
+  refreshConnectionCapabilities,
+} from "@egma/db";
 import { newId } from "@egma/ids";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -156,12 +160,17 @@ describe("reading what a run would freeze", () => {
     ).toBe("Impatient Rita");
     expect(test?.skip).toBeNull();
 
-    // The built-in is in every group, because applying it is part of what
-    // running a test means.
+    // The seeded expected-behaviors copy is in every group, because applying
+    // it is part of what running a test means. It is a running copy pointing at
+    // a predefined library entry, so it is found by the entry it points at
+    // rather than by a reserved key of its own.
     const graders = test?.graders as Record<string, unknown>[];
-    const builtIn = graders.find((one) => one.kind === "built_in");
-    expect(builtIn?.grader_key).toBe("expected_behaviors_v1");
-    expect(builtIn?.judge).toMatchObject({ tag: "configured" });
+    const behaviors = graders.find(
+      (one) => one.library_id === PREDEFINED_GRADERS.expectedBehaviors,
+    );
+    expect(behaviors?.kind).toBe("authored");
+    expect(behaviors?.required).toBe(true);
+    expect(behaviors?.judge).toMatchObject({ tag: "configured" });
 
     // A judge choice names a reference and never a secret, and the whole answer
     // is checked as bytes rather than field by field.

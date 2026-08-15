@@ -200,13 +200,21 @@ describe("getting to the Running-graders screen", () => {
    * A slow request must not replace the application with the access-page
    * composition — the sidebar, the navigation and the account menu stay put
    * until the API has said the session is gone.
+   *
+   * **The shell is asked for bare, and that is the reconciliation.** This page
+   * asked for `<AppShell active="graders">` and the product shell no longer
+   * takes an `active` prop: it reads the project out of the address and marks
+   * the section from that. This address carries no project, so nothing here
+   * may name a section — and the page is reachable by its URL alone, named by
+   * no navigation item, until wave two rebuilds it project-scoped.
    */
   it("keeps the application shell while its data settles", async () => {
     const page = await readFile(
       path.join(WEB, "app/graders/running/page.tsx"),
       "utf8",
     );
-    expect(page).toContain('<AppShell active="graders">');
+    expect(page).toContain("<AppShell>");
+    expect(page).not.toContain("<AppShell active=");
     expect(page).not.toMatch(/state\.status === "loading"[\s\S]*?return <StatePage/);
   });
 });

@@ -146,12 +146,10 @@ describe("creating a test", () => {
       name: RESCHEDULING.name,
       version: 1,
       scenario: RESCHEDULING.scenario,
-      // A body may send bare text, and what comes back is never bare: each
-      // statement with the priority it carries, and text sent bare is a P0.
-      expected_behaviors: RESCHEDULING.expected_behaviors.map((behavior) => ({
-        behavior,
-        priority: "P0",
-      })),
+      // Sentences in, sentences out. What a body sends is what comes back:
+      // an expected behavior carries no metadata, and the retired
+      // `{behavior, priority}` shape is refused by name on the way in.
+      expected_behaviors: [...RESCHEDULING.expected_behaviors],
     });
     expect(String(created.body.id)).toMatch(/^tst_/u);
     expect(String(created.body.version_id)).toMatch(/^tstv_/u);

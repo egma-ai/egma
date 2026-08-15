@@ -194,7 +194,7 @@ describe("the newest snapshot", () => {
  * always.** Drizzle writes the naive diff — `ADD COLUMN … NOT NULL` — which
  * fails outright on a table that already holds rows and moves no data, so a
  * migration that has to backfill is authored by hand: add nullable, fill every
- * row, then `SET NOT NULL`. That is correct and it is what `0026` does.
+ * row, then `SET NOT NULL`. That is correct and it is what `0030` does.
  *
  * It leaves a gap nothing else covers. Drizzle never reads the `.sql` when it
  * diffs, so an authored body and its generated snapshot can disagree and no
@@ -1996,7 +1996,7 @@ describe("the connection type leaving the simulation row (0019)", () => {
 
 /**
  * Archive, live revisions, the stored variant and the capability record, over a
- * database that already holds agents and connections (0025).
+ * database that already holds agents and connections (0029).
  *
  * Four changes in one migration because they are one change to what an agent
  * and a connection *are*, and every one of them has to land without changing
@@ -2005,7 +2005,7 @@ describe("the connection type leaving the simulation row (0019)", () => {
  * that has to be the shape the code would have derived from that row's config
  * the moment before the upgrade ran.
  */
-describe("the agent and connection lifecycle over installed data (0025)", () => {
+describe("the agent and connection lifecycle over installed data (0029)", () => {
   let database: EmptyDatabase;
   let before: string;
   let client: pg.Client;
@@ -2032,9 +2032,9 @@ describe("the agent and connection lifecycle over installed data (0025)", () => 
   beforeAll(async () => {
     database = await createEmptyDatabase("agent_lifecycle");
 
-    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0025-"));
+    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0029-"));
     for (const migration of await readMigrations()) {
-      if (migration.name < "0025") {
+      if (migration.name < "0029") {
         await writeFile(path.join(before, migration.name), migration.sql);
       }
     }
@@ -2130,9 +2130,9 @@ describe("the agent and connection lifecycle over installed data (0025)", () => 
 
   it("is what is still pending on a database that already holds agents", async () => {
     const upgrade = (await readMigrations()).find((migration) =>
-      migration.name.startsWith("0025_"),
+      migration.name.startsWith("0029_"),
     );
-    if (upgrade === undefined) throw new Error("0025 is missing");
+    if (upgrade === undefined) throw new Error("0029 is missing");
     await writeFile(path.join(before, upgrade.name), upgrade.sql);
 
     const { applied } = await runMigrations(database.url, before);
@@ -2287,7 +2287,7 @@ describe("the agent and connection lifecycle over installed data (0025)", () => 
 
 /**
  * A test says which agents it applies to, over a database that already holds
- * tests (0028).
+ * tests (0032).
  *
  * **This is the migration whose generated body would have been wrong**, and the
  * two ways it would have been wrong are what this block is for. `ADD COLUMN …
@@ -2300,7 +2300,7 @@ describe("the agent and connection lifecycle over installed data (0025)", () => 
  * archived themselves. Every one of those is a row the backfill has to treat
  * differently, and an empty database can prove none of it.
  */
-describe("tests gaining applicable agents over installed data (0028)", () => {
+describe("tests gaining applicable agents over installed data (0032)", () => {
   let database: EmptyDatabase;
   let before: string;
   let client: pg.Client;
@@ -2328,9 +2328,9 @@ describe("tests gaining applicable agents over installed data (0028)", () => {
   beforeAll(async () => {
     database = await createEmptyDatabase("tests_apply_to_agents");
 
-    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0028-"));
+    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0032-"));
     for (const migration of await readMigrations()) {
-      if (migration.name < "0028") {
+      if (migration.name < "0032") {
         await writeFile(path.join(before, migration.name), migration.sql);
       }
     }
@@ -2346,7 +2346,7 @@ describe("tests gaining applicable agents over installed data (0028)", () => {
       [staffed, "staffed"],
       [bare, "bare"],
     ] as const) {
-      // 0027 has already run, so a project carries a live revision of its own.
+      // 0031 has already run, so a project carries a live revision of its own.
       await client.query(
         `insert into project (id, organization_id, name, slug, revision)
          values ($1, $2, $3, $3, $4)`,
@@ -2354,7 +2354,7 @@ describe("tests gaining applicable agents over installed data (0028)", () => {
       );
     }
 
-    // 0025 has already run, so agents carry a revision and an archive marker.
+    // 0029 has already run, so agents carry a revision and an archive marker.
     const agent = async (id: string, name: string, project: string, archived: boolean) =>
       client.query(
         `insert into agent (id, organization_id, project_id, name, revision, archived_at)
@@ -2400,9 +2400,9 @@ describe("tests gaining applicable agents over installed data (0028)", () => {
 
   it("is what is still pending on a database that already holds tests", async () => {
     const upgrade = (await readMigrations()).find((migration) =>
-      migration.name.startsWith("0028_"),
+      migration.name.startsWith("0032_"),
     );
-    if (upgrade === undefined) throw new Error("0028 is missing");
+    if (upgrade === undefined) throw new Error("0032 is missing");
     await writeFile(path.join(before, upgrade.name), upgrade.sql);
 
     const { applied } = await runMigrations(database.url, before);
@@ -2528,20 +2528,26 @@ describe("tests gaining applicable agents over installed data (0028)", () => {
  * Runs written before egma froze a grading plan, and what the upgrade may say
  * about them.
  *
- * **The rule is that nothing is invented.** A run with work still outstanding
- * has a plan captured during the upgrade, because that work is about to be
- * judged and has to be judged against something written down. Every other old
- * run says `not_recorded` and holds nothing at all — reconstructing a plan from
- * today's graders would put a sentence on a run from March claiming it was
- * judged by things that may not have existed when it ran, and a page would
- * present that as a pin.
+ * **The rule is that nothing is invented, and after the grader redesign that
+ * rule swallows the whole file.** This migration used to capture a
+ * `migration_snapshot` for every run with work still outstanding, built out of
+ * the project's authored graders, their priorities, what each version read and
+ * which modalities it scored, the graders a test named directly, and the
+ * expected-behaviors built-in as a rowless item with a reserved key. Every one
+ * of those retired: `grader.priority` is dropped by `0025`, `test_grader` by
+ * `0027`, `reads` and `modalities` never exist, and the built-in is an ordinary
+ * running copy. There is nothing left to read and no shape left to write it in
+ * — and `0026` deletes every grader row on an upgraded instance in any case, so
+ * a snapshot taken here would name graders that are gone.
  *
- * The second claim is the shape of a captured plan on history that predates
- * stored tests: a simulation with no test version falls into the one testless
- * group, which carries the project's default authored graders and neither a
- * scenario grader nor the expected-behaviors built-in.
+ * So **every old run says `not_recorded`**, which is exactly what that state is
+ * for: this run predates frozen plans, and egma will not reconstruct one from
+ * today's graders. What is under test is that the row lands for every run,
+ * whatever state it is in, and that an unrecorded plan holds nothing — no
+ * groups, no credentials, and no moment, because a plan and the moment it was
+ * captured are one fact.
  */
-describe("grading plans over installed runs (0029)", () => {
+describe("grading plans over installed runs (0033)", () => {
   let database: EmptyDatabase;
   let before: string;
   let client: pg.Client;
@@ -2554,8 +2560,6 @@ describe("grading plans over installed runs (0029)", () => {
   const personaVersionId = newId("prsv");
   const testId = newId("tst");
   const testVersionId = newId("tstv");
-  const graderId = newId("grd");
-  const graderVersionId = newId("grv");
 
   /** Still conducting when the upgrade landed. */
   const movingRun = newId("run");
@@ -2570,9 +2574,9 @@ describe("grading plans over installed runs (0029)", () => {
   beforeAll(async () => {
     database = await createEmptyDatabase("grading_plans");
 
-    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0029-"));
+    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0033-"));
     for (const migration of await readMigrations()) {
-      if (migration.name < "0029") {
+      if (migration.name < "0033") {
         await writeFile(path.join(before, migration.name), migration.sql);
       }
     }
@@ -2601,7 +2605,7 @@ describe("grading plans over installed runs (0029)", () => {
       [connectionId, organizationId, projectId, agentId, newId("rev")],
     );
 
-    // The project's judge, migrated into its own credential by 0026 — which is
+    // The project's judge, migrated into its own credential by 0030 — which is
     // what a plan may point at, and the reason this migration comes after it.
     const credentialId = newId("jcr");
     await client.query(
@@ -2640,22 +2644,6 @@ describe("grading plans over installed runs (0029)", () => {
       `insert into test_version (id, test_id, version, content)
        values ($1, $2, 1, '{"scenario":"Moves a booking","expectedBehaviors":["confirms the new time"]}'::jsonb)`,
       [testVersionId, testId],
-    );
-    await client.query("commit");
-
-    // A project-default grader, which every captured group has to carry.
-    await client.query("begin");
-    await client.query(
-      `insert into grader
-         (id, organization_id, project_id, name, type, priority, scope, current_version_id, revision)
-       values ($1, $2, $3, 'Never promises a price', 'phrase_match', 'P1', 'simulations', $4, $5)`,
-      [graderId, organizationId, projectId, graderVersionId, newId("rev")],
-    );
-    await client.query(
-      `insert into grader_version (id, grader_id, version, config, reads, modalities)
-       values ($1, $2, 1, '{"required":[],"banned":[],"speaker":"agent"}'::jsonb,
-               array['transcript']::text[], array['voice','chat']::text[])`,
-      [graderVersionId, graderId],
     );
     await client.query("commit");
 
@@ -2733,93 +2721,63 @@ describe("grading plans over installed runs (0029)", () => {
 
   it("is what is still pending on a database that already holds runs", async () => {
     const upgrade = (await readMigrations()).find((migration) =>
-      migration.name.startsWith("0029_"),
+      migration.name.startsWith("0033_"),
     );
-    if (upgrade === undefined) throw new Error("0029 is missing");
+    if (upgrade === undefined) throw new Error("0033 is missing");
     await writeFile(path.join(before, upgrade.name), upgrade.sql);
 
     const { applied } = await runMigrations(database.url, before);
     expect(applied).toEqual([upgrade.name]);
   });
 
-  it("captures a plan only for the run that still has work outstanding", async () => {
+  it("records no plan for any old run, whatever state it is in", async () => {
     const { rows } = await client.query<{ run_id: string; state: string }>(
       "select run_id, state from grading_plan order by run_id",
     );
     const byRun = new Map(rows.map((row) => [row.run_id, row.state]));
 
-    expect(byRun.get(movingRun)).toBe("migration_snapshot");
-    expect(byRun.get(testlessRun)).toBe("migration_snapshot");
-    // Nothing outstanding, so nothing is claimed about what judged it.
+    // A run still conducting, a run finished long ago, and a run conducted
+    // before a simulation could pin a test at all. Nothing separates them here:
+    // none of the three was judged against a plan anybody wrote down, and
+    // reconstructing one would put a sentence on an old run claiming it was
+    // judged by things that may not have existed when it ran.
+    expect(byRun.get(movingRun)).toBe("not_recorded");
+    expect(byRun.get(testlessRun)).toBe("not_recorded");
     expect(byRun.get(settledRun)).toBe("not_recorded");
+    // Every run gets a row. A run with no row at all would be a page unable to
+    // tell "nobody wrote this down" from "nobody has looked yet".
+    expect(rows).toHaveLength(3);
   });
 
-  it("leaves an unrecorded plan holding nothing at all", async () => {
+  it("leaves every unrecorded plan holding nothing at all", async () => {
     const { rows } = await client.query<{
       groups: unknown;
       credentials: unknown;
       captured_at: string | null;
     }>(
       `select groups, judge_credential_ids as credentials, captured_at
-       from grading_plan where run_id = $1`,
-      [settledRun],
+       from grading_plan order by run_id`,
     );
-    expect(rows[0]?.groups).toEqual([]);
-    expect(rows[0]?.credentials).toEqual([]);
-    // No plan, and therefore no moment: the two are one fact.
-    expect(rows[0]?.captured_at).toBeNull();
+    for (const row of rows) {
+      expect(row.groups).toEqual([]);
+      expect(row.credentials).toEqual([]);
+      // No plan, and therefore no moment: the two are one fact, and
+      // `grading_plan_recorded_plans_carry_their_moment` holds them together.
+      expect(row.captured_at).toBeNull();
+    }
   });
 
-  it("gives a pinned simulation a version group carrying the built-in and the project's graders", async () => {
-    const { rows } = await client.query<{ groups: PlanShape[] }>(
-      "select groups from grading_plan where run_id = $1",
-      [movingRun],
-    );
-    const [group] = rows[0]?.groups ?? [];
-
-    expect(group?.tag).toBe("version");
-    expect(group?.testVersionId).toBe(testVersionId);
-    expect(group?.items.map((item) => item.kind).sort()).toEqual([
-      "authored",
-      "built_in",
-    ]);
-
-    const builtIn = group?.items.find((item) => item.kind === "built_in");
-    expect(builtIn?.graderKey).toBe("expected_behaviors_v1");
-    // Judged, so it names the migrated credential — and never the secret.
-    expect(builtIn?.judge).toMatchObject({ tag: "configured", provider: "openai" });
-
-    const authored = group?.items.find((item) => item.kind === "authored");
-    expect(authored?.graderId).toBe(graderId);
-    expect(authored?.graderVersionId).toBe(graderVersionId);
-    // A phrase match asks no model, so naming one would be a bill nobody incurs.
-    expect(authored?.judge).toEqual({ tag: "not_required" });
-  });
-
-  it("gives a simulation with no test version the testless group, and nothing it cannot support", async () => {
-    const { rows } = await client.query<{ groups: PlanShape[] }>(
-      "select groups from grading_plan where run_id = $1",
-      [testlessRun],
-    );
-    const [group] = rows[0]?.groups ?? [];
-
-    expect(group?.tag).toBe("legacy_testless");
-    // Only the project's default authored graders. No scenario grader and no
-    // expected-behaviors built-in, because there is no stored test content to
-    // support either — and inventing one would be a claim about a conversation
-    // nobody can check.
-    expect(group?.items.map((item) => item.kind)).toEqual(["authored"]);
-    expect(group?.items[0]?.graderId).toBe(graderId);
-  });
-
-  it("indexes the credentials a captured plan needs, so an archive can refuse", async () => {
-    const { rows } = await client.query<{ credentials: string[] }>(
-      "select judge_credential_ids as credentials from grading_plan where run_id = $1",
-      [movingRun],
-    );
-    expect(rows[0]?.credentials).toHaveLength(1);
-    expect(rows[0]?.credentials[0]).toMatch(/^jcr_/u);
-  });
+  /**
+   * **Three proofs about a captured snapshot's shape used to stand here.** They
+   * held that a pinned simulation got a `version` group carrying the
+   * expected-behaviors built-in beside the project's authored graders, that a
+   * simulation with no test version got the one `legacy_testless` group, and
+   * that a captured plan indexed the judge credentials it needed so an archive
+   * could refuse. The migration captures nothing now, so all three describe a
+   * row this file can no longer produce. The shapes they proved are proved
+   * where plans are still written — at run start, by the run routes' own tests
+   * — and a `legacy_testless` group is not written anywhere any more.
+   */
 
   it("gives every finished run a skipped count of zero, because nothing was skipped before it could be", async () => {
     const { rows } = await client.query<{ skipped_count: number | null }>(
@@ -2830,15 +2788,3 @@ describe("grading plans over installed runs (0029)", () => {
   });
 });
 
-/** A captured plan's stored shape, as this file reads it back. */
-type PlanShape = {
-  readonly tag: string;
-  readonly testVersionId?: string;
-  readonly items: readonly {
-    readonly kind: string;
-    readonly graderKey?: string;
-    readonly graderId?: string;
-    readonly graderVersionId?: string;
-    readonly judge: Record<string, unknown>;
-  }[];
-};

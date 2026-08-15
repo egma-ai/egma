@@ -222,7 +222,7 @@ function NewTest({ projectId }: { readonly projectId: string }) {
 
           <Section
             title="What should happen"
-            lead="Statements about the agent's conduct, in order. P0 blocks a release, P1 warns, P2 informs — and a test always keeps at least one P0."
+            lead="Statements about the agent's conduct, in order. Every one has to hold, and a test keeps at least one — a test that cannot fail is not a test."
           >
             <Behaviors
               behaviors={behaviors}
@@ -234,7 +234,8 @@ function NewTest({ projectId }: { readonly projectId: string }) {
             )}
             <Help>
               The expected-behaviors grader judges every simulation against this
-              list. It is built in, always on, and never attached or removed.
+              list. It is a predefined grader, and every project starts with a
+              running copy of it switched on — a test never names its own.
             </Help>
           </Section>
 

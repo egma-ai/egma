@@ -6,6 +6,7 @@ import {
   createPersona,
   failSimulation,
   markSimulationCanceled,
+  PREDEFINED_GRADERS,
   startSimulation,
   type SimulationClaim,
 } from "@egma/db";
@@ -365,7 +366,13 @@ describe("one run, read whole", () => {
       test_version_id: ready.reschedules.versionId,
     });
     const items = groups[0]?.items as Record<string, unknown>[];
-    expect(items.some((one) => one.kind === "built_in")).toBe(true);
+    // The expected-behaviors grader is a running copy of a predefined library
+    // entry, seeded into every project — so it is in the plan as an ordinary
+    // item with an id of its own, not as a rowless `built_in` sentinel.
+    expect(items.some((one) => one.kind === "authored")).toBe(true);
+    expect(
+      items.some((one) => one.library_id === PREDEFINED_GRADERS.expectedBehaviors),
+    ).toBe(true);
     // A plan names a credential reference and never a key.
     expect(JSON.stringify(plan)).not.toContain("sk-");
   });

@@ -472,7 +472,7 @@ describe("egma pull", () => {
     expect(await readTest("missed-appointment-reschedule.md")).toBe(
       [
         "---",
-        "format: 2",
+        "format: 3",
         "name: missed-appointment-reschedule",
         `version: ${first.versionId}`,
         `identity_revision: ${first.revision}`,
@@ -483,8 +483,10 @@ describe("egma pull", () => {
         "## Scenario",
         "The caller missed yesterday's appointment and wants to reschedule.",
         "## Expected behaviors",
-        "1. [P0] The agent acknowledges the missed appointment without blame.",
-        "2. [P0] The agent offers at least two concrete alternative slots.",
+        // No priority marker on any line: format 3 writes the sentence and
+        // nothing else, because every expected behavior has to hold.
+        "1. The agent acknowledges the missed appointment without blame.",
+        "2. The agent offers at least two concrete alternative slots.",
         "",
       ].join("\n"),
     );
@@ -626,8 +628,8 @@ describe("egma push", () => {
     await writeTest(
       "missed-appointment-reschedule.md",
       before.replace(
-        "1. [P0] The agent acknowledges it without blame.",
-        "1. [P0] The agent acknowledges it without blame.\n2. [P1] The agent offers two slots.",
+        "1. The agent acknowledges it without blame.",
+        "1. The agent acknowledges it without blame.\n2. The agent offers two slots.",
       ),
     );
 
@@ -649,10 +651,11 @@ describe("egma push", () => {
     expect(old.status).toBe(200);
     const held = (await old.json()) as { current: boolean; expected_behaviors: string[] };
     expect(held.current).toBe(false);
-    // Objects both ways, and the priority is on the frozen version too: the
-    // wire never answers a bare statement, whatever a body may send.
+    // Sentences both ways. A frozen version is read past rather than
+    // rewritten, so a version stored before the ladder retired still holds the
+    // priority beside each sentence — but the wire answers the sentence.
     expect(held.expected_behaviors).toEqual([
-      { behavior: "The agent acknowledges it without blame.", priority: "P0" },
+      "The agent acknowledges it without blame.",
     ]);
   });
 
@@ -756,7 +759,7 @@ describe("egma push", () => {
     // The developer, meanwhile, has changed all three files.
     for (const name of ["first", "second", "third"]) {
       const held = await readTest(`${name}.md`);
-      await writeTest(`${name}.md`, held.replace("1. [P0] b", "1. [P0] b, said better"));
+      await writeTest(`${name}.md`, held.replace("1. b", "1. b, said better"));
     }
 
     const refused = await egma(["push"]);
@@ -779,10 +782,10 @@ describe("egma push", () => {
     const pulled = await egma(["pull"]);
     expect(pulled.code).toBe(0);
     expect([...valuesOf(pulled.stdout, "written")].sort()).toEqual(["first", "second", "third"]);
-    expect(await readTest("first.md")).toContain("2. [P0] and one more");
+    expect(await readTest("first.md")).toContain("2. and one more");
 
     const second = await readTest("second.md");
-    await writeTest("second.md", second.replace("1. [P0] b", "1. [P0] b, said better"));
+    await writeTest("second.md", second.replace("1. b", "1. b, said better"));
 
     const pushed = await egma(["push"]);
     expect(pushed.code).toBe(0);
@@ -1350,7 +1353,7 @@ describe("both verbs, run with nobody watching", () => {
     // A conflict, a refusal at the door, and an egma that does not answer.
     platform.tests.editInDashboard("one", { scenario: "s, changed" });
     const held = await readTest("one.md");
-    await writeTest("one.md", held.replace("1. [P0] b", "1. [P0] b, said better"));
+    await writeTest("one.md", held.replace("1. b", "1. b, said better"));
     await writeTest(
       "nothing-to-check.md",
       ["---", "name: nothing-to-check", "---", "## Scenario", "s", "## Expected behaviors", ""].join("\n"),
@@ -1393,7 +1396,7 @@ describe("both verbs, run with nobody watching", () => {
 
     await writeTest("nothing-to-check.md", ["---", "name: nothing-to-check", "---", "## Scenario", "s", "## Expected behaviors", ""].join("\n"));
     const held = await readTest("one.md");
-    await writeTest("one.md", held.replace("1. [P0] b", "1. [P0] b, said better"));
+    await writeTest("one.md", held.replace("1. b", "1. b, said better"));
 
     const refused = await egma(["push"]);
     const pulled = await egma(["pull"]);

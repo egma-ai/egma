@@ -180,12 +180,10 @@ describe("push, against a real instance", () => {
     expect(items[0]).toMatchObject({
       name: FILE.name,
       scenario: FILE.scenario,
-      // The wire carries each statement with the priority it holds; a folder's
-      // file writes statements, and a statement with no marker is a P0.
-      expected_behaviors: STATEMENTS.map((behavior) => ({
-        behavior,
-        priority: "P0",
-      })),
+      // The wire carries plain sentences in both directions. A folder's file
+      // writes statements and the platform answers statements — the priority
+      // that once rode beside each one retired with the P0/P1/P2 ladder.
+      expected_behaviors: [...STATEMENTS],
     });
     expect((items[0]?.personas as unknown[]).length).toBe(1);
   });

@@ -531,7 +531,7 @@ describe("the gate", () => {
   });
 
   it("browses to a test, opens it in $EDITOR, and comes back to the list", async () => {
-    const added = "2. [P0] The agent thanks the person.";
+    const added = "2. The agent thanks the person.";
     const editor = await workspace.editor(added);
     const third = path.join(workspace.dir, "egma", "tests", `${IN_ORDER[2] as string}.md`);
 
@@ -584,7 +584,7 @@ describe("the gate", () => {
    * one binary name would find nothing on this machine called `code --wait`.
    */
   it("honours an $EDITOR that carries arguments of its own", async () => {
-    const added = "2. [P0] The agent thanks the person.";
+    const added = "2. The agent thanks the person.";
     const editor = await workspace.editor(added);
     const first = path.join(workspace.dir, "egma", "tests", `${IN_ORDER[0] as string}.md`);
 
@@ -611,7 +611,7 @@ describe("the gate", () => {
    * can say whether it did.
    */
   it("comes back drawn whole after an editor that took the alternate screen", async () => {
-    const added = "2. [P0] The agent thanks the person.";
+    const added = "2. The agent thanks the person.";
     const editor = await workspace.editor(added, { alternateScreen: true });
     const first = path.join(workspace.dir, "egma", "tests", `${IN_ORDER[0] as string}.md`);
 
@@ -747,7 +747,7 @@ describe("the gate", () => {
       "",
     ].join("\n");
     const refused = path.join(workspace.dir, "egma", "tests", "wanted-it-by-friday.md");
-    const added = "2. [P0] The agent thanks the person.";
+    const added = "2. The agent thanks the person.";
     const editor = await workspace.editor(added);
 
     const run = await toTheGate({ EDITOR: editor.command }, [

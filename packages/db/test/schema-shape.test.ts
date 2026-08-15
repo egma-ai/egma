@@ -226,7 +226,11 @@ describe("every table", () => {
    * through many.
    */
   const REVISION_COLUMNS: Readonly<Record<string, number>> = {
-    grader: 1,
+    // No `grader` here, and it used to be. A running copy carries no live
+    // revision: the effort's `grader.revision NOT NULL` rode on the same
+    // migration as the judge credentials, and the grader half of that migration
+    // went with the redesign. A copy is made by pressing **Use** and deleted
+    // whole; there is no live edit for a revision to guard.
     judge_credential: 1,
     project: 1,
     // Two, because a test carries two live tokens that guard two different

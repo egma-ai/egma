@@ -86,7 +86,13 @@ export type TestVersionRow = {
   readonly scenario: string;
   readonly expected_behaviors: readonly ExpectedBehavior[];
   readonly personas: readonly Named[];
-  readonly graders: readonly Named[];
+  /**
+   * No `graders` field, and its absence is the point. A test named its own
+   * graders through a junction, and the junction went with the redesign: what
+   * judges a simulation is the project's running copies, decided at the moment
+   * a run freezes its plan. A version that still carried a grader list would be
+   * this browser holding a fact the server stopped answering.
+   */
   readonly required_capabilities: readonly string[];
   readonly override_count: number;
   readonly created_at: string;

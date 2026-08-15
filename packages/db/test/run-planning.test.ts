@@ -34,7 +34,12 @@ import {
   createConnectedDatabase,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
+import {
+  seedGraderCopies,
+  seedJudge,
+  seedOrganization,
+  seedUser,
+} from "./support/tenancy.ts";
 
 /**
  * What a run decides before it exists.
@@ -144,6 +149,11 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedJudge(actingAsAcme("admin"));
+  // And the copy of the predefined expected-behaviors grader that a real
+  // project is born with. Every claim in this file about what a run freezes is
+  // a claim about that copy being in the plan, so a fixture without one would
+  // prove them all against an empty list.
+  await seedGraderCopies();
 
   const created = await createAgent(actingAsAcme(), {
     name: "Front desk",

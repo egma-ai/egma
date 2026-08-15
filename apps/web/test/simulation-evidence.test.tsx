@@ -155,19 +155,22 @@ function turn(
   };
 }
 
+/**
+ * One judgment, as the read carries it: the assertion by **key**, the words
+ * behind that key resolved from the pinned version, and which lane the row is
+ * in. `judged_by` retired with human corrections (ADR-0009) and `priority`
+ * with the P0/P1/P2 ladder, so neither is here to be drawn.
+ */
 function machineVerdict(overrides: Record<string, unknown> = {}) {
   return {
     grader_id: "grd_1",
-    grader_version_id: "grv_1",
-    dimension: "confirms the new time back before finishing",
-    source: "simulation",
+    assertion: "behavior_1",
+    assertion_text: "confirms the new time back before finishing",
+    required: true,
     verdict: "failed",
     score: 0,
-    reason: "",
-    priority: "P0",
     rationale: "The agent never said the new time back.",
     cited_turns: ["span_agent"],
-    judged_by: "gpt-4o-mini",
     judged_at: "2026-08-15T10:05:00.000000Z",
     ...overrides,
   };
@@ -200,12 +203,7 @@ function evidence(overrides: Record<string, unknown> = {}) {
       version_id: "tstv_1",
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
-      expected_behaviors: [
-        {
-          behavior: "confirms the new time back before finishing",
-          priority: "P0",
-        },
-      ],
+      expected_behaviors: ["confirms the new time back before finishing"],
       required_capabilities: [],
     },
     persona: {
@@ -234,11 +232,13 @@ function evidence(overrides: Record<string, unknown> = {}) {
       captured_at: "2026-08-15T09:59:00.000Z",
       items: [
         {
-          kind: "built_in",
-          grader_key: "expected_behaviors_v1",
-          engine_version: "1",
-          reads: ["transcript"],
-          modalities: ["voice"],
+          kind: "authored",
+          grader_id: "grd_1",
+          grader_version_id: "grv_1",
+          name: "Expected behaviors",
+          library_id: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
+          required: true,
+          scope: "simulations",
           judge: {
             tag: "configured",
             provider: "openai",
@@ -258,9 +258,19 @@ function evidence(overrides: Record<string, unknown> = {}) {
       },
     ],
     verdicts: [machineVerdict()],
+    // The conversation's own answer is folded over the required copies alone,
+    // and the diagnostic lane sits beside it. Nothing diagnostic judged this
+    // one, so that lane is absent rather than an empty 0/0.
+    outcome: {
+      verdict: "failed",
+      score: 0,
+      counts: { ...NO_COUNTS, failed: 1, total: 1 },
+    },
+    diagnostics: null,
     by_grader: [
       {
         grader_id: "grd_1",
+        required: true,
         verdict: "failed",
         score: 0,
         counts: { ...NO_COUNTS, failed: 1, total: 1 },
@@ -292,7 +302,6 @@ function page(
     readonly read?: Record<string, unknown> | readonly Record<string, unknown>[];
     /** One answer, or one per ask in order — a page may regrade twice. */
     readonly regrade?: Stubbed | readonly Stubbed[];
-    readonly correction?: Stubbed;
   } = {},
 ): void {
   const read = options.read ?? evidence();
@@ -309,16 +318,6 @@ function page(
         reopened: 1,
         already_waiting: 0,
       },
-    },
-    "/api/simulations/sim_1/corrections": options.correction ?? {
-      status: 201,
-      body: machineVerdict({
-        verdict: "passed",
-        score: 1,
-        judged_by: "human",
-        rationale: "She said 'Tuesday at four' at 00:41; the judge missed it.",
-        judged_at: "2026-08-15T11:00:00.000000Z",
-      }),
     },
   });
 }
@@ -569,102 +568,19 @@ describe("asking for it to be judged again", () => {
   });
 });
 
-describe("disagreeing with a judgement", () => {
-  it("sends the judged thing it disagrees with, and never who judged it", async () => {
-    page();
-    render(<SimulationEvidencePage />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Disagree" }));
-    fireEvent.change(screen.getByLabelText("Why you disagree"), {
-      target: { value: "She said 'Tuesday at four' at 00:41." },
-    });
-    fireEvent.change(screen.getByLabelText("What you say happened"), {
-      target: { value: "passed" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save correction" }));
-
-    await waitFor(() => {
-      expect(
-        sentWith("/api/simulations/sim_1/corrections", "POST"),
-      ).toHaveLength(1);
-    });
-    expect(
-      sentWith("/api/simulations/sim_1/corrections", "POST")[0]?.body,
-    ).toEqual({
-      grader_id: "grd_1",
-      grader_version_id: "grv_1",
-      dimension: "confirms the new time back before finishing",
-      verdict: "passed",
-      rationale: "She said 'Tuesday at four' at 00:41.",
-    });
-    expect(
-      sentWith("/api/simulations/sim_1/corrections", "POST")[0]?.url,
-    ).toContain("project=prj_1");
-  });
-
-  it("keeps the machine's verdict on the page underneath the correction", async () => {
-    const corrected = evidence({
-      verdict: "passed",
-      score: 1,
-      counts: { ...NO_COUNTS, passed: 1, total: 1 },
-      verdicts: [
-        machineVerdict(),
-        machineVerdict({
-          verdict: "passed",
-          score: 1,
-          judged_by: "human",
-          rationale: "She said 'Tuesday at four' at 00:41.",
-          judged_at: "2026-08-15T11:00:00.000000Z",
-        }),
-      ],
-    });
-    page({ read: corrected });
-    render(<SimulationEvidencePage />);
-
-    // The person's word is what counts.
-    await screen.findByText("She said 'Tuesday at four' at 00:41.");
-    await screen.findByText("Corrected");
-
-    // And the machine's is still on the page, underneath, saying what it said.
-    fireEvent.click(
-      screen.getByText(/What egma’s judge said, which this correction supersedes/u),
-    );
-    await screen.findByText("The agent never said the new time back.");
-  });
-
-  it("empties the form when a different judgement is opened", async () => {
-    const two = evidence({
-      verdicts: [
-        machineVerdict(),
-        machineVerdict({
-          grader_id: "grd_2",
-          grader_version_id: "grv_2",
-          dimension: "does not interrupt the caller",
-          rationale: "The agent talked over her twice.",
-        }),
-      ],
-    });
-    page({ read: two });
-    render(<SimulationEvidencePage />);
-
-    const openers = await screen.findAllByRole("button", { name: "Disagree" });
-    fireEvent.click(openers[0]!);
-    fireEvent.change(screen.getByLabelText("Why you disagree"), {
-      target: { value: "a word about the first judgement" },
-    });
-    // The form is drawn once, under whichever judgement is open, so its fields
-    // are shared by every row. A word left standing would be filed against a
-    // judgement nobody read.
-    fireEvent.click(screen.getAllByRole("button", { name: "Disagree" })[0]!);
-
-    await waitFor(() => {
-      expect(screen.getByLabelText("Why you disagree")).toHaveProperty(
-        "value",
-        "",
-      );
-    });
-  });
-});
+/**
+ * **Three proofs about disagreeing with a judgement used to stand here.** They
+ * opened a Disagree form on a verdict row, sent a `POST` to
+ * `/api/simulations/:id/corrections`, and held that a person's word replaced
+ * the machine's with the machine's still readable underneath.
+ *
+ * ADR-0009 takes corrections and their calibration data out of v0: the form,
+ * the endpoint and the `judged_by` column that carried the second author are
+ * all gone. The capability returns as the reserved `human` grader type, which
+ * writes its own verdict rows under its own grader id — so what supersedes
+ * what becomes the ordinary supersession this page already draws, and needs no
+ * second author on a row. The proofs return with it, at that shape.
+ */
 
 describe("what a viewer sees", () => {
   it("gets all of the evidence and none of the controls", async () => {
@@ -680,7 +596,6 @@ describe("what a viewer sees", () => {
     // above only exist once the answer landed, so an absence here is an
     // absence and not an early assertion.
     expect(screen.queryByRole("button", { name: "Regrade" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Disagree" })).toBeNull();
     // And it says why, rather than leaving somebody hunting for a control.
     await screen.findByText(/viewer role can read every piece of evidence/u);
   });

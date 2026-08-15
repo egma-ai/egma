@@ -230,12 +230,18 @@ function runDetail(overrides: Record<string, unknown> = {}) {
           test_version_id: "tstv_1",
           test_name: "Reschedules a booked appointment",
           items: [
+            // A running copy, like every item in a frozen plan: the
+            // expected-behaviors grader is a seeded copy of a predefined
+            // library entry now, not a rowless sentinel with an engine
+            // version, so one shape describes the whole plan.
             {
-              kind: "built_in",
-              grader_key: "expected_behaviors_v1",
-              engine_version: "1",
-              reads: ["transcript"],
-              modalities: ["chat"],
+              kind: "authored",
+              grader_id: "grd_seeded",
+              grader_version_id: "grv_1",
+              name: "Expected behaviors",
+              library_id: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
+              required: true,
+              scope: "simulations",
               judge: {
                 tag: "configured",
                 provider: "openai",

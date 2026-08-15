@@ -107,18 +107,6 @@ async function versionCount(testId: string): Promise<number> {
   return Number(rows[0]?.count);
 }
 
-/**
- * The behaviors as the wire answers them: the statement, and how much it
- * matters. A behavior sent as bare text is a P0 — that is what a list of
- * statements has always meant — so this is the same list said the other way
- * round.
- */
-function blocking(
-  behaviors: readonly string[],
-): readonly { behavior: string; priority: string }[] {
-  return behaviors.map((behavior) => ({ behavior, priority: "P0" }));
-}
-
 const RESCHEDULING = {
   name: "Reschedules a booked appointment",
   scenario:
@@ -160,7 +148,7 @@ describe("creating a test", () => {
       name: RESCHEDULING.name,
       version: 1,
       scenario: RESCHEDULING.scenario,
-      expected_behaviors: blocking(RESCHEDULING.expected_behaviors),
+      expected_behaviors: [...RESCHEDULING.expected_behaviors],
     });
     expect(String(created.body.id)).toMatch(/^tst_/u);
     expect(String(created.body.version_id)).toMatch(/^tstv_/u);
@@ -603,7 +591,7 @@ describe("one frozen version", () => {
       version: 1,
       current: true,
       scenario: RESCHEDULING.scenario,
-      expected_behaviors: blocking(RESCHEDULING.expected_behaviors),
+      expected_behaviors: [...RESCHEDULING.expected_behaviors],
     });
   });
 
@@ -860,7 +848,7 @@ describe("editing a test", () => {
     expect(edited.statusCode, JSON.stringify(edited.body)).toBe(200);
     expect(edited.body).toMatchObject({
       name: RESCHEDULING.name,
-      expected_behaviors: blocking(RESCHEDULING.expected_behaviors),
+      expected_behaviors: [...RESCHEDULING.expected_behaviors],
       personas: created.body.personas,
       version: 2,
     });

@@ -18,7 +18,6 @@ import {
   type ProjectJudge,
 } from "../../../../../lib/judge.ts";
 import { roleOf } from "../../../../../lib/me.ts";
-import { projectPath } from "../../../../../lib/project-context.ts";
 import {
   Badge,
   Button,
@@ -53,7 +52,7 @@ import {
  *
  * **`needs_setup` is a state, said plainly.** A project without a judge still
  * runs every deterministic grader it has; what it cannot do is ask a model
- * anything — and the built-in expected-behaviors grader asks a model, so a run
+ * anything — and the predefined expected-behaviors grader asks a model, so a run
  * started this way would come back with errored verdicts after real calls had
  * been paid for. A page that showed an empty form would hide that.
  *
@@ -202,11 +201,6 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
         eyebrow="Settings"
         title="Judge"
         lead="The model that decides an LLM judgment in this project, and the organization key it is asked with."
-        action={
-          <ButtonLink href={projectPath(projectId, "graders")}>
-            Back to graders
-          </ButtonLink>
-        }
       />
       <PageBody>
         <SettingsNav projectId={projectId} current="judge" />
@@ -215,7 +209,7 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
           {judge.value.state === "needs_setup" ? (
             <p>
               <Badge tone="warn">Needs setup</Badge> This project has no judge, so
-              LLM grading is unavailable — including the built-in
+              LLM grading is unavailable — including the predefined
               expected-behaviors grader, which every test relies on. Add a judge
               credential below and choose it, and grading works from the next run.
             </p>

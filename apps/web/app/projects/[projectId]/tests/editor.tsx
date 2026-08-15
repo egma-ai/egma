@@ -116,12 +116,13 @@ export function Ordered({
 }
 
 /**
- * The expected behaviors, each with how much it matters.
+ * The expected behaviors: one sentence each, and nothing beside them.
  *
- * **The priority sits with the statement rather than in a column of its own.**
- * P0 blocks, P1 warns, P2 informs, and which of the three a sentence carries is
- * a fact about that sentence — putting it in a separate column would make
- * somebody read across the page to answer "what happens if this fails".
+ * **There is nothing to say per sentence, so there is no second column.** Every
+ * expected behavior has to hold — that is what makes a test falsifiable — so
+ * the question "what happens if this one fails" has one answer for the whole
+ * list and does not belong on any row. How loudly a *grader* speaks is the
+ * running copy's `required` flag, set where the copy is, once.
  */
 export function Behaviors({
   behaviors,
