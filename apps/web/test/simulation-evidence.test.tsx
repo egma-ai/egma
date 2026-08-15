@@ -290,7 +290,8 @@ function page(
   options: {
     readonly role?: string;
     readonly read?: Record<string, unknown> | readonly Record<string, unknown>[];
-    readonly regrade?: Stubbed;
+    /** One answer, or one per ask in order — a page may regrade twice. */
+    readonly regrade?: Stubbed | readonly Stubbed[];
     readonly correction?: Stubbed;
   } = {},
 ): void {
@@ -511,6 +512,60 @@ describe("asking for it to be judged again", () => {
     );
 
     await screen.findByText("simulation sim_1 has no grading to ask for again.");
+  });
+
+  /**
+   * The reassurance from the first ask has to go when the second is refused.
+   *
+   * `narrower_grading_in_flight` is the answer that says *nothing was queued*,
+   * and it is exactly the answer a second ask can meet after a first one
+   * succeeded — the engine takes the first job, narrowed, and the second ask
+   * falls outside what it is judging. Two boxes then disagree about the same
+   * conversation, and the comforting one is drawn first.
+   */
+  it("drops the sentence about the last ask when the next one is refused", async () => {
+    const inFlight =
+      "simulation sim_1 is being judged right now, for one grader that does " +
+      "not cover what you asked for. Ask again once those verdicts land.";
+    page({
+      regrade: [
+        {
+          status: 200,
+          body: {
+            simulation_id: "sim_1",
+            grader_id: null,
+            reopened: 1,
+            already_waiting: 0,
+          },
+        },
+        {
+          status: 409,
+          body: { error: "narrower_grading_in_flight", message: inFlight },
+        },
+      ],
+    });
+    render(<SimulationEvidencePage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Regrade" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Judge it again" }),
+    );
+    // Wait for the first answer to have landed and been drawn, so the second
+    // ask is genuinely a second one rather than a race with the first.
+    await screen.findByText(/queued to be judged again/u);
+    await waitFor(() => {
+      expect(sentWith("/api/simulations/sim_1/regrade", "POST")).toHaveLength(1);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Regrade" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Judge it again" }),
+    );
+
+    await screen.findByText(inFlight);
+    // And the reassurance from the first ask is gone rather than sitting above
+    // the refusal that contradicts it.
+    expect(screen.queryByText(/queued to be judged again/u)).toBeNull();
   });
 });
 

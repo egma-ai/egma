@@ -1,6 +1,7 @@
 import {
   appendVerdicts,
   claimGradingJobs,
+  createGrader,
   finishGradingJob,
   listGradingJobsForSimulation,
   type AuthContext,
@@ -124,6 +125,48 @@ async function finishGrading(auth: AuthContext): Promise<void> {
   for (const job of claimed) {
     await finishGradingJob(auth, job.id, CLAIMANT);
   }
+}
+
+/**
+ * A grader this customer actually holds, so a re-grade can be narrowed to one.
+ *
+ * `GRADER` above is a made-up id on purpose — it is what the "not there for a
+ * grader nobody can reach" test names — and a narrowing test needs the opposite.
+ */
+async function aGraderOf(auth: AuthContext, name: string): Promise<string> {
+  const created = await createGrader(auth, {
+    name,
+    type: "metric_threshold",
+    config: {
+      measure: "turn_response_latency",
+      aggregation: "p90",
+      comparator: "below",
+      threshold: 2_000,
+    },
+  });
+  return created.id;
+}
+
+/**
+ * Take the outstanding work the way the grader service takes it: the real claim,
+ * instance-wide and oldest-first, which is the only thing that moves a job to
+ * `claimed` and stamps whose it is.
+ */
+async function theEngineTakesTheWork(claimant: string): Promise<void> {
+  await claimGradingJobs({ claimant, capacity: 50 });
+}
+
+/** How this conversation's one job stands, as the route's own read sees it. */
+async function theJobOn(
+  auth: AuthContext,
+  simulationId: string,
+): Promise<{ status: string; narrowedTo: string | null }> {
+  const jobs = await listGradingJobsForSimulation(auth, simulationId);
+  const [only] = jobs;
+  if (only === undefined || jobs.length !== 1) {
+    throw new Error(`${simulationId} has ${jobs.length} grading jobs, not one`);
+  }
+  return { status: only.status, narrowedTo: only.regradeGraderId };
 }
 
 describe("one conversation's evidence, in one read", () => {
@@ -299,6 +342,149 @@ describe("judging one conversation again", () => {
     expect(asked.statusCode).toBe(404);
     const jobs = await listGradingJobsForSimulation(who.auth, run.heard);
     expect(jobs.map((job) => job.status)).toEqual(["graded"]);
+  });
+
+  /**
+   * The four cases a conversation already in the queue can be in, driven through
+   * the route rather than through the sentence that answers it — the branch is
+   * the thing under test, and a test of the sentence alone would pass with the
+   * route choosing the wrong one of them.
+   *
+   * A claimed job is judged under the instruction it was claimed with. So the
+   * question is never "is anything running" but "does what is running cover what
+   * has just been asked", and only the last two below say no.
+   */
+  it("still says a conversation is already waiting when the work running judges everything", async () => {
+    const { who, run } = await aCustomerWhoHasRun("evidence_regrade_covered");
+    await finishGrading(who.auth);
+    const grader = await aGraderOf(who.auth, "Answers inside two seconds");
+
+    // Asked for the whole conversation, then taken by the engine.
+    const first = await request(
+      "POST",
+      `/api/simulations/${run.heard}/regrade`,
+      who.key,
+      {},
+    );
+    expect(first.statusCode, JSON.stringify(first.body)).toBe(200);
+    await theEngineTakesTheWork("grader-judging-everything");
+    expect(await theJobOn(who.auth, run.heard)).toEqual({
+      status: "claimed",
+      narrowedTo: null,
+    });
+
+    // Judging everything includes judging this grader, so the ask is carried
+    // out by the work already running and the old sentence is the true one.
+    const again = await request(
+      "POST",
+      `/api/simulations/${run.heard}/regrade`,
+      who.key,
+      { grader_id: grader },
+    );
+    expect(again.statusCode, JSON.stringify(again.body)).toBe(200);
+    expect(again.body).toMatchObject({
+      simulation_id: run.heard,
+      reopened: 0,
+      already_waiting: 1,
+    });
+  });
+
+  it("still says a conversation is already waiting when the ask is the narrowing already running", async () => {
+    const { who, run } = await aCustomerWhoHasRun("evidence_regrade_same");
+    await finishGrading(who.auth);
+    const grader = await aGraderOf(who.auth, "Answers inside two seconds");
+
+    const first = await request(
+      "POST",
+      `/api/simulations/${run.heard}/regrade`,
+      who.key,
+      { grader_id: grader },
+    );
+    expect(first.statusCode, JSON.stringify(first.body)).toBe(200);
+    await theEngineTakesTheWork("grader-judging-that-grader");
+    expect(await theJobOn(who.auth, run.heard)).toEqual({
+      status: "claimed",
+      narrowedTo: grader,
+    });
+
+    const again = await request(
+      "POST",
+      `/api/simulations/${run.heard}/regrade`,
+      who.key,
+      { grader_id: grader },
+    );
+    expect(again.statusCode, JSON.stringify(again.body)).toBe(200);
+    expect(again.body).toMatchObject({ reopened: 0, already_waiting: 1 });
+  });
+
+  it("says nothing was queued when the work running is narrowed to another grader", async () => {
+    const { who, run } = await aCustomerWhoHasRun("evidence_regrade_narrowed");
+    await finishGrading(who.auth);
+    const judged = await aGraderOf(who.auth, "Answers inside two seconds");
+    const asked = await aGraderOf(who.auth, "Reads the booking back");
+
+    const first = await request(
+      "POST",
+      `/api/simulations/${run.heard}/regrade`,
+      who.key,
+      { grader_id: judged },
+    );
+    expect(first.statusCode, JSON.stringify(first.body)).toBe(200);
+    await theEngineTakesTheWork("grader-judging-one-grader");
+
+    const again = await request(
+      "POST",
+      `/api/simulations/${run.heard}/regrade`,
+      who.key,
+      { grader_id: asked },
+    );
+
+    // Not a success with a caveat: the ask was not carried out and nothing was
+    // queued behind it, so no verdict for it is ever coming.
+    expect(again.statusCode, JSON.stringify(again.body)).toBe(409);
+    expect(again.body.error).toBe("narrower_grading_in_flight");
+    expect(String(again.body.message)).toContain("being judged right now");
+    expect(String(again.body.message)).toContain("Ask again once those");
+    // And it says nothing that could be read as "already waiting".
+    expect(again.body.already_waiting).toBeUndefined();
+    expect(again.body.reopened).toBeUndefined();
+
+    // The judgment already running is untouched. Nothing interrupts it.
+    expect(await theJobOn(who.auth, run.heard)).toEqual({
+      status: "claimed",
+      narrowedTo: judged,
+    });
+  });
+
+  it("says nothing was queued when the whole conversation is asked for over a narrowed judgment", async () => {
+    const { who, run } = await aCustomerWhoHasRun("evidence_regrade_whole");
+    await finishGrading(who.auth);
+    const judged = await aGraderOf(who.auth, "Answers inside two seconds");
+
+    const first = await request(
+      "POST",
+      `/api/simulations/${run.heard}/regrade`,
+      who.key,
+      { grader_id: judged },
+    );
+    expect(first.statusCode, JSON.stringify(first.body)).toBe(200);
+    await theEngineTakesTheWork("grader-judging-one-of-many");
+
+    // The ask a browser makes: the whole conversation. One grader of it is
+    // running, and the rest of it is not going to be judged by that job.
+    const again = await request(
+      "POST",
+      `/api/simulations/${run.heard}/regrade`,
+      who.key,
+      {},
+    );
+
+    expect(again.statusCode, JSON.stringify(again.body)).toBe(409);
+    expect(again.body.error).toBe("narrower_grading_in_flight");
+    expect(await theJobOn(who.auth, run.heard)).toEqual({
+      status: "claimed",
+      narrowedTo: judged,
+    });
   });
 
   it("refuses a viewer, whatever their page offers them", async () => {

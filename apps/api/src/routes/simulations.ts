@@ -35,6 +35,7 @@ import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
 import {
   invalid,
+  narrowerGradingInFlight,
   notFound,
   notPermitted,
   unprocessable,
@@ -592,6 +593,15 @@ export async function simulationRoutes(
    * verdicts land through the ordinary path. A conversation that was already
    * waiting is left exactly alone and counted, because it was already going to
    * be judged at today's versions, which is everything a re-grade asks for.
+   *
+   * **Except when what is already running is narrower than what was asked**, and
+   * then this refuses. A job somebody has claimed is judged under the
+   * instruction it was claimed with, so one claimed for a single grader answers
+   * an ask about a different grader — or about the whole conversation — by
+   * judging neither, with nothing queued behind it. Counting that as "already
+   * waiting" is the same sentence as the covered case for the opposite fact, so
+   * the two are told apart here and answered apart: `narrower_grading_in_flight`
+   * says nothing happened and says when to ask again.
    */
   app.post(SIMULATION_REGRADE_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -641,6 +651,22 @@ export async function simulationRoutes(
         `simulation ${simulationId} has no grading to ask for again. Egma ` +
           `never conducted it, or it never finished, so nothing was ever ` +
           `judged and there is nothing to judge a second time.`,
+      );
+    }
+
+    // A conversation has exactly one grading job, so this is the whole answer
+    // rather than part of one: the job is being judged this moment for a grader
+    // that is not the one asked about, nothing was queued behind it, and no
+    // verdict for this ask is coming. Saying `already_waiting: 1` here would be
+    // the answer below telling somebody to wait for nothing.
+    if (asked.beingJudgedNarrower > 0) {
+      return narrowerGradingInFlight(
+        reply,
+        `simulation ${simulationId} is being judged right now, for one grader ` +
+          `that does not cover what you asked for, and egma will not ` +
+          `interrupt a judgment that is already running. Nothing was queued ` +
+          `and no verdict for this ask is coming. Ask again once those ` +
+          `verdicts land.`,
       );
     }
 

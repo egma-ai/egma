@@ -732,7 +732,85 @@ describe("re-grading with a grader named", () => {
 
     expect(second?.reopened).toEqual([]);
     expect(second?.alreadyWaiting).toBe(1);
+    expect(second?.beingJudgedNarrower).toBe(0);
     expect(await getGradingJob(auth, waiting.id)).toEqual(waiting);
+  });
+
+  /**
+   * The one case a re-grade cannot carry out, counted so that a surface can say
+   * so. A claimed job is judged under the instruction it was claimed with, and
+   * widening the column decides nothing for it any more — so the ask is neither
+   * carried out nor queued, and "already waiting" is the wrong word for it.
+   */
+  it("counts a claimed narrowing that does not cover the ask, apart from the rest", async () => {
+    const { runId, simulationId } = await aJudgedSimulation();
+    const otherGrader = await aGrader();
+
+    await regrade(auth, { runId, graderId });
+    const job = await theJobFor(simulationId);
+    const claimant = `grader-narrowed-${job.id.slice(-6)}`;
+    const claimed = await claimGradingJobs({ claimant, capacity: 50 });
+    if (!claimed.some((claim) => claim.id === job.id)) {
+      throw new Error("the narrowed job was not claimed");
+    }
+
+    const second = await regrade(auth, { runId, graderId: otherGrader });
+
+    expect(second?.reopened).toEqual([]);
+    // Still one conversation left alone, and now the reason it was left alone
+    // is one nobody should be reassured by.
+    expect(second?.alreadyWaiting).toBe(1);
+    expect(second?.beingJudgedNarrower).toBe(1);
+    // And the running judgment is untouched: nothing interrupts it.
+    expect(await narrowedTo(job.id)).toBe(graderId);
+    expect((await getGradingJob(auth, job.id))?.status).toBe("claimed");
+  });
+
+  it("counts the same claimed narrowing against an ask for the whole conversation", async () => {
+    const { runId, simulationId } = await aJudgedSimulation();
+
+    await regrade(auth, { runId, graderId });
+    const job = await theJobFor(simulationId);
+    const claimant = `grader-whole-${job.id.slice(-6)}`;
+    await claimGradingJobs({ claimant, capacity: 50 });
+
+    // Narrower than the whole conversation is still narrower. Four of five
+    // graders go unjudged, and nothing behind this job will judge them.
+    const second = await regrade(auth, { runId });
+
+    expect(second?.alreadyWaiting).toBe(1);
+    expect(second?.beingJudgedNarrower).toBe(1);
+  });
+
+  it("counts nothing narrowed away when the claimed job judges the whole conversation", async () => {
+    const { runId, simulationId } = await aJudgedSimulation();
+
+    await regrade(auth, { runId });
+    const job = await theJobFor(simulationId);
+    const claimant = `grader-covers-${job.id.slice(-6)}`;
+    await claimGradingJobs({ claimant, capacity: 50 });
+    expect(await narrowedTo(job.id)).toBeNull();
+
+    // Judging everything includes judging this grader, so the ask is carried
+    // out by the work already running.
+    const second = await regrade(auth, { runId, graderId });
+
+    expect(second?.alreadyWaiting).toBe(1);
+    expect(second?.beingJudgedNarrower).toBe(0);
+  });
+
+  it("counts nothing narrowed away when the claimed narrowing is the ask", async () => {
+    const { runId, simulationId } = await aJudgedSimulation();
+
+    await regrade(auth, { runId, graderId });
+    const job = await theJobFor(simulationId);
+    const claimant = `grader-same-${job.id.slice(-6)}`;
+    await claimGradingJobs({ claimant, capacity: 50 });
+
+    const second = await regrade(auth, { runId, graderId });
+
+    expect(second?.alreadyWaiting).toBe(1);
+    expect(second?.beingJudgedNarrower).toBe(0);
   });
 
   it("gives up on a narrowed job with the narrowing given up too", async () => {

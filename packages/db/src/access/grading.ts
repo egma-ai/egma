@@ -126,6 +126,15 @@ import { within } from "./within.ts";
  * reopened job — `grading_job.regrade_grader_id`, cleared the moment the job
  * settles — and the engine reads it off the claim. Omitting it re-judges the
  * conversation, which is what a re-grade has always meant.
+ *
+ * That narrowing is the one thing that makes "it is already in the queue" an
+ * insufficient answer. A job **nobody has taken** is widened until it covers
+ * both asks, so it stays sufficient. A job somebody has taken cannot be: it is
+ * judged under the instruction it was claimed with, and a job claimed for one
+ * grader carries out neither an ask about a different grader nor an ask about
+ * the whole conversation. `Regraded.beingJudgedNarrower` counts exactly those,
+ * so the surface asking can say nothing happened rather than report the ask as
+ * covered and leave somebody waiting for verdicts that are not coming.
  */
 
 /**
@@ -1199,11 +1208,33 @@ export type Regraded = {
   readonly graderId: string | null;
   /**
    * How many of the conversations named were already waiting to be judged and
-   * were left exactly alone. They are not a failure and not a skip: a
-   * conversation still in the queue is going to be judged at today's grader
-   * versions, which is all a re-grade was going to ask for.
+   * were left exactly alone. Almost all of them are neither a failure nor a
+   * skip: a conversation still in the queue is going to be judged at today's
+   * grader versions, which is all a re-grade was going to ask for.
+   *
+   * **Almost**, because `beingJudgedNarrower` below counts the ones where that
+   * is not true, and they are counted in here as well. This number stays what
+   * it has always been — how many were left alone — so the one that says *and
+   * these will not be judged for what you asked* is a second number rather than
+   * a quiet subtraction from this one.
    */
   readonly alreadyWaiting: number;
+  /**
+   * How many of those already waiting are being judged **right now** under a
+   * narrowing that does not cover what has just been asked.
+   *
+   * A pending job that was narrowed is widened by this call, so it comes out
+   * covering both asks. A claimed one cannot be: it is being judged under the
+   * instruction it was claimed with, and the column decides nothing for it any
+   * more — so a job claimed for grader Y answers an ask about grader X, or about
+   * the whole conversation, by judging neither of them.
+   *
+   * That is the one case in which a re-grade names a conversation and nothing at
+   * all comes of it, and it is counted apart for exactly that reason. A surface
+   * that folded these into the number above would tell somebody their ask was
+   * covered and leave them waiting for verdicts that are never coming.
+   */
+  readonly beingJudgedNarrower: number;
 };
 
 /**
@@ -1234,7 +1265,10 @@ export type Regraded = {
  * The conversations are resolved, their jobs reopened, and the service does the
  * judging — so a re-grade returns as soon as the work is queued rather than when
  * it is done, on the same terms as starting a run. What comes back says how many
- * conversations were asked for and how many were already going to be judged.
+ * conversations were asked for, how many were already going to be judged, and —
+ * the one case where asking achieves nothing — how many are being judged this
+ * moment under a narrowing that does not cover the ask, so a surface can say
+ * that instead of claiming the ask was covered.
  *
  * A run or a conversation nobody can reach answers `undefined`, which is the
  * answer reading it would have given, and so does a grader nobody can reach — a
@@ -1271,14 +1305,25 @@ export async function regrade(
 
   await widenWhatIsAlreadyWaiting(named, graderId);
 
+  // One read for both numbers, so the second is a fact about the same instant
+  // as the first rather than about a queue that moved between two queries. The
+  // widen above has settled every pending job, so what is still narrowed away
+  // afterwards is exactly the work somebody has already taken.
   const [waiting] = await db()
-    .select({ howMany: count() })
+    .select({
+      howMany: count(),
+      narrower: sql<number>`count(*) filter (where ${and(
+        eq(gradingJob.status, "claimed"),
+        narrowedAwayFrom(graderId),
+      )})`.mapWith(Number),
+    })
     .from(gradingJob)
     .where(and(named, inArray(gradingJob.status, [...OUTSTANDING])));
 
   const alreadyWaiting = Number(waiting?.howMany ?? 0);
+  const beingJudgedNarrower = Number(waiting?.narrower ?? 0);
   if (settled.length === 0) {
-    return { reopened: [], graderId, alreadyWaiting };
+    return { reopened: [], graderId, alreadyWaiting, beingJudgedNarrower };
   }
 
   return {
@@ -1294,7 +1339,25 @@ export async function regrade(
     ),
     graderId,
     alreadyWaiting,
+    beingJudgedNarrower,
   };
+}
+
+/**
+ * A job whose narrowing does not cover a re-grade for `forGrader`: it is queued
+ * for one grader, and what has now been asked for is a different grader or the
+ * whole conversation.
+ *
+ * Written once because the two places that read it are each other's halves —
+ * the pending ones are widened until this is false of them, and the claimed ones
+ * are counted because it cannot be made false of them — and two copies of this
+ * test would drift into a job that is in neither half.
+ */
+function narrowedAwayFrom(forGrader: string | null): SQL {
+  return forGrader === null
+    ? isNotNull(gradingJob.regradeGraderId)
+    : sql`${gradingJob.regradeGraderId} is not null
+          and ${gradingJob.regradeGraderId} <> ${forGrader}`;
 }
 
 /**
@@ -1311,8 +1374,8 @@ export async function regrade(
  * **Only a job nobody has taken.** A claimed job is being judged right now,
  * under the instruction it was claimed with; the column no longer decides
  * anything for it, and finishing clears it — so a second ask that arrives during
- * that window is asked again once the conversation is graded, which is a re-grade
- * of a graded conversation and the ordinary case.
+ * that window is not carried out at all, and the caller is told so rather than
+ * counted as covered. `Regraded.beingJudgedNarrower` is where that is said.
  */
 async function widenWhatIsAlreadyWaiting(
   theseJobs: SQL,
@@ -1325,10 +1388,7 @@ async function widenWhatIsAlreadyWaiting(
       and(
         theseJobs,
         eq(gradingJob.status, "pending"),
-        isNotNull(gradingJob.regradeGraderId),
-        forGrader === null
-          ? undefined
-          : sql`${gradingJob.regradeGraderId} <> ${forGrader}`,
+        narrowedAwayFrom(forGrader),
       ),
     );
 }

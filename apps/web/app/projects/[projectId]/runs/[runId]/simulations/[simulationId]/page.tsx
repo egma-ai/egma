@@ -201,7 +201,13 @@ function EvidenceView({
 
   async function regrade(): Promise<void> {
     if (!mayRevisit || working) return;
+    // Both of these belong to the *last* ask, and a new one is being made. The
+    // sentence saying a conversation was queued is the one that must go: a
+    // second ask that is refused would otherwise leave a reassurance about work
+    // that was queued standing above a refusal saying nothing was — two boxes
+    // disagreeing, with the comforting one on top.
     setRefused(null);
+    setAsked(null);
     setWorking(true);
     const answered = await writeJson<RegradeAsked>(
       simulationRegradePath(simulationId),
