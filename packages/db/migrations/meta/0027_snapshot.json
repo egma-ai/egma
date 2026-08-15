@@ -1,5 +1,5 @@
 {
-  "id": "64282cc3-0d12-4e05-be3b-7d94d454c4aa",
+  "id": "8a2e8c1c-f4eb-4016-8cf9-ec14472af62c",
   "prevId": "48313070-5a92-4b54-bc49-687d619ea9ca",
   "version": "7",
   "dialect": "postgresql",
@@ -1133,6 +1133,18 @@
           "primaryKey": false,
           "notNull": true
         },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
         "default_persona_id": {
           "name": "default_persona_id",
           "type": "text COLLATE \"C\"",
@@ -1249,6 +1261,10 @@
         "project_id_prefix": {
           "name": "project_id_prefix",
           "value": "\"project\".\"id\" ~ '^prj_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "project_revision_prefix": {
+          "name": "project_revision_prefix",
+          "value": "\"project\".\"revision\" ~ '^rev_[0-9A-HJKMNP-TV-Z]{26}$'"
         }
       },
       "isRLSEnabled": false
@@ -3173,27 +3189,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "revision": {
-          "name": "revision",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "applicability_revision": {
-          "name": "applicability_revision",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "archived_at": {
-          "name": "archived_at",
+        "deleted_at": {
+          "name": "deleted_at",
           "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "archive_reason": {
-          "name": "archive_reason",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -3236,7 +3234,7 @@
             }
           ],
           "isUnique": false,
-          "where": "\"test\".\"archived_at\" is null",
+          "where": "\"test\".\"deleted_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -3314,165 +3312,6 @@
         "test_id_prefix": {
           "name": "test_id_prefix",
           "value": "\"test\".\"id\" ~ '^tst_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "test_revision_prefix": {
-          "name": "test_revision_prefix",
-          "value": "\"test\".\"revision\" ~ '^rev_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "test_applicability_revision_prefix": {
-          "name": "test_applicability_revision_prefix",
-          "value": "\"test\".\"applicability_revision\" ~ '^rev_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "test_archive_reason_allowed": {
-          "name": "test_archive_reason_allowed",
-          "value": "\"test\".\"archive_reason\" in ('needs_agent')"
-        },
-        "test_archive_reason_needs_an_archive": {
-          "name": "test_archive_reason_needs_an_archive",
-          "value": "\"test\".\"archive_reason\" is null or \"test\".\"archived_at\" is not null"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.test_agent": {
-      "name": "test_agent",
-      "schema": "",
-      "columns": {
-        "test_id": {
-          "name": "test_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "agent_id": {
-          "name": "agent_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "test_agent_agent_id_idx": {
-          "name": "test_agent_agent_id_idx",
-          "columns": [
-            {
-              "expression": "agent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "test_agent_test_id_test_id_fk": {
-          "name": "test_agent_test_id_test_id_fk",
-          "tableFrom": "test_agent",
-          "tableTo": "test",
-          "columnsFrom": [
-            "test_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "test_agent_agent_id_agent_id_fk": {
-          "name": "test_agent_agent_id_agent_id_fk",
-          "tableFrom": "test_agent",
-          "tableTo": "agent",
-          "columnsFrom": [
-            "agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "test_agent_created_by_user_id_fk": {
-          "name": "test_agent_created_by_user_id_fk",
-          "tableFrom": "test_agent",
-          "tableTo": "user",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "test_agent_test_project_fk": {
-          "name": "test_agent_test_project_fk",
-          "tableFrom": "test_agent",
-          "tableTo": "test",
-          "columnsFrom": [
-            "test_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "test_agent_agent_project_fk": {
-          "name": "test_agent_agent_project_fk",
-          "tableFrom": "test_agent",
-          "tableTo": "agent",
-          "columnsFrom": [
-            "agent_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "test_agent_pk": {
-          "name": "test_agent_pk",
-          "columns": [
-            "test_id",
-            "agent_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "test_agent_test_id_prefix": {
-          "name": "test_agent_test_id_prefix",
-          "value": "\"test_agent\".\"test_id\" ~ '^tst_[0-9A-HJKMNP-TV-Z]{26}$'"
         }
       },
       "isRLSEnabled": false

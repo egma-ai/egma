@@ -20,6 +20,7 @@ import { Badge } from "./controls.tsx";
 import { Dialog } from "./dialog.tsx";
 import { Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
 import { ProjectSelector } from "./project-selector.tsx";
+import { settingsPath } from "./settings-nav.tsx";
 import styles from "./system.module.css";
 import { useTheme } from "./theme.tsx";
 
@@ -153,12 +154,23 @@ function AccountMenu({
   settled,
   role,
   placement,
+  projectId,
 }: {
   readonly me: Me | null;
   readonly settled: boolean;
   /** Null until the session read says. Never guessed. */
   readonly role: Role | null;
   readonly placement: "above" | "below";
+  /**
+   * The project Settings is drawn under, or nothing while the session read is
+   * still in flight or the organization holds none.
+   *
+   * Settings lives inside the product shell so the project selector stays on
+   * screen throughout it, which means every Settings address names a project —
+   * including the pages whose subject is the whole organization. With none to
+   * name, the menu falls back to `/members`, which resolves one for itself.
+   */
+  readonly projectId?: string | null;
 }) {
   const [signingOut, setSigningOut] = useState(false);
   const email = me?.user.email ?? "";
@@ -200,7 +212,13 @@ function AccountMenu({
       {() => (
         <>
           <MenuLabel>{standing}</MenuLabel>
-          <MenuItem href="/members">Organization settings</MenuItem>
+          <MenuItem
+            href={
+              projectId == null ? "/members" : settingsPath(projectId, "project")
+            }
+          >
+            Settings
+          </MenuItem>
           <MenuDivider />
           <ThemeItem />
           <MenuItem disabled={signingOut} onClick={() => void signOut()}>
@@ -302,6 +320,7 @@ export function AppShell({
             settled={session.settled}
             role={role}
             placement="above"
+            projectId={shown}
           />
         </div>
       </aside>
@@ -325,6 +344,7 @@ export function AppShell({
             settled={session.settled}
             role={role}
             placement="below"
+            projectId={shown}
           />
         </header>
 

@@ -577,6 +577,32 @@ export class GraderNamedByTestsError extends Error {
 }
 
 /**
+ * A project could not take the slug it was asked for, because a living project
+ * of the same organization already holds it.
+ *
+ * **Its own class rather than a general validation refusal, because the slug is
+ * the one project field a person chooses and can be told is taken.** A name is
+ * free — two projects may both be called Outbound — and the slug is what has to
+ * be unique inside the organization, so this is the only collision the product
+ * can meet here and the sentence names the one field to change.
+ *
+ * It carries the slug because the refusal quotes it back: somebody who typed
+ * `outbound` has to be told that `outbound` is the word that is taken, rather
+ * than that "the project" is.
+ */
+export class ProjectSlugTakenError extends Error {
+  readonly slug: string;
+
+  constructor(slug: string) {
+    super(
+      `project slug ${slug} is already in use in this organization`,
+    );
+    this.name = "ProjectSlugTakenError";
+    this.slug = slug;
+  }
+}
+
+/**
  * A project's judge named a credential belonging to another provider.
  *
  * Its own refusal rather than a general validation error because the fix is

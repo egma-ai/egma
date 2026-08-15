@@ -117,8 +117,8 @@ export async function makeWorld(label: string): Promise<World> {
     organizationId.slice(-8),
   ]);
   await database.sql(
-    "insert into project (id, organization_id, name, slug) values ($1, $2, 'default', 'default')",
-    [projectId, organizationId],
+    "insert into project (id, organization_id, name, slug, revision) values ($1, $2, 'default', 'default', $3)",
+    [projectId, organizationId, newId("rev")],
   );
   await database.sql('insert into "user" (id, email) values ($1, $2)', [
     ada,

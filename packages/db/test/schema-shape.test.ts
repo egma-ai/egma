@@ -217,9 +217,11 @@ describe("every table", () => {
   const REVISION_COLUMNS: Readonly<Record<string, number>> = {
     grader: 1,
     judge_credential: 1,
+    project: 1,
     // Two, because a test carries two live tokens that guard two different
     // losses: the identity revision an edit to the name is written against, and
-    // the applicability revision a link edit is written against.
+    // the applicability revision a link edit is written against. A count rather
+    // than a list, because one table can carry more than one.
     test: 2,
   };
 

@@ -61,7 +61,7 @@ async function insertStarterPersona(
   values: {
     readonly organizationId: string;
     readonly projectId: string;
-    readonly createdBy: string;
+    readonly createdBy: string | null;
   },
 ): Promise<string> {
   const id = newId("prs");
@@ -86,6 +86,103 @@ async function insertStarterPersona(
   });
 
   return id;
+}
+
+/**
+ * Everything a project needs to be a *usable* project, written in one
+ * transaction: the row itself, the starter persona, the pointer that makes that
+ * persona the project's default, and whatever judge state the deployment can
+ * give it.
+ *
+ * **One factory, two callers, and that is the whole reason it is a function.**
+ * Signup provisions the first project and an admin creates every one after it,
+ * and the two used to be different code — which is how a project created from
+ * Settings came to have no starter persona and no judge while a project created
+ * at signup had both. A project half-built is not a smaller project; it is one
+ * that refuses the first test somebody writes in it and returns errored
+ * verdicts on the first run, both for reasons nobody could see from the page
+ * they were on.
+ *
+ * It takes the transaction rather than opening one, because both callers have
+ * other rows to write in the same breath — an organization and a membership for
+ * one, nothing yet for the other — and a project that committed while its
+ * organization rolled back would be a project belonging to nobody.
+ */
+export type NewProjectRow = {
+  readonly projectId: string;
+  readonly organizationId: string;
+  readonly name: string;
+  readonly slug: string;
+  readonly description: string | null;
+  readonly revision: string;
+  /** Nullable, because a project can be created by nobody — a seeded one. */
+  readonly createdBy: string | null;
+  /**
+   * The judge this deployment gives a project that has configured none, when it
+   * has one at all.
+   *
+   * **Absent is a state and not a gap.** A project born without one is in
+   * `needs_setup`: it can still run every deterministic grader it has, and it
+   * cannot ask a model anything until an admin points it at a credential. That
+   * is what the settings page says out loud, and it is honest — where a project
+   * silently born unjudged would look configured and produce errored verdicts
+   * after real calls had been paid for.
+   */
+  readonly defaultJudge?: NewPlatformJudge | undefined;
+};
+
+export async function insertProject(
+  on: Queryable,
+  input: NewProjectRow,
+): Promise<void> {
+  await on.insert(project).values({
+    id: input.projectId,
+    organizationId: input.organizationId,
+    name: input.name,
+    slug: input.slug,
+    description: input.description,
+    revision: input.revision,
+    createdBy: input.createdBy,
+  });
+
+  // The project's first persona, and the project pointed at them, so a
+  // developer's first test never waits on authoring one. In this transaction
+  // like everything else, on the same terms the project itself is: a project
+  // pointing at nobody would refuse the first test written in it.
+  const starterId = await insertStarterPersona(on, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    createdBy: input.createdBy,
+  });
+
+  // Its own statement because the project has to exist before a persona
+  // can name it, and this reference back is not the deferred one.
+  await on
+    .update(project)
+    .set({ defaultPersonaId: starterId })
+    .where(eq(project.id, input.projectId));
+
+  // The platform's own judge, where it has one, in the same transaction as
+  // everything else this project needs to be usable. `onConflictDoNothing` for
+  // the same reason the backfill has it: a project that has a judge has chosen
+  // it, and nothing here may spend from a different account than the one
+  // somebody picked.
+  if (input.defaultJudge !== undefined) {
+    await on
+      .insert(judgeConfiguration)
+      .values(
+        platformJudgeRow({
+          projectId: input.projectId,
+          organizationId: input.organizationId,
+          createdBy: input.createdBy,
+          provider: input.defaultJudge.provider,
+          model: input.defaultJudge.model,
+          key: input.defaultJudge.key,
+          now: new Date(),
+        }),
+      )
+      .onConflictDoNothing({ target: judgeConfiguration.projectId });
+  }
 }
 
 export type NewOrganization = {
@@ -138,52 +235,23 @@ export async function provisionOrganization(
       slug: input.organizationSlug,
     });
 
-    await tx.insert(project).values({
-      id: projectId,
+    // The one project factory, on the same terms an admin's Settings create
+    // gets: the row, the starter persona, the pointer at them, and whatever
+    // judge this deployment can give. Signing up and creating a second project
+    // are the same act performed by different people, so they are the same
+    // write.
+    await insertProject(tx, {
+      projectId,
       organizationId,
       name: input.projectName,
       slug: input.projectSlug,
+      description: null,
+      revision: newId("rev"),
       createdBy: input.ownerUserId,
+      ...(input.defaultJudge === undefined
+        ? {}
+        : { defaultJudge: input.defaultJudge }),
     });
-
-    // The project's first persona, and the project pointed at them, so a
-    // developer's first test never waits on authoring one. In this transaction
-    // like everything else, on the same terms the project itself is: a project
-    // pointing at nobody would refuse the first test written in it.
-    const starterId = await insertStarterPersona(tx, {
-      organizationId,
-      projectId,
-      createdBy: input.ownerUserId,
-    });
-
-    // Its own statement because the project has to exist before a persona
-    // can name it, and this reference back is not the deferred one.
-    await tx
-      .update(project)
-      .set({ defaultPersonaId: starterId })
-      .where(eq(project.id, projectId));
-
-    // The platform's own judge, where it has one, in the same transaction as
-    // everything else this project needs to be usable. `onConflictDoNothing`
-    // for the same reason the backfill has it: a project that has a judge has
-    // chosen it, and nothing here may spend from a different account than the
-    // one somebody picked.
-    if (input.defaultJudge !== undefined) {
-      await tx
-        .insert(judgeConfiguration)
-        .values(
-          platformJudgeRow({
-            projectId,
-            organizationId,
-            createdBy: input.ownerUserId,
-            provider: input.defaultJudge.provider,
-            model: input.defaultJudge.model,
-            key: input.defaultJudge.key,
-            now: new Date(),
-          }),
-        )
-        .onConflictDoNothing({ target: judgeConfiguration.projectId });
-    }
 
     // Everyone is an admin in v1 and roles are invisible, but the permission
     // map is real from the first commit. The creator of an organization is its

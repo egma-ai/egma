@@ -57,8 +57,8 @@ async function seedTenancy(): Promise<void> {
     [globex.project, globex.organization, "default"],
   ] as const) {
     await db.sql(
-      "insert into project (id, organization_id, name, slug) values ($1, $2, $3, $3)",
-      [project, organization, slug],
+      "insert into project (id, organization_id, name, slug, revision) values ($1, $2, $3, $3, $4)",
+      [project, organization, slug, newId("rev")],
     );
   }
 }

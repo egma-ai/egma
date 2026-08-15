@@ -307,7 +307,16 @@ const CONTEXT_REQUIRING = [
   "startSimulation",
   "updateAgent",
   "updateConnection",
+  // A project's live name, slug and description, written against the revision
+  // the edit was read at. Its counterpart `createProject` above is the one
+  // factory signup uses too, so a project made from Settings is born with the
+  // same starter persona, default pointer and judge state.
+  "updateProject",
   "testsNamingGrader",
+  // The customer's own name, changed. The slug is deliberately not offered:
+  // it is unique across the deployment, and invitation links were sent under
+  // it, so it is a different decision with a different blast radius.
+  "updateOrganization",
   "updateOrganizationSettings",
   "writePlatformSettings",
 ];
@@ -375,6 +384,10 @@ const VALUES = [
   "IdentityConflictError",
   "PersonaNamedByTestsError",
   "ProjectOutsideOrganizationError",
+  // A slug an admin typed that a living project of the same organization
+  // already holds. Its own class because the slug is the one project field
+  // that has to be unique, and the refusal names the word to change.
+  "ProjectSlugTakenError",
   // A run turned away, carrying which rule turned it away: a connection
   // nobody can see, one that is not on the agent that was named, a type no
   // simulator adapter has shipped for, a selection that cannot be conducted,

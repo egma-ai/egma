@@ -123,6 +123,7 @@ export {
   NotPermittedError,
   PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
+  ProjectSlugTakenError,
   RunWriteRefusedError,
   TestAgentRefusedError,
   TestDependencyInactiveError,
@@ -220,6 +221,7 @@ export {
 export {
   readOrganization,
   readOrganizationSettings,
+  updateOrganization,
   updateOrganizationSettings,
   type Organization,
   type OrganizationSettings,
@@ -231,8 +233,10 @@ export {
   projectsOf,
   readProject,
   createProject,
+  updateProject,
   type NewProject,
   type Project,
+  type ProjectChanges,
 } from "./projects.ts";
 
 export {

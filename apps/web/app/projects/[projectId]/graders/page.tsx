@@ -20,6 +20,7 @@ import { Badge, Button, ButtonLink } from "../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
+import { settingsPath } from "../../../../ui/settings-nav.tsx";
 import {
   AppShell,
   PageBody,
@@ -190,7 +191,7 @@ function Graders({ projectId }: { readonly projectId: string }) {
       lead="Every judgment egma can make here. A metric measures; a grader judges."
       action={
         <>
-          <ButtonLink href={projectPath(projectId, "graders", "judge")}>
+          <ButtonLink href={settingsPath(projectId, "judge")}>
             Judge settings
           </ButtonLink>
           {author("strong")}

@@ -1,3 +1,5 @@
+import { newId } from "@egma/ids";
+
 import type { MigratedDatabase } from "./database.ts";
 
 /**
@@ -17,8 +19,8 @@ export async function seedOrganization(
   );
   for (const { id, slug } of projects) {
     await database.sql(
-      "insert into project (id, organization_id, name, slug) values ($1, $2, $3, $3)",
-      [id, organizationId, slug],
+      "insert into project (id, organization_id, name, slug, revision) values ($1, $2, $3, $3, $4)",
+      [id, organizationId, slug, newId("rev")],
     );
   }
 }
