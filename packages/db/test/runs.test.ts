@@ -41,7 +41,7 @@ import {
   createConnectedDatabase,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedOrganization, seedUser } from "./support/tenancy.ts";
+import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
  * The whole lifecycle at the db seam, through the module: a run and its
@@ -190,6 +190,12 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, grace, "grace@globex.example");
+  // Every run needs a judge, because every run carries the judge-backed
+  // expected-behaviors built-in. Provisioning gives a real project one; these
+  // fixtures build their tenants by raw SQL, so they have to.
+  await seedJudge(actingAsAcme("admin"));
+  await seedJudge({ ...actingAsAcme("admin"), projectId: acme.outbound });
+  await seedJudge({ ...actingAsGlobex(), role: "admin" });
 
   const created = await createAgent(actingAsAcme(), {
     name: "Front desk",

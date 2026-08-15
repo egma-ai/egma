@@ -67,6 +67,13 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   run: "run",
   run_event: "run",
   simulation: "sim",
+  // One run's frozen grading plan: what will judge each pinned test version,
+  // and whose account pays for the judging.
+  grading_plan: "gpl",
+  // The operations a client may safely send twice. Its identity is the whole
+  // five-column key rather than an id of its own, so it pins its leading
+  // column — the shape both junction tables have, for the same reason.
+  idempotent_operation: "org",
   grading_job: "gjb",
 };
 

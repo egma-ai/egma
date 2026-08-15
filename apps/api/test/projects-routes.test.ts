@@ -197,7 +197,9 @@ describe("creating a project", () => {
   });
 
   it("starts a project in needs_setup where the deployment configured no judge", async () => {
-    api = await createApi("projects_create_needs_setup");
+    api = await createApi("projects_create_needs_setup", {
+      defaultJudge: null,
+    });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const made = await request("POST", "/api/projects", { cookie: ada.cookie }, {

@@ -230,6 +230,23 @@ function AgentDetailView({
         action={
           role === null ? undefined : (
             <Actions>
+              {/*
+               * Straight into the builder with this agent already chosen.
+               *
+               * **It preselects and bypasses nothing.** The connection still
+               * has to be this agent's, every test still has to apply to it,
+               * and the project still has to have a judge — all of it checked
+               * on the server, exactly as it is for somebody who chose the
+               * agent from the list. Hidden while the agent is archived,
+               * because an archived agent cannot enter new work at all.
+               */}
+              {agent.archived ? null : (
+                <ButtonLink
+                  href={`${projectPath(projectId, "runs", "new")}?agent=${encodeURIComponent(agent.id)}`}
+                >
+                  Plan a run
+                </ButtonLink>
+              )}
               <Button
                 disabled={!mayAuthor || agent.archived}
                 onClick={() => setEditing(true)}

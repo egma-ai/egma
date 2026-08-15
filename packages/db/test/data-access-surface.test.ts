@@ -305,6 +305,18 @@ const CONTEXT_REQUIRING = [
   "setProjectJudge",
   "startRun",
   "startSimulation",
+  // What a run would freeze, answered before anybody starts it — and the same
+  // resolver `startRun` uses, so a review step and the run it produces can
+  // never disagree about which tests are skipped or which graders judge.
+  "planRun",
+  // What a run actually froze, including the honest `not_recorded` state for
+  // history that predates frozen plans.
+  "getGradingPlan",
+  // Taking a judge credential out of use, and asking what is stopping that.
+  // Both refuse and answer from one read, so a settings page and the refusal
+  // can never give two different reasons.
+  "archiveJudgeCredential",
+  "judgeCredentialUses",
   "updateAgent",
   "updateConnection",
   // A project's live name, slug and description, written against the revision
@@ -341,6 +353,14 @@ const PERMISSION = [
  * disagree with itself.
  */
 const THE_PLATFORMS_SETTINGS = ["PLATFORM_SETTINGS"];
+
+/**
+ * The version string the expected-behaviors built-in judges at, exported
+ * because a frozen plan stores it and a reader of one has to be able to say
+ * which engine wrote those verdicts. A behavior change in the built-in mints a
+ * new one; nothing else moves it.
+ */
+const THE_BUILT_IN_ENGINE = ["EXPECTED_BEHAVIORS_ENGINE_VERSION"];
 
 /** Vocabulary: the table definitions, how a caller proved who they are, and the refusals. */
 const VALUES = [
@@ -381,7 +401,20 @@ const VALUES = [
   // An identity write that named the revision it was written against, after
   // somebody else moved the row. `TestMovedOnError` below is the same refusal
   // one level down, about content rather than identity.
+  // A start action that reused an idempotency key over a different request.
+  // Its own class because the answer is neither the original run nor a second
+  // one: telling somebody their new selection had started when it had not is
+  // the one failure the key exists to prevent.
+  "IdempotencyConflictError",
   "IdentityConflictError",
+  // A judge credential something still needs — a project pointing at it, a run
+  // whose frozen plan names it while a conversation is still moving, or a
+  // grading job about to resolve its secret. It carries every blocking use,
+  // because the fix for each is somewhere different.
+  "JudgeCredentialInUseError",
+  // A run refused before anything was dialed, because the project has no LLM
+  // judge and every run carries the judge-backed built-in.
+  "JudgeNotConfiguredError",
   "PersonaNamedByTestsError",
   "ProjectOutsideOrganizationError",
   // A slug an admin typed that a living project of the same organization
@@ -549,6 +582,7 @@ describe("the data-access module's surface", () => {
         ...THE_FOLD,
         ...THE_MOCKED_WORLD,
         ...THE_PLATFORMS_SETTINGS,
+        ...THE_BUILT_IN_ENGINE,
       ].sort(),
     );
   });

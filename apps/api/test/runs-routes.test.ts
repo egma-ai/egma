@@ -215,6 +215,7 @@ describe("starting a run", () => {
       agent: agentId,
       connection: connectionId,
       test_versions: [oneCaller, twoCallers],
+      idempotency_key: newId("run"),
       label: "the whole folder",
     });
 
@@ -270,6 +271,7 @@ describe("starting a run", () => {
     const started = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
 
     expect(started.body.results_url).toBe(
@@ -286,6 +288,7 @@ describe("starting a run", () => {
     const started = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
 
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
@@ -300,6 +303,7 @@ describe("starting a run", () => {
     const unknown = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [oneCaller, missing, twoCallers],
+      idempotency_key: newId("run"),
     });
     expect(unknown.statusCode).toBe(422);
     expect(unknown.body).toEqual({
@@ -312,6 +316,7 @@ describe("starting a run", () => {
     const doubled = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [oneCaller, oneCaller],
+      idempotency_key: newId("run"),
     });
     expect(doubled.statusCode).toBe(422);
     expect(doubled.body).toEqual({
@@ -327,6 +332,7 @@ describe("starting a run", () => {
     const unusable = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [oneCaller, 7],
+      idempotency_key: newId("run"),
     });
     expect(unusable.statusCode).toBe(422);
     expect(unusable.body).toEqual({
@@ -340,6 +346,7 @@ describe("starting a run", () => {
     const none = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [],
+      idempotency_key: newId("run"),
     });
     expect(none.statusCode).toBe(422);
     expect(none.body).toEqual({
@@ -371,6 +378,7 @@ describe("starting a run", () => {
     const nowhere = await request("POST", "/api/runs", key, {
       connection: missing,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
     expect(nowhere.statusCode).toBe(404);
     expect(nowhere.body).toEqual({
@@ -384,6 +392,7 @@ describe("starting a run", () => {
       agent: other.agentId,
       connection: connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
     expect(mismatched.statusCode).toBe(404);
     expect(mismatched.body).toEqual({
@@ -400,6 +409,7 @@ describe("starting a run", () => {
       agent: connectionId,
       connection: connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
     expect(misread.statusCode).toBe(404);
     expect(misread.body).toEqual({
@@ -414,6 +424,7 @@ describe("starting a run", () => {
     const unreadable = await request("POST", "/api/runs", key, {
       connection: other.agentId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
     expect(unreadable.statusCode).toBe(404);
     expect(unreadable.body).toEqual({
@@ -430,9 +441,17 @@ describe("starting a run", () => {
     // Absent and blank are the same mistake, and "no connection of yours has
     // that id" would be a sentence about an id the request never sent.
     for (const body of [
-      { test_versions: [oneCaller] },
-      { connection: "", test_versions: [oneCaller] },
-      { connection: "   ", test_versions: [oneCaller] },
+      { test_versions: [oneCaller], idempotency_key: newId("run") },
+      {
+        connection: "",
+        test_versions: [oneCaller],
+        idempotency_key: newId("run"),
+      },
+      {
+        connection: "   ",
+        test_versions: [oneCaller],
+        idempotency_key: newId("run"),
+      },
     ]) {
       const refused = await request("POST", "/api/runs", key, body);
       expect(refused.statusCode, JSON.stringify(body)).toBe(422);
@@ -482,6 +501,7 @@ describe("starting a run", () => {
     const refused = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: versions,
+      idempotency_key: newId("run"),
     });
 
     expect(refused.statusCode).toBe(422);
@@ -522,6 +542,7 @@ describe("starting a run", () => {
     const refused = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [pinned.versionId],
+      idempotency_key: newId("run"),
     });
 
     expect(refused.statusCode).toBe(422);
@@ -546,6 +567,7 @@ describe("starting a run", () => {
     const started = await request("POST", "/api/runs", key, {
       connection: dialled.connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
 
     // This used to be the `no_adapter` refusal. The adapter is in the shipped
@@ -582,6 +604,7 @@ describe("starting a run", () => {
     const refused = await request("POST", "/api/runs", key, {
       connection: dialled.connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
 
     expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
@@ -624,6 +647,7 @@ describe("starting a run", () => {
     const refused = await request("POST", "/api/runs", key, {
       connection: dialled.connectionId,
       test_versions: [versionId],
+      idempotency_key: newId("run"),
     });
 
     expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
@@ -644,6 +668,7 @@ describe("starting a run", () => {
     const started = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
 
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
@@ -668,6 +693,7 @@ describe("starting a run", () => {
     const refused = await request("POST", "/api/runs", key, {
       connection: theirs.connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
 
     expect(refused.statusCode).toBe(404);
@@ -686,6 +712,7 @@ describe("starting a run", () => {
     const refused = await request("POST", "/api/runs", quentin.secret, {
       connection: connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
 
     expect(refused.statusCode).toBe(403);
@@ -703,6 +730,7 @@ describe("starting a run", () => {
     const refused = await request("POST", "/api/runs", "egma_not_a_key", {
       connection: connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
 
     expect(refused.statusCode).toBe(401);
@@ -728,6 +756,7 @@ describe("the project a run lands in", () => {
     const refused = await request("POST", "/api/runs", ada.secret, {
       connection: connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
 
     expect(refused.statusCode).toBe(400);
@@ -749,6 +778,7 @@ describe("the project a run lands in", () => {
     const refused = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
       project: grace.projectId,
     });
 
@@ -775,6 +805,7 @@ describe("the project a run lands in", () => {
     const refused = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
       project: outbound.id,
     });
 
@@ -800,6 +831,7 @@ describe("reading one run", () => {
     const started = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
     const runId = String(started.body.id);
 
@@ -818,6 +850,7 @@ describe("reading one run", () => {
     const started = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
 
     const theirs = await request(
@@ -848,6 +881,7 @@ describe("following a run", () => {
     const started = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [oneCaller, twoCallers],
+      idempotency_key: newId("run"),
     });
     const runId = String(started.body.id);
 
@@ -936,6 +970,7 @@ describe("following a run", () => {
     const started = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
     const runId = String(started.body.id);
 
@@ -991,6 +1026,7 @@ describe("following a run", () => {
     const started = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
     const runId = String(started.body.id);
 
@@ -1024,6 +1060,7 @@ describe("following a run", () => {
     const started = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
     const runId = String(started.body.id);
 
@@ -1078,6 +1115,7 @@ describe("stopping a run", () => {
     const started = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [oneCaller, twoCallers],
+      idempotency_key: newId("run"),
     });
     const runId = String(started.body.id);
 
@@ -1122,6 +1160,7 @@ describe("stopping a run", () => {
     const started = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
     const runId = String(started.body.id);
     const [only] = await claimOwn(runId);
@@ -1161,6 +1200,7 @@ describe("stopping a run", () => {
     const stopped = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
     const stoppedId = String(stopped.body.id);
     await request("POST", `/api/runs/${stoppedId}/cancel`, key);
@@ -1173,6 +1213,7 @@ describe("stopping a run", () => {
     const ran = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [twoCallers],
+      idempotency_key: newId("run"),
     });
     const ranId = String(ran.body.id);
     for (const one of await claimOwn(ranId)) {
@@ -1202,6 +1243,7 @@ describe("stopping a run", () => {
     const started = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [oneCaller],
+      idempotency_key: newId("run"),
     });
     const runId = String(started.body.id);
 

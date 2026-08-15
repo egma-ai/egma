@@ -844,3 +844,98 @@ export class NoCapabilityAdapterError extends Error {
     this.connectionType = connectionType;
   }
 }
+
+/**
+ * A run could not start because the project has no LLM judge.
+ *
+ * **Its own refusal rather than one of the run factory's, because it is a fact
+ * about the project rather than about the selection.** Every run carries the
+ * expected-behaviors built-in — applying it is part of what running a test
+ * means — and that built-in asks a model. A project in `needs_setup` therefore
+ * cannot produce an honest run at all: it would dial real conversations, spend
+ * real telephony, and then write `errored` against every behavior because there
+ * was nobody to ask. Refusing before the money is spent is the whole point, and
+ * the sentence sends an admin to the one page that fixes it.
+ *
+ * It carries the project because the sentence names it: somebody looking at a
+ * run builder may hold several, and "this project" is not enough to act on.
+ */
+export class JudgeNotConfiguredError extends Error {
+  readonly projectId: string;
+
+  constructor(projectId: string) {
+    super(
+      `this run needs an LLM judge, and project ${projectId} has none configured`,
+    );
+    this.name = "JudgeNotConfiguredError";
+    this.projectId = projectId;
+  }
+}
+
+/** One thing that still needs a judge credential, in the words a refusal uses. */
+export type JudgeCredentialUse = {
+  /**
+   * What kind of thing it is: a project pointing at the credential, a run whose
+   * frozen plan names it while a conversation is still moving, or a grading job
+   * that is waiting to be judged or already claimed.
+   */
+  readonly kind: "project" | "run" | "grading_job";
+  readonly id: string;
+};
+
+/**
+ * A judge credential could not be archived, because something still needs the
+ * key behind it.
+ *
+ * **Three blocking uses, and they are three because their fixes are three.** A
+ * project pointing at it is repointed in Settings; a run whose frozen plan
+ * names it while conversations are still moving has to finish or be canceled;
+ * a grading job that is `pending` or `claimed` has to finish. Archiving under
+ * any of them would strand work mid-flight: the grader service resolves the
+ * current secret for a plan's credential source when it claims, so a credential
+ * that went away between freezing and claiming would turn a whole run's
+ * judgments into errors nobody could act on.
+ *
+ * The uses travel as values rather than baked into prose, because the layer
+ * above spells the product's sentence and a page wants to link to each one.
+ */
+export class JudgeCredentialInUseError extends Error {
+  readonly credentialId: string;
+  /** Every blocking use, projects first, then runs, then grading jobs. */
+  readonly uses: readonly JudgeCredentialUse[];
+
+  constructor(credentialId: string, uses: readonly JudgeCredentialUse[]) {
+    super(
+      `judge credential ${credentialId} is still needed by ${uses.length} ${
+        uses.length === 1 ? "thing" : "things"
+      } (${uses.map((use) => `${use.kind} ${use.id}`).join(", ")}); point those projects at another credential and let pending grading finish, then archive it`,
+    );
+    this.name = "JudgeCredentialInUseError";
+    this.credentialId = credentialId;
+    this.uses = uses;
+  }
+}
+
+/**
+ * A start action reused an idempotency key over a different request.
+ *
+ * **The whole value of remembering a key is that it can refuse this.** Answering
+ * the original run would tell somebody their new selection had started when it
+ * had not; starting a second run would make the key mean nothing. So the third
+ * answer is the only honest one, and it says which of the two moves to make:
+ * send the original request again, or send a new key for the new one.
+ */
+export class IdempotencyConflictError extends Error {
+  readonly idempotencyKey: string;
+  /** What the key already produced, so a caller can go and read it. */
+  readonly resultId: string;
+
+  constructor(idempotencyKey: string, resultId: string) {
+    super(
+      `idempotency key ${idempotencyKey} already started run ${resultId}, and this request is not the one it started`,
+    );
+    this.name = "IdempotencyConflictError";
+    this.idempotencyKey = idempotencyKey;
+    this.resultId = resultId;
+  }
+}

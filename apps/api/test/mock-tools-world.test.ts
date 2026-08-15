@@ -305,6 +305,7 @@ describe("the world a run freezes", () => {
     const started = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [pinned.versionId],
+      idempotency_key: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     const runId = String(started.body.id);
@@ -347,6 +348,7 @@ describe("the world a run freezes", () => {
     const after = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [pinned.versionId],
+      idempotency_key: newId("run"),
     });
     expect(
       (after.body.mock_tools as { defaults: { delay_ms: number }[] }).defaults[0]
@@ -379,6 +381,7 @@ describe("the world a run freezes", () => {
     const started = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [plain.versionId, forcing.versionId],
+      idempotency_key: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
@@ -434,6 +437,7 @@ describe("the world a run freezes", () => {
     const started = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [pinned.versionId],
+      idempotency_key: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
@@ -472,6 +476,7 @@ describe("the world a run freezes", () => {
       const started = await request("POST", "/api/runs", key, {
         connection: connectionId,
         test_versions: [pinned.versionId],
+        idempotency_key: newId("run"),
       });
       expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
       const held = await getRun(auth, String(started.body.id));
@@ -500,6 +505,7 @@ describe("the world a run freezes", () => {
     const started = await request("POST", "/api/runs", key, {
       connection: connectionId,
       test_versions: [pinned.versionId],
+      idempotency_key: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     expect(started.body.mock_tools).toEqual({ defaults: [], overrides: {} });
