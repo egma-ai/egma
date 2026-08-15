@@ -849,6 +849,14 @@ export async function registerAgent(
           // what the row's own CHECK demands.
           credentials: inline.credentials,
           credentialsHint: inline.credentialsHint,
+          // This row moved, so anybody holding the revision it was on has to
+          // read it again before writing. A registration is the one writer
+          // that reaches a connection from outside the browser — a deploy
+          // re-running `register` while somebody has the connection open — and
+          // leaving the revision standing would let that open page archive or
+          // rename a connection whose credential is no longer the one it is
+          // showing. Every other writer here advances it; so does this one.
+          revision: newId("rev"),
           updatedAt: new Date(),
         })
         .where(eq(connection.id, sameModality.reached.id))
