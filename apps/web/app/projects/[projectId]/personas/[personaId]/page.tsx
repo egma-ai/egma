@@ -86,6 +86,58 @@ export default function PersonaPage() {
   );
 }
 
+/** What the two editors on this page are holding, between reads and writes. */
+type Draft = {
+  readonly personaId: string;
+  readonly name: string;
+  readonly description: string;
+  readonly traits: TraitsDraft;
+};
+
+/**
+ * The server's answer, taken into the draft **field by field**.
+ *
+ * The rule is one sentence: a field the author has not touched since it was
+ * submitted takes what the server kept; a field they have touched keeps their
+ * newer keystrokes. Both halves matter, and each is a defect on its own.
+ * Adopting nothing leaves somebody looking at text egma rewrote. Adopting
+ * everything throws away what they typed while the save was in the air — a
+ * reply cannot speak for text it never saw.
+ *
+ * The traits are walked by key rather than listed, so a trait added later is
+ * covered by this without anybody remembering to come back.
+ */
+function adopted(
+  current: Draft | null,
+  submitted: Draft | null,
+  fromServer: Persona,
+): Draft | null {
+  if (current === null) return current;
+  // A write that carried no draft — a clone, an Archive, a Restore — has
+  // nothing to adopt: it never sent these fields, so it cannot answer for them.
+  if (submitted === null || submitted.personaId !== current.personaId) {
+    return current;
+  }
+
+  const theirs = draftOf(fromServer.traits);
+  const traits = { ...current.traits };
+  for (const trait of Object.keys(current.traits) as (keyof TraitsDraft)[]) {
+    if (current.traits[trait] === submitted.traits[trait]) {
+      traits[trait] = theirs[trait];
+    }
+  }
+
+  return {
+    personaId: current.personaId,
+    name: current.name === submitted.name ? fromServer.name : current.name,
+    description:
+      current.description === submitted.description
+        ? (fromServer.description ?? "")
+        : current.description,
+    traits,
+  };
+}
+
 const HISTORY_COLUMNS: readonly Column<PersonaVersion>[] = [
   {
     key: "version",
@@ -150,12 +202,7 @@ function PersonaDetail({
    * part-way through typing — which is exactly what happens after a conflict,
    * at the moment they most need to keep it.
    */
-  const [held, setHeld] = useState<{
-    readonly personaId: string;
-    readonly name: string;
-    readonly description: string;
-    readonly traits: TraitsDraft;
-  } | null>(null);
+  const [held, setHeld] = useState<Draft | null>(null);
 
   useEffect(() => {
     setHeld(null);
@@ -229,6 +276,9 @@ function PersonaDetail({
     what: "identity" | "traits" | "lifecycle",
   ): Promise<Persona | null> {
     const asked = { projectId, personaId };
+    // The draft exactly as it was when this write left, so the reply can be
+    // told apart from anything typed while it was in flight.
+    const submitted = held;
     setSaving(what);
     setRefusal(null);
 
@@ -260,25 +310,21 @@ function PersonaDetail({
     }
 
     /**
-     * **What the server kept is what the editor shows from here on.**
+     * **What the server kept is what the editor shows — field by field.**
      *
      * egma trims a described trait and drops one that is only whitespace, so
-     * `"  calm  "` is stored as `"calm"`. Leaving the draft as it was typed
-     * would put the author in front of text the system did not accept —
-     * agreeing with nothing on the page, disagreeing with the facts above it,
-     * and quietly not the thing the next save would compare against. The
-     * reply already carries the accepted values, so the draft takes them.
+     * `"  calm  "` is stored as `"calm"`, and a draft left as it was typed
+     * would put the author in front of text the system did not accept. So the
+     * reply is adopted.
      *
-     * This is the one moment the draft is overwritten, and it is safe for the
-     * reason the other moments are not: this is the answer to what this
-     * editor itself just sent.
+     * **But only where the draft still holds what was sent.** A save takes a
+     * moment, and somebody typing in the next field during that moment has
+     * written something the server has never seen — so the reply says nothing
+     * about it, and overwriting it would eat keystrokes to fix a trim. Each
+     * field is decided on its own: unchanged since it was submitted, take the
+     * server's; changed since, keep theirs.
      */
-    setHeld({
-      personaId: written.value.id,
-      name: written.value.name,
-      description: written.value.description ?? "",
-      traits: draftOf(written.value.traits),
-    });
+    setHeld((current) => adopted(current, submitted, written.value));
 
     reload();
     reloadHistory();

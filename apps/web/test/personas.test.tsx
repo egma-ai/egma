@@ -1154,3 +1154,75 @@ describe("after a save lands", () => {
     });
   });
 });
+
+/* ------------------------------------------------------------------------ */
+
+/**
+ * The other half of adopting a save's answer, and the half it is easy to
+ * break while fixing the first.
+ *
+ * A save takes a moment. Somebody typing in the next field during that moment
+ * has written something the server has never seen, so its reply says nothing
+ * about it — and adopting the whole reply would eat those keystrokes to fix a
+ * trim. Both properties have to hold at once, which is why this sits beside
+ * the trim test rather than replacing it.
+ */
+describe("a save answering while the author is still typing", () => {
+  it("takes the server's word for what it saw, and nobody else's field", async () => {
+    let release: (answer: Response) => void = () => undefined;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init?: RequestInit) => {
+        const at = new URL(String(input), "http://egma.test");
+        if (at.pathname === "/api/me") return json(200, meWith("member"));
+        if (at.pathname === "/api/persona-form") {
+          return json(200, { voice_providers: ["elevenlabs"] });
+        }
+        if ((init?.method ?? "GET") !== "GET") return pending;
+        if (at.pathname.endsWith("/versions")) {
+          return json(200, { items: [], next_cursor: null });
+        }
+        if (at.pathname.endsWith("/usage")) return json(200, { tests: [] });
+        return json(200, RITA);
+      }),
+    );
+
+    render(<PersonaPage />);
+
+    // A name that egma will trim, sent.
+    fireEvent.change(await screen.findByLabelText("Name"), {
+      target: { value: "  A  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+
+    // And a description typed while that save is still in the air. The server
+    // has never seen this text.
+    fireEvent.change(screen.getByLabelText("Description"), {
+      target: { value: "Typed while saving" },
+    });
+
+    release(
+      json(200, {
+        ...RITA,
+        name: "A",
+        description: "Somebody in a hurry.",
+        revision: "revision-two",
+      }),
+    );
+
+    // The name takes what egma kept…
+    await vi.waitFor(() => {
+      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("A");
+    });
+
+    // …and the description keeps the newer keystrokes, rather than the value
+    // the reply carried for a field it was never told about.
+    expect(
+      (screen.getByLabelText("Description") as HTMLInputElement).value,
+    ).toBe("Typed while saving");
+  });
+});
