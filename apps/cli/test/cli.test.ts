@@ -98,8 +98,11 @@ describe("the egma command", () => {
     expect(help.stdout).toContain("--no-follow");
     expect(help.stdout).toContain("What egma run answers with:");
 
-    // The test seam is not product surface, so it is not offered.
+    // The test seams are not product surface, so neither is offered: not the
+    // one that starts a scripted coding agent, and not the one that stands an
+    // address in for egma's own.
     expect(help.stdout).not.toContain("-- <command>");
+    expect(help.stdout).not.toContain("EGMA_TEST_DEFAULT_URL");
 
     const version = await egma(["--version"], workspace);
     expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);

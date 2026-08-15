@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MOVE_TO_ANOTHER_PLATFORM,
+  teachingTheMove,
+} from "../src/folder/egma-folder.ts";
+import {
   buildExitLine,
   buildExitNotice,
   exitLines,
@@ -316,5 +320,39 @@ describe("the exit line", () => {
       if (report.kind === "run-started") continue;
       expect(exitLines(report)).toEqual([buildExitLine(report)]);
     }
+  });
+
+  /**
+   * A reason that arrived carrying a block keeps the block.
+   *
+   * One refusal in egma is more than a sentence: the one that keeps a
+   * repository on the platform it is bound to ends with every line a developer
+   * deletes to move it, and a coding agent is meant to act on those lines
+   * without a person reading them out. Squashed into the exit line they are
+   * neither readable nor usable — which is exactly what happened, because a
+   * reason is otherwise flattened to one line on purpose.
+   *
+   * The flattening stays for everything else. A wrapped sentence and a stack
+   * trace are still one line, so the last thing in scrollback still selects
+   * whole with one triple-click.
+   */
+  it("keeps a block under the line, and flattens everything else onto it", () => {
+    const refusal = teachingTheMove(
+      "This repository is already bound to Egma platform pf_01K3XQ7M4E8YB2FVN0H9TZQWEP at https://theirs.example, and this run reached Egma platform pf_01K3XQ7M4E8YB2FVN0H9TZQWEQ at https://ours.example. egma does not move a repository between platforms, and nothing was sent.",
+    );
+    const lines = exitLines({ kind: "failed", reason: refusal });
+
+    expect(lines[0]).toBe(
+      "egma could not finish: This repository is already bound to Egma platform pf_01K3XQ7M4E8YB2FVN0H9TZQWEP at https://theirs.example, and this run reached Egma platform pf_01K3XQ7M4E8YB2FVN0H9TZQWEQ at https://ours.example. egma does not move a repository between platforms, and nothing was sent.",
+    );
+    expect(lines[1]).toBe("");
+    expect(lines.slice(2)).toEqual([...MOVE_TO_ANOTHER_PLATFORM]);
+    // One line each, which is what "one plain block of lines" means.
+    expect(lines.filter((line) => line.startsWith("  - "))).toHaveLength(5);
+
+    // And a reason that is one paragraph is still one line, however it wrapped.
+    expect(
+      exitLines({ kind: "failed", reason: "no answer\n  from the\n  platform" }),
+    ).toEqual(["egma could not finish: no answer from the platform"]);
   });
 });

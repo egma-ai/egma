@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { INVALID_KEY_LINE } from "../src/retell/connect.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { buildExitLine, buildExitNotice } from "../src/wizard/exit-line.ts";
+import { alreadyAsked } from "../src/wizard/login-step.ts";
 import { walk } from "../src/wizard/walk.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
@@ -118,11 +119,11 @@ async function walkWith(options: {
       launch: workspace.launch(options.script),
       cwd: workspace.dir,
       signal: new AbortController().signal,
-      platform: {
+      platform: alreadyAsked({
         url: platform.url,
         instanceId: platform.instanceId,
         credentialsFile: workspace.credentialsFile,
-      },
+      }),
       retell: { url: retell.url },
       howManyTests: 1,
       home: path.join(workspace.dir, "pretend-home"),

@@ -173,6 +173,138 @@ describe("the newest snapshot", () => {
   });
 });
 
+/**
+ * The newest snapshot, held to the database the migrations actually build.
+ *
+ * **The two tests above cost nothing because they read files, and that is also
+ * their limit: a snapshot is generated, but a migration's SQL body is not
+ * always.** Drizzle writes the naive diff — `ADD COLUMN … NOT NULL` — which
+ * fails outright on a table that already holds rows and moves no data, so a
+ * migration that has to backfill is authored by hand: add nullable, fill every
+ * row, then `SET NOT NULL`. That is correct and it is what `0026` does.
+ *
+ * It leaves a gap nothing else covers. Drizzle never reads the `.sql` when it
+ * diffs, so an authored body and its generated snapshot can disagree and no
+ * tool notices — and the next `generate` would then plan against a schema that
+ * does not exist. The file tests cannot see it, because both files can be
+ * internally consistent while the SQL between them builds something else.
+ *
+ * Nullability is where they come apart, and it is the one thing nothing checked:
+ * the type test above compares types only, and `schema-shape.test.ts` pins
+ * nullability for exactly two columns of `simulation` as a structural claim
+ * about runs. A column left nullable by an authored body while the snapshot
+ * claims otherwise passed every test in this repository until this one.
+ *
+ * So: build from empty, ask Postgres what it ended up with, and hold every
+ * column to what the snapshot claims.
+ */
+describe("the newest snapshot, against what the migrations build", () => {
+  let database: EmptyDatabase;
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("snapshot_agreement");
+    await runMigrations(database.url);
+  });
+
+  afterAll(async () => {
+    await database.drop();
+  });
+
+  it("claims every column the migrations build, and no other", async () => {
+    const journal = JSON.parse(
+      await readFile(
+        path.join(MIGRATIONS_DIRECTORY, "meta", "_journal.json"),
+        "utf8",
+      ),
+    ) as { entries: readonly { idx: number }[] };
+    const last = journal.entries.at(-1);
+    if (last === undefined) throw new Error("the journal holds no entries");
+
+    const snapshot = JSON.parse(
+      await readFile(
+        path.join(
+          MIGRATIONS_DIRECTORY,
+          "meta",
+          `${String(last.idx).padStart(4, "0")}_snapshot.json`,
+        ),
+        "utf8",
+      ),
+    ) as {
+      readonly tables: Readonly<
+        Record<
+          string,
+          {
+            readonly name: string;
+            readonly columns: Readonly<
+              Record<string, { readonly name: string; readonly notNull: boolean }>
+            >;
+          }
+        >
+      >;
+    };
+
+    const client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    let built: Map<string, boolean>;
+    try {
+      const { rows } = await client.query<{
+        table_name: string;
+        column_name: string;
+        is_nullable: string;
+      }>(
+        `select table_name, column_name, is_nullable
+           from information_schema.columns
+          where table_schema = 'public'`,
+      );
+      built = new Map(
+        rows.map((row) => [
+          `${row.table_name}.${row.column_name}`,
+          row.is_nullable === "NO",
+        ]),
+      );
+    } finally {
+      await client.end();
+    }
+
+    const disagreements: string[] = [];
+    let compared = 0;
+
+    for (const table of Object.values(snapshot.tables)) {
+      for (const column of Object.values(table.columns)) {
+        const key = `${table.name}.${column.name}`;
+        const inDatabase = built.get(key);
+        if (inDatabase === undefined) {
+          disagreements.push(
+            `${key}: the snapshot claims it, the migrations build no such column`,
+          );
+          continue;
+        }
+        compared += 1;
+        if (inDatabase !== column.notNull) {
+          disagreements.push(
+            `${key}: the snapshot says notNull=${column.notNull}, the migrations build notNull=${inDatabase}`,
+          );
+        }
+        built.delete(key);
+      }
+    }
+
+    for (const key of built.keys()) {
+      // Drizzle's own bookkeeping is not part of the schema it describes.
+      if (key.startsWith("__drizzle")) continue;
+      disagreements.push(
+        `${key}: the migrations build it, the snapshot claims no such column`,
+      );
+    }
+
+    // Named rather than counted, for the same reason as the type test above:
+    // the fix is per column, and a count sends somebody hunting through
+    // thousands of lines of JSON to find which one.
+    expect(disagreements).toEqual([]);
+    expect(compared).toBeGreaterThan(0);
+  });
+});
+
 describe("applying migrations on boot", () => {
   let database: EmptyDatabase;
 

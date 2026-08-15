@@ -1,0 +1,99 @@
+# Run egma against managed services instead of the bundled ones.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.managed.yml up -d
+#
+# The default `docker compose up` is untouched by this file. It exists for a
+# deployment that already has a Postgres, a trace store, an object store and a
+# media bridge — a hosted platform, or a self-hoster on their own cloud — and
+# does not want egma to start a second copy of each beside them.
+#
+# **It names no vendor, no account and no address.** Which managed services, and
+# where they are, arrive as settings. This file only says which containers to
+# stop starting.
+#
+# What you must set for this to work, because the bundled defaults point at
+# containers that are now switched off. Every one is named in full: a variable
+# has no `*` in it, and a self-hoster cannot set a name that does not exist.
+#
+# The two stores, each whole:
+#
+#   DATABASE_URL
+#   CLICKHOUSE_URL
+#
+# The media bridge:
+#
+#   EGMA_SIMULATOR_LIVEKIT_URL
+#   EGMA_SIMULATOR_LIVEKIT_API_KEY
+#   EGMA_SIMULATOR_LIVEKIT_API_SECRET
+#
+# The object store, which is two halves and needs both. The simulator writes a
+# recording; the API signs the link a browser plays it back from. They are set
+# separately because the writer and the reader are different credentials, and
+# should be — a leaked playback key should read a recording, not replace one:
+#
+#   EGMA_SIMULATOR_S3_ENDPOINT           EGMA_BLOB_PUBLIC_URL
+#   EGMA_SIMULATOR_S3_BUCKET             EGMA_BLOB_BUCKET
+#   EGMA_SIMULATOR_S3_REGION             EGMA_BLOB_REGION
+#   EGMA_SIMULATOR_S3_ACCESS_KEY_ID      EGMA_BLOB_ACCESS_KEY_ID
+#   EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY  EGMA_BLOB_SECRET_ACCESS_KEY
+#
+# The API refuses to start without the two stores and says which is missing, so
+# a half-configured deployment is loud at boot rather than quiet.
+
+services:
+  # The seven containers a managed deployment does not run. A profile is what
+  # takes a service out of the default set: `docker compose up` starts
+  # everything with no profile, so naming one here is how a service becomes
+  # opt-in without being deleted.
+  postgres:
+    profiles: [bundled]
+  clickhouse:
+    profiles: [bundled]
+  minio:
+    profiles: [bundled]
+  minio-bucket:
+    profiles: [bundled]
+  livekit:
+    profiles: [bundled]
+  livekit-redis:
+    profiles: [bundled]
+  livekit-sip:
+    profiles: [bundled]
+
+  # The web application is here too, and for a different reason than the rest.
+  # It is not replaced by a managed *store* — it is replaced by a managed
+  # *host*, and one setting of its own goes with it: `EGMA_API_ORIGIN` is a
+  # build argument, because Next resolves rewrites into the build rather than
+  # reading them at start-up. So a deployment serving its pages elsewhere
+  # carries that setting wherever it builds, and no compose file can hold it.
+  web:
+    profiles: [bundled]
+
+  # The five edges that point at a switched-off service.
+  #
+  # **`required: false` is what makes this work, and without it nothing loads.**
+  # Compose refuses a file whose service depends on one that no profile
+  # enabled — `service "api" depends on undefined service "postgres"` — and it
+  # skips that error only when the edge is not required. With the flag, the
+  # health condition underneath is still honoured whenever the service *is*
+  # enabled, so a self-hoster running everything loses nothing at all.
+  api:
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+      clickhouse:
+        condition: service_healthy
+        required: false
+
+  simulator:
+    depends_on:
+      minio-bucket:
+        condition: service_completed_successfully
+        required: false
+      livekit:
+        condition: service_healthy
+        required: false
+      livekit-sip:
+        condition: service_started
+        required: false

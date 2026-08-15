@@ -25,6 +25,32 @@ export type PlatformAccess = ResolvedPlatform & {
 };
 
 /**
+ * Which egma the walk uses, in the two parts the wizard needs it in.
+ *
+ * The address is here from the start, because the wizard's first screen names
+ * it. Who is answering there is asked for by `verify`, which the walk calls
+ * once — after the keystroke of consent and never before. That ordering is the
+ * whole point of the split: a developer reads which egma their repository is
+ * about to talk to before egma has said one word to it.
+ */
+export type WalkPlatform = {
+  readonly url: string;
+  verify(): Promise<PlatformAccess>;
+};
+
+/**
+ * A platform whoever is calling has already asked.
+ *
+ * Every check that stands its own platform up knows the answer before the walk
+ * starts, and so does anything else that resolved a platform for its own
+ * reasons. They hand it over through here rather than each writing a `verify`
+ * that asks nobody anything.
+ */
+export function alreadyAsked(access: PlatformAccess): WalkPlatform {
+  return { url: access.url, verify: () => Promise.resolve(access) };
+}
+
+/**
  * Logs in, or answers with the line the wizard should close on.
  *
  * `null` means the developer is signed in and the walk carries on. Everything

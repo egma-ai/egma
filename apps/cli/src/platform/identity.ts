@@ -67,11 +67,34 @@ export const IDENTITY_TIMEOUT_MS = 10_000;
 const NOT_A_PLATFORM =
   "Check the address. If it is right, this is probably not an Egma platform, or it is older than this copy of egma.";
 
-/** A platform answered, but not with the public contract the CLI requires. */
+/**
+ * A platform answered, but not with the public contract the CLI requires.
+ *
+ * The clause saying what happened is kept apart from the advice that follows
+ * it, because one caller needs the first half without the second: the built-in
+ * address is one nobody typed and nobody outside egma can fix, so a developer
+ * who reaches it must be told what happened there and never sent to go and look
+ * at it.
+ */
 export class PlatformIdentityError extends Error {
-  constructor(origin: string, because: string, advice: string = NOT_A_PLATFORM) {
-    super(`egma asked ${origin} which platform it is, and ${because} ${advice}`);
+  /** What happened, in one clause, with no advice attached to it. */
+  readonly said: string;
+  /** Whether asking this same address again in a moment could answer differently. */
+  readonly worthRetrying: boolean;
+
+  constructor(
+    origin: string,
+    because: string,
+    options: { readonly advice?: string; readonly worthRetrying?: boolean } = {},
+  ) {
+    super(
+      `egma asked ${origin} which platform it is, and ${because} ${options.advice ?? NOT_A_PLATFORM}`,
+    );
     this.name = "PlatformIdentityError";
+    this.said = because;
+    // An answer that is not the contract is the address being what it is, not a
+    // bad moment, so waiting changes nothing unless the caller says otherwise.
+    this.worthRetrying = options.worthRetrying ?? false;
   }
 }
 
@@ -91,7 +114,10 @@ export class PlatformRedirectedError extends PlatformIdentityError {
       to === ""
         ? "it answered with a redirect somewhere else instead."
         : `it redirected to ${to} instead.`,
-      "egma does not follow that. Something in front of this address is answering for it — a sign-in page or a proxy — so this is where to look, not at your copy of egma.",
+      {
+        advice:
+          "egma does not follow that. Something in front of this address is answering for it — a sign-in page or a proxy — so this is where to look, not at your copy of egma.",
+      },
     );
     this.name = "PlatformRedirectedError";
   }
@@ -137,6 +163,9 @@ function isLoopback(origin: string): boolean {
  * listening. So the second half of the advice is only given when it is true.
  */
 export class PlatformOriginMismatchError extends Error {
+  /** The address the platform named for itself, which egma did not follow. */
+  readonly stated: string;
+
   constructor(asked: string, stated: string) {
     const statedIsOnlyItsOwnMachine = isLoopback(stated) && !isLoopback(asked);
     super(
@@ -152,7 +181,47 @@ export class PlatformOriginMismatchError extends Error {
       ].join(" "),
     );
     this.name = "PlatformOriginMismatchError";
+    this.stated = stated;
   }
+}
+
+/**
+ * What happened at an address, in one clause, and whether waiting could change
+ * it.
+ *
+ * Written for the one caller that must not relay these refusals whole: egma's
+ * own built-in address. The developer never typed it, does not run what is at
+ * it, and cannot reconfigure it — so the advice half of every sentence below is
+ * addressed to nobody who is reading. What happened is still theirs to know:
+ * "it did not answer" told about a platform that answered with a redirect is
+ * wrong about the fact and wrong about the remedy, and "try again in a moment"
+ * on a permanent shape is a retry loop.
+ *
+ * `worthRetrying` is deliberately generous at the edges. A 5xx is a bad moment
+ * on a deployment that is otherwise the right one; anything egma cannot place
+ * is treated the same way, because inviting one wasted retry costs less than
+ * telling somebody a passing fault is permanent.
+ */
+export type WhatAnswered = {
+  /** Reads after "…egma used its own at <address>, and ". */
+  readonly said: string;
+  readonly worthRetrying: boolean;
+};
+
+export function whatAnswered(cause: unknown): WhatAnswered {
+  if (cause instanceof PlatformTimedOutError) {
+    return { said: "it took the connection and then said nothing.", worthRetrying: true };
+  }
+  if (cause instanceof PlatformUnreachableError) {
+    return { said: "nothing answered there.", worthRetrying: true };
+  }
+  if (cause instanceof PlatformOriginMismatchError) {
+    return { said: `it answered that it lives at ${cause.stated} instead.`, worthRetrying: false };
+  }
+  if (cause instanceof PlatformIdentityError) {
+    return { said: cause.said, worthRetrying: cause.worthRetrying };
+  }
+  return { said: "egma could not use what came back.", worthRetrying: true };
 }
 
 function text(value: unknown): string {
@@ -202,6 +271,10 @@ export async function readPlatformIdentity(
     throw new PlatformIdentityError(
       selectedOrigin,
       `it answered ${String(response.status)} rather than its identity.`,
+      // A platform having a bad minute answers in the 500s, and the same
+      // address a minute later is the ordinary way that ends. A 4xx is the
+      // address being what it is, and no amount of waiting makes it egma.
+      { worthRetrying: response.status >= 500 },
     );
   }
 
