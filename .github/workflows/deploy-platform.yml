@@ -1,0 +1,172 @@
+name: Deploy platform
+
+# Deploying is one deliberate act: push a tag that names the deployment.
+#
+#   git tag platform-v2 && git push origin platform-v2
+#
+# Merging to main does not deploy. That is on purpose: this workflow can
+# replace a simulator while it is conducting a simulation, and a documentation
+# fix is not a reason to drop somebody's call.
+#
+# **There is no migration step, and there is no missing one.** The API applies
+# both stores' schemas on boot, inside its own process, so a deployment is
+# three images and a restart. The API is also started first, because it owns
+# the schema the grader reads.
+#
+# **The web application is not here.** It is a Next application on Vercel,
+# which deploys itself when main moves. This workflow is the half that runs on
+# egma's own machine.
+#
+# **Nothing in this file is specific to egma's hosted platform.** Every address
+# it uses arrives as a repository variable, so a self-hoster can point it at
+# their own account and registry without editing it. The values egma's own
+# deployment uses live in a private repository, not in this one.
+
+on:
+  push:
+    tags:
+      - "platform-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # What lets this job prove which repository and which ref it is, to AWS,
+  # without a stored key. The same posture release-cli.yml takes with npm.
+  id-token: write
+
+concurrency:
+  # Two deployments at once would race over the same containers, and the loser
+  # would be a half-replaced platform. Queue instead, and never cancel a
+  # deployment half way.
+  group: deploy-platform
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      DEPLOY_ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      REGISTRY: ${{ vars.ECR_REGISTRY }}
+      INSTANCE: ${{ vars.PLATFORM_INSTANCE_ID }}
+
+    steps:
+      # The one third-party action here, pinned to the same commit
+      # release-cli.yml already trusts. A tag can be moved; this job holds
+      # deployment authority, so what it runs must not change under it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check the deployment is configured
+        # Fails here, naming the variable, rather than half way through with a
+        # registry error that names nothing.
+        run: |
+          missing=""
+          for v in DEPLOY_ROLE REGISTRY INSTANCE; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "Set these repository variables before deploying:$missing" >&2
+            echo "AWS_DEPLOY_ROLE_ARN is the role this workflow assumes." >&2
+            echo "ECR_REGISTRY is <account>.dkr.ecr.<region>.amazonaws.com." >&2
+            echo "PLATFORM_INSTANCE_ID is the box to restart." >&2
+            exit 1
+          fi
+
+      - name: Take a short-lived AWS credential
+        # Done in shell rather than through an action. Resolving a third-party
+        # action's commit needs network access this repository's CI does not
+        # promise, and a guessed SHA in the one job that can deploy is worse
+        # than ten lines of curl. The runner already carries the AWS CLI.
+        #
+        # The credential lasts one hour and is never written to disk.
+        run: |
+          set -euo pipefail
+          token=$(curl -sS \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])')
+          creds=$(aws sts assume-role-with-web-identity \
+            --role-arn "$DEPLOY_ROLE" \
+            --role-session-name "deploy-${GITHUB_RUN_ID}" \
+            --web-identity-token "$token" \
+            --duration-seconds 3600 \
+            --query Credentials --output json)
+          python3 - "$creds" >> "$GITHUB_ENV" <<'PY'
+          import json, sys
+          c = json.loads(sys.argv[1])
+          print(f"AWS_ACCESS_KEY_ID={c['AccessKeyId']}")
+          print(f"AWS_SECRET_ACCESS_KEY={c['SecretAccessKey']}")
+          print(f"AWS_SESSION_TOKEN={c['SessionToken']}")
+          PY
+          echo "::add-mask::$(echo "$creds" | python3 -c 'import json,sys; print(json.load(sys.stdin)["SecretAccessKey"])')"
+          echo "::add-mask::$(echo "$creds" | python3 -c 'import json,sys; print(json.load(sys.stdin)["SessionToken"])')"
+
+      - name: Build and push the three images
+        # Tagged with the commit rather than with `latest`, so what is running
+        # can always be named. `latest` moves too, for the restart below.
+        run: |
+          set -euo pipefail
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$REGISTRY"
+          for app in api simulator grader; do
+            echo "::group::$app"
+            docker build -f "apps/$app/Dockerfile" \
+              -t "$REGISTRY/egma/$app:$GITHUB_SHA" \
+              -t "$REGISTRY/egma/$app:latest" .
+            docker push "$REGISTRY/egma/$app:$GITHUB_SHA"
+            docker push "$REGISTRY/egma/$app:latest"
+            echo "::endgroup::"
+          done
+
+      - name: Replace what is running, and wait for it
+        # Reached through SSM rather than SSH. The box publishes no port at all
+        # — not even 22 — so there is nothing to hold a key for.
+        #
+        # The API goes first and is waited on, because it owns the schema the
+        # grader reads and applies it on boot. Starting the grader against a
+        # schema that has not been migrated yet is the one ordering mistake
+        # this deployment can make.
+        run: |
+          set -euo pipefail
+          # The steps run from a script on the box rather than from a document
+          # built here. It keeps this file free of a shell script nested inside
+          # JSON nested inside YAML — three levels of quoting, and every one of
+          # them a way to ship a deployment that fails on a stray character.
+          # It also means the same steps can be run by hand, on the box, when
+          # something has gone wrong and nobody wants to drive it through CI.
+          command_id=$(aws ssm send-command \
+            --instance-ids "$INSTANCE" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy $GITHUB_SHA" \
+            --parameters commands="/opt/egma/deploy.sh $GITHUB_SHA" \
+            --query Command.CommandId --output text)
+          echo "SSM command: $command_id"
+          aws ssm wait command-executed \
+            --command-id "$command_id" --instance-id "$INSTANCE" || true
+          aws ssm get-command-invocation \
+            --command-id "$command_id" --instance-id "$INSTANCE" \
+            --query '[Status,StandardOutputContent,StandardErrorContent]' \
+            --output text
+          status=$(aws ssm get-command-invocation \
+            --command-id "$command_id" --instance-id "$INSTANCE" \
+            --query Status --output text)
+          [ "$status" = "Success" ] || { echo "Deployment failed: $status" >&2; exit 1; }
+
+      - name: Prove the platform answers
+        # The last word belongs to the platform itself rather than to a
+        # container's health check: the identity contract is what the CLI reads
+        # before it sends a repository's identifiers anywhere, so it is the
+        # thing worth confirming after a deployment.
+        run: |
+          set -euo pipefail
+          url="${{ vars.PLATFORM_URL || 'https://app.egma.ai' }}/api/platform"
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -sS -o /tmp/platform.json -w '%{http_code}' --max-time 20 "$url" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "$url answered 200:"; cat /tmp/platform.json; exit 0
+            fi
+            echo "attempt $attempt: $code"
+            sleep 10
+          done
+          echo "$url never answered 200 after the deployment." >&2
+          exit 1
