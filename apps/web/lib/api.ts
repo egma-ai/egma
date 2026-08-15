@@ -106,3 +106,33 @@ export async function readJson<T>(
     return unreachable<T>();
   }
 }
+
+/**
+ * One write, with the project named in the body where the caller named one.
+ *
+ * The same fold as `readJson`, deliberately: a write is refused in the same
+ * four ways a read is, and a page that handled a failed write differently from
+ * a failed read would be a page with two ideas about what a 401 means.
+ *
+ * The project travels in the body rather than the query because a write says
+ * where it lands, and a body is what the API reads it from.
+ */
+export async function writeJson<T>(
+  path: string,
+  options: {
+    readonly method: "POST" | "PATCH";
+    readonly body: Record<string, unknown>;
+  },
+): Promise<Answer<T>> {
+  try {
+    const response = await fetch(path, {
+      method: options.method,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(options.body),
+    });
+    const body: unknown = await response.json().catch(() => null);
+    return answerFor<T>(response.status, body);
+  } catch {
+    return unreachable<T>();
+  }
+}

@@ -472,6 +472,39 @@
   line-height: var(--line-normal);
 }
 
+/* A row's name, and whatever small state belongs beside it. */
+.rowName {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.rowName a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.rowName a:hover {
+  text-decoration: underline;
+}
+
+.statedTraits {
+  margin-bottom: var(--space-5);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.plainList {
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--foreground);
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+}
+
 /* ---------------------------------------------------------------- status */
 
 .badge {

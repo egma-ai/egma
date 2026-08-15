@@ -24,12 +24,19 @@ export function Button({
   weight = "quiet",
   type = "button",
   disabled,
+  why,
   onClick,
   children,
 }: {
   readonly weight?: Weight;
   readonly type?: "button" | "submit";
   readonly disabled?: boolean;
+  /**
+   * Why it is not available, for whoever hovers or focuses it. A disabled
+   * control that cannot say why is a control somebody presses twice and then
+   * gives up on.
+   */
+  readonly why?: string;
   readonly onClick?: () => void;
   readonly children: ReactNode;
 }) {
@@ -38,6 +45,7 @@ export function Button({
       className={weightClass(weight)}
       type={type}
       disabled={disabled}
+      title={why}
       onClick={onClick}
     >
       {children}
@@ -95,10 +103,13 @@ export function ButtonLink({
 export function Field({
   label,
   htmlFor,
+  hint,
   children,
 }: {
   readonly label: string;
   readonly htmlFor: string;
+  /** One line saying what belongs here, for a field whose name is not enough. */
+  readonly hint?: ReactNode;
   readonly children: ReactNode;
 }) {
   return (
@@ -107,8 +118,45 @@ export function Field({
         {label}
       </label>
       {children}
+      {hint === undefined ? null : <p className={styles.fieldHint}>{hint}</p>}
     </div>
   );
+}
+
+/**
+ * A form, its rows, and the controls that finish it.
+ *
+ * The three exist so that no page decides for itself how far a form runs
+ * across a wide screen or how two fields sit beside each other. A row is a
+ * grid that collapses to one column on a narrow screen, which is the whole of
+ * the responsive story for every editor in the product.
+ */
+export function Form({
+  onSubmit,
+  children,
+}: {
+  readonly onSubmit?: () => void;
+  readonly children: ReactNode;
+}) {
+  return (
+    <form
+      className={styles.form}
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit?.();
+      }}
+    >
+      {children}
+    </form>
+  );
+}
+
+export function FormRow({ children }: { readonly children: ReactNode }) {
+  return <div className={styles.formRow}>{children}</div>;
+}
+
+export function FormActions({ children }: { readonly children: ReactNode }) {
+  return <div className={styles.formActions}>{children}</div>;
 }
 
 export function TextInput({
@@ -116,6 +164,7 @@ export function TextInput({
   value,
   placeholder,
   label,
+  disabled = false,
   autoFocusFirst = false,
   onChange,
   onKeyDown,
@@ -125,6 +174,12 @@ export function TextInput({
   readonly placeholder?: string;
   /** When the field carries its own name rather than a visible label. */
   readonly label?: string;
+  /**
+   * Genuinely inert, to pointer and keyboard alike. A read-only role sees the
+   * field and what is in it, and cannot change it — and the server refuses
+   * their write either way, which is where the boundary actually is.
+   */
+  readonly disabled?: boolean;
   /** Whether an opening menu should put focus here. */
   readonly autoFocusFirst?: boolean;
   readonly onChange: (value: string) => void;
@@ -138,6 +193,7 @@ export function TextInput({
       value={value}
       placeholder={placeholder}
       aria-label={label}
+      disabled={disabled}
       autoComplete="off"
       spellCheck={false}
       onChange={(event) => onChange(event.target.value)}

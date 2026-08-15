@@ -1,0 +1,673 @@
+"use client";
+
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+
+import { readJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
+import { asMoment } from "../../../../../lib/instants.ts";
+import { roleOf } from "../../../../../lib/me.ts";
+import {
+  describedTraits,
+  draftOf,
+  personaPath,
+  personaUsagePath,
+  personaVersionsPath,
+  personasPath,
+  traitsFrom,
+  type Persona,
+  type PersonaPage,
+  type PersonaUsage,
+  type PersonaVersion,
+  type PersonaVersionPage,
+  type TraitsDraft,
+} from "../../../../../lib/personas.ts";
+import { projectPath } from "../../../../../lib/project-context.ts";
+import { canAuthor } from "../../../../../lib/roles.ts";
+import {
+  Badge,
+  Button,
+  ButtonLink,
+  Facts,
+  Field,
+  Form,
+  FormActions,
+  Refused,
+  Select,
+  TextInput,
+} from "../../../../../ui/controls.tsx";
+import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
+import { Dialog } from "../../../../../ui/dialog.tsx";
+import {
+  Empty,
+  Failure,
+  Loading,
+  NotFound,
+} from "../../../../../ui/page-state.tsx";
+import { useProjectRead } from "../../../../../ui/resource.ts";
+import {
+  AppShell,
+  PageBody,
+  PageHeader,
+  ProductPage,
+  Section,
+  useShellSession,
+} from "../../../../../ui/shell.tsx";
+import styles from "../../../../../ui/system.module.css";
+import { TraitFields } from "../traits-editor.tsx";
+
+/**
+ * One persona: who they are now, who they have been, and what uses them.
+ *
+ * **The page is arranged around the one distinction that decides everything
+ * else.** Name and description are *live*: they are how a team finds this
+ * person in a list, and rewriting them changes nothing about any simulation
+ * that ever ran. Traits are *versioned*: a run pinned the exact traits it used,
+ * so an edit mints a new version and leaves every old one where it is. The two
+ * are separate forms with separate save controls, and each names its own
+ * expectation, because a page that saved both at once could not tell somebody
+ * which half of their work lost a race.
+ *
+ * Archive and Restore live here rather than on the list, because both are
+ * decisions somebody makes about a persona they are looking at — and because
+ * archiving the project's default takes a replacement, which is a question this
+ * page has the room to ask.
+ */
+export default function PersonaPage() {
+  const { projectId, personaId } = useParams<{
+    projectId: string;
+    personaId: string;
+  }>();
+  return (
+    <AppShell>
+      <PersonaDetail projectId={projectId} personaId={personaId} />
+    </AppShell>
+  );
+}
+
+const HISTORY_COLUMNS: readonly Column<PersonaVersion>[] = [
+  {
+    key: "version",
+    header: "Version",
+    primary: true,
+    mono: true,
+    width: "90px",
+    cell: (one) => `v${one.version}`,
+  },
+  {
+    key: "personality",
+    header: "Personality",
+    cell: (one) => one.traits.personality,
+  },
+  {
+    key: "written",
+    header: "Written",
+    mono: true,
+    width: "170px",
+    cell: (one) => asMoment(one.created_at),
+  },
+];
+
+function PersonaDetail({
+  projectId,
+  personaId,
+}: {
+  readonly projectId: string;
+  readonly personaId: string;
+}) {
+  const { me } = useShellSession();
+  // Null until the session read answers. A page that guessed would tell an
+  // admin their role cannot do something it can, on every load.
+  const role = me === null ? null : roleOf(me);
+  const router = useRouter();
+
+  const { answer, reload } = useProjectRead<Persona>(
+    personaPath(personaId),
+    projectId,
+  );
+  const { answer: history, reload: reloadHistory } =
+    useProjectRead<PersonaVersionPage>(
+      personaVersionsPath(personaId),
+      projectId,
+    );
+  const { answer: usage } = useProjectRead<PersonaUsage>(
+    personaUsagePath(personaId),
+    projectId,
+  );
+
+  /**
+   * What the two forms are holding.
+   *
+   * **They are filled from the read once and never overwritten by a later
+   * one.** A reload that reset the fields would throw away work somebody is
+   * part-way through typing — which is exactly what happens after a conflict,
+   * at the moment they most need to keep it.
+   */
+  const [held, setHeld] = useState<{
+    readonly personaId: string;
+    readonly name: string;
+    readonly description: string;
+    readonly traits: TraitsDraft;
+  } | null>(null);
+
+  useEffect(() => {
+    setHeld(null);
+  }, [personaId, projectId]);
+
+  useEffect(() => {
+    if (answer?.status !== "ready") return;
+    const persona = answer.value;
+    setHeld((already) =>
+      already !== null && already.personaId === persona.id
+        ? already
+        : {
+            personaId: persona.id,
+            name: persona.name,
+            description: persona.description ?? "",
+            traits: draftOf(persona.traits),
+          },
+    );
+  }, [answer]);
+
+  useEffect(() => {
+    if (answer?.status === "signed-out") window.location.replace("/sign-in");
+  }, [answer]);
+
+  const [saving, setSaving] = useState<"identity" | "traits" | "lifecycle" | null>(
+    null,
+  );
+  const [refusal, setRefusal] = useState<Refusal | null>(null);
+  const [reading, setReading] = useState<PersonaVersion | null>(null);
+  const [archiving, setArchiving] = useState(false);
+
+  const persona = answer?.status === "ready" ? answer.value : null;
+  const mayAuthor = role !== null && canAuthor(role);
+  const whyNot =
+    role === null
+      ? undefined
+      : `Your ${role} role cannot author personas. Ask an organization admin to change your role.`;
+
+  /** One write, and the three things that can come back instead of a persona. */
+  async function write(
+    path: string,
+    method: "POST" | "PATCH",
+    body: Record<string, unknown>,
+    what: "identity" | "traits" | "lifecycle",
+  ): Promise<Persona | null> {
+    setSaving(what);
+    setRefusal(null);
+
+    const written = await writeJson<Persona>(path, {
+      method,
+      body: { project: projectId, ...body },
+    });
+
+    setSaving(null);
+
+    if (written.status === "signed-out") {
+      window.location.replace("/sign-in");
+      return null;
+    }
+    if (written.status !== "ready") {
+      // Everything typed stays where it is, and the refusal's own sentence
+      // says what to do next. A conflict is recovered by reading the persona
+      // again — which is a control below, not a lost afternoon.
+      setRefusal(written.refusal);
+      return null;
+    }
+
+    reload();
+    reloadHistory();
+    return written.value;
+  }
+
+  function body() {
+    if (answer === null || answer.status === "signed-out") {
+      return <Loading what="this persona" />;
+    }
+
+    if (answer.status === "missing") {
+      return (
+        <NotFound
+          message={answer.refusal.message}
+          action={
+            <ButtonLink href={projectPath(projectId, "personas")}>
+              Back to personas
+            </ButtonLink>
+          }
+        />
+      );
+    }
+
+    if (answer.status === "failed") {
+      return <Failure message={answer.refusal.message} onRetry={reload} />;
+    }
+
+    // The read has answered and the forms have not been filled from it yet,
+    // which is one render. Checked *after* the three refusals above, so a
+    // persona that is not there says so rather than loading forever.
+    if (held === null) return <Loading what="this persona" />;
+
+    const one = answer.value;
+    const archived = one.archived_at !== null;
+    const stated = describedTraits(one.traits);
+
+    return (
+      <>
+        {refusal === null ? null : (
+          <Refused
+            message={refusal.message}
+            action={
+              <Button onClick={reload}>Read this persona again</Button>
+            }
+          />
+        )}
+
+        <Facts
+          facts={[
+            { label: "Identifier", value: <code>{one.id}</code> },
+            { label: "Current version", value: `v${one.version}` },
+            { label: "Language", value: one.traits.language },
+            {
+              label: "Voice",
+              value: `${one.traits.voice.provider} · ${one.traits.voice.voiceId}`,
+            },
+            { label: "Speech rate", value: `${one.traits.voice.speed}×` },
+            { label: "Updated", value: asMoment(one.updated_at) },
+          ]}
+        />
+
+        <Section
+          title="Name and description"
+          lead="Live fields. Rewriting them changes nothing about any simulation that has already run."
+        >
+          <Form onSubmit={() => void saveIdentity()}>
+            <Field label="Name" htmlFor="persona-name">
+              <TextInput
+                id="persona-name"
+                value={held.name}
+                disabled={!mayAuthor}
+                onChange={(name) => setHeld({ ...held, name })}
+              />
+            </Field>
+            <Field label="Description" htmlFor="persona-description">
+              <TextInput
+                id="persona-description"
+                value={held.description}
+                disabled={!mayAuthor}
+                onChange={(description) => setHeld({ ...held, description })}
+              />
+            </Field>
+            <FormActions>
+              <Button
+                weight="strong"
+                type="submit"
+                disabled={!mayAuthor || saving !== null}
+                {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
+              >
+                {saving === "identity" ? "Saving…" : "Save name"}
+              </Button>
+            </FormActions>
+          </Form>
+        </Section>
+
+        <Section
+          title="Traits"
+          lead="Version content. A change mints a new immutable version; saving the same traits again mints nothing."
+        >
+          {stated.length === 0 ? null : (
+            <div className={styles.statedTraits}>
+              <Facts
+                facts={stated.map((trait) => ({
+                  label: trait.label,
+                  value: trait.value,
+                }))}
+              />
+            </div>
+          )}
+          <Form onSubmit={() => void saveTraits()}>
+            <TraitFields
+              draft={held.traits}
+              disabled={!mayAuthor}
+              onChange={(traits) => setHeld({ ...held, traits })}
+            />
+            <FormActions>
+              <Button
+                weight="strong"
+                type="submit"
+                disabled={!mayAuthor || saving !== null}
+                {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
+              >
+                {saving === "traits" ? "Saving…" : "Save traits"}
+              </Button>
+            </FormActions>
+          </Form>
+        </Section>
+
+        <Section
+          title="Used by"
+          lead="The active tests whose current version names this persona. These are exactly what would refuse an Archive."
+        >
+          {usage === null ? (
+            <Loading what="what uses this persona" />
+          ) : usage.status === "ready" ? (
+            usage.value.tests.length === 0 ? (
+              <Empty
+                title="No active test names this persona"
+                lead="Nothing stands in the way of archiving them."
+              />
+            ) : (
+              <ul className={styles.plainList}>
+                {usage.value.tests.map((test) => (
+                  <li key={test.id}>
+                    {test.name} <code>{test.id}</code>
+                  </li>
+                ))}
+              </ul>
+            )
+          ) : usage.status === "signed-out" ? (
+            <Loading what="what uses this persona" />
+          ) : (
+            <Failure message={usage.refusal.message} />
+          )}
+        </Section>
+
+        <Section
+          title="History"
+          lead="Every version this persona has stood on, newest first. A run pinned one of these, so none of them ever changes."
+        >
+          {history === null ? (
+            <Loading what="this persona's history" />
+          ) : history.status === "ready" ? (
+            <DataTable
+              label="Versions of this persona"
+              columns={[
+                ...HISTORY_COLUMNS,
+                {
+                  key: "read",
+                  header: "",
+                  width: "100px",
+                  cell: (version) => (
+                    <Button onClick={() => setReading(version)}>Read</Button>
+                  ),
+                },
+              ]}
+              rows={history.value.items}
+              keyOf={(version) => version.id}
+            />
+          ) : history.status === "signed-out" ? (
+            <Loading what="this persona's history" />
+          ) : (
+            <Failure
+              message={history.refusal.message}
+              onRetry={reloadHistory}
+            />
+          )}
+        </Section>
+
+        {reading === null ? null : (
+          <Dialog
+            title={`Version ${reading.version}, written ${asMoment(reading.created_at)}`}
+            onClose={() => setReading(null)}
+          >
+            <Facts
+              facts={[
+                { label: "Personality", value: reading.traits.personality },
+                { label: "Language", value: reading.traits.language },
+                {
+                  label: "Voice",
+                  value: `${reading.traits.voice.provider} · ${reading.traits.voice.voiceId}`,
+                },
+                { label: "Speech rate", value: `${reading.traits.voice.speed}×` },
+                ...describedTraits(reading.traits).map((trait) => ({
+                  label: trait.label,
+                  value: trait.value,
+                })),
+              ]}
+            />
+          </Dialog>
+        )}
+
+        {archiving ? (
+          <ArchiveDialog
+            persona={one}
+            projectId={projectId}
+            busy={saving === "lifecycle"}
+            refusal={refusal}
+            onClose={() => setArchiving(false)}
+            onArchive={(replacement) => void archive(replacement)}
+          />
+        ) : null}
+
+      </>
+    );
+
+    async function saveIdentity(): Promise<void> {
+      if (held === null || !mayAuthor || saving !== null) return;
+      await write(
+        personaPath(one.id),
+        "PATCH",
+        {
+          expected_revision: one.revision,
+          name: held.name,
+          description: held.description,
+        },
+        "identity",
+      );
+    }
+
+    async function saveTraits(): Promise<void> {
+      if (held === null || !mayAuthor || saving !== null) return;
+      await write(
+        personaPath(one.id),
+        "PATCH",
+        {
+          expected_revision: one.revision,
+          expected_version_id: one.version_id,
+          traits: traitsFrom(held.traits),
+        },
+        "traits",
+      );
+    }
+
+    async function archive(replacement: string | undefined): Promise<void> {
+      const done = await write(
+        `${personaPath(one.id)}/archive`,
+        "POST",
+        {
+          expected_revision: one.revision,
+          ...(replacement === undefined
+            ? {}
+            : { replacement_persona_id: replacement }),
+        },
+        "lifecycle",
+      );
+      if (done !== null) setArchiving(false);
+    }
+  }
+
+  async function restore(): Promise<void> {
+    if (persona === null) return;
+    await write(
+      `${personaPath(persona.id)}/restore`,
+      "POST",
+      { expected_revision: persona.revision },
+      "lifecycle",
+    );
+  }
+
+  async function clone(): Promise<void> {
+    if (persona === null) return;
+    const made = await write(
+      `${personaPath(persona.id)}/clone`,
+      "POST",
+      {},
+      "lifecycle",
+    );
+    if (made !== null) {
+      router.push(projectPath(projectId, "personas", made.id));
+    }
+  }
+
+  const archived = persona?.archived_at != null;
+
+  const actions =
+    persona === null || role === null ? undefined : (
+      <>
+        <ButtonLink href={projectPath(projectId, "personas")}>
+          All personas
+        </ButtonLink>
+        <Button
+          disabled={!mayAuthor || saving !== null}
+          {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
+          onClick={() => void clone()}
+        >
+          Clone
+        </Button>
+        {archived ? (
+          <Button
+            weight="strong"
+            disabled={!mayAuthor || saving !== null}
+            {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
+            onClick={() => void restore()}
+          >
+            Restore
+          </Button>
+        ) : (
+          <Button
+            disabled={!mayAuthor || saving !== null}
+            {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
+            onClick={() => setArchiving(true)}
+          >
+            Archive
+          </Button>
+        )}
+      </>
+    );
+
+  return (
+    <ProductPage>
+      <PageHeader
+        eyebrow="Persona"
+        title={persona?.name ?? "Persona"}
+        lead={
+          persona === null ? undefined : (
+            <span className={styles.rowName}>
+              {persona.description ?? "Who calls, and how they behave."}
+              {persona.is_default ? (
+                <Badge title="A test that names nobody is given this persona">
+                  Default
+                </Badge>
+              ) : null}
+              {archived ? <Badge tone="warn">Archived</Badge> : null}
+            </span>
+          )
+        }
+        action={actions}
+      />
+      <PageBody>{body()}</PageBody>
+    </ProductPage>
+  );
+}
+
+/**
+ * Asking who takes the project's default pointer.
+ *
+ * **The replacement is part of the Archive, not a step after it.** A project
+ * always has a default persona — a test authored naming nobody is given it —
+ * so archiving the one a project points at without saying who replaces them
+ * would break the commonest create there is, later, for somebody who did
+ * nothing wrong. The server writes both in one transaction; this is where the
+ * question gets asked.
+ *
+ * For a persona that is not the default there is nothing to choose, and the
+ * dialog is a plain confirmation.
+ */
+function ArchiveDialog({
+  persona,
+  projectId,
+  busy,
+  refusal,
+  onClose,
+  onArchive,
+}: {
+  readonly persona: Persona;
+  readonly projectId: string;
+  readonly busy: boolean;
+  readonly refusal: Refusal | null;
+  readonly onClose: () => void;
+  readonly onArchive: (replacement: string | undefined) => void;
+}) {
+  const [others, setOthers] = useState<readonly Persona[] | null>(null);
+  const [chosen, setChosen] = useState("");
+
+  useEffect(() => {
+    if (!persona.is_default) return undefined;
+    let current = true;
+
+    void readJson<PersonaPage>(personasPath(false), { project: projectId }).then(
+      (answer) => {
+        if (!current || answer.status !== "ready") return;
+        const rest = answer.value.items.filter((one) => one.id !== persona.id);
+        setOthers(rest);
+        setChosen(rest[0]?.id ?? "");
+      },
+    );
+
+    return () => {
+      current = false;
+    };
+  }, [persona.id, persona.is_default, projectId]);
+
+  const nobodyToTakeIt = persona.is_default && others !== null && others.length === 0;
+
+  return (
+    <Dialog title={`Archive ${persona.name}?`} onClose={onClose}>
+      <p className={styles.stateLead}>
+        They leave the list your team authors from. Every version stays exactly
+        where it is, every run that pinned one stays readable, and Restore is on
+        this page.
+      </p>
+
+      {persona.is_default ? (
+        <Field
+          label="Replacement default persona"
+          htmlFor="persona-replacement"
+          hint="This project points at them, so a test naming nobody is given them. Somebody has to take that."
+        >
+          {others === null ? (
+            <p className={styles.fieldHint}>Reading this project's personas…</p>
+          ) : nobodyToTakeIt ? (
+            <p className={styles.fieldHint}>
+              There is no other active persona in this project to take it.
+              Create one first.
+            </p>
+          ) : (
+            <Select
+              id="persona-replacement"
+              value={chosen}
+              options={others.map((one) => ({ value: one.id, label: one.name }))}
+              onChange={setChosen}
+            />
+          )}
+        </Field>
+      ) : null}
+
+      {refusal === null ? null : <Refused message={refusal.message} />}
+
+      <FormActions>
+        <Button
+          weight="strong"
+          disabled={busy || nobodyToTakeIt || (persona.is_default && chosen === "")}
+          onClick={() =>
+            onArchive(persona.is_default ? chosen : undefined)
+          }
+        >
+          {busy ? "Archiving…" : "Archive persona"}
+        </Button>
+        <Button disabled={busy} onClick={onClose}>
+          Cancel
+        </Button>
+      </FormActions>
+    </Dialog>
+  );
+}
