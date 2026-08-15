@@ -2,7 +2,6 @@ import {
   ApplicabilityConflictError,
   archiveTest,
   authorize,
-  CAPABILITY_CATALOG,
   cloneTest,
   createTest,
   editTest,
@@ -79,6 +78,12 @@ import { given, text, textList } from "../http/reading.ts";
  * the link editor cannot empty the set, and Restore of a test that has none
  * takes one in the same request.
  *
+ * **What a test may require of a connection comes from `GET /api/capabilities`,
+ * which already exists** — the same catalog the connection forms draw from. A
+ * second endpoint answering the same list would be a second opinion about which
+ * keys exist, and the whole worth of the catalog is that a requirement and a
+ * measurement name the same thing.
+ *
  * The addresses follow the standing rule: nothing is rooted at a project, and
  * the organization is never in a path. Both are resolved from the credential. A
  * write may name a project in its body and a read may filter by one.
@@ -97,7 +102,6 @@ export const TEST_CLONE_PATH = "/api/tests/:testId/clone";
 export const TEST_ARCHIVE_PATH = "/api/tests/:testId/archive";
 export const TEST_RESTORE_PATH = "/api/tests/:testId/restore";
 export const TEST_VERSION_PATH = "/api/test-versions/:versionId";
-export const CAPABILITY_CATALOG_PATH = "/api/capability-catalog";
 
 type Body = Record<string, unknown>;
 
@@ -434,25 +438,6 @@ export async function testRoutes(
   credentialed(app, {
     provider: options.provider,
     rateLimit: options.rateLimit,
-  });
-
-  /**
-   * What a test may require of a connection, from the one catalog that decides.
-   *
-   * **The editor is told rather than knowing.** A form holding its own copy of
-   * these would be free to offer a key the platform refuses, and the refusal
-   * would arrive after somebody had written a test around it. It is the same
-   * catalog the connection forms draw from, which is what makes a requirement
-   * and a measurement comparable at all.
-   */
-  app.get(CAPABILITY_CATALOG_PATH, async (_request, reply) => {
-    return reply.send({
-      items: CAPABILITY_CATALOG.map((entry) => ({
-        key: entry.key,
-        label: entry.label,
-        description: entry.description,
-      })),
-    });
   });
 
   /**

@@ -9,6 +9,7 @@ import {
   createAgent,
   createPersona,
   createTest,
+  getTest,
   setTestAgents,
   failSimulationDispatch,
   getPersonaVersion,
@@ -742,6 +743,18 @@ describe("archiving a target out from under work", () => {
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
       },
     });
+    // The seeded test was authored before this agent existed, so nothing yet
+    // says it is worth running against it — and a run may only pair the two
+    // once somebody has. Added rather than replaced, so the blocks that run
+    // against the seed's own agent keep working.
+    const applying = await getTest(actingAsAcme(), acmeSeed.testId);
+    await setTestAgents(actingAsAcme(), acmeSeed.testId, {
+      agentIds: [
+        ...(applying?.agents ?? []).map((applies) => applies.id),
+        created.id,
+      ],
+    });
+
     return { agentId: created.id, connectionId: created.connection?.id ?? "" };
   }
 

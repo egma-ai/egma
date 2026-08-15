@@ -1655,12 +1655,14 @@ export async function editTest(
           ? {}
           : { description: changes.description }),
         ...(mintsVersion ? { currentVersionId: versionId } : {}),
-        // The identity moved, so the token that names it moves too — whichever
-        // half of the edit moved it. The applicability revision is deliberately
-        // left alone: no edit here can touch which agents the test applies to,
-        // and moving it would refuse a link edit somebody is typing elsewhere
-        // for a change that has nothing to do with links.
-        revision: newId("rev"),
+        // **Only when the identity moved**, which is the whole worth of two
+        // tokens. A version-only edit refuses a rename somebody is typing in
+        // another tab if this moves for it — and a rename is not stale for a
+        // scenario somebody else sharpened, because the name they read is
+        // still the name. A repository copy is made stale by the version, so
+        // nothing downstream needs this to move for content. The applicability
+        // revision is left alone for the same reason, one door across.
+        ...(identityChanged ? { revision: newId("rev") } : {}),
         updatedAt: new Date(),
       })
       .where(eq(test.id, current.id))
