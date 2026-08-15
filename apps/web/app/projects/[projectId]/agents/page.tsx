@@ -1,9 +1,9 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { readJson } from "../../../../lib/api.ts";
+import { readJson, type Refusal } from "../../../../lib/api.ts";
 import {
   AGENTS_PATH,
   agentsAfter,
@@ -80,13 +80,41 @@ function Agents({ projectId }: { readonly projectId: string }) {
   const role = me === null ? null : roleOf(me);
   const { answer, reload } = useProjectRead<AgentPage>(AGENTS_PATH, projectId);
 
-  // Pages fetched after the first, kept beside it rather than folded into it,
-  // so that asking again always starts from a clean first page.
-  const [after, setAfter] = useState<AgentPage | null>(null);
+  /**
+   * Pages fetched after the first, kept beside it rather than folded into it,
+   * so that asking again always starts from a clean first page — **and each
+   * one remembers the project it was fetched for.**
+   *
+   * That is not belt and braces. Changing project does not remount this page:
+   * it is the same route with another project in it, so this state outlives
+   * the change and a read still in flight comes back into a view that has
+   * moved on. Carrying the project in the value means a page fetched for
+   * somewhere else can never be *rendered* here, whatever wrote it and
+   * whenever it landed — a render-time fact, which no race can get past.
+   */
+  const [after, setAfter] = useState<{
+    readonly project: string;
+    readonly page: AgentPage;
+  } | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  /** Why the next page did not arrive, until somebody asks for it again. */
+  const [moreRefused, setMoreRefused] = useState<Refusal | null>(null);
+
+  const carried = after !== null && after.project === projectId ? after.page : null;
+
+  /** Which project this view is showing, readable from inside an await. */
+  const showing = useRef(projectId);
+
+  useEffect(() => {
+    showing.current = projectId;
+    setAfter(null);
+    setMoreRefused(null);
+    setLoadingMore(false);
+  }, [projectId]);
 
   useEffect(() => {
     setAfter(null);
+    setMoreRefused(null);
   }, [answer]);
 
   useEffect(() => {
@@ -158,8 +186,8 @@ function Agents({ projectId }: { readonly projectId: string }) {
       return <Failure message={answer.refusal.message} onRetry={reload} />;
     }
 
-    const items = [...answer.value.items, ...(after?.items ?? [])];
-    const cursor = after === null ? answer.value.next_cursor : after.next_cursor;
+    const items = [...answer.value.items, ...(carried?.items ?? [])];
+    const cursor = carried === null ? answer.value.next_cursor : carried.next_cursor;
 
     if (items.length === 0) {
       return (
@@ -171,36 +199,74 @@ function Agents({ projectId }: { readonly projectId: string }) {
       );
     }
 
+    /**
+     * The next page, and everything that can happen instead of one.
+     *
+     * A next page that does not arrive is still something that happened.
+     * Returning quietly would re-enable the control, say nothing, and leave
+     * somebody pressing it — and a session that has expired would leave them
+     * pressing it forever, on a page that can no longer read anything.
+     */
     async function showMore(): Promise<void> {
       if (cursor === null) return;
+
+      // The project this read is for. Somebody may choose another one before
+      // it comes back, and the answer is then not this view's to show.
+      const asked = projectId;
+      setMoreRefused(null);
       setLoadingMore(true);
+
       const next = await readJson<AgentPage>(agentsAfter(cursor), {
-        project: projectId,
+        project: asked,
       });
+
       setLoadingMore(false);
-      if (next.status !== "ready") return;
+      if (showing.current !== asked) return;
+
+      if (next.status === "signed-out") {
+        window.location.replace("/sign-in");
+        return;
+      }
+
+      if (next.status !== "ready") {
+        setMoreRefused(next.refusal);
+        return;
+      }
+
       setAfter({
-        items: [...(after?.items ?? []), ...next.value.items],
-        next_cursor: next.value.next_cursor,
+        project: asked,
+        page: {
+          items: [...(carried?.items ?? []), ...next.value.items],
+          next_cursor: next.value.next_cursor,
+        },
       });
     }
 
     return (
-      <DataTable
-        label="Agents in this project"
-        columns={COLUMNS}
-        rows={items}
-        keyOf={(agent) => agent.id}
-        {...(cursor === null
-          ? {}
-          : {
-              more: {
-                onMore: () => void showMore(),
-                loading: loadingMore,
-                note: `${items.length} agents so far`,
-              },
-            })}
-      />
+      <>
+        <DataTable
+          label="Agents in this project"
+          columns={COLUMNS}
+          rows={items}
+          keyOf={(agent) => agent.id}
+          {...(cursor === null
+            ? {}
+            : {
+                more: {
+                  onMore: () => void showMore(),
+                  loading: loadingMore,
+                  note: `${items.length} agents so far`,
+                },
+              })}
+        />
+        {moreRefused === null ? null : (
+          <Failure
+            title="Egma could not load more agents."
+            message={moreRefused.message}
+            onRetry={() => void showMore()}
+          />
+        )}
+      </>
     );
   }
 

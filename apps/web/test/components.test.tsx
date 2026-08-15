@@ -30,12 +30,13 @@ import { AppShell } from "../ui/shell.tsx";
 const routed = vi.hoisted(() => ({
   push: vi.fn(),
   pathname: "/projects/prj_1/agents",
+  projectId: "prj_1",
 }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => routed.pathname,
   useRouter: () => ({ push: routed.push, replace: vi.fn(), back: vi.fn() }),
-  useParams: () => ({ projectId: "prj_1" }),
+  useParams: () => ({ projectId: routed.projectId }),
 }));
 
 vi.mock("next/link", () => ({
@@ -68,21 +69,39 @@ function meWith(role: string): Me {
   };
 }
 
-/** Whatever egma is standing in for, answered as the API would answer it. */
-function apiAnswers(
-  answers: Record<string, { status: number; body: unknown } | "never">,
-): void {
+function json(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+type Stubbed = { status: number; body: unknown } | "never";
+
+/**
+ * Whatever egma is standing in for, answered as the API would answer it.
+ *
+ * A path may be given a list, which is answered in order and then repeats its
+ * last entry — that is how a read that fails and then succeeds is written.
+ */
+function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): void {
+  const asked: Record<string, number> = {};
+
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string) => {
       const path = new URL(input, "http://egma.test").pathname;
-      const answer = answers[path];
-      if (answer === undefined) throw new Error(`nothing stubbed for ${path}`);
-      if (answer === "never") return new Promise(() => undefined);
-      return new Response(JSON.stringify(answer.body), {
-        status: answer.status,
-        headers: { "content-type": "application/json" },
-      });
+      const held = answers[path];
+      if (held === undefined) throw new Error(`nothing stubbed for ${path}`);
+
+      const turn = asked[path] ?? 0;
+      asked[path] = turn + 1;
+      const answer = Array.isArray(held)
+        ? ((held[Math.min(turn, held.length - 1)] ?? "never") as Stubbed)
+        : (held as Stubbed);
+
+      if (answer === "never") return new Promise<Response>(() => undefined);
+      return json(answer.status, answer.body);
     }),
   );
 }
@@ -90,6 +109,7 @@ function apiAnswers(
 beforeEach(() => {
   routed.push.mockReset();
   routed.pathname = "/projects/prj_1/agents";
+  routed.projectId = "prj_1";
   // The shell returns to the top on every navigation; jsdom has no scrolling.
   vi.stubGlobal("scrollTo", vi.fn());
 });
@@ -507,6 +527,110 @@ describe("the Agents page", () => {
     for (const control of screen.getAllByRole("button", { name: "Register agent" })) {
       expect((control as HTMLButtonElement).disabled).toBe(true);
     }
+  });
+
+  /**
+   * A next page that does not arrive is still something that happened.
+   *
+   * Swallowing the refusal leaves somebody pressing a control that re-enables
+   * itself, says nothing, and never works — which is worse than the failure it
+   * hides, because there is nothing to act on.
+   */
+  it("says so when the next page fails, and lets somebody ask again on purpose", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/agents": [
+        { status: 200, body: { items: [AGENT], next_cursor: "agt_1" } },
+        {
+          status: 503,
+          body: { error: "unavailable", message: "Egma could not reach the agents store." },
+        },
+        {
+          status: 200,
+          body: {
+            items: [{ ...AGENT, id: "agt_2", name: "Outbound reminders" }],
+            next_cursor: null,
+          },
+        },
+      ],
+    });
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+
+    const said = await screen.findByRole("alert");
+    expect(said.textContent).toContain("Egma could not reach the agents store.");
+
+    // And asking again is a deliberate act with a control of its own, not a
+    // guess that pressing the same thing might work this time.
+    fireEvent.click(within(said).getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findAllByText("Outbound reminders")).not.toHaveLength(0);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  /**
+   * The one thing this whole ticket exists to prevent, in the page it ships.
+   *
+   * Press `Show more` in one project, change project before the answer comes
+   * back, and the rows that arrive belong to the project nobody is looking at
+   * any more. They were correctly scoped when they were sent — the server was
+   * never wrong — and showing them under another project's name would still
+   * make somebody distrust everything else on the screen.
+   */
+  it("drops a next page that arrives after the project changed", async () => {
+    let release: (answer: Response) => void = () => undefined;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+
+    const firstPageOf = (project: string | null) =>
+      json(200, {
+        items: [
+          {
+            ...AGENT,
+            project_id: String(project),
+            id: `agt_${String(project)}`,
+            name: project === "prj_1" ? "Front desk" : "Night line",
+          },
+        ],
+        next_cursor: "agt_cursor",
+      });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        const at = new URL(String(input), "http://egma.test");
+        if (at.pathname === "/api/me") return json(200, meWith("admin"));
+        if (at.searchParams.has("cursor")) return pending;
+        return firstPageOf(at.searchParams.get("project"));
+      }),
+    );
+
+    const { rerender } = render(<AgentsPage />);
+    expect(await screen.findAllByText("Front desk")).not.toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+
+    // Somebody chooses another project while that read is still in flight.
+    // The page is not remounted — it is the same route with another project in
+    // it, which is exactly why its own state can outlive the change.
+    routed.projectId = "prj_2";
+    routed.pathname = "/projects/prj_2/agents";
+    rerender(<AgentsPage />);
+    expect(await screen.findAllByText("Night line")).not.toHaveLength(0);
+
+    // The first project's next page finally arrives.
+    release(
+      json(200, {
+        items: [{ ...AGENT, id: "agt_stale", name: "Somebody else's project" }],
+        next_cursor: null,
+      }),
+    );
+    await new Promise((settle) => setTimeout(settle, 0));
+
+    expect(screen.queryByText("Somebody else's project")).toBeNull();
+    expect(screen.queryAllByText("Front desk")).toHaveLength(0);
+    expect(screen.getAllByText("Night line").length).toBeGreaterThan(0);
   });
 
   it("offers a member the way to register, and a viewer the same control disabled", async () => {
