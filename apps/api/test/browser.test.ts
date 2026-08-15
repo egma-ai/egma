@@ -261,9 +261,18 @@ describe("adding a colleague, with no mail configured", () => {
   it(
     "hands the link to the inviter, and following it lands the colleague inside",
     async () => {
+      // The address organization settings has always been at. Settings moved
+      // into the product shell so the project selector stays on screen through
+      // it, and this one resolves the project and goes there — which is the
+      // half worth walking in a real browser, because a redirect that never
+      // arrives looks exactly like a page that failed to load.
       await page.goto(`${origin}/members`);
+      await page.waitForURL(/\/projects\/prj_[^/]+\/settings\/people$/);
       expect(await page.getByText("Invite somebody").count()).toBe(0);
-      await page.getByRole("tab", { name: "Invitations" }).click();
+      // A radio group rather than a tablist: it is the product's shared "which
+      // of two lists is this page showing" control, and it is exactly one of a
+      // small closed set.
+      await page.getByRole("radio", { name: "Invitations" }).click();
       await page.waitForSelector("text=Invite somebody");
 
       await page.fill("#invite-email", "bob@acme.example");
@@ -351,13 +360,23 @@ describe("adding a colleague, with no mail configured", () => {
     "does nothing until an admin confirms a destructive member action",
     async () => {
       await page.goto(`${origin}/members`);
-      const bob = page.locator("article", { hasText: "bob@acme.example" });
+      await page.waitForURL(/\/settings\/people$/);
+      // The wide layout's row. The list beside it is the same three controls
+      // over the same person, drawn for a narrow screen from one column
+      // definition, so driving either would prove the same thing.
+      const bob = page.locator("tr", { hasText: "bob@acme.example" });
       await bob.waitFor();
-      expect(
-        await bob.locator("select, button").evaluateAll((controls) =>
+      // Three controls, and all one height. The height itself is the shared
+      // system's token rather than this page's own now that Settings is built
+      // from the same controls as every other product page, so what is held
+      // here is that they agree — the density itself is a token to tune.
+      const heights = await bob
+        .locator("select, button")
+        .evaluateAll((controls) =>
           controls.map((control) => control.getBoundingClientRect().height),
-        ),
-      ).toEqual([44, 44, 44]);
+        );
+      expect(heights).toHaveLength(3);
+      expect(new Set(heights).size).toBe(1);
 
       const memberActions: string[] = [];
       const recordMemberAction = (request: Request) => {
@@ -391,7 +410,9 @@ describe("adding a colleague, with no mail configured", () => {
         );
         await page.getByRole("dialog").getByRole("button", { name: "Deactivate" }).click();
         expect((await deactivated).status()).toBe(200);
-        await expect.poll(() => bob.innerText()).toContain("deactivated");
+        // Case-insensitive: the standing is a badge now, and the shared
+        // system draws a badge in small capitals.
+        await expect.poll(() => bob.innerText()).toMatch(/deactivated/i);
         expect(memberActions).toHaveLength(1);
         expect(memberActions[0]).toMatch(/\/deactivate$/u);
 
@@ -731,9 +752,16 @@ describe("the list of what an organization recorded", () => {
       expect(
         await page.locator("main").getByRole("button", { name: "Sign out" }).count(),
       ).toBe(0);
-      await sidebar.getByRole("menuitem", { name: "Organization settings" }).click();
-      await page.waitForURL(/\/members$/);
-      await page.getByRole("tab", { name: "People" }).waitFor({ state: "visible" });
+      await sidebar.getByRole("menuitem", { name: "Settings" }).click();
+      // Settings is inside the product shell now, so its address names the
+      // project like every other product page and the selector stays on screen
+      // throughout it. Its own navigation is what separates the settings that
+      // belong to this project from the ones that belong to the organization.
+      await page.waitForURL(new RegExp(`/projects/${project}/settings$`));
+      await page
+        .getByRole("navigation", { name: "Settings" })
+        .getByRole("link", { name: "People" })
+        .waitFor({ state: "visible" });
 
       await page.evaluate(() => {
         Reflect.set(globalThis, "__egma_same_document_navigation", true);
@@ -1619,10 +1647,10 @@ describe("recovering when a page cannot load", () => {
     async () => {
       await page.route("**/api/members", (route) => route.abort());
       await page.goto(`${origin}/members`);
-      await page.waitForSelector("text=Organization settings could not be loaded");
+      await page.waitForSelector("text=Egma could not be reached");
       await page.unroute("**/api/members");
       await page.getByRole("button", { name: "Try again" }).click();
-      await page.waitForSelector("text=Everybody in your organization");
+      await page.waitForSelector("text=Everybody in this organization");
 
       await page.route("**/api/invitations/lookup", (route) =>
         route.fulfill({ status: 503, contentType: "application/json", body: '{"message":"unavailable"}' }),

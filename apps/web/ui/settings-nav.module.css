@@ -1,0 +1,91 @@
+/*
+ * The Settings navigation's own measurements.
+ *
+ * A file of its own rather than more lines on `system.module.css`, because this
+ * is one component's styling and not part of the shared visual system. Every
+ * value here is a token from `tokens.css`; nothing is a number typed in, so the
+ * hands-on tuning pass at the end of this effort reaches these rows the same
+ * way it reaches every other.
+ */
+
+.nav {
+  display: flex;
+  margin-bottom: var(--space-5);
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/*
+ * Which scope a run of items belongs to, said out loud above them.
+ *
+ * **This label is the whole reason the navigation is grouped rather than one
+ * flat row.** Members, invitations, retention and API keys belong to the
+ * organization; a page that listed them beside the project's own settings, with
+ * the project selector on screen, would be quietly saying they belong to
+ * whichever project is selected — and somebody would eventually believe it.
+ */
+.groupLabel {
+  margin: 0;
+  padding: 0 var(--space-2);
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.item {
+  display: flex;
+  height: var(--control-lg);
+  align-items: center;
+  padding: 0 var(--space-3);
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-size: var(--text-md);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.item:hover {
+  color: var(--foreground);
+}
+
+.itemActive {
+  border-bottom-color: var(--accent, var(--foreground));
+  color: var(--foreground);
+  font-weight: 550;
+}
+
+/*
+ * What an organization-wide page says under its heading.
+ *
+ * The project selector stays on screen throughout Settings — somebody has to be
+ * able to see where they are and to leave — so a page whose subject is the
+ * whole organization has to say so in words rather than rely on the selector
+ * being absent.
+ */
+.scopeNote {
+  margin: 0 0 var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}

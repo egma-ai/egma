@@ -83,6 +83,27 @@ const config: NextConfig = {
           source: "/api/password-reset/:path*",
           destination: `${api}/api/password-reset/:path*`,
         },
+        // The Settings surface: the customer itself, and the product areas
+        // inside it. Without these the pages would post at Next, which has no
+        // such route, and read its 404 page as egma's refusal.
+        { source: "/api/organization", destination: `${api}/api/organization` },
+        { source: "/api/projects", destination: `${api}/api/projects` },
+        {
+          source: "/api/projects/:path*",
+          destination: `${api}/api/projects/:path*`,
+        },
+        // Which model judges a project, and the organization keys behind it.
+        // Both halves are reached from Settings, and neither is served here.
+        { source: "/api/judge", destination: `${api}/api/judge` },
+        { source: "/api/judge/:path*", destination: `${api}/api/judge/:path*` },
+        {
+          source: "/api/judge-credentials",
+          destination: `${api}/api/judge-credentials`,
+        },
+        {
+          source: "/api/judge-credentials/:path*",
+          destination: `${api}/api/judge-credentials/:path*`,
+        },
         { source: "/api/tests", destination: `${api}/api/tests` },
         { source: "/api/tests/:path*", destination: `${api}/api/tests/:path*` },
         {

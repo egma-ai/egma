@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 
 import { readJson, type Answer } from "../lib/api.ts";
-import { firstProjectOf, type Me } from "../lib/me.ts";
+import { firstProjectOf, roleOf, type Me } from "../lib/me.ts";
 import { projectLanding } from "../lib/project-context.ts";
-import { Button } from "../ui/controls.tsx";
+import { NEW_PROJECT_PATH } from "../lib/settings.ts";
+import { Button, ButtonLink } from "../ui/controls.tsx";
 import { ProductStatePage } from "../ui/shell.tsx";
 
 /**
@@ -71,12 +72,30 @@ export default function RootPage() {
    * than left on a product shell with nothing in it.
    */
   if (answer.status === "ready") {
+    const role = roleOf(answer.value);
     return (
       <ProductStatePage
         eyebrow="Organization"
         title="This organization has no project yet"
-        lead="Tests, agents, personas and graders all live in a project. An organization admin can create the first one in organization settings."
-      />
+        lead="Agents, tests, personas, graders and runs all live in a project. Making one is the first step, and it takes a name."
+      >
+        {/*
+          * A way forward rather than a dead end. Signup provisions a project, so
+          * an organization reaching this state is rare — and the person looking
+          * at it is standing in front of a product shell with nothing in it,
+          * which is exactly when being told what to do next matters. A viewer
+          * or a member sees the same control, genuinely disabled, and the
+          * sentence that says who to ask.
+          */}
+        <ButtonLink
+          href={NEW_PROJECT_PATH}
+          weight="strong"
+          disabled={role !== "admin"}
+          why={`Your ${role} role cannot create a project. Ask an organization admin to make the first one.`}
+        >
+          Create the first project
+        </ButtonLink>
+      </ProductStatePage>
     );
   }
 

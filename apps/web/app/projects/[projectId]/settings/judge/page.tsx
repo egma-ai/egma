@@ -12,18 +12,17 @@ import {
   JUDGE_CREDENTIALS_PATH,
   JUDGE_PATH,
   JUDGE_REGISTRY_PATH,
-  judgeCredentialPath,
   PLATFORM_SOURCE,
-  type JudgeCredential,
   type JudgeCredentialPage,
   type JudgeRegistry,
   type ProjectJudge,
 } from "../../../../../lib/judge.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
-import { Badge, Button, ButtonLink, Field, TextInput } from "../../../../../ui/controls.tsx";
+import { Badge, Button, ButtonLink, Field, Help, Section, TextInput } from "../../../../../ui/controls.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
+import { SettingsNav, settingsPath } from "../../../../../ui/settings-nav.tsx";
 import {
   AppShell,
   PageBody,
@@ -74,8 +73,10 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
     JUDGE_PATH,
     projectId,
   );
-  const { answer: credentials, reload: reloadCredentials } =
-    useProjectRead<JudgeCredentialPage>(JUDGE_CREDENTIALS_PATH, projectId);
+  const { answer: credentials } = useProjectRead<JudgeCredentialPage>(
+    JUDGE_CREDENTIALS_PATH,
+    projectId,
+  );
   const { answer: registry, reload: reloadRegistry } =
     useProjectRead<JudgeRegistry>(JUDGE_REGISTRY_PATH, projectId);
 
@@ -158,8 +159,9 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
   if (judge === null) {
     return (
       <ProductPage>
-        <PageHeader eyebrow="Graders" title="Judge settings" />
+        <PageHeader eyebrow="Settings" title="Judge" />
         <PageBody>
+          <SettingsNav projectId={projectId} current="judge" />
           <Loading what="the judge" />
         </PageBody>
       </ProductPage>
@@ -169,8 +171,9 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
   if (judge.status !== "ready") {
     return (
       <ProductPage>
-        <PageHeader eyebrow="Graders" title="Judge settings" />
+        <PageHeader eyebrow="Settings" title="Judge" />
         <PageBody>
+          <SettingsNav projectId={projectId} current="judge" />
           <Failure
             message={
               judge.status === "signed-out"
@@ -187,8 +190,8 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
   return (
     <ProductPage>
       <PageHeader
-        eyebrow="Graders"
-        title="Judge settings"
+        eyebrow="Settings"
+        title="Judge"
         lead="The model that decides an LLM judgment in this project, and the organization key it is asked with."
         action={
           <ButtonLink href={projectPath(projectId, "graders")}>
@@ -197,6 +200,7 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
         }
       />
       <PageBody>
+        <SettingsNav projectId={projectId} current="judge" />
         <section aria-label="This project's judge">
           <h2>This project</h2>
           {judge.value.state === "needs_setup" ? (
@@ -305,7 +309,8 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
             </select>
             {choosable.length === 0 ? (
               <small>
-                This organization holds no {provider} key yet. Add one below.
+                This organization holds no {provider} key yet. Add one under
+                Organization settings.
               </small>
             ) : null}
           </Field>
@@ -329,207 +334,27 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
           </Button>
         </section>
 
-        <Credentials
-          credentials={held}
-          projectId={projectId}
-          mayAdminister={mayAdminister}
-          onChanged={reloadCredentials}
-        />
+        {/*
+          * **Where the keys themselves are is one group over, and that is the
+          * separation this whole Settings area is built on.** A judge
+          * credential belongs to the organization: one key can serve every
+          * project, and archiving or rotating it is felt by all of them. What
+          * is on this page is one project's *choice* among them, which is the
+          * only half that belongs to a project.
+          */}
+        <Section title="Where these keys come from">
+          <Help>
+            A judge key belongs to the organization rather than to this project,
+            so one key can serve every project. Add, label and replace them
+            under{" "}
+            <ButtonLink href={settingsPath(projectId, "organization")}>
+              Organization settings
+            </ButtonLink>
+            .
+          </Help>
+        </Section>
+
       </PageBody>
     </ProductPage>
-  );
-}
-
-/**
- * The organization's keys: what each is called, four characters of it, and a
- * way to replace one whole.
- *
- * **Rotation is a write and never a read.** The form has one field, it is
- * empty, and nothing fills it in from what is stored — because nothing can. The
- * identity survives, so every project pointing at this credential keeps
- * pointing at it and pending grading picks the new key up when it claims.
- *
- * There is no Archive here on purpose. Removing a credential has to be refused
- * while a project points at it and while frozen grading work still needs it,
- * and frozen grading plans arrive with run planning. A control with none of
- * that behind it would strand work mid-flight.
- */
-function Credentials({
-  credentials,
-  projectId,
-  mayAdminister,
-  onChanged,
-}: {
-  readonly credentials: readonly JudgeCredential[];
-  readonly projectId: string;
-  readonly mayAdminister: boolean;
-  readonly onChanged: () => void;
-}) {
-  const [label, setLabel] = useState("");
-  const [key, setKey] = useState("");
-  const [rotating, setRotating] = useState<string | null>(null);
-  const [replacement, setReplacement] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  /**
-   * Why a key could not be saved, **and which action to try again.**
-   *
-   * Kept here rather than handed up to the judge section, because a failure has
-   * to report the thing that failed. Sending it up put "Egma did not save the
-   * judge" on screen when adding a key had failed, beside a Try again that
-   * saved the judge — a different action from the one somebody had just been
-   * refused, which is worse than no retry at all.
-   */
-  const [failed, setFailed] = useState<{
-    readonly what: string;
-    readonly refusal: Refusal;
-    readonly again: () => void;
-  } | null>(null);
-
-  async function add(): Promise<void> {
-    if (!mayAdminister || busy || label.trim() === "" || key.trim() === "") return;
-    setFailed(null);
-    setBusy(true);
-    const written = await sendJson<JudgeCredential>(JUDGE_CREDENTIALS_PATH, {
-      method: "POST",
-      body: { label: label.trim(), provider: "openai", key: key.trim() },
-      project: projectId,
-    });
-    setBusy(false);
-    if (written.status === "signed-out") {
-      window.location.replace("/sign-in");
-      return;
-    }
-    if (written.status !== "ready") {
-      setFailed({
-        what: "Egma did not add this key.",
-        refusal: written.refusal,
-        again: () => void add(),
-      });
-      return;
-    }
-    setLabel("");
-    // The typed key leaves the page the moment it has been sent. It was never
-    // read back and it is not kept around either.
-    setKey("");
-    onChanged();
-  }
-
-  async function rotate(credential: JudgeCredential): Promise<void> {
-    if (!mayAdminister || busy || replacement.trim() === "") return;
-    setFailed(null);
-    setBusy(true);
-    const written = await sendJson<JudgeCredential>(
-      judgeCredentialPath(credential.id),
-      {
-        method: "PATCH",
-        body: {
-          key: replacement.trim(),
-          expected_revision: credential.revision,
-        },
-        project: projectId,
-      },
-    );
-    setBusy(false);
-    if (written.status === "signed-out") {
-      window.location.replace("/sign-in");
-      return;
-    }
-    if (written.status !== "ready") {
-      setFailed({
-        what: `Egma did not replace the key for ${credential.label}.`,
-        refusal: written.refusal,
-        again: () => void rotate(credential),
-      });
-      return;
-    }
-    setReplacement("");
-    setRotating(null);
-    onChanged();
-  }
-
-  return (
-    <section aria-label="Judge credentials">
-      <h2>Organization keys</h2>
-      <p>
-        A key belongs to the organization, not to a project, so one key can serve
-        every project. Egma shows the last four characters and never the key
-        itself — not here, and not through any other page.
-      </p>
-
-      {failed === null ? null : (
-        <Failure
-          title={failed.what}
-          message={failed.refusal.message}
-          onRetry={failed.again}
-        />
-      )}
-
-      {credentials.length === 0 ? (
-        <p>No judge credentials yet.</p>
-      ) : (
-        <ul>
-          {credentials.map((credential) => (
-            <li key={credential.id}>
-              {credential.label} · {credential.provider} · ends …{credential.hint}{" "}
-              <Button
-                disabled={!mayAdminister || busy}
-                onClick={() =>
-                  setRotating(rotating === credential.id ? null : credential.id)
-                }
-              >
-                Replace key
-              </Button>
-              {rotating === credential.id ? (
-                <>
-                  <Field label="New key" htmlFor={`rotate-${credential.id}`}>
-                    <input
-                      id={`rotate-${credential.id}`}
-                      type="password"
-                      value={replacement}
-                      autoComplete="off"
-                      disabled={!mayAdminister || busy}
-                      onChange={(event) => setReplacement(event.target.value)}
-                    />
-                    <small>
-                      Replaces the stored key whole. You do not need the old one,
-                      and egma will not show it to you.
-                    </small>
-                  </Field>
-                  <Button
-                    weight="strong"
-                    disabled={!mayAdminister || busy || replacement.trim() === ""}
-                    onClick={() => void rotate(credential)}
-                  >
-                    Save new key
-                  </Button>
-                </>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <h3>Add a key</h3>
-      <Field label="Label" htmlFor="credential-label">
-        <TextInput id="credential-label" value={label} onChange={setLabel} />
-      </Field>
-      <Field label="OpenAI key" htmlFor="credential-key">
-        <input
-          id="credential-key"
-          type="password"
-          value={key}
-          autoComplete="off"
-          disabled={!mayAdminister || busy}
-          onChange={(event) => setKey(event.target.value)}
-        />
-      </Field>
-      <Button
-        disabled={!mayAdminister || busy || label.trim() === "" || key.trim() === ""}
-        onClick={() => void add()}
-      >
-        Add key
-      </Button>
-    </section>
   );
 }

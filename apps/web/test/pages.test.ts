@@ -195,16 +195,20 @@ describe("the pages", () => {
    * The link that comes back when nothing was emailed is the whole ticket. A
    * page that quietly dropped it would leave a self-hoster with an invitation
    * that exists and cannot be delivered, which is worse than a refusal.
+   *
+   * Organization settings moved into the product shell, so this reads the page
+   * that now holds it. `settings.test.tsx` drives the behaviour; this only
+   * holds the file to carrying the branch at all.
    */
   it("hand the invitation link back when there was nowhere to post it", async () => {
-    const members = await readFile(
-      path.join(WEB, "app/members/page.tsx"),
+    const people = await readFile(
+      path.join(WEB, "app/projects/[projectId]/settings/people/page.tsx"),
       "utf8",
     );
 
-    expect(members).toContain("accept_url");
-    expect(members).toContain("delivered");
-    expect(members).toMatch(/no mail transport is configured/i);
+    expect(people).toContain("accept_url");
+    expect(people).toContain("delivered");
+    expect(people).toMatch(/no mail transport is configured/i);
   });
 
   /**
@@ -360,10 +364,7 @@ describe("the pages", () => {
   it("reach the API for invitations at paths this instance rewrites", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
     const invite = await readFile(path.join(WEB, "app/invite/page.tsx"), "utf8");
-    const members = await readFile(
-      path.join(WEB, "app/members/page.tsx"),
-      "utf8",
-    );
+    const settings = await readFile(path.join(WEB, "lib/settings.ts"), "utf8");
 
     // A path a page fetches and the config does not forward would be served by
     // this process, which has no such route, and the flow would 404.
@@ -371,7 +372,22 @@ describe("the pages", () => {
     expect(rewrites).toContain("/api/members/:path*");
     expect(invite).toContain("/api/invitations/lookup");
     expect(invite).toContain("/api/invitations/accept");
-    expect(members).toContain('fetch("/api/members")');
+    expect(settings).toContain('"/api/members"');
+    expect(settings).toContain('"/api/invitations"');
+  });
+
+  /**
+   * The Settings pages reach four more of the API's paths, and none of them is
+   * served by this process. Without the rules the pages would post at Next and
+   * read its 404 page as egma's refusal.
+   */
+  it("reach the API for settings at paths this instance rewrites", async () => {
+    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
+
+    expect(rewrites).toContain("/api/organization");
+    expect(rewrites).toContain("/api/projects/:path*");
+    expect(rewrites).toContain("/api/judge/:path*");
+    expect(rewrites).toContain("/api/judge-credentials/:path*");
   });
 
   /**
@@ -400,7 +416,7 @@ describe("the pages", () => {
   it("keep the application shell while signed-in page data settles", async () => {
     const shell = await readFile(path.join(WEB, "ui/shell.tsx"), "utf8");
     const members = await readFile(
-      path.join(WEB, "app/members/page.tsx"),
+      path.join(WEB, "app/projects/[projectId]/settings/people/page.tsx"),
       "utf8",
     );
     const transcript = await readFile(
@@ -413,14 +429,17 @@ describe("the pages", () => {
     );
     const root = await readFile(path.join(WEB, "app/page.tsx"), "utf8");
     expect(shell).toContain("export function ProductStatePage");
-    expect(members).toContain("<ProductStatePage");
+    // The Settings pages keep the shell a stronger way than the state page
+    // does: they draw `AppShell` themselves and put loading, failure and
+    // not-found states inside it, so the navigation, selector and account menu
+    // never leave the screen while a read is in flight.
+    expect(members).toContain("<AppShell>");
+    expect(members).toContain("<Loading ");
     expect(transcript).toContain("<ProductStatePage");
     expect(run).toContain("<ProductStatePage");
     expect(root).toContain('<ProductStatePage');
     expect(root).not.toContain("<StatePage");
-    expect(members).not.toContain(
-      'return <StatePage title="Loading organization settings"',
-    );
+    expect(members).not.toContain("<StatePage");
     expect(transcript).not.toMatch(
       /state\.status === "loading"[\s\S]*?return <StatePage/,
     );
