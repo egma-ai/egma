@@ -323,11 +323,19 @@ export class TestAgentRefusedError extends Error {
  *   project. Archived agents keep the links they already have; they never
  *   receive a new one, because a link nothing can run is a promise egma cannot
  *   keep.
+ * - `repository_agent_not_applicable` — the write came from a repository bound
+ *   to one agent, and this test no longer applies to it. It is the fourth here
+ *   rather than an error of its own because it is the same fact as the three
+ *   above — a test and an agent that do not go together — read from the other
+ *   side. What differs is only the fix, and the fix is what the reason carries:
+ *   relink the test in the browser, or delete the local file. Nothing is
+ *   written either way, which is the sentence's last clause.
  */
 export type TestAgentRefusal =
   | "test_needs_agent"
   | "last_test_agent"
-  | "agent_not_available";
+  | "agent_not_available"
+  | "repository_agent_not_applicable";
 
 /**
  * A test's Restore was refused because its current version names something
@@ -506,6 +514,33 @@ export class UnknownCapabilityError extends UnprocessableInputError {
     super(message);
     this.name = "UnknownCapabilityError";
     this.capability = capability;
+  }
+}
+
+/**
+ * A write named a persona by a name that more than one active persona in the
+ * project answers to.
+ *
+ * **A subclass, for `UnknownCapabilityError`'s reason**: it is the caller's
+ * body, and every layer that relays an `UnprocessableInputError` word for word
+ * is right about this one too. What the subclass buys is the code, and the code
+ * matters here because the reader is usually a repository file rather than a
+ * form: a version-1 test file carries persona *names* and nothing else, and the
+ * fix is to put the stable identifier in the file — which is a different
+ * instruction from anything a browser would be told.
+ *
+ * **Never resolved by picking one.** There is no uniqueness rule on a persona's
+ * name, so choosing by list order would silently put somebody in a test nobody
+ * chose, and the run would be about a caller the author never named.
+ */
+export class PersonaNameAmbiguousError extends UnprocessableInputError {
+  /** The name as the writer wrote it, which is what the sentence names. */
+  readonly personaName: string;
+
+  constructor(personaName: string, message: string) {
+    super(message);
+    this.name = "PersonaNameAmbiguousError";
+    this.personaName = personaName;
   }
 }
 

@@ -442,6 +442,11 @@ const VALUES = [
   // relay of that one is right about this one too, with a code of its own for
   // a form that wants to point at the capability list.
   "UnknownCapabilityError",
+  // A persona named by a name two living personas answer to. The same subclass
+  // arrangement, and its own code because the reader is usually a repository
+  // file: the fix is to put the stable identifier in the file, which is an
+  // instruction no browser form would ever be given.
+  "PersonaNameAmbiguousError",
   "UnprocessableInputError",
   // A versioned write that named the version it was written against, for every
   // versioned resource reached by identifier rather than by filename.

@@ -24,6 +24,7 @@ import {
   IdentityConflictError,
   PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
+  PersonaNameAmbiguousError,
   UnprocessableInputError,
   VersionConflictError,
   WriteAbortedError,
@@ -813,7 +814,8 @@ export async function listPersonas(
  * and so gets the factory's own words for it rather than being reported as never
  * having existed. A name two living personas answer to, because there is no
  * uniqueness rule on a persona's name and picking one of the two would put
- * somebody in a test that nobody chose. And the same persona named twice, which
+ * somebody in a test that nobody chose — its own class, so a repository client
+ * can be told to write the identifier into the file. And the same persona named twice, which
  * asks for the same simulation twice — a run's business, never a test's.
  */
 export async function resolvePersonaNames(
@@ -885,8 +887,14 @@ export async function resolvePersonaNames(
       );
     }
     if (found.length > 1) {
-      throw new UnprocessableInputError(
-        `this project has more than one persona called "${entry}", so egma cannot tell which one this test means. Name the one you want by its prs_ identifier.`,
+      // Its own class, because the reader is usually a repository file rather
+      // than a form, and the sentence tells them where the identifier goes.
+      throw new PersonaNameAmbiguousError(
+        entry,
+        `Persona name ${entry} matches more than one active persona in this ` +
+          `project. Put the intended persona's stable ID in the file and try ` +
+          `again; for a pinned file, egma pull can write the IDs after the ` +
+          `file is safe to migrate.`,
       );
     }
 

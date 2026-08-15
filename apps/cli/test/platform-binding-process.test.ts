@@ -21,6 +21,7 @@ import {
   makeWorkspace,
   type Workspace,
 } from "./support/workspace.ts";
+import { aTestFile, blocking } from "./support/test-file.ts";
 
 const PROVIDER_KEY = "synthetic-retell-key-for-binding-process-test";
 const BOUND_KEY = "egma_sk_for-the-bound-platform";
@@ -147,14 +148,14 @@ describe("commands after a repository is bound", () => {
 
     for (let number = 1; number <= DEFAULT_TEST_COUNT; number += 1) {
       const name = `moves-appointment-${number}`;
-      await writeTestFile(path.join(workspace.dir, "egma", "tests", `${name}.md`), {
+      await writeTestFile(path.join(workspace.dir, "egma", "tests", `${name}.md`), aTestFile({
         name,
         personas: [],
         version: null,
         scenario: `The persona needs a different appointment time in case ${number}.`,
-        expectedBehaviors: ["The agent confirms the new time."],
+        expectedBehaviors: blocking("The agent confirms the new time."),
         mockTools: [],
-      });
+      }));
     }
 
     const pushed = await reachesBound(["push"], "/api/tests");

@@ -74,6 +74,15 @@ export const CODES = {
   last_test_agent: 409,
   agent_not_available: 409,
   /**
+   * A repository push at a test the browser has unlinked from the agent that
+   * repository is bound to. A fourth code beside the three above because the
+   * reader is a terminal rather than a form and the fix is somewhere else
+   * entirely: relink the test in the browser, or delete the local file. Neither
+   * side was changed, which the sentence says out loud because a push that
+   * stopped half way is the fear this refusal exists to settle.
+   */
+  repository_agent_not_applicable: 409,
+  /**
    * A run that paired an agent with a test not linked to it. Its own code so a
    * run builder can offer the fix — link the test, or choose another — rather
    * than showing a general refusal about a version.
@@ -90,6 +99,12 @@ export const CODES = {
    * beside the capability list rather than at the top of the page.
    */
   unknown_capability: 422,
+  /**
+   * A file naming a persona by a name two living personas answer to. Its own
+   * code because the fix belongs to a file rather than to a form: put the
+   * stable identifier in the file. Nothing picks one by list order, ever.
+   */
+  persona_name_ambiguous: 422,
   unprocessable: 422,
   credential_required: 422,
   credential_forbidden: 422,
@@ -269,6 +284,27 @@ export const REFUSALS = {
   agentNotAvailable: (agentId: string): string =>
     `Agent ${agentId} is not active in this project. Choose an active agent ` +
     "from this project's Agents page.",
+
+  /**
+   * A push at a test the browser has unlinked from the repository's own agent.
+   *
+   * **Said twice, in one wording.** `push` preflights the whole folder against
+   * the tests its bound agent still has, so the ordinary path never sends the
+   * request at all — the client says this sentence itself, from its own copy.
+   * This one is the door's, for the race where the link is removed between that
+   * preflight and the write. Both readers get the same instruction, which is
+   * the only reason a client can be told to act on the code.
+   */
+  repositoryAgentNotApplicable: (testId: string, agentId: string): string =>
+    `Test ${testId} no longer applies to the agent bound to this repository. ` +
+    `Link it to agent ${agentId} in Egma, or remove this local file; egma ` +
+    "push changed neither side.",
+
+  personaNameAmbiguous: (name: string): string =>
+    `Persona name ${name} matches more than one active persona in this ` +
+    "project. Put the intended persona's stable ID in the file and try again; " +
+    "for a pinned file, egma pull can write the IDs after the file is safe to " +
+    "migrate.",
 
   testNotApplicable: (
     testId: string,

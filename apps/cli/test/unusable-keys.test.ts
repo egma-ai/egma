@@ -23,6 +23,7 @@ import { createEgmaFolder, writeTestFile } from "../src/folder/egma-folder.ts";
 import { KEYS_UNUSABLE } from "../src/platform/credentials.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { CLI_ENTRY, makeWorkspace, type Workspace } from "./support/workspace.ts";
+import { aTestFile, blocking } from "./support/test-file.ts";
 
 /** Truncated mid-key, which is what an interrupted write leaves behind. */
 const DAMAGED = '{\n  "version": 1,\n  "platforms": {\n    "https://one.example": {"ke';
@@ -45,14 +46,14 @@ beforeEach(async () => {
       suite: { name: "first-suite", id: null },
     },
   });
-  await writeTestFile(path.join(workspace.dir, "egma", "tests", "moves-a-booking.md"), {
+  await writeTestFile(path.join(workspace.dir, "egma", "tests", "moves-a-booking.md"), aTestFile({
     name: "moves-a-booking",
     personas: [],
     version: null,
     scenario: "The persona asks to move an appointment.",
-    expectedBehaviors: ["The agent confirms the new time."],
+    expectedBehaviors: blocking("The agent confirms the new time."),
     mockTools: [],
-  });
+  }));
 
   await mkdir(workspace.egmaFolder, { recursive: true });
   await writeFile(workspace.credentialsFile, DAMAGED, "utf8");

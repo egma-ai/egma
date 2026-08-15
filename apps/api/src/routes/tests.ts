@@ -11,6 +11,7 @@ import {
   listTests,
   listTestVersions,
   NotPermittedError,
+  PersonaNameAmbiguousError,
   ProjectOutsideOrganizationError,
   resolvePersonaNames,
   restoreTest,
@@ -716,6 +717,24 @@ export async function testRoutes(
       );
     }
 
+    /**
+     * The agent the repository sending this edit is bound to, when one is.
+     *
+     * A question and never a change: the platform answers it by refusing when
+     * the test no longer applies to that agent. It is separate from `agents`
+     * above — which this door refuses outright — because that one would be an
+     * instruction, and one file must never become the source of truth for a set
+     * of links it cannot see.
+     */
+    const repositoryAgent = given(text(body.repository_agent));
+    if (repositoryAgent !== undefined && !isId("agt", repositoryAgent)) {
+      return unprocessable(
+        reply,
+        `"${repositoryAgent}" is not an agent id. Send the agt_ id of the ` +
+          "agent this repository is bound to, or leave it out.",
+      );
+    }
+
     const acting = await actingIn(auth, given(text(body.project)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
@@ -725,6 +744,9 @@ export async function testRoutes(
         : await resolvePersonaNames(acting.auth, personas.entries);
 
     const edited = await editTest(acting.auth, testId, {
+      ...(repositoryAgent === undefined
+        ? {}
+        : { repositoryAgentId: repositoryAgent }),
       ...(given(text(body.expected_version_id)) === undefined
         ? {}
         : { expectedVersionId: text(body.expected_version_id) }),
@@ -908,6 +930,15 @@ export async function testRoutes(
 
     if (error instanceof TestAgentRefusedError) {
       switch (error.reason) {
+        case "repository_agent_not_applicable":
+          return sendRefusal(
+            reply,
+            "repository_agent_not_applicable",
+            REFUSALS.repositoryAgentNotApplicable(
+              error.testId ?? "",
+              error.agentId ?? "",
+            ),
+          );
         case "test_needs_agent":
           return sendRefusal(
             reply,
@@ -949,6 +980,17 @@ export async function testRoutes(
     // with a code of its own, so a form can point at the capability list.
     if (error instanceof UnknownCapabilityError) {
       return sendRefusal(reply, "unknown_capability", error.message);
+    }
+
+    // The other subclass, for the same reason and a different reader: a file
+    // naming a persona two living personas answer to. The code is what lets a
+    // repository client say where the identifier goes.
+    if (error instanceof PersonaNameAmbiguousError) {
+      return sendRefusal(
+        reply,
+        "persona_name_ambiguous",
+        REFUSALS.personaNameAmbiguous(error.personaName),
+      );
     }
 
     // The factory turned the write away at its door, in its own words. Relayed

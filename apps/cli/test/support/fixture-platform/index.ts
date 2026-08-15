@@ -29,11 +29,13 @@ export type {
   Verdict,
 } from "./runs.ts";
 export type { FixturePlatform, Observation } from "./server.ts";
-export type { SeedTest, SeededTest, TestControls } from "./tests.ts";
+export type { SeedBehavior, SeedTest, SeededTest, TestControls } from "./tests.ts";
 
 export type Platform = FixturePlatform & {
   /** Stable identity returned before login. */
   readonly instanceId: PlatformIdentityControls["instanceId"];
+  /** What this platform says about the shapes it reads and writes. */
+  readonly speaking: PlatformIdentityControls;
   /** What a person in a browser would do, done directly. */
   readonly device: DeviceControls;
   /** What was registered, and what the platform was handed to seal. */
@@ -80,7 +82,14 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
     const agentGroup = agentRoutes({ knowsKey: holdsKey, projectId });
     registered = agentGroup.controls;
 
-    const testGroup = testRoutes({ holdsKey, projectId });
+    // The agents a test may be linked to are the ones the agent group holds,
+    // read rather than copied — one answer to "does this project have that
+    // agent", exactly as the mock tool group does it.
+    const testGroup = testRoutes({
+      holdsKey,
+      projectId,
+      agentsHere: () => agentGroup.controls.agents,
+    });
     tests = testGroup.controls;
 
     // The scope a mock tool may name is read out of the agent group rather
@@ -119,6 +128,7 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
   return {
     ...platform,
     instanceId: identity.instanceId,
+    speaking: identity,
     device,
     registered,
     tests,

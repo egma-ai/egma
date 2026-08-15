@@ -124,6 +124,7 @@ export {
   MockToolTakenError,
   NoCapabilityAdapterError,
   NotPermittedError,
+  PersonaNameAmbiguousError,
   PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
   ProjectSlugTakenError,

@@ -25,6 +25,7 @@ import { startInstance, type Instance } from "../../api/test/support/instance.ts
 import { signUp } from "../../api/test/support/traces.ts";
 import { folderPathsIn, readConfig, writeTestFile } from "../src/folder/egma-folder.ts";
 import { CLI_ENTRY, makeWorkspace } from "./support/workspace.ts";
+import { aTestFile, blocking } from "./support/test-file.ts";
 
 type Ended = { readonly code: number; readonly stdout: string; readonly stderr: string };
 
@@ -95,14 +96,14 @@ it("reaches a real local platform with nothing configured anywhere", async () =>
     // What `egma init` writes: names, and no platform of any kind.
     expect((await readConfig(paths.config)).platform).toBeNull();
 
-    await writeTestFile(path.join(paths.tests, "moves-appointment.md"), {
+    await writeTestFile(path.join(paths.tests, "moves-appointment.md"), aTestFile({
       name: "moves-appointment",
       personas: [],
       version: null,
       scenario: "The persona needs a different appointment time.",
-      expectedBehaviors: ["The agent confirms the new time."],
+      expectedBehaviors: blocking("The agent confirms the new time."),
       mockTools: [],
-    });
+    }));
 
     const pushed = await egma(["push", "--cwd", workspace.dir], {
       cwd: workspace.dir,
