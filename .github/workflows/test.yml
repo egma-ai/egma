@@ -19,9 +19,11 @@ name: Tests
 # depends on the branch being merged into: `github.base_ref`, which on a pull
 # request is the branch the change is going to.
 #
-# `tools/test-lanes.ts` owns what each lane selects, and every run prints the
-# lane it chose before it starts, so a green tick can always be read back to
-# the proof it stands for.
+# `vitest.config.ts` owns what each lane selects, as two Vitest projects. The
+# fast lane declares no `include` — it is Vitest's own default search minus the
+# one real-browser file — so a new test file joins it by existing. Every run
+# prints its lane and Vitest labels each file with the project it came from, so
+# a green tick can always be read back to the proof it stands for.
 #
 # Every job runs on a Blacksmith runner, which the organization already pays
 # for and which carries GitHub's own runner image — so docker, the compose
