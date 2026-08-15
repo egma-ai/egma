@@ -55,6 +55,7 @@ import { descriptorOf, noSimulatorAdapterMessage } from "./connection-registry.t
 import type { AuthContext } from "./context.ts";
 import {
   IdempotencyConflictError,
+  refuseRetry,
   RunWriteRefusedError,
 } from "./errors.ts";
 import { enqueueGradingJob } from "./grading.ts";
@@ -66,6 +67,7 @@ import {
   resolvePersonaVersions,
   resolvePinnedVersions,
   resolveRunPlan,
+  scenarioGradersMissingFrom,
   validPinnedVersions,
   writeGradingPlan,
 } from "./run-plans.ts";
@@ -1117,16 +1119,8 @@ export async function startRun(
   // never learned its first attempt succeeded: the answer is a read, and there
   // is nothing to write. The insert inside the transaction is what catches the
   // two attempts that arrive at the same instant.
-  if (idempotencyKey !== undefined && requestDigest !== undefined) {
-    const already = await originalRunFor(
-      db(),
-      auth,
-      projectId,
-      idempotencyKey,
-      requestDigest,
-    );
-    if (already !== undefined) return already;
-  }
+  const remembered = await runAlreadyStartedFor(auth, input);
+  if (remembered !== undefined) return remembered;
 
   const runId = newId("run");
   const now = new Date();
@@ -1223,6 +1217,27 @@ export async function startRun(
        * the money is spent is the whole point.
        */
       const { groups } = await resolveRunPlan(tx, auth, projectId, versions);
+
+      /**
+       * A Retry's last recheck, made here because here is the only place it
+       * cannot be split from the freeze.
+       *
+       * `retryRun` checks the graders before it calls in, and every other
+       * resource it checks is re-read inside this transaction by the reads
+       * above — an archived agent or connection, an archived or unlinked test,
+       * an archived persona all refuse in here on their own. A directly named
+       * grader is the one that does not: archiving it simply removes it from
+       * the plan, which is right for an ordinary start and wrong for a Retry.
+       * So it is asked of the plan this transaction is about to freeze, and a
+       * grader archived in the gap refuses the whole creation instead of
+       * quietly producing a run judged by less than the one it copies.
+       */
+      if (retryOfRunId !== null) {
+        const [missing] = scenarioGradersMissingFrom(versions, groups);
+        if (missing !== undefined) {
+          refuseRetry(retryOfRunId, "grader", `grader ${missing}`, missing);
+        }
+      }
 
       /**
        * Which of these conversations egma can honestly have, decided once against
@@ -1472,6 +1487,43 @@ export async function startRun(
       }))
       .sort((a, b) => a.position - b.position),
   };
+}
+
+/**
+ * The run this start has already produced under its own idempotency key, if it
+ * has produced one.
+ *
+ * **It exists so that a caller with work to do in front of `startRun` can ask
+ * the shield first.** `retryRun` has six rechecks to make, every one of which
+ * can refuse — and a repeat under a key whose first attempt succeeded must be
+ * answered with that run rather than refused, because by then the retry it is
+ * asking about is already dialing a real agent. Asking here, off the very input
+ * `startRun` will be handed, is the only way the two digests cannot drift: a
+ * recall computed from a second object that merely looks the same would miss
+ * every time and nothing would show it.
+ *
+ * `startRun` asks it too, so there is one recall and not two.
+ *
+ * A key remembered against a *different* body throws `IdempotencyConflictError`
+ * from in here rather than answering, on the terms `originalRunFor` sets out.
+ * The caller is expected to have authorized already; this reads only what the
+ * context's own organization, project and actor remembered.
+ */
+export async function runAlreadyStartedFor(
+  auth: AuthContext,
+  input: NewRun,
+): Promise<StartedRun | undefined> {
+  const { projectId } = auth;
+  if (projectId === undefined) return undefined;
+  const idempotencyKey = input.idempotencyKey?.trim() || undefined;
+  if (idempotencyKey === undefined) return undefined;
+  return originalRunFor(
+    db(),
+    auth,
+    projectId,
+    idempotencyKey,
+    digestOfStart(input),
+  );
 }
 
 /**

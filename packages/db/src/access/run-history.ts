@@ -13,15 +13,17 @@ import {
   type SimulationFold,
 } from "../verdicts/read-fold.ts";
 import type { AuthContext } from "./context.ts";
-import { RunRetryRefusedError, type RetryBlocker } from "./errors.ts";
+import { refuseRetry } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
 import { LARGEST_PAGE_SIZE, type PageRequest } from "./pages.ts";
 import { testsApplyingToAgent } from "./tests.ts";
 import {
   getRun,
   listRuns,
+  runAlreadyStartedFor,
   simulationStatusesOfRuns,
   startRun,
+  type NewRun,
   type Run,
   type RunFilter,
   type StartedRun,
@@ -214,38 +216,6 @@ async function foldEachRun(
  * Retry.
  * ------------------------------------------------------------------- */
 
-/**
- * The sentence a refused Retry answers with, filled in and never composed.
- *
- * It is written here rather than at the HTTP door because the resource it names
- * is decided here, and a sentence assembled in two places is a contract that
- * exists nowhere as one string. Every refusal below is this sentence with a
- * different noun in it, and the last clause is the promise the whole operation
- * rests on: nothing about the earlier run has been touched.
- */
-function retryUnavailable(runId: string, resource: string): string {
-  return (
-    `Run ${runId} cannot be retried because ${resource} is not active or no ` +
-    `longer applies. Open the run builder and choose active resources; the ` +
-    `original run was not changed.`
-  );
-}
-
-function refuseRetry(
-  runId: string,
-  kind: RetryBlocker,
-  resource: string,
-  resourceId: string | null,
-): never {
-  throw new RunRetryRefusedError({
-    runId,
-    resource,
-    resourceKind: kind,
-    resourceId,
-    message: retryUnavailable(runId, resource),
-  });
-}
-
 export type RetryRequest = {
   /**
    * The caller's own word for this attempt, on the same terms every start has
@@ -278,6 +248,15 @@ export type RetryRequest = {
  * credential, and the project's mock tools are all resolved fresh by `startRun`
  * — because those are what a run under current conditions means. The earlier run
  * is never reopened and never changed.
+ *
+ * **The idempotency key is asked about before any of the rechecks.** The common
+ * repeat is a client that never learned its first attempt succeeded, and by then
+ * the retry it is asking about is already dialing a real agent — so anything it
+ * used may have been archived in the meantime, with no race needed. A recheck in
+ * front of the recall would answer "this cannot be retried" about a retry that
+ * is running, which is the exact failure a key exists to prevent. So the recall
+ * comes first, off the same input `startRun` is later handed, and the rechecks
+ * run only when the key remembers nothing.
  */
 export async function retryRun(
   auth: AuthContext,
@@ -304,6 +283,26 @@ export async function retryRun(
     );
   }
 
+  // Built before anything is asked, because the digest the recall matches on is
+  // taken from this exact object: a recall computed from anything else would
+  // miss, and the shield would be gone in a way nothing shows.
+  const start: NewRun = {
+    agentId: earlier.agentId,
+    connectionId: earlier.connectionId,
+    testVersionIds: [...versionIds],
+    retryOfRunId: runId,
+    idempotencyKey: request.idempotencyKey,
+    ...(earlier.label === null ? {} : { label: earlier.label }),
+  };
+
+  // Ahead of every recheck below. The answer is a read, there is nothing to
+  // write, and a refusal in front of it would be a sentence about a retry that
+  // is already running. A key reused with a *different* body still refuses out
+  // loud from in here, and that refusal is a conflict rather than a Retry the
+  // conditions stopped — two different sentences leading two different ways.
+  const remembered = await runAlreadyStartedFor(auth, start);
+  if (remembered !== undefined) return remembered;
+
   await demandActiveAgent(on, auth, runId, earlier.agentId);
   await demandActiveConnection(on, auth, runId, earlier.connectionId);
   const versions = await demandLiveVersions(on, auth, runId, versionIds);
@@ -311,14 +310,7 @@ export async function retryRun(
   await demandActivePersonas(on, auth, runId, versionIds);
   await demandActiveGraders(on, auth, runId, versionIds);
 
-  return startRun(auth, {
-    agentId: earlier.agentId,
-    connectionId: earlier.connectionId,
-    testVersionIds: [...versionIds],
-    retryOfRunId: runId,
-    idempotencyKey: request.idempotencyKey,
-    ...(earlier.label === null ? {} : { label: earlier.label }),
-  });
+  return startRun(auth, start);
 }
 
 async function demandActiveAgent(

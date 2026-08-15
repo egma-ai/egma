@@ -23,6 +23,7 @@ import {
   foldRun,
   foldSimulation,
   getRun,
+  IdempotencyConflictError,
   listRunHistory,
   markSimulationCanceled,
   readRunFold,
@@ -645,6 +646,76 @@ describe("retrying a run", () => {
     expect(second?.id).toBe(first?.id);
   });
 
+  /**
+   * The repeat the key is actually for, and the reason the recall has to be
+   * asked before any recheck.
+   *
+   * The first attempt succeeded and its answer was lost on the way back. By the
+   * time the client asks again, the retry it is asking about is already running
+   * — and the agent has since been archived, which needs no race at all, only
+   * minutes. A recheck in front of the recall would answer "this cannot be
+   * retried" about a retry that is running, which is the one failure an
+   * idempotency key exists to prevent.
+   *
+   * It drives `retryRun` twice for real. Nothing here calls the recall itself.
+   */
+  it("answers the run the key already started, even after the agent is archived", async () => {
+    // Its own agent, its own test and its own connection, so archiving it does
+    // not disturb the rest of this file.
+    const spare = await createAgent(auth, {
+      name: `Archived under a repeat ${newId("agt")}`,
+      connection: {
+        type: "retell",
+        modality: "chat",
+        config: { retellAgentId: "agent_in_retell_4" },
+        credentials: { apiKey: "retell-secret-R1R2R3R4WXYZ" },
+      },
+    });
+    const spareTest = await createTest(auth, {
+      name: `Applies to the repeat's agent ${newId("tst")}`,
+      scenario: "Anything at all, so long as it applies to this agent.",
+      expectedBehaviors: ["answers"],
+      personaIds: [rita],
+      agentIds: [spare.id],
+    });
+    const earlier = await startRun(auth, {
+      agentId: spare.id,
+      connectionId: spare.connection?.id ?? "",
+      testVersionIds: [spareTest.versionId],
+      idempotencyKey: newId("run"),
+    });
+
+    const key = newId("run");
+    const first = await retryRun(auth, earlier.id, { idempotencyKey: key });
+    if (first === undefined) throw new Error("the retry should have started");
+
+    // Minutes later, and with the retry already dialing.
+    await archiveAgent(auth, spare.id);
+
+    const repeated = await retryRun(auth, earlier.id, { idempotencyKey: key });
+    expect(repeated?.id).toBe(first.id);
+    expect(repeated?.retryOfRunId).toBe(earlier.id);
+  });
+
+  /**
+   * The shield answers a repeat; it never answers a different request. A key
+   * carrying a new body is a conflict, and a conflict must not arrive wearing
+   * the Retry sentence — the two lead two different ways, and "choose active
+   * resources" would send somebody to fix a thing that is not broken.
+   */
+  it("still refuses a key reused for a different run, and not as a Retry refusal", async () => {
+    const earlier = await anEarlierRun();
+    const another = await anEarlierRun();
+    const key = newId("run");
+    await retryRun(auth, earlier, { idempotencyKey: key });
+
+    // Archived agents and unlinked tests are what the rechecks look for, and
+    // this refusal has to come from in front of all of them.
+    await expect(
+      retryRun(auth, another, { idempotencyKey: key }),
+    ).rejects.toBeInstanceOf(IdempotencyConflictError);
+  });
+
   it("answers nothing about a run that is not this caller's", async () => {
     const earlier = await anEarlierRun();
     expect(
@@ -854,6 +925,73 @@ describe("retrying a run", () => {
     );
     expect(refused.resourceKind).toBe("grader");
     expect(refused.message).toContain(`grader ${grader.id}`);
+  });
+
+  /**
+   * The same refusal, from inside the transaction that freezes the plan.
+   *
+   * A grader archived *after* the recheck above and *before* the plan is
+   * resolved used to be dropped rather than refused: the plan simply did not
+   * carry it, the retry ran with one grader fewer than the run it copies, and
+   * the two results were then compared as though they measured the same thing.
+   * Every other resource a Retry rechecks is re-read inside that transaction
+   * already; the grader was the one that was not.
+   *
+   * The window is a moment wide and cannot be held open from a test, so what is
+   * driven here is exactly what is left of the retry once the window has passed
+   * — the same call `retryRun` makes, with the same input, against a grader that
+   * is already archived. The refusal it must produce is the Retry's own
+   * sentence, and no run may exist afterwards.
+   */
+  it("refuses a grader archived between the recheck and the freeze", async () => {
+    const grader = await createGrader(auth, {
+      name: `Archived mid-flight ${newId("grd")}`,
+      type: "llm_rubric",
+      priority: "P1",
+      scope: "simulations",
+      config: { rubric: "The agent never promises a refund." },
+    });
+    const named = await createTest(auth, {
+      name: `Names the mid-flight grader ${newId("tst")}`,
+      scenario: "Anything, so long as this grader judges it.",
+      expectedBehaviors: ["answers"],
+      personaIds: [rita],
+      graderIds: [grader.id],
+    });
+    const earlier = await startRun(auth, {
+      agentId,
+      connectionId,
+      testVersionIds: [named.versionId],
+      idempotencyKey: newId("run"),
+    });
+
+    await editTest(auth, named.id, {
+      graderIds: [],
+      expectedVersionId: named.versionId,
+    });
+    await deleteGrader(auth, grader.id);
+
+    const refused = await refusalFrom(
+      startRun(auth, {
+        agentId,
+        connectionId,
+        testVersionIds: [named.versionId],
+        retryOfRunId: earlier.id,
+        idempotencyKey: newId("run"),
+      }),
+    );
+    expect(refused.resourceKind).toBe("grader");
+    expect(refused.resourceId).toBe(grader.id);
+    expect(refused.message).toBe(
+      `Run ${earlier.id} cannot be retried because grader ${grader.id} is ` +
+        `not active or no longer applies. Open the run builder and choose ` +
+        `active resources; the original run was not changed.`,
+    );
+
+    // And the whole creation rolled back: this test has exactly the one run it
+    // started with, and nothing retrying it.
+    const history = await listRunHistory(auth, { testId: named.id });
+    expect(history.items.map((entry) => entry.run.id)).toEqual([earlier.id]);
   });
 });
 

@@ -989,8 +989,9 @@ export class IdempotencyConflictError extends Error {
  *
  * The blocking resource travels as a value rather than only inside the sentence,
  * because a page offers a link to it and reading a noun back out of prose is how
- * a sentence becomes load-bearing. The sentence itself is composed at the door,
- * where every other product refusal's wording lives.
+ * a sentence becomes load-bearing. The sentence itself is `refuseRetry` below,
+ * beside the error rather than at the HTTP door, because the resource it names
+ * is decided in the data-access module and two of its files raise it.
  */
 export class RunRetryRefusedError extends Error {
   readonly runId: string;
@@ -1035,3 +1036,38 @@ export type RetryBlocker =
   | "grader"
   | "applicability"
   | "selection";
+
+/**
+ * The sentence a refused Retry answers with, filled in and never composed.
+ *
+ * It is one string in one place because a sentence assembled twice is a contract
+ * that exists nowhere as one string — and this one is now raised from two files:
+ * `run-history.ts`, which rechecks before it asks for the run, and `runs.ts`,
+ * which rechecks again inside the transaction that freezes the plan. Every
+ * refusal is this sentence with a different noun in it, and the last clause is
+ * the promise the whole operation rests on: nothing about the earlier run has
+ * been touched.
+ */
+export function retryUnavailable(runId: string, resource: string): string {
+  return (
+    `Run ${runId} cannot be retried because ${resource} is not active or no ` +
+    `longer applies. Open the run builder and choose active resources; the ` +
+    `original run was not changed.`
+  );
+}
+
+/** Refuse a Retry, naming the resource that stopped it. */
+export function refuseRetry(
+  runId: string,
+  kind: RetryBlocker,
+  resource: string,
+  resourceId: string | null,
+): never {
+  throw new RunRetryRefusedError({
+    runId,
+    resource,
+    resourceKind: kind,
+    resourceId,
+    message: retryUnavailable(runId, resource),
+  });
+}
