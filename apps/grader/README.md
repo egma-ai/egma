@@ -103,17 +103,35 @@ separately is two graders, which gives two rows a developer can read apart.
 Splitting one rubric's text on whatever punctuation looked like a list would
 invent criteria nobody wrote.
 
-## The measure catalog
+## The measure catalog, and the one module that computes it
 
-A `metric_threshold` grader names the measure it reads as a string, and a string
-that names nothing produces a grader that reads nothing, judges nothing, and is
-`skipped` forever. The **measure catalog** —
-`packages/simulation-contract/measure-catalog.md`, beside the two schemas, with
-`src/measures.ts` as the same list in code — names every measure a simulation
-produces and the aggregations a threshold may ask of them. The grader factory's
-write door refuses a measure that is not in it, naming the catalog, so a typo is
-a refusal at the moment it is written rather than a check that quietly never
-fires.
+A grader names the measure it reads as a string, and a string that names nothing
+produces a grader that reads nothing, judges nothing, and is `skipped` forever.
+The **measure catalog** — `packages/simulation-contract/measure-catalog.md`,
+beside the two schemas, with `src/measures.ts` as the same list in code — names
+every measure egma records, **and now pins each one's span-level definition
+beside its name**: the rule that says how it is computed from a conversation's
+spans, or that no span carries it at all.
+
+One shared measure module implements exactly those definitions
+(`packages/db/src/measures/from-spans.ts`), and it is the **only** computation
+path for them. The metrics display reads through it and so does the `latency`
+grader, for a simulation and a production conversation alike — so the number on
+a screen and the number a verdict rests on are one piece of arithmetic and can
+never disagree. Nothing is stored: a measure is the spans, reduced, at read time.
+
+The module knows nothing about where a conversation came from. Identical spans
+therefore produce identical numbers whether egma conducted the conversation or a
+real caller had it, which is what makes "passes in simulation, fails in
+production" a fact about the agent rather than about two readers.
+
+The grader factory's **write door refuses a measure a copy could not read** —
+one the catalog does not name, and one it names but no span carries, which is a
+real number arriving on the transition that ends a simulation and living on the
+simulation row instead. Both would be a check that is `skipped` forever, and the
+moment of writing is the only place anything can tell them from a measure a chat
+conversation simply did not produce. The **Use** form's dropdown is fed from the
+same list, so a developer is never offered something a write would refuse.
 
 ## The built-in: a test's expected behaviors, judged one at a time
 

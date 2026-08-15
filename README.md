@@ -873,6 +873,21 @@ for a trace egma conducted, because a production trace converts just as neatly
 into an id nothing ever minted. It is what lets a reader holding one transcript
 ask for that conversation's recording without looking anything else up.
 
+And it carries **`measures`**: what this exchange measured, computed from its
+own spans. Each entry is `{measure, unit, samples, span_ids}` — the measure's
+name from
+[the measure catalog](packages/simulation-contract/measure-catalog.md), the unit
+that catalog counts it in, one sample per measurement in the order they were
+taken, and the span each sample came off. A measure this exchange did not
+produce is **absent** rather than present with nothing in it, so an empty list
+means nothing was measured — which is the ordinary answer for a production
+exchange, since most agent frameworks emit no timing spans at all.
+
+These are computed at read time by the same code a `latency` grader is judged
+through, so the number you read here and the number a verdict rests on are one
+piece of arithmetic and can never disagree. Nothing stores them: they are the
+spans in this response, reduced.
+
 Five things about the contract are worth knowing before you build on it:
 
 - **The window is required, and wider than 31 days is refused rather than
