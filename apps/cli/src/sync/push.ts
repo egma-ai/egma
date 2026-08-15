@@ -116,8 +116,34 @@ export type PushedTest = {
   readonly name: string;
   readonly shown: string;
   readonly versionId: string;
+  /**
+   * What this push did about it. **`unchanged` is not a write**: the file said
+   * exactly what the platform already held, so nothing was sent and no version
+   * was minted. Its file may still have been rewritten — a hand-formatted file
+   * says the same thing in different bytes — but that is a fact about the
+   * working tree and never about the platform.
+   */
   readonly state: "created" | "updated" | "unchanged";
 };
+
+/**
+ * The tests this push actually wrote to the platform.
+ *
+ * **Every count of "what landed" comes through here**, because a count is a
+ * promise about the platform and `report.tests` is a list of what the push
+ * *looked at*. The two differ by exactly the settled files, and somebody told
+ * that three tests went up will go and check three tests — finding one of them
+ * untouched teaches them not to trust the sentence, which is worse than not
+ * having said a number at all.
+ *
+ * One function rather than a filter written at each reader, so the printed
+ * count and the sentence beside it cannot come to disagree.
+ */
+export function landed(
+  tests: readonly PushedTest[],
+): readonly PushedTest[] {
+  return tests.filter((test) => test.state !== "unchanged");
+}
 
 /** A test the platform would not accept, in the platform's own words. */
 export type TurnedAway = {

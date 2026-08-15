@@ -10,7 +10,7 @@
 import { PlatformUnreachableError } from "../platform/device-flow.ts";
 import { PlatformRefusedError } from "../platform/refused.ts";
 import { pushMockTools, type PushMockToolsReport } from "../sync/mock-tools.ts";
-import { pushTests, type PushConflict, type PushedTest } from "../sync/push.ts";
+import { landed, pushTests, type PushConflict, type PushedTest } from "../sync/push.ts";
 import { FOLDER_EXIT, readyToSync, type FolderCommandOptions } from "./folder-verbs.ts";
 
 /**
@@ -57,9 +57,13 @@ export function movedRefusal(conflicts: readonly PushConflict[]): string {
  * of what happened is not a recovery.
  *
  * So this one counts. It names what went up, names what did not with the reason
- * for each, and asks for the pull that makes the second push a real one. The
- * count agrees with the `uploaded:` line the caller prints beside it, because
- * both are read off the same report.
+ * for each, and asks for the pull that makes the second push a real one.
+ *
+ * **`pushed` is what was written, not what was looked at.** The caller filters
+ * it through `landed` and prints its length on the `uploaded:` line, so the
+ * number here and the number there are one list. A test the push found already
+ * settled was never sent and is in neither: naming it would be this sentence
+ * making the same mistake as the one it replaced, one decimal place further in.
  */
 export function lateRefusal(
   pushed: readonly PushedTest[],
@@ -144,7 +148,13 @@ export async function runPushCommand(options: FolderCommandOptions): Promise<num
       options.out(`reason-code: ${conflict.reason}`);
       if (conflict.said !== null) options.out(`reason: ${conflict.said}`);
     }
-    options.out(`uploaded: ${report.uploadedNothing ? "nothing" : String(report.tests.length)}`);
+    // One value, two readers: the printed count and the sentence beside it are
+    // the same list, so they cannot come to disagree. It is what the push
+    // *wrote*, which is not what it looked at — a file that already said what
+    // the platform held was never sent, and counting it would send somebody to
+    // check a test nothing touched.
+    const written = landed(report.tests);
+    options.out(`uploaded: ${report.uploadedNothing ? "nothing" : String(written.length)}`);
     options.out("status: refused");
     // Two sentences, and which one is said is decided by what actually
     // happened rather than by which check refused. "Nothing was uploaded" is
@@ -153,7 +163,7 @@ export async function runPushCommand(options: FolderCommandOptions): Promise<num
     options.fail(
       report.uploadedNothing
         ? movedRefusal(report.conflicts)
-        : lateRefusal(report.tests, report.conflicts),
+        : lateRefusal(written, report.conflicts),
     );
     return FOLDER_EXIT.moved;
   }

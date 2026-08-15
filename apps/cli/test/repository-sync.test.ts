@@ -1016,6 +1016,85 @@ describe("a link removed after the preflight", () => {
     );
     expect(platform.tests.versionsOf("first")).toBe(2);
   });
+
+  /**
+   * The count is a promise about the platform, so it counts writes.
+   *
+   * A file that already says what egma holds is never sent — it is in the
+   * report because the push looked at it, and its version did not move. Adding
+   * it to "egma uploaded 3 of these" sends somebody to check three tests and
+   * find one untouched, which is the same mistake as the sentence this one
+   * replaced, made one decimal place further in.
+   *
+   * Three files, in the order the folder reads them: one settled, one edited
+   * that lands, and one edited that the platform refuses after the check.
+   */
+  it("counts what it wrote, not what it looked at", async () => {
+    const { agentId, paths } = await boundRepository();
+    for (const name of ["a-settled", "b-edited", "c-refused"]) {
+      platform.tests.add({
+        name,
+        scenario: `${name} happens`,
+        expectedBehaviors: ["b"],
+        agents: [agentId],
+      });
+    }
+    await egma(["pull"]);
+    // Two of the three are edited. `a-settled` is left exactly as the pull
+    // wrote it, so the push finds it already saying what egma holds.
+    for (const name of ["b-edited", "c-refused"]) {
+      const held = await readTest(`${name}.md`);
+      await writeTest(`${name}.md`, held.replace("1. [P0] b", "1. [P0] b, said better"));
+    }
+
+    const reallyFetch = globalThis.fetch;
+    let uploads = 0;
+    const racing: typeof fetch = async (input, init) => {
+      const address = new URL(typeof input === "string" ? input : String(input));
+      const write = init?.method === "PATCH" && address.pathname.startsWith("/api/tests/");
+      const answer = await reallyFetch(input, init);
+      if (write) {
+        uploads += 1;
+        // The first upload is b-edited's, because the folder reads in file-name
+        // order. c-refused loses its link between that write and its own.
+        if (uploads === 1) platform.tests.setAgents("c-refused", []);
+      }
+      return answer;
+    };
+
+    globalThis.fetch = racing as typeof fetch;
+    const out: string[] = [];
+    const failed: string[] = [];
+    let code: number;
+    try {
+      code = await runPushCommand({
+        access: { url: platform.url, credentialsFile: workspace.credentialsFile },
+        cwd: workspace.dir,
+        out: (line) => out.push(line),
+        fail: (line) => failed.push(line),
+      });
+    } finally {
+      globalThis.fetch = reallyFetch;
+    }
+    const printed = out.join("\n");
+    const spoken = failed.join("\n");
+
+    expect(code).toBe(5);
+    // What the platform actually holds: one test moved, and two did not.
+    expect(platform.tests.versionsOf("a-settled")).toBe(1);
+    expect(platform.tests.versionsOf("b-edited")).toBe(2);
+    expect(platform.tests.versionsOf("c-refused")).toBe(1);
+
+    // So the count is one, on the line and in the sentence alike.
+    expect(factOf(printed, "uploaded")).toBe("1");
+    expect(spoken).toContain("egma uploaded 1 of these and then refused c-refused");
+    expect(spoken).toContain("What has landed has landed — b-edited");
+    // And the settled test is named in neither, because nothing was sent for it.
+    expect(spoken).not.toContain("a-settled");
+    // It is still reported, under the word for what happened to it, because the
+    // push did look at it and its file was rewritten.
+    expect(valuesOf(printed, "unchanged")).toEqual(["a-settled"]);
+  });
 });
 
 /**
