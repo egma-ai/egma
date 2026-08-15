@@ -25,7 +25,9 @@ name: Tests
 #
 # Every job runs on a Blacksmith runner, which the organization already pays
 # for and which carries GitHub's own runner image — so docker, the compose
-# services and the official cache actions all behave as they did. The release
+# services and the official cache actions all behave as they did. One thing it
+# does not carry is `node-gyp`, which this repository needs to install at all;
+# `.github/native-toolchain.sh` is that gap and nothing else. The release
 # workflow beside this one stays on `ubuntu-latest` on purpose: it holds npm
 # publishing authority, and moving that is a separate decision.
 
@@ -72,6 +74,15 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      - name: Make the native build toolchain available
+        # Blacksmith's image carries no node-gyp, and `node-pty` publishes no
+        # Linux prebuild — so the install below compiles it, and without a
+        # compiler it dies as a bare "node-gyp: not found" underneath a package
+        # name. A gap in this runner image, not a requirement of this
+        # repository: `.github/native-toolchain.sh` says why in full, and
+        # installs nothing on an image that already has the four tools.
+        run: ./.github/native-toolchain.sh
+
       - run: pnpm install --frozen-lockfile
 
       - name: Lint
@@ -95,6 +106,15 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+
+      - name: Make the native build toolchain available
+        # Blacksmith's image carries no node-gyp, and `node-pty` publishes no
+        # Linux prebuild — so the install below compiles it, and without a
+        # compiler it dies as a bare "node-gyp: not found" underneath a package
+        # name. A gap in this runner image, not a requirement of this
+        # repository: `.github/native-toolchain.sh` says why in full, and
+        # installs nothing on an image that already has the four tools.
+        run: ./.github/native-toolchain.sh
 
       - run: pnpm install --frozen-lockfile
 
@@ -148,6 +168,15 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      - name: Make the native build toolchain available
+        # Blacksmith's image carries no node-gyp, and `node-pty` publishes no
+        # Linux prebuild — so the install below compiles it, and without a
+        # compiler it dies as a bare "node-gyp: not found" underneath a package
+        # name. A gap in this runner image, not a requirement of this
+        # repository: `.github/native-toolchain.sh` says why in full, and
+        # installs nothing on an image that already has the four tools.
+        run: ./.github/native-toolchain.sh
+
       - run: pnpm install --frozen-lockfile
 
       - name: Report the browser
@@ -186,6 +215,15 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      - name: Make the native build toolchain available
+        # Blacksmith's image carries no node-gyp, and `node-pty` publishes no
+        # Linux prebuild — so the install below compiles it, and without a
+        # compiler it dies as a bare "node-gyp: not found" underneath a package
+        # name. A gap in this runner image, not a requirement of this
+        # repository: `.github/native-toolchain.sh` says why in full, and
+        # installs nothing on an image that already has the four tools.
+        run: ./.github/native-toolchain.sh
+
       - run: pnpm install --frozen-lockfile
 
       - name: Install uv
@@ -211,6 +249,15 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      - name: Make the native build toolchain available
+        # Blacksmith's image carries no node-gyp, and `node-pty` publishes no
+        # Linux prebuild — so the install below compiles it, and without a
+        # compiler it dies as a bare "node-gyp: not found" underneath a package
+        # name. A gap in this runner image, not a requirement of this
+        # repository: `.github/native-toolchain.sh` says why in full, and
+        # installs nothing on an image that already has the four tools.
+        run: ./.github/native-toolchain.sh
+
       - run: pnpm install --frozen-lockfile
 
       - name: Install uv
@@ -232,6 +279,15 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+
+      - name: Make the native build toolchain available
+        # Blacksmith's image carries no node-gyp, and `node-pty` publishes no
+        # Linux prebuild — so the install below compiles it, and without a
+        # compiler it dies as a bare "node-gyp: not found" underneath a package
+        # name. A gap in this runner image, not a requirement of this
+        # repository: `.github/native-toolchain.sh` says why in full, and
+        # installs nothing on an image that already has the four tools.
+        run: ./.github/native-toolchain.sh
 
       - run: pnpm install --frozen-lockfile
 

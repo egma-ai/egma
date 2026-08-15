@@ -23,11 +23,13 @@ import {
  * and a real command run under the lock.
  */
 
-let scratch: string | undefined;
+/** Every temporary directory a case asked for, so all of them are swept. */
+const scratch: string[] = [];
 
 async function aLockPath(): Promise<string> {
-  scratch = await mkdtemp(path.join(tmpdir(), "egma-web-output-lock-"));
-  return path.join(scratch, ".next.lock");
+  const directory = await mkdtemp(path.join(tmpdir(), "egma-web-output-lock-"));
+  scratch.push(directory);
+  return path.join(directory, ".next.lock");
 }
 
 /** A process id that certainly belongs to nobody: one that has already gone. */
@@ -38,8 +40,11 @@ async function aFinishedProcessId(): Promise<number> {
 }
 
 afterEach(async () => {
-  if (scratch !== undefined) await rm(scratch, { recursive: true, force: true });
-  scratch = undefined;
+  await Promise.all(
+    scratch.splice(0).map((directory) =>
+      rm(directory, { recursive: true, force: true }),
+    ),
+  );
 });
 
 describe("holding the web output directory", () => {
@@ -73,6 +78,9 @@ describe("holding the web output directory", () => {
         pid: await aFinishedProcessId(),
         who: THE_REAL_BROWSER_TEST,
         since: new Date().toISOString(),
+        token: "the-holder-that-went",
+        // Any value: the number answers to nobody, so nothing is compared.
+        startedAt: "1",
       }),
     );
 
@@ -165,6 +173,47 @@ describe("a process id the operating system has given to somebody else", () => {
       A_PRODUCTION_WEB_BUILD,
     );
     build.release();
+  });
+
+  /**
+   * The same defect, reached through a lock file this code did not write.
+   *
+   * A `.next.lock` left by the version before start times were recorded carries
+   * a process number and nothing to confirm the number is still that process.
+   * Reading the missing field as an empty string and comparing it with another
+   * empty string is how two unknowns became a match — and how an unrelated
+   * process wearing a recycled number became the holder forever.
+   *
+   * Refused, not stolen. Unreadable is not abandoned, and a record this version
+   * cannot verify is unreadable in every way that matters.
+   */
+  it("is refused, not matched, when the lock predates start times", async () => {
+    const shapes = [
+      { token: "no-startedAt-at-all" },
+      { token: "an-empty-startedAt", startedAt: "" },
+    ];
+
+    for (const shape of shapes) {
+      const lockPath = await aLockPath();
+      await writeFile(
+        lockPath,
+        JSON.stringify({
+          pid: process.pid, // Genuinely running, which is what made it stick.
+          who: THE_REAL_BROWSER_TEST,
+          since: new Date().toISOString(),
+          ...shape,
+        }),
+      );
+
+      expect(() =>
+        holdWebOutputLock(A_PRODUCTION_WEB_BUILD, lockPath),
+      ).toThrow(/cannot be read, or does not carry the identity/);
+
+      // And it is still there: refusing must not become a second way to steal.
+      expect(JSON.parse(await readFile(lockPath, "utf8")).token).toBe(
+        shape.token,
+      );
+    }
   });
 
   it("still refuses a holder that really is this process", async () => {

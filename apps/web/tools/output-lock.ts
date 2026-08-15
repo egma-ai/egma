@@ -93,8 +93,13 @@ type Holder = {
   /** This holding, told apart from every other. Checked before release. */
   readonly token: string;
   /**
-   * What the operating system says about when process {@link pid} started.
-   * Empty where this machine would not say — see `processIdentity`.
+   * What the operating system says about when process {@link pid} started —
+   * the half of a holder's identity a recycled number cannot bring with it.
+   *
+   * **Never empty, and never absent.** A record without it is not a record this
+   * code can vouch for, and it is refused rather than read: an absent value
+   * that compares equal to another absent value is how a lock written by an
+   * older version of this file would have matched any process at all.
    */
   readonly startedAt: string;
 };
@@ -141,6 +146,14 @@ function read(lockPath: string): Reading {
     if (typeof pid !== "number" || typeof who !== "string") {
       return { state: "unreadable" };
     }
+    // Two unknowns are not a match. A lock file written before this field
+    // existed carries a process number and nothing that can confirm the number
+    // is still the same process, so it is neither evidence that the holder
+    // lives nor evidence that it has gone — which is exactly the state
+    // `unreadable` already names, and gets the same refusal.
+    if (typeof startedAt !== "string" || startedAt === "") {
+      return { state: "unreadable" };
+    }
     return {
       state: "held",
       holder: {
@@ -148,7 +161,7 @@ function read(lockPath: string): Reading {
         who,
         since: typeof since === "string" ? since : "",
         token: typeof token === "string" ? token : "",
-        startedAt: typeof startedAt === "string" ? startedAt : "",
+        startedAt,
       },
     };
   } catch {
@@ -212,10 +225,12 @@ function processIdentity(pid: number): string | undefined {
  */
 function stillHolding(holder: Holder): boolean {
   if (!numberInUse(holder.pid)) return false;
-  if (holder.startedAt === "") return true; // Written before this was recorded.
 
   const nowRunning = processIdentity(holder.pid);
-  if (nowRunning === undefined) return true; // This machine would not say.
+  // Something answers to the number, but this machine will not say what. That
+  // is not a match — it is an unknown, and the safe unknown is the one that
+  // costs a person a deleted file rather than a corrupted build.
+  if (nowRunning === undefined) return true;
   return nowRunning === holder.startedAt;
 }
 
@@ -299,6 +314,27 @@ function refusal(who: string, lockPath: string, because: string): Error {
 /**
  * Take the lock, or refuse and say who has it.
  */
+/**
+ * This process's own identity, or a refusal to lock at all.
+ *
+ * Every lock file this code writes carries one, because a record without it
+ * cannot be verified by anybody — including by this process, at release. A
+ * machine with neither `/proc` nor `ps` cannot tell two processes apart, and
+ * the honest thing to say there is so, rather than to write a lock that will
+ * quietly match whatever is given the number next.
+ */
+function identityOfThisProcess(): string {
+  const startedAt = processIdentity(process.pid);
+  if (startedAt === undefined) {
+    throw new Error(
+      "this machine will not say when a process started — neither /proc nor " +
+        "ps answered — so the web output lock cannot tell one process from " +
+        "another and will not pretend to.",
+    );
+  }
+  return startedAt;
+}
+
 export function holdWebOutputLock(
   who: string,
   lockPath: string = WEB_OUTPUT_LOCK,
@@ -309,7 +345,7 @@ export function holdWebOutputLock(
     who,
     since: new Date().toISOString(),
     token,
-    startedAt: processIdentity(process.pid) ?? "",
+    startedAt: identityOfThisProcess(),
   };
 
   for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
@@ -339,10 +375,10 @@ export function holdWebOutputLock(
       throw refusal(
         who,
         lockPath,
-        `the lock file at ${lockPath} cannot be read, so who holds the ` +
-          "output directory is unknown — and a lock that cannot be read is " +
-          "not the same as one nobody is behind, so it is never cleared " +
-          "automatically.",
+        `the lock file at ${lockPath} cannot be read, or does not carry the ` +
+          "identity this version records, so who holds the output directory " +
+          "is unknown — and a lock that cannot be read is not the same as one " +
+          "nobody is behind, so it is never cleared automatically.",
       );
     }
 
