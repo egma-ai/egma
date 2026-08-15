@@ -385,6 +385,143 @@ describe("re-grading a run", () => {
   });
 });
 
+/**
+ * The grain somebody reading one conversation's evidence asks at.
+ *
+ * **It is not a one-run window and it is not a one-conversation run**, which is
+ * why it is a target of its own. A window names conversations by the moment they
+ * became judgeable, and two conversations of one run land inside the same second
+ * — so asking about one through a window would ask about its neighbour too, and
+ * spend the judge on a conversation nobody was looking at.
+ */
+describe("re-grading one conversation", () => {
+  /** A run of two conversations, both judged: the pair the narrowing is proved on. */
+  async function aJudgedPair(): Promise<{
+    readonly runId: string;
+    readonly opened: string;
+    readonly neighbour: string;
+  }> {
+    const suffix = newId("prs").slice(-6);
+    const callers = await Promise.all(
+      [`Impatient Rita ${suffix}`, `Deliberate Sam ${suffix}`].map(
+        async (name) =>
+          (
+            await createPersona(auth, {
+              name,
+              traits: {
+                personality: "Speaks plainly.",
+                language: "en-US",
+                voice: {
+                  provider: "elevenlabs",
+                  voiceId: "EXAVITQu4vr4xnSDxMaL",
+                  speed: 1,
+                },
+              },
+            })
+          ).id,
+      ),
+    );
+
+    const pair = await createTest(auth, {
+      name: `Reschedules for two callers ${suffix}`,
+      scenario: "Their cleaning has to move to any afternoon next week.",
+      expectedBehaviors: ["confirms the new time back before finishing"],
+      personaIds: callers,
+    });
+
+    const claimant = `simulator-${suffix}`;
+    const started = await startRun(auth, {
+      agentId,
+      connectionId,
+      testVersionIds: [pair.versionId],
+    });
+    expect(started.simulations).toHaveLength(2);
+
+    await claimSimulations({ claimant, capacity: 50 });
+    for (const one of started.simulations) {
+      await startSimulation(auth, one.id, claimant);
+      await completeSimulation(auth, one.id, claimant, {
+        endingReason: "persona_concluded",
+      });
+    }
+
+    const grader = `grader-${suffix}`;
+    const claimed = await claimGradingJobs({ claimant: grader, capacity: 50 });
+    for (const one of started.simulations) {
+      const job = await theJobFor(one.id);
+      const mine = claimed.find((claim) => claim.id === job.id);
+      if (mine === undefined) throw new Error("the job was not claimed");
+      await finishGradingJob(mine.auth, job.id, grader);
+    }
+
+    const [opened, neighbour] = started.simulations;
+    if (opened === undefined || neighbour === undefined) {
+      throw new Error("the run has fewer than two conversations");
+    }
+    return { runId: started.id, opened: opened.id, neighbour: neighbour.id };
+  }
+
+  it("reaches that conversation and never the one beside it in the same run", async () => {
+    const { opened, neighbour } = await aJudgedPair();
+
+    const asked = await regrade(auth, { simulationId: opened });
+
+    expect(asked?.reopened.map((job) => job.simulationId)).toEqual([opened]);
+    expect(asked?.graderId).toBeNull();
+    expect((await theJobFor(opened)).status).toBe("pending");
+    // The other conversation of the same run, landed in the same second, was
+    // never named — so nobody spent the judge on it.
+    expect((await theJobFor(neighbour)).status).toBe("graded");
+  });
+
+  it("counts a conversation already waiting rather than asking twice for it", async () => {
+    const { simulationId } = await aFinishedSimulation();
+
+    const asked = await regrade(auth, { simulationId });
+
+    expect(asked?.reopened).toEqual([]);
+    expect(asked?.alreadyWaiting).toBe(1);
+    expect((await theJobFor(simulationId)).attempts).toBe(0);
+  });
+
+  it("narrows to one grader exactly as a run does, and leaves it on the job", async () => {
+    const { simulationId } = await aJudgedSimulation();
+
+    const asked = await regrade(auth, { simulationId, graderId });
+
+    expect(asked?.graderId).toBe(graderId);
+    expect(await narrowedTo((await theJobFor(simulationId)).id)).toBe(graderId);
+  });
+
+  it("answers with nothing at all for a conversation nobody can reach", async () => {
+    const { simulationId } = await aJudgedSimulation();
+
+    expect(await regrade(outsider, { simulationId })).toBeUndefined();
+    expect(await regrade(auth, { simulationId: newId("sim") })).toBeUndefined();
+    expect((await theJobFor(simulationId)).status).toBe("graded");
+  });
+
+  it("answers with nothing at all for a grader nobody can reach", async () => {
+    const { simulationId } = await aJudgedSimulation();
+    const gone = await aGrader();
+    await deleteGrader(auth, gone);
+
+    expect(await regrade(auth, { simulationId, graderId: gone })).toBeUndefined();
+    // An archived grader judges nothing from now on, and a re-grade is from now
+    // on — so nothing was reopened on the strength of naming one.
+    expect((await theJobFor(simulationId)).status).toBe("graded");
+  });
+
+  it("is refused to a viewer, who cannot spend the judge on history", async () => {
+    const { simulationId } = await aJudgedSimulation();
+
+    await expect(
+      regrade(actingAsAcme("viewer"), { simulationId }),
+    ).rejects.toThrow(NotPermittedError);
+    expect((await theJobFor(simulationId)).status).toBe("graded");
+  });
+});
+
 describe("re-grading a window", () => {
   /**
    * The half that covers production, which belongs to no run and never will.

@@ -1126,15 +1126,25 @@ export type RegradeWindow = {
 };
 
 /**
- * Which conversations to judge again: one run's, or every one that became
- * judgeable inside a window.
+ * Which conversations to judge again: one conversation, one run's, or every one
+ * that became judgeable inside a window.
  *
- * Both are honest halves of the same act rather than one shape with a
- * convenience on top. A run is how somebody re-scores a suite they just watched
- * fail on a grader they have since fixed; a window is how they re-score
- * production, which belongs to no run and never will.
+ * All three are honest halves of the same act rather than one shape with
+ * conveniences on top. One simulation is how somebody reading a single
+ * conversation's evidence asks for it to be looked at again; a run is how they
+ * re-score a suite they just watched fail on a grader they have since fixed; a
+ * window is how they re-score production, which belongs to no run and never
+ * will.
+ *
+ * The single conversation is deliberately **not** expressible as a one-run
+ * window, and that is why it is its own shape. A window names conversations by
+ * when they became judgeable, so two conversations of one run that landed inside
+ * the same second are indistinguishable to it — asking about one would ask about
+ * both, and the person who opened one conversation's page would spend the judge
+ * on its neighbour without being told.
  */
 type RegradeConversations =
+  | { readonly simulationId: string }
   | { readonly runId: string }
   | { readonly window: RegradeWindow };
 
@@ -1226,11 +1236,11 @@ export type Regraded = {
  * it is done, on the same terms as starting a run. What comes back says how many
  * conversations were asked for and how many were already going to be judged.
  *
- * A run nobody can reach answers `undefined`, which is the answer reading it
- * would have given, and so does a grader nobody can reach — a thing that is not
- * there is not there, whichever of the two was named. A window that holds
- * nothing still answers, because a window with nothing in it is a different fact
- * from a window that is not there.
+ * A run or a conversation nobody can reach answers `undefined`, which is the
+ * answer reading it would have given, and so does a grader nobody can reach — a
+ * thing that is not there is not there, whichever of them was named. A window
+ * that holds nothing still answers, because a window with nothing in it is a
+ * different fact from a window that is not there.
  */
 export async function regrade(
   auth: AuthContext,
@@ -1352,6 +1362,39 @@ async function conversationsNamed(
         gte(gradingJob.createdAt, from),
         lt(gradingJob.createdAt, to),
       ),
+    );
+  }
+
+  if ("simulationId" in target) {
+    // The conversation is resolved within the caller's own tenancy before its
+    // job is named — exactly as the run below is — so a conversation of another
+    // customer, or of a project this credential does not act in, is as absent as
+    // one that was never conducted, and this call learns nothing about it either
+    // way. Naming the job straight from the id would reopen work on the strength
+    // of an identifier somebody guessed.
+    const [conversation] = await db()
+      .select({ id: simulation.id })
+      .from(simulation)
+      .where(
+        within(
+          auth,
+          simulation,
+          and(
+            eq(simulation.id, target.simulationId),
+            auth.projectId === undefined
+              ? undefined
+              : eq(simulation.projectId, auth.projectId),
+          ),
+        ),
+      )
+      .limit(1);
+
+    if (conversation === undefined) return undefined;
+
+    return within(
+      auth,
+      gradingJob,
+      and(inActingProject, eq(gradingJob.simulationId, conversation.id)),
     );
   }
 

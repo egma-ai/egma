@@ -1,0 +1,444 @@
+import {
+  appendVerdicts,
+  claimGradingJobs,
+  finishGradingJob,
+  listGradingJobsForSimulation,
+  type AuthContext,
+  type NewVerdict,
+} from "@egma/db";
+import { traceIdOfSimulation } from "@egma/simulation-contract";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { createApi, type TestApi } from "./support/api.ts";
+import {
+  aConductedRun,
+  fileTranscriptOf,
+  standingOf,
+  type ConductedRun,
+  type Standing,
+} from "./support/recordings.ts";
+import { colleagueOf, request as ask, signUp, type Answer } from "./support/traces.ts";
+
+/**
+ * One conversation's evidence over real HTTP, against real Postgres and a real
+ * ClickHouse.
+ *
+ * **The claim is that one request is enough**, and that is what most of this
+ * file is about: what happened, the versions it executed against, who it was
+ * against, what egma made of it and what a person said afterwards all arrive
+ * together — including the transcript, whose window this side works out from the
+ * conversation's own stamps rather than asking a caller to guess it.
+ *
+ * The rest is the two ways a judgment is revisited, and who may. A `viewer` sees
+ * every piece of evidence on the page and is refused both writes **by the
+ * server**; the page offering no buttons is the page agreeing with this, never
+ * the check itself.
+ */
+
+let api: TestApi;
+
+afterEach(async () => {
+  await api?.close();
+});
+
+function request(
+  method: "GET" | "POST",
+  url: string,
+  key: string,
+  payload?: Record<string, unknown>,
+): Promise<Answer> {
+  return ask(api.app, method, url, key, payload);
+}
+
+const GRADER = "grd_01JQZ0000000000000000000AA";
+const GRADER_VERSION = "grv_01JQZ0000000000000000000AA";
+const BEHAVIOR = "confirms the new time back before finishing";
+
+/** Who moved the conversations, as a simulator and a grader name themselves. */
+const CLAIMANT = "simulator-blue-1";
+
+/** What the engine said about one conversation, stated field by field. */
+function machineVerdict(
+  one: ConductedRun,
+  simulationId: string,
+  overrides: Partial<NewVerdict> = {},
+): NewVerdict {
+  return {
+    traceId: simulationId,
+    graderId: GRADER,
+    graderVersionId: GRADER_VERSION,
+    dimension: BEHAVIOR,
+    source: "simulation",
+    judgedBy: "gpt-4o-mini",
+    verdict: "failed",
+    score: 0,
+    rationale: "the agent never said the new time back.",
+    citedSpanIds: [],
+    priority: "P0",
+    runId: one.runId,
+    agentId: "agt_01JQZ0000000000000000000AA",
+    agentVersionId: "",
+    judgedAtMicroseconds: BigInt(Date.parse("2026-08-15T10:00:00Z")) * 1000n,
+    ...overrides,
+  };
+}
+
+type Conducted = {
+  readonly who: Standing;
+  readonly ada: Awaited<ReturnType<typeof signUp>>;
+  readonly run: ConductedRun;
+};
+
+/**
+ * A customer with one run of two conversations, one of them with a transcript
+ * filed at the door a simulator files one at.
+ *
+ * Every step goes through the product: the agent is registered over HTTP, the
+ * test is pushed over HTTP, the run is started over HTTP, and the conversations
+ * are moved with the same data-access calls a simulator makes.
+ */
+async function aCustomerWhoHasRun(label: string): Promise<Conducted> {
+  api = await createApi(label, { traceStore: true });
+  const ada = await signUp(api.app, "ada@acme.example", "Acme");
+  const who = await standingOf(api.app, ada.cookie, "a terminal");
+  const run = await aConductedRun(api.app, who, {
+    reference: "sim_01JQ0A2B3C4D5E6F7G8H9J0K/dual-channel.wav",
+  });
+
+  await fileTranscriptOf(
+    api.app,
+    run.heard,
+    {
+      human: "I need to move Thursday's clean to next week.",
+      agent: "Of course — Tuesday at four works. You are all set.",
+    },
+    new Date(),
+  );
+
+  return { who, ada, run };
+}
+
+/** Move every outstanding grading job of this customer to `graded`. */
+async function finishGrading(auth: AuthContext): Promise<void> {
+  const claimed = await claimGradingJobs({ claimant: CLAIMANT, capacity: 50 });
+  for (const job of claimed) {
+    await finishGradingJob(auth, job.id, CLAIMANT);
+  }
+}
+
+describe("one conversation's evidence, in one read", () => {
+  it("carries the pins, the identities, the plan, the judgement and the transcript together", async () => {
+    const { who, run } = await aCustomerWhoHasRun("evidence_one_read");
+    await appendVerdicts(who.auth, [machineVerdict(run, run.heard)]);
+
+    const read = await request("GET", `/api/simulations/${run.heard}`, who.key);
+    expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
+
+    // Which run this belongs to, so the page can go back to it.
+    expect(read.body.run_id).toBe(run.runId);
+
+    // The two pins: what actually executed, which never moves.
+    const test = read.body.test as Record<string, unknown>;
+    expect(String(test.version_id)).toMatch(/^tstv_/u);
+    expect(String(test.scenario)).toContain("cleaning is booked for Thursday");
+    expect(test.expected_behaviors).toEqual([
+      { behavior: BEHAVIOR, priority: "P0" },
+    ]);
+
+    const persona = read.body.persona as Record<string, unknown>;
+    expect(String(persona.version_id)).toMatch(/^prsv_/u);
+    expect(persona.traits).not.toBeNull();
+
+    // Who it was against, and exactly how egma reached them.
+    expect((read.body.agent as { name: string }).name).toBe("Front desk voice");
+    expect((read.body.connection as { name: string }).name).not.toBe(null);
+    const snapshot = read.body.connection_snapshot as Record<string, unknown>;
+    expect(snapshot.type).toBe("retell");
+    expect(snapshot.modality).toBe("voice");
+    // Nothing a credential could ride in. The secret lives in its own sealed
+    // column and was never copied into the snapshot.
+    expect(JSON.stringify(snapshot)).not.toContain("retell-secret");
+
+    // What judged it, and the state that says how much of it can be believed.
+    const plan = read.body.grading_plan as { state: string; items: unknown[] };
+    expect(plan.state).toBe("run_start");
+    expect(plan.items.length).toBeGreaterThan(0);
+
+    // What egma made of it, with everything a reviewer needs to argue back.
+    const verdicts = read.body.verdicts as Record<string, unknown>[];
+    expect(verdicts).toHaveLength(1);
+    expect(verdicts[0]).toMatchObject({
+      grader_id: GRADER,
+      grader_version_id: GRADER_VERSION,
+      dimension: BEHAVIOR,
+      verdict: "failed",
+      priority: "P0",
+      judged_by: "gpt-4o-mini",
+    });
+
+    // And what was said, read inside a window nobody had to name.
+    const transcript = read.body.transcript as {
+      turns: { text: string }[];
+      spans_truncated: boolean;
+    };
+    expect(transcript.turns.map((turn) => turn.text)).toEqual([
+      "I need to move Thursday's clean to next week.",
+      "Of course — Tuesday at four works. You are all set.",
+    ]);
+    expect(transcript.spans_truncated).toBe(false);
+
+    // Measured, not judged, and only what is actually known.
+    const measures = read.body.measures as Record<string, number>;
+    expect(measures.turn_count).toBe(6);
+    expect(measures.measured_audio_band_hertz).toBe(8000);
+    expect(measures.human_turn_count).toBe(1);
+  });
+
+  /**
+   * A conversation that never emitted anything is not a fault. The evidence
+   * still reads; the transcript is `null` rather than an empty tree, which is
+   * the difference between *nothing was filed* and *nobody said anything*.
+   */
+  it("says there is no transcript rather than drawing an empty one", async () => {
+    const { who, run } = await aCustomerWhoHasRun("evidence_no_transcript");
+
+    const read = await request("GET", `/api/simulations/${run.silent}`, who.key);
+    expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
+    expect(read.body.transcript).toBeNull();
+    // The evidence around it is all still there.
+    expect(read.body.run_id).toBe(run.runId);
+    expect((read.body.test as { version_id: string }).version_id).not.toBeNull();
+  });
+
+  /**
+   * A conversation nobody has judged is not a conversation that failed. The
+   * grading state says the work is outstanding and the verdict stays null.
+   */
+  it("reports pending grading without turning the page into a failure", async () => {
+    const { who, run } = await aCustomerWhoHasRun("evidence_pending");
+
+    const read = await request("GET", `/api/simulations/${run.heard}`, who.key);
+    expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
+    expect(read.body.status).toBe("completed");
+    expect(read.body.grading).toBe("pending");
+    expect(read.body.verdict).toBeNull();
+    const jobs = read.body.grading_jobs as { status: string }[];
+    expect(jobs.map((job) => job.status)).toContain("pending");
+  });
+
+  it("is not there for another organization, whatever the id", async () => {
+    const { run } = await aCustomerWhoHasRun("evidence_other_customer");
+    const grace = await signUp(api.app, "grace@globex.example", "Globex");
+
+    const read = await request(
+      "GET",
+      `/api/simulations/${run.heard}`,
+      grace.secret,
+    );
+    expect(read.statusCode).toBe(404);
+    expect(read.body.error).toBe("not_found");
+  });
+});
+
+describe("judging one conversation again", () => {
+  it("reopens its grading job, and says what the ask was narrowed to", async () => {
+    const { who, run } = await aCustomerWhoHasRun("evidence_regrade");
+    await finishGrading(who.auth);
+
+    const asked = await request(
+      "POST",
+      `/api/simulations/${run.heard}/regrade`,
+      who.key,
+      {},
+    );
+    expect(asked.statusCode, JSON.stringify(asked.body)).toBe(200);
+    expect(asked.body).toMatchObject({
+      simulation_id: run.heard,
+      // No grader named: the whole applicable set is resolved again.
+      grader_id: null,
+      reopened: 1,
+    });
+
+    const jobs = await listGradingJobsForSimulation(who.auth, run.heard);
+    expect(jobs.map((job) => job.status)).toEqual(["pending"]);
+    expect(jobs[0]?.regradeGraderId).toBeNull();
+
+    // And the conversation beside it was left exactly alone. A re-grade of one
+    // conversation is a re-grade of one conversation.
+    const neighbour = await listGradingJobsForSimulation(who.auth, run.silent);
+    expect(neighbour.map((job) => job.status)).toEqual(["graded"]);
+  });
+
+  it("refuses a grader_id that is not a grader id, and says why", async () => {
+    const { who, run } = await aCustomerWhoHasRun("evidence_regrade_shape");
+    await finishGrading(who.auth);
+
+    const asked = await request(
+      "POST",
+      `/api/simulations/${run.heard}/regrade`,
+      who.key,
+      { grader_id: "expected_behaviors_v1" },
+    );
+    expect(asked.statusCode).toBe(400);
+    expect(String(asked.body.message)).toContain("built-in");
+    // Nothing was reopened by a refused ask.
+    const jobs = await listGradingJobsForSimulation(who.auth, run.heard);
+    expect(jobs.map((job) => job.status)).toEqual(["graded"]);
+  });
+
+  it("is not there for a grader this customer cannot reach", async () => {
+    const { who, run } = await aCustomerWhoHasRun("evidence_regrade_grader");
+    await finishGrading(who.auth);
+
+    const asked = await request(
+      "POST",
+      `/api/simulations/${run.heard}/regrade`,
+      who.key,
+      { grader_id: GRADER },
+    );
+    expect(asked.statusCode).toBe(404);
+    const jobs = await listGradingJobsForSimulation(who.auth, run.heard);
+    expect(jobs.map((job) => job.status)).toEqual(["graded"]);
+  });
+
+  it("refuses a viewer, whatever their page offers them", async () => {
+    const { who, ada, run } = await aCustomerWhoHasRun("evidence_regrade_viewer");
+    await finishGrading(who.auth);
+    const sam = await colleagueOf(api.app, ada, "sam@acme.example", "viewer");
+
+    // They can read every piece of evidence on the page.
+    const read = await request("GET", `/api/simulations/${run.heard}`, sam.secret);
+    expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
+
+    const asked = await request(
+      "POST",
+      `/api/simulations/${run.heard}/regrade`,
+      sam.secret,
+      {},
+    );
+    expect(asked.statusCode).toBe(403);
+    expect(asked.body.error).toBe("not_permitted");
+
+    // And the queue is untouched by the attempt.
+    const jobs = await listGradingJobsForSimulation(who.auth, run.heard);
+    expect(jobs.map((job) => job.status)).toEqual(["graded"]);
+  });
+});
+
+describe("disagreeing with one judgement", () => {
+  it("writes the person's word beside the machine's, and folds to theirs", async () => {
+    const { who, run } = await aCustomerWhoHasRun("evidence_correction");
+    await appendVerdicts(who.auth, [machineVerdict(run, run.heard)]);
+
+    const written = await request(
+      "POST",
+      `/api/simulations/${run.heard}/corrections`,
+      who.key,
+      {
+        grader_id: GRADER,
+        grader_version_id: GRADER_VERSION,
+        dimension: BEHAVIOR,
+        verdict: "passed",
+        rationale: "she said 'Tuesday at four' at 00:41; the judge missed it.",
+      },
+    );
+    expect(written.statusCode, JSON.stringify(written.body)).toBe(201);
+    expect(written.body.judged_by).toBe("human");
+
+    const read = await request("GET", `/api/simulations/${run.heard}`, who.key);
+    const verdicts = read.body.verdicts as Record<string, unknown>[];
+
+    // Both rows, and the machine's is still saying exactly what it said.
+    expect(verdicts).toHaveLength(2);
+    expect(
+      verdicts.find((its) => its.judged_by === "gpt-4o-mini"),
+    ).toMatchObject({ verdict: "failed" });
+    expect(verdicts.find((its) => its.judged_by === "human")).toMatchObject({
+      verdict: "passed",
+    });
+
+    // And the read folds to the person's word.
+    expect(read.body.verdict).toBe("passed");
+  });
+
+  it("refuses a correction with no reason, because that is an assertion", async () => {
+    const { who, run } = await aCustomerWhoHasRun("evidence_correction_bare");
+    await appendVerdicts(who.auth, [machineVerdict(run, run.heard)]);
+
+    const written = await request(
+      "POST",
+      `/api/simulations/${run.heard}/corrections`,
+      who.key,
+      {
+        grader_id: GRADER,
+        grader_version_id: GRADER_VERSION,
+        dimension: BEHAVIOR,
+        verdict: "passed",
+        rationale: "   ",
+      },
+    );
+    expect(written.statusCode).toBe(400);
+    expect(String(written.body.message)).toContain("why you disagree");
+  });
+
+  it("refuses a correction of a judgement nobody ever made", async () => {
+    const { who, run } = await aCustomerWhoHasRun("evidence_correction_nothing");
+
+    const written = await request(
+      "POST",
+      `/api/simulations/${run.heard}/corrections`,
+      who.key,
+      {
+        grader_id: GRADER,
+        grader_version_id: GRADER_VERSION,
+        dimension: BEHAVIOR,
+        verdict: "passed",
+        rationale: "I disagree with a verdict that does not exist.",
+      },
+    );
+    expect(written.statusCode).toBe(422);
+    expect(String(written.body.message)).toContain("no verdict on");
+  });
+
+  it("refuses a viewer, and writes nothing", async () => {
+    const { who, ada, run } = await aCustomerWhoHasRun("evidence_correct_viewer");
+    await appendVerdicts(who.auth, [machineVerdict(run, run.heard)]);
+    const sam = await colleagueOf(api.app, ada, "sam@acme.example", "viewer");
+
+    const written = await request(
+      "POST",
+      `/api/simulations/${run.heard}/corrections`,
+      sam.secret,
+      {
+        grader_id: GRADER,
+        grader_version_id: GRADER_VERSION,
+        dimension: BEHAVIOR,
+        verdict: "passed",
+        rationale: "I think the agent did say it.",
+      },
+    );
+    expect(written.statusCode).toBe(403);
+
+    // Read back as somebody who may: the machine's row is alone and unchanged.
+    const read = await request("GET", `/api/simulations/${run.heard}`, who.key);
+    const verdicts = read.body.verdicts as Record<string, unknown>[];
+    expect(verdicts).toHaveLength(1);
+    expect(verdicts[0]?.judged_by).toBe("gpt-4o-mini");
+    expect(read.body.verdict).toBe("failed");
+  });
+});
+
+/**
+ * The two identifiers a reader holds are the same 128 bits written two ways, and
+ * this is where that stops being a claim: the transcript above came back under
+ * the id derived from the conversation, with nothing having stored a mapping.
+ */
+describe("the conversation and its spans", () => {
+  it("files the transcript under the id derived from the simulation", async () => {
+    const { who, run } = await aCustomerWhoHasRun("evidence_trace_identity");
+
+    const read = await request("GET", `/api/simulations/${run.heard}`, who.key);
+    const transcript = read.body.transcript as { trace_id: string };
+    expect(transcript.trace_id).toBe(traceIdOfSimulation(run.heard));
+  });
+});

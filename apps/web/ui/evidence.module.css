@@ -1,0 +1,376 @@
+/*
+ * How one conversation's evidence looks.
+ *
+ * Every selector here belongs to a component in `evidence.tsx` and to nothing
+ * else, which is the point of the file: the components carry a data contract
+ * that the page depends on, and their appearance is tuned by editing this file
+ * alone. Nothing in here is appended to the shared system module, so retuning
+ * the transcript's density cannot move a table on some other page.
+ *
+ * Every value is a token.
+ */
+
+/* ------------------------------------------------------------------ *
+ * The transcript.
+ * ------------------------------------------------------------------ */
+
+/*
+ * Normal reading density, deliberately.
+ *
+ * A transcript is prose somebody reads top to bottom, so it is set as lines of
+ * text with a speaker label in front — not as a stack of chat bubbles. Oversized
+ * message cards put two turns on a screen and make a twenty-turn conversation a
+ * scrolling exercise, which is exactly the surface where somebody is trying to
+ * hold a whole conversation in their head.
+ */
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.turn {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  align-items: baseline;
+}
+
+.turn:hover {
+  background: var(--surface-soft);
+}
+
+.turnCited {
+  border-color: var(--border-strong);
+  background: var(--surface-soft);
+}
+
+/*
+ * `human:` and `agent:` — the two words the domain model labels a transcript's
+ * speakers with, drawn as a compact prefix rather than as an avatar or a colour
+ * somebody has to learn. The colon is part of the word.
+ */
+.speaker {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.speakerHuman {
+  color: var(--foreground);
+}
+
+.said {
+  margin: 0;
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+  white-space: pre-wrap;
+}
+
+.saidNothing {
+  color: var(--faint);
+  font-style: italic;
+}
+
+.turnAside {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.turnAside > * + *::before {
+  content: " · ";
+}
+
+/* ------------------------------------------------------------------ *
+ * The timed view: speech, tool work and system steps on one clock.
+ * ------------------------------------------------------------------ */
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.timelineRow {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr) 90px 70px;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+}
+
+.timelineRow:nth-child(odd) {
+  background: var(--surface-soft);
+}
+
+.timelineAt {
+  font-family: var(--mono);
+  color: var(--muted);
+}
+
+.timelineWhat {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  min-width: 0;
+}
+
+.timelineWhat strong {
+  font-weight: 600;
+}
+
+.timelineWhat span {
+  font-family: var(--mono);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The bar, which is the only thing on this row that is a picture. */
+.timelineTrack {
+  position: relative;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-soft);
+  overflow: hidden;
+}
+
+.timelineTrack > span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--timeline-left);
+  width: var(--timeline-width);
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+}
+
+.timelineTrackBad > span {
+  background: var(--bad);
+}
+
+.timelineHow {
+  font-family: var(--mono);
+  color: var(--muted);
+  text-align: right;
+}
+
+.timelineHowBad {
+  color: var(--bad);
+}
+
+/* ------------------------------------------------------------------ *
+ * Measures. Numbers, apart from anything judged.
+ * ------------------------------------------------------------------ */
+
+.measures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin: 0;
+}
+
+.measure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.measure dt {
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.measure dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--text-lg);
+}
+
+/* ------------------------------------------------------------------ *
+ * Mock tools: what egma answered for, and what ran for real.
+ * ------------------------------------------------------------------ */
+
+.tools {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.toolGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.toolGroup > strong {
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-right: var(--space-2);
+}
+
+.tool {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+}
+
+.toolUncovered {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+/* ------------------------------------------------------------------ *
+ * Verdicts, and the human word beside them.
+ * ------------------------------------------------------------------ */
+
+.verdicts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.verdict {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.verdictHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.verdictWhat {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.verdictWhat strong {
+  font-size: var(--text-md);
+}
+
+.verdictWho {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.rationale {
+  margin: 0;
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+}
+
+.cited {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+/*
+ * The machine's word, kept underneath a person's rather than replaced by it.
+ * Quieter, and never hidden: it is the other half of every pair that a future
+ * measurement of judge accuracy would be made of.
+ */
+.beneath {
+  border-left: 2px solid var(--border);
+  padding-left: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  color: var(--muted);
+}
+
+.beneath summary {
+  cursor: pointer;
+  font-size: var(--text-xs);
+}
+
+.pending {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------------ *
+ * The frozen plan, and the correction form.
+ * ------------------------------------------------------------------ */
+
+.plan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.planItem {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: baseline;
+  font-size: var(--text-sm);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.planItem:last-child {
+  border-bottom: none;
+}
+
+.planNote {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.correctionForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+
+.wrong {
+  color: var(--bad);
+}
+
+/* A transcript, a timeline and a plan all overflow before the page does. */
+.scrolls {
+  overflow-x: auto;
+}

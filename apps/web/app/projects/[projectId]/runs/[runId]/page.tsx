@@ -507,7 +507,7 @@ function RunDetailView({
           ) : (
             <DataTable
               label="Conversations in this run"
-              columns={SIMULATION_COLUMNS}
+              columns={simulationColumns(projectId, runId)}
               rows={simulations}
               keyOf={(one) => one.id}
             />
@@ -644,89 +644,112 @@ function mockToolsLine(run: RunDetail): string {
   return `${String(defaults)} project default${defaults === 1 ? "" : "s"}, ${String(overridden)} test override${overridden === 1 ? "" : "s"}`;
 }
 
-const SIMULATION_COLUMNS: readonly Column<RunSimulation>[] = [
-  {
-    key: "test",
-    header: "Conversation",
-    primary: true,
-    cell: (one) => (
-      <span className={styles.conversation}>
-        <span className={styles.position}>
-          {String(one.position).padStart(2, "0")}
+/**
+ * The columns one conversation's row is drawn with, in this project.
+ *
+ * A function of the project rather than a constant, because the first cell is
+ * now the way in to that conversation's evidence — and an address inside a
+ * project has to name the project. Nothing else about a row moved.
+ */
+function simulationColumns(
+  projectId: string,
+  runId: string,
+): readonly Column<RunSimulation>[] {
+  return [
+    {
+      key: "test",
+      header: "Conversation",
+      primary: true,
+      cell: (one) => (
+        <span className={styles.conversation}>
+          <span className={styles.position}>
+            {String(one.position).padStart(2, "0")}
+          </span>
+          <span>
+            {/*
+              The way in to this conversation's own evidence: what was said, when
+              each thing happened, what judged it and any later human correction.
+              It is reached from here and from nowhere else — a conversation is a
+              thing inside a run rather than a product area, so it is deliberately
+              absent from the navigation.
+            */}
+            <Link
+              href={projectPath(projectId, "runs", runId, "simulations", one.id)}
+            >
+              <strong>{one.test_name ?? "No stored test"}</strong>
+            </Link>
+            <small>{one.persona_name}</small>
+            {/*
+              The exact frozen versions this conversation executed, beside the two
+              names. The names read as they stand today — a test renamed this
+              morning reads under its new name everywhere at once — and these do
+              not move, which is what makes the evidence still interpretable.
+            */}
+            <small className={styles.pins}>
+              {one.test_version_id ?? "no test pinned"} ·{" "}
+              {one.persona_version_id}
+            </small>
+          </span>
         </span>
-        <span>
-          <strong>{one.test_name ?? "No stored test"}</strong>
-          <small>{one.persona_name}</small>
-          {/*
-            The exact frozen versions this conversation executed, beside the two
-            names. The names read as they stand today — a test renamed this
-            morning reads under its new name everywhere at once — and these do
-            not move, which is what makes the evidence still interpretable.
-          */}
-          <small className={styles.pins}>
-            {one.test_version_id ?? "no test pinned"} ·{" "}
-            {one.persona_version_id}
-          </small>
-        </span>
-      </span>
-    ),
-  },
-  {
-    key: "status",
-    header: "Conversation",
-    width: "120px",
-    cell: (one) => <SimulationStatus status={one.status} />,
-  },
-  {
-    key: "grading",
-    header: "Grading",
-    width: "110px",
-    cell: (one) => <GradingState grading={one.grading} />,
-  },
-  {
-    key: "verdict",
-    header: "Verdict",
-    width: "130px",
-    cell: (one) => <VerdictBadge verdict={one.verdict} />,
-  },
-  {
-    key: "checks",
-    header: "Checks",
-    width: "160px",
-    cell: (one) => <VerdictTally counts={one.counts} />,
-  },
-  {
-    key: "score",
-    header: "Score",
-    mono: true,
-    width: "70px",
-    cell: (one) => shownScore(one.score),
-  },
-  {
-    key: "why",
-    header: "Why",
-    width: "220px",
-    // The one place a page says why a conversation never happened or could not
-    // be conducted. It is deliberately its own column rather than being folded
-    // into the status: `skipped` says egma declined, and this says what it
-    // declined over.
-    cell: (one) =>
-      one.skip_reason !== null ? (
-        <span className={styles.why}>
-          {one.skip_reason === "required_capability_unsupported"
-            ? `This connection was measured and does not support ${(one.skipped_capabilities ?? []).join(", ")}. Egma conducted nothing and says nothing about the agent.`
-            : `Nobody has measured whether this connection supports ${(one.skipped_capabilities ?? []).join(", ")}. Egma conducted nothing and says nothing about the agent.`}
-        </span>
-      ) : one.status === "failed" ? (
-        <span className={styles.why}>
-          {one.reason ?? "Egma could not conduct this conversation."} This is an
-          execution problem, not a failed grader verdict.
-        </span>
-      ) : (
-        ""
       ),
-  },
-];
+    },
+    {
+      key: "status",
+      header: "Conversation",
+      width: "120px",
+      cell: (one) => <SimulationStatus status={one.status} />,
+    },
+    {
+      key: "grading",
+      header: "Grading",
+      width: "110px",
+      cell: (one) => <GradingState grading={one.grading} />,
+    },
+    {
+      key: "verdict",
+      header: "Verdict",
+      width: "130px",
+      cell: (one) => <VerdictBadge verdict={one.verdict} />,
+    },
+    {
+      key: "checks",
+      header: "Checks",
+      width: "160px",
+      cell: (one) => <VerdictTally counts={one.counts} />,
+    },
+    {
+      key: "score",
+      header: "Score",
+      mono: true,
+      width: "70px",
+      cell: (one) => shownScore(one.score),
+    },
+    {
+      key: "why",
+      header: "Why",
+      width: "220px",
+      // The one place a page says why a conversation never happened or could not
+      // be conducted. It is deliberately its own column rather than being folded
+      // into the status: `skipped` says egma declined, and this says what it
+      // declined over.
+      cell: (one) =>
+        one.skip_reason !== null ? (
+          <span className={styles.why}>
+            {one.skip_reason === "required_capability_unsupported"
+              ? `This connection was measured and does not support ${(one.skipped_capabilities ?? []).join(", ")}. Egma conducted nothing and says nothing about the agent.`
+              : `Nobody has measured whether this connection supports ${(one.skipped_capabilities ?? []).join(", ")}. Egma conducted nothing and says nothing about the agent.`}
+          </span>
+        ) : one.status === "failed" ? (
+          <span className={styles.why}>
+            {one.reason ?? "Egma could not conduct this conversation."} This is an
+            execution problem, not a failed grader verdict.
+          </span>
+        ) : (
+          ""
+        ),
+    },
+  ];
+}
 
 /**
  * What this run froze to judge itself by.

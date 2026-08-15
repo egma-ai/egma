@@ -30,6 +30,7 @@ import { reportRoutes } from "./routes/reports.ts";
 import { runRoutes } from "./routes/runs.ts";
 import { signOutRoutes } from "./routes/sign-out.ts";
 import { signupRoutes } from "./routes/signup.ts";
+import { simulationRoutes } from "./routes/simulations.ts";
 import { testRoutes } from "./routes/tests.ts";
 import { traceReadRoutes } from "./routes/trace-reads.ts";
 import { traceRoutes } from "./routes/traces.ts";
@@ -337,6 +338,16 @@ export function buildApi(options: ServerOptions): Api {
     provider: identity.provider,
     rateLimit,
     baseUrl: config.baseUrl,
+  });
+
+  // One conversation's own evidence: what happened, how egma judged it, and the
+  // two ways a person revisits that judgement. Its own scope beside the run
+  // group rather than inside it, because a conversation is reached by its own id
+  // — the address somebody pastes into a ticket — and because its refusals are
+  // its own: nothing to judge again, and nothing to disagree with.
+  void app.register(simulationRoutes, {
+    provider: identity.provider,
+    rateLimit,
   });
 
   // Where a recording's reference becomes something a browser can play. Its own

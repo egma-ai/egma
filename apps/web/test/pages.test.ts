@@ -13,12 +13,17 @@ import {
   NOTHING_TO_HEAR,
   offersNothing,
 } from "../lib/recording-refusals.ts";
-import { runProgress } from "../lib/run-progress.ts";
 import {
   DEFAULT_SIGNED_IN_PATH,
   returnPathIn,
   safeReturnPath,
 } from "../lib/return-to.ts";
+import {
+  citedTurnPositions,
+  judgedDimensions,
+  type EvidenceStep,
+  type EvidenceVerdict,
+} from "../lib/simulations.ts";
 import {
   DEFAULT_PROJECT_NAME,
   organizationNameFromEmail,
@@ -483,8 +488,22 @@ describe("the pages", () => {
       path.join(WEB, "app/traces/[traceId]/page.tsx"),
       "utf8",
     );
-    const run = await readFile(
+    // The address a terminal prints. It draws no run of its own any more — see
+    // the guard below — so what it has to keep is the shell while it works out
+    // where the run belongs.
+    const forwarder = await readFile(
       path.join(WEB, "app/runs/[runId]/page.tsx"),
+      "utf8",
+    );
+    const run = await readFile(
+      path.join(WEB, "app/projects/[projectId]/runs/[runId]/page.tsx"),
+      "utf8",
+    );
+    const conversation = await readFile(
+      path.join(
+        WEB,
+        "app/projects/[projectId]/runs/[runId]/simulations/[simulationId]/page.tsx",
+      ),
       "utf8",
     );
     const root = await readFile(path.join(WEB, "app/page.tsx"), "utf8");
@@ -492,25 +511,64 @@ describe("the pages", () => {
     // The Settings pages keep the shell a stronger way than the state page
     // does: they draw `AppShell` themselves and put loading, failure and
     // not-found states inside it, so the navigation, selector and account menu
-    // never leave the screen while a read is in flight.
-    expect(members).toContain("<AppShell>");
-    expect(members).toContain("<Loading ");
+    // never leave the screen while a read is in flight. The run and the
+    // conversation inside it do the same.
+    for (const page of [members, run, conversation]) {
+      expect(page).toContain("<AppShell>");
+      expect(page).toContain("<Loading ");
+      expect(page).not.toContain("<StatePage");
+    }
     expect(transcript).toContain("<ProductStatePage");
-    expect(run).toContain("<ProductStatePage");
+    expect(forwarder).toContain("<ProductStatePage");
     expect(root).toContain('<ProductStatePage');
     expect(root).not.toContain("<StatePage");
-    expect(members).not.toContain("<StatePage");
     expect(transcript).not.toMatch(
       /state\.status === "loading"[\s\S]*?return <StatePage/,
     );
-    expect(run).not.toMatch(
+    expect(forwarder).not.toMatch(
       /state\.status === "loading"[\s\S]*?return <StatePage/,
     );
   });
 
+  /**
+   * **One run has one page.** The address a terminal prints carries no project,
+   * and the product's own pages are all project-scoped — so for a while there
+   * were two pages drawing one run, free to disagree about whether a skipped
+   * conversation is a failure and only one of them kept in step as the product
+   * moved. The terminal's address now reads the run for the project it belongs
+   * to and forwards.
+   *
+   * The guard is on the forwarder rather than on the run page, because the
+   * mistake it catches is a second run page growing back here.
+   */
+  it("send the address a terminal prints to the run inside its project", async () => {
+    const forwarder = await readFile(
+      path.join(WEB, "app/runs/[runId]/page.tsx"),
+      "utf8",
+    );
+
+    // The project comes off the run read. A browser holding only a run id
+    // cannot know it, and an organization with two projects makes any default
+    // wrong.
+    expect(forwarder).toContain("runPath(runId)");
+    expect(forwarder).toContain("answer.value.project_id");
+    expect(forwarder).toContain("router.replace(");
+    // And it draws no run: no conversations, no verdicts, no grading counts.
+    expect(forwarder).not.toContain("simulations");
+    expect(forwarder).not.toContain("verdict");
+    expect(forwarder).not.toContain("graded_count");
+  });
+
   it("show real run verdicts without folding execution failures into grader failures", async () => {
     const run = await readFile(
-      path.join(WEB, "app/runs/[runId]/page.tsx"),
+      path.join(WEB, "app/projects/[projectId]/runs/[runId]/page.tsx"),
+      "utf8",
+    );
+    const conversation = await readFile(
+      path.join(
+        WEB,
+        "app/projects/[projectId]/runs/[runId]/simulations/[simulationId]/page.tsx",
+      ),
       "utf8",
     );
     const judgment = await readFile(
@@ -518,14 +576,21 @@ describe("the pages", () => {
       "utf8",
     );
 
-    expect(run).toContain("/api/runs/");
-    expect(run).toContain("runProgress(run)");
-    expect(run).toContain("run.graded_count");
-    expect(run).toContain("simulation.verdicts.map");
-    expect(run).toContain("This is an execution problem, not a failed grader verdict.");
-    expect(run).toContain("<JudgmentCard");
+    // A conversation egma could not conduct is egma's own failure, and both
+    // surfaces say so in the same sentence rather than colouring it like a
+    // grader's verdict.
+    for (const page of [run, conversation]) {
+      expect(page).toContain("Egma could not conduct this conversation.");
+      expect(page).toContain("not a failed grader verdict");
+    }
+    // Grading progress is reported apart from execution progress on both.
+    expect(run).toContain("read.graded_count");
+    expect(conversation).toContain("evidence.grading_jobs.some");
+    // And the rationale and the turns it cites are what a judgement is worth
+    // reading for, wherever one is drawn.
     expect(judgment).toContain("judgment.rationale");
     expect(judgment).toContain("judgment.cited_turns");
+    expect(conversation).toContain("judgedDimensions(read.verdicts)");
   });
 
   it("shows the aggregate trace outcome", async () => {
@@ -731,24 +796,131 @@ describe("a refusal of a recording", () => {
   });
 });
 
-describe("run progress", () => {
-  it("uses the simulation rows while aggregate counters are still empty", () => {
-    expect(runProgress({
-      expected_simulation_count: 3,
-      graded_count: 1,
-      simulations: [
-        { status: "completed" },
-        { status: "failed" },
-        { status: "running" },
-      ],
-    })).toEqual({ finished: 2, gradable: 2, failed: 1, moving: true });
+/**
+ * Which judgement counts, once a grader has been re-run and a person has spoken.
+ *
+ * The page shows the working — which rows count, which are superseded, and what
+ * the machine wrote underneath a person's word — so the fold is a decision this
+ * module makes rather than a shape the server hands over. The rule is the
+ * store's: the newest grading speaks, and inside it the human's word wins.
+ */
+describe("which verdict speaks", () => {
+  function row(overrides: Partial<EvidenceVerdict> = {}): EvidenceVerdict {
+    return {
+      grader_id: "grd_1",
+      grader_version_id: "grv_1",
+      dimension: "confirms the new time back",
+      source: "simulation",
+      verdict: "failed",
+      score: 0,
+      reason: "",
+      priority: "P0",
+      rationale: "the agent never said it back",
+      cited_turns: [],
+      judged_by: "gpt-4o-mini",
+      judged_at: "2026-08-15T10:00:00.000000Z",
+      ...overrides,
+    };
+  }
+
+  it("prefers a person's word and keeps the machine's underneath it", () => {
+    const [only] = judgedDimensions([
+      row(),
+      row({
+        judged_by: "human",
+        verdict: "passed",
+        score: 1,
+        judged_at: "2026-08-15T11:00:00.000000Z",
+      }),
+    ]);
+
+    expect(only?.corrected).toBe(true);
+    expect(only?.speaking.verdict).toBe("passed");
+    // The machine's row is still there, still saying what it said. That is the
+    // whole reason a correction is a second row rather than an edit.
+    expect(only?.machine?.verdict).toBe("failed");
   });
 
-  it("does not wait for a canceled simulation to be graded", () => {
-    expect(runProgress({
-      expected_simulation_count: 2,
-      graded_count: 1,
-      simulations: [{ status: "completed" }, { status: "canceled" }],
-    })).toEqual({ finished: 2, gradable: 1, failed: 0, moving: false });
+  it("lets the newest grading speak, with the older one kept as evidence", () => {
+    const [only] = judgedDimensions([
+      row({ grader_version_id: "grv_1", verdict: "passed", score: 1 }),
+      row({
+        grader_version_id: "grv_2",
+        verdict: "failed",
+        judged_at: "2026-08-15T12:00:00.000000Z",
+      }),
+    ]);
+
+    expect(only?.speaking.grader_version_id).toBe("grv_2");
+    expect(only?.speaking.verdict).toBe("failed");
+    expect(only?.superseded.map((its) => its.grader_version_id)).toEqual([
+      "grv_1",
+    ]);
+  });
+
+  it("does not let a correction of an older grading outrank a newer one", () => {
+    // Somebody disagreed with what version one said. Version two has judged
+    // since, and they have not read it — so their word stands against the
+    // grading they read and not in front of the one they did not.
+    const [only] = judgedDimensions([
+      row({ grader_version_id: "grv_1" }),
+      row({
+        grader_version_id: "grv_1",
+        judged_by: "human",
+        verdict: "passed",
+        score: 1,
+        judged_at: "2026-08-15T11:00:00.000000Z",
+      }),
+      row({
+        grader_version_id: "grv_2",
+        verdict: "failed",
+        judged_at: "2026-08-15T12:00:00.000000Z",
+      }),
+    ]);
+
+    expect(only?.speaking.grader_version_id).toBe("grv_2");
+    expect(only?.corrected).toBe(false);
+  });
+
+  it("keeps two dimensions of one grader apart", () => {
+    const folded = judgedDimensions([
+      row({ dimension: "confirms the new time back" }),
+      row({ dimension: "does not interrupt the caller" }),
+    ]);
+    expect(folded).toHaveLength(2);
+  });
+});
+
+describe("the turns a judgement points at", () => {
+  function step(id: string, children: EvidenceStep[] = []): EvidenceStep {
+    return {
+      span_id: id,
+      parent_span_id: "",
+      name: id,
+      kind: "turn:agent",
+      status: "ok",
+      started_at: "2026-08-15T10:00:00.000000Z",
+      duration_ns: "1000",
+      text: "",
+      audio_url: "",
+      tool_name: "",
+      tool_arguments: "",
+      tool_result: "",
+      spans: children,
+    };
+  }
+
+  const turns = [step("one"), step("two", [step("tool-inside-two")]), step("three")];
+
+  it("names them by their position in the transcript", () => {
+    expect(citedTurnPositions(["three", "one"], turns)).toEqual([1, 3]);
+  });
+
+  it("sends a cited step to the turn it happened inside", () => {
+    expect(citedTurnPositions(["tool-inside-two"], turns)).toEqual([2]);
+  });
+
+  it("drops an id that is nowhere in the transcript rather than inventing a turn", () => {
+    expect(citedTurnPositions(["nothing-here"], turns)).toEqual([]);
   });
 });
