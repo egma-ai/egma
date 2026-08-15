@@ -410,13 +410,27 @@ describe("starting a run safely", () => {
       failed_count: 0,
       canceled_count: 0,
       skipped_count: 1,
+      // A run that conducted nothing completes with no passing headline. The
+      // word is `skipped`, which is precisely what happened.
+      verdict: "skipped",
     });
     const [only] = started.body.simulations as Record<string, unknown>[];
     expect(only?.status).toBe("skipped");
     expect(only?.skip_reason).toBe("required_capability_unsupported");
     expect(only?.skipped_capabilities).toEqual(["raw_audio"]);
-    // No verdict is invented for a conversation that never happened.
-    expect(only?.verdict).toBeNull();
+    /*
+     * **No grader row is invented, and the verdict still says what happened.**
+     * `counts` is null because nothing was judged, and the verdict is `skipped`
+     * rather than null because nobody ever will: a null here would sit on a
+     * finished run reading "awaiting grading" forever, waiting on work that was
+     * deliberately never filed. What must never appear is `failed` — egma
+     * declined to conduct this conversation, and nothing about the agent is
+     * being said.
+     */
+    expect(only?.verdict).toBe("skipped");
+    expect(only?.counts).toBeNull();
+    // And no grading job was ever filed for it, so grading is not pending.
+    expect(only?.grading).toBe("not_required");
   });
 
   it("lets a viewer read the plan and refuses their start", async () => {

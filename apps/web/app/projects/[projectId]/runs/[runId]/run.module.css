@@ -1,0 +1,130 @@
+/*
+ * The parts one run's page needs and no other page has: a conversation's two
+ * lines in one cell, the sentence a following page shows while it follows, and
+ * the frozen plan drawn group by group.
+ *
+ * They live beside the page rather than in the shared system module, because
+ * they are this page's and nothing else uses them. Every value is a token.
+ */
+
+.following {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+/*
+ * One conversation in one cell: its position, then what it was.
+ *
+ * The position is drawn because a run's conversations are ordered by it and a
+ * person reading two runs side by side compares row three with row three.
+ */
+.conversation {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.conversation strong {
+  display: block;
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.conversation small {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.position {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+/*
+ * Why a conversation never happened, or could not be conducted.
+ *
+ * It wraps rather than truncating. The whole value of this column is the
+ * sentence, and half a sentence about a skip is how somebody comes to believe
+ * their agent failed.
+ */
+.why {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--muted);
+  white-space: normal;
+  line-height: var(--line-normal);
+}
+
+/* A name and, where it applies, the badge saying it has been archived. */
+.identity {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.plan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.planGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.planHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.planItems {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.planItem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.planItemName {
+  color: var(--foreground);
+}
+
+.planItemNote {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+/*
+ * The frozen versions a conversation executed, under the two names.
+ *
+ * Quiet and mono, because they are identifiers rather than prose — and present
+ * rather than hidden behind a disclosure, because "what exactly ran" is the
+ * question this page exists to answer.
+ */
+.pins {
+  display: block;
+  font-family: var(--mono);
+  font-size: var(--text-2xs);
+  color: var(--muted);
+}

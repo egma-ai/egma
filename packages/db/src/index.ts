@@ -50,6 +50,29 @@ export {
   type VerdictSource,
 } from "./verdicts/fold.ts";
 /**
+ * The fold one grain up, where execution meets judgment — and where the two are
+ * kept apart.
+ *
+ * It is here beside `foldVerdicts` and for exactly its reason: it reaches no
+ * store, takes no context, and is handed what two stores already answered. And
+ * it is exported for the fold's other reason, more sharply. A run holds four
+ * separate facts — the run's machinery, each conversation's machinery, whether
+ * anybody has judged yet, and what they decided — and every surface that shows
+ * one of them has to show it as itself. A page working that out for itself is a
+ * second opinion, and the way it goes wrong is always the same: an execution
+ * failure drawn as a failed verdict tells a team their agent is broken when egma
+ * is, and pending grading drawn as a failure tells them something failed when
+ * nobody has looked.
+ */
+export {
+  foldRun,
+  foldSimulation,
+  type GradingStanding,
+  type RunFold,
+  type SimulationFold,
+  type SimulationStatusCounts,
+} from "./verdicts/read-fold.ts";
+/**
  * The mocked world a simulation runs in, worked out from what its run froze.
  * It is here beside the verdict fold and for the fold's reason: it reaches no
  * store, takes no context, and is the one place a project default and a test

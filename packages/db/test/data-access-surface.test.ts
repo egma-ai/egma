@@ -235,6 +235,16 @@ const CONTEXT_REQUIRING = [
   // the events are a record rather than a rendering of the mutable rows.
   "listRunEvents",
   "listRuns",
+  // The same list with its judgment folded in: a page of runs, each carrying
+  // its machinery counts and its verdict, read from both stores at once so a
+  // row and the page it opens can never disagree.
+  "listRunHistory",
+  "readRunFold",
+  // A new run derived from an earlier one, under today's conditions. It is a
+  // verb of its own rather than a flag on `startRun` because everything it uses
+  // comes off the earlier run and nothing a caller sends can name any of it —
+  // which is what makes the link a retry writes worth trusting.
+  "retryRun",
   "listSimulations",
   "listTests",
   "listTraces",
@@ -427,6 +437,11 @@ const VALUES = [
   // and a cancel that arrived after the run had already finished. Five rules,
   // four codes between them, and a sentence apiece — which is why the reason
   // travels as a value rather than being read back out of the prose.
+  // A Retry that could not be derived, because something the earlier run used is
+  // no longer active or no longer applies. Its own class beside the one below
+  // because it never refuses a request somebody composed — it refuses to
+  // silently substitute, and it names the resource that stopped it.
+  "RunRetryRefusedError",
   "RunWriteRefusedError",
   // An edit refused because somebody moved the test since it was written. It
   // carries both versions and the test's identity, because the caller's next
@@ -503,6 +518,10 @@ const VALUES = [
   // that a form and a refusal read the same list the schema is checked against.
   "GRADER_READS",
   "GRADER_SCOPES",
+  // A run's four machinery words, exported so the door that filters a history
+  // by one refuses anything else by name rather than from a second copy of the
+  // list.
+  "RUN_STATUSES",
   "JUDGE_PROVIDERS",
   "JUDGE_SOURCES",
   "PLATFORM_JUDGE",
@@ -568,6 +587,13 @@ const THE_FOLD = [
   "JUDGED_BY_HUMAN",
   "PRIORITIES",
   "VERDICTS",
+  // The same algebra one grain up, where a run's machinery meets its judgment.
+  // It is here rather than in the context-requiring group for the reason the
+  // three above are: it is handed what two stores already answered and reaches
+  // nothing itself. It exists so that no page decides for itself that a failed
+  // execution is a failed verdict, or that grading nobody has finished is one.
+  "foldRun",
+  "foldSimulation",
 ];
 
 describe("the data-access module's surface", () => {

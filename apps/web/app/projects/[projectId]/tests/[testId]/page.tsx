@@ -42,6 +42,7 @@ import {
 } from "../../../../../ui/controls.tsx";
 import { Failure, Loading, NotFound } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
+import { RecentRuns } from "../../../../../ui/run-status.tsx";
 import {
   AppShell,
   PageBody,
@@ -560,6 +561,19 @@ function TestDetail({
             ]}
           />
         </Section>
+
+        {/*
+          What this test has actually been run against lately. The same
+          component the agent page uses, because it is the same question asked
+          of a different subject — and the answer keeps machinery and judgment
+          apart on both.
+        */}
+        <RecentRuns
+          projectId={projectId}
+          title="Recent runs"
+          lead="The newest runs that executed a version of this test. Each row keeps the run's machinery and its verdict apart."
+          filters={{ test: testId }}
+        />
 
         <Section
           title="Version history"

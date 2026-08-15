@@ -2,9 +2,15 @@ import {
   authorize,
   cancelRun,
   connectionTypeOf,
+  foldRun,
+  foldSimulation,
+  getAgent,
+  getConnection,
+  getGradingPlan,
   getRun,
   IdempotencyConflictError,
   JudgeNotConfiguredError,
+  listRunHistory,
   planRun,
   listRunEvents,
   listSimulations,
@@ -13,20 +19,32 @@ import {
   ProjectOutsideOrganizationError,
   readRunVerdicts,
   readVerdicts,
+  retryRun,
+  RUN_STATUSES,
+  RunRetryRefusedError,
   RunWriteRefusedError,
   startRun,
+  VERDICTS,
   type AuthContext,
   type ConductedSimulation,
+  type GradingPlan,
   type MockToolCoverage,
   type MockToolSnapshot,
   type Run,
+  type RunFold,
+  type RunHistoryEntry,
+  type RunHistoryRequest,
   type RecordedVerdict,
   type RunEvent,
+  type RunStatus,
   type JudgeChoice,
   type RunPlan,
   type RunVerdicts,
+  type SimulationFold,
   type SimulationVerdicts,
+  type Verdict,
 } from "@egma/db";
+import { isId } from "@egma/ids";
 import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
@@ -128,8 +146,27 @@ export const RUN_PLAN_PATH = "/api/run-plan";
 export const RUN_PATH = "/api/runs/:runId";
 export const RUN_EVENTS_PATH = "/api/runs/:runId/events";
 export const RUN_CANCEL_PATH = "/api/runs/:runId/cancel";
+/**
+ * Run it again, under today's conditions.
+ *
+ * **A verb on the earlier run, and deliberately not a field on the create
+ * body.** Everything it uses — the agent, the connection, the exact frozen test
+ * versions — comes off the run in the address, so a run that says it retries
+ * another one really does execute what that one executed. There is no key in the
+ * create body that could set `retry_of_run_id`, and there never will be.
+ */
+export const RUN_RETRY_PATH = "/api/runs/:runId/retry";
 
 type Body = Record<string, unknown>;
+
+/**
+ * The largest page of history this list will serve.
+ *
+ * The same cap the data-access layer enforces, named here because a refusal has
+ * to say what it is — and a cap said in two places is a cap that will one day
+ * disagree with itself, so this is the only copy above that layer.
+ */
+const LARGEST_RUN_PAGE = 200;
 
 /**
  * The versions a body pinned, in the order it pinned them.
@@ -185,12 +222,19 @@ const NO_SUCH_RUN =
  * The two pins are both here on purpose: `test_version_id` is what actually
  * executed and never moves, and `test_id` is what to go and edit.
  *
- * `verdict` is what the graders make of the conversation, folded over every
- * dimension judged against it. It is `null` for a conversation nobody has
- * judged **yet** — which is not the same as one judged and found wanting, and
- * the two must never read alike. `grading` carries that distinction: a
- * conversation with no rows says `pending`, and one with rows says `graded`
- * beside whatever the fold came to.
+ * **Four facts, kept apart, and `foldSimulation` is what keeps them apart.**
+ * `status` is the machinery; `grading` is where the judging stands; `verdict` is
+ * what was decided; and `null` on the verdict means nobody has decided yet,
+ * which is not a verdict and must never read as one. The fold's rules are the
+ * governing ones and live in `@egma/db`: a `failed` execution reads `errored`
+ * because it is egma's own failure rather than the agent's, a `skipped` or
+ * `canceled` one reads `skipped` because there was no conversation to judge, and
+ * only a `completed` one takes its verdict from grader rows.
+ *
+ * `grading` gained two words in this build — `not_required` for a conversation
+ * that will never be judged because it never happened, and `waiting` for one
+ * that has not finished. Both used to read `pending`, which left a page waiting
+ * forever on work nobody filed.
  *
  * Execution and grading are separate facts and are reported separately. A
  * conversation can be `completed` and ungraded, and a reader that collapsed the
@@ -209,6 +253,7 @@ function describedSimulation(
   judged: SimulationVerdicts | undefined,
   rows: readonly RecordedVerdict[],
 ): Record<string, unknown> {
+  const fold = foldSimulation(one.status, judged?.outcome);
   return {
     id: one.id,
     position: one.position,
@@ -217,15 +262,18 @@ function describedSimulation(
     test_version_id: one.testVersionId,
     persona_id: one.personaId,
     persona_name: one.personaName,
+    // The pin beside the identity, on the test pin's own terms: the name reads
+    // as it stands today, and this is exactly who called on the day.
+    persona_version_id: one.personaVersionId,
     status: one.status,
-    grading: judged === undefined ? "pending" : "graded",
-    verdict: judged?.outcome.verdict ?? null,
-    score: judged?.outcome.score ?? null,
+    grading: fold.grading,
+    verdict: fold.verdict,
+    score: fold.score ?? null,
     // Skipped and errored are carried out whole rather than folded into the
     // other two: missing judgment is not a pass and a broken judge is not a
     // failing agent, and a summary that hid either would say the opposite of
     // what happened.
-    counts: judged === undefined ? null : judged.outcome.counts,
+    counts: fold.counts,
     // Every judged behaviour, whole. The fold above says how many passed; this
     // says which ones and why, because "2 of 3 passed" without the rationale
     // sends somebody to read a transcript to work out what egma already knew.
@@ -442,14 +490,39 @@ function describedRun(
     (judged?.simulations ?? []).map((its) => [its.simulationId, its] as const),
   );
   const gradedCount = simulations.filter((one) => bySimulation.has(one.id)).length;
+  const fold = foldRun(
+    one.status,
+    one.expectedSimulationCount,
+    simulations.map((its) =>
+      foldSimulation(its.status, bySimulation.get(its.id)?.outcome),
+    ),
+  );
   return {
     id: one.id,
+    // Which project this run happened in. A run is reached by an address with no
+    // project in it — the one a terminal prints — so a page that wants to open
+    // the project's own view of it has no other way to learn where it belongs.
+    project_id: one.projectId,
     status: one.status,
     agent_id: one.agentId,
     connection_id: one.connectionId,
     connection_type: one.connectionSnapshot.type,
     modality: one.connectionSnapshot.modality,
+    // The connection's non-secret shape as this run executed over it, frozen at
+    // start. Connections are unversioned, so this is the only record of what the
+    // run actually reached — and there is no field here a credential could ride
+    // in: the secret lives in its own sealed column and was never copied.
+    connection_snapshot: {
+      type: one.connectionSnapshot.type,
+      modality: one.connectionSnapshot.modality,
+      topology: one.connectionSnapshot.topology,
+      environment: one.connectionSnapshot.environment,
+      config: one.connectionSnapshot.config,
+    },
     label: one.label,
+    // The run this one retries, and null on every run that retries nothing.
+    // Only the server-derived Retry can ever set it.
+    retry_of_run_id: one.retryOfRunId,
     test_versions: [...one.pinnedTestVersionIds],
     // The world this run was frozen into. It never changes after creation,
     // whatever anybody edits, which is what a reader comparing two runs' numbers
@@ -476,7 +549,33 @@ function describedRun(
     // two counts settle at different moments and a reader has to be able to see
     // which one it is waiting on.
     graded_count: gradedCount,
-    verdict: judged?.outcome.verdict ?? null,
+    // How many conversations have landed terminal, and how many of those left
+    // something to judge. Machinery, reported as machinery: a run whose every
+    // conversation was skipped has finished all of them and made none gradable.
+    finished_count: fold.finished,
+    gradable_count: fold.gradable,
+    // Where every conversation of this run stands, counted by machinery state.
+    // `skipped` has its own number here for the reason it has its own column:
+    // egma declining to conduct a conversation says nothing about the agent.
+    simulation_counts: fold.simulations,
+    /*
+     * The run's verdict, folded over its conversations' verdicts — one vote
+     * each, so a test with forty expected behaviors cannot outvote a test with
+     * two.
+     *
+     * **Null means nobody has finished looking**, and it stays null until every
+     * conversation has a verdict. The two available alternatives are both lies:
+     * the fold so far reads as a finished result, and `passed` because nothing
+     * has failed yet reads as a clean sweep nobody earned. A completed run may
+     * perfectly well read `failed` — the machinery finished and what it found
+     * was bad — and a run whose every conversation was skipped reads `skipped`
+     * rather than sitting on "awaiting grading" for a judgment nobody will make.
+     */
+    verdict: fold.verdict,
+    // Score and counts stay at the grader's grain and answer a different
+    // question: how many judged *checks* passed, across the whole run. Both are
+    // the fold over the verdict rows, which is what `by_grader` beneath them
+    // breaks down — they are deliberately not the simulation-level counts above.
     score: judged?.outcome.score ?? null,
     counts: judged?.outcome.counts ?? null,
     by_grader: (judged?.byGrader ?? []).map((its) => ({
@@ -493,6 +592,207 @@ function describedRun(
       ),
     ),
   };
+}
+
+/**
+ * The plan a run froze, as a reader of one meets it.
+ *
+ * **The state is the first thing, because it decides how much of the rest can be
+ * believed.** `run_start` is a pin made in the transaction that created the run.
+ * `migration_snapshot` was captured during an upgrade, and a page must say so
+ * rather than presenting it as something decided when the run began.
+ * `not_recorded` has no plan at all, and the honest answer is an empty list — a
+ * plan reconstructed from today's graders would be a claim about an old run that
+ * nobody can check.
+ *
+ * The groups keep their tagged shape whole. An authored item has a grader
+ * identity and a pinned grader version; the built-in has a reserved key and an
+ * engine version and takes its priority one behavior at a time. Folding the two
+ * into one shape of mostly-null fields would make every reader guess which half
+ * applied.
+ */
+function describedGradingPlan(plan: GradingPlan): Record<string, unknown> {
+  return {
+    state: plan.state,
+    captured_at: plan.capturedAt?.toISOString() ?? null,
+    groups: plan.groups.map((group) =>
+      group.tag === "version"
+        ? {
+            tag: "version",
+            test_id: group.testId,
+            test_version_id: group.testVersionId,
+            test_name: group.testName,
+            items: group.items.map(describedPlanItem),
+          }
+        : { tag: "legacy_testless", items: group.items.map(describedPlanItem) },
+    ),
+  };
+}
+
+function describedPlanItem(
+  item: GradingPlan["groups"][number]["items"][number],
+): Record<string, unknown> {
+  return item.kind === "built_in"
+    ? {
+        kind: "built_in",
+        grader_key: item.graderKey,
+        engine_version: item.engineVersion,
+        reads: [...item.reads],
+        modalities: [...item.modalities],
+        judge: describedJudgeChoice(item.judge),
+      }
+    : {
+        kind: "authored",
+        grader_id: item.graderId,
+        grader_version_id: item.graderVersionId,
+        name: item.graderName,
+        origin: item.origin,
+        priority: item.priority,
+        scope: item.scope,
+        reads: [...item.reads],
+        modalities: [...item.modalities],
+        judge: describedJudgeChoice(item.judge),
+      };
+}
+
+/**
+ * One run of a history, as a list draws it.
+ *
+ * Deliberately not the whole run: a list of fifty runs each carrying two hundred
+ * conversations would be a page nobody asked for. What a row shows is the four
+ * facts kept apart — the run's machinery, how its conversations are distributed
+ * across theirs, where grading stands, and the folded verdict — plus enough
+ * identity to link at the agent and the connection it used.
+ */
+function describedHistoryEntry(
+  entry: RunHistoryEntry,
+  fold: RunFold,
+): Record<string, unknown> {
+  const { run } = entry;
+  return {
+    id: run.id,
+    project_id: run.projectId,
+    status: run.status,
+    label: run.label,
+    agent_id: run.agentId,
+    connection_id: run.connectionId,
+    connection_type: run.connectionSnapshot.type,
+    modality: run.connectionSnapshot.modality,
+    environment: run.connectionSnapshot.environment,
+    retry_of_run_id: run.retryOfRunId,
+    expected_simulation_count: run.expectedSimulationCount,
+    completed_count: run.completedCount,
+    failed_count: run.failedCount,
+    canceled_count: run.canceledCount,
+    skipped_count: run.skippedCount,
+    simulation_counts: fold.simulations,
+    finished_count: fold.finished,
+    gradable_count: fold.gradable,
+    graded_count: fold.graded,
+    // Null until every conversation has a verdict. A row that guessed early
+    // would put a red mark on a run nobody has finished judging.
+    verdict: fold.verdict,
+    score: fold.score ?? null,
+    verdict_counts: fold.counts,
+    created_at: run.createdAt.toISOString(),
+    started_at: run.startedAt?.toISOString() ?? null,
+    finished_at: run.finishedAt?.toISOString() ?? null,
+  };
+}
+
+/**
+ * The filters on a history read, checked one at a time and refused by name.
+ *
+ * Every id is checked for its own prefix rather than passed through: a query
+ * naming `agent=tst_1` would otherwise match nothing and read as *this agent has
+ * never been run*, which is a different and false sentence. The same reasoning
+ * for the status and the verdict — an unknown word is refused with the list
+ * rather than quietly ignored, because a filter that was dropped leaves somebody
+ * reading an answer as though it had applied.
+ */
+type Narrowing =
+  | { readonly filter: RunHistoryRequest }
+  | { readonly refusal: string };
+
+function readNarrowing(query: Record<string, unknown>): Narrowing {
+  const filter: {
+    agentId?: string;
+    connectionId?: string;
+    testId?: string;
+    status?: RunStatus;
+    verdict?: Verdict;
+    since?: Date;
+    until?: Date;
+  } = {};
+
+  const ids: readonly [string, "agt" | "con" | "tst", "agentId" | "connectionId" | "testId", string][] = [
+    ["agent", "agt", "agentId", "agt_ id of the agent whose runs you want"],
+    [
+      "connection",
+      "con",
+      "connectionId",
+      "con_ id of the connection whose runs you want",
+    ],
+    ["test", "tst", "testId", "tst_ id of the test whose runs you want"],
+  ];
+
+  for (const [name, prefix, field, instead] of ids) {
+    const said = given(text(query[name]));
+    if (said === undefined) continue;
+    if (!isId(prefix, said)) {
+      return {
+        refusal:
+          `"${said}" is not a ${name} id. Send the ${instead}, or leave it ` +
+          `out for every run in the project.`,
+      };
+    }
+    filter[field] = said;
+  }
+
+  const status = given(text(query.status));
+  if (status !== undefined) {
+    if (!(RUN_STATUSES as readonly string[]).includes(status)) {
+      return {
+        refusal:
+          `"${status}" is not a run status. Send one of ` +
+          `${RUN_STATUSES.join(", ")}, or leave status out for every run.`,
+      };
+    }
+    filter.status = status as RunStatus;
+  }
+
+  const verdict = given(text(query.verdict));
+  if (verdict !== undefined) {
+    if (!(VERDICTS as readonly string[]).includes(verdict)) {
+      return {
+        refusal:
+          `"${verdict}" is not a verdict. Send one of ${VERDICTS.join(", ")}, ` +
+          `or leave verdict out for every run. A run still being judged has no ` +
+          `verdict yet and matches none of them.`,
+      };
+    }
+    filter.verdict = verdict as Verdict;
+  }
+
+  const moments: readonly [string, "since" | "until", string][] = [
+    ["since", "since", "at or after"],
+    ["until", "until", "before"],
+  ];
+  for (const [name, field, meaning] of moments) {
+    const said = given(text(query[name]));
+    if (said === undefined) continue;
+    const moment = new Date(said);
+    if (Number.isNaN(moment.getTime())) {
+      return {
+        refusal:
+          `"${said}" is not a moment this list can read. Send ${name} as an ` +
+          `RFC 3339 timestamp — runs started ${meaning} it — or leave it out.`,
+      };
+    }
+    filter[field] = moment;
+  }
+
+  return { filter };
 }
 
 /** One change, as the feed carries it. */
@@ -692,16 +992,136 @@ export async function runRoutes(
   });
 
   /**
-   * The run as it now stands, with every conversation in it. What a follower
-   * seeds itself from when it did not start the run itself.
+   * One page of this project's run history, newest first.
+   *
+   * **Every filter here is a narrowing and none of them is a predicate.** Agent,
+   * connection, test, machinery status and a date window are all facts of the
+   * run table; the verdict is the one that is not, and it is applied to the fold
+   * rather than to the query, because a verdict is computed at read time from
+   * rows in another store and there is nothing stored anywhere for a `where` to
+   * name.
+   *
+   * **A verdict-filtered page may come back short and still carry a cursor.**
+   * That is not a bug and the sentence is worth keeping: `next_cursor` promises
+   * there is more to *look at*, never that there is more to show. Asking again
+   * with it continues from exactly where the sweep stopped.
+   */
+  app.get(RUNS_PATH, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const query = (request.query ?? {}) as Record<string, unknown>;
+
+    const acting = await actingIn(auth, given(text(query.project)));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+
+    const cursor = given(text(query.cursor));
+    if (cursor !== undefined && !isId("run", cursor)) {
+      return sendRefusal(
+        reply,
+        "invalid_cursor",
+        REFUSALS.invalidCursor(cursor),
+      );
+    }
+
+    const narrowing = readNarrowing(query);
+    if ("refusal" in narrowing) {
+      return invalid(reply, narrowing.refusal);
+    }
+
+    // A page size a client asked for, checked here rather than left to the
+    // layer beneath — which raises rather than answers, because a bad limit at
+    // that seam is a caller of egma's own that has lost track of itself.
+    const said = given(text(query.limit));
+    const limit = said === undefined ? undefined : Number(said);
+    if (
+      said !== undefined &&
+      (!/^\d+$/u.test(said) ||
+        limit === undefined ||
+        !Number.isInteger(limit) ||
+        limit < 1 ||
+        limit > LARGEST_RUN_PAGE)
+    ) {
+      return invalid(
+        reply,
+        `"${said}" is not a page size this list can serve. Send limit as a ` +
+          `whole number between 1 and ${String(LARGEST_RUN_PAGE)}, or leave ` +
+          `it out for the default.`,
+      );
+    }
+
+    const page = await listRunHistory(acting.auth, {
+      ...(cursor === undefined ? {} : { cursor }),
+      ...(limit === undefined ? {} : { limit }),
+      ...narrowing.filter,
+    });
+
+    return reply.send({
+      items: page.items.map((entry) =>
+        describedHistoryEntry(entry, entry.fold),
+      ),
+      // Null rather than absent, so a client can tell "there is no next page"
+      // from "this response is an older shape that never had one".
+      next_cursor: page.nextCursor ?? null,
+    });
+  });
+
+  /**
+   * The run as it now stands, with every conversation in it, what it froze to
+   * judge itself by, and the two identities it executed against.
+   *
+   * The agent and the connection are read **as they now stand, archived or
+   * not**, and that is the whole of what "past runs remain readable" means: a
+   * connection somebody archived last week is still what this run went over, and
+   * a page that could not name it would leave the evidence uninterpretable. What
+   * archiving takes away is entry into new work, which is enforced where new
+   * work is created.
    */
   app.get(RUN_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { runId } = request.params as { runId: string };
 
-    const described = await runAsItStands(auth, runId, options.baseUrl);
+    const header = await getRun(auth, runId);
+    if (header === undefined) return notFound(reply, NO_SUCH_RUN);
+
+    const described = await runAsItStands(
+      auth,
+      runId,
+      options.baseUrl,
+      header,
+    );
     if (described === undefined) return notFound(reply, NO_SUCH_RUN);
-    return reply.send(described);
+
+    const plan = await getGradingPlan(auth, runId);
+    const ranAgainst = await getAgent(auth, header.agentId);
+    const ranOver = await getConnection(
+      auth,
+      header.agentId,
+      header.connectionId,
+    );
+
+    return reply.send({
+      ...described,
+      // Absent only where the run itself is not this caller's, which cannot
+      // happen here — but a plan row can be missing on an instance whose
+      // upgrade has not run, and `null` says so rather than inventing a state.
+      grading_plan: plan === undefined ? null : describedGradingPlan(plan),
+      agent:
+        ranAgainst === undefined
+          ? null
+          : {
+              id: ranAgainst.id,
+              name: ranAgainst.name,
+              archived: ranAgainst.archivedAt !== null,
+            },
+      connection:
+        ranOver === undefined
+          ? null
+          : {
+              id: ranOver.id,
+              name: ranOver.name,
+              type: ranOver.type,
+              archived: ranOver.archivedAt !== null,
+            },
+    });
   });
 
   /**
@@ -753,6 +1173,55 @@ export async function runRoutes(
   });
 
   /**
+   * Run it again, under today's conditions.
+   *
+   * **Server-derived, and that is what makes the link trustworthy.** The agent,
+   * the connection and the exact frozen test versions come off the run in the
+   * address; the body carries an idempotency key and nothing else. There is no
+   * field on `POST /api/runs` that can set `retry_of_run_id`, so a run that says
+   * it retries another one really does execute what that one executed.
+   *
+   * **It refuses rather than substituting.** Every resource the earlier run used
+   * is rechecked as it stands now, and one that is archived or no longer
+   * applicable refuses the whole Retry by name. Quietly swapping in a live
+   * replacement would answer "we ran it again" about a different run, and the
+   * two results would then be compared as though they were about the same thing.
+   *
+   * **It is honestly not a replay, and the answer says so by what it resolves.**
+   * Persona and grader versions, project-default graders, the judge setting, the
+   * connection's current configuration, and the project's mock tools are all
+   * resolved fresh — because a retry under current conditions is what this is.
+   */
+  app.post(RUN_RETRY_PATH, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const { runId } = request.params as { runId: string };
+    const body = (request.body ?? {}) as Body;
+
+    authorize(auth, "start_and_cancel_runs", {
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+    });
+
+    const acting = await actingIn(auth, given(text(body.project)));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+
+    // Required here for the reason it is required on a start: a retry dials a
+    // real agent and spends a real judge, and an answer lost on the way back
+    // must never become a second conversation.
+    const idempotencyKey = given(text(body.idempotency_key));
+    if (idempotencyKey === undefined) {
+      return unprocessable(reply, REFUSALS.idempotencyKeyRequired);
+    }
+
+    const started = await retryRun(acting.auth, runId, { idempotencyKey });
+    if (started === undefined) return notFound(reply, NO_SUCH_RUN);
+
+    return reply
+      .code(201)
+      .send(describedRun(started, started.simulations, options.baseUrl));
+  });
+
+  /**
    * Stop a run.
    *
    * Conversations still queued end here and now; ones already with a simulator
@@ -799,6 +1268,14 @@ export async function runRoutes(
    * nobody would think to check.
    */
   app.setErrorHandler(async (error: unknown, _request, reply) => {
+    // A Retry that could not be derived. Its own code and its own sentence,
+    // relayed word for word from where the resource was decided: the refusal
+    // names what stopped it, points at the builder, and promises the earlier run
+    // was not touched.
+    if (error instanceof RunRetryRefusedError) {
+      return sendRefusal(reply, "retry_unavailable", error.message);
+    }
+
     if (error instanceof RunWriteRefusedError) {
       // A map from the reason to the answer, and nothing else. The sentence is
       // written whole where the refusal was decided and travels untouched:

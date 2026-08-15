@@ -843,6 +843,51 @@ export function planGroupsFor(
   });
 }
 
+/**
+ * The graders a selection names directly that the plan it just produced does
+ * not carry, in the order the versions named them.
+ *
+ * Only one thing puts a grader in this answer: it was archived, so
+ * `applicableGraders` did not see it and `planGroupsFor` left it out. For an
+ * ordinary start that is exactly right — Archive means "stop entering new
+ * grading plans", and the run still starts. For a **Retry** it is not: the new
+ * run would be judged by fewer graders than the one it copies, and the two
+ * results would then be compared as though they measured the same thing.
+ *
+ * It is asked of the plan rather than of the grader table, so the answer and
+ * the plan about to be frozen come from one read. A grader archived after that
+ * read is inside the plan and stays there, which is what a frozen plan means; a
+ * grader archived before it is missing here, and the Retry is refused.
+ */
+export function scenarioGradersMissingFrom(
+  versions: readonly PinnedVersion[],
+  groups: readonly PlanGroup[],
+): readonly string[] {
+  const carried = new Map<string, ReadonlySet<string>>();
+  for (const group of groups) {
+    if (group.tag !== "version") continue;
+    carried.set(
+      group.testVersionId,
+      new Set(
+        group.items.flatMap((item) =>
+          item.kind === "authored" ? [item.graderId] : [],
+        ),
+      ),
+    );
+  }
+
+  const missing: string[] = [];
+  for (const version of versions) {
+    const held = carried.get(version.versionId);
+    for (const graderId of version.graderIds) {
+      if (held?.has(graderId) === true) continue;
+      if (missing.includes(graderId)) continue;
+      missing.push(graderId);
+    }
+  }
+  return missing;
+}
+
 /** Every `jcr_` credential a plan names, deduplicated, in the order first met. */
 export function judgeCredentialsIn(
   groups: readonly PlanGroup[],

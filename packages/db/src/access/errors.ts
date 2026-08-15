@@ -974,3 +974,100 @@ export class IdempotencyConflictError extends Error {
     this.resultId = resultId;
   }
 }
+
+/**
+ * A Retry that could not be derived, because something the earlier run used is
+ * no longer active or no longer applies.
+ *
+ * **It refuses rather than substituting, and that is the whole design.** A Retry
+ * that quietly swapped an archived connection for a live one, or dropped the
+ * test whose agent link was removed, would answer "we ran it again" about a
+ * different run — and the person reading the result would compare two numbers
+ * that were never about the same thing. So the one honest move is to say which
+ * resource stopped it and send them back to the builder, where every choice is
+ * theirs to make out loud.
+ *
+ * The blocking resource travels as a value rather than only inside the sentence,
+ * because a page offers a link to it and reading a noun back out of prose is how
+ * a sentence becomes load-bearing. The sentence itself is `refuseRetry` below,
+ * beside the error rather than at the HTTP door, because the resource it names
+ * is decided in the data-access module and two of its files raise it.
+ */
+export class RunRetryRefusedError extends Error {
+  readonly runId: string;
+  /** As a sentence names it: `agent agt_1`, `test tst_2`, `persona prs_3`. */
+  readonly resource: string;
+  /** The kind, for a page that wants to link at it. */
+  readonly resourceKind: RetryBlocker;
+  /** The blocking row's own id, or null where the blocker is the selection itself. */
+  readonly resourceId: string | null;
+
+  constructor(input: {
+    readonly runId: string;
+    readonly resource: string;
+    readonly resourceKind: RetryBlocker;
+    readonly resourceId: string | null;
+    readonly message: string;
+  }) {
+    super(input.message);
+    this.name = "RunRetryRefusedError";
+    this.runId = input.runId;
+    this.resource = input.resource;
+    this.resourceKind = input.resourceKind;
+    this.resourceId = input.resourceId;
+  }
+}
+
+/**
+ * What can stop a Retry.
+ *
+ * `selection` is the odd one and is the honest answer for an upgraded
+ * instance's history: a run that recorded no test versions has nothing to copy,
+ * so there is no resource to name and the selection itself is what is missing.
+ * `applicability` is a live link rather than an archived row — the test and the
+ * agent are both fine, and the test no longer applies to that agent.
+ */
+export type RetryBlocker =
+  | "agent"
+  | "connection"
+  | "test"
+  | "test_version"
+  | "persona"
+  | "grader"
+  | "applicability"
+  | "selection";
+
+/**
+ * The sentence a refused Retry answers with, filled in and never composed.
+ *
+ * It is one string in one place because a sentence assembled twice is a contract
+ * that exists nowhere as one string — and this one is now raised from two files:
+ * `run-history.ts`, which rechecks before it asks for the run, and `runs.ts`,
+ * which rechecks again inside the transaction that freezes the plan. Every
+ * refusal is this sentence with a different noun in it, and the last clause is
+ * the promise the whole operation rests on: nothing about the earlier run has
+ * been touched.
+ */
+export function retryUnavailable(runId: string, resource: string): string {
+  return (
+    `Run ${runId} cannot be retried because ${resource} is not active or no ` +
+    `longer applies. Open the run builder and choose active resources; the ` +
+    `original run was not changed.`
+  );
+}
+
+/** Refuse a Retry, naming the resource that stopped it. */
+export function refuseRetry(
+  runId: string,
+  kind: RetryBlocker,
+  resource: string,
+  resourceId: string | null,
+): never {
+  throw new RunRetryRefusedError({
+    runId,
+    resource,
+    resourceKind: kind,
+    resourceId,
+    message: retryUnavailable(runId, resource),
+  });
+}

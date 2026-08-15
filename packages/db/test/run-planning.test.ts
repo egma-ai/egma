@@ -3,6 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   archiveJudgeCredential,
+  claimSimulations,
+  completeSimulation,
   createAgent,
   createGrader,
   createJudgeCredential,
@@ -11,6 +13,7 @@ import {
   deleteGrader,
   getGradingPlan,
   IdempotencyConflictError,
+  listGradingJobsForSimulation,
   JudgeCredentialInUseError,
   JudgeNotConfiguredError,
   listSimulations,
@@ -19,6 +22,7 @@ import {
   refreshConnectionCapabilities,
   setProjectJudge,
   startRun,
+  startSimulation,
   type AuthContext,
   type AuthoredPlanItem,
   type BuiltInPlanItem,
@@ -799,6 +803,85 @@ describe("archiving a judge credential", () => {
       kind: "run",
       id: started.id,
     });
+  });
+
+  /**
+   * The third blocker, and the one a run's own state cannot stand in for.
+   *
+   * A run whose conversations have all landed no longer blocks on the plan — the
+   * second rule above asks about nonterminal simulations, and there are none.
+   * But the grading queue is a separate thing that settles later, and a job
+   * still `pending` or `claimed` is about to resolve this credential's secret.
+   * Archiving here would strand judging that has already been promised, so the
+   * refusal has to name the job rather than the run.
+   */
+  it("is refused while a pending grading job still needs it, and names the job", async () => {
+    const credential = await createJudgeCredential(actingAsAcme("admin"), {
+      label: "Needed by a job that has not run",
+      provider: "openai",
+      key: "sk-a-real-looking-openai-key-0007",
+    });
+    await setProjectJudge(actingAsAcme("admin"), {
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      source: credential.id,
+    });
+
+    const started = await startRun(actingAsAcme(), {
+      agentId,
+      connectionId: measured,
+      testVersionIds: [plain],
+      idempotencyKey: newId("run"),
+    });
+
+    // Every conversation lands, so the run itself is terminal and the
+    // nonterminal-simulation rule is satisfied. The grading job it left behind
+    // is not, and that is the whole subject.
+    const claimed = (
+      await claimSimulations({ claimant: "simulator-blue-1", capacity: 50 })
+    ).filter((claim) => claim.runId === started.id);
+    expect(claimed.length).toBeGreaterThan(0);
+    for (const claim of claimed) {
+      await startSimulation(actingAsAcme(), claim.id, claim.claimedBy);
+      await completeSimulation(actingAsAcme(), claim.id, claim.claimedBy, {
+        endingReason: "persona_concluded",
+      });
+    }
+
+    const [job] = await listGradingJobsForSimulation(
+      actingAsAcme(),
+      claimed[0]?.id ?? "",
+    );
+    expect(job?.status).toBe("pending");
+
+    // Point the project somewhere else, so nothing but the job is holding it.
+    await setProjectJudge(actingAsAcme("admin"), {
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      source: (
+        await createJudgeCredential(actingAsAcme("admin"), {
+          label: "Somewhere else again",
+          provider: "openai",
+          key: "sk-a-real-looking-openai-key-0008",
+        })
+      ).id,
+    });
+
+    const refused = await archiveJudgeCredential(
+      actingAsAcme("admin"),
+      credential.id,
+    ).catch((cause: unknown) => cause);
+
+    expect(refused).toBeInstanceOf(JudgeCredentialInUseError);
+    expect((refused as JudgeCredentialInUseError).uses).toContainEqual({
+      kind: "grading_job",
+      id: job?.id,
+    });
+    // And the run is emphatically not what is blocking it: its conversations
+    // have all landed, so the second rule has nothing to say here.
+    for (const use of (refused as JudgeCredentialInUseError).uses) {
+      expect(use.kind).not.toBe("run");
+    }
   });
 
   it("succeeds once nothing needs it, and the plans that named it stay readable", async () => {

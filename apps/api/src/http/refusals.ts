@@ -146,6 +146,14 @@ export const CODES = {
    * third answer is the only honest one.
    */
   idempotency_conflict: 409,
+  /**
+   * A Retry that could not be derived, because something the earlier run used
+   * is no longer active or no longer applies. Its own code rather than a plain
+   * conflict because the fix is a specific one and a page can offer it: the
+   * refusal names the resource, and the next move is the run builder, where
+   * every substitution is the person's to make out loud.
+   */
+  retry_unavailable: 409,
   unsignable_reference: 422,
   no_adapter: 422,
   phone_setup_required: 422,
