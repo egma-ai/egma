@@ -17,8 +17,8 @@ import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
 import { mockToolRoutes } from "./routes/mock-tools.ts";
-import { phoneReadiness } from "./phone-readiness.ts";
 import { platformRoutes } from "./routes/platform.ts";
+import { platformSettingsRoutes } from "./routes/platform-settings.ts";
 import { recordingRoutes } from "./routes/recordings.ts";
 import { reportRoutes } from "./routes/reports.ts";
 import { runRoutes } from "./routes/runs.ts";
@@ -116,26 +116,30 @@ export function buildApi(options: ServerOptions): Api {
     },
     hooks: {
       admitIdentity: admitIdentity(config.singleOrganization),
-      // **The platform's own judge is only ever given away on a
-      // single-organization deployment**, and the guard is here rather than
-      // deeper because this is the only place that knows both facts.
+      // **The platform's own judge goes to every project this deployment
+      // creates**, whichever organization it belongs to. A deployment that
+      // names a default judge is offering a working grader, and the offer is
+      // the whole point: a new project's first simulation is graded before
+      // anybody has configured anything. Withhold it and a new customer's
+      // first run comes back ungraded — `errored` verdicts naming a missing
+      // judge, after real calls have been paid for.
       //
-      // That judge is the operator's own model credential. On a deployment
-      // holding one customer — a self-hoster, which is what this default is
-      // for — handing it to the project is the whole point: a first run has to
-      // be gradable before anybody has configured anything. On a deployment
-      // with open signup it is the opposite. Every stranger who signs up gets
-      // their own organization, and giving each one the operator's key means
-      // untrusted people's grading is billed to the operator, on a credential
-      // they never chose to share.
+      // **Said out loud, because it was weighed rather than missed.** On a
+      // deployment serving several organizations, that judge is the *operator's*
+      // own model credential, so every organization's new projects grade on the
+      // operator's account. That is what a hosted platform offering grading
+      // means, and an operator who does not want to pay for it names no default
+      // judge at all — then every project is ungraded until it configures its
+      // own, which is the honest failure rather than a quiet invoice.
       //
-      // So a multi-tenant deployment provisions no default judge, and a
-      // project there is ungraded until it configures its own. That is the
-      // honest failure: `errored` verdicts naming a missing judge, rather than
-      // a quiet invoice.
-      onIdentityCreated: onIdentityCreated(
-        config.singleOrganization ? config.defaultJudge : undefined,
-      ),
+      // Two things keep this safe and neither is this wiring's to give up. A
+      // project that has chosen a judge is never overwritten —
+      // `onConflictDoNothing` in the transaction that creates a project and
+      // again in the boot backfill. And that backfill has always seeded every
+      // unconfigured project across every organization, so gating this path
+      // alone never withheld the operator's key; it only delayed it to the next
+      // restart, which is the exact gap this hook exists to close.
+      onIdentityCreated: onIdentityCreated(config.defaultJudge),
     },
   });
 
@@ -173,15 +177,16 @@ export function buildApi(options: ServerOptions): Api {
       .send({ status: healthy ? "ok" : "unavailable", postgres, clickhouse });
   });
 
-  // Whether this deployment can dial, worked out once and handed to both the
-  // door that reports it and the door that enforces it. One value rather than
-  // two calls, so what `GET /api/platform` tells a developer and what run
-  // creation does to them can never be two different answers.
-  const phone = phoneReadiness(config.phone);
-
   // Read before login and before any repository identifier is sent. It is
   // public because the CLI uses it to decide whether login is safe to start.
-  void app.register(platformRoutes, { origin: config.baseUrl, phone });
+  //
+  // Whether this deployment can dial is no longer worked out here and handed
+  // down: the carrier is one of the platform's own settings now, so the door
+  // that reports it and the door that enforces it each read the store when
+  // they are asked. That is what stops them being one answer from start-up
+  // that an operator finishing setup cannot change without a restart, and they
+  // still cannot disagree — one store, one `phoneReadiness`, two callers.
+  void app.register(platformRoutes, { origin: config.baseUrl });
 
   // Registered without `fastify-plugin` on purpose: the adapter replaces every
   // body parser inside its own scope so the provider sees the bytes that were
@@ -229,6 +234,24 @@ export function buildApi(options: ServerOptions): Api {
     baseUrl: config.baseUrl,
   });
 
+  // What this deployment has been configured with, as an owner reads and
+  // changes it. Its own credentialed scope, like every other group, so its one
+  // refusal — the settings of a platform are not everybody's to see — never
+  // reaches another group's error handler. It sits beside the public platform
+  // route rather than inside it: they answer at addresses that share a prefix
+  // and share nothing else, one asking for no credential and one refusing
+  // anybody but an owner.
+  void app.register(platformSettingsRoutes, {
+    provider: identity.provider,
+    rateLimit,
+    // The same flag the platform's own judge is gated on a few lines above, and
+    // for the same reason: what a deployment holds for itself is an owner's to
+    // read and to change only while that owner is the whole deployment. On one
+    // serving several customers these settings belong to none of them, and the
+    // question of whose they are is not answered yet.
+    singleOrganization: config.singleOrganization,
+  });
+
   // What a developer's folder syncs against. Its own scope, like every other
   // group here, so the credentialed hook and the routes it protects cannot come
   // apart and one group's error handler never answers another's refusals.
@@ -250,7 +273,6 @@ export function buildApi(options: ServerOptions): Api {
     provider: identity.provider,
     rateLimit,
     baseUrl: config.baseUrl,
-    phone,
   });
 
   // Where a recording's reference becomes something a browser can play. Its own

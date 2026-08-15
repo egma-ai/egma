@@ -160,7 +160,7 @@ def test_the_openai_mouth_is_built_at_the_provider_band_and_converted_after():
     conversion to the line's band sits after it.
     """
     leg, spoken_with, closers = _mouth(
-        SpeechProviders(tts="openai", openai_api_key=A_KEY),
+        SpeechProviders(tts="openai", tts_key=A_KEY),
         voice_from_traits({}),
         TELEPHONY_BAND_HZ,
     )

@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 
 from .blob import BlobStore
 from .conductor import DEFAULT_CONDUCT, ConductParameters, VoiceConductor
+from .config import MediaSettings
 from .mock_tools import ExchangedToolCall, MockToolSeam
 from .plugs import DuplexLine, PlatformPlug, PlugError, plug_for
 from .recording import RECORDING_NAME
@@ -80,6 +81,7 @@ def assemble(
     *,
     blobs: BlobStore,
     speech: SpeechProviders = SCRIPTED_PAIR,
+    media: MediaSettings | None = None,
     parameters: ConductParameters | None = None,
 ) -> Assembled:
     """Build one simulation's pipeline from its spec.
@@ -93,6 +95,12 @@ def assemble(
     configuration says what carries it. Left alone it is the scripted
     pair, so a deployment with nothing to say about providers gets
     exactly the pipeline it always got.
+
+    ``media`` is the same for the telephone network — this container's
+    bridge with the platform's own carrier already laid over it, resolved
+    once by whoever built these arguments and handed whole to the plug.
+    ``None`` is a deployment that places no calls, and a spec that then
+    names a phone number is refused by the plug with a sentence saying so.
     """
     factory = plug_for(spec.connection_type)
     if factory is None:
@@ -110,6 +118,7 @@ def assemble(
         credentials=spec.credentials,
         simulation_id=spec.simulation_id,
         mock_tools=mock_tools,
+        media=media,
     )
     if spec.modality != "voice":
         return Assembled(plug=plug, mock_tools=mock_tools)

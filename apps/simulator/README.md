@@ -245,12 +245,13 @@ already stored in LiveKit or the inline fields below — and the same three
 LiveKit variables serve a self-hosted server and LiveKit Cloud.
 
 If your carrier is Twilio, none of this is yours to build by hand.
-`egma self-host phone setup`, in the platform workspace, reads your
-account, shows a plan, and on approval creates the Elastic SIP Trunk, the
+`egma self-host setup`, in the platform workspace, reads your account,
+shows a plan, and on approval creates the Elastic SIP Trunk, the
 credential list and its credential, attaches both and the number to the
-trunk, and writes every variable below into that workspace's own private
-configuration. It is safe to run again and safe to run again after a run
-that stopped half way. **The account token is used by that command and
+trunk, and writes what that produced into the **platform's own store**,
+sealed — from where every simulator is handed it on the work order it
+claims. It is safe to run again and safe to run again after a run that
+stopped half way. **The account token is used by that command and
 nothing else** — what a deployment keeps afterwards is a SIP credential
 that can do nothing but place calls over one trunk. See the root README.
 
@@ -304,10 +305,21 @@ one.
 
 Everything arrives as environment variables.
 
+**The provider settings in this table are a fallback, and a deployment does
+not use them.** Which model the persona thinks with, what it speaks and hears
+with, which bridge places a call and which carrier trunk it goes over are the
+*platform's* settings: the control plane stores them sealed and hands them to
+this process on the work order it claims, read afresh for every simulation. A
+work-order value replaces whatever this environment said, and no compose file
+passes any of them — so on a real deployment there is nothing here to set and
+nothing to keep in step. They stay readable for the one reader who has no
+platform behind them: a bare `egma-simulator` process, which is what the
+workbench story and every contributor's checkout run.
+
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `EGMA_SIMULATOR_CONTROL_PLANE_URL` | (required) | Where to claim, heartbeat, and report. |
-| `EGMA_SIMULATOR_SERVICE_TOKEN` | (none) | Sent as `Authorization: Bearer` on every outbound call. The real control plane requires it and checks it against its own `EGMA_SIMULATOR_SERVICE_TOKEN` — under compose one development default reaches both sides, and changing it (once, in `.env`) before anybody else can reach the machine is part of deploying; the claim answers carry live provider credentials. The workbench asks for none. |
+| `EGMA_SIMULATOR_SERVICE_TOKEN` | (none) | Sent as `Authorization: Bearer` on every outbound call. The real control plane requires it and checks it against its own `EGMA_SIMULATOR_SERVICE_TOKEN` — under compose one variable reaches both sides and neither has a default, so a deployment states it once in `.env` and Compose refuses by name until it does; the claim answers carry live provider credentials. The workbench asks for none. |
 | `EGMA_SIMULATOR_CAPACITY` | `4` | Most simulations conducted at once. |
 | `EGMA_SIMULATOR_CLAIMANT` | `egma-simulator-<host>-<pid>` | The name stamped on claims. |
 | `EGMA_SIMULATOR_HEARTBEAT_SECONDS` | `5` | Beat interval per running simulation. |
