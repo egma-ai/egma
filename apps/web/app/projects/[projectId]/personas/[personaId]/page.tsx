@@ -95,45 +95,82 @@ type Draft = {
 };
 
 /**
- * The server's answer, taken into the draft **field by field**.
+ * What a write actually put in its body, and the values it put there.
  *
- * The rule is one sentence: a field the author has not touched since it was
- * submitted takes what the server kept; a field they have touched keeps their
- * newer keystrokes. Both halves matter, and each is a defect on its own.
- * Adopting nothing leaves somebody looking at text egma rewrote. Adopting
- * everything throws away what they typed while the save was in the air — a
- * reply cannot speak for text it never saw.
+ * A field is present here only if the request carried it. That is the whole
+ * distinction the adoption below turns on, so it is a shape rather than a
+ * convention: a save that forgets to declare a field it sent cannot silently
+ * get that field adopted, and a save that declares one it did not send cannot
+ * exist.
+ */
+type Submitted = {
+  readonly personaId: string;
+  readonly name?: string;
+  readonly description?: string;
+  readonly traits?: TraitsDraft;
+};
+
+/**
+ * The server's answer, taken into the draft.
+ *
+ * **The invariant, stated once: adoption may touch exactly the fields the
+ * request carried, and among those, only where the draft still holds what was
+ * sent.** Everything outside the submitted set is left alone, always.
+ *
+ * Both halves are load-bearing and each was learned the hard way.
+ *
+ * - *Only the submitted fields.* This page has two forms with two saves. A
+ *   reply carries the whole persona, but for a field the request never
+ *   mentioned that value is a **stale read, not an answer** — so adopting it
+ *   would quietly undo an edit sitting unsaved in the other form.
+ * - *Only where the draft still holds what was sent.* A save takes a moment,
+ *   and somebody typing during that moment has written something the server
+ *   has never seen. Its reply cannot speak for text it never saw.
+ *
+ * What is left is the case adoption exists for: a field this request sent,
+ * untouched since, which egma stored in a form of its own — a trimmed trait,
+ * a dropped blank — and which the author should be looking at rather than
+ * their own draft of it.
  *
  * The traits are walked by key rather than listed, so a trait added later is
- * covered by this without anybody remembering to come back.
+ * covered without anybody remembering to come back.
  */
 function adopted(
   current: Draft | null,
-  submitted: Draft | null,
+  submitted: Submitted | undefined,
   fromServer: Persona,
 ): Draft | null {
   if (current === null) return current;
-  // A write that carried no draft — a clone, an Archive, a Restore — has
-  // nothing to adopt: it never sent these fields, so it cannot answer for them.
-  if (submitted === null || submitted.personaId !== current.personaId) {
+  // A write that carried none of these fields — a clone, an Archive, a
+  // Restore — has nothing to adopt, because it asked about none of them.
+  if (submitted === undefined || submitted.personaId !== current.personaId) {
     return current;
   }
 
+  /** Sent, and untouched since. The only fields an answer may land on. */
+  const answered = <T,>(mine: T, sent: T | undefined, theirs: T): T =>
+    sent !== undefined && mine === sent ? theirs : mine;
+
   const theirs = draftOf(fromServer.traits);
   const traits = { ...current.traits };
-  for (const trait of Object.keys(current.traits) as (keyof TraitsDraft)[]) {
-    if (current.traits[trait] === submitted.traits[trait]) {
-      traits[trait] = theirs[trait];
+  if (submitted.traits !== undefined) {
+    for (const trait of Object.keys(current.traits) as (keyof TraitsDraft)[]) {
+      traits[trait] = answered(
+        current.traits[trait],
+        submitted.traits[trait],
+        theirs[trait],
+      );
     }
   }
 
   return {
     personaId: current.personaId,
-    name: current.name === submitted.name ? fromServer.name : current.name,
-    description:
-      current.description === submitted.description
-        ? (fromServer.description ?? "")
-        : current.description,
+    name: answered(current.name, submitted.name, fromServer.name),
+    description: answered(
+      current.description,
+      submitted.description,
+      fromServer.description ?? "",
+    ),
     traits,
   };
 }
@@ -268,17 +305,22 @@ function PersonaDetail({
     editing.current = { projectId, personaId };
   }, [projectId, personaId]);
 
-  /** One write, and the three things that can come back instead of a persona. */
+  /**
+   * One write, and the three things that can come back instead of a persona.
+   *
+   * `submitted` is what this request put in its body — declared by the caller
+   * rather than read off the draft, because the draft holds fields the request
+   * did not carry and the reply cannot answer for those. Left out entirely by
+   * a write that carries none of the editable fields.
+   */
   async function write(
     path: string,
     method: "POST" | "PATCH",
     body: Record<string, unknown>,
     what: "identity" | "traits" | "lifecycle",
+    submitted?: Submitted,
   ): Promise<Persona | null> {
     const asked = { projectId, personaId };
-    // The draft exactly as it was when this write left, so the reply can be
-    // told apart from anything typed while it was in flight.
-    const submitted = held;
     setSaving(what);
     setRefusal(null);
 
@@ -591,6 +633,13 @@ function PersonaDetail({
           description: held.description,
         },
         "identity",
+        // The two fields this body carries, and no others: an unsaved trait
+        // sitting in the form below is not this request's to answer for.
+        {
+          personaId: one.id,
+          name: held.name,
+          description: held.description,
+        },
       );
     }
 
@@ -605,6 +654,9 @@ function PersonaDetail({
           traits: traitsFrom(held.traits),
         },
         "traits",
+        // The traits and nothing else: a name half-retyped in the form above
+        // is not this request's to answer for either.
+        { personaId: one.id, traits: held.traits },
       );
     }
 

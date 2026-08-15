@@ -1226,3 +1226,69 @@ describe("a save answering while the author is still typing", () => {
     ).toBe("Typed while saving");
   });
 });
+
+/* ------------------------------------------------------------------------ */
+
+/**
+ * The third property, and the one that states the whole rule.
+ *
+ * This page has two forms with two saves. A reply carries the whole persona,
+ * but for a field the request never mentioned that value is a stale read
+ * rather than an answer — so adopting it would quietly undo an edit sitting
+ * unsaved in the other form.
+ *
+ * **Adoption may touch exactly the fields the request carried, and among
+ * those, only where the draft still holds what was sent.** The three tests in
+ * this file are that sentence: this one is the first clause, the two above are
+ * the second, and none of them is safe without the others.
+ */
+describe("a save from one form while the other holds an unsaved edit", () => {
+  it("adopts what it asked about, and leaves the other form alone", async () => {
+    let release: (answer: Response) => void = () => undefined;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init?: RequestInit) => {
+        const at = new URL(String(input), "http://egma.test");
+        if (at.pathname === "/api/me") return json(200, meWith("member"));
+        if (at.pathname === "/api/persona-form") {
+          return json(200, { voice_providers: ["elevenlabs"] });
+        }
+        if ((init?.method ?? "GET") !== "GET") return pending;
+        if (at.pathname.endsWith("/versions")) {
+          return json(200, { items: [], next_cursor: null });
+        }
+        if (at.pathname.endsWith("/usage")) return json(200, { tests: [] });
+        return json(200, RITA);
+      }),
+    );
+
+    render(<PersonaPage />);
+
+    // An accent typed into the traits form and deliberately not saved.
+    fireEvent.change(await screen.findByLabelText("Accent"), {
+      target: { value: "Glaswegian" },
+    });
+
+    // Then a name saved from the form above it, carrying no traits at all.
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "  A  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+
+    // The reply carries the whole persona, accent and all — as every read of a
+    // persona does. For the accent that value is a stale read, not an answer.
+    release(json(200, { ...RITA, name: "A", revision: "revision-two" }));
+
+    await vi.waitFor(() => {
+      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("A");
+    });
+
+    expect((screen.getByLabelText("Accent") as HTMLInputElement).value).toBe(
+      "Glaswegian",
+    );
+  });
+});
