@@ -95,9 +95,19 @@ describe("a diagnostic copy", () => {
     expect(without.outcome.verdict).toBe("passed");
     expect(without.diagnostics).toBeUndefined();
 
+    // A bound this conversation misses, so the diagnostic genuinely **fails** —
+    // which is what the case is named for. It used to be a copy of an entry
+    // egma could not execute, answering `errored`; now that latency is computed
+    // the same test is made with the word the lane is actually about, and
+    // `failed` is the stronger of the two: it is the one a required copy would
+    // have turned the whole conversation red with.
     const reporting = await seedGrader(
       world,
-      aLatencyCopy({ name: "Reports and never blocks", required: false }),
+      aLatencyCopy({
+        name: "Reports and never blocks",
+        required: false,
+        params: { metric: "turn_response_latency", bound: 100 },
+      }),
     );
     const { simulationId: beside } = await conductSimulation(world, { testId });
     await verdictsOn(world, beside, 2);
@@ -115,12 +125,14 @@ describe("a diagnostic copy", () => {
     expect(with_.outcome).toEqual(without.outcome);
     expect(with_.outcome.verdict).toBe("passed");
 
-    // Its own fraction is reported, in its own lane, beside that answer.
+    // Its own fraction is reported, in its own lane, beside that answer — and
+    // it is red in that lane while the answer to its left stays green, which is
+    // the whole of what a diagnostic is.
     const its = with_.byGrader.find((one) => one.graderId === reporting);
     expect(its?.required).toBe(false);
-    expect(its?.outcome.verdict).toBe("errored");
-    expect(with_.diagnostics?.verdict).toBe("errored");
-    expect(with_.diagnostics?.counts.errored).toBeGreaterThan(0);
+    expect(its?.outcome.verdict).toBe("failed");
+    expect(with_.diagnostics?.verdict).toBe("failed");
+    expect(with_.diagnostics?.counts.failed).toBeGreaterThan(0);
 
     // The copy the project was born with stays in the lane that decides.
     const seeded = await theSeededGrader(world);
@@ -138,16 +150,20 @@ describe("a diagnostic copy", () => {
   it("changes lane the moment the flag does, for judgments already made", async () => {
     await service.judgingWith({ [THE_BEHAVIOR]: met("the agent named it back.") });
 
+    // Blocking, and failing: a bound this conversation misses.
     const blocking = await seedGrader(
       world,
-      aLatencyCopy({ name: "Blocks until it does not" }),
+      aLatencyCopy({
+        name: "Blocks until it does not",
+        params: { metric: "turn_response_latency", bound: 100 },
+      }),
     );
     const testId = await seedTest(world);
     const { simulationId } = await conductSimulation(world, { testId });
     await verdictsOn(world, simulationId, 2);
 
     const before = await readVerdicts(world.auth, simulationId);
-    expect(before.outcome.verdict).toBe("errored");
+    expect(before.outcome.verdict).toBe("failed");
     expect(before.byGrader.find((its) => its.graderId === blocking)?.required).toBe(
       true,
     );
@@ -155,11 +171,11 @@ describe("a diagnostic copy", () => {
     await editGrader(world.auth, blocking, { required: false });
 
     const after = await readVerdicts(world.auth, simulationId);
-    // The same rows, read again: the errored ones are now in the lane that only
+    // The same rows, read again: the failing ones are now in the lane that only
     // reports, and the conversation passes on what is left.
     expect(after.verdicts).toHaveLength(before.verdicts.length);
     expect(after.outcome.verdict).toBe("passed");
-    expect(after.diagnostics?.verdict).toBe("errored");
+    expect(after.diagnostics?.verdict).toBe("failed");
     expect(after.byGrader.find((its) => its.graderId === blocking)?.required).toBe(
       false,
     );

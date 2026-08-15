@@ -11,6 +11,7 @@ import {
   executeExpectedBehaviors,
   expectedBehaviorAssertions,
 } from "./expected-behaviors.ts";
+import { executeLatency, latencyAssertions } from "./latency.ts";
 
 /**
  * The executor seam: one library entry, one function, and nothing else in the
@@ -25,21 +26,31 @@ import {
  * those two words could hold exactly two entries forever. Keyed by identifier it
  * holds as many as egma ships, each named by the row a copy actually points at.
  *
- * **Not total, deliberately, and the gap is answered rather than silent.** An
- * entry with no executor here is one egma has not built yet — `latency` until
- * the change that computes it from spans lands — and a copy of it answers
- * `errored`, out loud, rather than passing. The row is replaced by a real
- * judgment the moment the executor arrives, because a re-grade at the same
- * grader version replaces rather than doubles.
+ * **Complete for the two entries v0 ships, and deliberately not total.** An
+ * entry with no executor here is one egma has not built yet, and a copy of it
+ * answers `errored`, out loud, rather than passing — which is the arm a third
+ * entry arrives through, and the arm `latency` sat in while the shelf had it and
+ * the engine did not.
+ *
+ * That arm names the grader's **one** check, because an entry egma cannot run is
+ * an entry that cannot say what it would have checked. Everything with an
+ * executor names its own keys, so the rows a failure writes are the rows a later
+ * judging writes over — see `couldNotJudge`, which is where that matters.
  */
 const EXECUTORS: Readonly<Record<string, GraderExecutor | undefined>> = {
   [PREDEFINED_GRADERS.expectedBehaviors]: {
     execute: executeExpectedBehaviors,
     assertions: expectedBehaviorAssertions,
   },
-  // `latency` is computed from the conversation's spans by the change that
-  // brings the shared measure module. Until then a copy of it says so.
-  [PREDEFINED_GRADERS.latency]: undefined,
+  // Computed from the conversation's spans by the one shared measure module —
+  // the same module the metrics display reads through — with no model call
+  // anywhere on this path. Its keys are the copy's config entries by position,
+  // which is what makes an `errored` latency row re-gradable: the keys a
+  // failure writes are exactly the keys a later judging writes over.
+  [PREDEFINED_GRADERS.latency]: {
+    execute: executeLatency,
+    assertions: latencyAssertions,
+  },
 };
 
 /**

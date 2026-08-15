@@ -1,7 +1,8 @@
 import {
   claimGradingJobs,
+  getGrader,
   getGradingJob,
-  PREDEFINED_GRADERS,
+  readRunVerdicts,
   readVerdicts,
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -36,8 +37,12 @@ import { cannotDetermine, met, notMet } from "./support/scripted-judge.ts";
  * are.** A project is created holding an active copy of `expected_behaviors`,
  * so the conversation below is judged against its test's own sentences with
  * nothing set up at all; a copy of `latency` is what a second grader on the
- * project looks like, and until egma computes it from spans a copy of it says
- * `errored` out loud rather than passing.
+ * project looks like, and it is computed from the conversation's own spans with
+ * no model asked anything.
+ *
+ * **And a test names no graders**, because there is nowhere for it to. The
+ * junction is gone: which copies judge a conversation is each copy's own scope
+ * and nothing about the test in front of it.
  *
  * **The judge is scripted and no key is present anywhere in this file.** What
  * is under test here is egma's side of the seam — which graders applied, what
@@ -175,34 +180,176 @@ describe("a conversation reaching its terminal transition", () => {
 });
 
 /**
- * A grader egma has not built the engine for yet.
+ * The other predefined grader, end to end: a measure off the conversation's own
+ * spans, held to a bound somebody typed.
  *
- * `latency` is on the shelf and a project can press Use on it today; computing
- * it from a conversation's spans is a later change. Until then a copy of it
- * must say so out loud rather than pass, because a project's page going green
- * on a check nobody made is the exact false trust this product exists to kill.
+ * **No model is asked anything on this path.** The judge is scripted for the
+ * behaviors grader beside it, and the rows below come from egma's own engine
+ * reading the numbers the shared measure module worked out — the same numbers
+ * the metrics display shows for this conversation.
  */
-describe("a copy of an entry egma cannot execute yet", () => {
-  it("is errored, and never passed or skipped", async () => {
+describe("a latency copy", () => {
+  it("passes a conversation inside its bound, one row per config entry", async () => {
     await service.judgingWith({ [THE_BEHAVIOR]: met("it did.") });
-    const waiting = await seedGrader(
+    const quick = await seedGrader(
       world,
-      aLatencyCopy({ name: "Waiting on the measures" }),
+      aLatencyCopy({ name: "Answers inside two seconds" }),
     );
 
     const testId = await seedTest(world);
-    const { simulationId } = await conductSimulation(world, { testId });
+    const { simulationId, runId } = await conductSimulation(world, {
+      testId,
+      spans: { measured: { turn_response_latency: [900, 1_100] } },
+    });
     const verdicts = await verdictsOn(world, simulationId, 2);
-    const mine = verdicts.find((verdict) => verdict.graderId === waiting);
+    const mine = verdicts.filter((verdict) => verdict.graderId === quick);
+
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({
+      // The config entry's position, one-based. Never the measure and never the
+      // bound: a re-grade at a tightened bound has to write *over* this row
+      // rather than beside it, and a key made of what somebody typed would not.
+      assertion: "turn_response_latency",
+      verdict: "passed",
+      score: 1,
+    });
+    // The worst measurement decides, and the row says which one it was.
+    expect(mine[0]?.rationale).toContain("1100 milliseconds at its worst");
+    // And it cites the span that measurement happened in, which is what the
+    // column is for.
+    expect(mine[0]?.citedSpanIds).toHaveLength(1);
+
+    /**
+     * **And the run read path shows it**, which is the grain a results page and
+     * a CI gate actually read. `readRunVerdicts` is the function behind
+     * `GET /api/runs/:runId`; asserting only the per-conversation read would
+     * leave the last join between a latency verdict and the page somebody looks
+     * at unexercised by anything but hand-written rows.
+     */
+    const run = await readRunVerdicts(world.auth, runId);
+    const its = run.byGrader.find((one) => one.graderId === quick);
+
+    expect(run.simulations.map((one) => one.simulationId)).toContain(
+      simulationId,
+    );
+    expect(its?.outcome).toMatchObject({ verdict: "passed", score: 1 });
+
+    // The run's own headline is folded over the same rows at read time, so the
+    // counts underneath it add up to it — a stored rollup is what could drift,
+    // and there is not one.
+    const beneath = run.simulations.reduce(
+      (total, one) => total + one.outcome.counts.total,
+      0,
+    );
+    expect(run.outcome.counts.total).toBe(beneath);
+  });
+
+  it("fails a conversation over its bound, and says by how much", async () => {
+    await service.judgingWith({ [THE_BEHAVIOR]: met("it did.") });
+    const strict = await seedGrader(
+      world,
+      aLatencyCopy({
+        name: "Answers inside half a second",
+        params: { metric: "turn_response_latency", bound: 500 },
+      }),
+    );
+
+    const testId = await seedTest(world);
+    const { simulationId } = await conductSimulation(world, {
+      testId,
+      spans: { measured: { turn_response_latency: [900, 1_100] } },
+    });
+    const verdicts = await verdictsOn(world, simulationId, 2);
+    const mine = verdicts.find((verdict) => verdict.graderId === strict);
 
     expect(mine).toMatchObject({
-      // The entry's identifier: stable for its whole life, where its name is
-      // ordinary text a release may improve.
-      assertion: PREDEFINED_GRADERS.latency,
-      verdict: "errored",
+      assertion: "turn_response_latency",
+      verdict: "failed",
       score: 0,
     });
-    expect(mine?.rationale).toContain("does not execute the latency grader yet");
+    expect(mine?.rationale).toContain("over the bound of 500");
+  });
+
+  /**
+   * **`skipped`, and out of the fraction's denominator.** A measure this
+   * conversation never took is a check that did not apply — a chat simulation
+   * has no audio and therefore no `time_to_first_word` — and marking an agent
+   * down for a measurement nobody took is the false signal this product exists
+   * to kill. Never `failed`, and never `errored` either: nothing broke.
+   */
+  it("is skipped for a measure the conversation's spans do not carry", async () => {
+    await service.judgingWith({ [THE_BEHAVIOR]: met("it did.") });
+    const voiceOnly = await seedGrader(
+      world,
+      aLatencyCopy({
+        name: "Speaks up inside a second",
+        params: { metric: "time_to_first_word", bound: 1_000 },
+      }),
+    );
+
+    const testId = await seedTest(world);
+    const { simulationId } = await conductSimulation(world, {
+      testId,
+      // A chat conversation: it measured its turn latency and no audio at all.
+      spans: { measured: { turn_response_latency: [900] } },
+    });
+    const verdicts = await verdictsOn(world, simulationId, 2);
+    const mine = verdicts.find((verdict) => verdict.graderId === voiceOnly);
+
+    expect(mine).toMatchObject({ assertion: "time_to_first_word", verdict: "skipped" });
+    expect(mine?.rationale).toContain("nothing in this conversation measured time_to_first_word");
+
+    const read = await readVerdicts(world.auth, simulationId);
+    const its = read.byGrader.find((one) => one.graderId === voiceOnly);
+    // Nothing was scored, so there is no fraction — not a nought, which would
+    // read as a grader that found something wrong.
+    expect(its?.outcome.counts.skipped).toBe(1);
+    expect(its?.outcome.score).toBeUndefined();
+  });
+
+  /**
+   * **A diagnostic reports and gates nothing.** `required: false` is v0's only
+   * loudness switch: the copy is judged like any other, its rows land beside
+   * everything else's, and its failure is the run's business to display rather
+   * than to fail anything with. What the run's results make of that is the
+   * results page's own concern; what is asserted here is that the copy behaves
+   * as a diagnostic — judged, written, and separable by the grader it names.
+   */
+  it("is judged and written when it is a diagnostic, and fails on its own", async () => {
+    await service.judgingWith({ [THE_BEHAVIOR]: met("it did.") });
+    const watching = await seedGrader(
+      world,
+      aLatencyCopy({
+        name: "Watching the tail",
+        required: false,
+        params: { metric: "turn_response_latency", bound: 100 },
+      }),
+    );
+
+    const testId = await seedTest(world);
+    const { simulationId } = await conductSimulation(world, {
+      testId,
+      spans: { measured: { turn_response_latency: [900] } },
+    });
+    const verdicts = await verdictsOn(world, simulationId, 2);
+
+    const copy = await getGrader(world.auth, watching);
+    expect(copy?.required).toBe(false);
+
+    const mine = verdicts.find((verdict) => verdict.graderId === watching);
+    expect(mine).toMatchObject({ verdict: "failed", assertion: "turn_response_latency" });
+
+    // **Its failure is its own.** The rows fold per grader, so a diagnostic
+    // going red changes nothing about what any other copy answered — which is
+    // what lets a results page put these in a lane of their own and leave the
+    // gating graders' fold untouched.
+    const seeded = await theSeededGrader(world);
+    const read = await readVerdicts(world.auth, simulationId);
+    const diagnostic = read.byGrader.find((one) => one.graderId === watching);
+    const behaviors = read.byGrader.find((one) => one.graderId === seeded);
+
+    expect(diagnostic?.outcome.verdict).toBe("failed");
+    expect(behaviors?.outcome.verdict).toBe("passed");
   });
 });
 

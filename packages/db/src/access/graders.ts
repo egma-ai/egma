@@ -1,9 +1,10 @@
 import { newId } from "@egma/ids";
 import {
   isCatalogedMeasure,
-  CATALOGED_MEASURES,
+  isSpanDerivedMeasure,
   MEASURE_CATALOG_DOCUMENT,
   MEASURE_CATALOG_VERSION,
+  SPAN_DERIVED_MEASURES,
 } from "@egma/simulation-contract";
 import { and, desc, eq, inArray, isNull, lt, sql, type SQL } from "drizzle-orm";
 
@@ -351,7 +352,8 @@ async function definitionOf(
 }
 
 /**
- * A measure the simulator actually produces, checked against the catalog.
+ * A measure egma computes from a conversation's spans, checked against the
+ * catalog.
  *
  * **The one write-door rule that is about the world rather than about the
  * shape.** A copy names what it reads as a string, and a string naming nothing
@@ -361,15 +363,27 @@ async function definitionOf(
  * conversation whose spans do not carry it, so the engine has no way to tell a
  * typo from a modality. Only the moment of writing can.
  *
+ * **The list is the span-derived one, which is narrower than the catalog.** A
+ * measure the catalog names but no span carries — the turn count and the audio
+ * band, both reported on the terminal transition and both kept on the simulation
+ * row — is a real number in the wrong place for a grader: reading the trace
+ * would never find it, so a copy naming one is exactly the forever-`skipped`
+ * check this rule exists to refuse. It is the same list the **Use** form offers
+ * and the same list the shared measure module implements, so a developer cannot
+ * be shown an option a write would refuse.
+ *
  * The refusal names the catalog rather than only the list, because the next
  * question after "that is not a measure" is always "then what is", and the
- * catalog is the document that answers it — and says what each measure means,
- * which a list of names cannot.
+ * catalog is the document that answers it — and says what each measure means and
+ * how each is computed, which a list of names cannot.
  */
 function validMeasure(measure: string, parameter: string): string {
-  if (!isCatalogedMeasure(measure)) {
+  if (!isSpanDerivedMeasure(measure)) {
+    const named = isCatalogedMeasure(measure)
+      ? `"${measure}" is a measure egma records, and no span carries it — it arrives on the transition that ends a simulation — so a grader reading a conversation could never find it`
+      : `"${measure}" is not a measure egma computes, so a grader reading it could never fire`;
     throw new UnprocessableInputError(
-      `"${measure}" is not a measure egma computes, so a grader reading it could never fire; ${parameter} takes one of ${CATALOGED_MEASURES.join(", ")}, and the measure catalog (${MEASURE_CATALOG_DOCUMENT}, version ${MEASURE_CATALOG_VERSION}) says what each of them means`,
+      `${named}; ${parameter} takes one of ${SPAN_DERIVED_MEASURES.join(", ")}, and the measure catalog (${MEASURE_CATALOG_DOCUMENT}, version ${MEASURE_CATALOG_VERSION}) says what each of them means and how each is computed from the spans`,
     );
   }
   return measure;
@@ -459,6 +473,21 @@ function validAssertion(
  * no assertions reads nothing, judges nothing, and is a row on the Running
  * graders screen that says a project is checking something it is not. An entry
  * that asks nothing must have none, for the mirror-image reason.
+ *
+ * **And no measure twice, which is the rule that makes an assertion knowable.**
+ * A verdict row is filed under the measure its check bounds, because a copy's
+ * config is not pinned by a run and a position therefore names a different check
+ * after an edit. That key has to be unique inside a copy or it is not a key: two
+ * entries bounding one measure would write two judgments under one name, and the
+ * verdict store's sorting key ends at the assertion — so the two would collapse
+ * into one row and a check somebody wrote down would vanish inside a single
+ * grading, silently.
+ *
+ * It is a small product restriction and an honest one. What a second bound on
+ * one measure usually means is a second *copy* — a strict one that blocks and a
+ * looser one that only reports — and `required` lives on the copy rather than on
+ * an assertion, so that is where the difference has to be expressed anyway. The
+ * refusal says so.
  */
 function validConfig(
   definition: Definition,
@@ -475,7 +504,44 @@ function validConfig(
         .join('", "')}" — because a copy that checks nothing can never fail`,
     );
   }
+
+  const twice = measureNamedTwice(definition, assertions);
+  if (twice !== undefined) {
+    throw new UnprocessableInputError(
+      `this grader already bounds "${twice}", and a copy checks each measure once — its verdicts are filed under the measure they are about, so a second check on the same one could not be told from the first. Press Use again for a second copy, which is also where a different "required" belongs.`,
+    );
+  }
+
   return { assertions };
+}
+
+/**
+ * The first measure a copy names more than once, or nothing where each is named
+ * once.
+ *
+ * It reads the entry's own declaration to find *which* value is a measure rather
+ * than looking for a parameter called `metric`: what the parameters are is the
+ * library entry's business, and an entry that one day asks for a measure under
+ * another name is still an entry whose copies file verdicts under it.
+ */
+function measureNamedTwice(
+  definition: Definition,
+  assertions: readonly GraderAssertion[],
+): string | undefined {
+  const measures = definition.params
+    .filter((parameter) => parameter.kind === "measure")
+    .map((parameter) => parameter.name);
+
+  const named = new Set<string>();
+  for (const assertion of assertions) {
+    for (const parameter of measures) {
+      const measure = assertion[parameter];
+      if (typeof measure !== "string") continue;
+      if (named.has(measure)) return measure;
+      named.add(measure);
+    }
+  }
+  return undefined;
 }
 
 /**

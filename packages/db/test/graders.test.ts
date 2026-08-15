@@ -1,5 +1,8 @@
 import { isId, newId } from "@egma/ids";
-import { CATALOGED_MEASURES } from "@egma/simulation-contract";
+import {
+  CATALOGED_MEASURES,
+  SPAN_DERIVED_MEASURES,
+} from "@egma/simulation-contract";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -393,16 +396,111 @@ describe("values that do not answer what the entry asked", () => {
     );
 
     expect(refusal).toContain('"turn_responze_latency" is not a measure');
-    // Every cataloged name, because "then what is" is always the next question
-    // and a refusal that sends somebody hunting is a refusal that cost them the
-    // afternoon.
-    for (const cataloged of CATALOGED_MEASURES) {
+    // Every name a copy may bound, because "then what is" is always the next
+    // question and a refusal that sends somebody hunting is a refusal that cost
+    // them the afternoon.
+    for (const cataloged of SPAN_DERIVED_MEASURES) {
       expect(refusal).toContain(cataloged);
     }
   });
 
-  it("takes every measure the catalog does name", async () => {
-    for (const cataloged of CATALOGED_MEASURES) {
+  /**
+   * **A measure the catalog names and no span carries is refused too**, and the
+   * refusal says which of the two things went wrong.
+   *
+   * The turn count and the audio band are real numbers egma records — they
+   * arrive on the transition that ends a simulation and live on the simulation
+   * row — and a grader reading a conversation's spans would never find one. So a
+   * copy naming one is exactly the forever-`skipped` check this rule exists to
+   * refuse, and it is refused at the one moment anything can tell it from a
+   * measure a chat conversation simply did not produce.
+   */
+  it("is refused for a measure the catalog names and no span carries", async () => {
+    const notFromSpans = CATALOGED_MEASURES.filter(
+      (measure) => !SPAN_DERIVED_MEASURES.includes(measure),
+    );
+    expect(notFromSpans.length).toBeGreaterThan(0);
+
+    for (const measure of notFromSpans) {
+      const refusal = await useLibraryEntry(actingAsAcme(), {
+        libraryId: PREDEFINED_GRADERS.latency,
+        params: { metric: measure, bound: 2_000 },
+      }).then(
+        () => "the grader was written",
+        (error: unknown) =>
+          error instanceof Error ? error.message : String(error),
+      );
+
+      expect(refusal).toContain(`"${measure}" is a measure egma records`);
+      expect(refusal).toContain("no span carries it");
+    }
+  });
+
+  /**
+   * **One measure, one check, per copy — because the key has to be an
+   * identity.**
+   *
+   * A latency verdict is filed under the measure its check bounds, and a copy's
+   * config is not pinned by a run, so a position could not be the name (an edit
+   * makes the next entry the first, and the key would name a different measure
+   * than it did before). That makes the measure the key — and a key has to be
+   * unique inside a copy or it is not one: the verdict store's sorting key ends
+   * at the assertion, so two entries on one measure would collapse into a single
+   * row and one of the two checks would vanish inside a single grading.
+   *
+   * The refusal points at the thing a second bound usually wants to be, which is
+   * a second copy — `required` lives on the copy, so a blocking bound and a
+   * reporting one are two copies whatever this rule said.
+   */
+  it("is refused a second check on a measure the copy already bounds", async () => {
+    const refusal = await useLibraryEntry(actingAsAcme(), {
+      libraryId: PREDEFINED_GRADERS.latency,
+      params: { metric: "turn_response_latency", bound: 2_000 },
+    })
+      .then((created) =>
+        editGrader(actingAsAcme(), created.id, {
+          config: {
+            assertions: [
+              { metric: "turn_response_latency", bound: 2_000 },
+              { metric: "turn_response_latency", bound: 500 },
+            ],
+          },
+        }),
+      )
+      .then(
+        () => "the grader was written",
+        (error: unknown) =>
+          error instanceof Error ? error.message : String(error),
+      );
+
+    expect(refusal).toContain('already bounds "turn_response_latency"');
+    expect(refusal).toContain("Press Use again for a second copy");
+  });
+
+  it("takes two checks on two different measures, which is the ordinary case", async () => {
+    const created = await useLibraryEntry(actingAsAcme(), {
+      libraryId: PREDEFINED_GRADERS.latency,
+      name: "Two measures, one copy",
+      params: { metric: "turn_response_latency", bound: 2_000 },
+    });
+
+    const edited = await editGrader(actingAsAcme(), created.id, {
+      config: {
+        assertions: [
+          { metric: "turn_response_latency", bound: 2_000 },
+          { metric: "first_response_latency", bound: 1_000 },
+        ],
+      },
+    });
+
+    expect(edited?.config.assertions).toEqual([
+      { metric: "turn_response_latency", bound: 2_000 },
+      { metric: "first_response_latency", bound: 1_000 },
+    ]);
+  });
+
+  it("takes every measure a conversation's spans can carry", async () => {
+    for (const cataloged of SPAN_DERIVED_MEASURES) {
       const created = await useLibraryEntry(actingAsAcme(), {
         libraryId: PREDEFINED_GRADERS.latency,
         name: `Holds ${cataloged} to something`,

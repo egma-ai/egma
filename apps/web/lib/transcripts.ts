@@ -110,11 +110,54 @@ export type Outcome = {
   readonly counts: VerdictCounts;
 };
 
+/**
+ * One measure this exchange produced, as the read hands it over.
+ *
+ * **Computed by the platform, never here — the reduction included.** The
+ * samples arrive already worked out by egma's one shared measure module, and so
+ * does `worst`: the single number a grader holds against a bound. Both are the
+ * platform's arithmetic, so this page renders figures rather than deriving any.
+ *
+ * The reduction is the part that matters. Taking the maximum here would look
+ * harmless and would be a second implementation of the exact number a verdict
+ * rests on — right up to the day a grader reduces by p90 instead, when the page
+ * would go on showing the maximum with nothing failing anywhere. A developer who
+ * found this page and a verdict disagreeing would be right to stop believing
+ * both, so the page is not allowed to be capable of it.
+ *
+ * The unit rides each measure because the measure catalog owns it: a page that
+ * assumed milliseconds would be wrong the moment somebody bounds a measure
+ * counted in something else.
+ */
+export type Measured = {
+  readonly measure: string;
+  readonly unit: string;
+  /** One sample, or the series a per-turn measure produced. Never empty. */
+  readonly samples: readonly number[];
+  /** The span each sample came off, in the same order. */
+  readonly span_ids: readonly string[];
+  /**
+   * The measurement a bound is held against, reduced by the platform. Null
+   * only on an answer that carried no measurement at all.
+   */
+  readonly worst: { readonly value: number; readonly span_id: string } | null;
+  /**
+   * True when this reading is a prefix of the exchange, so the figure is the
+   * worst of what egma holds rather than the worst of the call.
+   */
+  readonly partial?: boolean;
+};
+
 export type Detail = {
   readonly trace: Facts;
   readonly turns: readonly Step[];
   readonly spans: readonly Step[];
   readonly spans_truncated: boolean;
+  /**
+   * What this exchange measured. Absent on an answer from an older platform,
+   * which is a page with no measures rather than a page that breaks.
+   */
+  readonly measures?: readonly Measured[];
   /**
    * The simulation this exchange is, when egma conducted it, and `null` when a
    * customer's own agent did.

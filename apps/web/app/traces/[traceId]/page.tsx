@@ -8,6 +8,7 @@ import {
   DETAIL,
   FACTS,
   LIST,
+  MEASURES,
   RECORDING,
   SPEAKERS,
   UNKNOWN_STEP_LABEL,
@@ -17,6 +18,7 @@ import {
   everyStep,
   howFarIn,
   howLong,
+  humanizeIdentifier,
   isHuman,
   milliseconds,
   somethingFailed,
@@ -25,6 +27,7 @@ import {
   turnsCited,
   type Detail,
   type Facts as TraceFacts,
+  type Measured,
   type Outcome,
   type Step,
 } from "../../../lib/transcripts.ts";
@@ -195,6 +198,7 @@ export default function TranscriptPage({
         </header>
 
         <Summary facts={detail.trace} />
+        <Measures measured={detail.measures ?? []} />
         {detail.outcome ? (
           <OutcomeSummary
             outcome={detail.outcome}
@@ -293,6 +297,76 @@ function Summary({ facts }: { facts: TraceFacts }) {
       ))}
     </section>
   );
+}
+
+/**
+ * What this exchange measured — the metrics display.
+ *
+ * **Above the verdicts and apart from them, because a measure measures and a
+ * grader judges.** Nothing here is green or red: a duration is not good or bad
+ * until somebody has written down a bound, and the section below is where that
+ * decision shows up. Putting them in one block would make every number look like
+ * a check that passed.
+ *
+ * **Every number here came off the platform's one shared measure module**, which
+ * is the same module a `latency` grader is judged through — and that includes
+ * the **reduction**, the single measurement a bound is held against. This page
+ * renders what it was handed and derives nothing. Taking the maximum here would
+ * look harmless and would be a second implementation of exactly the number a
+ * verdict rests on: correct while both happen to take the maximum, silently
+ * wrong the first day a grader reduces by p90 instead. A developer who found the
+ * page and the verdict disagreeing would be right to stop believing both.
+ *
+ * A measure the spans do not carry is absent rather than shown empty, and an
+ * exchange with none says so in a sentence — "nothing was measured" is a fact
+ * about the telemetry that arrived, and a blank strip would read as a page that
+ * failed to load.
+ */
+function Measures({ measured }: { measured: readonly Measured[] }) {
+  return (
+    <section className={styles.detailFacts} aria-label={MEASURES.label}>
+      {measured.length === 0 ? (
+        <div className={styles.contextFact}>
+          <span>{MEASURES.label}</span>
+          <strong className={styles.muted}>{MEASURES.none}</strong>
+        </div>
+      ) : (
+        measured.map((one) => (
+          <div className={styles.contextFact} key={one.measure}>
+            <span>{humanizeIdentifier(one.measure)}</span>
+            <strong>{measurement(one)}</strong>
+          </div>
+        ))
+      )}
+    </section>
+  );
+}
+
+/**
+ * One measure as a person reads it: the number the platform reduced to, its
+ * unit, and — where there was more than one measurement — that this is the worst
+ * of them and how many there were.
+ *
+ * **Nothing is worked out here.** `worst` arrives on the answer, reduced by the
+ * same code a verdict was decided by; this reads it. The series is used for one
+ * thing only, which is saying how many measurements there were.
+ *
+ * **A prefix says so.** A reading over the store's limit holds the first part of
+ * a long exchange, and the worst measurement in it is the worst of that part —
+ * the worst turn of the call may be past the cut. Showing it unqualified would
+ * be the page asserting something about a conversation it has only some of.
+ */
+function measurement(one: Measured): string {
+  // Unreachable: a measure with no measurement is absent from the answer
+  // rather than present and empty. Said rather than assumed, because the
+  // alternative is this page printing a figure nobody measured.
+  if (one.worst === null) return DETAIL.notReported;
+
+  const shown = `${String(one.worst.value)} ${one.unit}`;
+  if (one.partial === true) return `${shown} · ${MEASURES.partialWorst}`;
+  return one.samples.length === 1
+    ? shown
+    : `${shown} · ${MEASURES.worst} of ${MEASURES.counted(one.samples.length)}`;
 }
 
 /** What was judged, in the words a tally is read in. Written once, so the two

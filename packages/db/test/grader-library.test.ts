@@ -1,4 +1,8 @@
 import { newId } from "@egma/ids";
+import {
+  CATALOGED_MEASURES,
+  SPAN_DERIVED_MEASURES,
+} from "@egma/simulation-contract";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -9,6 +13,7 @@ import {
   GRADER_LIBRARY_CATALOG,
   GraderLibraryEntryInUseError,
   listGraderLibrary,
+  PREDEFINED_GRADERS,
   PredefinedGraderError,
   RESERVED_LIBRARY_TYPES,
   seedGraderLibrary,
@@ -195,15 +200,56 @@ describe("seeding egma's own graders", () => {
     expect(latency?.prompt).toBeNull();
     expect(latency?.output_definition).toBeNull();
 
-    const params = latency?.params as readonly { name: string; kind: string }[];
+    const params = latency?.params as readonly {
+      name: string;
+      kind: string;
+      options?: readonly { value: string; label: string; unit: string }[];
+    }[];
     expect(params.map((one) => one.name)).toEqual(["metric", "bound"]);
     // The measure is its own kind rather than a string with a note attached:
     // the catalog is the only list the form may offer, so the dropdown and the
     // check behind it cannot drift apart.
     expect(params[0]?.kind).toBe("measure");
-    // Unitless on purpose: the unit is the chosen measure's own, and the
-    // measure catalog is where that is already written down.
+    // Unitless on the parameter itself: the unit is the chosen measure's own,
+    // and it rides each option below rather than being fixed here.
     expect(params[1]?.kind).toBe("number");
+    expect(params[1]?.options).toBeUndefined();
+  });
+
+  /**
+   * **The dropdown's own values, on the entry.** The Library screen is a browser
+   * page with no way to read egma's packages, so a list of measures typed there
+   * would be a second copy of the measure catalog — stale the first time a
+   * measure joined or left, and its first symptom a write refused for offering
+   * exactly what the form offered.
+   *
+   * They are exactly the measures egma computes from a conversation's spans,
+   * which is the same list the write door accepts and the same list the shared
+   * measure module implements. Narrower than the catalog on purpose: a measure
+   * that arrives on the terminal transition is a real number a grader reading a
+   * trace would never find.
+   */
+  it("publishes the measures a copy may bound, straight off the measure catalog", async () => {
+    const rows = await shelf();
+    const latency = rows.find((row) => row.name === "latency");
+    const params = latency?.params as readonly {
+      name: string;
+      options?: readonly { value: string; label: string; unit: string; means: string }[];
+    }[];
+
+    const offered = params[0]?.options ?? [];
+    expect(offered.map((one) => one.value)).toEqual([...SPAN_DERIVED_MEASURES]);
+    // Not the whole catalog: a measure no span carries is not offerable.
+    expect(offered.length).toBeLessThan(CATALOGED_MEASURES.length);
+
+    for (const option of offered) {
+      // Words a person reads, and the unit a bound beside it is counted in —
+      // both from the catalog, so a form never has an opinion of its own.
+      expect(option.label).not.toBe("");
+      expect(option.label).not.toContain("_");
+      expect(option.unit).not.toBe("");
+      expect(option.means.length).toBeGreaterThan(20);
+    }
   });
 
   it("changes nothing on a second run, so every boot is safe", async () => {
@@ -267,6 +313,88 @@ describe("a catalog entry whose words changed", () => {
     const [first] = GRADER_LIBRARY_CATALOG;
     const row = (await shelf()).find((candidate) => candidate.id === first?.id);
     expect(row?.description).toBe(first?.description);
+  });
+
+  /**
+   * **What the entry asks for, which is a jsonb column and not a string.**
+   *
+   * Every case above moves `description`, and a text column is the easy half:
+   * `is distinct from` on text is what anybody would expect. The comparison that
+   * actually decides whether a release reaches a project is the one over
+   * `params` — jsonb, compared as a value — and the release that added the
+   * **Use** form's measure list changed exactly that and nothing else. A row
+   * whose `params` moved and whose version did not would be a form still
+   * offering last release's measures with no sign anything was stale.
+   *
+   * The reverse matters as much and is asserted with it: jsonb compares as a
+   * value rather than as bytes, so the same declaration written with its keys
+   * in a different order must move nothing at all. Without that half, every boot
+   * would bump a version for nothing and the number would stop meaning "when did
+   * these words last change".
+   */
+  it("refreshes an entry whose params moved, and only when they really did", async () => {
+    const latency = GRADER_LIBRARY_CATALOG.find(
+      (entry) => entry.id === PREDEFINED_GRADERS.latency,
+    );
+    if (latency === undefined) throw new Error("the catalog ships no latency");
+
+    const others = GRADER_LIBRARY_CATALOG.filter(
+      (entry) => entry.id !== latency.id,
+    );
+    const before = (await shelf()).find((row) => row.id === latency.id);
+
+    // The same parameters, with one option's own keys written in another order.
+    // Nothing about what the form asks for has changed.
+    const rewritten: PredefinedGrader = {
+      ...latency,
+      params: latency.params.map((parameter) => ({
+        ...parameter,
+        ...(parameter.options === undefined
+          ? {}
+          : {
+              options: parameter.options.map((option) => ({
+                unit: option.unit,
+                means: option.means,
+                label: option.label,
+                value: option.value,
+              })),
+            }),
+      })),
+    };
+
+    expect(await seedGraderLibrary([rewritten, ...others])).toEqual([]);
+    expect((await shelf()).find((row) => row.id === latency.id)).toEqual(before);
+
+    // And now a real change: one fewer measure on the dropdown, which is what
+    // retiring one would look like arriving at a deployment.
+    const narrowed: PredefinedGrader = {
+      ...latency,
+      params: latency.params.map((parameter) => ({
+        ...parameter,
+        ...(parameter.options === undefined
+          ? {}
+          : { options: parameter.options.slice(1) }),
+      })),
+    };
+
+    const written = await seedGraderLibrary([narrowed, ...others]);
+    expect(written).toEqual([
+      { id: latency.id, name: latency.name, version: 2 },
+    ]);
+
+    const after = (await shelf()).find((row) => row.id === latency.id);
+    const offered = (
+      after?.params as readonly { options?: readonly unknown[] }[]
+    )[0]?.options;
+    expect(offered).toHaveLength(
+      (latency.params[0]?.options?.length ?? 0) - 1,
+    );
+
+    // And the shipped list comes back on the next boot, exactly as reverting
+    // any other word does.
+    expect(await seedGraderLibrary()).toEqual([
+      { id: latency.id, name: latency.name, version: 3 },
+    ]);
   });
 });
 

@@ -806,6 +806,38 @@ describe("resolving what a simulation was executed against", () => {
     });
 
     /**
+     * **What a latency copy actually writes, and why it needs nothing from
+     * here.**
+     *
+     * Its keys are the measures its checks bound — `turn_response_latency` — and
+     * not the whole-grader key above, which is what an entry egma cannot execute
+     * files under. A measure is already the name of the thing the judgment is
+     * about, so there is nothing to resolve and this answers absent, which a
+     * reader renders as the key itself: "Turn response latency".
+     *
+     * That is the honest answer rather than a gap. Resolving it to the *copy's*
+     * name would put "Answers quickly" on every one of its rows, and a copy
+     * bounding two measures would then have two rows reading identically.
+     */
+    it("leaves a latency key alone, because the measure is already its own name", async () => {
+      const versionId = await seedTestVersion(actingAsAcme(), "Two measures", [
+        rita,
+      ]);
+      const simulationId = await conducted(versionId);
+      const latency = await aLatencyCopy("Answers quickly enough");
+
+      const words = await readAssertionWords(actingAsAcme(), simulationId, [
+        latency,
+      ]);
+
+      expect(words.of(latency, "turn_response_latency")).toBeUndefined();
+      expect(words.of(latency, "first_response_latency")).toBeUndefined();
+      // And it is not accidentally caught by the whole-grader arm, which would
+      // put the entry's name on a row about one particular measure.
+      expect(words.of(latency, "turn_response_latency")).not.toBe("latency");
+    });
+
+    /**
      * A conversation with no test still resolves what does not need one. There
      * are no behaviors to look up, and that is not the same as having nothing
      * at all to say.

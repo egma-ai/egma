@@ -1487,6 +1487,115 @@ describe.skipIf(!storage.available)("hearing a recording from a transcript", () 
   );
 });
 
+/**
+ * Switching the Use form from one grader to another, in a real browser.
+ *
+ * **The one thing about this screen a source scan cannot prove.** Every other
+ * assertion about the Library screen is that it draws its controls from what the
+ * entry declared and holds no list of its own, which reading the file settles.
+ * What it cannot settle is what happens between two presses: a form is state,
+ * and state that outlives the thing it was answering questions about is a bug
+ * only a running page can show.
+ *
+ * The failure it is here to catch: the entry that asks for nothing was open,
+ * somebody pressed Use on the entry that asks for a measure and a bound, and the
+ * new entry's controls drew over the old entry's empty answers — a measure
+ * dropdown with nothing chosen. Typing a bound and submitting then sends a bound
+ * with no measure, and the write door refuses it naming a field the person can
+ * see is filled in.
+ */
+describe("pressing Use on a second grader while the first one's form is open", () => {
+  /** One library row's Use button, from the table rather than the mobile list. */
+  function useOn(named: string) {
+    return page
+      .locator("table")
+      .getByRole("row")
+      .filter({ hasText: named })
+      .getByRole("button", { name: "Use" });
+  }
+
+  it(
+    "draws the second grader's form, with its own fields and nothing left over",
+    async () => {
+      await page.goto(`${origin}/graders`);
+      // Both of egma's own graders, written onto the shelf at boot.
+      await page.waitForSelector("text=expected_behaviors");
+      await page.waitForSelector("text=latency");
+
+      // The entry whose assertions are each test's own sentences: it asks for
+      // nothing, so its form has no fields at all.
+      await useOn("expected_behaviors").click();
+      await page.waitForSelector("text=This grader asks for nothing");
+      expect(await page.locator("form select").count()).toBe(0);
+
+      // And now the other one, **without closing the first**.
+      await useOn("latency").click();
+
+      // The heading followed, and the sentence belonging to the entry that asks
+      // nothing is gone rather than sitting above fields that ask for two things.
+      await page.waitForSelector("text=Use latency");
+      expect(
+        await page.locator("text=This grader asks for nothing").count(),
+      ).toBe(0);
+
+      // The measure dropdown is there, and so is the bound.
+      const measure = page.locator("form select");
+      await measure.waitFor();
+      expect(await page.locator('form input[type="number"]').inputValue()).toBe(
+        "",
+      );
+
+      /**
+       * **Submitted, because the DOM cannot be asked this question.**
+       *
+       * A `<select>` whose React value is the empty string still *displays* its
+       * first option and reports that option from `inputValue()` — so reading
+       * the control back says "a measure is chosen" in exactly the case where
+       * none is. The only witness that cannot be fooled is what the form
+       * actually sends, and the write door is the thing that would refuse it:
+       * "this grader needs metric".
+       *
+       * So this fills in the bound the way somebody would and presses the
+       * button. A copy appearing is the proof that the measure travelled with
+       * it.
+       */
+      await page.locator('form input[type="number"]').fill("2000");
+      await page.getByRole("button", { name: "Start judging" }).click();
+
+      await page.waitForSelector("text=is running on this project now");
+      // And no refusal — a missing measure would have come back as one rather
+      // than as a copy.
+      expect(await page.locator("text=this grader needs").count()).toBe(0);
+    },
+    SETTLE,
+  );
+
+  it(
+    "starts from the entry's own answers again when somebody switches back",
+    async () => {
+      // Type into the latency form, so there is something that could be left
+      // behind, then go to the entry that asks nothing and come back.
+      await useOn("latency").click();
+      await page.waitForSelector("text=Use latency");
+      await page.locator('form input[type="number"]').fill("1234");
+
+      await useOn("expected_behaviors").click();
+      await page.waitForSelector("text=This grader asks for nothing");
+
+      await useOn("latency").click();
+      await page.waitForSelector("text=Use latency");
+
+      // Nothing survived the round trip. This is the assertion the DOM *can*
+      // answer honestly: an input holds the string it was given, so a bound
+      // still reading 1234 is state that outlived the question it answered.
+      expect(await page.locator('form input[type="number"]').inputValue()).toBe(
+        "",
+      );
+    },
+    SETTLE,
+  );
+});
+
 describe("recovering when a page cannot load", () => {
   it(
     "shows a retry for People and for an invitation lookup",

@@ -535,3 +535,86 @@ describe("the transcript pages", () => {
     }
   });
 });
+
+/**
+ * The metrics display: what this exchange measured, shown beside the exchange.
+ *
+ * **The page derives no number.** Every figure it shows arrived already computed
+ * by the platform's one shared measure module — the same module a `latency`
+ * grader is judged through — so a duration worked out in a browser would be a
+ * second answer about one exchange and exactly what that module exists to
+ * prevent. What the page decides is which of the samples to lead with, and it
+ * says which one that is.
+ */
+describe("what the exchange measured", () => {
+  it("is read from the answer, and never worked out from the timings", async () => {
+    const page = await readFile(
+      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      "utf8",
+    );
+
+    // Rendered from the answer's own field.
+    expect(page).toContain("detail.measures");
+    // With the unit the answer carried, never one this page assumed — a page
+    // that said "ms" would be wrong the moment a measure is not a duration.
+    expect(page).toContain("one.unit");
+    // And separate from the verdicts, because a measure measures and a grader
+    // judges: nothing here is green or red.
+    expect(page).toContain("MEASURES.label");
+  });
+
+  /**
+   * **The reduction is the platform's, and this page must not be able to
+   * repeat it.**
+   *
+   * The one number a bound is held against arrives on the answer as `worst`.
+   * Taking the maximum here instead would look harmless and would be a second
+   * implementation of exactly that figure — correct while both happen to take
+   * the maximum, silently wrong the first day a grader reduces some other way,
+   * with nothing anywhere failing. The page held those four lines once; this is
+   * what stops them coming back.
+   *
+   * The rule that no source file outside the measure module reduces a series
+   * lives in `packages/db/test/one-measure-path.test.ts` and covers this file
+   * too. What is asserted here is the positive half: the page reads the reduced
+   * figure it was sent.
+   */
+  it("prints the reduction it was handed, and never computes one", async () => {
+    const page = await readFile(
+      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      "utf8",
+    );
+
+    expect(page).toContain("one.worst");
+    // The series is used for one thing, which is saying how many there were.
+    expect(page).toContain("one.samples.length");
+    expect(page).not.toContain("samples.reduce");
+    expect(page).not.toContain("samples[0]");
+  });
+
+  it("says which measurement it is showing, and how many there were", () => {
+    expect(copy.MEASURES.worst).toBe("worst");
+    expect(copy.MEASURES.counted(1)).toContain("1 measurement");
+    expect(copy.MEASURES.counted(11)).toContain("11 measurements");
+  });
+
+  /**
+   * A reading the store's span limit cut short holds the first part of a long
+   * exchange, so its worst measurement is the worst of that part — the slowest
+   * turn may be past the cut. Saying so is the difference between a figure a
+   * reader can use and one that quietly means something else.
+   */
+  it("qualifies the figure when the reading is only part of the exchange", async () => {
+    const page = await readFile(
+      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      "utf8",
+    );
+
+    expect(page).toContain("one.partial");
+    expect(copy.MEASURES.partialWorst).toContain("part egma holds");
+  });
+
+  it("says nothing was measured rather than showing a blank", () => {
+    expect(copy.MEASURES.none.length).toBeGreaterThan(40);
+  });
+});

@@ -202,11 +202,27 @@ describe("a simulation whose spans arrived complete", () => {
 
     // The measures, in milliseconds, each one a timing span's own duration —
     // including the half a millisecond, which a whole-number division would
-    // have floored away.
-    expect(conversation.metrics).toEqual({
-      first_response_latency: [1_214],
-      turn_response_latency: [862.5, 1_100],
-    });
+    // have floored away. They are the shared measure module's answer, which is
+    // the same answer the metrics display shows for this conversation and the
+    // same one a latency grader is judged on.
+    expect(
+      conversation.measures.map((one) => ({
+        measure: one.measure,
+        unit: one.unit,
+        samples: one.samples.map((sample) => sample.value),
+      })),
+    ).toEqual([
+      {
+        measure: "first_response_latency",
+        unit: "milliseconds",
+        samples: [1_214],
+      },
+      {
+        measure: "turn_response_latency",
+        unit: "milliseconds",
+        samples: [862.5, 1_100],
+      },
+    ]);
   });
 
   it("cites every turn a judgment rests on, in the order the answer gave them", async () => {

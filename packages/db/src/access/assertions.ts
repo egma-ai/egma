@@ -8,13 +8,23 @@ import { getSimulationTestVersion } from "./runs.ts";
 /**
  * Turning an assertion **key** back into the words somebody wrote.
  *
- * A verdict row files its assertion by key and never by content — a behavior's
- * position in the pinned test version, a config entry's index — because the fold
- * counts one assertion once per grader and prefers the latest grading of it, and
- * a key derived from what a person typed would make an edited sentence a
- * *second* assertion counted beside the first forever. The cost of that decision
- * is exactly this file: what a human reads has to be fetched, at display time,
- * from the versions the conversation was pinned to.
+ * A verdict row files its assertion by key and never by what a person typed,
+ * because the fold counts one assertion once per grader and prefers the latest
+ * grading of it — so a key that moved when somebody edited a sentence or
+ * tightened a bound would make the edit a *second* assertion, counted beside the
+ * first forever. The cost of that decision is exactly this file: what a human
+ * reads has to be fetched, at display time, from the versions the conversation
+ * was pinned to.
+ *
+ * **Each grader picks the key its own list can keep, and they differ.** An
+ * expected-behaviors key is a behavior's **position** in the pinned test
+ * version, which is stable because a simulation is pinned to that version and
+ * the list cannot change beneath it. A latency key is the **measure** the check
+ * bounds, because a copy's config is pinned by nothing: removing one entry makes
+ * the next one first, so a position there would name a different check after an
+ * edit. That difference is why this resolves per grader rather than per key
+ * shape — and why a latency key needs no resolution at all, being already the
+ * name of the thing it is about.
  *
  * **From the pinned version, never from the live test.** The whole point of a
  * key is that within one frozen version position 3 is the same sentence forever.
@@ -121,6 +131,10 @@ export async function readAssertionShelf(
           // it is the expected-behaviors entry that mints them. Any other
           // entry's keys are its own business — absent here rather than guessed
           // at, so a reader sees the key exactly as it is written.
+          //
+          // A latency key needs nothing from this and gets nothing: it is the
+          // measure the check bounds, which is already the name of what the
+          // judgment is about, and a reader shows it as written.
           if (its.libraryId !== PREDEFINED_GRADERS.expectedBehaviors) {
             return undefined;
           }

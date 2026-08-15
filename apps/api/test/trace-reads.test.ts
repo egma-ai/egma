@@ -443,4 +443,29 @@ describe("the captured trace, read as a transcript", () => {
       ]);
     }
   });
+
+  /**
+   * **What this exchange measured — the metrics display's read path.**
+   *
+   * The numbers are not on any row and are not stored: they are computed from
+   * the spans this answer already carries, by the same shared measure module the
+   * latency grader is judged through. So the figure a page shows and the figure a
+   * verdict rests on are one arithmetic, and no page can be the reason somebody
+   * distrusts a judgment.
+   *
+   * The captured exchange measures **nothing**, and that is the honest answer
+   * rather than a gap: LiveKit's own agent emits no timing spans, so there is
+   * nothing in this trace for a measure to be computed from. A grader asked for
+   * one answers `skipped`, which leaves the score's denominator. The day the
+   * ingest door normalises a provider's own latency attribute into a span this
+   * list grows, and nothing else has to change.
+   */
+  it("answers what the exchange measured, which for this telemetry is nothing", async () => {
+    const detail = await transcript();
+
+    expect(detail.measures).toEqual([]);
+    // Present and empty rather than absent, so a client can tell "nothing was
+    // measured" from "this response is an older shape that never said".
+    expect(Array.isArray(detail.measures)).toBe(true);
+  });
 });

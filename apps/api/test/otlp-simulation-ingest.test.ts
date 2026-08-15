@@ -24,9 +24,12 @@ import {
 import { createApi, type TestApi } from "./support/api.ts";
 import {
   contextFor,
+  mintKey,
+  readTraceOverHttp,
   signUp,
   NEUTRAL_TRAITS,
   type Customer,
+  type TraceDetailBody,
 } from "./support/traces.ts";
 
 /**
@@ -305,6 +308,74 @@ describe("the contract's golden flushes, posted with the service token", () => {
     expect(
       await countOf(`select count() as n from spans where trace_id = '${CHAT_TRACE}'`),
     ).toBe(8);
+  });
+
+  /**
+   * **The metrics display, end to end, from the emitter's own bytes.**
+   *
+   * The golden flushes go in at the door and come back out of the read endpoint
+   * as numbers — computed by the one shared measure module, from exactly the
+   * spans this trace holds, with nothing stored in between. That is the whole of
+   * the claim the module exists for: the figure a page shows and the figure a
+   * `latency` verdict rests on are one arithmetic, so the two can never
+   * disagree about how fast the agent answered.
+   *
+   * Read with an ordinary customer key, at the endpoint the dashboard reads —
+   * not through the module directly — because what is being asserted is that the
+   * numbers reach a reader, not that a function returns them.
+   */
+  it("read back as the conversation's measures, at the endpoint a page reads", async () => {
+    const key = await mintKey(api.app, acme.cookie, "reading the measures");
+
+    // The day the golden flushes are stamped with — the store is filed by time,
+    // so a read names the window the conversation happened in.
+    const answer = await readTraceOverHttp(api.app, key, CHAT_TRACE, {
+      from: "2026-08-05T00:00:00Z",
+      to: "2026-08-06T00:00:00Z",
+    });
+    expect(answer.statusCode, answer.body).toBe(200);
+
+    const detail = answer.json() as TraceDetailBody;
+
+    // Two measures on this conversation, in the catalog's own order, each
+    // sample a timing span's own duration in milliseconds — including the
+    // 862.5, which a whole-number division would have floored away.
+    expect(
+      detail.measures.map(({ measure, unit, samples }) => ({
+        measure,
+        unit,
+        samples,
+      })),
+    ).toEqual([
+      {
+        measure: "first_response_latency",
+        unit: "milliseconds",
+        samples: [1_214],
+      },
+      {
+        measure: "turn_response_latency",
+        unit: "milliseconds",
+        samples: [862.5],
+      },
+    ]);
+
+    /**
+     * **And the reduction rides with them.** The one number a bound is held
+     * against is worked out by the platform, beside the series it came from, so
+     * that no reader has to reduce anything: a client taking the maximum for
+     * itself would be a second implementation of exactly the figure a verdict
+     * rests on, right until the day a grader reduces some other way.
+     */
+    for (const measured of detail.measures) {
+      expect(measured.span_ids).toHaveLength(measured.samples.length);
+      for (const spanId of measured.span_ids) expect(spanId).not.toBe("");
+
+      expect(measured.worst?.value).toBe(Math.max(...measured.samples));
+      // And where it happened, which is what a judgment about it cites.
+      expect(measured.span_ids).toContain(measured.worst?.span_id);
+      // A whole reading, so the figure is the exchange's rather than a prefix's.
+      expect(measured.partial).toBe(false);
+    }
   });
 
   /**

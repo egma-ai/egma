@@ -28,7 +28,13 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
     endingReason: "persona_concluded",
     transcript: [],
     events: [],
-    metrics: { turn_response_latency: [900] },
+    measures: [
+      {
+        measure: "turn_response_latency",
+        unit: "milliseconds" as const,
+        samples: [{ value: 900, spanId: "0000000000000001" }],
+      },
+    ],
     runId: "run_01JQZ0000000000000000000AA",
     agentId: "agt_01JQZ0000000000000000000AA",
     ...overrides,
@@ -110,11 +116,23 @@ describe("a copy of an entry egma cannot execute yet", () => {
    * here: this check applies perfectly well and egma did not make it. Saying so
    * out loud is what keeps a project's page from going green because a grader
    * quietly judged nothing.
+   *
+   * Both entries v0 ships are executed now, so the case is asked with an entry
+   * off the shelf that no roster names — which is exactly what a copy of a
+   * *third* predefined grader looks like on the release before its executor
+   * lands. Asking it with a real entry would mean waiting for one to be missing
+   * again, which is to say never asking it.
    */
   it("says so out loud rather than passing", async () => {
+    const unbuilt = {
+      ...definition(PREDEFINED_GRADERS.latency),
+      id: "grl_01M01MH8KCE00NOTHINGBUILTYET",
+      name: "interruptions",
+    };
+
     const [only] = await judgmentsOf(
-      grader(),
-      definition(PREDEFINED_GRADERS.latency),
+      grader({ libraryId: unbuilt.id }),
+      unbuilt,
       judging(),
     );
 
@@ -123,12 +141,14 @@ describe("a copy of an entry egma cannot execute yet", () => {
       // identifier for life while its name is text a release may improve, and a
       // key that moved with the name would split every row written before a
       // rename from every row written after.
-      assertion: PREDEFINED_GRADERS.latency,
+      assertion: unbuilt.id,
       verdict: "errored",
       score: 0,
       citedSpanIds: [],
     });
-    expect(only?.rationale).toContain("does not execute the latency grader yet");
+    expect(only?.rationale).toContain(
+      "does not execute the interruptions grader yet",
+    );
   });
 });
 
@@ -149,7 +169,13 @@ describe("a simulation that never ran", () => {
         endingReason: "agent_never_joined",
         // Measures the grader would happily have passed, so the answer cannot
         // be coming from anything having looked at them.
-        metrics: { turn_response_latency: [10] },
+        measures: [
+          {
+            measure: "turn_response_latency",
+            unit: "milliseconds" as const,
+            samples: [{ value: 10, spanId: "0000000000000001" }],
+          },
+        ],
       }),
     );
 
@@ -222,8 +248,14 @@ describe("a grader whose execution falls over", () => {
   it("never says failed, because nothing is being said about the agent", async () => {
     // The two a conversation can reach without a store behind it: an entry egma
     // does not execute yet, and a copy whose entry could not be read at all.
+    const unbuilt = {
+      ...definition(PREDEFINED_GRADERS.latency),
+      id: "grl_01M01MH8KCE00NOTHINGBUILTYET",
+      name: "interruptions",
+    };
+
     for (const [copy, entry] of [
-      [grader(), definition(PREDEFINED_GRADERS.latency)] as const,
+      [grader({ libraryId: unbuilt.id }), unbuilt] as const,
       [grader(), undefined] as const,
     ]) {
       const judgments = await judgmentsOf(copy, entry, judging());
@@ -232,5 +264,32 @@ describe("a grader whose execution falls over", () => {
         expect(judgment.verdict).toBe("errored");
       }
     }
+  });
+
+  /**
+   * **A computed grader never reaches for a judge**, and that is asserted rather
+   * than assumed: `noJudgeWanted` throws if anything on this path opens the
+   * envelope. A project whose only running graders are computed must never
+   * unseal its judge key, and the way that is guaranteed is that resolving one
+   * is something an executor asks for rather than something the engine does in
+   * front of it.
+   */
+  it("computes latency without asking anybody, and passes what holds", async () => {
+    const judgments = await judgmentsOf(
+      grader(),
+      definition(PREDEFINED_GRADERS.latency),
+      judging(),
+    );
+
+    expect(judgments).toHaveLength(1);
+    expect(judgments[0]).toMatchObject({
+      // The config entry's position, one-based — never the measure or the
+      // bound, which a person may edit and which a re-grade must write over
+      // rather than beside.
+      assertion: "turn_response_latency",
+      verdict: "passed",
+      score: 1,
+    });
+    expect(judgments[0]?.rationale).toContain("turn_response_latency");
   });
 });
