@@ -45,16 +45,46 @@ export function Button({
   );
 }
 
-/** Somewhere to go, dressed as a control. Still a link, so it still opens in a new tab. */
+/**
+ * Somewhere to go, dressed as a control — and what it becomes when whoever is
+ * looking at it may not go there.
+ *
+ * **A disabled control is genuinely inert or it is a lie.** A link cannot be
+ * disabled: `aria-disabled` on an anchor greys it out and it still follows on
+ * click and still takes the keyboard. So when this is not available it stops
+ * being a link and becomes a disabled `button` — unfocusable, unclickable, and
+ * disabled to assistive technology because the element really is.
+ *
+ * It stays on the page rather than disappearing. One page, one layout, and a
+ * viewer is told plainly that an action is not theirs instead of quietly not
+ * being shown that it exists. `why` is the sentence they get for asking.
+ *
+ * None of this is authorization. The server checks the same permission on
+ * every request and refuses a viewer's write whether or not a browser was
+ * involved; this is a courtesy to a reader, and never a lock.
+ */
 export function ButtonLink({
   href,
   weight = "quiet",
+  disabled = false,
+  why,
   children,
 }: {
   readonly href: string;
   readonly weight?: Weight;
+  readonly disabled?: boolean;
+  /** Why it is not available, for whoever hovers or focuses it. */
+  readonly why?: string;
   readonly children: ReactNode;
 }) {
+  if (disabled) {
+    return (
+      <button className={weightClass(weight)} type="button" disabled title={why}>
+        {children}
+      </button>
+    );
+  }
+
   return (
     <Link className={weightClass(weight)} href={href}>
       {children}

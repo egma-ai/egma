@@ -49,7 +49,13 @@ export function ProjectSelector({
   const current = projects.find((project) => project.id === projectId);
   const shown = projectsMatching(projects, query);
   const organizationName = organization?.name ?? "No organization";
-  const projectName = current?.name ?? projects[0]?.name ?? "No project";
+
+  // An address naming a project this membership does not hold says so. Falling
+  // back to the first project's name would tell somebody they are working in
+  // Default while the page beside it refuses everything they ask for.
+  const projectName =
+    current?.name ??
+    (projectId === null ? (projects[0]?.name ?? "No project") : "Unknown project");
 
   function choose(project: Project, close: () => void): void {
     close();

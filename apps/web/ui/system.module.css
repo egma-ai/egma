@@ -35,7 +35,7 @@
 
 .mark {
   display: block;
-  width: 74px;
+  width: 64px;
   height: auto;
   filter: brightness(0);
 }
@@ -700,9 +700,16 @@
 
 .list {
   display: none;
+  margin: 0;
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
+  list-style: none;
+}
+
+.listRow dl {
+  margin: 0;
 }
 
 .listRow {

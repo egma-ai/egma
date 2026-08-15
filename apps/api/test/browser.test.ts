@@ -299,16 +299,37 @@ describe("adding a colleague, with no mail configured", () => {
       // named in the address he was sent to.
       await bob.waitForURL(new RegExp(`^${origin}/projects/prj_[^/]+/agents$`));
       await expect
-        .poll(() => bob.getByRole("heading", { name: "Agents" }).count())
+        .poll(() => bob.getByRole("heading", { name: "Agents", exact: true }).count())
         .toBe(1);
 
-      // He was invited as a viewer, so he is told so once and is offered no
-      // control he may not use. The server refuses those either way; this is
-      // about not filling a read-only page with things that would be refused.
-      expect(await bob.locator("aside").innerText()).toContain("View only");
+      // He was invited as a viewer, so he is told so once, on the same page
+      // everybody else sees, and the control that would change data is
+      // disabled rather than removed.
+      //
+      // Waiting on the organization first, so this is his role and not the
+      // shell's cautious default while the session read is still in flight.
+      const hisSidebar = bob.locator("aside");
+      await expect.poll(() => hisSidebar.innerText()).toMatch(/acme/i);
+      expect(await hisSidebar.innerText()).toMatch(/view only/i);
+
+      // Disabled for real: not a link he can follow, not focusable, and a
+      // forced click goes nowhere. A control that looked disabled and still
+      // fired would promise a refusal it does not deliver — and the refusal
+      // that does hold is the server's, proved in `agents.test.ts`.
+      const register = bob.getByRole("button", { name: "Register agent" });
+      await register.first().waitFor();
+      expect(
+        await register.evaluateAll((controls) =>
+          controls.map((control) => (control as { disabled?: boolean }).disabled),
+        ),
+      ).not.toContain(false);
       expect(
         await bob.getByRole("link", { name: "Register agent" }).count(),
       ).toBe(0);
+      const before = bob.url();
+      await register.first().click({ force: true }).catch(() => undefined);
+      await bob.waitForTimeout(300);
+      expect(bob.url()).toBe(before);
 
       const { rows } = await instance.database.sql<{ email: string; role: string }>(
         `select u.email, m.role from membership m
@@ -686,7 +707,7 @@ describe("the list of what an organization recorded", () => {
       // the project, on one compact control that is there with one project.
       const selector = sidebar.locator('button[aria-label^="Organization"]');
       await selector.waitFor({ state: "visible" });
-      expect(await selector.innerText()).toContain("Acme");
+      await expect.poll(() => selector.innerText()).toMatch(/acme/i);
 
       // The four product areas, and Personas beside them. Settings is not one
       // of them and neither is a simulation.
@@ -755,29 +776,52 @@ describe("the list of what an organization recorded", () => {
       expect(first).toBeDefined();
       expect(first).not.toBe(outbound.id);
 
-      // A second tab, opened on the other project by its address alone.
-      const other = await page.context().newPage();
+      // A second tab, opened on the other project by its address alone, with
+      // this person's own session.
+      const second = await browser.newContext();
+      await second.addCookies(await page.context().cookies());
+      const other = await second.newPage();
       other.setDefaultTimeout(30_000);
       await other.goto(`${origin}/projects/${outbound.id}/agents`);
-      await other.waitForSelector('button[aria-label^="Organization"]');
-      expect(
-        await other.locator('aside button[aria-label^="Organization"]').innerText(),
-      ).toContain("Outbound");
+      const otherSelector = other.locator(
+        'aside button[aria-label^="Organization"]',
+      );
+      await otherSelector.waitFor({ state: "visible" });
+      await expect.poll(() => otherSelector.innerText()).toContain("Outbound");
 
       // And the first tab did not move. Nothing about opening the second one
       // changed which project the first one is in.
       expect(page.url()).toContain(`/projects/${first}/agents`);
-      expect(
-        await page.locator('aside button[aria-label^="Organization"]').innerText(),
-      ).not.toContain("Outbound");
+      await expect
+        .poll(() =>
+          page.locator('aside button[aria-label^="Organization"]').innerText(),
+        )
+        .toContain("Default");
 
       // Choosing from the selector changes the address, which is what Back then
-      // undoes.
-      await page.locator('aside button[aria-label^="Organization"]').click();
-      await page.getByRole("menuitem", { name: "Outbound" }).click();
+      // undoes. Done entirely from the keyboard: opening puts focus in the
+      // search field, typing narrows the list, and Enter takes the one left.
+      const here = page.locator('aside button[aria-label^="Organization"]');
+      await here.focus();
+      await page.keyboard.press("Enter");
+      await page.keyboard.type("outb");
+      await page.keyboard.press("Enter");
       await page.waitForURL(new RegExp(`/projects/${outbound.id}/agents$`));
       await page.goBack();
       await page.waitForURL(new RegExp(`/projects/${first}/agents$`));
+
+      // And Escape leaves a menu opened by accident, with focus back where it
+      // was rather than lost inside a panel that is no longer there.
+      await here.focus();
+      await page.keyboard.press("Enter");
+      await page.waitForSelector('[role="menu"]');
+      await page.keyboard.press("Escape");
+      expect(await page.locator('[role="menu"]').count()).toBe(0);
+      expect(
+        await page.evaluate(
+          "document.activeElement && document.activeElement.getAttribute('aria-label')",
+        ),
+      ).toMatch(/^Organization/);
 
       // A project of another organization is an absence, in the API's own
       // words, with a way back to one this membership holds.
@@ -787,7 +831,7 @@ describe("the list of what an organization recorded", () => {
         "available to this organization",
       );
 
-      await other.close();
+      await second.close();
     },
     SETTLE,
   );

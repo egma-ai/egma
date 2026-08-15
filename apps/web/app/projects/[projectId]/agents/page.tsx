@@ -91,18 +91,37 @@ function Agents({ projectId }: { readonly projectId: string }) {
     if (answer?.status === "signed-out") window.location.replace("/sign-in");
   }, [answer]);
 
+  /**
+   * One page for every role, and the control that changes data is disabled
+   * rather than removed. A viewer sees what egma can do here and is told
+   * plainly that this part is not theirs; the server refuses their write
+   * either way, which is where the boundary actually is.
+   *
+   * It is disabled for the same reason on a project this organization does not
+   * hold: there is nothing to register an agent in.
+   */
+  const mayRegister = canAuthor(role) && answer?.status !== "missing";
+  const whyNot = canAuthor(role)
+    ? "There is no project here to register an agent in."
+    : `Your ${role} role cannot register agents. Ask an organization admin to change your role.`;
+
+  const register = (weight: "strong" | "quiet") => (
+    <ButtonLink
+      href={projectPath(projectId, "agents", "new")}
+      weight={weight}
+      disabled={!mayRegister}
+      why={mayRegister ? undefined : whyNot}
+    >
+      Register agent
+    </ButtonLink>
+  );
+
   const header = (
     <PageHeader
       eyebrow="Project"
       title="Agents"
       lead="The voice agents egma can test in this project."
-      action={
-        canAuthor(role) ? (
-          <ButtonLink href={projectPath(projectId, "agents", "new")} weight="strong">
-            Register agent
-          </ButtonLink>
-        ) : undefined
-      }
+      action={register("strong")}
     />
   );
 
@@ -138,21 +157,8 @@ function Agents({ projectId }: { readonly projectId: string }) {
       return (
         <Empty
           title="No agents in this project yet"
-          lead={
-            canAuthor(role)
-              ? "Register the voice agent you want to test, then give egma a way to reach it."
-              : "Nobody has registered a voice agent here. A member or an admin can add the first one."
-          }
-          action={
-            canAuthor(role) ? (
-              <ButtonLink
-                href={projectPath(projectId, "agents", "new")}
-                weight="strong"
-              >
-                Register agent
-              </ButtonLink>
-            ) : undefined
-          }
+          lead="Register the voice agent you want to test, then give egma a way to reach it."
+          action={register("strong")}
         />
       );
     }
