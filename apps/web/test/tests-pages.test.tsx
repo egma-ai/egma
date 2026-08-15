@@ -189,6 +189,22 @@ function sentTo(path: string): { method: string; body: unknown }[] {
     .map((one) => ({ method: one.method, body: one.body }));
 }
 
+/**
+ * The requests of one method to one path.
+ *
+ * **A page reads the path it writes to**, so waiting on "anything reached this
+ * address" is satisfied by the page's own load and says nothing about the save.
+ * Under load the assertion then runs against the GET, and `body` is undefined —
+ * which arrives as a TypeError about a property of undefined rather than as
+ * anything about the save that had not happened yet.
+ */
+function sentWith(
+  path: string,
+  method: string,
+): { method: string; body: unknown }[] {
+  return sentTo(path).filter((one) => one.method === method);
+}
+
 /* ------------------------------------------------------------------------ */
 
 describe("the list of tests", () => {
@@ -458,9 +474,9 @@ describe("one test's page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => {
-      expect(sentTo("/api/tests/tst_1").length).toBeGreaterThan(0);
+      expect(sentWith("/api/tests/tst_1", "PATCH").length).toBeGreaterThan(0);
     });
-    const body = sentTo("/api/tests/tst_1").at(-1)?.body as Record<string, unknown>;
+    const body = sentWith("/api/tests/tst_1", "PATCH").at(-1)?.body as Record<string, unknown>;
     expect(body.name).toBe("Renamed");
     expect(body.expected_revision).toBe("rev_1");
     // Sending the version too would make a rename fail because somebody else
@@ -478,9 +494,9 @@ describe("one test's page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save version" }));
 
     await waitFor(() => {
-      expect(sentTo("/api/tests/tst_1").length).toBeGreaterThan(0);
+      expect(sentWith("/api/tests/tst_1", "PATCH").length).toBeGreaterThan(0);
     });
-    const body = sentTo("/api/tests/tst_1").at(-1)?.body as Record<string, unknown>;
+    const body = sentWith("/api/tests/tst_1", "PATCH").at(-1)?.body as Record<string, unknown>;
     expect(body.expected_version_id).toBe("tstv_1");
     expect(body.expected_revision).toBeUndefined();
     // The whole of what stops a partial form erasing hidden versioned content:
@@ -503,9 +519,9 @@ describe("one test's page", () => {
     );
 
     await waitFor(() => {
-      expect(sentTo("/api/tests/tst_1/agents").length).toBeGreaterThan(0);
+      expect(sentWith("/api/tests/tst_1/agents", "POST").length).toBeGreaterThan(0);
     });
-    const call = sentTo("/api/tests/tst_1/agents").at(-1);
+    const call = sentWith("/api/tests/tst_1/agents", "POST").at(-1);
     expect(call?.method).toBe("POST");
     const body = call?.body as Record<string, unknown>;
     expect(body.agents).toEqual(["agt_1", "agt_2"]);
