@@ -446,6 +446,21 @@ const THE_FOLD = [
   "VERDICTS",
 ];
 
+/**
+ * The shared measure module, on the fold's exact terms: spans a caller already
+ * read go in, the measure catalog's numbers come out, and it reaches nothing.
+ *
+ * Exported for the fold's reason too. A measure has to be worked out in exactly
+ * one place — the metrics display reads through this and so does the grader that
+ * bounds one — because no number is stored anywhere that a disagreement between
+ * two readers could be settled against.
+ */
+const THE_MEASURES = [
+  "measureFromSpans",
+  "measuresFromSpans",
+  "worstSampleOf",
+];
+
 describe("the data-access module's surface", () => {
   it("is exactly this, so widening it cannot happen by accident", () => {
     expect(Object.keys(dataAccess).sort()).toEqual(
@@ -461,6 +476,7 @@ describe("the data-access module's surface", () => {
         ...VALUES,
         ...READ_LIMITS,
         ...THE_FOLD,
+        ...THE_MEASURES,
         ...THE_MOCKED_WORLD,
         ...THE_PLATFORMS_SETTINGS,
         ...THE_GRADER_LIBRARY,

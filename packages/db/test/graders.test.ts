@@ -1,5 +1,8 @@
 import { isId, newId } from "@egma/ids";
-import { CATALOGED_MEASURES } from "@egma/simulation-contract";
+import {
+  CATALOGED_MEASURES,
+  SPAN_DERIVED_MEASURES,
+} from "@egma/simulation-contract";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -393,16 +396,48 @@ describe("values that do not answer what the entry asked", () => {
     );
 
     expect(refusal).toContain('"turn_responze_latency" is not a measure');
-    // Every cataloged name, because "then what is" is always the next question
-    // and a refusal that sends somebody hunting is a refusal that cost them the
-    // afternoon.
-    for (const cataloged of CATALOGED_MEASURES) {
+    // Every name a copy may bound, because "then what is" is always the next
+    // question and a refusal that sends somebody hunting is a refusal that cost
+    // them the afternoon.
+    for (const cataloged of SPAN_DERIVED_MEASURES) {
       expect(refusal).toContain(cataloged);
     }
   });
 
-  it("takes every measure the catalog does name", async () => {
-    for (const cataloged of CATALOGED_MEASURES) {
+  /**
+   * **A measure the catalog names and no span carries is refused too**, and the
+   * refusal says which of the two things went wrong.
+   *
+   * The turn count and the audio band are real numbers egma records — they
+   * arrive on the transition that ends a simulation and live on the simulation
+   * row — and a grader reading a conversation's spans would never find one. So a
+   * copy naming one is exactly the forever-`skipped` check this rule exists to
+   * refuse, and it is refused at the one moment anything can tell it from a
+   * measure a chat conversation simply did not produce.
+   */
+  it("is refused for a measure the catalog names and no span carries", async () => {
+    const notFromSpans = CATALOGED_MEASURES.filter(
+      (measure) => !SPAN_DERIVED_MEASURES.includes(measure),
+    );
+    expect(notFromSpans.length).toBeGreaterThan(0);
+
+    for (const measure of notFromSpans) {
+      const refusal = await useLibraryEntry(actingAsAcme(), {
+        libraryId: PREDEFINED_GRADERS.latency,
+        params: { metric: measure, bound: 2_000 },
+      }).then(
+        () => "the grader was written",
+        (error: unknown) =>
+          error instanceof Error ? error.message : String(error),
+      );
+
+      expect(refusal).toContain(`"${measure}" is a measure egma records`);
+      expect(refusal).toContain("no span carries it");
+    }
+  });
+
+  it("takes every measure a conversation's spans can carry", async () => {
+    for (const cataloged of SPAN_DERIVED_MEASURES) {
       const created = await useLibraryEntry(actingAsAcme(), {
         libraryId: PREDEFINED_GRADERS.latency,
         name: `Holds ${cataloged} to something`,

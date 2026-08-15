@@ -1,13 +1,14 @@
 # The measure catalog
 
-**Catalog version: 1**
+**Catalog version: 2**
 
-Every measure a simulation produces, named once, so that a `metric_threshold`
-grader references a known measure instead of guessing a string.
+Every measure a conversation produces, named once and defined once, so that a
+grader references a known measure instead of guessing a string — and so that the
+number egma shows and the number egma judges are the same arithmetic.
 
 This is a contract document, not a table. Nothing writes a row to declare a
 measure and nothing queries for the list. It sits beside `schemas/` because it
-is the same kind of fact those two schemas are: what the simulator emits, agreed
+is the same kind of fact those two schemas are: what egma measures, agreed
 between the control plane and the simulator, versioned so that neither side can
 change it quietly.
 
@@ -18,13 +19,21 @@ than surfacing months later as a grader nobody noticed was silent.
 
 ## Why it exists
 
-A threshold grader names what it reads as a string, and a string that names
-nothing produces a grader that reads nothing, judges nothing, and is `skipped`
-forever: green, silent, and wrong. Nothing downstream can catch it. A missing
-measure is a perfectly legitimate `skipped` — a chat conversation has no audio
-band to threshold — so the grading engine has no way to tell a typo from a
-modality. Only the moment of writing can, which is why the grader factory's
-write door refuses a measure this catalog does not name.
+A grader names what it reads as a string, and a string that names nothing
+produces a grader that reads nothing, judges nothing, and is `skipped` forever:
+green, silent, and wrong. Nothing downstream can catch it. A missing measure is a
+perfectly legitimate `skipped` — a chat conversation has no audio band to bound —
+so the grading engine has no way to tell a typo from a modality. Only the moment
+of writing can, which is why the grader factory's write door refuses a measure
+this catalog does not name.
+
+The same argument, one level down, is why each measure now carries its
+**span-level definition**. A name says what may be asked for; the definition
+beside it says what egma computes when asked. One shared measure module
+implements exactly the definitions below, the **Use** form offers exactly the
+measures that have one, and the write door accepts exactly the same list — so a
+developer cannot pick a measure nothing can answer, and the number on the metrics
+display cannot come out differently from the number a grader judged.
 
 ## The measures
 
@@ -57,9 +66,52 @@ not apply: the verdict is `skipped` and it leaves the score's denominator. That
 is what stops a chat simulation being marked down for having no audio.
 
 The same is true of a measure no conversation carries yet. This table is the
-contract the report fold honors, and it is written down first on purpose: a
-grader written against a measure the fold has not started recording is `skipped`
-until it does, which is an honest "not measured here" rather than a silent pass.
+contract the shared measure module honors, and it is written down first on
+purpose: a grader written against a measure the module has not started computing
+is `skipped` until it does, which is an honest "not measured here" rather than a
+silent pass.
+
+## How each measure is computed from the spans
+
+One shared measure module reads a trace and computes every measure below. It is
+the **only** computation path for them: the metrics display reads through it and
+so does the grader, for a simulation and for a production trace alike — so
+identical spans produce identical numbers whatever conducted the conversation,
+and the number on the screen and the number that was judged can never disagree.
+
+Each definition names a **rule**, and the rules are a closed list the module
+switches on exhaustively. A rule nothing implements stops the build.
+
+| Measure | Rule | Computed from the trace as |
+| --- | --- | --- |
+| `first_response_latency` | `timing_spans_named_for_it` | Every span named `first_response_latency`; each span's own duration is one sample. |
+| `turn_response_latency` | `timing_spans_named_for_it` | Every span named `turn_response_latency`; each span's own duration is one sample. |
+| `time_to_first_word` | `timing_spans_named_for_it` | Every span named `time_to_first_word`; each span's own duration is one sample. |
+| `agent_speech_duration` | `timing_spans_named_for_it` | Every span named `agent_speech_duration`; each span's own duration is one sample. |
+| `persona_speech_duration` | `timing_spans_named_for_it` | Every span named `persona_speech_duration`; each span's own duration is one sample. |
+| `turn_count` | `no_span_carries_it` | Nothing. The simulator counts the turns it conducted and reports the total on the terminal transition, where the simulation row keeps it. |
+| `measured_audio_band_hertz` | `no_span_carries_it` | Nothing. The band is heard on the media line and reported on the terminal transition, where the simulation row keeps it beside the recording. |
+
+A timing span's duration **is** the measurement — nanoseconds on the wire,
+milliseconds here, and nothing carries the number a second time for the two to
+disagree about. Samples come back in the order the measurements were taken, so a
+per-turn series reads forwards and two readings of one conversation reduce the
+same list.
+
+**A measure with the rule `no_span_carries_it` may not be named by a grader**,
+and the write door refuses it. Both of the ones here already arrive on the
+terminal transition and are read back off the simulation row; deriving them a
+second time from the spans would be a second answer about one conversation, and
+two counts of one call disagreeing is exactly what one shared module exists to
+prevent. `turn_count` is the pointed case: the turn spans could be counted, and
+they are deliberately not.
+
+**Nothing is derived from the shape of the transcript**, on either source. The
+obvious candidate — the gap between a human turn ending and the agent's beginning
+— comes out negative on a real captured conversation, where five of twelve
+neighbouring turn pairs overlap. A number that is wrong is worse than a measure
+that is missing, so a measure the spans do not carry is absent, and a grader
+asked for it answers `skipped`.
 
 ## The aggregations
 
@@ -98,23 +150,28 @@ a rule somebody has to remember.
 ## What is deliberately not here
 
 - **Verdicts.** A metric measures and a grader judges. Nothing in this catalog
-  decides whether a number is good; a `metric_threshold` grader is somebody
-  deciding that, written down, and it is the only thing that turns a measurement
-  into a judgment.
+  decides whether a number is good; a `latency` grader is somebody deciding that,
+  written down, and it is the only thing that turns a measurement into a
+  judgment.
 - **Measures a customer defines.** The catalog ships as egma's own contract. A
   team that wants a number egma does not measure is asking for a feature, and
   the honest answer today is that the list is this one.
-- **Anything a production conversation measures.** A real caller's telemetry
-  arrives through the same OTLP door and carries the agent's own attributes,
-  which is a different measurement from egma standing on one side with a clock.
-  When threshold grading reaches them, what they measure joins this document
-  under the same discipline — named, versioned, and refused at the write door
-  until it is.
+- **A provider's own latency attributes.** A real caller's telemetry arrives
+  through the same OTLP door carrying the agent's own numbers — LiveKit puts an
+  end-to-end turn latency on `lk.e2e_latency`, inside the verbatim payload the
+  trace read deliberately does not return. Reading one is a decision for the
+  ingest door, normalised once for every provider into a span this catalog
+  already names; a measure module that parsed provider attributes would be a
+  second normaliser, disagreeing with the first for every framework egma ever
+  supports. Until then a production trace carries exactly the measures its spans
+  carry, which for an agent emitting no timing spans is none — and a grader
+  asked for one answers `skipped`, which is the honest word.
 
 ## Changing this catalog
 
-Bump the version when a measure joins, leaves, or changes what it means, and
-change `MEASURE_CATALOG_VERSION` in `src/measures.ts` in the same commit.
+Bump the version when a measure joins, leaves, or changes what it means — a
+span-level definition changing is a measure changing what it means — and change
+`MEASURE_CATALOG_VERSION` in `src/measures.ts` in the same commit.
 
 A measure that leaves needs more than a deletion. Graders already stored against
 it keep naming it, and they keep reading: the write door guards new writes and

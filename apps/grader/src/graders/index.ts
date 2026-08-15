@@ -7,6 +7,7 @@ import {
   type Judgment,
 } from "./contract.ts";
 import { executeExpectedBehaviors } from "./expected-behaviors.ts";
+import { executeLatency } from "./latency.ts";
 
 /**
  * The executor seam: one library entry, one function, and nothing else in the
@@ -22,17 +23,19 @@ import { executeExpectedBehaviors } from "./expected-behaviors.ts";
  * holds as many as egma ships, each named by the row a copy actually points at.
  *
  * **Not total, deliberately, and the gap is answered rather than silent.** An
- * entry with no executor here is one egma has not built yet — `latency` until
- * the change that computes it from spans lands — and a copy of it answers
- * `errored`, out loud, rather than passing. The row is replaced by a real
- * judgment the moment the executor arrives, because a re-grade at the same
- * grader version replaces rather than doubles.
+ * entry with no executor here is one egma has not built yet, and a copy of it
+ * answers `errored`, out loud, rather than passing. The roster is complete for
+ * the two entries v0 ships and the arm below is what the next one lands
+ * through; a row written while an entry waited is replaced by a real judgment
+ * the moment its executor arrives, because a re-grade at the same grader version
+ * replaces rather than doubles.
  */
 const EXECUTORS: Readonly<Record<string, Executor | undefined>> = {
   [PREDEFINED_GRADERS.expectedBehaviors]: executeExpectedBehaviors,
-  // `latency` is computed from the conversation's spans by the change that
-  // brings the shared measure module. Until then a copy of it says so.
-  [PREDEFINED_GRADERS.latency]: undefined,
+  // Computed from the conversation's spans by the one shared measure module —
+  // the same module the metrics display reads through — with no model call
+  // anywhere on this path.
+  [PREDEFINED_GRADERS.latency]: executeLatency,
 };
 
 /**

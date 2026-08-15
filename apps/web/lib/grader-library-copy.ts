@@ -51,6 +51,54 @@ export const COLUMNS = {
   type: "Type",
   owner: "Owner",
   description: "What it judges",
+  use: "",
+} as const;
+
+/**
+ * Pressing **Use**: the one act on this screen, and every word it says.
+ *
+ * **The form is drawn from the entry, not from this file.** What a grader asks
+ * for is the library entry's own declaration — a measure and a bound for
+ * latency, nothing at all for expected behaviors — and it arrives on the answer
+ * beside the entry. So the labels, the help text and the values in the dropdown
+ * are the platform's, and this file holds only the words around them: the
+ * heading, the two buttons, and what to say when a write is refused. A list of
+ * measures typed here would be a second copy of egma's measure catalog, wrong
+ * the first time a measure joined or left.
+ *
+ * **`required` is a word this screen has to get right.** It is the only
+ * loudness switch v0 has: on, and a test cannot pass while this grader does
+ * not; off, and it is a **diagnostic** — judged, shown with its fraction, never
+ * able to fail anything. Neither reading is obvious from the flag's name alone,
+ * so both are spelled out beside the control rather than left to a tooltip.
+ */
+export const USE = {
+  open: "Use",
+  title: (name: string): string => `Use ${name}`,
+  /** Said above the form, because pressing Use is what switching on means. */
+  lead:
+    "This puts a running copy of the grader on your project. It starts " +
+    "judging the conversations in its scope straight away; nothing else has " +
+    "to be switched on.",
+  /** An entry whose assertions come from the test asks for nothing at all. */
+  asksNothing:
+    "This grader asks for nothing. Its assertions are each test's own expected " +
+    "behaviors, read when a conversation is judged.",
+  required: "Can fail a run",
+  requiredOn:
+    "A test cannot pass while this grader does not.",
+  requiredOff:
+    "A diagnostic: judged and shown with its fraction, and never able to fail " +
+    "anything.",
+  submit: "Start judging",
+  submitting: "Starting…",
+  cancel: "Cancel",
+  started: (name: string): string =>
+    `${name} is running on this project now. It judges the conversations in its scope from here on; what it has already judged is unchanged.`,
+  seeRunning: "See the running graders",
+  /** A refusal the platform did not explain — the network, or a proxy. */
+  unreachable:
+    "egma could not be reached, so nothing was switched on. Is the API running?",
 } as const;
 
 /**

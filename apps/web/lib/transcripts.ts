@@ -94,11 +94,38 @@ export type Outcome = {
   readonly counts: VerdictCounts;
 };
 
+/**
+ * One measure this exchange produced, as the read hands it over.
+ *
+ * **Computed by the platform, never here.** The samples arrive already worked
+ * out by egma's one shared measure module — the same module a `latency` grader
+ * reads through — so this page renders a number rather than deriving one. A
+ * duration arithmetic done in a browser would be a second answer about one
+ * exchange, and the whole point of the module is that there is not one.
+ *
+ * The unit rides each measure because the measure catalog owns it: a page that
+ * assumed milliseconds would be wrong the moment somebody bounds a measure
+ * counted in something else.
+ */
+export type Measured = {
+  readonly measure: string;
+  readonly unit: string;
+  /** One sample, or the series a per-turn measure produced. Never empty. */
+  readonly samples: readonly number[];
+  /** The span each sample came off, in the same order. */
+  readonly span_ids: readonly string[];
+};
+
 export type Detail = {
   readonly trace: Facts;
   readonly turns: readonly Step[];
   readonly spans: readonly Step[];
   readonly spans_truncated: boolean;
+  /**
+   * What this exchange measured. Absent on an answer from an older platform,
+   * which is a page with no measures rather than a page that breaks.
+   */
+  readonly measures?: readonly Measured[];
   /**
    * The simulation this exchange is, when egma conducted it, and `null` when a
    * customer's own agent did.

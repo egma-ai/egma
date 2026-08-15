@@ -194,6 +194,40 @@ export const FACTS = {
 } as const;
 
 /**
+ * What this exchange measured — the metrics display, in words.
+ *
+ * **A measure measures and a grader judges**, and the two are shown apart on
+ * this page for exactly that reason: the numbers below say what happened, and
+ * the verdicts above say what somebody decided about it. Nothing here is green
+ * or red, because a duration is not good or bad until a grader has been asked.
+ *
+ * The numbers are the same ones a `latency` grader is judged on, computed once
+ * by egma's shared measure module and read here through it — so a developer
+ * reading "1100 ms at its worst" on this page and a verdict row saying a bound
+ * was missed are the same arithmetic, and the page can never be the reason
+ * somebody distrusts the judgment.
+ *
+ * A measure the spans do not carry is **absent** rather than shown as nothing:
+ * an empty row would read as a measurement of zero, and a chat exchange has no
+ * audio to have measured.
+ */
+export const MEASURES = {
+  label: "What was measured",
+  lead:
+    "Computed from this exchange's own spans — the same numbers a grader " +
+    "reads when it is asked to hold one to a bound.",
+  /** Nothing measured is an ordinary answer, and it says which two ways. */
+  none:
+    "Nothing was measured here. egma's own simulations time their turns; a " +
+    "production exchange carries whatever its agent's telemetry emitted, which " +
+    "for most frameworks is no timings at all.",
+  /** One measurement is the number; several are the worst of them. */
+  worst: "worst",
+  counted: (howMany: number): string =>
+    howMany === 1 ? "1 measurement" : `${howMany} measurements`,
+} as const;
+
+/**
  * The audio **egma** recorded, and the words that keep it apart from the audio
  * a step carries.
  *

@@ -1,9 +1,10 @@
 import { newId } from "@egma/ids";
 import {
   isCatalogedMeasure,
-  CATALOGED_MEASURES,
+  isSpanDerivedMeasure,
   MEASURE_CATALOG_DOCUMENT,
   MEASURE_CATALOG_VERSION,
+  SPAN_DERIVED_MEASURES,
 } from "@egma/simulation-contract";
 import { and, desc, eq, isNull, lt, sql, type SQL } from "drizzle-orm";
 
@@ -353,7 +354,8 @@ async function definitionOf(
 }
 
 /**
- * A measure the simulator actually produces, checked against the catalog.
+ * A measure egma computes from a conversation's spans, checked against the
+ * catalog.
  *
  * **The one write-door rule that is about the world rather than about the
  * shape.** A copy names what it reads as a string, and a string naming nothing
@@ -363,15 +365,27 @@ async function definitionOf(
  * conversation whose spans do not carry it, so the engine has no way to tell a
  * typo from a modality. Only the moment of writing can.
  *
+ * **The list is the span-derived one, which is narrower than the catalog.** A
+ * measure the catalog names but no span carries — the turn count and the audio
+ * band, both reported on the terminal transition and both kept on the simulation
+ * row — is a real number in the wrong place for a grader: reading the trace
+ * would never find it, so a copy naming one is exactly the forever-`skipped`
+ * check this rule exists to refuse. It is the same list the **Use** form offers
+ * and the same list the shared measure module implements, so a developer cannot
+ * be shown an option a write would refuse.
+ *
  * The refusal names the catalog rather than only the list, because the next
  * question after "that is not a measure" is always "then what is", and the
- * catalog is the document that answers it — and says what each measure means,
- * which a list of names cannot.
+ * catalog is the document that answers it — and says what each measure means and
+ * how each is computed, which a list of names cannot.
  */
 function validMeasure(measure: string, parameter: string): string {
-  if (!isCatalogedMeasure(measure)) {
+  if (!isSpanDerivedMeasure(measure)) {
+    const named = isCatalogedMeasure(measure)
+      ? `"${measure}" is a measure egma records, and no span carries it — it arrives on the transition that ends a simulation — so a grader reading a conversation could never find it`
+      : `"${measure}" is not a measure egma computes, so a grader reading it could never fire`;
     throw new UnprocessableInputError(
-      `"${measure}" is not a measure egma computes, so a grader reading it could never fire; ${parameter} takes one of ${CATALOGED_MEASURES.join(", ")}, and the measure catalog (${MEASURE_CATALOG_DOCUMENT}, version ${MEASURE_CATALOG_VERSION}) says what each of them means`,
+      `${named}; ${parameter} takes one of ${SPAN_DERIVED_MEASURES.join(", ")}, and the measure catalog (${MEASURE_CATALOG_DOCUMENT}, version ${MEASURE_CATALOG_VERSION}) says what each of them means and how each is computed from the spans`,
     );
   }
   return measure;

@@ -8,20 +8,29 @@ import {
   NOTHING,
   OWNERS,
   TYPES,
+  USE,
 } from "../../lib/grader-library-copy.ts";
 import { AppShell, Notice, PageHeader, ProductPage, StatePage, styles } from "../ui.tsx";
 import { GraderTabs } from "./tabs.tsx";
+import { UseForm, type Parameter } from "./use-form.tsx";
 
 /**
  * The grader library: the shelf of definitions a developer picks from.
  *
- * **Read-only, and that is the product decision rather than an unfinished
- * screen.** v0 ships a small set of graders egma maintains, so there is nothing
- * on this page to create and nothing to edit — a team meets judgment logic that
- * already works instead of being asked to design some on their first day. The
- * screen beside it is the running graders: the copies a developer switches on,
- * each pointing back at an entry here, and the strip under the heading is how
+ * **Nothing here is authored, and one thing here is pressed.** v0 ships a small
+ * set of graders egma maintains, so there is nothing on this page to create and
+ * nothing to edit — a team meets judgment logic that already works instead of
+ * being asked to design some on their first day. What a developer does here is
+ * press **Use**, which puts a running copy of an entry on their project; the
+ * screen beside it lists those copies, and the strip under the heading is how
  * somebody gets between the two.
+ *
+ * **The Use form is drawn from the entry it is opened on.** Every entry
+ * declares what pressing Use asks for, and that declaration arrives on this
+ * answer — so latency draws a measure dropdown and a bound, expected behaviors
+ * draws nothing at all, and this page has no opinion about either. A form
+ * written per grader would be a copy of the platform's own declaration, drifting
+ * the first time one changed.
  *
  * **Owner is the entry's own answer, printed rather than worked out.** The API
  * derives it from who the entry belongs to — egma's own entries belong to
@@ -48,6 +57,12 @@ type Entry = {
   readonly description: string | null;
   readonly type: string;
   readonly owner: string;
+  /**
+   * What pressing Use asks for, as this entry declares it. Absent on an answer
+   * from an older platform, which is an entry whose form asks nothing rather
+   * than a page that breaks.
+   */
+  readonly params?: readonly Parameter[];
 };
 
 type Answer = {
@@ -62,6 +77,10 @@ type State =
 
 export default function GraderLibraryPage() {
   const [state, setState] = useState<State>({ status: "loading" });
+  /** The entry whose form is open, and nothing while none is. */
+  const [using, setUsing] = useState<Entry | null>(null);
+  /** What the last press came to, kept after the form closes so it can be read. */
+  const [started, setStarted] = useState<string | null>(null);
 
   useEffect(() => {
     let current = true;
@@ -111,6 +130,37 @@ export default function GraderLibraryPage() {
         {state.status === "failed" ? <Notice tone="error">{state.why}</Notice> : null}
         {state.status === "loading" ? <Notice>{LIBRARY.loading}</Notice> : null}
 
+        {/*
+          What the last press came to, and it stays until the next one. A copy
+          is judging from the moment it exists, so the sentence says that and
+          points at the screen where it now appears.
+        */}
+        {started === null ? null : (
+          <Notice tone="success">
+            {USE.started(started)} <a href="/graders/running">{USE.seeRunning}</a>
+          </Notice>
+        )}
+
+        {/*
+          The form, opened on one entry at a time and drawn from that entry's own
+          declaration. Inline rather than in a dialog: it is the one act on this
+          screen, and a modal over a two-row table hides the thing being acted
+          on for no benefit.
+        */}
+        {using === null ? null : (
+          <section className={styles.settingsPanel} aria-labelledby="use-title">
+            <h2 id="use-title">{USE.title(using.name)}</h2>
+            <UseForm
+              entry={using}
+              onCancel={() => setUsing(null)}
+              onStarted={(name) => {
+                setUsing(null);
+                setStarted(name);
+              }}
+            />
+          </section>
+        )}
+
         {state.status === "loaded" ? (
           state.rows.length === 0 ? <Notice>{LIBRARY.empty}</Notice> : (
             <>
@@ -120,8 +170,8 @@ export default function GraderLibraryPage() {
               </div>
               <div className={styles.tableWrap}>
                 <table className={styles.dataTable}>
-                  <thead><tr>{COLUMN_ORDER.map(([heading]) => <th key={heading} scope="col">{heading}</th>)}</tr></thead>
-                  <tbody>{state.rows.map((row) => <tr key={row.id}>{COLUMN_ORDER.map(([heading, fill]) => <td key={heading}><span className={styles.tableCell}>{fill(row)}</span></td>)}</tr>)}</tbody>
+                  <thead><tr>{columnsOf(setUsing).map(([heading]) => <th key={heading} scope="col">{heading}</th>)}</tr></thead>
+                  <tbody>{state.rows.map((row) => <tr key={row.id}>{columnsOf(setUsing).map(([heading, fill]) => <td key={heading}><span className={styles.tableCell}>{fill(row)}</span></td>)}</tr>)}</tbody>
                 </table>
               </div>
               <div className={styles.mobileRows}>
@@ -130,6 +180,7 @@ export default function GraderLibraryPage() {
                     <span><span>{typeOf(row)}</span><span className={styles.muted}>{ownerOf(row)}</span></span>
                     <strong>{row.name}</strong>
                     <p>{row.description ?? NOTHING}</p>
+                    <UseButton entry={row} onUse={setUsing} />
                   </div>
                 ))}
               </div>
@@ -159,25 +210,60 @@ function ownerOf(entry: Entry): string {
 }
 
 /**
+ * The one act on this screen: start judging with this entry.
+ *
+ * It opens the form rather than writing anything, because every entry decides
+ * for itself what pressing Use asks for — and an entry that asks nothing still
+ * opens it, so that switching a grader on is always the same two steps and
+ * never a button that quietly did something.
+ */
+function UseButton({
+  entry,
+  onUse,
+}: {
+  entry: Entry;
+  onUse: (entry: Entry) => void;
+}) {
+  return (
+    <button
+      className={styles.buttonSecondary}
+      type="button"
+      onClick={() => onUse(entry)}
+    >
+      {USE.open}
+    </button>
+  );
+}
+
+/**
  * The columns, in the order they are shown, each beside what fills it.
  *
  * One list rather than a header row and a body row kept in step by hand — a
  * table whose third heading names its fourth value is a bug nobody sees in a
  * diff. The order is a judgement about scanning: what somebody looking down
  * this list wants is which grader this is, then what kind of thing it does,
- * then whose it is, and the sentence last because it is the widest.
+ * then whose it is, then the sentence because it is the widest, and the action
+ * last where a reader's eye ends up.
+ *
+ * A function rather than a constant because the last column presses something,
+ * and what it presses belongs to the page's state rather than to this module.
  */
-const COLUMN_ORDER: readonly (readonly [string, (row: Entry) => ReactNode])[] = [
-  [COLUMNS.name, (row) => <strong>{row.name}</strong>],
-  [COLUMNS.type, (row) => typeOf(row)],
-  [COLUMNS.owner, (row) => ownerOf(row)],
-  [
-    COLUMNS.description,
-    (row) =>
-      row.description === null ? (
-        <span className={styles.muted}>{NOTHING}</span>
-      ) : (
-        <span>{row.description}</span>
-      ),
-  ],
-];
+function columnsOf(
+  onUse: (entry: Entry) => void,
+): readonly (readonly [string, (row: Entry) => ReactNode])[] {
+  return [
+    [COLUMNS.name, (row) => <strong>{row.name}</strong>],
+    [COLUMNS.type, (row) => typeOf(row)],
+    [COLUMNS.owner, (row) => ownerOf(row)],
+    [
+      COLUMNS.description,
+      (row) =>
+        row.description === null ? (
+          <span className={styles.muted}>{NOTHING}</span>
+        ) : (
+          <span>{row.description}</span>
+        ),
+    ],
+    [COLUMNS.use, (row) => <UseButton entry={row} onUse={onUse} />],
+  ];
+}

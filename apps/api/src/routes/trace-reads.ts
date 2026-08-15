@@ -1,5 +1,6 @@
 import {
   listTraces,
+  measuresFromSpans,
   MAXIMUM_LIST_LIMIT,
   NotPermittedError,
   readTrace,
@@ -237,12 +238,43 @@ function describedSpan(span: TraceSpan): Record<string, unknown> {
   };
 }
 
+/**
+ * What this conversation measured — **the metrics display's read path, and it
+ * goes through the one shared measure module.**
+ *
+ * The numbers are not on the rows and are not stored anywhere: they are
+ * computed here from the spans this answer already carries, by the same
+ * function the latency grader computes with. So the figure on a page and the
+ * figure a verdict was decided by are one arithmetic, and the two cannot come to
+ * disagree — which is the whole reason the module exists rather than each
+ * surface reading timing spans for itself.
+ *
+ * **The same call for a simulation and for a real caller's trace.** Nothing here
+ * looks at `source`; a trace whose agent emits no timing spans simply carries no
+ * measures, which is a fact about the telemetry rather than a branch taken here.
+ *
+ * The unit rides each measure because the catalog owns it — a client that named
+ * one of its own would be a second opinion about something already written
+ * down, and wrong the moment a measure is not a duration.
+ */
+function describedMeasures(
+  detail: TraceDetail,
+): readonly Record<string, unknown>[] {
+  return measuresFromSpans(detail).map((measured) => ({
+    measure: measured.measure,
+    unit: measured.unit,
+    samples: measured.samples,
+    span_ids: measured.spanIds,
+  }));
+}
+
 function describedDetail(detail: TraceDetail): Record<string, unknown> {
   return {
     trace: describedFacts(detail),
     turns: detail.turns.map(describedSpan),
     spans: detail.spans.map(describedSpan),
     spans_truncated: detail.truncated,
+    measures: describedMeasures(detail),
   };
 }
 

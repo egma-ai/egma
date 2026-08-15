@@ -7,6 +7,7 @@ import {
   DETAIL,
   FACTS,
   LIST,
+  MEASURES,
   RECORDING,
   SPEAKERS,
   UNKNOWN_STEP_LABEL,
@@ -16,6 +17,7 @@ import {
   everyStep,
   howFarIn,
   howLong,
+  humanizeIdentifier,
   isHuman,
   milliseconds,
   somethingFailed,
@@ -24,6 +26,7 @@ import {
   turnsCited,
   type Detail,
   type Facts as TraceFacts,
+  type Measured,
   type Outcome,
   type Step,
 } from "../../../lib/transcripts.ts";
@@ -194,6 +197,7 @@ export default function TranscriptPage({
         </header>
 
         <Summary facts={detail.trace} />
+        <Measures measured={detail.measures ?? []} />
         {detail.outcome ? <OutcomeSummary outcome={detail.outcome} /> : null}
 
         {/*
@@ -287,6 +291,68 @@ function Summary({ facts }: { facts: TraceFacts }) {
       ))}
     </section>
   );
+}
+
+/**
+ * What this exchange measured — the metrics display.
+ *
+ * **Above the verdicts and apart from them, because a measure measures and a
+ * grader judges.** Nothing here is green or red: a duration is not good or bad
+ * until somebody has written down a bound, and the section below is where that
+ * decision shows up. Putting them in one block would make every number look like
+ * a check that passed.
+ *
+ * **Every number here came off the platform's one shared measure module**, which
+ * is the same module a `latency` grader is judged through. So this page renders
+ * what it was handed and derives nothing: a duration worked out in a browser
+ * would be a second answer about one exchange, and a developer who found the
+ * page and the verdict disagreeing would be right to stop believing both.
+ *
+ * A measure the spans do not carry is absent rather than shown empty, and an
+ * exchange with none says so in a sentence — "nothing was measured" is a fact
+ * about the telemetry that arrived, and a blank strip would read as a page that
+ * failed to load.
+ */
+function Measures({ measured }: { measured: readonly Measured[] }) {
+  return (
+    <section className={styles.detailFacts} aria-label={MEASURES.label}>
+      {measured.length === 0 ? (
+        <div className={styles.contextFact}>
+          <span>{MEASURES.label}</span>
+          <strong className={styles.muted}>{MEASURES.none}</strong>
+        </div>
+      ) : (
+        measured.map((one) => (
+          <div className={styles.contextFact} key={one.measure}>
+            <span>{humanizeIdentifier(one.measure)}</span>
+            <strong>{measurement(one)}</strong>
+          </div>
+        ))
+      )}
+    </section>
+  );
+}
+
+/**
+ * One measure as a person reads it: the number, its unit, and — where there was
+ * more than one measurement — that this is the worst of them and how many there
+ * were.
+ *
+ * **The worst rather than the average, and it says so.** It is the number a
+ * bound is held against, so showing a mean here would put a different figure on
+ * the page from the one a verdict was decided by. "1100 ms · worst of 11" is
+ * also the more useful reading: the average hides the one turn that took nine
+ * seconds, which is the turn the caller hung up on.
+ */
+function measurement(one: Measured): string {
+  const worst = one.samples.reduce(
+    (highest, sample) => (sample > highest ? sample : highest),
+    one.samples[0] ?? 0,
+  );
+  const shown = `${String(worst)} ${one.unit}`;
+  return one.samples.length === 1
+    ? shown
+    : `${shown} · ${MEASURES.worst} of ${MEASURES.counted(one.samples.length)}`;
 }
 
 function OutcomeSummary({ outcome }: { outcome: Outcome }) {

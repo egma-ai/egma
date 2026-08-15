@@ -1,4 +1,4 @@
-import { CATALOGED_MEASURES } from "@egma/simulation-contract";
+import { SPAN_DERIVED_MEASURE_CATALOG } from "@egma/simulation-contract";
 
 import type { LibraryType } from "../schema/graders.ts";
 
@@ -59,6 +59,39 @@ import type { LibraryType } from "../schema/graders.ts";
  */
 export type LibraryParameterKind = "measure" | "number";
 
+/**
+ * One value a parameter may take, as the form's dropdown draws it.
+ *
+ * **The options ride the entry, and that is what makes the dropdown honest.**
+ * The Library screen is a browser page with no way to read egma's own packages,
+ * so a list typed there would be a second copy of the measure catalog, drifting
+ * quietly the first time a measure joined or left. These are built from the
+ * catalog itself, published on the entry the form is drawn from, and they are
+ * the same list the write door accepts — so a developer cannot be offered
+ * something a write would refuse, and cannot be refused something they were
+ * offered.
+ *
+ * The check behind the control still reads the catalog directly rather than
+ * these, which is deliberate: a stored row is a snapshot of the release that
+ * seeded it, and what a write may take is this release's decision.
+ */
+export type LibraryParameterOption = {
+  /** What is stored on the copy — a measure's own catalog name. */
+  readonly value: string;
+  /** The words a person reads in the list. */
+  readonly label: string;
+  /** What it is, in the one line the measure catalog says it in. */
+  readonly means: string;
+  /**
+   * What a bound beside it is counted in — milliseconds, turns, hertz. It rides
+   * the option rather than the bound because the unit belongs to the measure:
+   * a form that named one of its own would be a second opinion about something
+   * already written down, and wrong the moment somebody bounds a measure that is
+   * not a duration.
+   */
+  readonly unit: string;
+};
+
 export type LibraryParameter = {
   /** The key the filled-in value is stored under on a running copy. */
   readonly name: string;
@@ -67,6 +100,11 @@ export type LibraryParameter = {
   readonly kind: LibraryParameterKind;
   /** What it is for, in the one line a form shows under the control. */
   readonly means: string;
+  /**
+   * Everything this parameter may be, where it is one of a list. Absent on a
+   * parameter a person types into.
+   */
+  readonly options?: readonly LibraryParameterOption[];
 };
 
 /**
@@ -180,6 +218,28 @@ export type PredefinedGrader = {
 const SHIPPED = new Date("2026-08-14T00:00:00.000Z");
 
 /**
+ * The measures a copy may bound, as the **Use** form's dropdown lists them —
+ * built from the measure catalog rather than written out here.
+ *
+ * The narrower list on purpose: every measure egma can compute from a
+ * conversation's spans, and none of the ones that arrive somewhere else. A
+ * dropdown offering a measure the trace never carries would be a form inviting
+ * somebody to write a check that is `skipped` forever, which is the exact
+ * failure the catalog exists to prevent — so the option list, the write door and
+ * the shared measure module are one list read three times.
+ */
+const MEASURES_A_COPY_MAY_BOUND: readonly LibraryParameterOption[] =
+  SPAN_DERIVED_MEASURE_CATALOG.map((cataloged) => ({
+    value: cataloged.measure,
+    // The stored name as a person reads it — `turn_response_latency` becomes
+    // "Turn response latency". Derived rather than written down beside the
+    // name, because a second string is a second thing to keep in step.
+    label: `${cataloged.measure.charAt(0).toUpperCase()}${cataloged.measure.slice(1).replace(/_/gu, " ")}`,
+    means: cataloged.means,
+    unit: cataloged.unit,
+  }));
+
+/**
  * The identifiers of the entries egma ships, by the name a person calls them.
  *
  * They are written here as names rather than left as characters in the list
@@ -229,14 +289,15 @@ export const GRADER_LIBRARY_CATALOG: readonly PredefinedGrader[] = [
         name: "metric",
         label: "Measure",
         kind: "measure",
-        means: `which measure to read, from the measure catalog: ${CATALOGED_MEASURES.join(", ")}`,
+        means: "which measure to read, computed from the conversation's spans",
+        options: MEASURES_A_COPY_MAY_BOUND,
       },
       {
         name: "bound",
         label: "Bound",
         kind: "number",
         means:
-          "the most the measure may be for this assertion to pass, in the measure's own unit; anything above it fails",
+          "the most the measure may be for this assertion to pass, in the measure's own unit; every measurement has to hold it, so the worst one decides",
       },
     ],
     outputDefinition: null,

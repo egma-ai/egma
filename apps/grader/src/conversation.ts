@@ -1,8 +1,10 @@
-import type {
-  Simulation,
-  TraceDetail,
-  TraceSpan,
-  VerdictSource,
+import {
+  measuresFromSpans,
+  type MeasuredFromSpans,
+  type Simulation,
+  type TraceDetail,
+  type TraceSpan,
+  type VerdictSource,
 } from "@egma/db";
 
 /**
@@ -25,11 +27,14 @@ import type {
  *
  * A simulation's row is still read for what only it knows — that this
  * conversation was one egma conducted, which run it belongs to, what the
- * simulator said about how it ended. The three conversation fields are
+ * simulator said about how it ended. The transcript and the tool calls are
  * `unknown` because a production trace and a simulation are assembled into
  * them by the same code and nothing downstream may branch on which; each
  * grader reads what it needs and says honestly when what it needs is not
- * there.
+ * there. The measures are the exception and are typed, because they are not a
+ * shape to be read — they are arithmetic, done in one place by the shared
+ * measure module, and a second reading of them here is precisely the thing that
+ * module exists to make impossible.
  */
 export type Conversation = {
   /** Which kind of conversation this is, in the verdict row's own vocabulary. */
@@ -74,8 +79,26 @@ export type Conversation = {
   readonly endingReason: string | null;
   readonly transcript: unknown;
   readonly events: unknown;
-  /** What was measured. A metric measures; a grader judges. */
-  readonly metrics: unknown;
+  /**
+   * What was measured, from the conversation's own spans. A metric measures; a
+   * grader judges.
+   *
+   * **Typed rather than `unknown`, and computed by the one shared measure
+   * module rather than here.** The other two fields are shapes this file builds
+   * out of spans and hands on for somebody to read defensively; a measure is not
+   * — it is a number, computed in exactly one place, and the same number the
+   * metrics display shows for this conversation. Reading it defensively here
+   * would be a second reading of one arithmetic, and two readings of one
+   * arithmetic is how a page and a verdict row come to disagree about how fast
+   * an agent answered.
+   *
+   * **Assembled the same way whatever conducted the conversation.** The module
+   * is handed spans and knows nothing about `source`, so a simulation and a
+   * production trace holding the same spans produce the same measures — which is
+   * what makes "passes in simulation, fails in production" a join rather than
+   * two readers that could disagree about what a millisecond is.
+   */
+  readonly measures: readonly MeasuredFromSpans[];
   /** Where the verdict rows file the conversation, beside the conversation. */
   readonly runId: string;
   readonly agentId: string;
@@ -133,7 +156,7 @@ export function conversationOfSimulation(
     endingReason: simulation.endingReason,
     transcript: [],
     events: [],
-    metrics: {},
+    measures: [],
     runId: simulation.runId,
     agentId: simulation.agentId,
   };
@@ -149,7 +172,12 @@ export function conversationOfSimulation(
       // not the return, so its vocabulary declares no result attribute and the
       // door has nothing to write into the column.
       events: toolCallsIn(trace),
-      metrics: measuresTimedIn(trace),
+      // The one shared measure module, called exactly as the production branch
+      // below calls it and exactly as the metrics display calls it. There is no
+      // reading of a timing span left in this file: the same spans produce the
+      // same numbers whoever conducted the conversation, because there is only
+      // one place the numbers are worked out.
+      measures: measuresFromSpans(trace),
     };
   }
 
@@ -233,7 +261,12 @@ export function conversationOfTrace(trace: TraceDetail): Conversation {
     endingReason: null,
     transcript: transcriptOf(trace),
     events: toolCallsIn(trace),
-    metrics: measuresIn(),
+    // The same call the simulation branch makes, on the same rows, with nothing
+    // between the two that could tell them apart — which is the whole of "one
+    // source, both worlds". A trace whose agent emits no timing spans carries no
+    // measures and a grader asked for one answers `skipped`; that is a fact
+    // about the telemetry rather than a branch taken here.
+    measures: measuresFromSpans(trace),
     runId: trace.runId,
     agentId: trace.agentId,
   };
@@ -325,102 +358,16 @@ type ToolCall = {
 };
 
 /**
- * What a production trace measured, which today is nothing — and the reason is
- * worth writing down rather than discovering twice.
- *
- * The measures a threshold grader names are the simulator's: egma stands on one
- * side of the conversation with a clock and reports what it timed. A production
- * trace is the agent's own telemetry from the inside, and the two views are
- * different measurements — the trace store's own schema says so, and averaging
- * them together is the same error as mixing two audio bands.
- *
- * Deriving one anyway was tried and is wrong. The obvious candidate is the gap
- * between a human's turn ending and the agent's beginning; in the captured
- * LiveKit trace five of the twelve neighbouring pairs of turns *overlap* — a
- * user turn stays open past the point the agent starts answering — so the
- * "latency" comes out negative by as much as two and a half seconds. A number
- * that is wrong is worse than a measure that is missing, and a grader asked for
- * a measure this does not have answers `skipped`, which leaves the score's
- * denominator exactly as an inapplicable check should.
- *
- * What is actually needed is on the row already: LiveKit puts its own
- * end-to-end turn latency on `lk.e2e_latency`, inside the verbatim payload that
- * the trace read deliberately does not return. Reading it is a decision for the
- * ingest door — a column, or a kind, normalised once for every provider — and
- * not one this path may take alone, because a grader that parsed provider
- * attributes would be a second normaliser, disagreeing with the first for every
- * framework egma ever supports.
- */
-function measuresIn(): Readonly<Record<string, never>> {
-  return {};
-}
-
-/**
- * What a simulation measured, from the timing spans — and there **is** a number
- * here, which is the whole difference from a production trace.
- *
- * These are the simulator's own measurements: egma stood on one side of the
- * conversation with a clock, and every measure it took is a span named for that
- * measure. Nothing is derived from the shape of the transcript here — the same
- * arithmetic that comes out negative on overlapping turns would come out
- * negative on a simulation's, and the simulator already knows the answer.
- *
- * **The span's own duration is the measurement.** A timing span is opened one
- * measurement before the moment it was taken and closed at it, so its start and
- * end bracket the interval that was measured. There is deliberately no
- * attribute carrying the number: a second copy of it would be free to disagree
- * with the interval, and the vocabulary refuses to write one down twice.
- *
- * Nanoseconds on the wire, milliseconds in the catalog, so the conversion
- * happens once and here. It is floating-point on purpose — a measure is
- * `862.5ms` and a whole-number division would quietly floor every one of them —
- * and the counts involved are tens of seconds, nowhere near where a double
- * stops holding a nanosecond exactly.
- *
- * **A measure the conversation never took is simply absent**, which is what
- * makes the voice measures free on chat: `time_to_first_word`,
- * `agent_speech_duration` and `persona_speech_duration` come out of audio, a
- * chat simulation has none, and a threshold grader asked for one answers
- * `skipped` — out of the score's denominator, never an error and never a
- * failure.
- */
-function measuresTimedIn(trace: TraceDetail): Readonly<Record<string, number[]>> {
-  const NANOSECONDS_PER_MILLISECOND = 1_000_000;
-
-  const timed: (Measurement & { readonly at: string })[] = [];
-  for (const span of everySpanIn(trace)) {
-    if (span.kind !== TIMING) continue;
-    timed.push({
-      // The span is named for the measure it takes, which is what makes the
-      // catalog and the vocabulary the same list read twice.
-      measure: span.name,
-      at: span.startedAt,
-      milliseconds:
-        Number(span.durationNanoseconds) / NANOSECONDS_PER_MILLISECOND,
-    });
-  }
-
-  // In the order they were taken, so that a per-turn series is the conversation
-  // read forwards and two gradings of one conversation aggregate the same list.
-  const measured: Record<string, number[]> = {};
-  for (const measurement of timed.sort(byWhenItStarted)) {
-    (measured[measurement.measure] ??= []).push(measurement.milliseconds);
-  }
-  return measured;
-}
-
-type Measurement = {
-  readonly measure: string;
-  readonly milliseconds: number;
-};
-
-/**
- * The kinds this file selects on, as the door normalised them — never the
+ * The one kind this file still selects on, as the door normalised it — never the
  * provider's own span names, which is what keeps one reading working for
  * LiveKit, for the simulator and for whatever the registry learns next.
+ *
+ * The timing kind used to be here beside it, read into a second copy of the
+ * measure arithmetic. It moved into the shared measure module with everything
+ * else about a measure, so this file no longer has an opinion about what a
+ * millisecond is.
  */
 const ROOT = "root";
-const TIMING = "timing";
 
 /**
  * Every span the trace holds, exactly once: the turns, whatever hangs inside

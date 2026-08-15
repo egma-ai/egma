@@ -68,6 +68,15 @@ export type ToolCall = {
   readonly arguments: string | null;
 };
 
+/**
+ * One measure, as the judge is shown it.
+ *
+ * **Taken from the conversation rather than re-read out of it.** The shared
+ * measure module computed these off the spans, and the words a judge reads are
+ * that answer rendered — so the number in a prompt, the number on the metrics
+ * display and the number a latency verdict rests on are one arithmetic, not
+ * three readings that agree today.
+ */
 export type Measure = {
   readonly measure: string;
   /** One sample, or the whole series when the measure was taken per turn. */
@@ -112,7 +121,14 @@ export function judgeInputOf(conversation: Conversation): JudgeInput {
       turns: transcript.length,
     },
     toolCalls: toolCallsOf(conversation.events),
-    measures: measuresOf(conversation.metrics),
+    // Straight across, because there is nothing to read defensively: the
+    // measures arrived as numbers from the one module that computes them, not
+    // as a shape somebody wrote. A second reading here would be a second
+    // opinion about one arithmetic.
+    measures: conversation.measures.map(({ measure, samples }) => ({
+      measure,
+      samples,
+    })),
   };
 }
 
@@ -183,38 +199,6 @@ function toolCallsOf(events: unknown): readonly ToolCall[] {
     });
   }
   return called;
-}
-
-/**
- * What was measured, read the way the threshold grader reads it: a value is one
- * number or a series of them, and anything else is a measure this conversation
- * does not have.
- */
-function measuresOf(metrics: unknown): readonly Measure[] {
-  if (
-    typeof metrics !== "object" ||
-    metrics === null ||
-    Array.isArray(metrics)
-  ) {
-    return [];
-  }
-
-  const measured: Measure[] = [];
-  for (const [measure, value] of Object.entries(metrics)) {
-    if (typeof value === "number" && Number.isFinite(value)) {
-      measured.push({ measure, samples: [value] });
-      continue;
-    }
-    if (!Array.isArray(value)) continue;
-    const samples = value.filter(
-      (sample): sample is number =>
-        typeof sample === "number" && Number.isFinite(sample),
-    );
-    if (samples.length === value.length && samples.length > 0) {
-      measured.push({ measure, samples });
-    }
-  }
-  return measured;
 }
 
 /**
