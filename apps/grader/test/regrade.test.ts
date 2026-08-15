@@ -133,6 +133,9 @@ describe("editing a grader", () => {
   });
 
   it("leaves the conversations judged and asks nothing of the queue", async () => {
+    // Same reason as the re-grade case below: the rows land before the job's
+    // own word for what happened to it does.
+    await jobFor(world, judged, "graded");
     const [job] = await listGradingJobsForSimulation(
       world.auth,
       judged.simulationId,
@@ -188,6 +191,12 @@ describe("editing a grader", () => {
     });
 
     it("reopened the conversation's one job rather than filing a second", async () => {
+      // Wait for the job before counting the jobs. The service writes the
+      // verdict rows and marks the job `graded` after them, so a case that
+      // waited only for the rows — which is what the cases above wait for —
+      // can arrive while this one still reads `claimed`. Under a full suite
+      // that gap is wide enough to lose on.
+      await jobFor(world, judged, "graded");
       const jobs = await listGradingJobsForSimulation(
         world.auth,
         judged.simulationId,
