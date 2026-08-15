@@ -35,7 +35,7 @@ export type PhoneState = "ready" | "setup_required";
 export type PhoneReadiness = {
   readonly state: PhoneState;
   /**
-   * What phone setup has not supplied yet, by the name a person would use.
+   * What setup has not supplied yet, by the name a person would use.
    * Empty when the state is `ready`. Named rather than counted, because
    * "setup required" with nothing after it sends a self-hoster to read source.
    */
@@ -110,6 +110,6 @@ export function phoneSetupRequiredMessage(readiness: PhoneReadiness): string {
     `dialled and nothing was charged. It is missing ${readiness.missing.join(
       " and ",
     )}. Whoever runs this platform makes it ready with one command in the ` +
-    "platform workspace: egma self-host phone setup."
+    "platform workspace: egma self-host setup."
   );
 }

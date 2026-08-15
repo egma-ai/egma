@@ -143,8 +143,8 @@ const ATTEMPTS = 3;
  * The pair this workspace uses, written down if it was not already, with
  * exactly one winner when two commands ask at the same moment.
  *
- * **Two commands mint.** `egma self-host up` and `egma self-host phone setup`
- * both reach here, so the two racers need not even be the same command. Left
+ * **Two commands mint.** `egma self-host up` and `egma self-host setup` both
+ * reach here, so the two racers need not even be the same command. Left
  * unguarded, each would generate its own pair, each would write the file, and
  * each would then hand *its* pair to Compose — leaving the recorded pair and
  * the running containers' pair different. That failure passes every health

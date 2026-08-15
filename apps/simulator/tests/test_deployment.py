@@ -226,7 +226,7 @@ def test_a_plain_compose_up_starts_the_whole_phone_stack():
     point rather than an accident: a platform that cannot place a phone
     call is not the product, so `egma self-host up` — and a plain
     `docker compose up`, which is the same containers — brings all three
-    up. What stays off until `egma self-host phone setup` has run is the
+    up. What stays off until `egma self-host setup` has run is the
     simulator's *media backend*, because a simulator told to dial with no
     trunk refuses to start and platform readiness must never wait on
     carrier setup. That is asserted below.

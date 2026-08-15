@@ -81,7 +81,7 @@ export type Config = {
   readonly simulatorServiceToken: string;
   /**
    * The judge a project is given when it has configured none, from the one
-   * OpenAI key a self-hoster supplied at phone setup.
+   * model key a self-hoster supplied at setup.
    *
    * A judge still belongs to a project — this is written into each project's
    * own sealed configuration, exactly as a project that configured its own
@@ -390,8 +390,8 @@ function platformSettings(
     text_to_speech_voice: environment.EGMA_PERSONA_TTS_VOICE?.trim(),
     voice_activity_provider: environment.EGMA_PERSONA_VAD_PROVIDER?.trim(),
     media_backend: environment.EGMA_MEDIA_BACKEND?.trim(),
-    // The carrier keeps the variable names phone setup already wrote, so an
-    // operator upgrading meets the same three words they were given before.
+    // The carrier keeps the variable names the old phone setup already wrote,
+    // so an operator upgrading meets the same words they were given before.
     carrier_trunk_address: environment.EGMA_PHONE_TRUNK_ADDRESS?.trim(),
     carrier_trunk_number: environment.EGMA_PHONE_SOURCE_NUMBER?.trim(),
     carrier_trunk_username: environment.EGMA_PHONE_TRUNK_USERNAME?.trim(),

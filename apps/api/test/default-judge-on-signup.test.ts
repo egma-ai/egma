@@ -7,14 +7,14 @@ import { createApi, type TestApi } from "./support/api.ts";
  * A project created while the platform is running is born gradable.
  *
  * **This file exists because the gap it closes is the ordinary first run.** The
- * platform's default judge — the one OpenAI key a self-hoster supplies to
- * `egma self-host phone setup` — used to be applied only by a backfill at API
+ * platform's default judge — the model key a self-hoster puts in
+ * `EGMA_JUDGE_API_KEY` — used to be applied only by a backfill at API
  * startup. That is fine for a project that already exists and useless for the
  * sequence the product actually documents:
  *
  * 1. a clean platform workspace, `egma self-host up` — **no project exists**,
  *    so the backfill runs against nothing;
- * 2. `egma self-host phone setup`;
+ * 2. `egma self-host setup`;
  * 3. in a separate agent repository, the wizard signs in — and *that* is what
  *    creates the organization and its first project, with the API already up.
  *

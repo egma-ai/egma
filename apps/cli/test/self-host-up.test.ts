@@ -43,8 +43,21 @@ describe("egma self-host up", () => {
       expect(run.code).toBe(0);
       expect(run.stdout).toContain(`url: ${platform.url}`);
       expect(run.stdout).toContain("status: ready");
-      // Phone readiness is reported separately, and honestly.
+      // Two facts about one deployment, reported separately and honestly. The
+      // platform answers for its whole configuration — the persona's providers
+      // as much as the carrier — and for the phone half beside it, because a
+      // platform with no carrier runs chat and text simulations perfectly well.
+      expect(run.stdout).toContain("setup: setup_required");
+      expect(run.stdout).toContain("setup_missing: the persona's model provider");
       expect(run.stdout).toContain("phone: setup_required");
+      // And the **whole** next step, named, because "setup required" with
+      // nothing after it sends a self-hoster to read source — and because
+      // setup writes through the platform's own API, whose door opens for an
+      // organization owner. A closing line naming only the last command would
+      // route a new operator straight into a refusal telling them to log in.
+      expect(run.stderr).toContain(`Sign up at ${platform.url}`);
+      expect(run.stderr).toContain(`npx @egma/cli login --url ${platform.url}`);
+      expect(run.stderr).toContain("npx @egma/cli self-host setup");
       expect(run.stdout).toContain(
         `connect: npx @egma/cli --url ${platform.url}`,
       );

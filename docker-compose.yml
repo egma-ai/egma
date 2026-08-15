@@ -308,8 +308,10 @@ services:
       # prerequisite for anything, including adding a second person.
       EGMA_SMTP_URL: ${EGMA_SMTP_URL:-}
       EGMA_MAIL_FROM: ${EGMA_MAIL_FROM:-}
-      # The judge a project is given when it has configured none, from the one
-      # OpenAI key phone setup asked for. Written into each project's own
+      # The judge a project is given when it has configured none. It is the
+      # one thing setup does not put in the platform's store: a judge belongs
+      # to the project that chose it, so it is seeded from here on boot.
+      # Written into each project's own
       # sealed row on boot and never over one that is already there. It is here
       # rather than on the grader on purpose: a judge configured per container
       # is a judge no project chose. All three or none — the API refuses to
@@ -342,7 +344,7 @@ services:
       EGMA_PERSONA_TTS_MODEL: ${EGMA_PERSONA_TTS_MODEL:-}
       EGMA_PERSONA_TTS_VOICE: ${EGMA_PERSONA_TTS_VOICE:-}
       EGMA_PERSONA_VAD_PROVIDER: ${EGMA_PERSONA_VAD_PROVIDER:-}
-      # The carrier, under the names phone setup already wrote, so an
+      # The carrier, under the names the old phone setup wrote, so an
       # operator upgrading meets the words they were given before. The API
       # holds the trunk password only long enough to seal it — exactly as it
       # already holds a judge's key and a connection's credentials — and it
@@ -632,7 +634,7 @@ services:
   # gateway (the thing that speaks to your carrier), and the Redis those two
   # find each other through. They start with everything else, because a
   # platform that cannot place a phone call is not the product — `egma
-  # self-host up` brings up one deployment and `egma self-host phone setup`
+  # self-host up` brings up one deployment and `egma self-host setup`
   # makes it able to dial. They were an opt-in overlay until the self-hosted
   # release; that overlay is gone and nothing needs to be asked for by name.
   #

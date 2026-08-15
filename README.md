@@ -35,18 +35,21 @@ deployment must not run on a credential every reader of this repository holds.
 
 `docker compose up` starts the same containers, and is not the same thing.
 
-**Once you have run `egma self-host phone setup`, use `egma self-host up` to
-start this platform.** What that command wrote is in `.egma-platform/`, and
-nothing points compose at it — the self-host commands read it back and hand it
-to the containers themselves. A bare `docker compose up` therefore brings the
-platform back with its carrier, speech and judge configuration empty: the
-containers are recreated, phone readiness goes back to `setup required`, and
-the simulator has no trunk to dial through. Its media server refuses to start
-at all, because that pair has no default and a bare compose run does not read
-the file holding yours. **That takes the simulator with it** — the simulator
-waits for a healthy media server, so a bare `docker compose up` leaves you with
-no simulator at all, not merely no phone. Nothing is lost and nothing has to be
-set up again; `egma self-host up` restores it.
+**Your settings survive either way**, and that is the difference this release
+made. The carrier, the persona's model and the speech providers live in the
+platform's own database rather than in a file beside it, so a plain
+`docker compose up`, a machine restart in another directory or a colleague's
+clone all bring the platform back configured. Nothing has to be set up again.
+
+**What a bare `docker compose up` does still lose is the media server's key and
+secret.** They are in `.egma-platform/platform.env`, nothing points compose at
+that file, and a container reads that pair when it is *created* — so it cannot
+come from the platform's database. The pair has no default anywhere, deliberately,
+so the media server refuses to start rather than run on a credential published in
+this repository. **That takes the simulator with it**, because the simulator
+waits for a healthy media server, and you are left with no simulator at all
+rather than merely no phone. `egma self-host up` reads the file and hands the
+pair over, which is why it is the way to start this platform.
 
 There is a second, smaller difference. `egma self-host up` waits for the
 platform to answer for itself, tells you what to type next, and tries once more
@@ -69,30 +72,68 @@ second `up` typed by hand.
 | LiveKit SIP gateway | its SIP port and RTP range, for your carrier |
 | LiveKit Redis | none |
 
-**Phone readiness is reported separately from platform readiness, and that is
-honest rather than fussy.** A platform with no carrier runs text simulations
-perfectly well, so `self-host up` brings one up *ready* and says phone is `setup
-required`. One more command in this directory makes it able to place calls:
+Open http://localhost:3101 and sign up. Your organization and your first project
+are created together, and you become their admin. On a fresh instance the first
+person to sign up claims it, and open signup closes behind them — everybody
+after that arrives by invitation.
+
+### Configuring it
+
+A started platform is not yet a configured one. It says so: `self-host up`
+reports `setup: setup_required` and names what is absent. One command in this
+directory asks for all of it, in one sitting:
 
 ```bash
-npx @egma/cli self-host phone setup
+npx @egma/cli login --url http://localhost:3101   # once, as the owner
+npx @egma/cli self-host setup
 ```
 
-It asks for a Twilio account, a voice number that account **already owns**, and
-one OpenAI key; shows you a plan before it writes anything to your carrier; and
-on approval does the paperwork, writes a private configuration file here, and
-waits for the platform to report phone readiness. It never buys, ports or
-registers a number. `--plan` shows the plan and stops. `--apply --yes --json` is
-the same work with nobody watching, for a coding agent driving it.
+It asks the platform what it is missing and then asks you for exactly that, in a
+fixed order — who the persona thinks with, what it speaks and hears with, and
+how a call reaches the telephone network — so you can gather one provider's
+paperwork at a time rather than discovering a missing key one setting at a time.
+**A setting the platform already holds is never asked for again**, so running it
+after supplying one more key is a single question, and running it on a
+configured platform changes nothing and says so. `--plan` prints the list of
+what it would ask for and stops.
+
+For the phone half it asks for a Twilio account, a voice number that account
+**already owns**, and the account's Auth Token; shows you a plan before it
+writes anything to your carrier; and on approval does the paperwork. It never
+buys, ports or registers a number. Press Enter at the Twilio question to leave
+the phone for later. `--apply --yes --json` is the same work with nobody
+watching, for a coding agent driving it — every answer can arrive in the
+environment variable named for it in `.env.example`.
+
+**Every answer is written through the platform's own API, and the platform is
+the only thing that seals.** The settings live in Postgres, sealed with
+`EGMA_ENCRYPTION_KEY`, so they survive a restart, an upgrade and a move to
+another machine — and every simulator is handed them on the work order it
+claims, so a second simulator on another host needs nothing copied to it. The
+CLI keeps none of them.
+
+**Phone readiness is reported separately from platform readiness, and that is
+honest rather than fussy.** A platform with no carrier runs text simulations
+perfectly well, so it is reported as its own fact beside the whole-platform one.
 
 **The Twilio Auth Token is used by that command and never kept.** What a running
 egma holds is a SIP credential that can authenticate one trunk and do nothing
 else on the account.
 
-Open http://localhost:3101 and sign up. Your organization and your first project
-are created together, and you become their admin. On a fresh instance the first
-person to sign up claims it, and open signup closes behind them — everybody
-after that arrives by invitation.
+*Upgrading from a release that used `egma self-host phone setup`:* your settings
+were in `.egma-platform/platform.env`, and **nothing reads them there any
+more** — there is no import path and no compatibility reader. Your platform will
+report `setup required` after the upgrade. Run `egma self-host setup` once and
+answer it again. The file itself stays, because it also holds the media server's
+key and secret, which a container reads when it is created; the settings lines
+left in it are inert, and you can delete them once setup has run.
+
+Two of those lines are **not** settings and want different treatment.
+`EGMA_BASE_URL` stays where it is and is still read from that file. The three
+`EGMA_JUDGE_*` variables are not read from it any more, and setup does not ask
+for them either — a judge belongs to the project that chose it rather than to
+the deployment, so it was never among the platform's settings. Move them to
+`.env`, which is the file Compose reads on its own.
 
 `GET /health` on the API and `GET /api/health` on the web application are what
 the container health checks poll.
@@ -368,9 +409,9 @@ LiveKit, and it is already running: the LiveKit server, its SIP gateway and the
 Redis they find each other through are part of the default deployment. There is
 no overlay to ask for by name.
 
-`egma self-host phone setup` is what turns your carrier account into the trunk.
-The rest of this section is what is happening underneath it, and what to do when
-the machine you are on cannot host the gateway.
+`egma self-host setup` is what turns your carrier account into the trunk. The
+rest of this section is what is happening underneath it, and what to do when the
+machine you are on cannot host the gateway.
 
 **LiveKit Cloud is one variable.** Point `EGMA_SIMULATOR_LIVEKIT_URL` at it with
 its key and secret and stop reading — there is nothing to host and nothing to
@@ -428,18 +469,19 @@ You should not have to hand-build SIP paperwork in somebody's console, and you
 do not:
 
 ```bash
-npx @egma/cli self-host phone setup
+npx @egma/cli self-host setup
 ```
 
 It reads your account first and shows you a plan — what it would create and what
 is already there — and writes nothing to your carrier until you approve it. Then
 it creates the trunk, its termination URI, a credential list and the credential,
-attaches the credential list and the number to the trunk, writes the
-configuration into `.egma-platform/platform.env`, restarts what needs it, and
-waits for the platform to report phone readiness. It names everything it made
-with that thing's own identifier, in the terminal and in a receipt filed beside
-the configuration, so a year from now you can find all of it in the Twilio
-console or delete it.
+attaches the credential list and the number to the trunk, and writes the trunk,
+the number and the credential **into the platform's own store, sealed**. Nothing
+is restarted: the platform reads its settings from that store for each
+simulation, so the phone is ready on the next request. It names everything it
+made with that thing's own identifier, in the terminal and in a receipt filed in
+`.egma-platform/receipts/`, so a year from now you can find all of it in the
+Twilio console or delete it.
 
 It is safe to run again, and safe to run again after a run that stopped half
 way: every step looks for what it would create before creating it, so a second
@@ -454,8 +496,9 @@ says so and stops before creating anything at all.
 
 **The account token is used by that command and by nothing else.** What a
 running deployment keeps is a SIP credential that can do exactly one thing:
-authenticate a call over one trunk. It is written into a file that is created
-readable by you and nobody else, and it belongs in no repository.
+authenticate a call over one trunk. It is sealed in the platform's own store
+with the same key a connection's credentials are sealed with, and it reaches a
+simulator only on the work order that simulator claims.
 
 ### The whole thing, end to end
 
@@ -485,10 +528,11 @@ docker compose exec minio sh -c \
 ```
 
 The persona speaks in a deterministic test tone unless you name real speech
-providers, and a real agent hears that as noise. `egma self-host phone setup`
-sets all of this from the one OpenAI key it asks for — the persona's words, its
-voice, its ears, and `silero` for hearing a real agent start and stop speaking.
-To do it by hand, set `EGMA_SIMULATOR_TTS_PROVIDER`,
+providers, and a real agent hears that as noise. `egma self-host setup` asks for
+all of it — the persona's words, its voice, its ears, and `silero` for hearing a
+real agent start and stop speaking — and stores it on the platform, from where
+every simulator is handed it. The workbench overlay runs a bare simulator with
+no platform to be handed anything by, so there set `EGMA_SIMULATOR_TTS_PROVIDER`,
 `EGMA_SIMULATOR_STT_PROVIDER`, their key and `EGMA_SIMULATOR_VAD_PROVIDER=silero`
 before you expect a conversation.
 

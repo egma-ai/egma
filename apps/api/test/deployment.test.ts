@@ -3,7 +3,7 @@
  *
  * **This file exists because the gap it closes really happened.** Phone
  * readiness was written, documented in `.env.example`, and covered by tests —
- * and then a real `egma self-host phone setup` against a real Twilio account
+ * and then a real carrier setup against a real Twilio account
  * finished every carrier step correctly and reported `setup required` anyway,
  * because the compose entry for the API never passed the three variables
  * through. A variable absent from a service's `environment:` is not merely

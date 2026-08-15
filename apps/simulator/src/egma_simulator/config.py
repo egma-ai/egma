@@ -477,7 +477,7 @@ class MediaSettings:
             raise ValueError(
                 "a phone call needs a trunk, and this deployment has none. "
                 "Give the platform a carrier trunk — the setting is on its "
-                "settings page and `egma self-host phone setup` writes it — "
+                "settings page and `egma self-host setup` writes it — "
                 "or set EGMA_SIMULATOR_SIP_TRUNK_ID on this container for a "
                 "trunk already stored in LiveKit"
             )
@@ -700,8 +700,8 @@ class SimulatorConfig:
     openai_api_key: str | None = field(default=None, repr=False)
     """The OpenAI key, for whichever of the two legs names ``openai``. The
     same key the persona's brain uses when the model provider is ``openai``
-    too — one account, one key, which is the whole of what phone setup
-    asks a self-hoster for."""
+    too — one account, one key, which is what a self-hoster supplies once at
+    `egma self-host setup` when both legs are on the same account."""
 
     stt_model: str = DEFAULT_STT_MODEL
     tts_model: str = DEFAULT_TTS_MODEL
