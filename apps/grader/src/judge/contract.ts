@@ -91,13 +91,13 @@ export type ResolvedJudge = {
 export type JudgeMaker = (judge: ResolvedJudge) => Judge;
 
 /**
- * How a verdict row says which judge answered — the provider and the model, and
+ * How a resolved judge says which judge it is — the provider and the model, and
  * never the key or the account.
  *
  * Both halves, because two providers may offer a model of the same name and
- * "which judge said this" has to stay answerable when they do. It goes in
- * `judged_by`, which is part of the verdict's identity, so a project that
- * changes its judge model gets rows beside the old ones rather than over them.
+ * "which judge is this" has to stay answerable when they do. It is what
+ * anything outside this directory is given to say *who answered* with, in place
+ * of the key it is never given.
  */
 export function named(judge: ResolvedJudge): string {
   return `${judge.provider}/${judge.model}`;

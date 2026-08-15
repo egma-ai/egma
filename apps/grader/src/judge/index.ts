@@ -65,7 +65,13 @@ export class NoJudge extends Error {}
  */
 export type AskableJudge = {
   readonly ask: Judge;
-  /** `provider/model`, for the verdict row's `judged_by`. Never the account. */
+  /**
+   * `provider/model` — which judge this is, and never the account behind it.
+   *
+   * Deliberately not on the verdict row: a judgment records what was decided
+   * and not who was asked, since the reserved `human` type will write its own
+   * rows under its own grader id rather than beside a machine's.
+   */
   readonly name: string;
 };
 
