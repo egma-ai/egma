@@ -782,3 +782,72 @@ describe("one persona's page", () => {
     expect(await screen.findByLabelText("Name")).toBeDefined();
   });
 });
+
+/* ------------------------------------------------------------------------ */
+
+/**
+ * The keyboard, on the two controls this area adds to the shared system.
+ *
+ * Neither is a link and neither is a native radio, so neither gets any of this
+ * for free — and a filter that only a pointer can reach is a filter half the
+ * people using egma do not have.
+ */
+describe("driving the Personas area without a pointer", () => {
+  it("chooses the other list from the keyboard, and says which is chosen", async () => {
+    apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /api/personas": [
+        { status: 200, body: { items: [RITA], next_cursor: null } },
+        { status: 200, body: { items: [], next_cursor: null } },
+      ],
+    });
+    render(<PersonasPage />);
+
+    const archived = await screen.findByRole("radio", { name: "Archived" });
+    const active = screen.getByRole("radio", { name: "Active" });
+    expect(active.getAttribute("aria-checked")).toBe("true");
+    expect(archived.getAttribute("aria-checked")).toBe("false");
+
+    archived.focus();
+    expect(document.activeElement).toBe(archived);
+    fireEvent.keyDown(archived, { key: "Enter" });
+    fireEvent.click(archived);
+
+    expect(await screen.findByText("Nothing has been archived here")).toBeDefined();
+    expect(
+      screen.getByRole("radio", { name: "Archived" }).getAttribute("aria-checked"),
+    ).toBe("true");
+  });
+
+  it("puts focus inside an older-version read, and closes it with Escape", async () => {
+    apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("member") },
+      "GET /api/personas/prs_1": { status: 200, body: RITA },
+      "GET /api/personas/prs_1/versions": {
+        status: 200,
+        body: {
+          items: [
+            {
+              id: "prsv_1",
+              persona_id: "prs_1",
+              version: 1,
+              traits: RITA.traits,
+              created_at: "2026-08-15T10:00:00.000Z",
+            },
+          ],
+          next_cursor: null,
+        },
+      },
+      "GET /api/personas/prs_1/usage": { status: 200, body: { tests: [] } },
+    });
+    render(<PersonaPage />);
+
+    fireEvent.click((await screen.findAllByRole("button", { name: "Read" }))[0]!);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});

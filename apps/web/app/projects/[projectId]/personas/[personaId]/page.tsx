@@ -253,7 +253,10 @@ function PersonaDetail({
 
     return (
       <>
-        {refusal === null ? null : (
+        {refusal === null || archiving ? null : (
+          // While the Archive dialog is open it shows the refusal itself, in
+          // front of the choice that caused it. Two copies of one sentence on
+          // one screen is one sentence too many.
           <Refused
             message={refusal.message}
             action={

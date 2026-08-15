@@ -241,6 +241,37 @@ describe("the list", () => {
     expect(first.body.next_cursor).toBeNull();
   });
 
+  it("keeps two personas of one name apart, because a name is not an identity", async () => {
+    api = await createApi("personas_same_name");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    // Two callers a team both thinks of as "the impatient one" is an ordinary
+    // thing for a project to hold. Nothing refuses it, and nothing has to
+    // guess which one an address means.
+    const first = await createPersonaThrough(ada, "Impatient caller");
+    const second = await createPersonaThrough(ada, "Impatient caller");
+    expect(second.id).not.toBe(first.id);
+
+    await browse("PATCH", `/api/personas/${second.id}`, ada, {
+      project: ada.projectId,
+      expected_revision: second.revision,
+      description: "The second one.",
+    });
+
+    const one = await browse(
+      "GET",
+      `/api/personas/${first.id}?project=${ada.projectId}`,
+      ada,
+    );
+    const other = await browse(
+      "GET",
+      `/api/personas/${second.id}?project=${ada.projectId}`,
+      ada,
+    );
+    expect(personaIn(one).description).toBeNull();
+    expect(personaIn(other).description).toBe("The second one.");
+  });
+
   it("refuses a cursor this list never issued", async () => {
     api = await createApi("personas_cursor");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");

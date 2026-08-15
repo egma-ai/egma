@@ -288,8 +288,11 @@ export function Select({
  *
  * **Two lists, chosen deliberately, never one list with a column saying which
  * rows are archived.** A mixed list is a list somebody picks the wrong row out
- * of. It is a radio group rather than a row of buttons because that is what it
- * is: exactly one is chosen, and arrow keys move between them.
+ * of.
+ *
+ * It is announced as a radio group because that is what it is — exactly one of
+ * a small closed set is chosen — and every option is reachable with Tab and
+ * chosen with Enter or Space, which is what a `button` gives for free.
  */
 export function Choice<Value extends string>({
   label,
