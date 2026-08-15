@@ -1669,6 +1669,23 @@ describe.skipIf(!storage.available)("hearing a recording from a transcript", () 
  * see is filled in.
  */
 describe("pressing Use on a second grader while the first one's form is open", () => {
+  /**
+   * The shelf's address, which is inside a project now.
+   *
+   * The library and the running copies moved under `/projects/:projectId` when
+   * the product UI took over these screens: a running copy belongs to one
+   * project, and an address that does not name one leaves the page to guess —
+   * which it did, by drawing whichever project came first. So this asks the
+   * platform which project this browser is standing in rather than assuming.
+   */
+  async function shelfUrl(): Promise<string> {
+    const hers = (await page.context().cookies(origin))
+      .map((cookie) => `${cookie.name}=${cookie.value}`)
+      .join("; ");
+    const who = await standingOf(instance.api, hers, "her graders");
+    return `${origin}/projects/${who.auth.projectId ?? ""}/graders`;
+  }
+
   /** One library row's Use button, from the table rather than the mobile list. */
   function useOn(named: string) {
     return page
@@ -1681,7 +1698,7 @@ describe("pressing Use on a second grader while the first one's form is open", (
   it(
     "draws the second grader's form, with its own fields and nothing left over",
     async () => {
-      await page.goto(`${origin}/graders`);
+      await page.goto(await shelfUrl());
       // Both of egma's own graders, written onto the shelf at boot.
       await page.waitForSelector("text=expected_behaviors");
       await page.waitForSelector("text=latency");
