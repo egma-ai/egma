@@ -17,6 +17,7 @@ import {
 } from "../src/migrate.ts";
 import * as schema from "../src/schema/index.ts";
 import { createEmptyDatabase, type EmptyDatabase } from "./support/database.ts";
+import { repeatedMigrationNumbers } from "./support/migration-numbers.ts";
 
 describe("the migration files", () => {
   it("are numbered plain SQL, applied in that order", async () => {
@@ -49,6 +50,18 @@ describe("the migration files", () => {
       Number(migration.name.slice(0, 4)),
     );
     expect(numbers).toEqual(numbers.map((_, index) => index));
+  });
+
+  /**
+   * The same rule again, said the way the failure reads: which number was used
+   * twice. The density check above already refuses a repeat, but it reports it
+   * as two long lists of integers that differ somewhere in the middle, and the
+   * person reading that has a merge of six renumbered migrations in front of
+   * them. Both directories are held by `repeatedMigrationNumbers`, so the two
+   * stores cannot drift into two answers about what a number means.
+   */
+  it("use each number once, and say which if not", async () => {
+    expect(repeatedMigrationNumbers(await readMigrations())).toEqual([]);
   });
 
   /**

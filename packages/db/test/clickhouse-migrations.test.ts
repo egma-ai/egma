@@ -7,6 +7,7 @@ import {
   CLICKHOUSE_MIGRATIONS_DIRECTORY,
   runClickHouseMigrations,
 } from "../src/clickhouse/migrate.ts";
+import { repeatedMigrationNumbers } from "./support/migration-numbers.ts";
 import {
   createEmptyTraceStore,
   createMigratedTraceStore,
@@ -73,6 +74,26 @@ describe("the trace store's migration files", () => {
     expect(migrations.map((migration) => migration.name)).toEqual(
       [...migrations.map((migration) => migration.name)].sort(),
     );
+  });
+
+  /**
+   * **Each number is used once.** There is no journal on this side — the
+   * runner reads the directory, sorts by filename and applies — so two files
+   * wearing one number is not a conflict git can see and not a mismatch any
+   * bookkeeping can catch. They simply both run, in filename order, and the
+   * second gets the schema the first left.
+   *
+   * The sortedness check above cannot see it: it compares a sorted list against
+   * itself, so it holds for any directory at all. This is the check that bites,
+   * and `a directory that repeats a number` below is the proof that it does.
+   *
+   * Numbers may be sparse here, unlike Postgres: a ClickHouse file is written
+   * by hand rather than generated, and the density rule the Postgres side keeps
+   * belongs to the generator's journal.
+   */
+  it("use each number once", async () => {
+    const migrations = await readMigrations(CLICKHOUSE_MIGRATIONS_DIRECTORY);
+    expect(repeatedMigrationNumbers(migrations)).toEqual([]);
   });
 
   /**
