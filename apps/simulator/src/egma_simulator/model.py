@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Protocol
 import aiohttp
 
 from .client import UNREACHABLE
+from .config import MODEL_PROVIDERS
 
 if TYPE_CHECKING:
     from .config import SimulatorConfig
@@ -174,15 +175,45 @@ def build_model_client(
     The scripted client derives its script from the spec, which is what
     makes two different specs conduct two different exchanges with no code
     change; the OpenAI-compatible client is configuration alone.
+
+    **The platform's own settings win over this container's.** They arrive
+    on the work order, they are read afresh for every simulation, and each
+    of the three replaces this container's answer on its own — so a
+    deployment that has configured the persona's model centrally needs no
+    model variables on any simulator, and a replaced key applies to the
+    next simulation with no restart. A setting the platform does not hold
+    leaves this container's own value standing, which is what makes a
+    deployment that has configured nothing behave exactly as it did.
     """
-    if config.model_provider == "openai":
-        if config.model_name is None or config.model_api_key is None:
-            raise ModelFailure(
-                "the openai model provider needs both a model name and a key"
-            )
-        return OpenAICompatibleModel(
-            base_url=config.model_base_url,
-            api_key=config.model_api_key,
-            model_name=config.model_name,
+    said = spec.platform.model
+    provider = said.provider or config.model_provider
+    if provider not in MODEL_PROVIDERS:
+        # **Refused rather than quietly downgraded to the stand-in.** This
+        # container's own provider name is checked when it starts, so a
+        # name that gets here is one the platform holds — and a typo on a
+        # settings page must not produce a completed, green simulation
+        # conducted by a canned robot. That is worse than a failure,
+        # because a failure tells the truth about what happened.
+        raise ModelFailure(
+            f"the platform's persona_model_provider is {provider!r}, which is "
+            "not a model client this simulator has; it thinks with "
+            f"{', '.join(MODEL_PROVIDERS)}"
         )
-    return ScriptedModel(spec.scenario_instructions)
+    if provider != "openai":
+        return ScriptedModel(spec.scenario_instructions)
+
+    model_name = said.model or config.model_name
+    api_key = said.key or config.model_api_key
+    if model_name is None or api_key is None:
+        raise ModelFailure(
+            "the openai model provider needs both a model name and a key"
+        )
+    return OpenAICompatibleModel(
+        # The base URL stays this container's. It is not one of the
+        # platform's settings: it says which address this simulator reaches
+        # a provider at, which is a property of the network it is on rather
+        # than of the deployment's account.
+        base_url=config.model_base_url,
+        api_key=api_key,
+        model_name=model_name,
+    )

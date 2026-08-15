@@ -326,6 +326,58 @@ describe("an exported call that could reach the database without a customer", ()
   });
 
   /**
+   * The widening that a pin on the *name* would have missed, which is the whole
+   * reason the pin carries the alias's body.
+   *
+   * `platformFacts` answers what this deployment was configured with, at the
+   * one door that asks for no credential, and what keeps that safe is the shape
+   * behind the name: non-secret values, with every secret reduced to null. A
+   * rule comparing `Promise<PlatformFacts>` as text would stay green while
+   * somebody put a key's hint — or a key — inside it, so the alias declared
+   * beside the function is pinned with it.
+   */
+  it("refuses an instance exception whose answer is widened behind its own name", async () => {
+    // Only the *value* is widened, and the keys beside it are left exactly as
+    // they were. That is the leak this pin exists to catch, isolated: the
+    // secret a caller may be handed lives in the value, and it is written
+    // inside the pinned alias's own body.
+    const widened =
+      "export type PlatformSettingName = 'persona_model';\n" +
+      "export type PlatformFacts = Readonly<Partial<Record<PlatformSettingName, { value: string | null; hint: string }>>>;\n" +
+      "export async function platformFacts(): Promise<PlatformFacts> {\n  return {};\n}\n";
+    await withSurface(
+      'export { platformFacts } from "./things.ts";\n',
+      widened,
+    );
+
+    const violations = await check(root);
+    expect(rules(violations)).toEqual([
+      "every-exported-call-carries-an-auth-context",
+    ]);
+    expect(violations[0]?.detail).toContain("PlatformFacts");
+    expect(violations[0]?.detail).toContain("wearing an exemption");
+  });
+
+  it("passes the same exception while its answer is the shape that was pinned", async () => {
+    const pinned =
+      "export type PlatformSettingName = 'persona_model';\n" +
+      "export type PlatformFacts = Readonly<Partial<Record<PlatformSettingName, string | null>>>;\n" +
+      "export async function platformFacts(): Promise<PlatformFacts> {\n  return {};\n}\n";
+    await withSurface('export { platformFacts } from "./things.ts";\n', pinned);
+
+    // **One level, and `PlatformSettingName` is deliberately not one of them.**
+    // The walk collects the aliases named in the *signature* — here
+    // `PlatformFacts` — and appends their declarations; it does not recurse
+    // into what those declarations then name. That is the point rather than a
+    // gap: the settings this platform holds are meant to grow, one per ticket
+    // of this effort, and a pin that followed their names would stop the build
+    // on every setting added. What may never grow is the *value* beside them,
+    // and that is written inside the body this pin does carry — the test above
+    // widens exactly that and is refused.
+    expect(await check(root)).toEqual([]);
+  });
+
+  /**
    * The engine's own work, which is the one thing on this surface that
    * legitimately spans customers: the grader service holds no credential
    * because there is nobody for it to be, so it is handed work instead. What

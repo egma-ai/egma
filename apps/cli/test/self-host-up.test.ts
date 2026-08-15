@@ -13,103 +13,51 @@
  *
  * So this file proves the two are one value: what is printed is what was set,
  * and a platform that disagrees is a failure here rather than a mystery later.
+ *
+ * The platform and the container runtime this runs against are the shared
+ * stand-ins in `support/platform-workspace.ts`; what it drives is the real CLI
+ * process.
  */
 
-import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { chmod, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { CLI_ENTRY } from "./support/workspace.ts";
+import {
+  makePlatformWorkspace,
+  runSelfHost,
+  startPlatform,
+} from "./support/platform-workspace.ts";
 
-type FakePlatform = {
-  readonly url: string;
-  /** Every path asked for, so a test can prove what `up` did *not* do. */
-  readonly asked: readonly string[];
-  close(): Promise<void>;
-};
-
-/** A platform that reports whichever origin it was told to report. */
-async function startPlatform(reports: (own: string) => string): Promise<FakePlatform> {
-  const asked: string[] = [];
-  const server: Server = createServer((request, answer) => {
-    asked.push(`${request.method} ${request.url ?? ""}`);
-    answer.writeHead(200, { "content-type": "application/json" });
-    answer.end(
-      JSON.stringify({
-        instance_id: "pf_00000000000000000000000001",
-        origin: reports(url),
-        phone: { state: "setup_required", missing: ["the carrier trunk"] },
-      }),
-    );
-  });
-  await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
-  const { port } = server.address() as AddressInfo;
-  const url = `http://127.0.0.1:${port}`;
-  return {
-    url,
-    asked,
-    close: () =>
-      new Promise<void>((closed) => {
-        server.close(() => closed());
-      }),
-  };
-}
-
-async function makeWorkspace(): Promise<{ dir: string; binDir: string; dockerCalls(): Promise<string> }> {
-  const dir = await mkdtemp(path.join(tmpdir(), "egma-platform-up-"));
-  await writeFile(path.join(dir, "docker-compose.yml"), "name: egma\nservices: {}\n");
-  const binDir = path.join(dir, "bin");
-  await mkdir(binDir, { recursive: true });
-  const calls = path.join(dir, "docker-calls.txt");
-  await writeFile(calls, "");
-  const shim = path.join(binDir, "docker");
-  // Records the environment it was given as well as the arguments, because
-  // what `up` really has to get right is what compose is told, not what the
-  // command printed about it.
-  await writeFile(
-    shim,
-    `#!/bin/sh\necho "ARGS $@" >> "${calls}"\necho "EGMA_BASE_URL=\${EGMA_BASE_URL}" >> "${calls}"\nexit 0\n`,
-  );
-  await chmod(shim, 0o755);
-  return { dir, binDir, dockerCalls: () => readFile(calls, "utf8") };
-}
-
-async function runUp(
-  workspace: { dir: string; binDir: string },
-  env: NodeJS.ProcessEnv,
-): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [CLI_ENTRY, "self-host", "up"], {
-      cwd: workspace.dir,
-      env: { ...process.env, PATH: `${workspace.binDir}:${process.env.PATH ?? ""}`, ...env },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString("utf8")));
-    child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString("utf8")));
-    child.on("error", reject);
-    child.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
-  });
-}
+const WORKSPACE_PREFIX = "egma-platform-up-";
 
 describe("egma self-host up", () => {
   it("starts the platform, and the address it prints is the one the platform reports", async () => {
-    const platform = await startPlatform((own) => own);
-    const workspace = await makeWorkspace();
+    const platform = await startPlatform();
+    const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
     try {
-      const run = await runUp(workspace, { EGMA_BASE_URL: platform.url });
+      const run = await runSelfHost(workspace, ["up"], { EGMA_BASE_URL: platform.url });
 
       expect(run.code).toBe(0);
       expect(run.stdout).toContain(`url: ${platform.url}`);
       expect(run.stdout).toContain("status: ready");
-      // Phone readiness is reported separately, and honestly.
+      // Two facts about one deployment, reported separately and honestly. The
+      // platform answers for its whole configuration — the persona's providers
+      // as much as the carrier — and for the phone half beside it, because a
+      // platform with no carrier runs chat and text simulations perfectly well.
+      expect(run.stdout).toContain("setup: setup_required");
+      expect(run.stdout).toContain("setup_missing: the persona's model provider");
       expect(run.stdout).toContain("phone: setup_required");
+      // And the **whole** next step, named, because "setup required" with
+      // nothing after it sends a self-hoster to read source — and because
+      // setup writes through the platform's own API, whose door opens for an
+      // organization owner. A closing line naming only the last command would
+      // route a new operator straight into a refusal telling them to log in.
+      expect(run.stderr).toContain(`Sign up at ${platform.url}`);
+      expect(run.stderr).toContain(`npx @egma/cli login --url ${platform.url}`);
+      expect(run.stderr).toContain("npx @egma/cli self-host setup");
       expect(run.stdout).toContain(
         `connect: npx @egma/cli --url ${platform.url}`,
       );
@@ -153,10 +101,10 @@ describe("egma self-host up", () => {
     // started on a LAN address whose API still reports localhost. Every later
     // command in every agent repository would be refused, a directory away
     // from anything that could explain it.
-    const platform = await startPlatform(() => "http://localhost:3101");
-    const workspace = await makeWorkspace();
+    const platform = await startPlatform({ reports: () => "http://localhost:3101" });
+    const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
     try {
-      const run = await runUp(workspace, { EGMA_BASE_URL: platform.url });
+      const run = await runSelfHost(workspace, ["up"], { EGMA_BASE_URL: platform.url });
 
       expect(run.code).toBe(4);
       expect(run.stdout).toContain("status: failed");
@@ -176,20 +124,18 @@ describe("egma self-host up", () => {
     // second `up` works. A first run that fails once and works when you type
     // the same thing again is a product that taught its first user to distrust
     // it, so the command types it again itself.
-    const platform = await startPlatform((own) => own);
-    const workspace = await makeWorkspace();
-    const failFirst = path.join(workspace.binDir, "docker");
-    const calls = path.join(workspace.dir, "docker-calls.txt");
+    const platform = await startPlatform();
+    const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
     await writeFile(
-      failFirst,
-      `#!/bin/sh\necho "ARGS $@" >> "${calls}"\n` +
-        `n=$(grep -c "^ARGS compose up" "${calls}")\n` +
+      workspace.dockerShim,
+      `#!/bin/sh\necho "ARGS $@" >> "${workspace.callsFile}"\n` +
+        `n=$(grep -c "^ARGS compose up" "${workspace.callsFile}")\n` +
         `if [ "$n" -le 1 ]; then exit 1; fi\nexit 0\n`,
     );
-    await chmod(failFirst, 0o755);
+    await chmod(workspace.dockerShim, 0o755);
 
     try {
-      const run = await runUp(workspace, { EGMA_BASE_URL: platform.url });
+      const run = await runSelfHost(workspace, ["up"], { EGMA_BASE_URL: platform.url });
 
       expect(run.code).toBe(0);
       expect(run.stdout).toContain("status: ready");
@@ -201,13 +147,49 @@ describe("egma self-host up", () => {
     }
   });
 
+  it("says which variable is missing, and does not try again for one", async () => {
+    // The other half of the retry above, and the reason the two have to be told
+    // apart. A bootstrap variable this deployment cannot invent — the key that
+    // seals every stored credential, the token a simulator claims with — has no
+    // default any more, so Compose refuses before it creates a container and
+    // names the one it is missing. A second attempt would invent nothing, and
+    // reporting it as a store's first boot would send an operator reading
+    // ClickHouse logs for a variable they never set.
+    const platform = await startPlatform();
+    const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
+    await writeFile(
+      workspace.dockerShim,
+      `#!/bin/sh\necho "ARGS $@" >> "${workspace.callsFile}"\n` +
+        "echo 'error while interpolating services.api.environment.EGMA_ENCRYPTION_KEY: " +
+        "required variable EGMA_ENCRYPTION_KEY is missing a value: no default' >&2\n" +
+        "exit 1\n",
+    );
+    await chmod(workspace.dockerShim, 0o755);
+
+    try {
+      const run = await runSelfHost(workspace, ["up"], { EGMA_BASE_URL: platform.url });
+
+      expect(run.code).not.toBe(0);
+      expect(run.stdout).toContain("status: failed");
+      expect(run.stdout).toContain("EGMA_ENCRYPTION_KEY");
+      expect(run.stdout).toContain(".env");
+      // Compose's own sentence reached the operator too, because it carries
+      // what to do about that particular variable.
+      expect(run.stderr).toContain("required variable EGMA_ENCRYPTION_KEY");
+      expect(run.stderr).not.toContain("did not come up on the first try");
+      const said = await workspace.dockerCalls();
+      expect(said.match(/^ARGS compose up/gmu)).toHaveLength(1);
+    } finally {
+      await platform.close();
+    }
+  });
+
   it("refuses in a directory that is not a platform workspace", async () => {
     const notAWorkspace = await mkdtemp(path.join(tmpdir(), "egma-not-platform-"));
-    const workspace = await makeWorkspace();
-    const run = await runUp(
-      { dir: notAWorkspace, binDir: workspace.binDir },
-      { EGMA_BASE_URL: "http://127.0.0.1:1" },
-    );
+    const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
+    const run = await runSelfHost({ dir: notAWorkspace, binDir: workspace.binDir }, ["up"], {
+      EGMA_BASE_URL: "http://127.0.0.1:1",
+    });
 
     expect(run.code).toBe(1);
     expect(run.stderr).toContain("this is not a platform workspace");

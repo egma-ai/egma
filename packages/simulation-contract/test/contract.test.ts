@@ -119,6 +119,16 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     keyword: "additionalProperties",
     property: "agent_id",
   },
+  // The platform's own settings are a closed list on both sides — the catalog
+  // the control plane stores them under, and the block the simulator reads. A
+  // field nobody writes is a setting nobody reads, and a spec carrying one has
+  // a deployment believing something is configured that is not, so it is
+  // refused rather than carried and dropped.
+  "spec/platform-setting-unknown.json": {
+    at: "/platform/model",
+    keyword: "additionalProperties",
+    property: "base_url",
+  },
   "spec/wrong-contract-version.json": {
     at: "/contract_version",
     keyword: "const",

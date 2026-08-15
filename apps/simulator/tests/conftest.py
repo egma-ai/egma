@@ -105,6 +105,26 @@ async def _serve_workbench(state: WorkbenchState) -> AsyncIterator[Workbench]:
 
 
 @pytest.fixture
+def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """A clean environment, and somewhere harmless for the two directories.
+
+    Whatever this machine has set is cleared first, so a developer with
+    their own ``EGMA_SIMULATOR_*`` exported cannot make these pass or fail
+    differently from anybody else's.
+
+    Here rather than in one suite because two of them configure a simulator
+    in process now: the one about reading the environment, and the one
+    about the platform's settings replacing what it read.
+    """
+    for name in list(os.environ):
+        if name.startswith("EGMA_SIMULATOR_"):
+            monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("EGMA_SIMULATOR_WAL_DIR", str(tmp_path / "wal"))
+    monkeypatch.setenv("EGMA_SIMULATOR_BLOB_DIR", str(tmp_path / "blobs"))
+    return monkeypatch
+
+
+@pytest.fixture
 async def workbench() -> AsyncIterator[Workbench]:
     async for running in _serve_workbench(
         WorkbenchState(hold_seconds=CLAIM_HOLD_SECONDS)
@@ -525,6 +545,7 @@ def a_spec(
     max_duration_seconds: int,
     modality: str = "chat",
     mock_tools: list[dict] | None = None,
+    platform: dict | None = None,
 ) -> dict:
     """The envelope every spec shares: one persona, one scenario, one set of
     walls, one exchange. What differs between two specs is the connection
@@ -549,6 +570,13 @@ def a_spec(
     }
     if mock_tools:
         spec["mock_tools"] = mock_tools
+    if platform:
+        # Left off the document entirely when the platform holds nothing,
+        # for the reason `mock_tools` is: that is what the control plane
+        # really sends for a deployment nobody has configured, and a spec
+        # carrying an empty block would be exercising a shape nothing
+        # produces.
+        spec["platform"] = platform
     return spec
 
 
@@ -566,6 +594,7 @@ def scripted_spec(
     max_turns: int = 60,
     max_duration_seconds: int = 600,
     credentials: dict | None = None,
+    platform: dict | None = None,
 ) -> dict:
     """One spec against the scripted counterpart, the whole suite's staple.
 
@@ -590,6 +619,7 @@ def scripted_spec(
             "config": config,
             "credentials": credentials,
         },
+        platform=platform,
         scenario=scenario,
         personality=personality,
         max_turns=max_turns,
@@ -729,16 +759,18 @@ def phone_spec(
     max_turns: int = 60,
     max_duration_seconds: int = 600,
     credentials: dict | None = None,
+    platform: dict | None = None,
 ) -> dict:
     """One voice spec that dials a number.
 
     Deliberately the same shape as :func:`loopback_spec`: a phone
     simulation differs from every other voice one by its connection block
-    and by nothing else. Which bridge places the call is the simulator's
-    own configuration rather than the spec's, so ``backend`` here only
-    decides whether the scripted backend's script is written into the
-    spec — what the far end says, whether it hangs up, what the carrier
-    answers — which only that backend reads.
+    and by nothing else. ``backend`` here only decides whether the
+    scripted backend's script is written into the spec — what the far end
+    says, whether it hangs up, what the carrier answers — which only that
+    backend reads. Which bridge really places the call is the deployment's:
+    this container's own configuration with the platform's carrier, which
+    ``platform`` is how a test supplies.
     """
     config: dict = {"phoneNumber": number}
     if caller_id is not None:
@@ -760,6 +792,7 @@ def phone_spec(
         simulation_id,
         modality="voice",
         connection={"type": "phone", "config": config, "credentials": credentials},
+        platform=platform,
         scenario=scenario,
         personality=personality,
         max_turns=max_turns,

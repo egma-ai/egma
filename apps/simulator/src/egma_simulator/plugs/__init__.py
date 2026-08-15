@@ -14,7 +14,7 @@ requires reading anything beyond this file, that is a bug in this file.
 ## What a plug receives
 
 A plug is constructed once per simulation, from the claimed spec, with
-five keyword arguments:
+six keyword arguments:
 
 - ``modality`` — ``"chat"`` or ``"voice"``. A plug that cannot speak the
   requested modality must refuse at construction (raise ``PlugError``).
@@ -42,6 +42,13 @@ five keyword arguments:
   that saying-so is what puts a coverage stamp on the record. Every other
   plug takes it and drops it, and its record honestly claims nothing about
   tools, because egma was never in the path to learn anything.
+- ``media`` — how a call reaches the telephone network for this
+  simulation (:class:`egma_simulator.config.MediaSettings`), or ``None``
+  on a deployment that places no calls. Already resolved: this
+  container's bridge with the platform's own carrier laid over it, worked
+  out once by assembly so that no plug reaches for an environment
+  variable of its own. Only a plug that dials has any use for it, which
+  today is the phone; every other plug takes it and drops it.
 
 Constructors validate and hold; they never do I/O. A constructor that
 raises means the simulation fails with an honest reason before the
@@ -298,9 +305,9 @@ class DuplexLine(Protocol):
 
 PlugFactory = Callable[..., PlatformPlug | DuplexLine]
 """What the registry hands back: called with ``modality=``, ``config=``,
-``credentials=``, ``simulation_id=`` and ``mock_tools=`` keywords, it
-returns one plug for one simulation — in practice, the plug class
-itself."""
+``credentials=``, ``simulation_id=``, ``mock_tools=`` and ``media=``
+keywords, it returns one plug for one simulation — in practice, the plug
+class itself."""
 
 
 def plug_for(connection_type: str) -> PlugFactory | None:
