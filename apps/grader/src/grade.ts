@@ -23,8 +23,8 @@ import {
   type Conversation,
 } from "./conversation.ts";
 import {
+  couldNotJudge,
   execute,
-  theOneCheck,
   type Judging,
   type Judgment,
   type Reading,
@@ -407,6 +407,19 @@ async function theProductionTrace(claim: GradingClaim): Promise<Resolved> {
  * or not, while a grader that makes one check writes one. Every executor is
  * handed `nothingToJudgeBecause` on the conversation and is held to it by a
  * test.
+ *
+ * **A grader that falls over answers under its own keys too**, which is the same
+ * rule one step further out. A verdict is counted once per conversation, grader
+ * and assertion key, and that identity does not span the grader version — so a
+ * row filed under a key the executor never writes can never be superseded. It
+ * would outrank every `passed` beside it forever and no re-grade could reach it,
+ * and a test that failed once could never pass again. So the reason is handed to
+ * the same grader to spread across the same keys.
+ *
+ * **If even that cannot be answered, nothing is written and the throw escapes.**
+ * A grader egma cannot describe is one it must stay silent about rather than
+ * file a row it can never correct; the job is released and judged again from the
+ * beginning, which is what the attempt count is for.
  */
 export async function judgmentsOf(
   grader: Grader,
@@ -420,7 +433,10 @@ export async function judgmentsOf(
   if (definition === undefined) {
     return [
       {
-        assertion: grader.name,
+        // The pointer rather than the copy's name: a name is text a person
+        // wrote and may rewrite, and a key that moved with it would split every
+        // row written before the rename from every row written after.
+        assertion: grader.libraryId,
         verdict: "errored",
         score: 0,
         rationale:
@@ -430,31 +446,28 @@ export async function judgmentsOf(
     ];
   }
 
+  // The definition and the copy's filled-in values, and nothing about whose
+  // grader this is or what it is called: an executor that could see any of that
+  // could be written to answer with it.
+  const asked = {
+    definition,
+    config: grader.config,
+    conversation: execution.conversation,
+    judging: execution.judging,
+    reading: execution.reading,
+  };
+
   try {
-    // The definition and the copy's filled-in values, and nothing about whose
-    // grader this is or what it is called: an executor that could see any of
-    // that could be written to answer with it.
-    return await execute({
-      definition,
-      config: grader.config,
-      conversation: execution.conversation,
-      judging: execution.judging,
-      reading: execution.reading,
-    });
+    return await execute(asked);
   } catch (error) {
-    // One grader falling over is one `errored` row, not a conversation with no
-    // verdicts on it. Every other grader's judgment still lands, and this one
-    // says out loud that egma could not make its check — which is the whole
-    // reason `errored` is a word separate from `failed`.
-    return [
-      {
-        assertion: theOneCheck(definition),
-        verdict: "errored",
-        score: 0,
-        rationale: `this check could not be made: ${error instanceof Error ? error.message : String(error)}`,
-        citedSpanIds: [],
-      },
-    ];
+    // One grader falling over is one `errored` row per check it makes, not a
+    // conversation with no verdicts on it. Every other grader's judgment still
+    // lands, and these say out loud that egma could not make the check — which
+    // is the whole reason `errored` is a word separate from `failed`.
+    return await couldNotJudge(
+      asked,
+      `this check could not be made: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 

@@ -119,7 +119,11 @@ describe("a copy of an entry egma cannot execute yet", () => {
     );
 
     expect(only).toMatchObject({
-      assertion: "latency",
+      // The entry's identifier, not its name: a predefined entry keeps one
+      // identifier for life while its name is text a release may improve, and a
+      // key that moved with the name would split every row written before a
+      // rename from every row written after.
+      assertion: PREDEFINED_GRADERS.latency,
       verdict: "errored",
       score: 0,
       citedSpanIds: [],
@@ -167,7 +171,9 @@ describe("a copy whose entry cannot be read", () => {
     const [only] = await judgmentsOf(grader(), undefined, judging());
 
     expect(only).toMatchObject({
-      assertion: "Answers inside two seconds",
+      // The pointer, not the copy's name, for the same reason: a name is
+      // something a person wrote and may rewrite.
+      assertion: PREDEFINED_GRADERS.latency,
       verdict: "errored",
       score: 0,
     });
@@ -177,50 +183,52 @@ describe("a copy whose entry cannot be read", () => {
 
 describe("a grader whose execution falls over", () => {
   /**
-   * One grader failing is one `errored` row and not a conversation with no
-   * verdicts on it. It matters most as the shelf grows: a judge model timing
-   * out on one check must leave every other check's judgment standing, and the
-   * engine rather than each executor is what guarantees it.
+   * **A grader that fell over writes one `errored` row per check it makes**, not
+   * one row for the grader — and where those keys come from is the whole point.
    *
-   * The expected-behaviors executor is the one that reaches a store — its
-   * assertions live on the test, so it has to go and get them — and nothing in
-   * this file connects one. So asking it here is a real executor throwing real
-   * code at the seam, which is exactly the case a well-formed input cannot
-   * otherwise produce.
+   * A verdict is counted once per conversation, grader and assertion key, and
+   * the newest grading of a key supersedes the older one. That identity does not
+   * span the grader version, so a row filed under a key the executor never
+   * produces can never be superseded by anything: it would outrank every
+   * `passed` beside it forever and no re-grade could reach it. The engine
+   * therefore asks the grader to spread the reason across its own keys, and
+   * `expected-behaviors.test.ts` watches a broken grading get rewritten by a
+   * later one through the whole service.
+   *
+   * **When even the keys cannot be answered, nothing is written and the throw
+   * escapes.** That is what this file can see. The expected-behaviors grader
+   * reads its assertions off the test — a store call — and nothing here connects
+   * a store, so both the execution and the question "what would you have
+   * checked" fail. A grader egma cannot describe is one it must stay silent
+   * about rather than file a row it can never correct; the job is released and
+   * judged again from the beginning, which is what the attempt count is for.
    */
-  it("is one errored row, and says what went wrong", async () => {
+  it("writes nothing at all when it cannot even name its assertions", async () => {
     const judged = grader({
       libraryId: PREDEFINED_GRADERS.expectedBehaviors,
       type: "llm_as_judge",
       config: { assertions: [] },
     });
 
-    const judgments = await judgmentsOf(
-      judged,
-      definition(PREDEFINED_GRADERS.expectedBehaviors),
-      judging(),
-    );
-
-    expect(judgments).toHaveLength(1);
-    expect(judgments[0]).toMatchObject({
-      assertion: "expected_behaviors",
-      verdict: "errored",
-      score: 0,
-      citedSpanIds: [],
-    });
-    expect(judgments[0]?.rationale).toContain("this check could not be made");
+    await expect(
+      judgmentsOf(
+        judged,
+        definition(PREDEFINED_GRADERS.expectedBehaviors),
+        judging(),
+      ),
+    ).rejects.toThrow(/not connected/);
   });
 
   it("never says failed, because nothing is being said about the agent", async () => {
+    // The two a conversation can reach without a store behind it: an entry egma
+    // does not execute yet, and a copy whose entry could not be read at all.
     for (const [copy, entry] of [
       [grader(), definition(PREDEFINED_GRADERS.latency)] as const,
-      [
-        grader({ libraryId: PREDEFINED_GRADERS.expectedBehaviors }),
-        definition(PREDEFINED_GRADERS.expectedBehaviors),
-      ] as const,
       [grader(), undefined] as const,
     ]) {
-      for (const judgment of await judgmentsOf(copy, entry, judging())) {
+      const judgments = await judgmentsOf(copy, entry, judging());
+      expect(judgments.length).toBeGreaterThan(0);
+      for (const judgment of judgments) {
         expect(judgment.verdict).toBe("errored");
       }
     }

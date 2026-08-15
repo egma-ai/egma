@@ -89,16 +89,7 @@ import { judgmentOf } from "./judged.ts";
 export async function executeExpectedBehaviors(
   execution: Execution,
 ): Promise<readonly Judgment[]> {
-  const { auth, simulationId } = execution.reading;
-  // A production trace has no simulation and therefore no test. The copy is
-  // scoped to simulations for exactly this reason, so reaching here means
-  // somebody widened a scope by hand; answering nothing is the honest reply.
-  if (simulationId === undefined) return [];
-
-  const version = await getSimulationTestVersion(auth, simulationId);
-  if (version === undefined) return [];
-
-  const behaviors = version.expectedBehaviors;
+  const behaviors = await theBehaviors(execution);
   if (behaviors.length === 0) return [];
 
   // The same sentence the other graders answer with, read off the conversation
@@ -158,6 +149,47 @@ export async function executeExpectedBehaviors(
       }
     }),
   );
+}
+
+/**
+ * The sentences this conversation's test wrote down, in the order they were
+ * authored — read live, because this grader's assertions live on the test
+ * rather than in its own config.
+ *
+ * Empty is an ordinary answer in two ways and neither is a gap: a production
+ * trace has no simulation and therefore no test, and a smoke call that pinned
+ * no test version wrote down no expectations. The copy is scoped to simulations
+ * for the first reason, so reaching here from production means somebody widened
+ * a scope by hand — and answering nothing is still the honest reply.
+ */
+async function theBehaviors(
+  execution: Execution,
+): Promise<readonly string[]> {
+  const { auth, simulationId } = execution.reading;
+  if (simulationId === undefined) return [];
+
+  const version = await getSimulationTestVersion(auth, simulationId);
+  return version?.expectedBehaviors ?? [];
+}
+
+/**
+ * The keys this grader files its rows under, whether or not it manages to judge
+ * anything — one per behavior, in the authored order.
+ *
+ * **The engine asks for these when something threw**, so a conversation whose
+ * judging broke gets one `errored` row per behavior rather than a single row
+ * under a key nothing writes again. `contract.ts` argues out why that
+ * distinction is the difference between a test that can pass tomorrow and one
+ * that never can.
+ *
+ * It reads the test a second time on that path, deliberately. Reading it is the
+ * cheap part; the expensive part is the fan-out of judge calls, and the case
+ * this exists for is precisely the one where those never happened.
+ */
+export async function expectedBehaviorAssertions(
+  execution: Execution,
+): Promise<readonly string[]> {
+  return (await theBehaviors(execution)).map((_, at) => behaviorKey(at));
 }
 
 /** The definition's own words, or nothing where the entry carries none. */

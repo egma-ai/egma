@@ -192,6 +192,17 @@ describe("the project's default judge", () => {
       log: captured.log,
     });
 
+    // A second judged copy, on a model of its own — pressed here rather than
+    // relied on from the case above, so this one says what it means when it is
+    // the only thing running.
+    await seedGrader(
+      world,
+      aJudgedCopy({
+        name: "A second opinion, on a stronger model, again",
+        judgeModel: { provider: "openai", model: "gpt-4.1" },
+      }),
+    );
+
     const testId = await seedTest(world, [], [BEHAVIOR]);
     const { simulationId } = await conductSimulation(world, {
       testId,
@@ -212,14 +223,12 @@ describe("the project's default judge", () => {
     });
     // Which judge answered is the resolution's own answer and is deliberately
     // on no row: `judged_by` retired with the human corrections it existed for.
-    // So the seam is where it is observable, and the project's own model is
-    // what the copy with no override of its own spoke on.
+    // So the seam is where it is observable.
     //
-    // The project holds two judged copies by now — the one it was created with
-    // and the one the case above pressed Use on — so both ask, each on its own
-    // model. That is the whole of what an override is, and asking for the set
-    // rather than the last one says so without depending on which id sorts
-    // first.
+    // Two judged copies asked about this conversation — the one the project was
+    // created with, on the project's own model, and the one seeded above on a
+    // model of its own. That is the whole of what an override is, and asking
+    // for the set says so without depending on which identifier sorts first.
     expect(new Set(judge.configured.map((asked) => asked.model))).toEqual(
       new Set(["gpt-4.1-mini", "gpt-4.1"]),
     );

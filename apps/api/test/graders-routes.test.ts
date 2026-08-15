@@ -253,6 +253,66 @@ describe("pressing Use on a library entry", () => {
     expect(String(used.body.message)).toContain("asks for nothing");
   });
 
+  /**
+   * **Dropped silently, this is a bill.** A rate that arrived as text and was
+   * ignored leaves the copy judging *all* of live traffic while the team that
+   * sent `"10"` believes it judges a tenth — every real conversation asked of a
+   * model, and paid for, on a setting somebody thinks they chose. The flag
+   * beside it is refused the same way and for a smaller version of the same
+   * reason.
+   */
+  it("refuses a sample rate that is not a number, rather than dropping it", async () => {
+    api = await createApi("graders_use_bad_rate");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+
+    const used = await request("POST", "/api/graders", key, {
+      library_id: PREDEFINED_GRADERS.latency,
+      params: { metric: "turn_response_latency", bound: 2000 },
+      scope: "both",
+      production_sample_rate: "10",
+    });
+
+    expect(used.statusCode, JSON.stringify(used.body)).toBe(422);
+    expect(String(used.body.message)).toContain("production_sample_rate");
+    // And nothing was written, so nobody is judging anything they did not ask
+    // to judge.
+    expect(itemsOf(await request("GET", "/api/graders", key))).toHaveLength(1);
+  });
+
+  it("refuses a required flag that is not a flag, on the same terms", async () => {
+    api = await createApi("graders_use_bad_required");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+
+    const used = await request("POST", "/api/graders", key, {
+      library_id: PREDEFINED_GRADERS.expectedBehaviors,
+      required: "false",
+    });
+
+    expect(used.statusCode, JSON.stringify(used.body)).toBe(422);
+    expect(String(used.body.message)).toContain("required");
+  });
+
+  /**
+   * The percentage itself is the factory's rule, and this door relays its
+   * sentence rather than holding a second opinion about the number.
+   */
+  it("refuses a percentage outside the traffic there is", async () => {
+    api = await createApi("graders_use_rate_range");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+
+    const used = await request("POST", "/api/graders", key, {
+      library_id: PREDEFINED_GRADERS.latency,
+      params: { metric: "turn_response_latency", bound: 2000 },
+      production_sample_rate: 140,
+    });
+
+    expect(used.statusCode, JSON.stringify(used.body)).toBe(422);
+    expect(String(used.body.message)).toContain("percentage");
+  });
+
   it("refuses a body naming no entry, and says what to send", async () => {
     api = await createApi("graders_use_no_entry");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
