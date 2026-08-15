@@ -106,7 +106,17 @@ async function register(type = "retell"): Promise<Registered> {
  * naming who issued it. A folder holding one and not the other is the
  * half-applied move, and egma refuses to resolve a platform from it.
  */
+/**
+ * The agent the folder is bound to, once one is registered.
+ *
+ * A repository sees the tests that apply to its own agent, so a seeded test
+ * that is linked to nothing is a test this folder would never pull — which is
+ * the platform's rule and not something to work around here.
+ */
+let boundAgentId: string | null = null;
+
 async function makeFolder(registered: Registered | null): Promise<void> {
+  boundAgentId = registered?.agentId ?? null;
   const made = await createEgmaFolder({ repository: workspace.dir });
   // Written rather than passed to the maker, because the maker deliberately
   // never rewrites a config that is already there — and a check that changes
@@ -140,6 +150,7 @@ async function seed(names: readonly string[], personas?: readonly string[]): Pro
       name,
       scenario: `Somebody rings the order line about ${name.replaceAll("-", " ")}.`,
       expectedBehaviors: ["The agent says the workshop's name."],
+      ...(boundAgentId === null ? {} : { agents: [boundAgentId] }),
       ...(personas === undefined ? {} : { personas }),
     });
   }
@@ -500,8 +511,8 @@ describe("egma run", () => {
     await writeFile(
       file,
       held.replace(
-        "1. The agent says the workshop's name.",
-        "1. The agent says the workshop's name.\n2. The agent never quotes a price.",
+        "1. [P0] The agent says the workshop's name.",
+        "1. [P0] The agent says the workshop's name.\n2. [P0] The agent never quotes a price.",
       ),
       "utf8",
     );

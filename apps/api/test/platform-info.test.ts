@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { expect, it } from "vitest";
 
 
+import { REPOSITORY_CONTRACT } from "../src/routes/platform.ts";
 import { buildApi } from "../src/server.ts";
 import {
   createMigratedDatabase,
@@ -72,11 +73,13 @@ it("keeps one public platform identity across an API restart", async () => {
       "instance_id",
       "origin",
       "phone",
+      "repository_contract",
       "setup",
     ]);
     expect(identity).toEqual({
       instance_id: expect.stringMatching(/^pf_[0-9A-HJKMNP-TV-Z]{26}$/u),
       origin: config.baseUrl,
+      repository_contract: REPOSITORY_CONTRACT,
       // What the whole platform is still missing, read from the platform's own
       // store rather than from this process's environment — which is why it
       // survives a restart with nothing carried across but the database.
@@ -139,6 +142,10 @@ it("reads its identity rather than writing on every public request", async () =>
       expect(again.json()).toEqual({
         instance_id: minted.instance_id,
         origin: config.baseUrl,
+        // The shape this platform speaks to a repository. It is a constant of
+        // the build rather than anything in the store, so it is here on every
+        // answer including the ones served entirely from memory.
+        repository_contract: REPOSITORY_CONTRACT,
         setup: NOTHING_SET_UP,
         // A platform nobody has set a carrier up on says so here rather than
         // anywhere a developer has to go looking, and says it separately from
@@ -180,6 +187,7 @@ it("reads its identity rather than writing on every public request", async () =>
     expect(cold.json()).toEqual({
       instance_id: minted.instance_id,
       origin: config.baseUrl,
+      repository_contract: REPOSITORY_CONTRACT,
       setup: NOTHING_SET_UP,
       phone: NO_CARRIER,
     });

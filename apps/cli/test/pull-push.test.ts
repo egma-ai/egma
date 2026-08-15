@@ -271,26 +271,32 @@ describe("egma pull", () => {
     ]);
     expect(valuesOf(result.stdout, "version")).toEqual([first.versionId, second.versionId]);
 
-    // The files are the format, and each one is pinned to the version it holds.
+    // The files are the format, and each one pins both halves of the test: the
+    // content a run is judged by, and the live name and description beside it.
+    // A persona is written by identity with the display name for the reader.
     expect(await readTest("missed-appointment-reschedule.md")).toBe(
       [
         "---",
+        "format: 2",
         "name: missed-appointment-reschedule",
-        "personas: [impatient-caller]",
         `version: ${first.versionId}`,
+        `identity_revision: ${first.revision}`,
+        "personas:",
+        `  - id: ${platform.tests.addPersona("impatient-caller")}`,
+        "    name: impatient-caller",
         "---",
         "## Scenario",
         "The caller missed yesterday's appointment and wants to reschedule.",
         "## Expected behaviors",
-        "1. The agent acknowledges the missed appointment without blame.",
-        "2. The agent offers at least two concrete alternative slots.",
+        "1. [P0] The agent acknowledges the missed appointment without blame.",
+        "2. [P0] The agent offers at least two concrete alternative slots.",
         "",
       ].join("\n"),
     );
     // A test that named nobody takes the default persona, and the file says so
     // rather than saying nothing.
     expect(await readTest("new-patient-insurance-question.md")).toContain(
-      "personas: [default-persona]",
+      "    name: default-persona",
     );
   });
 
@@ -425,8 +431,8 @@ describe("egma push", () => {
     await writeTest(
       "missed-appointment-reschedule.md",
       before.replace(
-        "1. The agent acknowledges it without blame.",
-        "1. The agent acknowledges it without blame.\n2. The agent offers two slots.",
+        "1. [P0] The agent acknowledges it without blame.",
+        "1. [P0] The agent acknowledges it without blame.\n2. [P1] The agent offers two slots.",
       ),
     );
 
@@ -448,7 +454,11 @@ describe("egma push", () => {
     expect(old.status).toBe(200);
     const held = (await old.json()) as { current: boolean; expected_behaviors: string[] };
     expect(held.current).toBe(false);
-    expect(held.expected_behaviors).toEqual(["The agent acknowledges it without blame."]);
+    // Objects both ways, and the priority is on the frozen version too: the
+    // wire never answers a bare statement, whatever a body may send.
+    expect(held.expected_behaviors).toEqual([
+      { behavior: "The agent acknowledges it without blame.", priority: "P0" },
+    ]);
   });
 
   it("uploads nothing when the files say what egma already holds", async () => {
@@ -551,7 +561,7 @@ describe("egma push", () => {
     // The developer, meanwhile, has changed all three files.
     for (const name of ["first", "second", "third"]) {
       const held = await readTest(`${name}.md`);
-      await writeTest(`${name}.md`, held.replace("1. b", "1. b, said better"));
+      await writeTest(`${name}.md`, held.replace("1. [P0] b", "1. [P0] b, said better"));
     }
 
     const refused = await egma(["push"]);
@@ -574,10 +584,10 @@ describe("egma push", () => {
     const pulled = await egma(["pull"]);
     expect(pulled.code).toBe(0);
     expect([...valuesOf(pulled.stdout, "written")].sort()).toEqual(["first", "second", "third"]);
-    expect(await readTest("first.md")).toContain("2. and one more");
+    expect(await readTest("first.md")).toContain("2. [P0] and one more");
 
     const second = await readTest("second.md");
-    await writeTest("second.md", second.replace("1. b", "1. b, said better"));
+    await writeTest("second.md", second.replace("1. [P0] b", "1. [P0] b, said better"));
 
     const pushed = await egma(["push"]);
     expect(pushed.code).toBe(0);
@@ -1120,6 +1130,9 @@ describe("both verbs, run with nobody watching", () => {
     expect(help.stdout).toContain("egma push");
     expect(help.stdout).toContain("5 push refused: egma has moved on, pull first");
     expect(help.stdout).toContain("6 egma turned a test or a mock tool away at its door");
+    expect(help.stdout).toContain(
+      "7 this egma and this platform read different shapes: upgrade one of them",
+    );
   });
 
   /**
@@ -1139,7 +1152,7 @@ describe("both verbs, run with nobody watching", () => {
     // A conflict, a refusal at the door, and an egma that does not answer.
     platform.tests.editInDashboard("one", { scenario: "s, changed" });
     const held = await readTest("one.md");
-    await writeTest("one.md", held.replace("1. b", "1. b, said better"));
+    await writeTest("one.md", held.replace("1. [P0] b", "1. [P0] b, said better"));
     await writeTest(
       "nothing-to-check.md",
       ["---", "name: nothing-to-check", "---", "## Scenario", "s", "## Expected behaviors", ""].join("\n"),
@@ -1181,7 +1194,7 @@ describe("both verbs, run with nobody watching", () => {
 
     await writeTest("nothing-to-check.md", ["---", "name: nothing-to-check", "---", "## Scenario", "s", "## Expected behaviors", ""].join("\n"));
     const held = await readTest("one.md");
-    await writeTest("one.md", held.replace("1. b", "1. b, said better"));
+    await writeTest("one.md", held.replace("1. [P0] b", "1. [P0] b, said better"));
 
     const refused = await egma(["push"]);
     const pulled = await egma(["pull"]);

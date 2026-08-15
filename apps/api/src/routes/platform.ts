@@ -19,6 +19,40 @@ export type PlatformRouteOptions = {
  */
 export const PLATFORM_IDENTITY_PATH = "/api/platform";
 
+/**
+ * Which repository-facing contract this platform speaks.
+ *
+ * **The promise this project makes about `/api/tests` is that the CLI and the
+ * platform ship together, and that a mismatch is loud.** That surface is
+ * internal — it is not `/api/v1` and nothing outside egma is invited to build
+ * on it — so it is free to change shape when the product needs it to. What it
+ * is not free to do is change shape quietly: a client reading a field it no
+ * longer understands must be told that, in one sentence, before it writes
+ * anything.
+ *
+ * The cost of not saying it was measured rather than imagined. Priorities on
+ * expected behaviors turned each entry from text into an object; a CLI built
+ * before that reads the objects as empty text and drops them, so it pulls a
+ * folder of tests with no behaviors at all. Nothing crashed and nothing looked
+ * wrong. What stopped the emptied folder being written back was a rule in a
+ * different part of the product — a version holds at least one behavior and at
+ * least one P0 — so the push was refused, correctly, with a sentence about
+ * falsifiability that had nothing to do with what had actually happened.
+ * Protection by accident, reported as the wrong problem.
+ *
+ * So: one integer, monotonic, bumped whenever a shape a repository client reads
+ * or writes changes. A client compares it with the number it was built for and
+ * refuses on any difference, naming which side is behind and the one command
+ * that fixes it. A platform that answers no number at all is contract 1 — the
+ * shape that shipped before this field existed.
+ *
+ * 2 — expected behaviors carry a priority, personas carry a stable id beside
+ * their display name, a test carries a description, graders, required
+ * capabilities and an identity revision, and a repository write names both the
+ * version and the revision it was written against.
+ */
+export const REPOSITORY_CONTRACT = 2;
+
 /** Public platform facts used before device login and repository binding. */
 export const platformRoutes: FastifyPluginAsync<PlatformRouteOptions> = async (
   app,
@@ -41,6 +75,10 @@ export const platformRoutes: FastifyPluginAsync<PlatformRouteOptions> = async (
     return reply.send({
       instance_id: await platformInstanceId(),
       origin: options.origin,
+      // Which shape this platform speaks to a repository. Read before either
+      // sync verb does anything, so an egma older or newer than this one says
+      // so plainly instead of quietly reading half of what came back.
+      repository_contract: REPOSITORY_CONTRACT,
       // What the whole platform is still missing, in the words a person would
       // use, and never a secret — see `platform-readiness.ts`.
       setup: { state: setup.state, missing: setup.missing },

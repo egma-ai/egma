@@ -351,6 +351,21 @@ export type TestChanges = {
    * two happened. An edit that changes both names both.
    */
   readonly expectedRevision?: string;
+  /**
+   * The agent the repository sending this edit is bound to.
+   *
+   * **A precondition, never a change.** One repository names one agent, and the
+   * set a test applies to is edited in the browser — so this asks a question
+   * rather than saying anything: *does this test still apply to me?* An edit
+   * that carried the set instead would make one file the source of truth for
+   * links it cannot see, and a colleague's link edit in the browser would be
+   * undone by the next push from a folder that never knew about it.
+   *
+   * Checked under the same lock the edit takes, so there is no moment between
+   * the answer and the write for the last link to be removed in. A mismatch
+   * refuses everything with `TestAgentRefusedError`, and nothing is written.
+   */
+  readonly repositoryAgentId?: string;
 };
 
 /** One version, frozen: the test exactly as some simulation executed it. */
@@ -1536,6 +1551,25 @@ export async function editTest(
 
     if (locked === undefined) return undefined;
     const { currentVersionId, ...current } = locked;
+
+    // First of the three, because it is the only one a pull cannot fix. A
+    // repository whose bound agent has been unlinked in the browser is told to
+    // relink the test or remove the file; telling it the content had moved
+    // would send somebody to pull a test their folder is no longer entitled to
+    // write, and the same refusal would meet them afterwards.
+    const repositoryAgentId = changes.repositoryAgentId;
+    if (repositoryAgentId !== undefined) {
+      const applies = await agentsOf(tx, current.id);
+      if (!applies.some((agent) => agent.id === repositoryAgentId)) {
+        throw new TestAgentRefusedError(
+          "repository_agent_not_applicable",
+          `Test ${current.id} no longer applies to the agent bound to this ` +
+            `repository. Link it to agent ${repositoryAgentId} in Egma, or ` +
+            `remove this local file; egma push changed neither side.`,
+          { testId: current.id, agentId: repositoryAgentId },
+        );
+      }
+    }
 
     // Before anything is read about the content, and inside the lock. Nothing
     // has been written yet, and returning through a throw takes the transaction

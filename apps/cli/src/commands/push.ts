@@ -13,15 +13,31 @@ import { pushMockTools, type PushMockToolsReport } from "../sync/mock-tools.ts";
 import { pushTests, type PushConflict } from "../sync/push.ts";
 import { FOLDER_EXIT, readyToSync, type FolderCommandOptions } from "./folder-verbs.ts";
 
-/** The one sentence a refusal ends on, naming what to do about it. */
+/**
+ * The sentence a refusal ends on, naming what to do about it.
+ *
+ * **A conflict that brought its own words keeps them.** Two of the six reasons
+ * are fixed by one pull and one look, and summarising those together is what
+ * this function is for. The other four each send somebody somewhere else — to
+ * migrate a file, to relink a test in the browser, to restore one — and folding
+ * those into "run egma pull" would be advice that does not work, given at the
+ * one moment somebody most needs advice that does.
+ */
 export function movedRefusal(conflicts: readonly PushConflict[]): string {
-  const names = conflicts.map((conflict) => conflict.name).join(", ");
-  const moved = conflicts.filter((conflict) => conflict.reason === "moved").length;
+  const spoken = conflicts.filter((conflict) => conflict.said !== null);
+  const summarised = conflicts.filter((conflict) => conflict.said === null);
+  if (summarised.length === 0) {
+    return spoken.map((conflict) => conflict.said).join(" ");
+  }
+
+  const names = summarised.map((conflict) => conflict.name).join(", ");
+  const moved = summarised.filter((conflict) => conflict.reason === "moved").length;
   const opening =
-    moved === conflicts.length
-      ? `egma has a newer version of ${conflicts.length === 1 ? "this test" : "these tests"}: ${names}.`
-      : `egma cannot match ${conflicts.length === 1 ? "this test" : "these tests"} to what it holds: ${names}.`;
-  return `${opening} Run egma pull to bring ${conflicts.length === 1 ? "it" : "them"} down, look at what changed, then push again. Nothing was uploaded.`;
+    moved === summarised.length
+      ? `egma has a newer version of ${summarised.length === 1 ? "this test" : "these tests"}: ${names}.`
+      : `egma cannot match ${summarised.length === 1 ? "this test" : "these tests"} to what it holds: ${names}.`;
+  const pull = `${opening} Run egma pull to bring ${summarised.length === 1 ? "it" : "them"} down, look at what changed, then push again. Nothing was uploaded.`;
+  return [pull, ...spoken.map((conflict) => conflict.said)].join(" ");
 }
 
 export async function runPushCommand(options: FolderCommandOptions): Promise<number> {
@@ -82,6 +98,11 @@ export async function runPushCommand(options: FolderCommandOptions): Promise<num
     for (const conflict of report.conflicts) {
       options.out(`conflict: ${conflict.name}`);
       options.out(`file: ${conflict.shown}`);
+      // Which of the six, on its own line, so something driving this knows
+      // whether the fix is a pull, a migration, or somebody's decision in the
+      // browser — without reading the sentence to find out.
+      options.out(`reason-code: ${conflict.reason}`);
+      if (conflict.said !== null) options.out(`reason: ${conflict.said}`);
     }
     options.out(`uploaded: ${report.uploadedNothing ? "nothing" : String(report.tests.length)}`);
     options.out("status: refused");

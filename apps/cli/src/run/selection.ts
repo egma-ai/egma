@@ -105,7 +105,13 @@ export async function selectFromFolder(options: SelectOptions): Promise<Selectio
   const inTheFolder = await readFolderTests(paths);
   if (inTheFolder.length === 0) return { pinned: [], unknown: [], diverged: [] };
 
-  const platformTests = await listTests(signedIn, ...extra);
+  // Every test this credential reaches, not only the ones the bound agent
+  // applies to: a run names an agent of its own, and the platform's own
+  // `test_not_applicable` is the authority on that pairing. Narrowing here
+  // would turn its refusal into a test this verb silently could not find.
+  const platformTests = await listTests(signedIn, {
+    ...(fetchImpl === undefined ? {} : { fetchImpl }),
+  });
   const resolve = pinsAgainst(signedIn, platformTests, ...extra);
   const byName = new Map(platformTests.map((test) => [test.name, test] as const));
   const byId = new Map(platformTests.map((test) => [test.id, test] as const));
