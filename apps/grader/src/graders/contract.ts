@@ -32,7 +32,7 @@ export type Judgment = {
    * **It must be stable across the grader's versions**, and that is a hard
    * constraint rather than a preference: the fold counts one assertion once,
    * keyed by the conversation, the grader and this name, and prefers the latest
-   * grading of it. A assertion name that changed when the config changed would
+   * grading of it. An assertion name that changed when the config changed would
    * make a re-grade at a tightened threshold a *second* assertion, counted
    * beside the first forever, with both of them speaking. So nothing derived
    * from the config may appear here.

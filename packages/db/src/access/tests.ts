@@ -319,7 +319,16 @@ function validContent(input: {
       "a test needs at least one expected behavior, because a test that cannot fail is not a test",
     );
   }
-  const expectedBehaviors = input.expectedBehaviors.map((entry) => {
+  const expectedBehaviors = input.expectedBehaviors.map((entry: unknown) => {
+    // The shape that retired with the P0/P1/P2 ladder, named rather than
+    // reported as an empty sentence: a writer sending last month's body should
+    // be told what changed, not told their behavior says nothing.
+    if (typeof entry === "object" && entry !== null && "behavior" in entry) {
+      throw new UnprocessableInputError(
+        'an expected behavior is a plain sentence now; the {"behavior", "priority"} ' +
+          "shape retired with the P0/P1/P2 ladder. Send the sentence on its own.",
+      );
+    }
     const behavior = typeof entry === "string" ? entry.trim() : "";
     if (behavior === "") {
       throw new UnprocessableInputError(
@@ -507,14 +516,18 @@ function sameOrderedList(a: readonly string[], b: readonly string[]): boolean {
 
 /**
  * The behaviors, compared as written: the same statements, in the same order.
- * Reordering them changes which assertion each verdict row is keyed to, so it is
- * an edit and mints a version like any other.
+ *
+ * The comparison a persona list gets, because a behavior is a plain sentence
+ * now and there is nothing else on it to compare — but named separately,
+ * because the reason order matters here is its own: a verdict row is keyed by a
+ * behavior's **position**, so moving a sentence rekeys every row about it, and
+ * minting a version is what keeps the old rows readable.
  */
 function sameBehaviors(
   a: readonly ExpectedBehavior[],
   b: readonly ExpectedBehavior[],
 ): boolean {
-  return a.length === b.length && a.every((entry, index) => entry === b[index]);
+  return sameOrderedList(a, b);
 }
 
 /**

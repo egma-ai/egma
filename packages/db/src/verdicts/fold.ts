@@ -133,9 +133,17 @@ function assertionKey(row: FoldableVerdict): string {
 /**
  * How seriously a word is taken when nothing else can tell two rows apart.
  *
- * Higher wins, and the order is the one that never hands out credit on a coin
- * toss: a failure outranks a broken judge, which outranks a check that did not
+ * Higher wins, and the order is the fold's own precedence rule said one row at a
+ * time: a failure outranks a broken judge, which outranks a check that did not
  * apply, which outranks a pass.
+ *
+ * `failed` over `errored` is the pair that matters most and it is not
+ * arbitrary. The two are kept apart everywhere else because a broken judge is
+ * not a broken agent — but that is a rule about not calling an `errored` row a
+ * failure, never about letting an `errored` row hide one. A conversation where
+ * the agent failed *and* the judging broke did fail, and `foldVerdicts` says so
+ * over the whole set; a tie broken the other way would let the same set answer
+ * `errored` because of which row a merge happened to keep.
  */
 const SERIOUSNESS: { readonly [Word in Verdict]: number } = {
   failed: 3,
@@ -159,7 +167,8 @@ const SERIOUSNESS: { readonly [Word in Verdict]: number } = {
  * free to keep whichever it merged last. The fold cannot be more decided than
  * the table underneath it, so what it can be is consistent — and it breaks the
  * tie towards the more serious word, because the alternative is a green tick
- * that arrived by luck.
+ * that arrived by luck, or a failure hidden behind a broken judge for the same
+ * reason.
  */
 function isLater(row: FoldableVerdict, than: FoldableVerdict): boolean {
   if (row.judgedAtMicroseconds !== than.judgedAtMicroseconds) {

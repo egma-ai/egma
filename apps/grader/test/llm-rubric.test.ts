@@ -294,7 +294,7 @@ describe("a rubric with no judge to ask", () => {
   });
 
   /**
-   * A assertion name may derive nothing from the config: the fold counts one
+   * An assertion name may derive nothing from the config: the fold counts one
    * assertion once per grader and prefers the latest grading of it, so a rubric
    * reworded and re-graded must land on the row it supersedes rather than beside
    * it forever with both of them speaking.

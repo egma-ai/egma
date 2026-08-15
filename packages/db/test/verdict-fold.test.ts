@@ -361,6 +361,30 @@ describe("an assertion judged more than once", () => {
     expect(foldVerdicts([passed, failed]).verdict).toBe("failed");
   });
 
+  /**
+   * And the pair the product is loudest about, decided the same way. `failed`
+   * and `errored` are kept apart everywhere else because a broken judge is not
+   * a broken agent — but that rule is about never calling an `errored` row a
+   * failure, not about letting one hide a failure. A dead heat resolves to the
+   * failure, which is what the same two rows fold to over any other set.
+   */
+  it("prefers a failure over a broken judge in a dead heat", () => {
+    const errored = row({
+      ...assertion,
+      verdict: "errored",
+      judgedAtMicroseconds: 1_000n,
+    });
+    const failed = row({
+      ...assertion,
+      verdict: "failed",
+      judgedAtMicroseconds: 1_000n,
+    });
+
+    expect(speakingVerdicts([errored, failed])).toEqual([failed]);
+    expect(speakingVerdicts([failed, errored])).toEqual([failed]);
+    expect(foldVerdicts([errored, failed]).verdict).toBe("failed");
+  });
+
   it("keeps two assertions apart even when everything else about them matches", () => {
     const rows = [
       row({ ...assertion, assertion: "behavior_1", verdict: "passed" }),

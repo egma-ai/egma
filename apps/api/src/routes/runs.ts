@@ -212,9 +212,12 @@ function describedSimulation(
     // Every judged assertion, whole. The fold above says how many passed; this
     // says which ones and why, because "2 of 3 passed" without the rationale
     // sends somebody to read a transcript to work out what egma already knew.
-    // Each row names its assertion by key rather than by sentence: what the
-    // sentence says is read from the pinned test version, which is the one place
-    // it cannot have drifted from what was judged.
+    //
+    // **`assertion` is a key and nothing else** — a behavior's position in the
+    // pinned test version, a config entry's index. Resolving it back into the
+    // sentence somebody wrote is display-time work that is not built yet, so a
+    // caller reading this today gets `behavior_1` and has to fetch the pinned
+    // version itself to learn what behavior 1 says.
     verdicts: rows.map((its) => ({
       grader_id: its.graderId,
       assertion: its.assertion,

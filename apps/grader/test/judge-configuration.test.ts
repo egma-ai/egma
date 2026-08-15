@@ -119,7 +119,6 @@ describe("the project's default judge", () => {
     const judge = scriptedJudge({ answers: {} });
     const asked = resolved.judging(null, judge.makers);
 
-    expect(asked.name).toBe("openai/gpt-4.1-mini");
     expect(judge.configured.at(-1)).toEqual({
       provider: "openai",
       model: "gpt-4.1-mini",
@@ -153,10 +152,8 @@ describe("the project's default judge", () => {
     const judge = scriptedJudge({ answers: {} });
     const overridden = resolved.judging(grader?.judgeModel ?? null, judge.makers);
 
-    // The name a verdict row would carry is the grader's model, not the
-    // project's — which is how "decided by this model" stays readable after the
-    // project's default moves on.
-    expect(overridden.name).toBe("openai/gpt-4.1");
+    // The model that reached the seam is the grader's, not the project's —
+    // which is the whole of what an override does.
     expect(judge.configured.at(-1)).toEqual({
       provider: "openai",
       // The grader's, not the project's.
@@ -167,10 +164,14 @@ describe("the project's default judge", () => {
       key: THE_JUDGE_KEY,
     });
 
-    // A grader with no override of its own judges on the project's judge.
-    expect(resolved.judging(null, judge.makers).name).toBe(
-      "openai/gpt-4.1-mini",
-    );
+    // A grader with no override of its own judges on the project's judge, and
+    // the seam is again where that is observable.
+    resolved.judging(null, judge.makers);
+    expect(judge.configured.at(-1)).toEqual({
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      key: THE_JUDGE_KEY,
+    });
   });
 
   it("spends the key at the provider seam and nowhere a reader can see", async () => {

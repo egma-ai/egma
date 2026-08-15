@@ -389,6 +389,22 @@ describe("a test's expected behaviors", () => {
   });
 
   /**
+   * The retired shape, named rather than reported as a blank sentence. A writer
+   * still sending last month's body should be told what changed, not sent to
+   * look at their own words for a problem that is in the envelope.
+   */
+  it("refuse the retired priority shape by name", async () => {
+    await expect(
+      createTest(actingAsAcme(), {
+        ...rescheduling,
+        expectedBehaviors: [
+          { behavior: "confirms the new time back", priority: "P0" },
+        ] as unknown as readonly string[],
+      }),
+    ).rejects.toThrow(/plain sentence now/);
+  });
+
+  /**
    * A version frozen while behaviors carried priorities still says what it said:
    * the sentence. The priority is read past rather than migrated away, because a
    * version a run can pin is never rewritten — which is the whole reason runs

@@ -247,7 +247,7 @@ describe("a list holding several phrases", () => {
   };
 
   /**
-   * One assertion, whatever number of phrases. A assertion name may derive
+   * One assertion, whatever number of phrases. An assertion name may derive
    * nothing from the config, so a per-phrase assertion could only be named by the
    * text or by its position — and either would leave an edited-away phrase's row
    * speaking forever, with no later grading able to supersede it.

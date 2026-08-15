@@ -130,6 +130,7 @@ export const DETAIL = {
    * code and reading the screen give the same answer.
    */
   whereItCameFrom: "Where this came from",
+  citedTurns: "Read from",
   missing: "That transcript is not here",
   missingLead:
     "Nothing by that name was recorded in this organization, inside the " +

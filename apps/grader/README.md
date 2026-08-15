@@ -39,9 +39,9 @@ fan-out, no judge latency on a request path.
    are deterministic and one asks the project's judge; what each one does is
    the section below.
 5. **Write.** One row per judged assertion: the verdict word, a score, a
-   one-line rationale, and the turns it cites. **No overall row is written anywhere** — a conversation's answer and
-   a run's are folded from these rows at read time, so a headline can never
-   disagree with the evidence under it.
+   one-line rationale, and the turns it cites. **No overall row is written
+   anywhere** — a conversation's answer and a run's are folded from these rows
+   at read time, so a headline can never disagree with the evidence under it.
 
 Two rules run through all of it. **A simulation that never ran is `errored` for
 every grader and never `failed`** — a broken test is not a broken agent. And **a
@@ -126,8 +126,10 @@ made unfalsifiable.
 own verdict row. The alternative — one call that reads the whole list — gives a
 developer one blurred explanation and lets a judge trade a failed behavior off
 against a passed one. Here each row names the behavior's position
-(`behavior_1`, `behavior_2`, …) in the order the author wrote them — the key,
-never the sentence, which a reader gets back from the pinned test version.
+(`behavior_1`, `behavior_2`, …) in the order the author wrote them — the
+key, never the sentence. Resolving a key back into the sentence somebody
+wrote is display-time work that is not built yet: what a reader sees today
+is the position, and the pinned test version is where the words still live.
 
 The isolation is structural: a judge is handed one criterion and the
 conversation's evidence, and the evidence has nowhere for a second criterion to
@@ -284,16 +286,16 @@ conversation, however many graders ask. `model` is this grader version's own
 `judge_model` — its override, or `null` for the project's default; the built-in
 behaviors grader passes `null`, because it is nobody's to configure.
 
-What `judging(…)` answers with is two things and no more: **`ask`**, a function
-that decides one criterion, and **`name`**, the `provider/model` string that says
-which judge answered. The key is not on that pair, and that is the point:
+What `judging(…)` answers with is one thing and no more: **`ask`**, a function
+that decides one criterion. The key is not on it, and that is the point:
 nothing under `src/graders/` can reach one, so no grader type — today's or
 tomorrow's — can put a key in a rationale, a row or a log.
 
-**The verdict row does not record which judge answered.** `judged_by` retired
-with the human corrections it existed for: a person's word returns as the
-reserved `human` grader type, writing its own rows under its own grader id, so
-the column had nothing left to keep apart.
+**The verdict row does not record which judge answered**, and nothing hands out
+a name for it to record. `judged_by` retired with the human corrections it
+existed for: a person's word returns as the reserved `human` grader type,
+writing its own rows under its own grader id, so the column had nothing left to
+keep apart.
 
 ## Adding a judge provider
 

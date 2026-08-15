@@ -6,9 +6,9 @@ import type { Judgment } from "./contract.ts";
  *
  * The built-in behaviors grader and the rubric type ask about different things —
  * one expectation a test's author wrote down, one criterion a team wrote down —
- * and they file the answers under different assertions, different versions and
- * different priorities. What each does with the answer *itself* is identical,
- * and it is three decisions that must not be made twice:
+ * and they file the answers under different assertions and different versions.
+ * What each does with the answer *itself* is identical, and it is three
+ * decisions that must not be made twice:
  *
  * - **`cannot_determine` is `skipped`, and never `failed`.** A judge that could
  *   only say yes or no would guess, and a guess dressed as a judgment is the

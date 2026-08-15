@@ -83,6 +83,11 @@ function describedPersona(named: TestPersona): Record<string, unknown> {
   return { id: named.id, name: named.name };
 }
 
+/** The behaviors a body carries, or the reason it carries none egma can read. */
+type WrittenBehaviors =
+  | { readonly entries: readonly string[] }
+  | { readonly refusal: string };
+
 /** The keys one entry of `mock_tools` holds, and no others. */
 const OVERRIDE_KEYS = ["tool", "answer", "error", "delay_ms"] as const;
 
@@ -223,6 +228,39 @@ function personaEntries(value: unknown): NamedPersonas {
   return { entries };
 }
 
+/**
+ * The behaviors a body carries, as the factory takes them: plain sentences, in
+ * the order they were written.
+ *
+ * It exists to name one refusal rather than to add a rule. `textList` turns
+ * anything that is not text into an empty string, so a body still sending the
+ * retired `{"behavior", "priority"}` shape would otherwise arrive at the factory
+ * as a list of blanks and be refused for saying nothing — which sends a writer
+ * looking at their sentences for a problem that is in their envelope.
+ */
+function behaviorEntries(value: unknown): WrittenBehaviors {
+  if (!Array.isArray(value)) {
+    return {
+      refusal:
+        "expected_behaviors is what should happen, as a list of sentences, " +
+        'like ["confirms the new time back before finishing"].',
+    };
+  }
+
+  for (const entry of value) {
+    if (typeof entry === "object" && entry !== null && "behavior" in entry) {
+      return {
+        refusal:
+          "an expected behavior is a plain sentence now; the " +
+          '{"behavior", "priority"} shape retired with the P0/P1/P2 ladder. ' +
+          "Send each sentence on its own.",
+      };
+    }
+  }
+
+  return { entries: textList(value) };
+}
+
 export async function testRoutes(
   app: FastifyInstance,
   options: TestRoutesOptions,
@@ -319,6 +357,9 @@ export async function testRoutes(
       "mock_tools" in body ? overrideEntries(body.mock_tools) : { entries: [] };
     if ("refusal" in overrides) return unprocessable(reply, overrides.refusal);
 
+    const behaviors = behaviorEntries(body.expected_behaviors);
+    if ("refusal" in behaviors) return unprocessable(reply, behaviors.refusal);
+
     const acting = await actingIn(auth, given(text(body.project)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
@@ -327,7 +368,7 @@ export async function testRoutes(
     const created = await createTest(acting.auth, {
       name: text(body.name),
       scenario: text(body.scenario),
-      expectedBehaviors: textList(body.expected_behaviors),
+      expectedBehaviors: behaviors.entries,
       personaIds,
       mockOverrides: overrides.entries,
     });
@@ -388,6 +429,14 @@ export async function testRoutes(
       return unprocessable(reply, overrides.refusal);
     }
 
+    const behaviors =
+      "expected_behaviors" in body
+        ? behaviorEntries(body.expected_behaviors)
+        : undefined;
+    if (behaviors !== undefined && "refusal" in behaviors) {
+      return unprocessable(reply, behaviors.refusal);
+    }
+
     const acting = await actingIn(auth, given(text(body.project)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
@@ -400,9 +449,9 @@ export async function testRoutes(
       expectedVersionId,
       ...("name" in body ? { name: text(body.name) } : {}),
       ...("scenario" in body ? { scenario: text(body.scenario) } : {}),
-      ...("expected_behaviors" in body
-        ? { expectedBehaviors: textList(body.expected_behaviors) }
-        : {}),
+      ...(behaviors === undefined
+        ? {}
+        : { expectedBehaviors: behaviors.entries }),
       ...(personaIds === undefined ? {} : { personaIds }),
       ...(overrides === undefined ? {} : { mockOverrides: overrides.entries }),
     });

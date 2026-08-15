@@ -254,7 +254,7 @@ describe("a shelf holding several rules", () => {
   };
 
   /**
-   * One assertion, whatever number of rules. A assertion name may derive nothing
+   * One assertion, whatever number of rules. An assertion name may derive nothing
    * from the config, so a per-rule assertion could only be named by the tool or
    * by its position — and either would leave an edited-away rule's row speaking
    * forever, with no later grading able to supersede it.

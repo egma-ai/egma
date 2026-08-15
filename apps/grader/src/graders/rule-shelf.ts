@@ -14,7 +14,7 @@
  * A shelf names one assertion — its own type — however many rules it holds, and
  * the rationale names every rule that was broken.
  *
- * **Because a assertion name may derive nothing from the config.** The fold
+ * **Because an assertion name may derive nothing from the config.** The fold
  * counts one assertion once, keyed by the conversation, the grader and the name,
  * and prefers the latest grading of it. A per-rule assertion could only be named
  * out of the config — by the rule's own words, which an edit changes, or by its

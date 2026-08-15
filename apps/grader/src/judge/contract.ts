@@ -74,8 +74,8 @@ export type Judge = (question: JudgeQuestion) => Promise<JudgeAnswer>;
  * The key is here because a provider cannot speak to an account without one,
  * and it is here **and nowhere else**: it is held for the length of one
  * grading, handed to one `fetch`, and never written to a row, a log line or a
- * rationale. Nothing in this file or under it prints it, and `named` below is
- * what everything that wants to say which judge answered uses instead.
+ * rationale. Nothing in this file or under it prints it, and nothing outside
+ * this directory is ever handed one of these.
  */
 export type ResolvedJudge = {
   readonly provider: JudgeProvider;
@@ -89,16 +89,3 @@ export type ResolvedJudge = {
  * in the roster.
  */
 export type JudgeMaker = (judge: ResolvedJudge) => Judge;
-
-/**
- * How a resolved judge says which judge it is — the provider and the model, and
- * never the key or the account.
- *
- * Both halves, because two providers may offer a model of the same name and
- * "which judge is this" has to stay answerable when they do. It is what
- * anything outside this directory is given to say *who answered* with, in place
- * of the key it is never given.
- */
-export function named(judge: ResolvedJudge): string {
-  return `${judge.provider}/${judge.model}`;
-}

@@ -35,6 +35,12 @@ const VERDICT_IDENTITY =
   "organization_id, project_id, trace_id, grader_id, grader_version_id, " +
   "assertion, source";
 
+/**
+ * The one migration allowed to drop a table: the verdict store's rebuild, taken
+ * pre-launch because the sorting key changed and no `ALTER` reaches one.
+ */
+const THE_ONE_FILE_THAT_DROPS_A_TABLE = "0003_verdicts_speak_the_redesign.sql";
+
 type Table = {
   readonly name: string;
   readonly engine: string;
@@ -108,11 +114,12 @@ describe("the trace store's migration files", () => {
    * migration file may create shape and never touch data. Moving rows belongs
    * to ingest, or to a tool a person runs once on purpose.
    *
-   * Dropping a table whole is not moving rows and is deliberately allowed: a
-   * ClickHouse sorting key is fixed at creation, so a table whose identity
-   * changes has no `ALTER` that could reach it. What that costs is the rows,
-   * which is why it is a decision taken once, pre-launch, and priced in the file
-   * that takes it.
+   * **One file may drop a table, and it is named here.** A ClickHouse sorting
+   * key is fixed at creation, so the verdict store's new identity had no
+   * `ALTER` that could reach it and the table was rebuilt instead. What that
+   * costs is the rows, which was affordable exactly once, pre-launch — so the
+   * exception is a filename rather than a rule, and the next file that drops a
+   * table fails here and has to argue for itself.
    */
   it("move no rows, ever", async () => {
     for (const migration of await readMigrations(
@@ -121,6 +128,9 @@ describe("the trace store's migration files", () => {
       for (const statement of statementsOf(migration.sql)) {
         expect(statement).not.toMatch(/^INSERT\b/i);
         expect(statement).not.toMatch(/^ALTER TABLE .*\b(?:UPDATE|DELETE)\b/i);
+        if (migration.name !== THE_ONE_FILE_THAT_DROPS_A_TABLE) {
+          expect(statement, migration.name).not.toMatch(/^DROP TABLE\b/i);
+        }
       }
     }
   });

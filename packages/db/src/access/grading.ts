@@ -1046,7 +1046,7 @@ export async function reopenGradingJob(
   auth: AuthContext,
   id: string,
 ): Promise<GradingJob | undefined> {
-  authorize(auth, "revisit_verdicts", here(auth));
+  authorize(auth, "regrade", here(auth));
 
   const [only] = await reopenJobs(theJob(auth, id), null);
   return only;
@@ -1236,7 +1236,7 @@ export async function regrade(
   auth: AuthContext,
   target: RegradeTarget,
 ): Promise<Regraded | undefined> {
-  authorize(auth, "revisit_verdicts", here(auth));
+  authorize(auth, "regrade", here(auth));
 
   const graderId = await theGraderNamed(auth, target.graderId);
   if (graderId === undefined) return undefined;

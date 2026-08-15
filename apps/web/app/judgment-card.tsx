@@ -1,3 +1,4 @@
+import { DETAIL } from "../lib/transcript-copy.ts";
 import { humanizeIdentifier, type Judgment } from "../lib/transcripts.ts";
 import styles from "./ui.module.css";
 
@@ -23,7 +24,11 @@ export function JudgmentCard({
         <strong>{humanizeIdentifier(judgment.assertion)}</strong>
       </div>
       <p>{judgment.rationale}</p>
-      {cited === "" ? null : <small>{cited}</small>}
+      {cited === "" ? null : (
+        <small>
+          {DETAIL.citedTurns} <span className={styles.mono}>{cited}</span>
+        </small>
+      )}
     </article>
   );
 }

@@ -20,7 +20,7 @@ import { judgmentOf } from "./judged.ts";
  * whatever punctuation looked like a list, would invent criteria nobody wrote.
  *
  * The assertion is the grader's own type, like every other one-check type's.
- * Not the rubric's text: a assertion name may derive nothing from the config,
+ * Not the rubric's text: an assertion name may derive nothing from the config,
  * because the fold counts one assertion once per grader and prefers the latest
  * grading of it — a rubric reworded would otherwise become a *second* assertion
  * counted beside the first forever, with both of them speaking.

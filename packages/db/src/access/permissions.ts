@@ -55,7 +55,7 @@ const PERMISSIONS = {
    * can turn a red release green — so a credential that can ask for one is not a
    * read-only credential, whatever it is called.
    */
-  revisit_verdicts:       [          "member", "admin"],
+  regrade:                [          "member", "admin"],
 
   /**
    * Send an agent's traces through the ingest door. A write like any other,
