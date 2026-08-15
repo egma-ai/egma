@@ -623,11 +623,25 @@ installs — so install uv too, and `pnpm test` covers all three worlds.
 ```bash
 pnpm install
 pnpm db:up        # Postgres on 5433 and ClickHouse on 8124, which the tests need
-pnpm test
+pnpm test         # everything: both lanes, then the three Python suites
+pnpm test:fast    # the loop you work in: no Chrome, no web application
+pnpm test:browser # the real-browser proof, on its own
 pnpm lint
 pnpm typecheck
 pnpm build
 ```
+
+**The suite has two lanes, because its two halves cost very different
+amounts.** Almost all of it is unit, database, API, grader, CLI and web tests,
+measured in milliseconds each; one file drives a real Chrome against a real web
+application and costs about a minute before it asserts anything. Paying that
+minute after every small edit is how a suite stops being run, so `test:fast`
+leaves it out and `test:browser` is the only thing that runs it. Nothing falls
+between the two — `pnpm test` runs both, then the simulator, SDK and fixture
+suites, and fails if any part failed. Every run prints which lane it chose
+before it starts, so a green run can be read back to the proof it stands for.
+[`tools/test-lanes.ts`](tools/test-lanes.ts) is where a lane is defined, and the
+tests beside it hold each lane to what it claims to select.
 
 Tests run against a real Postgres and a real ClickHouse — never a substitute,
 because every guarantee under test is one of theirs. Each test file creates a
@@ -670,6 +684,12 @@ Chrome already on your machine, and failing that any Chromium under
 downloads no browser of its own, so **install Google Chrome or point that
 variable at one** if you have neither. Every branch of those flows other than
 the happy one is covered against the API instead, where it costs milliseconds.
+
+That test and `pnpm --filter @egma/web build` both write `apps/web/.next`, so
+they cannot run at once in one checkout: whichever starts second is refused with
+a sentence naming the one already there, rather than each quietly serving half
+of the other's build. Two worktrees have two output directories and never
+collide.
 
 ## Layout
 

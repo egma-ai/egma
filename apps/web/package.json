@@ -2,9 +2,10 @@
   "name": "@egma/web",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev --port 3101",
-    "build": "next build",
+    "build": "node tools/build.ts",
     "start": "next start --port 3101",
     "typecheck": "tsc --noEmit"
   },
