@@ -43,12 +43,12 @@ beforeAll(async () => {
     ]);
   }
   await database.sql(
-    "insert into project (id, organization_id, name, slug) values ($1, $2, $3, $4)",
-    [acmeProject.id, acme.id, "Default", acmeProject.slug],
+    "insert into project (id, organization_id, name, slug, revision) values ($1, $2, $3, $4, $5)",
+    [acmeProject.id, acme.id, "Default", acmeProject.slug, newId("rev")],
   );
   await database.sql(
-    "insert into project (id, organization_id, name, slug) values ($1, $2, $3, $4)",
-    [globexProject.id, globex.id, "Default", globexProject.slug],
+    "insert into project (id, organization_id, name, slug, revision) values ($1, $2, $3, $4, $5)",
+    [globexProject.id, globex.id, "Default", globexProject.slug, newId("rev")],
   );
 });
 
@@ -117,8 +117,8 @@ describe("an identifier carrying the wrong prefix for its table", () => {
   it("is refused by the project table", async () => {
     await expect(
       database.sql(
-        "insert into project (id, organization_id, name, slug) values ($1, $2, $3, $4)",
-        [newId("usr"), acme.id, "Wrong", "wrong-prefix"],
+        "insert into project (id, organization_id, name, slug, revision) values ($1, $2, $3, $4, $5)",
+        [newId("usr"), acme.id, "Wrong", "wrong-prefix", newId("rev")],
       ),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
@@ -172,8 +172,8 @@ describe("a name is unique within its scope and nowhere wider", () => {
   it("refuses the same name twice inside one customer's account", async () => {
     await expect(
       database.sql(
-        "insert into project (id, organization_id, name, slug) values ($1, $2, $3, $4)",
-        [newId("prj"), acme.id, "Default again", acmeProject.slug],
+        "insert into project (id, organization_id, name, slug, revision) values ($1, $2, $3, $4, $5)",
+        [newId("prj"), acme.id, "Default again", acmeProject.slug, newId("rev")],
       ),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.uniqueViolation,
@@ -196,8 +196,8 @@ describe("a second project in the same organization", () => {
   it("is accepted, because multi-project is a product change and not a migration", async () => {
     await expect(
       database.sql(
-        "insert into project (id, organization_id, name, slug) values ($1, $2, $3, $4)",
-        [newId("prj"), acme.id, "Outbound", "outbound"],
+        "insert into project (id, organization_id, name, slug, revision) values ($1, $2, $3, $4, $5)",
+        [newId("prj"), acme.id, "Outbound", "outbound", newId("rev")],
       ),
     ).resolves.toBeDefined();
   });

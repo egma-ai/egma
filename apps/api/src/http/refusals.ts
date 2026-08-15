@@ -25,6 +25,14 @@ export const CODES = {
   project_outside_organization: 404,
   conflict: 409,
   name_taken: 409,
+  /**
+   * A slug an admin typed that a living project of the same organization
+   * already holds. Its own code beside `name_taken` because the two name
+   * different fields and have different fixes: a project's name is free and its
+   * slug is what has to be unique, so the refusal points at the one control the
+   * person can change.
+   */
+  project_slug_taken: 409,
   // A stale write, told apart from a plain conflict by which of the two things
   // moved: the resource's identity, or the content of its current version.
   // The caller's next move differs — one is retyped, the other is reapplied —
@@ -195,6 +203,10 @@ export const REFUSALS = {
   graderInUse: (graderId: string, tests: string): string =>
     `Grader ${graderId} is added directly to active tests ${tests}. Remove ` +
     "it from those tests, or archive the tests, then archive this grader.",
+
+  projectSlugTaken: (slug: string): string =>
+    `Project slug ${slug} is already in use in this organization. Choose a ` +
+    "different slug and save the project again.",
 
   judgeCredentialProviderMismatch: (
     credentialId: string,

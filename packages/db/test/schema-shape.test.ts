@@ -210,7 +210,11 @@ describe("every table", () => {
    * and a revision is not one — it says which *state* was read, and a row goes
    * through many.
    */
-  const REVISION_COLUMNS: readonly string[] = ["grader", "judge_credential"];
+  const REVISION_COLUMNS: readonly string[] = [
+    "grader",
+    "judge_credential",
+    "project",
+  ];
 
   it("pins a prefix that is one of the ones egma mints", () => {
     const pinned = checks

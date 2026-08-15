@@ -769,10 +769,10 @@ describe("the list of what an organization recorded", () => {
       // A second project for Acme, so that there is something to differ about.
       const outbound = newId("prj");
       await instance.database.sql(
-        `insert into project (id, organization_id, name, slug)
-           select $1, id, 'Outbound', 'outbound' from organization
+        `insert into project (id, organization_id, name, slug, revision)
+           select $1, id, 'Outbound', 'outbound', $2 from organization
             where slug = 'acme'`,
-        [outbound],
+        [outbound, newId("rev")],
       );
 
       await page.goto(`${origin}/`);
