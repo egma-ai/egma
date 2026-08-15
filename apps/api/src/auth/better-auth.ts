@@ -10,7 +10,6 @@ import {
   passwordResetLink,
   sealResetLink,
   PASSWORD_RESET_LIFETIME_MINUTES,
-  PASSWORD_RESET_PROVIDER_LIFETIME_SECONDS,
   RETURN_TO_HEADER,
 } from "./password-reset.ts";
 import {
@@ -282,16 +281,13 @@ export function createIdentity(options: IdentityOptions): Identity {
        * the path is a row read and a row written, which is what the provider
        * already evens out on purpose.
        *
-       * Nothing is dropped: the provider hands over a promise that already
-       * carries its own failure handling, and a send that fails is written to
-       * the log this instance keeps rather than to a person who is waiting.
+       * Nothing is dropped and nothing is added here. The provider attaches its
+       * own failure handling to the promise before handing it over, and writes
+       * what went wrong to the log this instance keeps rather than to a person
+       * who is waiting — so all this has to do is decline to wait for it.
        */
       backgroundTasks: {
-        handler: (task) => {
-          void Promise.resolve(task).catch((cause: unknown) => {
-            options.log("error", "a background task did not finish", [cause]);
-          });
-        },
+        handler: () => {},
       },
     },
 
@@ -302,14 +298,14 @@ export function createIdentity(options: IdentityOptions): Identity {
       requireEmailVerification: options.emailSender.delivers,
       autoSignIn: true,
 
-      // The provider's own copy of the deadline, and always the later of the
-      // two. Egma's travels inside the link and is the one that decides — and
-      // the only one anything can reach, because the provider's own reset
-      // endpoint is shut at egma's door. What the extra minutes are for is a
-      // record that outlives the link: a token the provider still holds is a
-      // token nobody spent, which is how a refusal past the deadline knows
-      // which of the two true sentences to write. See `password-reset.ts`.
-      resetPasswordTokenExpiresIn: PASSWORD_RESET_PROVIDER_LIFETIME_SECONDS,
+      // The same hour the link says, in the seconds this option is written in.
+      // **One number and not two**: the seal on a link is signed rather than
+      // encrypted, so the provider's raw token reads straight out of any link,
+      // and the provider's whole surface is served under this instance's
+      // origin. A provider deadline longer than the stated one would be a way
+      // in past the hour egma names — so there is no longer one to find. See
+      // `password-reset.ts`.
+      resetPasswordTokenExpiresIn: PASSWORD_RESET_LIFETIME_MINUTES * 60,
 
       /**
        * The reset message, through the one email seam.

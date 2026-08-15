@@ -1,18 +1,15 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 
 import type { Identity } from "../auth/better-auth.ts";
 import {
   openResetLink,
-  providerRecordSurvives,
   safeReturnPath,
   RETURN_TO_HEADER,
-  type ResetLink,
 } from "../auth/password-reset.ts";
 import {
   providerRefusal,
   sendProviderRefusal,
 } from "../http/provider-refusal.ts";
-import { notFound } from "../http/refusals.ts";
 
 /**
  * Getting back in, for somebody who cannot sign in to ask.
@@ -24,16 +21,19 @@ import { notFound } from "../http/refusals.ts";
  * **The link is the credential here**, and it names exactly one account.
  *
  * The provider owns the token, the hash and the password. These own the one
- * thing the provider has no way to say: *which* dead link a person is holding.
- * It consumes a token on the way past, so a spent link and an expired one both
- * come back as one word, `Invalid token` — and "you already did this" and
- * "nothing happened at all" are opposite instructions.
+ * thing the provider has no way to say, for as long as it is knowable at all:
+ * *which* dead link a person is holding. It consumes a token on the way past,
+ * so a spent link and an expired one both come back as one word,
+ * `Invalid token` — and "you already did this" and "nothing happened at all"
+ * are opposite instructions.
  *
  * **The rule every refusal here is written to is that egma never names a state
- * it has not checked.** Where it can tell the two apart it says which; where it
- * cannot it says that, rather than picking the likelier one. A refusal that
- * guesses wrong tells somebody to go on using a password that no longer signs
- * them in, which is worse than one that admits what it does not know.
+ * it has not checked.** Inside the hour a link states, egma can tell the two
+ * apart and says which. Past it, both systems have forgotten the token at the
+ * same moment — there is one deadline, deliberately — so egma says that it
+ * cannot tell rather than picking the likelier one. A refusal that guessed
+ * wrong would tell somebody to go on using a password that no longer signs them
+ * in, which is worse than one that admits what it does not know.
  *
  * Relaying to the provider's own endpoints rather than calling methods is the
  * signup route's pattern, for the signup route's reason: what egma depends on
@@ -53,9 +53,6 @@ export type PasswordResetRoutesOptions = {
 };
 
 type Body = Record<string, unknown>;
-
-/** Where the provider's own lookup is told to land. Nobody ever follows it. */
-const RESET_PAGE = "/reset-password";
 
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -164,10 +161,11 @@ export async function passwordResetRoutes(
    * Setting the new password, behind the link.
    *
    * The order is what makes each refusal true. A link that will not open is not
-   * egma's; one that opens and is past its deadline is answered by asking the
-   * provider what it still holds, which spends nothing; and inside the deadline
-   * the provider is asked to set the password, where a refusal can only mean
-   * the token was already consumed.
+   * egma's; one that opens and is past its deadline is dead, and dead is the
+   * whole of what egma knows about it, because the provider's own record of the
+   * token went at the same moment; and inside the deadline the provider is
+   * asked to set the password, where a refusal can only mean the token was
+   * already consumed.
    *
    * Nobody is signed in by this. Setting a password and then using it are two
    * steps a person can see, and the second one is the one that proves the first
@@ -189,9 +187,7 @@ export async function passwordResetRoutes(
     const link = openResetLink(sealed, options.secret);
     if (link === null) return noLink(reply);
 
-    if (link.expiresAt.getTime() <= Date.now()) {
-      return await pastTheDeadline(request, reply, link);
-    }
+    if (link.expiresAt.getTime() <= Date.now()) return cannotTell(reply);
 
     const response = await options.identity.handler(
       new Request(`${options.baseUrl}${options.authBasePath}/reset-password`, {
@@ -235,103 +231,6 @@ export async function passwordResetRoutes(
       .header("cache-control", "no-store")
       .send({ reset: true, message: "that password is set. Sign in with it." });
   });
-
-  /**
-   * The provider's own reset endpoint, shut.
-   *
-   * **Egma's deadline is only egma's deadline while it is the only way in.**
-   * The seal on a link is signed and not encrypted — whoever holds one can read
-   * the provider's token straight out of it — and the provider's whole surface
-   * is served publicly under this instance's origin. Without this, the hour
-   * stated in the message, on the page and in the README would be the hour
-   * egma's own door honours, while seventy minutes was the hour that actually
-   * applied. Stating one and enforcing the other is exactly the kind of untruth
-   * the rest of this file exists to prevent.
-   *
-   * Shutting this door rather than shortening the provider's deadline is what
-   * lets the extra minutes go on doing their real job: being the record of
-   * whether a link was ever spent, so that a refusal past the deadline can name
-   * which of two opposite things happened.
-   *
-   * It is Fastify's own routing and not a filter — an exact path beats the
-   * wildcard the provider's surface is mounted on — and egma's own relay calls
-   * the provider's handler directly, so nothing inside these routes is touched.
-   */
-  app.post(`${options.authBasePath}/reset-password`, async (_request, reply) =>
-    notFound(
-      reply,
-      "egma does not set a password here. Send the token from the reset link " +
-        "to POST /api/password-reset/complete instead — that is the door this " +
-        "egma answers on, and the one that honours the link's own deadline.",
-    ),
-  );
-
-  /**
-   * A link egma no longer honours, and which of the two things it is.
-   *
-   * The provider is asked what it still holds, through the one endpoint of its
-   * own that reads a reset token **without spending it**. A token it still
-   * knows is a token nobody used, so the link truly ran out of time and nothing
-   * changed. A token it does not know is a token somebody used — but only while
-   * the provider's own record would certainly still be there. Past that, a
-   * missing record says nothing, and neither does egma.
-   */
-  async function pastTheDeadline(
-    request: FastifyRequest,
-    reply: FastifyReply,
-    link: ResetLink,
-  ): Promise<FastifyReply> {
-    if (!providerRecordSurvives(link, new Date())) return cannotTell(reply);
-
-    const unspent = await stillUnspent(request, link.token);
-    if (unspent === true) return ranOutOfTime(reply);
-    if (unspent === false) return alreadyUsed(reply);
-    return cannotTell(reply);
-  }
-
-  /**
-   * Whether the provider still holds this token, without consuming it.
-   *
-   * `undefined` when the answer was neither of the two the provider gives —
-   * which is a fault worth an operator's attention, and to the person waiting
-   * is simply one more thing egma does not know.
-   */
-  async function stillUnspent(
-    request: FastifyRequest,
-    token: string,
-  ): Promise<boolean | undefined> {
-    try {
-      const response = await options.identity.handler(
-        new Request(
-          `${options.baseUrl}${options.authBasePath}/reset-password/` +
-            `${encodeURIComponent(token)}` +
-            `?callbackURL=${encodeURIComponent(RESET_PAGE)}`,
-          {
-            method: "GET",
-            headers: {
-              origin: options.baseUrl,
-              "x-forwarded-for": request.ip,
-            },
-          },
-        ),
-      );
-
-      // The provider answers this one by redirecting, carrying either the token
-      // it still holds or its word for one it does not.
-      const sentTo = response.headers.get("location");
-      if (sentTo === null) return undefined;
-      const answered = new URL(sentTo, options.baseUrl).searchParams;
-      if (answered.get("token") === token) return true;
-      if (answered.get("error") === "INVALID_TOKEN") return false;
-      return undefined;
-    } catch (cause) {
-      request.log.error(
-        { err: cause },
-        "the auth provider could not be asked whether a reset link was spent",
-      );
-      return undefined;
-    }
-  }
 }
 
 /**
@@ -349,16 +248,6 @@ function noLink(reply: FastifyReply): FastifyReply {
   });
 }
 
-/** Checked: the provider still holds the token, so nobody used the link. */
-function ranOutOfTime(reply: FastifyReply): FastifyReply {
-  return reply.code(409).send({
-    error: "reset_link_expired",
-    message:
-      "that link ran out of time before anybody used it, so nothing has " +
-      "changed and the old password still works. Ask for another link.",
-  });
-}
-
 /** Checked: the provider has consumed the token, so somebody used the link. */
 function alreadyUsed(reply: FastifyReply): FastifyReply {
   return reply.code(409).send({
@@ -371,15 +260,20 @@ function alreadyUsed(reply: FastifyReply): FastifyReply {
 }
 
 /**
- * Dead, and egma cannot say which way — the third answer, and the honest one.
+ * Dead, and egma cannot say which way — the honest answer past the hour.
  *
- * The two that mean opposite things are worth keeping apart only while both are
- * things egma has checked. Once the provider's record of the link has expired
- * too, there is no way to know whether the link was used before it ran out, and
- * either of the other sentences would be a guess: one tells somebody their old
- * password still works when it may not, the other tells them it has been
- * changed when it may not have been. So this one says both, and what to do
- * either way.
+ * "You already did this" and "nothing happened at all" are worth keeping apart
+ * only while both are things egma has checked, and past the deadline neither
+ * is: the provider was configured with that same deadline, so its record of the
+ * token is gone and there is nothing left to ask. Saying "it ran out" would
+ * tell somebody their old password still works when it may not; saying "it was
+ * used" would tell them it has changed when it may not have. So this one says
+ * both, and what to do either way.
+ *
+ * **This is the cost of there being one number**, and it is paid deliberately.
+ * A second, longer deadline at the provider would leave a record to read past
+ * the first — and would also be a second, longer way in for anybody holding the
+ * raw token, which is readable straight out of any link.
  */
 function cannotTell(reply: FastifyReply): FastifyReply {
   return reply.code(409).send({

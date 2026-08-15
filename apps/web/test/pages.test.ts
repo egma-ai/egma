@@ -137,10 +137,17 @@ describe("the pages", () => {
       const code = source.replaceAll(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
       const absolute = code.match(/https?:\/\/[^\s"'`)]+/g) ?? [];
 
-      // The one exception is the build-time default for where this process
-      // proxies to, which is a loopback address on the operator's own machine.
+      // Two exceptions, and neither is a host anything reaches. One is the
+      // build-time default for where this process proxies to, a loopback
+      // address on the operator's own machine. The other is the reserved name
+      // the return-path rule anchors a URL parser to: RFC 2606 guarantees a
+      // `.invalid` name resolves nowhere, and nothing here fetches it — it is
+      // there to be compared against, so that a candidate which moves the
+      // origin can be refused without listing the ways to move it.
       const offSite = absolute.filter(
-        (url) => !url.startsWith("http://127.0.0.1:"),
+        (url) =>
+          !url.startsWith("http://127.0.0.1:") &&
+          !/^https?:\/\/[^/]+\.invalid$/.test(url),
       );
       expect(offSite, `${file} reaches ${offSite.join(", ")}`).toEqual([]);
     }
@@ -269,47 +276,47 @@ describe("the pages", () => {
   });
 
   /**
-   * Spent, expired, never-minted and too-old-to-tell are four different things
-   * and each says so. A spent link means you already did this — sign in; an
-   * expired one means nothing happened at all — ask for another; and one too old
-   * for the API to tell which means both are still possible. Sharing a sentence
-   * would send half the people holding one exactly the wrong way, and worst of
-   * all for the fourth, where not even egma knows which half.
+   * Spent, never-minted and too-old-to-tell are three different things and each
+   * says so. A spent link means you already did this — sign in. One this egma
+   * never minted means check what was copied. One past the hour means both are
+   * still possible, and the page says so. Sharing a sentence would send half
+   * the people holding one exactly the wrong way.
    */
-  it("say which of the four a dead reset link is", async () => {
+  it("say which of the three a dead reset link is", async () => {
     const reset = await readFile(
       path.join(WEB, "app/reset-password/page.tsx"),
       "utf8",
     );
 
-    expect(reset).toContain("reset_link_expired");
     expect(reset).toContain("reset_link_already_used");
     expect(reset).toContain("reset_link_no_longer_works");
     expect(reset).toContain("no_such_reset_link");
-    expect(reset).toContain("has run out of time");
     expect(reset).toContain("has already been used");
     expect(reset).toContain("no longer works");
   });
 
   /**
-   * **The page never says a thing the API did not check.**
+   * **The page never says a thing the API did not check**, and past the hour
+   * there is exactly one thing left to check: that the link is dead.
    *
-   * "Your old password still works" is true of a link that ran out of time
-   * unused and false of one somebody already reset with — and the API can only
-   * tell which while the auth provider still holds a record of the token. So
-   * that reassurance belongs to `reset_link_expired`, which the API writes only
-   * after asking, and must never appear under the code that means it could not
-   * tell.
+   * "Your old password still works" is true of a link that ran out unused and
+   * false of one somebody already reset with, and there is one deadline now —
+   * the auth provider forgets the token at the moment egma stops honouring the
+   * link, so nothing can tell those two apart afterwards. The reassurance is
+   * therefore not on any refusal, anywhere on this page. It used to be, on the
+   * refusal that was checked; that refusal no longer exists to hold it.
    */
-  it("keep the reassurance on the one refusal that was actually checked", async () => {
+  it("never promise the old password still works", async () => {
     const reset = await readFile(
       path.join(WEB, "app/reset-password/page.tsx"),
       "utf8",
     );
 
+    expect(reset).not.toContain("old password still works");
+    expect(reset).not.toContain("Nothing has changed");
+    expect(reset).not.toContain("nothing has changed");
+
     const tooOld = reset.slice(reset.indexOf('"reset_link_no_longer_works"'));
-    expect(tooOld).not.toContain("old password still works");
-    expect(tooOld).not.toContain("Nothing has changed");
     expect(tooOld).toMatch(/whether it was used/i);
   });
 
@@ -359,6 +366,17 @@ describe("the pages", () => {
       "javascript:alert(1)",
       "  /device  ",
       "",
+      // The shapes a list of shapes let through. A URL parser strips tab,
+      // carriage return and newline before it parses, so each of these is read
+      // as `//elsewhere.example` by the browser that would follow it — and the
+      // last two also travelled to the auth provider as a header, where a line
+      // ending turned a public request into a 500.
+      "/\telsewhere.example",
+      "/\t/elsewhere.example",
+      "/\t\\elsewhere.example",
+      "/\n/elsewhere.example",
+      "/\r\n//elsewhere.example",
+      "/foo\r\nx: y",
     ]) {
       expect(safeReturnPath(raw), raw).toBe(apiSafeReturnPath(raw));
     }
@@ -528,6 +546,11 @@ describe("coming back after signing in", () => {
    * bug there has ever been, and this one is handed to somebody in the middle
    * of authorizing a terminal — which is exactly when a page that looks like
    * egma but is not would be worth the most to somebody.
+   *
+   * The rule used to be a list of the shapes that leave, and a list is a thing
+   * somebody finds the next entry in: the tab was the entry. It is resolution
+   * now — the candidate is parsed against this origin and has to land back on
+   * it — so the entries below are examples of a rule rather than the rule.
    */
   it("refuses anywhere that is not this instance", () => {
     for (const elsewhere of [
@@ -537,9 +560,29 @@ describe("coming back after signing in", () => {
       "javascript:alert(1)",
       "device/approve",
       "",
+      "/\t/elsewhere.example",
+      "/\t\\elsewhere.example",
+      "/\n/elsewhere.example",
+      "/\r\n//elsewhere.example",
     ]) {
       expect(safeReturnPath(elsewhere), elsewhere).toBeNull();
     }
+  });
+
+  /**
+   * And what survives is the parser's own path — the same string the browser
+   * would have made of it — so a return path can never carry a control
+   * character on into a header, and never means one thing here and another
+   * where it is followed.
+   */
+  it("hands back the path a browser would have read, and nothing else", () => {
+    expect(safeReturnPath("/device/approve?code=WDJB")).toBe(
+      "/device/approve?code=WDJB",
+    );
+    // Still on this instance once the tab is gone, so it is kept — as the one
+    // path it can mean, rather than as the two it looked like.
+    expect(safeReturnPath("/\telsewhere.example")).toBe("/elsewhere.example");
+    expect(safeReturnPath("/foo\r\nx: y")).not.toMatch(/[\t\r\n]/);
   });
 });
 

@@ -233,6 +233,53 @@ describe("a provider that is refusing what was typed", () => {
   });
 
   /**
+   * **The one sentence the provider writes about itself rather than about the
+   * caller**, and it reaches nobody.
+   *
+   * `[body.email] Invalid email address` names a field in the provider's own
+   * body schema. ADR-0007 forbids a refusal generated from validation
+   * internals, and is right to: a coding agent reading that learns the name of
+   * somebody else's parser and nothing it can act on. So neither half of it
+   * ships — not the code, which is the provider's word for its own schema, and
+   * not the sentence. It is held here rather than at either door, because the
+   * door that forgot would be the one nobody was looking at, which is exactly
+   * how signup came to be relaying it while the reset door was not.
+   */
+  it("never relays what the provider generated from its own body schema", async () => {
+    const door = await bothDoors(() =>
+      refusesWith(400, "VALIDATION_ERROR", "[body.email] Invalid email address"),
+    );
+
+    const [signedUp, reset] = await Promise.all([
+      door.inject({
+        method: "POST",
+        url: "/api/signup",
+        payload: {
+          email: "not-an-email",
+          password: "a-long-enough-password",
+          organizationName: "Acme",
+        },
+      }),
+      door.inject({
+        method: "POST",
+        url: "/api/password-reset/complete",
+        payload: { token: aLiveLink(), password: "a-long-enough-password" },
+      }),
+    ]);
+
+    for (const refused of [signedUp, reset]) {
+      const said = refused.json() as { error: string; message: string };
+      expect(refused.statusCode).toBe(400);
+      expect(said.error).not.toBe("validation_error");
+      expect(said.message).not.toContain("body.email");
+      // What is left is the door's own words, written for the person at it.
+      expect(said.message.length).toBeGreaterThan(0);
+    }
+
+    expect((signedUp.json() as { error: string }).error).toBe("signup_failed");
+  });
+
+  /**
    * And an answer that named no code egma could relay — a proxy's own page, an
    * empty body, HTML. A client branching on `error` must never be handed a
    * sentence or an empty string wearing the shape of a promise.

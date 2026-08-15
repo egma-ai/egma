@@ -13,8 +13,15 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  * holding one**, and the provider cannot tell them apart. It consumes the token
  * on the way past, so a spent token and an expired one are both simply a token
  * it no longer knows — one refusal, `Invalid token`, for "you already did this"
- * and "nothing happened at all". Egma carries the deadline itself, so the
- * refusal is decided before the provider is ever asked.
+ * and "nothing happened at all". The deadline in the link is what lets egma say
+ * which: **inside it**, a token the provider will not take is a token somebody
+ * already used, and egma says so.
+ *
+ * Past it, the two are one thing again. The provider is configured with the
+ * very same deadline, so its own record of the token goes at the same moment
+ * and there is nothing left to ask. Egma says that rather than guessing, and
+ * one number for both systems is what buys there being one door and one hour to
+ * state.
  *
  * **The signature is what makes the deadline worth reading.** Without it the
  * time in the link is a number the holder could edit, and a page would name its
@@ -28,7 +35,13 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  */
 
 /**
- * How long a link is worth following.
+ * How long a link is worth following — **one number, and both systems get it.**
+ *
+ * It is what the seal is stamped with, what the provider is configured with,
+ * and what the message, the page and the README all say. There is no second
+ * deadline for the stated one to be untrue against, and so nothing to spell
+ * around: the hour named is the hour a link lasts, whichever door its token
+ * reaches.
  *
  * Short, because unlike an invitation this one is a way into an account that
  * already exists, and the person asked for it seconds ago and is waiting for
@@ -37,74 +50,12 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  */
 export const PASSWORD_RESET_LIFETIME_MINUTES = 60;
 
-/**
- * How much longer the provider's own copy of the deadline runs.
- *
- * There are two deadlines because there are two systems, and **they are set
- * deliberately apart so that they can never disagree about which refusal a
- * person is owed**. Egma's is the one that decides, and it is the only one any
- * caller can reach: the provider's own reset endpoint is shut at egma's door,
- * so the hour named above is the hour a link actually lasts, everywhere. See
- * `routes/password-reset.ts`.
- *
- * The extra minutes do two jobs, and neither is about letting anybody in later:
- *
- * **They keep the spent-link inference sound.** Inside egma's deadline the
- * provider cannot be refusing over its own clock, so *the provider refused a
- * live link* means, exactly, that the link was spent.
- *
- * **They leave the provider's record readable after egma stops honouring the
- * link.** A token the provider still holds is a token nobody spent; one it no
- * longer holds is one somebody did. That is the only way egma can tell an
- * expired link from a used one *past* its own deadline without keeping a second
- * record of its own — and past this window it stops being able to, which is a
- * sentence the route has to be willing to write.
- */
-export const PASSWORD_RESET_PROVIDER_GRACE_MINUTES = 10;
-
-/** The provider's deadline, in the seconds its own option is written in. */
-export const PASSWORD_RESET_PROVIDER_LIFETIME_SECONDS =
-  (PASSWORD_RESET_LIFETIME_MINUTES + PASSWORD_RESET_PROVIDER_GRACE_MINUTES) * 60;
-
-/**
- * How much of the grace is deliberately not counted on.
- *
- * The two deadlines are stamped moments apart — the provider stamps its own as
- * it mints the token, egma stamps its own as the message for that token is
- * built — so the provider's expiry falls a shade *before* egma's plus the
- * grace, never after. This is that shade, made enormous: what it has to cover
- * is one row's insert, and a minute is longer than that by every measure a
- * machine has.
- *
- * It is here because a missing record is only evidence while the record would
- * certainly still have been there.
- */
-const PROVIDER_RECORD_MARGIN_MINUTES = 1;
-
 export type ResetLink = {
   /** The provider's own single-use token, which is what opens the account. */
   readonly token: string;
-  /** When egma stops honouring it, whatever the provider still thinks. */
+  /** When the link stops working, which is when the token stops working. */
   readonly expiresAt: Date;
 };
-
-/**
- * Whether the provider's record of this link would certainly still be there.
- *
- * **This is what decides whether egma may read anything into the provider's
- * silence.** Inside the window, a token the provider no longer knows is a token
- * somebody spent, and saying so is a fact. Outside it, the record has expired on
- * its own and a missing one means nothing — the link was used, or it was not,
- * and egma cannot tell which. A route that read the second case as the first
- * would tell somebody their password still works when it no longer does.
- */
-export function providerRecordSurvives(link: ResetLink, now: Date): boolean {
-  const survivesUntil =
-    link.expiresAt.getTime() +
-    (PASSWORD_RESET_PROVIDER_GRACE_MINUTES - PROVIDER_RECORD_MARGIN_MINUTES) *
-      60_000;
-  return now.getTime() < survivesUntil;
-}
 
 function signature(payload: string, secret: string): string {
   return createHmac("sha256", secret)
@@ -164,6 +115,15 @@ export function openResetLink(
 export const RETURN_TO_HEADER = "x-egma-return-to";
 
 /**
+ * Somewhere for the parser to stand, and nothing else.
+ *
+ * A name RFC 2606 reserves so that it can never resolve anywhere. Nothing is
+ * ever fetched from it: it is only what a candidate is measured against, and
+ * the measurement is that resolving must not move the origin.
+ */
+const HERE = "https://egma.invalid";
+
+/**
  * A path on this instance, or nothing.
  *
  * Somebody who was approving a terminal's login when they discovered they had
@@ -173,17 +133,34 @@ export const RETURN_TO_HEADER = "x-egma-return-to";
  *
  * So the return path travels in the link — which makes it a redirect decided by
  * a query parameter, the shape of every open-redirect bug there has ever been,
- * and this is the rule that stops it being one. One leading slash and no second:
- * `//elsewhere.example/x` is a URL a browser reads as another host, and a
- * backslash is refused too because some browsers have historically read it as a
- * slash. The web application applies the same rule again before it follows one.
+ * and this is the rule that stops it being one. **The candidate is resolved,
+ * and it has to land back where it started.**
+ *
+ * Listing the shapes that leave is what this used to do, and a list is a thing
+ * somebody finds the next entry in: `/<TAB>/elsewhere.example` was one, because
+ * a URL parser strips tab, carriage return and newline *before* it parses, so a
+ * browser reads that as `//elsewhere.example` and goes there. Asking the parser
+ * instead of guessing at it costs nothing and cannot be enumerated around.
+ *
+ * What comes back is the parser's own path, so nothing that survives can carry
+ * a stray control character on into a header either. The web application
+ * applies the same rule again before it follows one.
  */
 export function safeReturnPath(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
-  const path = raw.trim();
-  if (!path.startsWith("/")) return null;
-  if (path.startsWith("//") || path.startsWith("/\\")) return null;
-  return path;
+  const asked = raw.trim();
+  // Somewhere, rather than something: `device/approve` means whatever page is
+  // reading it, which is not a promise a link can carry.
+  if (!asked.startsWith("/")) return null;
+
+  let landed: URL;
+  try {
+    landed = new URL(asked, HERE);
+  } catch {
+    return null;
+  }
+  if (landed.origin !== HERE) return null;
+  return `${landed.pathname}${landed.search}${landed.hash}`;
 }
 
 /**

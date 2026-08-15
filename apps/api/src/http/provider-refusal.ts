@@ -11,19 +11,29 @@ import type { FastifyReply } from "fastify";
  * be two contracts. This module is the one translation,
  * and it is why a rate limit reads the same whichever door met it.
  *
- * **The provider's own spelling never reaches a client.** It writes
+ * **The provider's own spelling of a code never reaches a client.** It writes
  * `PASSWORD_TOO_SHORT`; egma's codes are snake_case, always, so what ships is
  * `password_too_short`. That is not decoration: a code is a promise egma makes
  * about egma, and shipping the vendor's exact spelling would make every code
  * in this API a vendor's word to keep — a provider swap would then be a
  * breaking change for every client rather than a change behind the seam.
  * egma's own refusals travel this same channel already spelled egma's way
- * (`invitation_required` from the signup hooks), and pass through untouched.
+ * (`invitation_required` from the signup hooks), and pass through untouched,
+ * sentence and all.
  *
  * A code egma cannot recognise as a code is not relayed at all. The caller's
  * fallback is used instead, because a client branching on `error` must never
  * be handed a sentence, a stack frame, or an empty string wearing the shape of
  * a promise.
+ *
+ * **The provider's sentence is relayed only where it is about the caller.**
+ * "Password is too short" describes what somebody typed, and the provider is
+ * the one holding that rule, so it goes back word for word. What its body
+ * schema writes does not: `[body.email] Invalid email address` names a field in
+ * a parser rather than the situation a person is in, and ADR-0007 forbids a
+ * refusal generated from validation internals. There is nothing in it to
+ * translate, so none of it is relayed — the door's own fallback is what a
+ * caller reads, at both doors, without either of them having to remember.
  */
 
 /** How long to wait when the provider refused for rate and said nothing more. */
@@ -31,6 +41,9 @@ const DEFAULT_RETRY_AFTER_SECONDS = 60;
 
 /** The shape every code in this API has, and the only shape that is relayed. */
 const A_CODE = /^[a-z][a-z0-9_]*$/;
+
+/** The provider's code for a body its own schema refused, whatever the door. */
+const GENERATED_FROM_THE_SCHEMA = "validation_error";
 
 export type ProviderRefusal = {
   readonly status: number;
@@ -84,6 +97,17 @@ export async function providerRefusal(
 
   const code =
     typeof said.code === "string" ? said.code.trim().toLowerCase() : "";
+
+  // A code that names the provider's own body schema, whose sentence names a
+  // field inside it. Nothing about either is egma's to ship, so neither is.
+  if (code === GENERATED_FROM_THE_SCHEMA) {
+    return {
+      status: response.status,
+      error: fallback.error,
+      message: fallback.message,
+      retryAfterSeconds: undefined,
+    };
+  }
 
   return {
     status: response.status,

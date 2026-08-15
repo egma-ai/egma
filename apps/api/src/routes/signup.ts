@@ -144,11 +144,18 @@ export async function signupRoutes(
       //
       // The translation is shared with the other route that relays to the
       // provider, so the same refusal cannot be spelled two ways by two doors.
+      //
+      // This sentence is what a caller reads whenever the provider refused the
+      // body itself, because the provider's own words for that name a field in
+      // its parser. So it says what to look at rather than only that something
+      // went wrong.
       return sendProviderRefusal(
         reply,
         await providerRefusal(response, {
           error: "signup_failed",
-          message: "signing up did not complete",
+          message:
+            "signing up did not complete. Check the email address and the " +
+            "password, then send it again.",
         }),
       );
     }

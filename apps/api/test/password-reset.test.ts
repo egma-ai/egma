@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  PASSWORD_RESET_LIFETIME_MINUTES,
-  PASSWORD_RESET_PROVIDER_GRACE_MINUTES,
-} from "../src/auth/password-reset.ts";
+import { PASSWORD_RESET_LIFETIME_MINUTES } from "../src/auth/password-reset.ts";
 import type { Email } from "../src/auth/email.ts";
 import { cookiesFrom, createApi, type TestApi } from "./support/api.ts";
 
@@ -102,6 +99,20 @@ function rawTokenIn(sealed: string): string {
   return opened.slice(0, opened.lastIndexOf(":"));
 }
 
+/**
+ * Something that has not happened yet because nothing waits for it. Polls
+ * rather than sleeps, so the test is as quick as the work is and never a
+ * threshold somebody has to raise on a busy machine.
+ */
+async function eventually<T>(look: () => T | undefined): Promise<T> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const found = look();
+    if (found !== undefined) return found;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("it never happened");
+}
+
 /** The clock, moved on, with only `Date` faked so the stores keep their timers. */
 function minutesLater(minutes: number): void {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -193,10 +204,10 @@ describe("a developer who forgot their password", () => {
 
 describe("a link that is no longer worth following", () => {
   /**
-   * The two refusals are never shared, because they mean opposite things to
-   * whoever is holding the link. A spent one says you already did this — sign
-   * in, or ask again if it was not you. An expired one says nothing happened at
-   * all: ask for another.
+   * Inside the hour, a token the provider will not take is a token somebody
+   * already used, and the refusal says exactly that — because "you already did
+   * this, so sign in" and "nothing happened at all, so ask for another" are
+   * opposite instructions to whoever is holding the link.
    */
   it("says the link was already used, when it was", async () => {
     api = await createApi("reset_spent", { emailDelivers: true });
@@ -218,7 +229,18 @@ describe("a link that is no longer worth following", () => {
     ).not.toBe(200);
   });
 
-  it("says the link ran out of time, when that is what happened instead", async () => {
+  /**
+   * And past the hour, egma says what it knows, which is that the link is dead.
+   *
+   * There is one deadline and both systems have it, so the moment egma stops
+   * honouring a link is the moment the provider forgets the token. Nothing is
+   * left to ask, a link that ran out unused and one somebody spent look
+   * identical from out here, and either of the other two sentences would be a
+   * guess. **That is the price of one number**, and it is written down as two
+   * tests rather than one, because the two situations it flattens together are
+   * opposite and a reader has to see both of them being flattened.
+   */
+  it("says only what it can still check, once the hour is up and nobody used the link", async () => {
     api = await createApi("reset_expired", { emailDelivers: true });
     await signUp("ada@acme.example");
 
@@ -231,25 +253,21 @@ describe("a link that is no longer worth following", () => {
     vi.useRealTimers();
 
     expect(late.status).toBe(409);
-    expect(late.body.error).toBe("reset_link_expired");
-    expect(String(late.body.message)).toMatch(/ran out of time|expired/i);
+    expect(late.body.error).toBe("reset_link_no_longer_works");
+    expect(String(late.body.message)).toMatch(/whether it was used/i);
 
-    // Different code, different sentence — and the password is untouched.
-    expect(late.body.error).not.toBe("reset_link_already_used");
+    // Nothing was set by asking, and the password they forgot is still theirs.
     expect((await signIn("ada@acme.example", FORGOTTEN)).status).toBe(200);
+    expect((await signIn("ada@acme.example", CHOSEN)).status).not.toBe(200);
   });
 
   /**
-   * **A link that was used and then followed again after the deadline is a used
-   * link, not an expired one**, and the difference is the whole of what the
-   * person is told. Deciding it from egma's clock alone would say "nothing has
-   * changed" about an account whose password had changed, and send somebody to
-   * go on using a password that no longer signs them in.
-   *
-   * What makes the true answer reachable is that the provider is asked what it
-   * still holds, by an endpoint that reads a token without spending it.
+   * The same answer for the opposite situation, and **the sentence that must
+   * never be written is the one that guesses**: telling somebody nothing has
+   * changed, about an account whose password has changed, sends them off to go
+   * on using a password that no longer signs them in.
    */
-  it("still says the link was used, when it was used and then followed late", async () => {
+  it("says the same when the link was used and then followed after the hour", async () => {
     api = await createApi("reset_spent_then_late", { emailDelivers: true });
     await signUp("ada@acme.example");
 
@@ -261,41 +279,14 @@ describe("a link that is no longer worth following", () => {
     vi.useRealTimers();
 
     expect(late.status).toBe(409);
-    expect(late.body.error).toBe("reset_link_already_used");
-
-    // The state the refusal names, against the state that is actually true.
-    expect((await signIn("ada@acme.example", CHOSEN)).status).toBe(200);
-    expect((await signIn("ada@acme.example", FORGOTTEN)).status).not.toBe(200);
-  });
-
-  /**
-   * And where egma cannot check, it says so rather than choosing.
-   *
-   * Past the provider's own record the two are genuinely indistinguishable
-   * without a second record egma does not keep. Both of the other sentences
-   * would be a guess, and each one sends half the people holding such a link
-   * the wrong way, so the third answer says what is known and what is not.
-   */
-  it("says only what it can still check, once the provider's record has gone too", async () => {
-    api = await createApi("reset_long_dead", { emailDelivers: true });
-    await signUp("ada@acme.example");
-
-    const token = tokenIn(await linkSentTo("ada@acme.example"));
-
-    minutesLater(
-      PASSWORD_RESET_LIFETIME_MINUTES + PASSWORD_RESET_PROVIDER_GRACE_MINUTES + 1,
-    );
-    const late = await setPassword(token, CHOSEN);
-    vi.useRealTimers();
-
-    expect(late.status).toBe(409);
     expect(late.body.error).toBe("reset_link_no_longer_works");
     // It claims neither of the two things it cannot see.
     expect(String(late.body.message)).not.toMatch(/nothing has changed/i);
-    expect(String(late.body.message)).toMatch(/whether it was used/i);
+    expect(String(late.body.message)).not.toMatch(/old password still works/i);
 
-    // And nothing was set by asking.
-    expect((await signIn("ada@acme.example", FORGOTTEN)).status).toBe(200);
+    // The state the refusal declines to name, against the one that is true.
+    expect((await signIn("ada@acme.example", CHOSEN)).status).toBe(200);
+    expect((await signIn("ada@acme.example", FORGOTTEN)).status).not.toBe(200);
   });
 
   it("refuses a link that was never one of egma's, naming nothing", async () => {
@@ -315,67 +306,61 @@ describe("a link that is no longer worth following", () => {
  *
  * The seal is signed rather than encrypted, so the provider's own token reads
  * straight out of any link, and the provider's whole surface is served under
- * this instance's origin. If its own reset endpoint answered, the deadline the
- * message names would be the deadline egma's door honours and nothing more.
+ * this instance's origin. **So the provider's own deadline is the one that has
+ * to be true**, and it is: egma states an hour and configures the provider with
+ * that same hour, which is why there is now nothing to shut and nothing to
+ * spell around.
+ *
+ * A route of egma's own in front of that endpoint would only ever have been a
+ * spelling of it. `POST /api/auth/x/../reset-password` reaches the same handler
+ * — Fastify matches the target as it arrived, so an exact route never sees it,
+ * while the URL the provider is handed is parsed with its dot segments removed
+ * — and that is exactly the shape a shorter deadline behind a longer one gets
+ * found through. So both spellings are driven here, and neither is a way in.
  */
 describe("the provider's own reset endpoint", () => {
   async function setPasswordAtTheProvider(
+    url: string,
     token: string,
     password: string,
-  ): Promise<{ status: number; body: string }> {
+  ): Promise<number> {
     const response = await api.app.inject({
       method: "POST",
-      url: "/api/auth/reset-password",
+      url,
       headers: {
         "content-type": "application/json",
         origin: api.config.baseUrl,
       },
       payload: { token, newPassword: password },
     });
-    return { status: response.statusCode, body: response.body };
+    return response.statusCode;
   }
 
-  it("does not honour the raw token past the hour the message names", async () => {
+  it("stops honouring the raw token at the same hour the message names", async () => {
     api = await createApi("reset_raw_late", { emailDelivers: true });
     await signUp("ada@acme.example");
     const raw = rawTokenIn(tokenIn(await linkSentTo("ada@acme.example")));
 
-    // Halfway through the minutes the provider's own copy of the deadline runs
-    // on for — the window this used to be a way in through.
-    minutesLater(
-      PASSWORD_RESET_LIFETIME_MINUTES + PASSWORD_RESET_PROVIDER_GRACE_MINUTES / 2,
+    minutesLater(PASSWORD_RESET_LIFETIME_MINUTES + 1);
+    const direct = await setPasswordAtTheProvider(
+      "/api/auth/reset-password",
+      raw,
+      CHOSEN,
     );
-    const direct = await setPasswordAtTheProvider(raw, CHOSEN);
+    const around = await setPasswordAtTheProvider(
+      "/api/auth/x/../reset-password",
+      raw,
+      CHOSEN,
+    );
     vi.useRealTimers();
 
-    expect(direct.status).toBe(404);
-    expect(direct.body).toContain("/api/password-reset/complete");
+    expect(direct).not.toBe(200);
+    expect(around).not.toBe(200);
 
-    // The password is the one they forgot, and the one they typed is nothing.
+    // The password is the one they forgot, and the one somebody typed at the
+    // provider's own door is nothing.
     expect((await signIn("ada@acme.example", FORGOTTEN)).status).toBe(200);
     expect((await signIn("ada@acme.example", CHOSEN)).status).not.toBe(200);
-  });
-
-  it("does not honour it inside the hour either, so there is one door", async () => {
-    api = await createApi("reset_raw_early", { emailDelivers: true });
-    await signUp("ada@acme.example");
-    const sealed = tokenIn(await linkSentTo("ada@acme.example"));
-
-    expect((await setPasswordAtTheProvider(rawTokenIn(sealed), CHOSEN)).status)
-      .toBe(404);
-    expect((await signIn("ada@acme.example", CHOSEN)).status).not.toBe(200);
-
-    // And the link itself still works, which is what says the token was never
-    // spent by being refused.
-    expect((await setPassword(sealed, CHOSEN)).status).toBe(200);
-    expect((await signIn("ada@acme.example", CHOSEN)).status).toBe(200);
-  });
-
-  it("leaves the rest of the provider's surface alone", async () => {
-    api = await createApi("reset_surface", { emailDelivers: true });
-    await signUp("ada@acme.example");
-
-    expect((await signIn("ada@acme.example", FORGOTTEN)).status).toBe(200);
   });
 });
 
@@ -481,6 +466,38 @@ describe("asking for a link", () => {
   });
 
   /**
+   * And when a message that nothing waits for does not go, **an operator can
+   * read why**.
+   *
+   * The log is the only place such a failure can appear, and the provider hands
+   * the cause along beside its own sentence. Pino writes an `Error` as `{}`
+   * under any key but `err`, so a bridge that put the cause anywhere else left
+   * "Failed to run background task:" with an empty object under it: an operator
+   * learns that something broke and nothing about what.
+   */
+  it("writes the cause of a message that did not go, where an operator reads it", async () => {
+    const lines: string[] = [];
+    api = await createApi("reset_send_failed", {
+      emailDelivers: true,
+      logTo: { write: (line) => lines.push(line) },
+      emailSendCompletesOn: () =>
+        Promise.reject(new Error("the smtp server refused the message")),
+    });
+    await signUp("ada@acme.example");
+
+    expect((await askForALink("ada@acme.example")).status).toBe(202);
+
+    const failure = await eventually(() =>
+      lines
+        .map((line) => JSON.parse(line) as { level: number; err?: unknown })
+        .find((line) => line.level >= 50 && line.err !== undefined),
+    );
+    const cause = failure.err as { type?: string; message?: string; stack?: string };
+    expect(cause.message).toBe("the smtp server refused the message");
+    expect(cause.stack).toContain("the smtp server refused the message");
+  });
+
+  /**
    * Where somebody was going survives the message, because the message is the
    * one hop no page does: a fresh tab, minutes later, with nothing left holding
    * it. A developer who was approving a terminal's login when they discovered
@@ -495,6 +512,15 @@ describe("asking for a link", () => {
     expect(link.searchParams.get("next")).toBe("/device/approve?code=WDJB");
   });
 
+  /**
+   * **This door is open to the whole internet and it writes a message egma
+   * signs its own name to**, so a return path that leaves the instance is an
+   * open redirect somebody else gets to post. The tab is the one that mattered:
+   * `/<TAB>/elsewhere.example` passed a rule written as a list of shapes, and a
+   * browser reads it as `//elsewhere.example` because a URL parser strips the
+   * tab before it parses. A victim would have got a genuine egma link, on the
+   * real origin, and landed off the instance the moment they signed in.
+   */
   it("writes nothing that could send somebody off this instance", async () => {
     api = await createApi("reset_return_elsewhere", { emailDelivers: true });
     await signUp("ada@acme.example");
@@ -504,9 +530,33 @@ describe("asking for a link", () => {
       "//elsewhere.example/x",
       "/\\elsewhere.example",
       "javascript:alert(1)",
+      "/\t/elsewhere.example",
+      "/\t\\elsewhere.example",
+      "/\n/elsewhere.example",
+      "/\r\n//elsewhere.example",
     ]) {
       const link = await linkSentTo("ada@acme.example", hostile);
       expect(link.searchParams.get("next"), hostile).toBeNull();
     }
+  });
+
+  /**
+   * And a path that stays here but carries a line break is answered rather than
+   * thrown over. It used to travel to the provider as a header, where
+   * `Headers.append` refused it: an unauthenticated caller could reach a 500 and
+   * an error-level log with a stack in it, from a public door, by typing two
+   * characters. ADR-0007 has no room for either.
+   */
+  it("does not break over a line ending in one", async () => {
+    api = await createApi("reset_return_crlf", { emailDelivers: true });
+    await signUp("ada@acme.example");
+
+    const asked = await askForALink("ada@acme.example", "/foo\r\nx: y");
+    expect(asked.status).toBe(202);
+
+    const link = linkIn(api.mail.at(-1) as Email);
+    const next = link.searchParams.get("next");
+    expect(next).not.toBeNull();
+    expect(next).not.toMatch(/[\r\n]/);
   });
 });

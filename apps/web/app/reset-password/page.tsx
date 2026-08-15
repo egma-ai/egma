@@ -12,15 +12,14 @@ import { AuthShell, Field, Notice, StatePage, styles } from "../ui.tsx";
  * there is no address to type and nothing to get wrong — the same reason the
  * invitation page shows the address rather than asking for it.
  *
- * **A spent link and an expired one say different things**, because they mean
- * opposite things to whoever is holding one: you already did this, so sign in —
- * versus nothing happened at all, so ask for another. The API decides which,
- * and this page never guesses between them.
+ * **A link somebody already used says so**, because "you already did this, so
+ * sign in" and "nothing happened at all, so ask for another" are opposite
+ * instructions. The API decides which, and this page never guesses between them.
  *
- * **There is a third answer**, and it has a page of its own for that same
- * reason. A link too old for the API to tell which of the two it is gets a
- * sentence that says so, because a page that picked the likelier one would tell
- * half the people holding it to go on using a password that no longer works.
+ * **Once the hour is up the API can no longer tell which**, and that has a page
+ * of its own for the same reason: a page that picked the likelier one would
+ * tell half the people holding such a link to go on using a password that no
+ * longer works. So it says both, and what to do either way.
  *
  * Setting the password does not sign anybody in. Two steps a person can see is
  * better than one they cannot, and using the password is what proves it works.
@@ -125,21 +124,8 @@ export default function ResetPasswordPage() {
     );
   }
 
-  // Said only where the API has checked it: this one means the provider was
-  // asked and still holds the token, so nobody used the link.
-  if (refused?.error === "reset_link_expired") {
-    return (
-      <StatePage
-        title="That link has run out of time"
-        lead="Nobody used it, so nothing has changed and your old password still works. Ask for another link and it will let you in."
-      >
-        <p className={styles.linkLine}>
-          <a href={forgotHref}>Ask for another link</a>
-        </p>
-      </StatePage>
-    );
-  }
-
+  // Said only where the API has checked it: inside the hour, a token the
+  // provider will not take is a token somebody already used.
   if (refused?.error === "reset_link_already_used") {
     return (
       <StatePage
@@ -154,10 +140,10 @@ export default function ResetPasswordPage() {
     );
   }
 
-  // The third answer. Old enough that the API cannot tell which of the two
-  // above it is, so the page says both rather than choosing one — telling
-  // somebody their old password still works when it may not is the failure this
-  // whole page is arranged to avoid.
+  // Past the hour, where the API can check nothing: the auth provider forgot
+  // the token at the same moment egma stopped honouring it. So the page says
+  // both rather than choosing one — telling somebody their old password still
+  // works when it may not is the failure this whole page is arranged to avoid.
   if (refused?.error === "reset_link_no_longer_works") {
     return (
       <StatePage

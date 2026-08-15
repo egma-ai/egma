@@ -112,8 +112,17 @@ export function buildApi(options: ServerOptions): Api {
     basePath: AUTH_BASE_PATH,
     secret: config.authSecret,
     emailSender,
+    // The provider says what happened in a sentence and hands the cause along
+    // beside it. Pino writes an `Error` as `{}` under any key but `err`, so
+    // putting a cause anywhere else leaves an operator reading "Failed to run
+    // background task:" with nothing under it. The cause goes where the
+    // serializer looks for it, and whatever else came with it stays beside it.
     log: (level, message, details) => {
-      app.log[level]({ details }, message);
+      const cause = details.find((detail) => detail instanceof Error);
+      app.log[level](
+        { err: cause, details: details.filter((detail) => detail !== cause) },
+        message,
+      );
     },
     hooks: {
       admitIdentity: admitIdentity(config.singleOrganization),

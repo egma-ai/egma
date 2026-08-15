@@ -110,9 +110,16 @@ const config: NextConfig = {
         // browser already has a session for, and every one of these routes
         // authenticates for itself.
         //
-        // One rule and not two: `:path*` matches zero segments, so this also
-        // matches the bare `/v1/traces` and forwards it to exactly that, with
-        // no trailing slash for the API to have an opinion about.
+        // Two rules, because one does not do it. `:path*` is documented as
+        // matching zero segments, and in this process it does — but on the
+        // hosted deployment the bare `/v1/traces` fell straight through it to
+        // this app's own routing, which has no such page:
+        // `POST https://app.egma.ai/v1/traces` answered 404 while the API
+        // answered 401 for the same request. An exporter pointed at the pages
+        // origin would have posted into a 404 and reported nothing wrong. So
+        // the bare path is named outright, rather than left to depend on how a
+        // host reads the wildcard.
+        { source: "/v1/traces", destination: `${api}/v1/traces` },
         { source: "/v1/traces/:path*", destination: `${api}/v1/traces/:path*` },
       ],
       afterFiles: [],
