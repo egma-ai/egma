@@ -6,7 +6,9 @@ import {
   runClickHouseMigrations,
   runMigrations,
   seedDefaultJudge,
+  seedGraderLibrary,
   seedPlatformSettings,
+  seedRunningGraders,
 } from "@egma/db";
 
 import { loadConfig } from "./config.ts";
@@ -42,6 +44,29 @@ const judged =
 // redeploy carrying a script's copy of an old key cannot undo a new one.
 const seeded = await seedPlatformSettings(config.platformSettings);
 
+// egma's own graders, written onto the shelf from egma's own catalog. After the
+// migrations because it writes rows, and before the first request because a
+// project reading its Library a second later has to find them there.
+//
+// An upsert keyed by fixed identifiers, so this is free on every boot after the
+// first: a release that improved a judge prompt refreshes that row and bumps
+// its version, and a release that changed nothing writes nothing at all — not
+// even `updated_at`. That is what makes running it every time the mechanism
+// rather than half of one.
+const shelved = await seedGraderLibrary();
+
+// And the other half of it: a shelf full of definitions judges nothing until a
+// project is running a copy of one. Every project created from now on is born
+// with the `expected_behaviors` copy inside the transaction that creates it;
+// this writes it into every project made before that was true, so no project —
+// new or old — runs unjudged.
+//
+// After the seeding above, because the copy points at the entry and the foreign
+// key means it. Idempotent for a reason stronger than the upsert's: it asks
+// whether a project has ever *had* a copy, so a team that switched theirs off
+// keeps it off across every restart.
+const judging = await seedRunningGraders();
+
 const { app } = buildApi({ config });
 if (seeded.length > 0) {
   // The names, never the values and never their hints: what is worth saying is
@@ -49,6 +74,23 @@ if (seeded.length > 0) {
   app.log.info(
     { settings: seeded },
     "the environment supplied platform settings this deployment was missing",
+  );
+}
+if (shelved.length > 0) {
+  // The names and the versions: what is worth saying is which of egma's own
+  // graders this release put on the shelf or moved, and a version of 1 is one
+  // that arrived while anything higher is one whose definition changed.
+  app.log.info(
+    { graders: shelved },
+    "egma's predefined graders were written to the library",
+  );
+}
+if (judging.length > 0) {
+  // The projects, never anything a customer wrote: what is worth saying is that
+  // projects which had no mandatory grading now have it, and which ones.
+  app.log.info(
+    { projects: judging.map((copy) => copy.projectId) },
+    "egma's expected-behaviors grader was switched on in projects that had never had it",
   );
 }
 if (judged.length > 0) {

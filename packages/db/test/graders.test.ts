@@ -1,18 +1,20 @@
 import { isId, newId } from "@egma/ids";
 import {
   CATALOGED_MEASURES,
-  MEASURE_CATALOG_DOCUMENT,
-  MEASURE_CATALOG_VERSION,
+  SPAN_DERIVED_MEASURES,
 } from "@egma/simulation-contract";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   advanceProductionSampling,
-  createGrader,
   editGrader,
   getGrader,
   NotPermittedError,
+  PREDEFINED_GRADERS,
   ProjectOutsideOrganizationError,
+  UnknownGraderLibraryEntryError,
+  useLibraryEntry,
+  type UseLibraryEntry,
 } from "@egma/db";
 
 import {
@@ -31,15 +33,19 @@ import {
 } from "./support/test-factory.ts";
 
 /**
- * Creating a grader and fetching it back, through the factory functions only.
- * Raw SQL appears in the row counts proving what a refused write left behind,
- * in the insert that bypasses the module to show the database refuses what the
- * module never attempts, and in the one hand-corrupted row no seam can write.
+ * Pressing **Use** on a library entry, and reading the running copy back —
+ * through the factory functions only. Raw SQL appears in the row counts proving
+ * what a refused write left behind, in the insert that bypasses the module to
+ * show the database refuses what the module never attempts, and in the one
+ * hand-corrupted row no seam can write.
  *
- * What a grader judges by is checked at this door and nowhere later: a config
- * that does not fit the type its author declared is refused here, in words that
- * name the field, because the alternative is a grader that runs for a month and
- * judges nothing.
+ * **There is one door that makes a grader and it takes a pointer, not a type.**
+ * That is the whole shape of the redesign at this level: the entry decides what
+ * kind of judgment this is and what the form asks for, and the copy holds the
+ * answers. So what this file checks is not "does a config fit a type" but "do
+ * the filled-in values answer what the entry actually asked" — refused here, in
+ * words that name the parameter, because the alternative is a grader that runs
+ * for a month and judges nothing.
  */
 
 let database: MigratedDatabase;
@@ -52,22 +58,27 @@ afterAll(async () => {
   await database.drop();
 });
 
-/** The rubric this file authors, whole enough to be worth reading back. */
-const empathy = {
-  name: "Stays kind when the caller is upset",
-  description: "The one nobody can write as a rule",
-  type: "llm_rubric",
-  config: {
-    rubric:
-      "The agent acknowledges the caller's frustration before it explains anything, and never repeats a policy the caller has already refused.",
-  },
-} as const;
+/**
+ * A copy of the entry that computes: it asks for a measure and a bound, so it
+ * is the one entry whose Use form has anything in it at all.
+ */
+const aLatencyCopy: UseLibraryEntry = {
+  libraryId: PREDEFINED_GRADERS.latency,
+  params: { metric: "turn_response_latency", bound: 2_000 },
+};
 
-describe("creating a grader", () => {
+/** A copy of the judged entry, whose form asks for nothing. */
+const aBehaviorsCopy: UseLibraryEntry = {
+  libraryId: PREDEFINED_GRADERS.expectedBehaviors,
+};
+
+describe("using a library entry", () => {
   it("returns a grd_ id and fetch round-trips every input", async () => {
-    const created = await createGrader(actingAsAcme(), {
-      ...empathy,
-      priority: "P1",
+    const created = await useLibraryEntry(actingAsAcme(), {
+      ...aLatencyCopy,
+      name: "Answers inside two seconds",
+      description: "The one nobody argues about",
+      required: false,
       scope: "both",
       productionSampleRate: 10,
       judgeModel: { provider: "openai", model: "gpt-4.1" },
@@ -78,12 +89,11 @@ describe("creating a grader", () => {
 
     const fetched = await getGrader(actingAsAcme(), created.id);
     expect(fetched).toBeDefined();
-    expect(fetched?.name).toBe(empathy.name);
-    expect(fetched?.description).toBe(empathy.description);
-    expect(fetched?.type).toBe("llm_rubric");
+    expect(fetched?.libraryId).toBe(PREDEFINED_GRADERS.latency);
+    expect(fetched?.name).toBe("Answers inside two seconds");
+    expect(fetched?.description).toBe("The one nobody argues about");
     expect(fetched?.version).toBe(1);
-    expect(fetched?.config).toEqual(empathy.config);
-    expect(fetched?.priority).toBe("P1");
+    expect(fetched?.required).toBe(false);
     expect(fetched?.scope).toBe("both");
     expect(fetched?.productionSampleRate).toBe(10);
     expect(fetched?.judgeModel).toEqual({
@@ -93,13 +103,43 @@ describe("creating a grader", () => {
     expect(fetched?.projectId).toBe(acme.project);
   });
 
+  /**
+   * The type is the entry's answer and never the caller's. Nothing in the input
+   * shape can say it, and what lands on the row is what the shelf said — which
+   * is what keeps every version behind this copy holding values that this kind
+   * of judgment actually takes.
+   */
+  it("copies the type down from the entry, and takes none from the caller", async () => {
+    const computed = await useLibraryEntry(actingAsAcme(), aLatencyCopy);
+    const judged = await useLibraryEntry(actingAsAcme(), aBehaviorsCopy);
+
+    expect(computed.type).toBe("code");
+    expect(judged.type).toBe("llm_as_judge");
+  });
+
+  /**
+   * A copy nobody renamed says on screen which grader it is a copy of. The
+   * alternative is a Running-graders list of rows called "Untitled", each of
+   * which somebody then has to open to find out what it does.
+   */
+  it("names the copy after the entry when nobody named it", async () => {
+    const created = await useLibraryEntry(actingAsAcme(), aBehaviorsCopy);
+    expect(created.name).toBe("expected_behaviors");
+
+    const named = await useLibraryEntry(actingAsAcme(), {
+      ...aBehaviorsCopy,
+      name: "  Our own words for it  ",
+    });
+    expect(named.name).toBe("Our own words for it");
+  });
+
   it("blocks, judges simulations and names no judge of its own by default", async () => {
-    const created = await createGrader(actingAsAcme(), empathy);
+    const created = await useLibraryEntry(actingAsAcme(), aLatencyCopy);
 
     const fetched = await getGrader(actingAsAcme(), created.id);
-    // Blocking by default, because a check somebody wrote is a check they
-    // expect to be believed; production is opt-in, because it costs money.
-    expect(fetched?.priority).toBe("P0");
+    // Required by default, because a grader somebody switched on is a grader
+    // they expect to be believed; production is opt-in, because it costs money.
+    expect(fetched?.required).toBe(true);
     expect(fetched?.scope).toBe("simulations");
     expect(fetched?.productionSampleRate).toBe(100);
     expect(fetched?.judgeModel).toBeNull();
@@ -107,23 +147,41 @@ describe("creating a grader", () => {
 
   it("is allowed to a member and refused to a viewer, per the permission table", async () => {
     await expect(
-      createGrader(actingAsAcme("viewer"), empathy),
+      useLibraryEntry(actingAsAcme("viewer"), aLatencyCopy),
     ).rejects.toThrow(NotPermittedError);
 
-    const created = await createGrader(actingAsAcme("member"), empathy);
+    const created = await useLibraryEntry(actingAsAcme("member"), aLatencyCopy);
     const fetchedByViewer = await getGrader(actingAsAcme("viewer"), created.id);
-    expect(fetchedByViewer?.name).toBe(empathy.name);
+    expect(fetchedByViewer?.id).toBe(created.id);
   });
 
   it("is refused to a credential acting in no project", async () => {
     await expect(
-      createGrader({ ...actingAsAcme(), projectId: undefined }, empathy),
+      useLibraryEntry(
+        { ...actingAsAcme(), projectId: undefined },
+        aLatencyCopy,
+      ),
     ).rejects.toThrow(/project/);
   });
 
+  /**
+   * An entry that is not on this caller's shelf and one that was never written
+   * get the same refusal, because telling them apart would answer a question
+   * about somebody else's shelf.
+   */
+  it("is refused for an entry that is not on the shelf, leaving no rows", async () => {
+    const before = await rowCounts();
+
+    await expect(
+      useLibraryEntry(actingAsAcme(), { libraryId: newId("grl") }),
+    ).rejects.toThrow(UnknownGraderLibraryEntryError);
+
+    expect(await rowCounts()).toEqual(before);
+  });
+
   it("cannot commit halfway: an identity row without its version dies at commit", async () => {
-    // The factory writes the grader and its version in one transaction, so a
-    // create that fails part-way leaves nothing. That guarantee is the deferred
+    // The factory writes the copy and its version in one transaction, so a Use
+    // that fails part-way leaves nothing. That guarantee is the deferred
     // pointer constraint, and this proves it where it lives — at commit, in the
     // database, for a writer that is not the factory.
     const connection = await openSingleConnection(database.url);
@@ -132,9 +190,15 @@ describe("creating a grader", () => {
       await connection.sql("begin");
       await connection.sql(
         `insert into grader
-           (id, organization_id, project_id, name, type, priority, current_version_id)
-         values ($1, $2, $3, 'Halfway', 'llm_rubric', 'P0', $4)`,
-        [orphan, acme.organization, acme.project, newId("grv")],
+           (id, organization_id, project_id, library_id, name, type, current_version_id)
+         values ($1, $2, $3, $4, 'Halfway', 'code', $5)`,
+        [
+          orphan,
+          acme.organization,
+          acme.project,
+          PREDEFINED_GRADERS.latency,
+          newId("grv"),
+        ],
       );
 
       await expect(connection.sql("commit")).rejects.toSatisfy(
@@ -149,303 +213,353 @@ describe("creating a grader", () => {
       await connection.close();
     }
   });
-});
 
-describe("each type of grader", () => {
-  it("keeps a metric_threshold's measure, aggregation, comparator and threshold", async () => {
-    const created = await createGrader(actingAsAcme(), {
-      name: "Answers within two seconds",
-      type: "metric_threshold",
-      config: {
-        measure: "turn_response_latency",
-        aggregation: "p90",
-        comparator: "below",
-        threshold: 2000,
-      },
-    });
-
-    const fetched = await getGrader(actingAsAcme(), created.id);
-    expect(fetched?.type).toBe("metric_threshold");
-    expect(fetched?.config).toEqual({
-      measure: "turn_response_latency",
-      aggregation: "p90",
-      comparator: "below",
-      threshold: 2000,
-    });
-  });
-
-  it("keeps a tool_calls grader's required and forbidden tools, and their arguments", async () => {
-    const created = await createGrader(actingAsAcme(), {
-      name: "Refunds through the refund tool",
-      type: "tool_calls",
-      config: {
-        required: [{ tool: "issue_refund", arguments: { currency: "USD" } }],
-        forbidden: [{ tool: "transfer_to_human" }],
-      },
-    });
-
-    const fetched = await getGrader(actingAsAcme(), created.id);
-    // The list a caller left out is stored empty rather than absent, and a tool
-    // named with no argument constraint says so with a null: what lands in the
-    // row is complete, so no reader has to know what a missing field meant.
-    expect(fetched?.config).toEqual({
-      required: [{ tool: "issue_refund", arguments: { currency: "USD" } }],
-      forbidden: [{ tool: "transfer_to_human", arguments: null }],
-    });
-  });
-
-  it("fills a phrase_match grader's defaults in at the door, not at read time", async () => {
-    const created = await createGrader(actingAsAcme(), {
-      name: "Never promises a refund",
-      type: "phrase_match",
-      config: { banned: [{ text: "guaranteed refund" }] },
-    });
-
-    const fetched = await getGrader(actingAsAcme(), created.id);
-    expect(fetched?.config).toEqual({
-      required: [],
-      banned: [{ text: "guaranteed refund", match: "contains" }],
-      // The agent's turns, because the persona is egma's own synthetic caller
-      // and judging what egma made it say would be judging egma.
-      speaker: "agent",
-    });
-  });
-
-  it("keeps a phrase pattern and a speaker the author chose", async () => {
-    const created = await createGrader(actingAsAcme(), {
-      name: "States the recording disclosure",
-      type: "phrase_match",
-      config: {
-        required: [{ text: "this call (is|may be) recorded", match: "regex" }],
-        speaker: "either",
-      },
-    });
-
-    const fetched = await getGrader(actingAsAcme(), created.id);
-    expect(fetched?.config).toEqual({
-      required: [{ text: "this call (is|may be) recorded", match: "regex" }],
-      banned: [],
-      speaker: "either",
-    });
-  });
-});
-
-describe("a grader whose config does not fit its type", () => {
-  /** What a refusal has to do: say the field, and write nothing. */
-  async function refusedNaming(
-    input: Parameters<typeof createGrader>[1],
-    field: RegExp,
-  ): Promise<void> {
-    const before = await rowCounts();
-    await expect(createGrader(actingAsAcme(), input)).rejects.toThrow(field);
-    expect(await rowCounts()).toEqual(before);
-  }
-
-  it("is refused when a metric_threshold names no measure", async () => {
-    await refusedNaming(
-      {
-        name: "Reads nothing",
-        type: "metric_threshold",
-        config: {
-          measure: "  ",
-          aggregation: "p90",
-          comparator: "below",
-          threshold: 2000,
-        },
-      },
-      /measure/,
+  /**
+   * The pointer is the connecting tissue and the database means it. A copy
+   * naming an entry that is not there is refused by the foreign key, not merely
+   * by the module above it — which is what makes "never orphaned" true of a
+   * hand-written statement too.
+   */
+  it("refuses a copy pointing at an entry that does not exist, even for raw SQL", async () => {
+    await expect(
+      database.sql(
+        `insert into grader
+           (id, organization_id, project_id, library_id, name, type, current_version_id)
+         values ($1, $2, $3, $4, 'Points at nothing', 'code', $5)`,
+        [
+          newId("grd"),
+          acme.organization,
+          acme.project,
+          newId("grl"),
+          newId("grv"),
+        ],
+      ),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
     );
   });
 
   /**
-   * The one write-door rule that is about the world rather than about the shape.
-   *
-   * A threshold grader names what it reads as a string, and a string naming
-   * nothing produces a grader that reads nothing, judges nothing and is
-   * `skipped` forever — green, silent, and wrong. Nothing downstream can catch
-   * it: a missing measure is a legitimate `skipped` on a chat conversation with
-   * no audio, so the engine cannot tell a typo from a modality. Only this moment
-   * can.
+   * Two words and no more. The reserved three — `human`, `ml_model`, `external`
+   * — are refused by name here as they are on the shelf, because a copy holding
+   * a type no engine executes is a grader somebody believes in that can never
+   * fire.
    */
-  it("is refused when a metric_threshold names a measure the catalog does not", async () => {
+  it("refuses a type the shelf never writes, even for raw SQL", async () => {
+    await expect(
+      database.sql(
+        `insert into grader
+           (id, organization_id, project_id, library_id, name, type, current_version_id)
+         values ($1, $2, $3, $4, 'Judged by a person', 'human', $5)`,
+        [
+          newId("grd"),
+          acme.organization,
+          acme.project,
+          PREDEFINED_GRADERS.latency,
+          newId("grv"),
+        ],
+      ),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+  });
+});
+
+/**
+ * What the copy holds: one filled-in set per assertion, and nothing the entry
+ * did not ask for.
+ */
+describe("the filled-in values a copy is born with", () => {
+  it("stores what Use asked for as the copy's one assertion", async () => {
+    const created = await useLibraryEntry(actingAsAcme(), aLatencyCopy);
+
+    const fetched = await getGrader(actingAsAcme(), created.id);
+    expect(fetched?.config).toEqual({
+      assertions: [{ metric: "turn_response_latency", bound: 2_000 }],
+    });
+  });
+
+  /**
+   * **Empty is a complete answer, not an unfinished one.** The
+   * expected-behaviors grader's assertions are the test's own sentences,
+   * supplied per test at judging time, so a correct copy of it holds nothing —
+   * forever.
+   */
+  it("stores nothing for an entry that asks nothing, and that is complete", async () => {
+    const created = await useLibraryEntry(actingAsAcme(), aBehaviorsCopy);
+
+    const fetched = await getGrader(actingAsAcme(), created.id);
+    expect(fetched?.config).toEqual({ assertions: [] });
+  });
+
+  /**
+   * The definition is read through the pointer at judging time and is never
+   * written down onto the copy. A prompt on this row would be a second copy of
+   * one text, and the day the two disagreed the Library screen would go on
+   * describing a judgment nobody was making.
+   */
+  it("never copies the entry's definition down onto the version row", async () => {
+    const created = await useLibraryEntry(actingAsAcme(), aBehaviorsCopy);
+
+    const { rows } = await database.sql<{ config: unknown }>(
+      "select config from grader_version where id = $1",
+      [created.versionId],
+    );
+    expect(rows[0]?.config).toEqual({ assertions: [] });
+    expect(JSON.stringify(rows[0]?.config)).not.toContain("cannot_determine");
+  });
+});
+
+describe("values that do not answer what the entry asked", () => {
+  /** What a refusal has to do: say the parameter, and write nothing. */
+  async function refusedNaming(
+    input: UseLibraryEntry,
+    named: RegExp,
+  ): Promise<void> {
+    const before = await rowCounts();
+    await expect(useLibraryEntry(actingAsAcme(), input)).rejects.toThrow(named);
+    expect(await rowCounts()).toEqual(before);
+  }
+
+  it("is refused when a parameter the entry asked for is missing", async () => {
     await refusedNaming(
       {
-        name: "Reads a measure nobody emits",
-        type: "metric_threshold",
-        config: {
-          measure: "turn_responze_latency",
-          aggregation: "p90",
-          comparator: "below",
-          threshold: 2000,
-        },
+        libraryId: PREDEFINED_GRADERS.latency,
+        params: { metric: "turn_response_latency" },
       },
-      /measure catalog/,
+      /bound/,
+    );
+    await refusedNaming(
+      { libraryId: PREDEFINED_GRADERS.latency, params: { bound: 2_000 } },
+      /metric/,
     );
   });
 
-  it("names the catalog and everything in it, so the next question is answered too", async () => {
-    const refusal = await createGrader(actingAsAcme(), {
-      name: "Reads a measure nobody emits",
-      type: "metric_threshold",
-      config: {
-        measure: "time_to_resolution",
+  /**
+   * A key the entry never declared is either a typo for one it did or a
+   * leftover from a definition that has moved on, and both become a grader
+   * quietly judging by less than somebody wrote down.
+   */
+  it("is refused for a value the entry never asked for, naming what it does ask", async () => {
+    const refusal = await useLibraryEntry(actingAsAcme(), {
+      libraryId: PREDEFINED_GRADERS.latency,
+      params: {
+        metric: "turn_response_latency",
+        bound: 2_000,
         aggregation: "p90",
-        comparator: "below",
-        threshold: 2000,
       },
     }).then(
       () => "the grader was written",
       (error: unknown) => (error instanceof Error ? error.message : String(error)),
     );
 
-    expect(refusal).toContain('"time_to_resolution" is not a measure');
-    expect(refusal).toContain(MEASURE_CATALOG_DOCUMENT);
-    expect(refusal).toContain(`version ${MEASURE_CATALOG_VERSION}`);
-    // Every cataloged name, because "then what is" is always the next question
-    // and a refusal that sends somebody hunting is a refusal that cost them the
-    // afternoon.
-    for (const cataloged of CATALOGED_MEASURES) {
+    expect(refusal).toContain('"aggregation"');
+    expect(refusal).toContain("metric");
+    expect(refusal).toContain("bound");
+  });
+
+  /**
+   * The mirror image, and it says the interesting half out loud: this entry
+   * asks for nothing because its assertions are the test's own sentences.
+   */
+  it("is refused for anything at all on an entry that asks nothing", async () => {
+    const refusal = await useLibraryEntry(actingAsAcme(), {
+      libraryId: PREDEFINED_GRADERS.expectedBehaviors,
+      params: { bound: 2_000 },
+    }).then(
+      () => "the grader was written",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+
+    expect(refusal).toContain("asks for nothing");
+    expect(refusal).toContain("expected behaviors");
+  });
+
+  /**
+   * The one write-door rule that is about the world rather than about the
+   * shape.
+   *
+   * A copy names what it reads as a string, and a string naming nothing
+   * produces a grader that reads nothing, judges nothing and is `skipped`
+   * forever — green, silent, and wrong. Nothing downstream can catch it: a
+   * missing measure is a legitimate `skipped` on a conversation whose spans do
+   * not carry it, so the engine cannot tell a typo from a modality. Only this
+   * moment can.
+   */
+  it("is refused for a measure egma does not compute, naming every one it does", async () => {
+    const refusal = await useLibraryEntry(actingAsAcme(), {
+      libraryId: PREDEFINED_GRADERS.latency,
+      params: { metric: "turn_responze_latency", bound: 2_000 },
+    }).then(
+      () => "the grader was written",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+
+    expect(refusal).toContain('"turn_responze_latency" is not a measure');
+    // Every name a copy may bound, because "then what is" is always the next
+    // question and a refusal that sends somebody hunting is a refusal that cost
+    // them the afternoon.
+    for (const cataloged of SPAN_DERIVED_MEASURES) {
       expect(refusal).toContain(cataloged);
     }
   });
 
-  it("takes every measure the catalog does name", async () => {
-    for (const cataloged of CATALOGED_MEASURES) {
-      const created = await createGrader(actingAsAcme(), {
-        name: `Holds ${cataloged} to something`,
-        type: "metric_threshold",
-        config: {
-          measure: cataloged,
-          aggregation: "p90",
-          comparator: "below",
-          threshold: 2000,
-        },
-      });
-      expect(created.config).toMatchObject({ measure: cataloged });
+  /**
+   * **A measure the catalog names and no span carries is refused too**, and the
+   * refusal says which of the two things went wrong.
+   *
+   * The turn count and the audio band are real numbers egma records — they
+   * arrive on the transition that ends a simulation and live on the simulation
+   * row — and a grader reading a conversation's spans would never find one. So a
+   * copy naming one is exactly the forever-`skipped` check this rule exists to
+   * refuse, and it is refused at the one moment anything can tell it from a
+   * measure a chat conversation simply did not produce.
+   */
+  it("is refused for a measure the catalog names and no span carries", async () => {
+    const notFromSpans = CATALOGED_MEASURES.filter(
+      (measure) => !SPAN_DERIVED_MEASURES.includes(measure),
+    );
+    expect(notFromSpans.length).toBeGreaterThan(0);
+
+    for (const measure of notFromSpans) {
+      const refusal = await useLibraryEntry(actingAsAcme(), {
+        libraryId: PREDEFINED_GRADERS.latency,
+        params: { metric: measure, bound: 2_000 },
+      }).then(
+        () => "the grader was written",
+        (error: unknown) =>
+          error instanceof Error ? error.message : String(error),
+      );
+
+      expect(refusal).toContain(`"${measure}" is a measure egma records`);
+      expect(refusal).toContain("no span carries it");
     }
   });
 
-  it("is refused when a metric_threshold names no threshold", async () => {
+  /**
+   * **One measure, one check, per copy — because the key has to be an
+   * identity.**
+   *
+   * A latency verdict is filed under the measure its check bounds, and a copy's
+   * config is not pinned by a run, so a position could not be the name (an edit
+   * makes the next entry the first, and the key would name a different measure
+   * than it did before). That makes the measure the key — and a key has to be
+   * unique inside a copy or it is not one: the verdict store's sorting key ends
+   * at the assertion, so two entries on one measure would collapse into a single
+   * row and one of the two checks would vanish inside a single grading.
+   *
+   * The refusal points at the thing a second bound usually wants to be, which is
+   * a second copy — `required` lives on the copy, so a blocking bound and a
+   * reporting one are two copies whatever this rule said.
+   */
+  it("is refused a second check on a measure the copy already bounds", async () => {
+    const refusal = await useLibraryEntry(actingAsAcme(), {
+      libraryId: PREDEFINED_GRADERS.latency,
+      params: { metric: "turn_response_latency", bound: 2_000 },
+    })
+      .then((created) =>
+        editGrader(actingAsAcme(), created.id, {
+          config: {
+            assertions: [
+              { metric: "turn_response_latency", bound: 2_000 },
+              { metric: "turn_response_latency", bound: 500 },
+            ],
+          },
+        }),
+      )
+      .then(
+        () => "the grader was written",
+        (error: unknown) =>
+          error instanceof Error ? error.message : String(error),
+      );
+
+    expect(refusal).toContain('already bounds "turn_response_latency"');
+    expect(refusal).toContain("Press Use again for a second copy");
+  });
+
+  it("takes two checks on two different measures, which is the ordinary case", async () => {
+    const created = await useLibraryEntry(actingAsAcme(), {
+      libraryId: PREDEFINED_GRADERS.latency,
+      name: "Two measures, one copy",
+      params: { metric: "turn_response_latency", bound: 2_000 },
+    });
+
+    const edited = await editGrader(actingAsAcme(), created.id, {
+      config: {
+        assertions: [
+          { metric: "turn_response_latency", bound: 2_000 },
+          { metric: "first_response_latency", bound: 1_000 },
+        ],
+      },
+    });
+
+    expect(edited?.config.assertions).toEqual([
+      { metric: "turn_response_latency", bound: 2_000 },
+      { metric: "first_response_latency", bound: 1_000 },
+    ]);
+  });
+
+  it("takes every measure a conversation's spans can carry", async () => {
+    for (const cataloged of SPAN_DERIVED_MEASURES) {
+      const created = await useLibraryEntry(actingAsAcme(), {
+        libraryId: PREDEFINED_GRADERS.latency,
+        name: `Holds ${cataloged} to something`,
+        params: { metric: cataloged, bound: 2_000 },
+      });
+      expect(created.config.assertions).toEqual([
+        { metric: cataloged, bound: 2_000 },
+      ]);
+    }
+  });
+
+  it("is refused when a number arrived as anything but a number", async () => {
     await refusedNaming(
       {
-        name: "Compares with nothing",
-        type: "metric_threshold",
-        config: {
-          measure: "turn_response_latency",
-          aggregation: "p90",
-          comparator: "below",
-          threshold: "2000" as unknown as number,
-        },
+        libraryId: PREDEFINED_GRADERS.latency,
+        params: { metric: "turn_response_latency", bound: "2000" },
       },
-      /threshold/,
+      /bound/,
     );
   });
 
-  it("is refused for an aggregation or comparator egma does not know", async () => {
+  it("is refused when a measure arrived as anything but text", async () => {
     await refusedNaming(
       {
-        name: "Aggregates somehow",
-        type: "metric_threshold",
-        config: {
-          measure: "turn_response_latency",
-          aggregation: "p42" as never,
-          comparator: "below",
-          threshold: 2000,
-        },
+        libraryId: PREDEFINED_GRADERS.latency,
+        params: { metric: 4, bound: 2_000 },
       },
-      /aggregation/,
-    );
-    await refusedNaming(
-      {
-        name: "Compares somehow",
-        type: "metric_threshold",
-        config: {
-          measure: "turn_response_latency",
-          aggregation: "p90",
-          comparator: "roughly" as never,
-          threshold: 2000,
-        },
-      },
-      /comparator/,
-    );
-  });
-
-  it("is refused when a phrase_match names neither required nor banned phrases", async () => {
-    await refusedNaming(
-      { name: "Looks for nothing", type: "phrase_match", config: {} },
-      /required or banned phrase/,
-    );
-  });
-
-  it("is refused when a phrase says nothing", async () => {
-    await refusedNaming(
-      {
-        name: "Looks for silence",
-        type: "phrase_match",
-        config: { banned: [{ text: "   " }] },
-      },
-      /banned phrase/,
-    );
-  });
-
-  it("is refused when an llm_rubric carries no rubric", async () => {
-    await refusedNaming(
-      { name: "Judges by nothing", type: "llm_rubric", config: { rubric: " " } },
-      /rubric/,
-    );
-  });
-
-  it("is refused when a tool_calls names neither required nor forbidden tools", async () => {
-    await refusedNaming(
-      { name: "Watches no tool", type: "tool_calls", config: {} },
-      /required or forbidden tool/,
-    );
-  });
-
-  it("is refused when a tool entry names no tool", async () => {
-    await refusedNaming(
-      {
-        name: "Watches something",
-        type: "tool_calls",
-        config: { required: [{ tool: "" }] },
-      },
-      /required entry/,
-    );
-  });
-
-  it("is refused for a type egma does not know", async () => {
-    await refusedNaming(
-      {
-        name: "Judges by vibes",
-        type: "vibes" as never,
-        config: {} as never,
-      },
-      /grader type/,
+      /metric/,
     );
   });
 });
 
-describe("a grader whose settings are not settings", () => {
-  it("is refused for a priority, scope or sample rate egma does not know", async () => {
+describe("a copy whose settings are not settings", () => {
+  it("is refused for a scope or sample rate egma does not know", async () => {
     await expect(
-      createGrader(actingAsAcme(), { ...empathy, priority: "P3" as never }),
-    ).rejects.toThrow(/priority/);
-    await expect(
-      createGrader(actingAsAcme(), { ...empathy, scope: "everywhere" as never }),
+      useLibraryEntry(actingAsAcme(), {
+        ...aLatencyCopy,
+        scope: "everywhere" as never,
+      }),
     ).rejects.toThrow(/scope/);
     await expect(
-      createGrader(actingAsAcme(), { ...empathy, productionSampleRate: 101 }),
+      useLibraryEntry(actingAsAcme(), {
+        ...aLatencyCopy,
+        productionSampleRate: 101,
+      }),
     ).rejects.toThrow(/percentage/);
     await expect(
-      createGrader(actingAsAcme(), { ...empathy, productionSampleRate: 12.5 }),
+      useLibraryEntry(actingAsAcme(), {
+        ...aLatencyCopy,
+        productionSampleRate: 12.5,
+      }),
     ).rejects.toThrow(/percentage/);
   });
 
-  it("is refused for a missing name, and no rows are left behind", async () => {
+  it("is refused for a name that says nothing, and no rows are left behind", async () => {
     const before = await rowCounts();
 
     await expect(
-      createGrader(actingAsAcme(), { ...empathy, name: "   " }),
+      useLibraryEntry(actingAsAcme(), { ...aLatencyCopy, name: "   " }),
     ).rejects.toThrow(/name/);
 
     expect(await rowCounts()).toEqual(before);
@@ -453,45 +567,37 @@ describe("a grader whose settings are not settings", () => {
 
   it("is refused for a judge egma cannot ask", async () => {
     await expect(
-      createGrader(actingAsAcme(), {
-        ...empathy,
+      useLibraryEntry(actingAsAcme(), {
+        ...aBehaviorsCopy,
         judgeModel: { provider: "acme-labs" as never, model: "big" },
       }),
     ).rejects.toThrow(/judge provider/);
     await expect(
-      createGrader(actingAsAcme(), {
-        ...empathy,
+      useLibraryEntry(actingAsAcme(), {
+        ...aBehaviorsCopy,
         judgeModel: { provider: "openai", model: " " },
       }),
     ).rejects.toThrow(/model/);
   });
 
-  it("stores the name, rubric and measure trimmed", async () => {
-    const created = await createGrader(actingAsAcme(), {
+  it("stores the name and the measure trimmed", async () => {
+    const created = await useLibraryEntry(actingAsAcme(), {
+      libraryId: PREDEFINED_GRADERS.latency,
       name: "  Padded  ",
-      type: "metric_threshold",
-      config: {
-        measure: "  turn_response_latency  ",
-        aggregation: "mean",
-        comparator: "at_most",
-        threshold: 1,
-      },
+      params: { metric: "  turn_response_latency  ", bound: 1 },
     });
 
     const fetched = await getGrader(actingAsAcme(), created.id);
     expect(fetched?.name).toBe("Padded");
-    expect(fetched?.config).toEqual({
-      measure: "turn_response_latency",
-      aggregation: "mean",
-      comparator: "at_most",
-      threshold: 1,
-    });
+    expect(fetched?.config.assertions).toEqual([
+      { metric: "turn_response_latency", bound: 1 },
+    ]);
   });
 });
 
 describe("a credential for the whole organization", () => {
   it("reads a project's graders without acting in the project", async () => {
-    const created = await createGrader(actingAsAcme(), empathy);
+    const created = await useLibraryEntry(actingAsAcme(), aLatencyCopy);
 
     const wholeCustomer = { ...actingAsAcme(), projectId: undefined };
     const fetched = await getGrader(wholeCustomer, created.id);
@@ -505,20 +611,23 @@ describe("tenancy", () => {
     const before = await rowCounts();
 
     await expect(
-      createGrader({ ...actingAsAcme(), projectId: globex.project }, empathy),
+      useLibraryEntry(
+        { ...actingAsAcme(), projectId: globex.project },
+        aLatencyCopy,
+      ),
     ).rejects.toThrow(ProjectOutsideOrganizationError);
 
     expect(await rowCounts()).toEqual(before);
   });
 
   it("returns nothing when another organization asks for my grader", async () => {
-    const created = await createGrader(actingAsAcme(), empathy);
+    const created = await useLibraryEntry(actingAsAcme(), aLatencyCopy);
 
     expect(await getGrader(actingAsGlobex(), created.id)).toBeUndefined();
   });
 
   it("returns nothing to the same customer acting in a sibling project", async () => {
-    const created = await createGrader(actingAsAcme(), empathy);
+    const created = await useLibraryEntry(actingAsAcme(), aLatencyCopy);
 
     const inOutbound = { ...actingAsAcme(), projectId: acme.outbound };
     expect(await getGrader(inOutbound, created.id)).toBeUndefined();
@@ -537,9 +646,15 @@ describe("tenancy", () => {
     await expect(
       database.sql(
         `insert into grader
-           (id, organization_id, project_id, name, type, priority, current_version_id)
-         values ($1, $2, $3, 'Smuggled', 'llm_rubric', 'P0', $4)`,
-        [newId("grd"), acme.organization, globex.project, newId("grv")],
+           (id, organization_id, project_id, library_id, name, type, current_version_id)
+         values ($1, $2, $3, $4, 'Smuggled', 'code', $5)`,
+        [
+          newId("grd"),
+          acme.organization,
+          globex.project,
+          PREDEFINED_GRADERS.latency,
+          newId("grv"),
+        ],
       ),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
@@ -549,12 +664,12 @@ describe("tenancy", () => {
 
 describe("a version row somebody hand-corrupted", () => {
   it("fails loudly on the read, naming the version, rather than leaking", async () => {
-    const created = await createGrader(actingAsAcme(), empathy);
+    const created = await useLibraryEntry(actingAsAcme(), aLatencyCopy);
 
     // Raw SQL on purpose: the factory can never write this, so the guard is the
     // only thing standing between the row and the caller.
     await database.sql(
-      `update grader_version set config = '{"rubric": ""}'::jsonb where id = $1`,
+      `update grader_version set config = '{"assertions": "two seconds"}'::jsonb where id = $1`,
       [created.versionId],
     );
 
@@ -580,8 +695,8 @@ describe("deciding whether a production trace is a grader's turn", () => {
     productionSampleRate: number,
     traces: number,
   ): Promise<boolean[]> {
-    const created = await createGrader(actingAsAcme(), {
-      ...empathy,
+    const created = await useLibraryEntry(actingAsAcme(), {
+      ...aLatencyCopy,
       name: `Sampled at ${productionSampleRate} per cent`,
       scope: "production",
       productionSampleRate,
@@ -647,8 +762,8 @@ describe("deciding whether a production trace is a grader's turn", () => {
   });
 
   it("takes a changed rate forward only, and never re-decides a trace it has passed", async () => {
-    const created = await createGrader(actingAsAcme(), {
-      ...empathy,
+    const created = await useLibraryEntry(actingAsAcme(), {
+      ...aLatencyCopy,
       name: "Turned up later",
       scope: "production",
       productionSampleRate: 0,
@@ -676,8 +791,8 @@ describe("deciding whether a production trace is a grader's turn", () => {
    * customer has.
    */
   it("does not touch the moment the grader was last edited", async () => {
-    const created = await createGrader(actingAsAcme(), {
-      ...empathy,
+    const created = await useLibraryEntry(actingAsAcme(), {
+      ...aLatencyCopy,
       name: "Busy, but unedited",
       scope: "production",
     });
@@ -691,8 +806,8 @@ describe("deciding whether a production trace is a grader's turn", () => {
   });
 
   it("says no for a grader the caller cannot reach, which judges nothing", async () => {
-    const created = await createGrader(actingAsAcme(), {
-      ...empathy,
+    const created = await useLibraryEntry(actingAsAcme(), {
+      ...aLatencyCopy,
       name: "Somebody else's",
       scope: "production",
       productionSampleRate: 100,

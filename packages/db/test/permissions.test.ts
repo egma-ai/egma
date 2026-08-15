@@ -46,13 +46,11 @@ const THE_TABLE: Readonly<Record<string, readonly Role[]>> = {
   "author_definitions": ["member", "admin"],
   "configure_agents": ["member", "admin"],
   "start_and_cancel_runs": ["member", "admin"],
-  // Re-grading a run and correcting a verdict are one row, because they are one
-  // decision: that a judgment already made should be looked at again. A viewer
-  // is refused both — either can turn a red release green, a re-grade by
-  // re-spending the judge over history and a correction by being preferred over
-  // the machine's word at read time, and a credential that can do that is not
-  // read-only however it is labelled.
-  "revisit_verdicts": ["member", "admin"],
+  // Asking for a judgment already made to be made again. A viewer is refused:
+  // a re-grade can turn a red release green by re-spending the judge over
+  // history, and a credential that can do that is not read-only however it is
+  // labelled.
+  "regrade": ["member", "admin"],
   // Sending an agent's traces through the ingest door is a write, so a
   // read-only credential does not get to do it. The door is the only route
   // where the credential is ordinarily a key rather than a browser, which is

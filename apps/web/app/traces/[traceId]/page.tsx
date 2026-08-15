@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { Fragment, use, useEffect, useState, type CSSProperties } from "react";
 
+import { GRADING } from "../../../lib/grading-copy.ts";
 import {
   DETAIL,
   FACTS,
   LIST,
+  MEASURES,
   RECORDING,
   SPEAKERS,
   UNKNOWN_STEP_LABEL,
@@ -16,6 +18,7 @@ import {
   everyStep,
   howFarIn,
   howLong,
+  humanizeIdentifier,
   isHuman,
   milliseconds,
   somethingFailed,
@@ -24,6 +27,7 @@ import {
   turnsCited,
   type Detail,
   type Facts as TraceFacts,
+  type Measured,
   type Outcome,
   type Step,
 } from "../../../lib/transcripts.ts";
@@ -194,7 +198,13 @@ export default function TranscriptPage({
         </header>
 
         <Summary facts={detail.trace} />
-        {detail.outcome ? <OutcomeSummary outcome={detail.outcome} /> : null}
+        <Measures measured={detail.measures ?? []} />
+        {detail.outcome ? (
+          <OutcomeSummary
+            outcome={detail.outcome}
+            diagnostics={detail.diagnostics ?? null}
+          />
+        ) : null}
 
         {/*
           The audio of this exchange, where egma is the one who had it.
@@ -289,12 +299,120 @@ function Summary({ facts }: { facts: TraceFacts }) {
   );
 }
 
-function OutcomeSummary({ outcome }: { outcome: Outcome }) {
-  const checks = [`${outcome.counts.passed}/${outcome.counts.total} passed`];
-  if (outcome.counts.failed > 0) checks.push(`${outcome.counts.failed} failed`);
-  if (outcome.counts.skipped > 0) checks.push(`${outcome.counts.skipped} skipped`);
-  if (outcome.counts.errored > 0) checks.push(`${outcome.counts.errored} errored`);
+/**
+ * What this exchange measured — the metrics display.
+ *
+ * **Above the verdicts and apart from them, because a measure measures and a
+ * grader judges.** Nothing here is green or red: a duration is not good or bad
+ * until somebody has written down a bound, and the section below is where that
+ * decision shows up. Putting them in one block would make every number look like
+ * a check that passed.
+ *
+ * **Every number here came off the platform's one shared measure module**, which
+ * is the same module a `latency` grader is judged through — and that includes
+ * the **reduction**, the single measurement a bound is held against. This page
+ * renders what it was handed and derives nothing. Taking the maximum here would
+ * look harmless and would be a second implementation of exactly the number a
+ * verdict rests on: correct while both happen to take the maximum, silently
+ * wrong the first day a grader reduces by p90 instead. A developer who found the
+ * page and the verdict disagreeing would be right to stop believing both.
+ *
+ * A measure the spans do not carry is absent rather than shown empty, and an
+ * exchange with none says so in a sentence — "nothing was measured" is a fact
+ * about the telemetry that arrived, and a blank strip would read as a page that
+ * failed to load.
+ */
+function Measures({ measured }: { measured: readonly Measured[] }) {
+  return (
+    <section className={styles.detailFacts} aria-label={MEASURES.label}>
+      {measured.length === 0 ? (
+        <div className={styles.contextFact}>
+          <span>{MEASURES.label}</span>
+          <strong className={styles.muted}>{MEASURES.none}</strong>
+        </div>
+      ) : (
+        measured.map((one) => (
+          <div className={styles.contextFact} key={one.measure}>
+            <span>{humanizeIdentifier(one.measure)}</span>
+            <strong>{measurement(one)}</strong>
+          </div>
+        ))
+      )}
+    </section>
+  );
+}
 
+/**
+ * One measure as a person reads it: the number the platform reduced to, its
+ * unit, and — where there was more than one measurement — that this is the worst
+ * of them and how many there were.
+ *
+ * **Nothing is worked out here.** `worst` arrives on the answer, reduced by the
+ * same code a verdict was decided by; this reads it. The series is used for one
+ * thing only, which is saying how many measurements there were.
+ *
+ * **A prefix says so.** A reading over the store's limit holds the first part of
+ * a long exchange, and the worst measurement in it is the worst of that part —
+ * the worst turn of the call may be past the cut. Showing it unqualified would
+ * be the page asserting something about a conversation it has only some of.
+ */
+function measurement(one: Measured): string {
+  // Unreachable: a measure with no measurement is absent from the answer
+  // rather than present and empty. Said rather than assumed, because the
+  // alternative is this page printing a figure nobody measured.
+  if (one.worst === null) return DETAIL.notReported;
+
+  const shown = `${String(one.worst.value)} ${one.unit}`;
+  if (one.partial === true) return `${shown} · ${MEASURES.partialWorst}`;
+  return one.samples.length === 1
+    ? shown
+    : `${shown} · ${MEASURES.worst} of ${MEASURES.counted(one.samples.length)}`;
+}
+
+/** What was judged, in the words a tally is read in. Written once, so the two
+ * lanes below cannot come to count the same rows two ways. */
+function tallyOf(counts: Outcome["counts"]): string {
+  const said = [`${counts.passed}/${counts.total} passed`];
+  if (counts.failed > 0) said.push(`${counts.failed} failed`);
+  if (counts.skipped > 0) said.push(`${counts.skipped} skipped`);
+  if (counts.errored > 0) said.push(`${counts.errored} errored`);
+  return said.join(" · ");
+}
+
+/**
+ * The fraction, as a person reads it: passed over counted, or a dash where
+ * there was nothing in the denominator.
+ *
+ * Written once for the same reason the tally is. A proportion of nothing is not
+ * a number, and both available lies are worse than saying so — so the store
+ * answers absent and this answers a dash, in both lanes identically.
+ */
+function shownScore(score: number | null): string {
+  return score === null ? "—" : String(Math.round(score * 1000) / 1000);
+}
+
+/**
+ * What egma made of this exchange: the verdict, the number, and what was
+ * counted — over the graders that can fail something.
+ *
+ * **The diagnostics sit beside it and never in it**, which is the same
+ * arrangement a run's results make and for the same reason. A grader carrying
+ * `required: false` is judged exactly as a blocking one is and reports the same
+ * fraction, and it can never change the word to its left. Folded in, it would
+ * move a verdict it is not allowed to move; left out altogether, it would be a
+ * grader somebody switched on that judges in silence — and the failures on the
+ * cards further down the page would have nothing up here to belong to.
+ *
+ * One figure rather than the run page's grid, because this page is one exchange:
+ * three cards of one row each would be furniture around a single number.
+ */
+function OutcomeSummary({
+  outcome,
+  diagnostics,
+}: {
+  outcome: Outcome;
+  diagnostics: Outcome | null;
+}) {
   return (
     <section className={`${styles.runFacts} ${styles.traceOutcome}`} aria-label="Grading outcome">
       <div className={styles.contextFact} data-verdict={outcome.verdict}>
@@ -303,12 +421,32 @@ function OutcomeSummary({ outcome }: { outcome: Outcome }) {
       </div>
       <div className={styles.contextFact}>
         <span>Score</span>
-        <strong>{outcome.score === null ? "—" : String(Math.round(outcome.score * 1000) / 1000)}</strong>
+        <strong>{shownScore(outcome.score)}</strong>
       </div>
       <div className={styles.contextFact}>
         <span>Checks</span>
-        <strong>{checks.join(" · ")}</strong>
+        <strong>{tallyOf(outcome.counts)}</strong>
       </div>
+      {/*
+        **The fraction is the point of this lane, so it is on the line.** A
+        diagnostic is switched on to be read rather than to decide, and passed ÷
+        counted is the number that reading produces — the counts beside it are a
+        different true statement, because a skipped assertion leaves the
+        denominator and stays in the count.
+
+        Deliberately uncoloured, whatever it says. `data-verdict` is what paints
+        a fact red, and a red diagnostic here would read as a reason the verdict
+        to its left is red — which is the one thing it can never be.
+      */}
+      {diagnostics === null ? null : (
+        <div className={styles.contextFact} title={GRADING.diagnosticAside}>
+          <span>{GRADING.diagnosticLane}</span>
+          <strong>
+            {diagnostics.verdict} · {GRADING.diagnosticScore}{" "}
+            {shownScore(diagnostics.score)} · {tallyOf(diagnostics.counts)}
+          </strong>
+        </div>
+      )}
     </section>
   );
 }
@@ -345,7 +483,7 @@ function TranscriptView({
               .filter((judgment) => turnsCited(judgment).includes(position + 1))
               .map((judgment) => (
                 <JudgmentCard
-                  key={`${judgment.grader_id}:${judgment.dimension}:${judgment.judged_at}`}
+                  key={`${judgment.grader_id}:${judgment.assertion}:${judgment.judged_at}`}
                   judgment={judgment}
                 />
               ))}

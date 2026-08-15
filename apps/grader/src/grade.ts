@@ -1,6 +1,7 @@
 import {
   appendVerdicts,
   getGrader,
+  getGraderLibraryEntry,
   getSimulation,
   readTrace,
   MAXIMUM_WINDOW_MILLISECONDS,
@@ -8,8 +9,8 @@ import {
   type Grader,
   type GradingClaim,
   type GradingSource,
+  type LibraryEntry,
   type NewVerdict,
-  type Priority,
   type Simulation,
   type TimeWindow,
   type TraceDetail,
@@ -22,14 +23,11 @@ import {
   type Conversation,
 } from "./conversation.ts";
 import {
-  EXPECTED_BEHAVIORS,
-  judgeExpectedBehaviors,
-} from "./graders/expected-behaviors.ts";
-import {
+  couldNotJudge,
   execute,
-  theOneCheck,
   type Judging,
   type Judgment,
+  type Reading,
 } from "./graders/index.ts";
 import { JUDGE_MAKERS, judgeOnce, type JudgeMakers } from "./judge/index.ts";
 import { applicableGraders, applicableProductionGraders } from "./resolve.ts";
@@ -45,12 +43,13 @@ import { applicableGraders, applicableProductionGraders } from "./resolve.ts";
  * **The source decides the first two steps and nothing after them.** Both are
  * read from their spans; what differs is what egma knows besides. A simulation
  * names its own row, which says whose conversation it was and how the simulator
- * said it ended, and it is judged by the project's graders plus its test's; a
- * production trace has no row and is judged by the project's production-scoped
- * graders, sampled. From the moment a `Conversation` and a grader list exist
- * there is one path — one executor seam, one verdict row builder, one write —
- * because a second judging path would be a second set of answers that could one
- * day disagree about the same agent.
+ * said it ended, and it is judged by the project's copies scoped to simulations;
+ * a production trace has no row and is judged by the project's production-scoped
+ * copies, sampled. Neither resolution reads a test: which graders apply is the
+ * copies' own scope and nothing else. From the moment a `Conversation` and a
+ * grader list exist there is one path — one executor seam, one verdict row
+ * builder, one write — because a second judging path would be a second set of
+ * answers that could one day disagree about the same agent.
  *
  * **The verdicts are written in one call.** A conversation's judgments land
  * together or not at all as far as any reader is concerned, and a job that fails
@@ -58,20 +57,25 @@ import { applicableGraders, applicableProductionGraders } from "./resolve.ts";
  * safe precisely because writing the same judgment twice at the same grader
  * version replaces rather than doubles.
  *
- * **The built-in stands beside the resolved graders and not among them.** The
- * expected-behaviors grader is never a row and never attachable, so it is never
- * resolved; it applies because running a test means judging it against what the
- * test says. That is why it is a second branch of the fan-out below rather than
- * an entry in the executor roster — and why it belongs to simulations alone: a
- * production trace has no test, so there is nothing for the built-in to judge
- * against.
+ * **Every grader is a resolved copy, including the expected-behaviors one.** It
+ * used to stand beside the list as a second branch of the fan-out, because it
+ * was never a row and could not be resolved. Every project is seeded with an
+ * active copy of it now, so there is one fan-out, one executor seam and one
+ * verdict row builder — and the rows it writes name a real grader and a real
+ * version instead of a sentinel string. It stays simulations-only by its scope
+ * rather than by a branch here, which is the same fact said where a person can
+ * change it.
  *
- * **A claim reopened for one grader judges that grader and nothing else.** Both
- * branches of the fan-out are narrowed by it: the resolved list becomes that one
- * grader, and the built-in does not run at all. Somebody who fixed one rubric
- * asked for one rubric's judgment, and every other judge call on the
- * conversation would be money they did not agree to spend — which is the whole
- * reason the narrowing exists rather than a nicety of it.
+ * **The definition is read through the copy's pointer, once per entry.** A
+ * grader's judge prompt lives on its library entry and is never written down
+ * onto the copy, so judging reads it here and hands it to the executor. Two
+ * copies of one entry cost one read, because the answer is remembered for the
+ * length of this conversation and no longer.
+ *
+ * **A claim reopened for one grader judges that grader and nothing else.**
+ * Somebody who fixed one grader asked for one grader's judgment, and every other
+ * judge call on the conversation would be money they did not agree to spend —
+ * which is the whole reason the narrowing exists rather than a nicety of it.
  */
 
 /** What judging one conversation came to. */
@@ -101,9 +105,9 @@ type Resolved = {
   readonly conversation: Conversation;
   readonly graders: readonly Grader[];
   /**
-   * The simulation the conversation came from, when it came from one — what
-   * the built-in judges by. A production trace resolves to none, and with it
-   * to no built-in.
+   * The simulation the conversation came from, when it came from one — what a
+   * grader whose assertions live on the test goes and reads. A production trace
+   * resolves to none, which is the same fact as "there is no test here".
    */
   readonly simulationId: string | undefined;
 };
@@ -118,11 +122,10 @@ type Resolved = {
  * deliberate re-grade must not spend other graders' turns to answer a question
  * about one of them.
  *
- * **The named grader judges whatever its scope says**, on the same terms a test's
- * grader array is applied whatever its scope says: naming it *is* the scoping
- * decision, made once by the person who asked for this re-grade rather than
- * standing policy about where the grader usually applies. Sampling is not asked
- * either — a re-grade somebody typed is not traffic egma did not cause.
+ * **The named grader judges whatever its scope says**: naming it *is* the
+ * scoping decision, made once by the person who asked for this re-grade rather
+ * than standing policy about where the grader usually applies. Sampling is not
+ * asked either — a re-grade somebody typed is not traffic egma did not cause.
  *
  * A grader that has gone between the ask and the claim — deleted in the minutes
  * the job sat in the queue — judges nothing, and the job finishes having written
@@ -158,95 +161,81 @@ export async function gradeClaim(
   // does never opens the envelope.
   const judge = judgeOnce(claim.auth);
 
-  // In parallel, and not because today's deterministic graders are slow — they
-  // are instant. Because the judged types are one model call each, and
+  // The definitions, read through the copies' pointers and remembered for the
+  // length of this conversation. Two copies of one entry cost one read; nothing
+  // is remembered past this call, because a definition is read *at judging
+  // time* and a cache that outlived the job would be the copied definition this
+  // whole shape exists to rule out.
+  const definitionOf = definitionsOnce(claim.auth);
+
+  // What every grader that judges is handed besides the conversation: the
+  // simulation to read a test off, and whose it is.
+  const reading: Reading = { auth: claim.auth, simulationId };
+
+  // In parallel, and not because today's computed graders are slow — they are
+  // instant. Because a judged grader is one model call per assertion, and
   // wall-clock for a conversation with five checks should be one call rather
   // than five.
-  const [byGrader, builtIn] = await Promise.all([
-    Promise.all(
+  const rows = (
+    await Promise.all(
       graders.map(async (grader) =>
         (
-          await judgmentsOf(grader, conversation, {
-            judge,
-            makers,
-            // This version's own judge, or null for the project's default. It
-            // is judged content, frozen on the version beside the config, so a
-            // verdict decided by it stays readable as "decided by this model"
-            // long after the project's default moved on.
-            model: grader.judgeModel,
+          await judgmentsOf(grader, await definitionOf(grader), {
+            conversation,
+            judging: {
+              judge,
+              makers,
+              // This version's own judge, or null for the project's default. It
+              // is judged content, frozen on the version beside the config, so
+              // a verdict decided by it stays readable as "decided by this
+              // model" long after the project's default moved on.
+              model: grader.judgeModel,
+            },
+            reading,
           })
-        ).map((judgment) =>
-          verdictRow(
-            {
-              graderId: grader.id,
-              // The version that judged, which is what keeps this row
-              // interpretable after the grader is tightened: the config it was
-              // decided by is frozen behind this id, and a re-grade at the next
-              // version writes beside rather than over.
-              graderVersionId: grader.versionId,
-              priority: grader.priority,
-            },
-            conversation,
-            judgment,
-          ),
-        ),
+        ).map((judgment) => verdictRow(grader, conversation, judgment)),
       ),
-    ),
-    // No test's behaviors on a narrowed claim, and the built-in is the reason
-    // narrowing had to be spelled out here rather than left to the resolution:
-    // it is never resolved, so nothing above could have dropped it. A re-grade
-    // naming a grader named an authored one — the built-in is not a row and has
-    // no identity to name — so it is not what was asked for, and it is one judge
-    // call per behavior of spend nobody agreed to.
-    simulationId === undefined || claim.regradeGraderId !== null
-      ? undefined
-      : judgeExpectedBehaviors({
-          auth: claim.auth,
-          simulationId,
-          conversation,
-          judge,
-          makers,
-        }),
-  ]);
-
-  const behaviorRows =
-    builtIn === undefined
-      ? []
-      : builtIn.judged.map((judged) =>
-          verdictRow(
-            {
-              // The built-in is never a row in any table, so it names itself
-              // with the one word that can never collide with a minted `grd_`
-              // identifier — the same word the grader type roster reserves and
-              // never holds.
-              graderId: EXPECTED_BEHAVIORS,
-              // Its version is the frozen test version whose behaviors it
-              // judged. Nothing else about the built-in can change, and that
-              // list changing is exactly when a verdict written under it stops
-              // meaning what it meant.
-              graderVersionId: builtIn.versionId,
-              judgedBy: builtIn.judgedBy,
-              // Each behavior's own, not one grader's: a nice-to-have behavior
-              // cannot block a release and a must-have one always can.
-              priority: judged.priority,
-            },
-            conversation,
-            judged.judgment,
-          ),
-        );
-
-  const rows = [...byGrader.flat(), ...behaviorRows];
+    )
+  ).flat();
 
   await appendVerdicts(claim.auth, rows);
 
   return {
     source: conversation.source,
     traceId: conversation.traceId,
-    // The built-in counts, because it judged: a conversation judged only against
-    // its test's behaviors was judged, and reporting nothing applied would be
-    // reporting that nothing happened.
-    graders: graders.length + (builtIn === undefined ? 0 : 1),
+    graders: graders.length,
     verdicts: rows.length,
+  };
+}
+
+/**
+ * The library entry behind a running copy, read at most once per entry for this
+ * conversation.
+ *
+ * **Read through `library_id` rather than off the copy**, every time a
+ * conversation is judged. That is the whole of the two-level shape: the judge
+ * prompt lives in one place, the Library screen reads that place, and a release
+ * that improves the words improves what a judge is actually sent. A definition
+ * written down onto the copy would be a second string that drifts, silently, in
+ * the direction of the screen being wrong about how conversations are judged.
+ *
+ * The promise is remembered rather than its answer, so two copies of one entry
+ * racing each other in a `Promise.all` share one read instead of starting two.
+ * An entry that comes back absent cannot happen — the pointer is a foreign key
+ * — and is answered rather than asserted, because a grading service is not the
+ * place to throw over a row that came out of its own database.
+ */
+function definitionsOnce(
+  auth: AuthContext,
+): (grader: Grader) => Promise<LibraryEntry | undefined> {
+  const reading = new Map<string, Promise<LibraryEntry | undefined>>();
+  return (grader) => {
+    const held = reading.get(grader.libraryId);
+    if (held !== undefined) return held;
+
+    const started = getGraderLibraryEntry(auth, grader.libraryId);
+    reading.set(grader.libraryId, started);
+    return started;
   };
 }
 
@@ -285,9 +274,7 @@ async function theSimulation(claim: GradingClaim): Promise<Resolved> {
       simulation,
       await theSimulationsTrace(claim.auth, simulation),
     ),
-    graders: await judgingGraders(claim, () =>
-      applicableGraders(claim.auth, simulation),
-    ),
+    graders: await judgingGraders(claim, () => applicableGraders(claim.auth)),
     simulationId: simulation.id,
   };
 }
@@ -400,107 +387,116 @@ async function theProductionTrace(claim: GradingClaim): Promise<Resolved> {
 /**
  * What one grader says about this conversation.
  *
- * **A conversation with nothing to judge is `errored` for every grader, and no
- * grader is executed at all.** Either it never happened — the agent never
+ * **The definition is required, and a copy pointing at nothing is `errored`.**
+ * The pointer is a foreign key, so this cannot happen; answering it rather than
+ * asserting it is what keeps a grading service from throwing over a row that
+ * came out of its own database, and the word is `errored` because egma failed to
+ * make a check rather than the agent failing one.
+ *
+ * **A conversation with nothing to judge is `errored` too, and the executor
+ * decides the shape of that answer.** Either it never happened — the agent never
  * joined, the line was never answered, egma's own runtime broke — or it happened
  * and egma cannot read it, because its spans never arrived and no column holds
  * it. Both are things that went wrong on egma's side of the glass, and the one
  * thing a test product must never do is score them as the agent behaving badly.
- * The word is `errored` rather than `failed`, the fold keeps the two apart all
- * the way up to the run's headline, and the check is here rather than inside
- * each executor so that no future grader type can get it wrong.
  *
- * It answers with one row per grader, named by the grader's own one check —
- * which is the honest shape while every *authored* type executed makes one. The
- * question this used to ask, of the first type to name several dimensions, is
- * answered: the built-in expected-behaviors grader names one per behavior and
- * writes one `errored` row per behavior when the conversation never happened, so
- * a page shows the same list whether it happened or not. An authored type that
- * grows several dimensions follows it, in its own module, on the same terms.
+ * That decision is inside the executors rather than in front of them because how
+ * many rows it is depends on what the grader's assertions are: the
+ * expected-behaviors grader names one per behavior and writes one `errored` row
+ * per behavior, so a page shows the same list whether the conversation happened
+ * or not, while a grader that makes one check writes one. Every executor is
+ * handed `nothingToJudgeBecause` on the conversation and is held to it by a
+ * test.
+ *
+ * **A grader that falls over answers under its own keys too**, which is the same
+ * rule one step further out. A verdict is counted once per conversation, grader
+ * and assertion key, and that identity does not span the grader version — so a
+ * row filed under a key the executor never writes can never be superseded. It
+ * would outrank every `passed` beside it forever and no re-grade could reach it,
+ * and a test that failed once could never pass again. So the reason is handed to
+ * the same grader to spread across the same keys.
+ *
+ * **If even that cannot be answered, nothing is written and the throw escapes.**
+ * A grader egma cannot describe is one it must stay silent about rather than
+ * file a row it can never correct; the job is released and judged again from the
+ * beginning, which is what the attempt count is for.
  */
 export async function judgmentsOf(
   grader: Grader,
-  conversation: Conversation,
-  judging: Judging,
+  definition: LibraryEntry | undefined,
+  execution: {
+    readonly conversation: Conversation;
+    readonly judging: Judging;
+    readonly reading: Reading;
+  },
 ): Promise<readonly Judgment[]> {
-  const nothingToJudge = conversation.nothingToJudgeBecause;
-  if (nothingToJudge !== null) {
-    return [couldNotJudge(grader, nothingToJudge)];
-  }
-
-  try {
-    // The grader *is* its judgment plus its identity and its live settings — the
-    // type and the config it shapes are one inseparable pair on the row already
-    // — so the executor is handed the grader itself and sees only the pair, plus
-    // a way to reach a judge that the deterministic types never use.
-    return await execute({ judgment: grader, conversation, judging });
-  } catch (error) {
-    // One grader falling over is one `errored` row, not a conversation with no
-    // verdicts on it. Every other grader's judgment still lands, and this one
-    // says out loud that egma could not make its check — which is the whole
-    // reason `errored` is a word separate from `failed`.
+  if (definition === undefined) {
     return [
-      couldNotJudge(
-        grader,
-        `this check could not be made: ${error instanceof Error ? error.message : String(error)}`,
-      ),
+      {
+        // The pointer rather than the copy's name: a name is text a person
+        // wrote and may rewrite, and a key that moved with it would split every
+        // row written before the rename from every row written after.
+        assertion: grader.libraryId,
+        verdict: "errored",
+        score: 0,
+        rationale:
+          "this grader points at a library entry egma cannot read, so there was nothing to judge by.",
+        citedSpanIds: [],
+      },
     ];
   }
-}
 
-/** egma could not judge this. Never `failed`: nothing is being said about the agent. */
-function couldNotJudge(grader: Grader, rationale: string): Judgment {
-  return {
-    dimension: theOneCheck(grader.type),
-    verdict: "errored",
-    score: 0,
-    rationale,
-    citedSpanIds: [],
+  // The definition and the copy's filled-in values, and nothing about whose
+  // grader this is or what it is called: an executor that could see any of that
+  // could be written to answer with it.
+  const asked = {
+    definition,
+    config: grader.config,
+    conversation: execution.conversation,
+    judging: execution.judging,
+    reading: execution.reading,
   };
+
+  try {
+    return await execute(asked);
+  } catch (error) {
+    // One grader falling over is one `errored` row per check it makes, not a
+    // conversation with no verdicts on it. Every other grader's judgment still
+    // lands, and these say out loud that egma could not make the check — which
+    // is the whole reason `errored` is a word separate from `failed`.
+    return await couldNotJudge(
+      asked,
+      `this check could not be made: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 /**
- * Whose judgment this is, and how loudly it speaks — everything a verdict row
- * needs that the judgment itself deliberately does not carry.
+ * One judgment, as the row that records it.
  *
- * The priority is **snapshotted, never referenced**: it is a live setting, read
- * at the moment of judging and written onto the row, so promoting a check to P0
- * tomorrow cannot reinterpret what today's warning meant.
+ * **The copy names itself now.** A verdict row used to carry the string
+ * `expected_behaviors` where a grader id belongs, because the built-in was never
+ * a row; every project runs a copy of the library entry instead, so every row
+ * this writes names a real grader and the version that decided it — which is
+ * what keeps the row interpretable after the grader is tightened, since the
+ * values it was decided by are frozen behind that id and a re-grade at the next
+ * version writes beside rather than over.
  */
-type JudgedBy = {
-  readonly graderId: string;
-  readonly graderVersionId: string;
-  /**
-   * Who judged, when the judgment did not say. The built-in names its own —
-   * one judge for the whole list — and an authored grader's is per judgment,
-   * because a judged type records the model that answered and a deterministic
-   * one records nothing at all.
-   */
-  readonly judgedBy?: string | undefined;
-  readonly priority: Priority;
-};
-
-/** One judgment, as the row that records it. */
 function verdictRow(
-  by: JudgedBy,
+  grader: Grader,
   conversation: Conversation,
   judgment: Judgment,
 ): NewVerdict {
   return {
     traceId: conversation.traceId,
-    graderId: by.graderId,
-    graderVersionId: by.graderVersionId,
-    dimension: judgment.dimension,
+    graderId: grader.id,
+    graderVersionId: grader.versionId,
+    assertion: judgment.assertion,
     source: conversation.source,
-    // The judge that answered, or `engine` when no model was asked anything —
-    // and `human` on the day a person disagrees, which is a row of their own
-    // rather than an edit to this one.
-    judgedBy: judgment.judgedBy ?? by.judgedBy ?? "engine",
     verdict: judgment.verdict,
     score: judgment.score,
     rationale: judgment.rationale,
     citedSpanIds: judgment.citedSpanIds,
-    priority: by.priority,
     runId: conversation.runId,
     agentId: conversation.agentId,
     // Empty, and honestly so: egma does not version agents yet, and a made-up

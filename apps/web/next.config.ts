@@ -83,6 +83,18 @@ const config: NextConfig = {
           source: "/api/password-reset/:path*",
           destination: `${api}/api/password-reset/:path*`,
         },
+        // The shelf of grader definitions the Library screen draws itself
+        // from. One rule and no `:path*` beside it, because the library is
+        // read and never authored: a second address under it would be a
+        // forwarding rule for a door that does not exist.
+        {
+          source: "/api/grader-library",
+          destination: `${api}/api/grader-library`,
+        },
+        // The running copies beside the shelf. One rule and no `:path*`: the
+        // group answers a list and a Use at one address, and a second address
+        // under it would be a forwarding rule for a door that does not exist.
+        { source: "/api/graders", destination: `${api}/api/graders` },
         { source: "/api/tests", destination: `${api}/api/tests` },
         { source: "/api/tests/:path*", destination: `${api}/api/tests/:path*` },
         {

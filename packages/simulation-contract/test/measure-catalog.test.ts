@@ -7,12 +7,16 @@ import { describe, expect, it } from "vitest";
 import {
   catalogedMeasure,
   isCatalogedMeasure,
+  isSpanDerivedMeasure,
   measureAccepts,
   CATALOGED_MEASURES,
   MEASURE_AGGREGATIONS,
   MEASURE_CATALOG,
   MEASURE_CATALOG_DOCUMENT,
   MEASURE_CATALOG_VERSION,
+  SPAN_DERIVED_MEASURE_CATALOG,
+  SPAN_DERIVED_MEASURES,
+  SPAN_RULES,
 } from "../src/measures.ts";
 
 /**
@@ -142,6 +146,84 @@ describe("what the catalog names", () => {
     expect(isCatalogedMeasure("time_to_resolution")).toBe(false);
     expect(catalogedMeasure("time_to_resolution")).toBeUndefined();
     expect(measureAccepts("time_to_resolution", "p90")).toBe(false);
+  });
+});
+
+/**
+ * The half of the catalog that says how each measure is **computed**, which is
+ * what stops the dropdown a developer picks from and the arithmetic that answers
+ * them being two lists.
+ *
+ * The list a form offers, the list a write accepts and the list the shared
+ * measure module implements are all `SPAN_DERIVED_MEASURES`. What is asserted
+ * here is that the catalog is complete enough for that to be safe: every measure
+ * says how it is computed, the definitions are readable in the document, and the
+ * two ways of asking "can a grader name this" agree.
+ */
+describe("how each measure is computed from the spans", () => {
+  it("is pinned beside every measure's name, with no gaps", () => {
+    for (const cataloged of MEASURE_CATALOG) {
+      expect(
+        SPAN_RULES,
+        `${cataloged.measure} names a rule the module could not switch on`,
+      ).toContain(cataloged.fromSpans.rule);
+      // Long enough to be a definition rather than a word — a rule with no
+      // sentence beside it is a measure nobody can check the code against.
+      expect(cataloged.fromSpans.definition.length).toBeGreaterThan(20);
+    }
+  });
+
+  it("says in the document what it says in the constant, measure by measure", () => {
+    for (const cataloged of MEASURE_CATALOG) {
+      expect(
+        document,
+        `${cataloged.measure} is computed by a rule the document never names`,
+      ).toContain(`\`${cataloged.fromSpans.rule}\``);
+    }
+    for (const rule of SPAN_RULES) expect(document).toContain(`\`${rule}\``);
+  });
+
+  /**
+   * A timing span is named for the measure it takes and its duration *is* the
+   * number, so "arrives as a timing span" and "computed from the timing spans
+   * named for it" are the same fact said from the two ends of the wire. They are
+   * held to each other here because the ingest door files spans by one of them
+   * and the measure module reads them by the other.
+   */
+  it("computes exactly the measures that arrive as timing spans", () => {
+    for (const cataloged of MEASURE_CATALOG) {
+      expect(
+        isSpanDerivedMeasure(cataloged.measure),
+        `${cataloged.measure} disagrees with itself about whether a span carries it`,
+      ).toBe(cataloged.origin === "timing_span");
+    }
+  });
+
+  /**
+   * **Narrower than the catalog, deliberately.** A measure egma records
+   * somewhere other than the trace is a real number in the wrong place for a
+   * grader: reading a conversation would never find it, so a copy naming one
+   * would be `skipped` forever — green, silent and wrong.
+   */
+  it("is a narrower list than the catalog, and every name on it is on the catalog", () => {
+    expect(SPAN_DERIVED_MEASURES.length).toBeGreaterThan(0);
+    expect(SPAN_DERIVED_MEASURES.length).toBeLessThan(CATALOGED_MEASURES.length);
+    for (const measure of SPAN_DERIVED_MEASURES) {
+      expect(CATALOGED_MEASURES).toContain(measure);
+      expect(isSpanDerivedMeasure(measure)).toBe(true);
+    }
+    expect(
+      SPAN_DERIVED_MEASURE_CATALOG.map((cataloged) => cataloged.measure),
+    ).toEqual([...SPAN_DERIVED_MEASURES]);
+  });
+
+  it("says no about a measure no span carries, and about one nobody emits", () => {
+    // Cataloged, recorded, and not something a grader may read a trace for.
+    expect(isCatalogedMeasure("turn_count")).toBe(true);
+    expect(isSpanDerivedMeasure("turn_count")).toBe(false);
+    expect(isSpanDerivedMeasure("measured_audio_band_hertz")).toBe(false);
+    // And a name nothing has ever measured is no on both counts.
+    expect(isSpanDerivedMeasure("time_to_resolution")).toBe(false);
   });
 });
 
