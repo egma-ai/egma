@@ -38,7 +38,7 @@ export const RUNNING = {
    */
   empty:
     "Nothing is judging this project, so a run would finish with nothing " +
-    "checked. Every project is given egma's expected-behaviors grader when it " +
+    "judged. Every project is given egma's expected-behaviors grader when it " +
     "is created — if it is gone, pick it from the library and press Use.",
   counted: (howMany: number): string =>
     `${howMany} ${howMany === 1 ? "grader" : "graders"}`,
@@ -50,7 +50,7 @@ export const RUNNING_COLUMNS = {
   name: "Name",
   scope: "Applies to",
   required: "Required",
-  config: "What it checks",
+  config: "Assertions",
 } as const;
 
 /**
@@ -91,8 +91,14 @@ export const REQUIRED = {
  */
 export const CONFIG = {
   fromTheTest: "Whatever the test says it expects",
+  /**
+   * **`assertion`, and never `check`.** `check` is a borrowed word for the
+   * judging job and the domain model bans it; `assertion` is the word this
+   * redesign un-banned for exactly this level — one 0-or-1 decision inside a
+   * grader — and it is the word the verdict store's own column uses.
+   */
   counted: (howMany: number): string =>
-    `${howMany} ${howMany === 1 ? "check" : "checks"}`,
+    `${howMany} ${howMany === 1 ? "assertion" : "assertions"}`,
 } as const;
 
 /** What a row says where the answer carried nothing. */

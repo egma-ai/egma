@@ -1,10 +1,16 @@
-import { readVerdicts, type RecordedVerdict } from "@egma/db";
+import {
+  PREDEFINED_GRADERS,
+  readVerdicts,
+  regrade,
+  type RecordedVerdict,
+} from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   aConversation,
   aLatencyCopy,
   conductSimulation,
+  eventually,
   jobFor,
   makeWorld,
   oneServiceAtATime,
@@ -19,6 +25,7 @@ import {
   cannotDetermine,
   met,
   notMet,
+  scriptedJudge,
   type Scripted,
   type ScriptedJudge,
 } from "./support/scripted-judge.ts";
@@ -304,7 +311,99 @@ describe("a simulation born from no test", () => {
     const verdicts = await verdictsOn(world, simulationId, 1);
 
     expect(await behaviorRows(verdicts)).toEqual([]);
-    expect(verdicts.map((verdict) => verdict.assertion)).toEqual(["latency"]);
+    expect(verdicts.map((verdict) => verdict.assertion)).toEqual([
+      PREDEFINED_GRADERS.latency,
+    ]);
     expect(judge.asked).toEqual([]);
+  });
+});
+
+/**
+ * **A grading that broke before it could ask anything must still be re-gradable
+ * later**, and that is a claim about the *keys* it wrote rather than about the
+ * words on the rows.
+ *
+ * A verdict is counted once per conversation, grader and assertion key, and the
+ * newest grading of a key supersedes the older one. That identity does not span
+ * the grader version — so a row filed under a key the grader never writes again
+ * can never be superseded by anything. It would sit beside the real rows
+ * forever, `errored` outranking every `passed` next to it, and the test could
+ * never pass again however many times somebody re-graded it.
+ *
+ * So a throw anywhere outside the per-behavior fan-out — a store that blinked
+ * while the test was read, a provider seam that would not build — has to land
+ * one row per behavior, exactly as a conversation that never happened does.
+ * The way in here is a judge maker that throws when it is constructed, which is
+ * the last thing that happens before the fan-out starts.
+ */
+describe("a grading that fell over before it could ask anything", () => {
+  it("errors once per behavior, under keys a later re-grade rewrites", async () => {
+    const broken = scriptedJudge({ answers: {} });
+    await service.start(undefined, {
+      makers: {
+        openai: () => {
+          throw new Error("the provider seam would not build");
+        },
+      },
+    });
+
+    const testId = await seedTest(world, [], THREE);
+    const { simulationId, runId } = await conductSimulation(world, {
+      testId,
+      spans: aConversation(),
+    });
+    const first = await verdictsOn(world, simulationId, THREE.length);
+    await jobFor(world, { simulationId }, "graded");
+
+    // One row per behavior, keyed by position — not one row for the grader.
+    const broke = await behaviorRows(first);
+    expect(broke.map((row) => row.assertion)).toEqual([
+      "behavior_1",
+      "behavior_2",
+      "behavior_3",
+    ]);
+    for (const row of broke) {
+      expect(row.verdict).toBe("errored");
+      expect(row.rationale).toContain("could not be made");
+    }
+    // And nothing else under this grader: a row under any other key would be
+    // the orphan this exists to rule out, because nothing would ever write that
+    // key again. (The project's latency copy writes its own row beside these,
+    // under its own grader, which is not this grader's business.)
+    expect(broke).toHaveLength(THREE.length);
+    expect(broken.asked).toEqual([]);
+
+    // Now the seam works, and the same conversation is asked again.
+    const working = await service.judgingWith({
+      [FIRST]: met("the agent read the new time back.", [5]),
+      [SECOND]: met("no price was mentioned."),
+      [THIRD]: met("a reminder was offered."),
+    });
+    await regrade(world.auth, { runId });
+
+    const after = await eventually("the second grading", async () => {
+      const read = await readVerdicts(world.auth, simulationId);
+      const rows = await behaviorRows(read.verdicts);
+      return rows.every((row) => row.verdict === "passed") ? read : undefined;
+    });
+
+    // **Every one of them rewritten, and the conversation passes.** The keys the
+    // broken grading wrote are the keys the working one writes, so the fold has
+    // one grading to prefer rather than an errored row it can never supersede.
+    expect(working.asked).toHaveLength(THREE.length);
+    expect((await behaviorRows(after.verdicts)).map((row) => row.verdict)).toEqual([
+      "passed",
+      "passed",
+      "passed",
+    ]);
+    // And this grader's own folded answer is `passed` — nothing errored is left
+    // under it for the fold to prefer. (The conversation as a whole is still
+    // `errored`, because the project's latency copy is on it and egma does not
+    // compute that one yet; that is a different grader's row and not this
+    // grader's business.)
+    const seeded = await theSeededGrader(world);
+    expect(
+      after.byGrader.find((one) => one.graderId === seeded)?.outcome.verdict,
+    ).toBe("passed");
   });
 });

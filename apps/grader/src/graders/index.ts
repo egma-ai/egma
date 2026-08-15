@@ -4,9 +4,13 @@ import {
   theOneCheck,
   type Execution,
   type Executor,
+  type GraderExecutor,
   type Judgment,
 } from "./contract.ts";
-import { executeExpectedBehaviors } from "./expected-behaviors.ts";
+import {
+  executeExpectedBehaviors,
+  expectedBehaviorAssertions,
+} from "./expected-behaviors.ts";
 
 /**
  * The executor seam: one library entry, one function, and nothing else in the
@@ -28,8 +32,11 @@ import { executeExpectedBehaviors } from "./expected-behaviors.ts";
  * judgment the moment the executor arrives, because a re-grade at the same
  * grader version replaces rather than doubles.
  */
-const EXECUTORS: Readonly<Record<string, Executor | undefined>> = {
-  [PREDEFINED_GRADERS.expectedBehaviors]: executeExpectedBehaviors,
+const EXECUTORS: Readonly<Record<string, GraderExecutor | undefined>> = {
+  [PREDEFINED_GRADERS.expectedBehaviors]: {
+    execute: executeExpectedBehaviors,
+    assertions: expectedBehaviorAssertions,
+  },
   // `latency` is computed from the conversation's spans by the change that
   // brings the shared measure module. Until then a copy of it says so.
   [PREDEFINED_GRADERS.latency]: undefined,
@@ -64,26 +71,60 @@ export async function execute(
 
   if (executor === undefined) {
     const nothingToJudge = execution.conversation.nothingToJudgeBecause;
-    return [
-      {
-        assertion: theOneCheck(execution.definition),
-        verdict: "errored",
-        score: 0,
-        rationale:
-          nothingToJudge ??
-          `egma does not execute the ${execution.definition.name} grader yet, so this check was not made.`,
-        citedSpanIds: [],
-      },
-    ];
+    return couldNotJudge(
+      execution,
+      nothingToJudge ??
+        `egma does not execute the ${execution.definition.name} grader yet, so this check was not made.`,
+    );
   }
 
-  return executor(execution);
+  return executor.execute(execution);
+}
+
+/**
+ * What a grader says when egma could not make its checks at all: one `errored`
+ * row per assertion it would have written, with the same reason on each.
+ *
+ * **One row per assertion, and never one row for the grader.** The fold counts a
+ * verdict once per conversation, grader and assertion key, and prefers the
+ * latest grading of that key — so a row filed under a key the executor never
+ * produces can never be superseded. It would sit beside the real rows forever,
+ * `errored` outranking every `passed` beside it, and no re-grade could reach it.
+ * A grader that failed today and passes tomorrow has to be able to say so.
+ *
+ * A grader egma cannot execute at all names its one check, which is what the
+ * branch above writes too — so those rows are re-writable on exactly the same
+ * terms the moment its executor arrives.
+ *
+ * **Asking for the keys may throw, and that is left to escape.** If egma cannot
+ * say what a grader checks, it must write nothing about that grader rather than
+ * a row it can never correct; the caller lets the job be retried instead.
+ */
+export async function couldNotJudge(
+  execution: Execution,
+  rationale: string,
+): Promise<readonly Judgment[]> {
+  const executor = EXECUTORS[execution.definition.id];
+  const keys =
+    executor === undefined
+      ? [theOneCheck(execution.definition)]
+      : await executor.assertions(execution);
+
+  return keys.map((assertion) => ({
+    assertion,
+    verdict: "errored" as const,
+    score: 0,
+    rationale,
+    citedSpanIds: [],
+  }));
 }
 
 export {
   theOneCheck,
+  type AssertionKeys,
   type Execution,
   type Executor,
+  type GraderExecutor,
   type Judging,
   type Judgment,
   type Reading,

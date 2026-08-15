@@ -26,10 +26,16 @@ const WEB = path.join(import.meta.dirname, "..");
  * product would type here first. `dimension` and `gate` are the redesign's own
  * retirements — the verdict store's old column name, and the word considered
  * for the must-pass flag and not chosen, which is exactly the word a heading
- * for `required` would reach for. `built-in` is the old name for what is now a
- * predefined grader, and this is the screen where the old built-in became a
- * row. `metric` is banned *for scoring logic*: a metric measures and a grader
- * judges, and every row on this screen is a grader.
+ * for `required` would reach for. `check` is the borrowed word for one
+ * criterion inside a grader, and it is the one this screen would reach for when
+ * counting a copy's filled-in values. `built-in` is the old name for what is
+ * now a predefined grader, and this is the screen where the old built-in became
+ * a row.
+ *
+ * `metric` is deliberately **not** here, and the distinction is the reason: a
+ * metric measures and a grader judges, so the word is banned for *scoring
+ * logic* and is the right word for the thing a latency copy reads. This screen
+ * will name one the moment it shows a copy's bound.
  *
  * `assertion` is deliberately **not** here. It was un-banned by the same
  * redesign that built this screen and is now the canonical word for one 0-or-1
@@ -41,6 +47,7 @@ const NEVER_SAID = [
   "evaluation",
   "evaluator",
   "scorer",
+  "check",
   "dimension",
   "gate",
   "built-in",

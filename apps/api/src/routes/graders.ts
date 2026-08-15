@@ -150,6 +150,41 @@ function requiredIn(body: Body): WrittenFlag {
   return { value: body.required };
 }
 
+/** A number a body sent, refused rather than dropped: `"10"` is not 10. */
+type WrittenRate =
+  | { readonly value: number | undefined }
+  | { readonly refusal: string };
+
+/**
+ * How much production traffic this grader judges, as a body sends it.
+ *
+ * **Refused rather than ignored**, on the unknown-key gate's exact terms and
+ * for a worse version of its reason. A rate that arrived as text and was
+ * quietly dropped leaves the copy judging *all* of production while the team
+ * that sent `"10"` believes it judges a tenth — every live conversation asked
+ * of a model, and billed, on a setting somebody thinks they chose. The shape is
+ * checked here; whether the number is a whole percentage is the factory's rule,
+ * refused in the factory's own words, because this door has no business holding
+ * a second opinion about that.
+ */
+function sampleRateIn(body: Body): WrittenRate {
+  if (
+    !("production_sample_rate" in body) ||
+    body.production_sample_rate === undefined
+  ) {
+    return { value: undefined };
+  }
+  if (typeof body.production_sample_rate !== "number") {
+    return {
+      refusal:
+        "production_sample_rate is what share of live traffic this grader " +
+        "judges, as a whole percentage between 0 and 100. Send it as a " +
+        `number, and this request sent ${typeof body.production_sample_rate}.`,
+    };
+  }
+  return { value: body.production_sample_rate };
+}
+
 export async function graderRoutes(
   app: FastifyInstance,
   options: GraderRoutesOptions,
@@ -235,6 +270,9 @@ export async function graderRoutes(
     const required = requiredIn(body);
     if ("refusal" in required) return unprocessable(reply, required.refusal);
 
+    const sampleRate = sampleRateIn(body);
+    if ("refusal" in sampleRate) return unprocessable(reply, sampleRate.refusal);
+
     const acting = await actingIn(auth, given(text(body.project)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
@@ -249,9 +287,9 @@ export async function graderRoutes(
       ...(given(text(body.scope)) === undefined
         ? {}
         : { scope: text(body.scope) as Grader["scope"] }),
-      ...(typeof body.production_sample_rate === "number"
-        ? { productionSampleRate: body.production_sample_rate }
-        : {}),
+      ...(sampleRate.value === undefined
+        ? {}
+        : { productionSampleRate: sampleRate.value }),
     });
 
     return reply.code(201).send(described(created));

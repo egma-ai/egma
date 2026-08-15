@@ -54,6 +54,17 @@ const THE_SEEDED_ENTRY = ((): PredefinedGrader => {
 const NOTHING_TO_FILL_IN: GraderConfig = { assertions: [] };
 
 /**
+ * What the backfill's advisory lock is taken on: this act, on this deployment,
+ * and nothing narrower.
+ *
+ * Not per project, which would be the finer lock and the wrong one — the read
+ * that decides which projects lack a copy spans them all, so two replicas
+ * holding two different project locks would still both read the same "none of
+ * them has one" and both write.
+ */
+const SEEDING_RUNNING_GRADERS = "egma:seed-running-graders";
+
+/**
  * What one seeded copy is, as two rows.
  *
  * **Written by hand rather than by calling the Use door**, for the reason the
@@ -137,6 +148,20 @@ export type SeededGraderCopy = {
  * is missing it whoever owns it. It takes no argument at all, so there is no
  * customer for a caller to name.
  *
+ * **One backfill runs at a time across the whole deployment**, held by an
+ * advisory lock taken before anything is read. Two replicas start together far
+ * more often than they do not — that is what a rolling deploy *is* — and this
+ * is a read followed by a write with nothing in the database to stop the second
+ * one: both would find a project holding no copy, both would insert, and the
+ * project would end up judging every behavior twice and billing for it, forever,
+ * with no surface to remove either row.
+ *
+ * The lock rather than a unique index, deliberately. **A second copy of one
+ * entry is allowed** — it is how per-agent strictness will work once filters
+ * arrive — so the database must not forbid what the product means to permit.
+ * What has to be single is this act, and an advisory lock says exactly that.
+ * `runMigrations` takes one for the same reason a line earlier in the same boot.
+ *
  * Soft-deleted projects are left alone: nothing runs in them, so nothing in them
  * can run unjudged.
  */
@@ -144,6 +169,14 @@ export async function seedRunningGraders(): Promise<
   readonly SeededGraderCopy[]
 > {
   return db().transaction(async (tx) => {
+    // Taken before anything is read and let go when the transaction ends, so
+    // the replica that arrives second waits here and then reads what the first
+    // one wrote — finding every project already holding its copy, and writing
+    // nothing.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${SEEDING_RUNNING_GRADERS}::text, 0))`,
+    );
+
     const projects = await tx
       .select({
         id: project.id,

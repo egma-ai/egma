@@ -1,5 +1,6 @@
 import {
   editGrader,
+  PREDEFINED_GRADERS,
   listGradingJobsForSimulation,
   readVerdicts,
   regrade,
@@ -150,7 +151,7 @@ describe("editing a grader", () => {
       // And the new one beside it, at the version that decided it.
       expect(newer).toMatchObject({
         graderId,
-        assertion: "latency",
+        assertion: PREDEFINED_GRADERS.latency,
         verdict: "errored",
         source: "simulation",
       });
@@ -322,7 +323,10 @@ describe("a re-grade that names one grader", () => {
       rowsFrom(after, alsoJudging).find(
         (row) => row.graderVersionId === tightened,
       ),
-    ).toMatchObject({ verdict: "errored", assertion: "latency" });
+    ).toMatchObject({
+      verdict: "errored",
+      assertion: PREDEFINED_GRADERS.latency,
+    });
 
     // And nothing else was asked anything. Row for row, byte for byte — the
     // moment each was stamped at included, which is what tells "not judged
