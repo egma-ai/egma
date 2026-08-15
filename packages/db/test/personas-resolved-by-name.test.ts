@@ -21,7 +21,7 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
  *
  * What is checked here is only what this function decides: which persona a
  * written name means, and how it refuses when the answer is none, somebody
- * deleted, more than one, or the same one twice. Whether an empty list becomes
+ * archived, more than one, or the same one twice. Whether an empty list becomes
  * the project's default is the test factory's rule and is tested there.
  */
 

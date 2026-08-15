@@ -17,6 +17,7 @@ import {
   testsUsingPersona,
   UnprocessableInputError,
   VersionConflictError,
+  VOICE_PROVIDERS,
   type AuthContext,
   type Persona,
   type PersonaTraits,
@@ -76,6 +77,7 @@ export const PERSONA_CLONE_PATH = "/api/personas/:personaId/clone";
 export const PERSONA_ARCHIVE_PATH = "/api/personas/:personaId/archive";
 export const PERSONA_RESTORE_PATH = "/api/personas/:personaId/restore";
 export const PERSONA_VERSION_PATH = "/api/persona-versions/:versionId";
+export const PERSONA_FORM_PATH = "/api/persona-form";
 
 type Body = Record<string, unknown>;
 
@@ -332,6 +334,30 @@ export async function personaRoutes(
       // from "this answer is an older shape that never had one".
       next_cursor: page.nextCursor ?? null,
     });
+  });
+
+  /**
+   * The safe projection of what the persona form is allowed to offer.
+   *
+   * **The list of voices egma can ask for is the server's, and the browser
+   * gets it from here rather than keeping a copy.** A hand-written copy is
+   * wrong the day the list grows and wrong silently: the form goes on offering
+   * yesterday's providers, and the one that arrived is unreachable from the
+   * only place a persona is authored. It is the same rule the connection form
+   * follows, one resource earlier.
+   *
+   * It is a read like any other, so it names a project like any other — not
+   * because the answer differs per project, but because a surface with one
+   * request that skips the project check is a surface with one hole in it.
+   */
+  app.get(PERSONA_FORM_PATH, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const query = (request.query ?? {}) as Query;
+
+    const acting = await projectFor(auth, given(query.project));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+
+    return reply.send({ voice_providers: VOICE_PROVIDERS });
   });
 
   /** One persona, active or archived — a detail page has to render both. */

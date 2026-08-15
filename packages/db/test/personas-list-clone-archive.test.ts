@@ -70,7 +70,7 @@ function actingAsGlobex(): AuthContext {
 function personaNamed(name: string): NewPersona {
   return {
     name,
-    description: `${name}, of the list-clone-delete tests`,
+    description: `${name}, of the list-clone-archive tests`,
     traits: {
       personality: `${name} books by phone, repeats the booking back twice, and hangs up satisfied.`,
       language: "en-US",
@@ -84,12 +84,12 @@ function personaNamed(name: string): NewPersona {
 }
 
 beforeAll(async () => {
-  database = await createConnectedDatabase("personas_list_clone_delete");
+  database = await createConnectedDatabase("personas_list_clone_archive");
 
   await seedOrganization(database, acme.organization, [
     { id: acme.listing, slug: "listing" },
     { id: acme.cloning, slug: "cloning" },
-    { id: acme.archiving, slug: "deleting" },
+    { id: acme.archiving, slug: "archiving" },
   ]);
   await seedOrganization(database, globex.organization, [
     { id: globex.project, slug: "default" },
@@ -206,7 +206,7 @@ describe("listing personas", () => {
     expect(page.items.map((item) => item.id)).toEqual([stranger.id]);
   });
 
-  it("drops a deleted persona from the list immediately", async () => {
+  it("drops an archived persona from the active list immediately", async () => {
     const [three] = created.filter((item) => item.name === "Three");
     if (three === undefined) throw new Error("Three was never created");
 

@@ -404,6 +404,14 @@
   line-height: var(--line-normal);
 }
 
+/* Why a control is not available, said where a keyboard can reach it. */
+.whyNot {
+  max-width: 56ch;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
+
 .refused {
   display: flex;
   flex-direction: column;

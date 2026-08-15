@@ -18,9 +18,6 @@
  * the two would drift the first time the API grew a field.
  */
 
-/** The mouths egma knows how to ask for. The API's list, and it grows. */
-export const VOICE_PROVIDERS = ["elevenlabs", "cartesia", "openai"] as const;
-
 export type PersonaTraits = {
   readonly personality: string;
   readonly language: string;
@@ -80,6 +77,39 @@ export type UsingTest = { readonly id: string; readonly name: string };
 export type PersonaUsage = { readonly tests: readonly UsingTest[] };
 
 export const PERSONAS_PATH = "/api/personas";
+
+/** Where the persona form's server-owned metadata comes from. */
+export const PERSONA_FORM_PATH = "/api/persona-form";
+
+/**
+ * What the persona form is allowed to offer, as the server says it.
+ *
+ * **The browser keeps no copy of this.** Which voices egma can ask for is the
+ * server's list and it grows one entry at a time; a second copy here would be
+ * wrong the day it grows, and wrong silently — the form would go on offering
+ * yesterday's providers, and the new one would be unreachable from the only
+ * place a persona is authored.
+ */
+export type PersonaForm = {
+  readonly voice_providers: readonly string[];
+};
+
+/**
+ * The providers a Select may show: the ones the server offers, plus whatever
+ * this persona is already on.
+ *
+ * A persona authored against a provider that has since left the list still has
+ * to be readable and still has to be editable in every other respect — so the
+ * value in hand is always among the options, and dropping it silently would
+ * change somebody's voice the first time they saved a typo in their accent.
+ */
+export function providerOptions(
+  offered: readonly string[] | null,
+  held: string,
+): readonly string[] {
+  const known = offered ?? [];
+  return known.includes(held) || held === "" ? known : [...known, held];
+}
 
 /** The list of one lifecycle state. Two lists, never one with a column. */
 export function personasPath(archived: boolean): string {

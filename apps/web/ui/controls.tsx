@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useId,
+  useRef,
+  type ReactNode,
+} from "react";
 
 import styles from "./system.module.css";
 
@@ -20,6 +26,27 @@ function weightClass(weight: Weight): string {
   return weight === "strong" ? styles.button : styles.buttonQuiet;
 }
 
+/**
+ * Why a control is not available, said where anybody can find it.
+ *
+ * **A disabled button cannot take focus, so a tooltip on one is a reason only
+ * a mouse can reach.** The developer's decision was to *disable rather than
+ * hide* precisely so a viewer is told why an action is not theirs — and a
+ * reason half the people using egma cannot get to does not deliver that
+ * decision, it only looks like it does.
+ *
+ * So the sentence is written on the page beside the control, and the control
+ * points at it with `aria-describedby`. It stays a `title` as well, because a
+ * pointer user hovering is a real way to ask.
+ */
+function WhyNot({ id, why }: { readonly id: string; readonly why: string }) {
+  return (
+    <span className={styles.whyNot} id={id}>
+      {why}
+    </span>
+  );
+}
+
 export function Button({
   weight = "quiet",
   type = "button",
@@ -32,24 +59,30 @@ export function Button({
   readonly type?: "button" | "submit";
   readonly disabled?: boolean;
   /**
-   * Why it is not available, for whoever hovers or focuses it. A disabled
-   * control that cannot say why is a control somebody presses twice and then
-   * gives up on.
+   * Why it is not available. Shown beside the control and named by it, so it
+   * reaches a keyboard and a screen reader and not only a pointer.
    */
   readonly why?: string;
   readonly onClick?: () => void;
   readonly children: ReactNode;
 }) {
+  const said = useId();
+  const explained = disabled === true && why !== undefined;
+
   return (
-    <button
-      className={weightClass(weight)}
-      type={type}
-      disabled={disabled}
-      title={why}
-      onClick={onClick}
-    >
-      {children}
-    </button>
+    <>
+      <button
+        className={weightClass(weight)}
+        type={type}
+        disabled={disabled}
+        title={why}
+        aria-describedby={explained ? said : undefined}
+        onClick={onClick}
+      >
+        {children}
+      </button>
+      {explained ? <WhyNot id={said} why={why} /> : null}
+    </>
   );
 }
 
@@ -87,9 +120,9 @@ export function ButtonLink({
 }) {
   if (disabled) {
     return (
-      <button className={weightClass(weight)} type="button" disabled title={why}>
+      <Button weight={weight} disabled {...(why === undefined ? {} : { why })}>
         {children}
-      </button>
+      </Button>
     );
   }
 
@@ -98,6 +131,23 @@ export function ButtonLink({
       {children}
     </Link>
   );
+}
+
+/**
+ * The id of the hint a field is wearing, offered to whatever control it wraps.
+ *
+ * **A hint nothing points at is a hint only a sighted reader ever gets.** It
+ * travels through context rather than through a prop because the alternative
+ * is every caller remembering to wire `aria-describedby` on every control —
+ * and the ones they forget are exactly the ones nobody notices, because the
+ * page still looks right.
+ */
+const FieldHintContext = createContext<string | undefined>(undefined);
+
+/** The hint this control is inside, for the controls that describe themselves. */
+function describedByHint(): string | undefined {
+  // eslint-disable-next-line react-hooks/rules-of-hooks -- called from components only
+  return useContext(FieldHintContext);
 }
 
 export function Field({
@@ -112,13 +162,21 @@ export function Field({
   readonly hint?: ReactNode;
   readonly children: ReactNode;
 }) {
+  const said = useId();
+
   return (
     <div className={styles.field}>
       <label className={styles.fieldLabel} htmlFor={htmlFor}>
         {label}
       </label>
-      {children}
-      {hint === undefined ? null : <p className={styles.fieldHint}>{hint}</p>}
+      <FieldHintContext.Provider value={hint === undefined ? undefined : said}>
+        {children}
+      </FieldHintContext.Provider>
+      {hint === undefined ? null : (
+        <p className={styles.fieldHint} id={said}>
+          {hint}
+        </p>
+      )}
     </div>
   );
 }
@@ -185,6 +243,8 @@ export function TextInput({
   readonly onChange: (value: string) => void;
   readonly onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void;
 }) {
+  const describedBy = describedByHint();
+
   return (
     <input
       className={styles.input}
@@ -193,6 +253,7 @@ export function TextInput({
       value={value}
       placeholder={placeholder}
       aria-label={label}
+      aria-describedby={describedBy}
       disabled={disabled}
       autoComplete="off"
       spellCheck={false}
@@ -226,6 +287,8 @@ export function TextArea({
   readonly disabled?: boolean;
   readonly onChange: (value: string) => void;
 }) {
+  const describedBy = describedByHint();
+
   return (
     <textarea
       className={styles.textarea}
@@ -233,6 +296,7 @@ export function TextArea({
       value={value}
       rows={rows}
       placeholder={placeholder}
+      aria-describedby={describedBy}
       disabled={disabled}
       spellCheck
       onChange={(event) => onChange(event.target.value)}
@@ -265,6 +329,8 @@ export function Select({
   readonly label?: string;
   readonly onChange: (value: string) => void;
 }) {
+  const describedBy = describedByHint();
+
   return (
     <select
       className={styles.select}
@@ -272,6 +338,7 @@ export function Select({
       value={value}
       disabled={disabled}
       aria-label={label}
+      aria-describedby={describedBy}
       onChange={(event) => onChange(event.target.value)}
     >
       {options.map((option) => (
@@ -305,17 +372,62 @@ export function Choice<Value extends string>({
   readonly options: readonly { readonly value: Value; readonly label: string }[];
   readonly onChange: (value: Value) => void;
 }) {
+  /**
+   * The radios themselves, so that moving with an arrow key can put focus on
+   * the one it moved to. A radio group that changes selection without moving
+   * focus leaves a screen reader announcing one thing and the keyboard on
+   * another.
+   */
+  const radios = useRef<(HTMLButtonElement | null)[]>([]);
+
+  const move = (from: number, by: number) => {
+    const to = (from + by + options.length) % options.length;
+    const going = options[to];
+    if (going === undefined) return;
+    onChange(going.value);
+    radios.current[to]?.focus();
+  };
+
+  const STEPS: Readonly<Record<string, number>> = {
+    ArrowRight: 1,
+    ArrowDown: 1,
+    ArrowLeft: -1,
+    ArrowUp: -1,
+  };
+
   return (
     <div className={styles.choice} role="radiogroup" aria-label={label}>
-      {options.map((option) => (
+      {options.map((option, at) => (
         <button
           key={option.value}
+          ref={(held) => {
+            radios.current[at] = held;
+          }}
           className={`${styles.choiceItem} ${
             option.value === value ? styles.choiceItemOn : ""
           }`}
           type="button"
           role="radio"
           aria-checked={option.value === value}
+          /**
+           * Roving: the group is one Tab stop, and the arrow keys move inside
+           * it. Every option being tabbable would make a two-option filter
+           * cost two Tab presses on the way to the table, and a ten-option one
+           * cost ten.
+           */
+          tabIndex={option.value === value ? 0 : -1}
+          onKeyDown={(event) => {
+            const step = STEPS[event.key];
+            if (step !== undefined) {
+              event.preventDefault();
+              move(at, step);
+              return;
+            }
+            if (event.key === "Home" || event.key === "End") {
+              event.preventDefault();
+              move(at, event.key === "Home" ? -at : options.length - 1 - at);
+            }
+          }}
           onClick={() => onChange(option.value)}
         >
           {option.label}

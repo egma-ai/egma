@@ -436,6 +436,10 @@ describe("authoring a persona", () => {
         status: 201,
         body: { ...RITA, id: "prs_new" },
       },
+      "GET /api/persona-form": {
+        status: 200,
+        body: { voice_providers: ["elevenlabs", "cartesia"] },
+      },
     });
     render(<NewPersonaPage />);
 
@@ -471,6 +475,10 @@ describe("authoring a persona", () => {
         status: 422,
         body: { error: "unprocessable", message: "a persona needs a name" },
       },
+      "GET /api/persona-form": {
+        status: 200,
+        body: { voice_providers: ["elevenlabs"] },
+      },
     });
     render(<NewPersonaPage />);
 
@@ -488,7 +496,13 @@ describe("authoring a persona", () => {
   });
 
   it("leaves a viewer the form to read and no way to submit it", async () => {
-    apiAnswers({ "GET /api/me": { status: 200, body: meWith("viewer") } });
+    apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("viewer") },
+      "GET /api/persona-form": {
+        status: 200,
+        body: { voice_providers: ["elevenlabs"] },
+      },
+    });
     render(<NewPersonaPage />);
 
     const submit = (await screen.findByRole("button", {
@@ -521,6 +535,10 @@ describe("one persona's page", () => {
       },
     },
     "GET /api/personas/prs_1/usage": { status: 200, body: { tests: [] } },
+    "GET /api/persona-form": {
+      status: 200,
+      body: { voice_providers: ["elevenlabs", "cartesia", "openai"] },
+    },
   });
 
   it("saves the live fields with the revision, and no version expectation at all", async () => {
@@ -751,6 +769,10 @@ describe("one persona's page", () => {
         status: 404,
         body: { error: "not_found", message: "There is no persona prs_1." },
       },
+      "GET /api/persona-form": {
+        status: 200,
+        body: { voice_providers: ["elevenlabs"] },
+      },
     });
     render(<PersonaPage />);
 
@@ -808,15 +830,20 @@ describe("driving the Personas area without a pointer", () => {
     expect(active.getAttribute("aria-checked")).toBe("true");
     expect(archived.getAttribute("aria-checked")).toBe("false");
 
-    archived.focus();
-    expect(document.activeElement).toBe(archived);
-    fireEvent.keyDown(archived, { key: "Enter" });
-    fireEvent.click(archived);
+    // One Tab stop for the group, and an arrow key moves inside it — which is
+    // what announcing a radiogroup promises anybody using a screen reader.
+    expect(active.getAttribute("tabindex")).toBe("0");
+    expect(archived.getAttribute("tabindex")).toBe("-1");
+
+    active.focus();
+    fireEvent.keyDown(active, { key: "ArrowRight" });
 
     expect(await screen.findByText("Nothing has been archived here")).toBeDefined();
-    expect(
-      screen.getByRole("radio", { name: "Archived" }).getAttribute("aria-checked"),
-    ).toBe("true");
+    const now = screen.getByRole("radio", { name: "Archived" });
+    expect(now.getAttribute("aria-checked")).toBe("true");
+    expect(now.getAttribute("tabindex")).toBe("0");
+    // Selection follows focus, so the keyboard and the announcement agree.
+    expect(document.activeElement).toBe(now);
   });
 
   it("puts focus inside an older-version read, and closes it with Escape", async () => {
@@ -839,6 +866,10 @@ describe("driving the Personas area without a pointer", () => {
         },
       },
       "GET /api/personas/prs_1/usage": { status: 200, body: { tests: [] } },
+      "GET /api/persona-form": {
+        status: 200,
+        body: { voice_providers: ["elevenlabs"] },
+      },
     });
     render(<PersonaPage />);
 
@@ -849,5 +880,215 @@ describe("driving the Personas area without a pointer", () => {
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
+/**
+ * The three failures ticket 02 shipped, asked of this area's own paths.
+ *
+ * Each one is written as the thing somebody would actually do — press Archive
+ * while the store is down, save and then open another persona, arrive before
+ * `/api/me` answers — because each of them once looked like nothing happening
+ * at all.
+ */
+describe("what this page does when something goes wrong underneath it", () => {
+  const reading = {
+    "GET /api/me": { status: 200, body: meWith("member") },
+    "GET /api/personas/prs_1/versions": {
+      status: 200,
+      body: { items: [], next_cursor: null },
+    },
+    "GET /api/personas/prs_1/usage": { status: 200, body: { tests: [] } },
+    "GET /api/persona-form": {
+      status: 200,
+      body: { voice_providers: ["elevenlabs"] },
+    },
+  } as const;
+
+  /**
+   * **A read that fails silently takes the default persona out of the
+   * product.** The choice never arrives, Archive stays disabled, and the one
+   * persona a project cannot do without becomes the one nobody can archive.
+   */
+  it("says why the replacements could not be read, and lets somebody ask again", async () => {
+    apiAnswers({
+      ...reading,
+      "GET /api/personas/prs_1": {
+        status: 200,
+        body: { ...RITA, is_default: true },
+      },
+      "GET /api/personas": [
+        {
+          status: 503,
+          body: {
+            error: "unavailable",
+            message: "Egma could not reach the personas store.",
+          },
+        },
+        {
+          status: 200,
+          body: {
+            items: [
+              { ...RITA, is_default: true },
+              { ...RITA, id: "prs_2", name: "Taking-Over Tam", is_default: false },
+            ],
+            next_cursor: null,
+          },
+        },
+      ],
+    });
+    render(<PersonaPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Archive" }));
+    const dialog = await screen.findByRole("dialog");
+
+    const said = await within(dialog).findByRole("alert");
+    expect(said.textContent).toContain("Egma could not reach the personas store.");
+    expect(
+      (within(dialog).getByRole("button", {
+        name: "Archive persona",
+      }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    fireEvent.click(within(said).getByRole("button", { name: "Try again" }));
+
+    expect(
+      await within(dialog).findByLabelText("Replacement default persona"),
+    ).toBeDefined();
+    expect(
+      (within(dialog).getByRole("button", {
+        name: "Archive persona",
+      }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it("sends an expired session where the rest of the application sends one", async () => {
+    const replaced = vi.fn();
+    vi.stubGlobal("location", { replace: replaced, assign: vi.fn() });
+    apiAnswers({
+      ...reading,
+      "GET /api/personas/prs_1": {
+        status: 200,
+        body: { ...RITA, is_default: true },
+      },
+      "GET /api/personas": {
+        status: 401,
+        body: { error: "not_authenticated", message: "sign in" },
+      },
+    });
+    render(<PersonaPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Archive" }));
+    await screen.findByRole("dialog");
+    await new Promise((settle) => setTimeout(settle, 0));
+
+    expect(replaced).toHaveBeenCalledWith("/sign-in");
+  });
+
+  /**
+   * Save on persona A, open persona B while the write is in flight, and A's
+   * refusal lands on B — a sentence about work nobody can see, over fields it
+   * does not describe. The list page carries the project with its data for the
+   * same reason; this is that rule on the write path.
+   */
+  it("drops a write's refusal that arrives after another persona was opened", async () => {
+    let release: (answer: Response) => void = () => undefined;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+
+    const personaFor = (id: string) =>
+      json(200, { ...RITA, id, name: id === "prs_1" ? "Impatient Rita" : "Patient Pat" });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init?: RequestInit) => {
+        const at = new URL(String(input), "http://egma.test");
+        if (at.pathname === "/api/me") return json(200, meWith("member"));
+        if (at.pathname === "/api/persona-form") {
+          return json(200, { voice_providers: ["elevenlabs"] });
+        }
+        if ((init?.method ?? "GET") !== "GET") return pending;
+        if (at.pathname.endsWith("/versions")) {
+          return json(200, { items: [], next_cursor: null });
+        }
+        if (at.pathname.endsWith("/usage")) return json(200, { tests: [] });
+        return personaFor(at.pathname.split("/").pop() ?? "prs_1");
+      }),
+    );
+
+    const { rerender } = render(<PersonaPage />);
+    fireEvent.change(await screen.findByLabelText("Name"), {
+      target: { value: "Rita" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+
+    // Somebody opens another persona while that write is still in flight. The
+    // page is not remounted — it is the same route with another id in it.
+    routed.personaId = "prs_2";
+    routed.pathname = "/projects/prj_1/personas/prs_2";
+    rerender(<PersonaPage />);
+    expect(await screen.findByDisplayValue("Patient Pat")).toBeDefined();
+
+    release(
+      json(409, {
+        error: "identity_conflict",
+        message: "Persona prs_1 changed after you opened it.",
+      }),
+    );
+    await new Promise((settle) => setTimeout(settle, 0));
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/Persona prs_1 changed/)).toBeNull();
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      "Patient Pat",
+    );
+  });
+
+  /**
+   * **An unanswered session is not a viewer.** A disabled field is a claim,
+   * and while `/api/me` is in flight there is nobody to make that claim about.
+   */
+  it("offers no editor at all until it knows whose page this is", async () => {
+    apiAnswers({
+      ...reading,
+      "GET /api/me": "never",
+      "GET /api/personas/prs_1": { status: 200, body: RITA },
+    });
+    render(<PersonaPage />);
+
+    // The persona is readable, which is the half that does not depend on a role.
+    expect(await screen.findAllByText(/hard of hearing/)).not.toHaveLength(0);
+
+    // And nothing claims anything about a role egma has not been told yet.
+    expect(screen.queryByLabelText("Name")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save name" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save traits" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
+    expect(screen.queryByText(/role cannot/)).toBeNull();
+  });
+
+  it("gives a viewer the reason without a pointer, not only in a tooltip", async () => {
+    apiAnswers({
+      ...reading,
+      "GET /api/me": { status: 200, body: meWith("viewer") },
+      "GET /api/personas/prs_1": { status: 200, body: RITA },
+    });
+    render(<PersonaPage />);
+
+    const save = (await screen.findByRole("button", {
+      name: "Save name",
+    })) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+
+    // The sentence is on the page and the control names it, so it reaches a
+    // screen reader and a keyboard — not only a hovering mouse.
+    const described = save.getAttribute("aria-describedby");
+    expect(described).not.toBeNull();
+    expect(document.getElementById(String(described))?.textContent).toContain(
+      "viewer role cannot",
+    );
   });
 });

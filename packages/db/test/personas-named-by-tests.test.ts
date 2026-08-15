@@ -70,7 +70,7 @@ async function refusalFrom(
   return error as PersonaNamedByTestsError;
 }
 
-describe("deleting a persona a live test names", () => {
+describe("archiving a persona an active test names", () => {
   it("is refused, and the refusal names the test", async () => {
     const cass = await seedPersona(actingAsAcme(), "Called-On Cass");
     const created = await createTest(actingAsAcme(), {
@@ -141,14 +141,14 @@ describe("deleting a persona a live test names", () => {
 });
 
 describe("a persona only history names", () => {
-  it("deletes fine, and the version that named them keeps them", async () => {
+  it("archives fine, and the version that named them keeps them", async () => {
     const lena = await seedPersona(actingAsAcme(), "Leaving Lena");
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
       personaIds: [rita, lena],
     });
 
-    // While version 1 is the current one, the delete is refused.
+    // While version 1 is the current one, the Archive is refused.
     await refusalFrom(archivePersona(actingAsAcme(), lena));
 
     // Version 2 does not name them, so version 1 is history and blocks nothing.
@@ -168,8 +168,8 @@ describe("a persona only history names", () => {
   });
 });
 
-describe("a persona only deleted tests name", () => {
-  it("deletes fine, and the deleted test's version keeps them", async () => {
+describe("a persona only archived tests name", () => {
+  it("archives fine, and the archived test's version keeps them", async () => {
     const dana = await seedPersona(actingAsAcme(), "Departing Dana");
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
@@ -250,12 +250,12 @@ async function writeTestNaming(
 }
 
 describe("the race between archiving a persona and naming them", () => {
-  it("makes a create wait behind a delete already holding the row, then refuses the create", async () => {
+  it("makes a create wait behind an Archive already holding the row, then refuses the create", async () => {
     const cora = await seedPersona(actingAsAcme(), "Contested Cora");
     const connection = await openSingleConnection(database.url);
 
     try {
-      // The first two statements of a delete, held open: the exclusive lock on
+      // The first two statements of an Archive, held open: the exclusive lock on
       // the persona, and the marker it is about to commit.
       await connection.sql("begin");
       await connection.sql(
@@ -274,14 +274,14 @@ describe("the race between archiving a persona and naming them", () => {
       });
 
       // The create cannot decide yet: checking that Cora is alive takes the
-      // shared lock, and the delete is holding the row exclusively.
+      // shared lock, and the Archive is holding the row exclusively.
       expect(await hasFinished(creating)).toBe(false);
       expect(await rowCounts()).toEqual(before);
 
       await connection.sql("commit");
 
-      // Released onto the row the delete left behind, the create sees the
-      // marker and refuses — rather than writing a live test naming a deleted
+      // Released onto the row the Archive left behind, the create sees the
+      // marker and refuses — rather than writing an active test naming an archived
       // persona, which is what a create deciding on its own snapshot would have
       // done.
       await expect(creating).rejects.toThrow(/is archived/);
@@ -291,7 +291,7 @@ describe("the race between archiving a persona and naming them", () => {
     }
   });
 
-  it("makes a delete wait behind a create already naming them, then refuses the delete", async () => {
+  it("makes an Archive wait behind a create already naming them, then refuses the Archive", async () => {
     const cyrus = await seedPersona(actingAsAcme(), "Contested Cyrus");
     const connection = await openSingleConnection(database.url);
 
@@ -306,21 +306,21 @@ describe("the race between archiving a persona and naming them", () => {
       const written = await writeTestNaming(connection, {
         projectId: acme.project,
         personaId: cyrus,
-        name: "Races the delete",
+        name: "Races the Archive",
       });
 
-      const deleting = archivePersona(actingAsAcme(), cyrus);
+      const archiving = archivePersona(actingAsAcme(), cyrus);
 
-      // The delete cannot decide yet: it takes the row exclusively before it
+      // The Archive cannot decide yet: it takes the row exclusively before it
       // counts anything, and the create is holding it shared.
-      expect(await hasFinished(deleting)).toBe(false);
+      expect(await hasFinished(archiving)).toBe(false);
 
       await connection.sql("commit");
 
       // It counts the rows the create committed while it waited, and refuses.
-      const refusal = await refusalFrom(deleting);
+      const refusal = await refusalFrom(archiving);
       expect(refusal.tests).toEqual([
-        { id: written.testId, name: "Races the delete" },
+        { id: written.testId, name: "Races the Archive" },
       ]);
       expect((await getPersona(actingAsAcme(), cyrus))?.id).toBe(cyrus);
     } finally {
@@ -394,13 +394,13 @@ describe("the persona a project points at by default", () => {
     expect((await getPersona(inOutbound, holding))?.archivedAt).toBeNull();
   });
 
-  it("makes a create taking the default wait behind a delete, then refuses it in the pointer's own words", async () => {
+  it("makes a create taking the default wait behind an Archive, then refuses it in the pointer's own words", async () => {
     const dee = await seedPersona(inOutbound, "Default Dee");
     await pointProjectAt(acme.outbound, dee);
     const connection = await openSingleConnection(database.url);
 
     try {
-      // The first two statements of a delete, held open.
+      // The first two statements of an Archive, held open.
       await connection.sql("begin");
       await connection.sql(
         "select id from persona where id = $1 for update",
@@ -417,7 +417,7 @@ describe("the persona a project points at by default", () => {
       const creating = createTest(inOutbound, rescheduling);
 
       // The create cannot decide yet: resolving the pointer takes the shared
-      // lock on the persona it points at, and the delete is holding the row
+      // lock on the persona it points at, and the Archive is holding the row
       // exclusively.
       expect(await hasFinished(creating)).toBe(false);
       expect(await rowCounts()).toEqual(before);
@@ -425,11 +425,11 @@ describe("the persona a project points at by default", () => {
       await connection.sql("commit");
 
       const refused = String(await creating.catch((thrown: unknown) => thrown));
-      // Released onto the row the delete left behind, the create reads the
+      // Released onto the row the Archive left behind, the create reads the
       // marker off it and names the fix that matches: repoint the default.
       expect(refused).toMatch(/default persona .* is archived/);
       // Not the other way a pointer can be wrong, which wants a different fix —
-      // which is what a read that filtered the deleted row out would say.
+      // which is what a read that filtered the archived row out would say.
       expect(refused).not.toMatch(/there is no persona/);
       expect(await rowCounts()).toEqual(before);
     } finally {
@@ -437,7 +437,7 @@ describe("the persona a project points at by default", () => {
     }
   });
 
-  it("makes a delete wait behind a create taking the default, then refuses the delete", async () => {
+  it("makes an Archive wait behind a create taking the default, then refuses the Archive", async () => {
     const dixon = await seedPersona(inOutbound, "Default Dixon");
     await pointProjectAt(acme.outbound, dixon);
     const connection = await openSingleConnection(database.url);
@@ -462,14 +462,14 @@ describe("the persona a project points at by default", () => {
         name: "Takes the default",
       });
 
-      const deleting = archivePersona(inOutbound, dixon);
+      const archiving = archivePersona(inOutbound, dixon);
 
-      expect(await hasFinished(deleting)).toBe(false);
+      expect(await hasFinished(archiving)).toBe(false);
 
       await connection.sql("commit");
 
       // The test that took the default is a test naming them like any other.
-      const refusal = await refusalFrom(deleting);
+      const refusal = await refusalFrom(archiving);
       expect(refusal.tests).toEqual([
         { id: written.testId, name: "Takes the default" },
       ]);

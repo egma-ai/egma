@@ -265,64 +265,58 @@ function Personas({ projectId }: { readonly projectId: string }) {
       });
     }
 
-    const list =
-      items.length === 0 ? (
-        archived ? (
-          <Empty
-            title="Nothing has been archived here"
-            lead="A persona somebody archives leaves the active list and lands here, with everything about them intact."
-          />
-        ) : (
-          <Empty
-            title="No personas in this project yet"
-            lead="A persona is the synthetic person who calls the agent — who they are, never what they want on a given occasion."
-            action={author()}
-          />
-        )
+    if (items.length === 0) {
+      return archived ? (
+        <Empty
+          title="Nothing has been archived here"
+          lead="A persona somebody archives leaves the active list and lands here, with everything about them intact."
+        />
       ) : (
-        <>
-          <DataTable
-            label={`${archived ? "Archived" : "Active"} personas in this project`}
-            columns={columnsFor(projectId)}
-            rows={items}
-            keyOf={(persona) => persona.id}
-            {...(cursor === null
-              ? {}
-              : {
-                  more: {
-                    onMore: () => void showMore(),
-                    loading: loadingMore,
-                    note: `${items.length} personas so far`,
-                  },
-                })}
-          />
-          {moreRefused === null ? null : (
-            <Failure
-              title="Egma could not load more personas."
-              message={moreRefused.message}
-              onRetry={() => void showMore()}
-            />
-          )}
-        </>
+        <Empty
+          title="No personas in this project yet"
+          lead="A persona is the synthetic person who calls the agent — who they are, never what they want on a given occasion."
+          action={author()}
+        />
       );
+    }
 
     return (
       <>
-        <div className={styles.toolbar}>
-          <Choice<Shown>
-            label="Which personas to show"
-            value={shown}
-            options={[
-              { value: "active", label: "Active" },
-              { value: "archived", label: "Archived" },
-            ]}
-            onChange={setShown}
+        <DataTable
+          label={`${archived ? "Archived" : "Active"} personas in this project`}
+          columns={columnsFor(projectId)}
+          rows={items}
+          keyOf={(persona) => persona.id}
+          {...(cursor === null
+            ? {}
+            : {
+                more: {
+                  onMore: () => void showMore(),
+                  loading: loadingMore,
+                  note: `${items.length} personas so far`,
+                },
+              })}
+        />
+        {moreRefused === null ? null : (
+          <Failure
+            title="Egma could not load more personas."
+            message={moreRefused.message}
+            onRetry={() => void showMore()}
           />
-        </div>
-        {list}
+        )}
       </>
     );
   }
+
+  /**
+   * The filter stays on screen while the list it chose is loading.
+   *
+   * Rendering it inside the state fold would unmount it on every change —
+   * which loses the keyboard's place in it, and makes the control somebody
+   * just pressed disappear while they are still looking at it. It goes when
+   * there is no list to filter at all, and only then.
+   */
+  const filterable = answer === null || answer.status === "ready";
 
   return (
     <ProductPage>
@@ -332,7 +326,22 @@ function Personas({ projectId }: { readonly projectId: string }) {
         lead="The synthetic people who call the agents in this project. One persona calls about many situations; what they want on a given occasion is the test's."
         action={author()}
       />
-      <PageBody>{body()}</PageBody>
+      <PageBody>
+        {filterable ? (
+          <div className={styles.toolbar}>
+            <Choice<Shown>
+              label="Which personas to show"
+              value={shown}
+              options={[
+                { value: "active", label: "Active" },
+                { value: "archived", label: "Archived" },
+              ]}
+              onChange={setShown}
+            />
+          </div>
+        ) : null}
+        {body()}
+      </PageBody>
     </ProductPage>
   );
 }

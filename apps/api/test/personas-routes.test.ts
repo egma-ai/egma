@@ -1,6 +1,7 @@
 import {
   createProject,
   createTest,
+  deleteTest,
   editTest,
   type PersonaTraits,
 } from "@egma/db";
@@ -165,6 +166,56 @@ describe("creating and reading a persona", () => {
     expect(tooFast.body.message).toBe(
       "speaking speed must be between 0.5 and 2",
     );
+  });
+
+  /**
+   * **A persona says who is calling, never what they are calling about.**
+   *
+   * The whole worth of a persona is that one of them calls about forty
+   * different situations, and a caller carrying a goal would quietly become a
+   * second copy of one test. That is a claim about behaviour, so it is shown
+   * by asking the system for it: a create that smuggles a scenario in comes
+   * back without one, and the stored version holds none either.
+   */
+  it("keeps a test's goal out of a persona, at the door and in the row", async () => {
+    api = await createApi("personas_no_scenario");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const made = await browse("POST", "/api/personas", ada, {
+      project: ada.projectId,
+      name: "Smuggling Sid",
+      traits: {
+        ...TRAITS,
+        scenario: "Their Thursday cleaning has to move to next week.",
+        goal: "Reschedule the appointment.",
+        wants: "An afternoon slot.",
+      },
+    });
+
+    expect(made.statusCode).toBe(201);
+    for (const smuggled of ["scenario", "goal", "wants"]) {
+      expect(made.body.traits, smuggled).not.toHaveProperty(smuggled);
+    }
+
+    const read = await browse(
+      "GET",
+      `/api/personas/${personaIn(made).id}?project=${ada.projectId}`,
+      ada,
+    );
+    expect(personaIn(read).traits).toEqual(TRAITS);
+
+    // And not merely hidden by the read: the stored version holds none of it,
+    // so nothing downstream — a simulator building a caller, a run pinning a
+    // version — can ever find one there.
+    const { rows } = await api.database.sql<{ traits: Record<string, unknown> }>(
+      "select traits from persona_version where persona_id = $1",
+      [personaIn(made).id],
+    );
+    expect(Object.keys(rows[0]?.traits ?? {}).sort()).toEqual([
+      "language",
+      "personality",
+      "voice",
+    ]);
   });
 
   it("shows the project's default persona as an ordinary persona of the list", async () => {
@@ -660,7 +711,7 @@ describe("archiving a persona", () => {
     );
   });
 
-  it("is not blocked by a historical version or by an archived test", async () => {
+  it("is not blocked by a version the test has moved past", async () => {
     api = await createApi("personas_history_does_not_block");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const author = contextFor(ada, "member");
@@ -688,6 +739,43 @@ describe("archiving a persona", () => {
       { project: ada.projectId, expected_revision: leaving.revision },
     );
     expect(archived.statusCode).toBe(200);
+  });
+
+  it("is not blocked by an archived test, whose current version still names them", async () => {
+    api = await createApi("personas_archived_test_does_not_block");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const author = contextFor(ada, "member");
+    const leaving = await createPersonaThrough(ada, "Leaving Lena");
+
+    const named = await createTest(author, {
+      name: "Reschedules a booked appointment",
+      scenario: "Their Thursday cleaning has to move to next week.",
+      expectedBehaviors: ["confirms the new time back before finishing"],
+      personaIds: [leaving.id],
+    });
+
+    // Nothing has moved off them: this test's **current** version still names
+    // them. It is the test itself that is out of circulation, and a test that
+    // is not going to run cannot lose a simulation.
+    const blocked = await browse(
+      "POST",
+      `/api/personas/${leaving.id}/archive`,
+      ada,
+      { project: ada.projectId, expected_revision: leaving.revision },
+    );
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.body.error).toBe("persona_in_use");
+
+    await deleteTest(author, named.id);
+
+    const archived = await browse(
+      "POST",
+      `/api/personas/${leaving.id}/archive`,
+      ada,
+      { project: ada.projectId, expected_revision: leaving.revision },
+    );
+    expect(archived.statusCode, JSON.stringify(archived.body)).toBe(200);
+    expect(personaIn(archived).archived_at).toEqual(expect.any(String));
   });
 });
 

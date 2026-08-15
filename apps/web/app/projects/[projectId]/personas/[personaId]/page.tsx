@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { readJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { asMoment } from "../../../../../lib/instants.ts";
@@ -9,12 +9,14 @@ import { roleOf } from "../../../../../lib/me.ts";
 import {
   describedTraits,
   draftOf,
+  PERSONA_FORM_PATH,
   personaPath,
   personaUsagePath,
   personaVersionsPath,
   personasPath,
   traitsFrom,
   type Persona,
+  type PersonaForm,
   type PersonaPage,
   type PersonaUsage,
   type PersonaVersion,
@@ -133,6 +135,12 @@ function PersonaDetail({
     personaUsagePath(personaId),
     projectId,
   );
+  const { answer: form } = useProjectRead<PersonaForm>(
+    PERSONA_FORM_PATH,
+    projectId,
+  );
+  const voiceProviders =
+    form?.status === "ready" ? form.value.voice_providers : null;
 
   /**
    * What the two forms are holding.
@@ -180,11 +188,38 @@ function PersonaDetail({
   const [archiving, setArchiving] = useState(false);
 
   const persona = answer?.status === "ready" ? answer.value : null;
-  const mayAuthor = role !== null && canAuthor(role);
-  const whyNot =
-    role === null
-      ? undefined
-      : `Your ${role} role cannot author personas. Ask an organization admin to change your role.`;
+
+  /**
+   * Whether this page may offer an authoring control at all, and whether the
+   * one it offers is available.
+   *
+   * **Three states, because there are three.** An admin whose session read has
+   * not answered yet is not a viewer, and a form disabled while egma works out
+   * who they are is a form that lies about what they may do — quietly, which
+   * is worse than saying something false out loud. So while the role is
+   * unknown there is no control and no field to disable: the page waits.
+   */
+  const settled = role !== null;
+  const mayAuthor = settled && canAuthor(role);
+  const whyNot = settled
+    ? `Your ${role} role cannot author personas. Ask an organization admin to change your role.`
+    : undefined;
+
+  /**
+   * Which persona this view is editing, readable from inside an await.
+   *
+   * Opening another persona does not remount this page — it is the same route
+   * with another identifier in it — so a write still in flight comes back into
+   * a view that has moved on. A refusal about persona A rendered over persona
+   * B's fields is a sentence about work nobody can see, on a page it does not
+   * describe. The list page carries the project with its data for the same
+   * reason; this is that rule on the write path.
+   */
+  const editing = useRef({ projectId, personaId });
+
+  useEffect(() => {
+    editing.current = { projectId, personaId };
+  }, [projectId, personaId]);
 
   /** One write, and the three things that can come back instead of a persona. */
   async function write(
@@ -193,13 +228,22 @@ function PersonaDetail({
     body: Record<string, unknown>,
     what: "identity" | "traits" | "lifecycle",
   ): Promise<Persona | null> {
+    const asked = { projectId, personaId };
     setSaving(what);
     setRefusal(null);
 
     const written = await writeJson<Persona>(path, {
       method,
-      body: { project: projectId, ...body },
+      body: { project: asked.projectId, ...body },
     });
+
+    // Whatever came back is not this view's to show if the view has moved.
+    if (
+      editing.current.projectId !== asked.projectId ||
+      editing.current.personaId !== asked.personaId
+    ) {
+      return null;
+    }
 
     setSaving(null);
 
@@ -283,67 +327,92 @@ function PersonaDetail({
           title="Name and description"
           lead="Live fields. Rewriting them changes nothing about any simulation that has already run."
         >
-          <Form onSubmit={() => void saveIdentity()}>
-            <Field label="Name" htmlFor="persona-name">
-              <TextInput
-                id="persona-name"
-                value={held.name}
-                disabled={!mayAuthor}
-                onChange={(name) => setHeld({ ...held, name })}
+          {/*
+            **No editor at all until egma knows who is reading.** A disabled
+            field is a claim — *this is not yours to change* — and while the
+            session read is in flight there is nobody to make that claim
+            about. So the facts are shown, the form is not, and the page says
+            plainly that it is still working out what it may offer.
+          */}
+          {settled ? (
+            <Form onSubmit={() => void saveIdentity()}>
+              <Field label="Name" htmlFor="persona-name">
+                <TextInput
+                  id="persona-name"
+                  value={held.name}
+                  disabled={!mayAuthor}
+                  onChange={(name) => setHeld({ ...held, name })}
+                />
+              </Field>
+              <Field label="Description" htmlFor="persona-description">
+                <TextInput
+                  id="persona-description"
+                  value={held.description}
+                  disabled={!mayAuthor}
+                  onChange={(description) => setHeld({ ...held, description })}
+                />
+              </Field>
+              <FormActions>
+                <Button
+                  weight="strong"
+                  type="submit"
+                  disabled={!mayAuthor || saving !== null}
+                  {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
+                >
+                  {saving === "identity" ? "Saving…" : "Save name"}
+                </Button>
+              </FormActions>
+            </Form>
+          ) : (
+            <>
+              <Facts
+                facts={[
+                  { label: "Name", value: one.name },
+                  { label: "Description", value: one.description ?? "—" },
+                ]}
               />
-            </Field>
-            <Field label="Description" htmlFor="persona-description">
-              <TextInput
-                id="persona-description"
-                value={held.description}
-                disabled={!mayAuthor}
-                onChange={(description) => setHeld({ ...held, description })}
-              />
-            </Field>
-            <FormActions>
-              <Button
-                weight="strong"
-                type="submit"
-                disabled={!mayAuthor || saving !== null}
-                {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
-              >
-                {saving === "identity" ? "Saving…" : "Save name"}
-              </Button>
-            </FormActions>
-          </Form>
+              <Loading what="what your role may edit" />
+            </>
+          )}
         </Section>
 
         <Section
           title="Traits"
           lead="Version content. A change mints a new immutable version; saving the same traits again mints nothing."
         >
-          {stated.length === 0 ? null : (
-            <div className={styles.statedTraits}>
-              <Facts
-                facts={stated.map((trait) => ({
+          <div className={styles.statedTraits}>
+            <Facts
+              facts={[
+                { label: "Personality", value: one.traits.personality },
+                ...stated.map((trait) => ({
                   label: trait.label,
                   value: trait.value,
-                }))}
-              />
-            </div>
-          )}
-          <Form onSubmit={() => void saveTraits()}>
-            <TraitFields
-              draft={held.traits}
-              disabled={!mayAuthor}
-              onChange={(traits) => setHeld({ ...held, traits })}
+                })),
+              ]}
             />
-            <FormActions>
-              <Button
-                weight="strong"
-                type="submit"
-                disabled={!mayAuthor || saving !== null}
-                {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
-              >
-                {saving === "traits" ? "Saving…" : "Save traits"}
-              </Button>
-            </FormActions>
-          </Form>
+          </div>
+          {settled ? (
+            <Form onSubmit={() => void saveTraits()}>
+              <TraitFields
+                draft={held.traits}
+                voiceProviders={voiceProviders}
+                disabled={!mayAuthor}
+                onChange={(traits) => setHeld({ ...held, traits })}
+              />
+              <FormActions>
+                <Button
+                  weight="strong"
+                  type="submit"
+                  disabled={!mayAuthor || saving !== null}
+                  {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
+                >
+                  {saving === "traits" ? "Saving…" : "Save traits"}
+                </Button>
+              </FormActions>
+            </Form>
+          ) : (
+            <Loading what="what your role may edit" />
+          )}
         </Section>
 
         <Section
@@ -602,14 +671,37 @@ function ArchiveDialog({
 }) {
   const [others, setOthers] = useState<readonly Persona[] | null>(null);
   const [chosen, setChosen] = useState("");
+  /**
+   * Why the replacements could not be read, until somebody asks again.
+   *
+   * **A read that fails silently here takes the default persona out of the
+   * product.** The choice never arrives, the control stays disabled, nothing
+   * says why, and the one persona a project cannot do without becomes the one
+   * persona nobody can archive. So the failure is said out loud, asking again
+   * is a deliberate act, and an expired session goes where every expired
+   * session in this application goes.
+   */
+  const [unread, setUnread] = useState<Refusal | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     if (!persona.is_default) return undefined;
     let current = true;
+    setUnread(null);
 
     void readJson<PersonaPage>(personasPath(false), { project: projectId }).then(
       (answer) => {
-        if (!current || answer.status !== "ready") return;
+        if (!current) return;
+
+        if (answer.status === "signed-out") {
+          window.location.replace("/sign-in");
+          return;
+        }
+        if (answer.status !== "ready") {
+          setUnread(answer.refusal);
+          return;
+        }
+
         const rest = answer.value.items.filter((one) => one.id !== persona.id);
         setOthers(rest);
         setChosen(rest[0]?.id ?? "");
@@ -619,9 +711,12 @@ function ArchiveDialog({
     return () => {
       current = false;
     };
-  }, [persona.id, persona.is_default, projectId]);
+  }, [persona.id, persona.is_default, projectId, attempt]);
 
   const nobodyToTakeIt = persona.is_default && others !== null && others.length === 0;
+  /** Nothing may be archived until a default has somebody to hand the pointer to. */
+  const cannotChoose =
+    persona.is_default && (unread !== null || others === null || nobodyToTakeIt);
 
   return (
     <Dialog title={`Archive ${persona.name}?`} onClose={onClose}>
@@ -637,7 +732,16 @@ function ArchiveDialog({
           htmlFor="persona-replacement"
           hint="This project points at them, so a test naming nobody is given them. Somebody has to take that."
         >
-          {others === null ? (
+          {unread !== null ? (
+            <Refused
+              message={unread.message}
+              action={
+                <Button onClick={() => setAttempt((one) => one + 1)}>
+                  Try again
+                </Button>
+              }
+            />
+          ) : others === null ? (
             <p className={styles.fieldHint}>Reading this project's personas…</p>
           ) : nobodyToTakeIt ? (
             <p className={styles.fieldHint}>
@@ -660,7 +764,12 @@ function ArchiveDialog({
       <FormActions>
         <Button
           weight="strong"
-          disabled={busy || nobodyToTakeIt || (persona.is_default && chosen === "")}
+          disabled={busy || cannotChoose || (persona.is_default && chosen === "")}
+          {...(cannotChoose
+            ? {
+                why: "Egma has not been able to read this project's personas, so there is nobody to hand the default pointer to yet.",
+              }
+            : {})}
           onClick={() =>
             onArchive(persona.is_default ? chosen : undefined)
           }

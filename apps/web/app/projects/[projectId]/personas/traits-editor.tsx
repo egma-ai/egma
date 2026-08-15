@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  VOICE_PROVIDERS,
+  providerOptions,
   type TraitsDraft,
 } from "../../../../lib/personas.ts";
 import {
@@ -30,10 +30,17 @@ import {
  */
 export function TraitFields({
   draft,
+  voiceProviders,
   disabled = false,
   onChange,
 }: {
   readonly draft: TraitsDraft;
+  /**
+   * The voices egma can ask for, as the server listed them, or `null` while
+   * that read has not answered. Never a copy kept here: a hand-written list is
+   * wrong the day the server's grows, and wrong silently.
+   */
+  readonly voiceProviders: readonly string[] | null;
   readonly disabled?: boolean;
   readonly onChange: (draft: TraitsDraft) => void;
 }) {
@@ -134,15 +141,22 @@ export function TraitFields({
             onChange={set("language")}
           />
         </Field>
-        <Field label="Voice provider" htmlFor="persona-provider">
+        <Field
+          label="Voice provider"
+          htmlFor="persona-provider"
+          hint={
+            voiceProviders === null
+              ? "Reading the voices egma can ask for…"
+              : "The providers this egma can ask for."
+          }
+        >
           <Select
             id="persona-provider"
             value={draft.provider}
-            disabled={disabled}
-            options={VOICE_PROVIDERS.map((provider) => ({
-              value: provider,
-              label: provider,
-            }))}
+            disabled={disabled || voiceProviders === null}
+            options={providerOptions(voiceProviders, draft.provider).map(
+              (provider) => ({ value: provider, label: provider }),
+            )}
             onChange={set("provider")}
           />
         </Field>

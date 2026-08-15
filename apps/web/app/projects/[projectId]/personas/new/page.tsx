@@ -7,9 +7,11 @@ import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import {
   BLANK_TRAITS,
+  PERSONA_FORM_PATH,
   PERSONAS_PATH,
   traitsFrom,
   type Persona,
+  type PersonaForm,
   type TraitsDraft,
 } from "../../../../../lib/personas.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
@@ -23,6 +25,7 @@ import {
   Refused,
   TextInput,
 } from "../../../../../ui/controls.tsx";
+import { useProjectRead } from "../../../../../ui/resource.ts";
 import {
   AppShell,
   PageBody,
@@ -65,6 +68,12 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [traits, setTraits] = useState<TraitsDraft>(BLANK_TRAITS);
+  const { answer: form } = useProjectRead<PersonaForm>(
+    PERSONA_FORM_PATH,
+    projectId,
+  );
+  const voiceProviders =
+    form?.status === "ready" ? form.value.voice_providers : null;
   const [saving, setSaving] = useState(false);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
 
@@ -148,7 +157,11 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
             />
           </Field>
 
-          <TraitFields draft={traits} onChange={setTraits} />
+          <TraitFields
+            draft={traits}
+            voiceProviders={voiceProviders}
+            onChange={setTraits}
+          />
 
           <FormActions>
             <Button
