@@ -44,8 +44,9 @@
 
 import path from "node:path";
 
-import { credentialsFileIn } from "../platform/credentials.ts";
+import { credentialsFileIn, UnusableUrlError } from "../platform/credentials.ts";
 import { PlatformUnreachableError } from "../platform/device-flow.ts";
+import { normalizePlatformOrigin } from "../platform/identity.ts";
 import { signedInAt } from "../platform/signed-in.ts";
 import { compose, DockerMissingError, type ComposeOptions } from "../self-host/compose.ts";
 import {
@@ -309,7 +310,14 @@ export async function runSelfHostCommand(options: SelfHostOptions): Promise<numb
       return SELF_HOST_EXIT.noWorkspace;
     }
   } catch (error) {
-    if (error instanceof NoPlatformWorkspaceError || error instanceof DockerMissingError) {
+    // Three ways this command cannot start at all: the directory is not a
+    // platform workspace, there is no docker, or the address it was given is
+    // not an address. Each is answered before anything is contacted.
+    if (
+      error instanceof NoPlatformWorkspaceError ||
+      error instanceof DockerMissingError ||
+      error instanceof UnusableUrlError
+    ) {
       options.out(`status: refused\nreason: ${error.message}`);
       options.fail(error.message);
       return SELF_HOST_EXIT.noWorkspace;
@@ -544,6 +552,21 @@ const MEDIA_CREDENTIAL_NOTICE = [
     "media containers are replaced by this start.",
 ] as const;
 
+/**
+ * What an operator is told when the media containers did not come back.
+ *
+ * Written once because two endings say it, and said as a failure rather than as
+ * a note beside a success: this machine now records a media credential that the
+ * running containers do not hold, and every phone simulation would fail to
+ * authenticate with nothing on screen to explain it.
+ */
+const MEDIA_DID_NOT_COME_BACK =
+  "a media-server credential was generated and written down, and the three containers " +
+  "that authenticate each other with it did not come back. What is recorded here and " +
+  "what is running now disagree, so a phone simulation would fail to authenticate. " +
+  "The settings themselves are safely stored. Run egma self-host up, which hands the " +
+  "recorded pair to those containers and is safe to run again.";
+
 type PlatformFacts = {
   readonly instanceId: string;
   readonly origin: string;
@@ -654,8 +677,17 @@ async function runSetup(
     signal: options.signal,
   };
 
-  const address =
-    options.env.EGMA_BASE_URL?.trim() || boot.EGMA_BASE_URL?.trim() || DEFAULT_PLATFORM_ADDRESS;
+  // **One shape for this address, decided before anything is keyed on it.**
+  // The keys this machine holds are filed under a *normalized* origin, so an
+  // address spelled any other way — a trailing slash, an upper-case host, an
+  // explicit `:443` — looks up nothing, and setup would refuse an owner who is
+  // signed in and refuse them again after they logged in a second time. Every
+  // other verb is handed an origin the platform itself reported; this one
+  // starts from a variable somebody typed, so it does the normalizing here.
+  const address = platformAddress(
+    options.env.EGMA_BASE_URL?.trim() || boot.EGMA_BASE_URL?.trim() || DEFAULT_PLATFORM_ADDRESS,
+    options.env.EGMA_BASE_URL?.trim() ? "EGMA_BASE_URL" : "this workspace's recorded address",
+  );
 
   // Where this is happening, for the person reading. Not in JSON mode: standard
   // output carries exactly one document there and nothing else, and two lines
@@ -746,12 +778,14 @@ async function runSetup(
     answer(options, mode, {
       command: "self-host setup",
       mode: "apply",
-      status: "ready",
+      status: media.settled ? "ready" : "incomplete",
       settings_written: [],
       media_credential: media.generated ? "generated" : "existing",
       changed: media.generated ? "the media-server credential" : "nothing",
       platform_url: address,
+      ...(media.settled ? {} : { reason: MEDIA_DID_NOT_COME_BACK }),
     });
+    if (!media.settled) return SELF_HOST_EXIT.refused;
     options.fail("");
     options.fail(
       "This egma already holds every setting it needs. Nothing was asked and nothing was written.",
@@ -973,7 +1007,7 @@ async function runSetup(
     media_credential: media.generated ? "generated" : "existing",
   } as const;
 
-  if (platform === null || platform.setupState !== "ready") {
+  if (platform === null || platform.setupState !== "ready" || !media.settled) {
     answer(
       options,
       mode,
@@ -983,9 +1017,11 @@ async function runSetup(
         reason:
           platform === null
             ? `the settings were written but ${address} stopped answering, so egma cannot say whether this platform is configured`
-            : `every answer was written and this platform still reports setup required. It is missing ${platform.setupMissing.join(
-                ", ",
-              )}. Run the same command again — it asks only for what is still absent.`,
+            : platform.setupState !== "ready"
+              ? `every answer was written and this platform still reports setup required. It is missing ${platform.setupMissing.join(
+                  ", ",
+                )}. Run the same command again — it asks only for what is still absent.`
+              : MEDIA_DID_NOT_COME_BACK,
       },
       allSecrets,
     );
@@ -1004,6 +1040,36 @@ async function runSetup(
     );
   }
   return SELF_HOST_EXIT.ok;
+}
+
+/**
+ * A media credential this run has finished with, and whether the containers
+ * that hold it really came back.
+ *
+ * **`settled: false` is not a detail to print and carry on from.** The pair is
+ * on the disk by the time the recreation runs, so a recreation that failed
+ * leaves the recorded pair and the running containers disagreeing — which
+ * passes every health check and surfaces minutes later as a media or carrier
+ * refusal naming nothing about configuration. That is the exact failure this
+ * whole effort exists to remove, so setup does not answer `ready` over it.
+ */
+type SettledMedia = MediaCredential & { readonly settled: boolean };
+
+/**
+ * The one spelling of a platform's address that everything here is keyed on.
+ *
+ * `normalizePlatformOrigin` is what the credentials file files a key under and
+ * what the platform reports about itself, so anything that looks a key up, asks
+ * the platform a question, or writes the address down goes through it first.
+ * An address it cannot make sense of is refused by naming where it came from —
+ * never by printing it, because a rejected address can carry a password.
+ */
+function platformAddress(given: string, from: string): string {
+  try {
+    return normalizePlatformOrigin(given);
+  } catch {
+    throw new UnusableUrlError(from);
+  }
 }
 
 /**
@@ -1034,14 +1100,14 @@ async function settleMediaCredential(
   stored: Readonly<Record<string, string>>,
   boot: Readonly<Record<string, string>>,
   address: string,
-): Promise<MediaCredential> {
+): Promise<SettledMedia> {
   const media = await recordMediaCredential(workspace, options.env);
   writePlatformConfig(workspace, {
     ...stored,
     ...media.values,
     EGMA_BASE_URL: address,
   });
-  if (!media.generated) return media;
+  if (!media.generated) return { ...media, settled: true };
 
   const recreated = await compose(
     ["up", "-d", "--wait", "--wait-timeout", "300", "--force-recreate", ...MEDIA_SERVICES],
@@ -1053,10 +1119,7 @@ async function settleMediaCredential(
     } satisfies ComposeOptions,
   );
   for (const line of MEDIA_CREDENTIAL_NOTICE) options.fail(line);
-  if (recreated.code !== 0) {
-    options.fail("Its media containers did not come back. Run egma self-host up.");
-  }
-  return media;
+  return { ...media, settled: recreated.code === 0 };
 }
 
 async function askApproval(

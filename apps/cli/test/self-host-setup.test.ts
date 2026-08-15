@@ -26,7 +26,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { mkdtemp, readdir, readFile, stat } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -268,6 +268,63 @@ describe("egma self-host setup", () => {
     expect(platform.written).toEqual([]);
     expect(twilio.requests).toEqual([]);
     expect(existsSync(path.join(workspace.dir, ".egma-platform"))).toBe(false);
+  });
+
+  it("finds this machine's key however the address was spelled", async () => {
+    // The keys this machine holds are filed under a *normalized* origin, and
+    // this command's address comes from a variable somebody typed rather than
+    // from an origin the platform reported. Spelled with a trailing slash, an
+    // unnormalized lookup finds nothing — so setup refuses an owner who is
+    // signed in, and refuses them again after they log in a second time,
+    // because logging in files the key under the same normal form.
+    platform = await startPlatform({ holds: EVERYTHING_HELD });
+    await workspace.signIn(platform);
+
+    const run = await runSetup(["--apply", "--yes"], {
+      ...EVERY_ANSWER,
+      EGMA_BASE_URL: `${platform.url}/`,
+    });
+
+    expect(run.code, run.stderr).toBe(0);
+    expect(run.stdout).toContain("status: ready");
+    // And what it prints and records is the one normal spelling, which is what
+    // the platform reports about itself and what a repository binds to.
+    expect(run.stdout).toContain(`url: ${platform.url}`);
+    expect((await workspace.storedConfig()).EGMA_BASE_URL).toBe(platform.url);
+  });
+
+  it("refuses an address that is not one, naming where it came from", async () => {
+    platform = await startPlatform();
+    await workspace.signIn(platform);
+
+    const run = await runSetup(["--plan"], { EGMA_BASE_URL: "egma.example/platform" });
+
+    expect(run.code).not.toBe(0);
+    expect(run.stderr).toContain("EGMA_BASE_URL is not a platform origin");
+    expect(run.stderr).toContain("no credentials, path, query, or fragment");
+    // Refused before anything is asked of anybody, and the address is never
+    // printed back — a rejected one can be carrying a password.
+    expect(platform.asked).toEqual([]);
+  });
+
+  it("refuses to call itself ready when the media containers did not come back", async () => {
+    // The pair is on the disk by the time the recreation runs, so a recreation
+    // that failed leaves what is recorded and what is running disagreeing —
+    // which passes every health check and surfaces minutes later as a media
+    // refusal naming nothing about configuration. That is this effort's own
+    // failure, so setup must not answer `ready` over it.
+    platform = await startPlatform({ holds: EVERYTHING_HELD });
+    await workspace.signIn(platform);
+    await writeFile(workspace.dockerShim, "#!/bin/sh\nexit 1\n");
+    await chmod(workspace.dockerShim, 0o755);
+
+    const run = await runSetup(["--apply", "--yes"], EVERY_ANSWER);
+
+    expect(run.code).toBe(4);
+    expect(run.stdout).toContain("status: incomplete");
+    expect(run.stdout).toContain("did not come back");
+    // And it names the command that repairs it, rather than the trouble alone.
+    expect(run.stdout).toContain("Run egma self-host up");
   });
 
   it("refuses, naming the address, when the platform cannot be reached", async () => {
