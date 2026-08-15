@@ -43,6 +43,17 @@ export async function runPullCommand(options: FolderCommandOptions): Promise<num
   }
   for (const name of report.kept) options.out(`kept: ${name}`);
 
+  // An old file a pull would have rewritten in the current format and did not,
+  // because it holds a draft or a name egma cannot attribute to one side. Under
+  // the same key as anything else a pull left alone, with the recovery on its
+  // own line — the developer has to do this by hand, and the line is the
+  // instructions.
+  for (const draft of report.drafts) {
+    options.out(`kept: ${draft.name}`);
+    options.out(`file: ${draft.shown}`);
+    options.out(`reason: ${draft.reason}`);
+  }
+
   // Under a key of their own, never under the tests': a mock tool and a test
   // are two things, and something reading these lines has to be able to tell
   // one from the other without knowing which order they came in.

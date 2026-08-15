@@ -24,6 +24,7 @@
  */
 
 import type { FolderContents } from "../folder/egma-folder.ts";
+import type { FilePersona } from "../folder/test-file.ts";
 
 /** What a persona column says for a test that names nobody. */
 export const DEFAULT_PERSONA = "default persona";
@@ -119,8 +120,17 @@ export function unreadableReason(problem: string): string {
   return `egma could not read it — ${problem}. Fix the file, then run egma push.`;
 }
 
-function personaColumn(personas: readonly string[]): string {
-  const named = personas.map((persona) => persona.trim()).filter((persona) => persona !== "");
+/**
+ * Who calls, as one column of the list somebody agrees to.
+ *
+ * The display name, falling back to the identifier for a file that carries one
+ * and no name — which is a file somebody hand-wrote, since everything egma
+ * writes carries both. A screen is for reading, so the name comes first.
+ */
+function personaColumn(personas: readonly FilePersona[]): string {
+  const named = personas
+    .map((persona) => (persona.name.trim() === "" ? persona.id.trim() : persona.name.trim()))
+    .filter((persona) => persona !== "");
   return named.length === 0 ? DEFAULT_PERSONA : named.join(", ");
 }
 

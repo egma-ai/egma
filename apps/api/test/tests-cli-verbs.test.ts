@@ -15,6 +15,7 @@ import {
 } from "../../cli/src/folder/egma-folder.ts";
 import type { Fetch } from "../../cli/src/platform/device-flow.ts";
 import type { SignedIn } from "../../cli/src/platform/signed-in.ts";
+import type { TestFile } from "../../cli/src/folder/test-file.ts";
 import { editTest as editTestOnPlatform } from "../../cli/src/platform/tests.ts";
 import { pullTests } from "../../cli/src/sync/pull.ts";
 import { pushTests } from "../../cli/src/sync/push.ts";
@@ -103,18 +104,28 @@ async function signedInAs(person: Customer): Promise<SignedIn> {
   return { url: "http://egma.test", key };
 }
 
-const FILE = {
+const STATEMENTS = [
+  "verifies who it is speaking to before discussing the booking",
+  "confirms the new time back before finishing",
+] as const;
+
+const FILE: TestFile = {
+  format: 2,
   name: "Reschedules a booked appointment",
+  description: null,
   personas: [],
   version: null,
+  identityRevision: null,
+  graders: [],
+  requiredCapabilities: [],
   scenario:
     "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-  expectedBehaviors: [
-    "verifies who it is speaking to before discussing the booking",
-    "confirms the new time back before finishing",
-  ],
+  expectedBehaviors: STATEMENTS.map((behavior) => ({
+    behavior,
+    priority: "P0" as const,
+  })),
   mockTools: [],
-} as const;
+};
 
 function fileAt(name: string): string {
   return path.join(folder.tests, name);
@@ -175,7 +186,7 @@ describe("push, against a real instance", () => {
       scenario: FILE.scenario,
       // The wire carries each statement with the priority it holds; a folder's
       // file writes statements, and a statement with no marker is a P0.
-      expected_behaviors: FILE.expectedBehaviors.map((behavior) => ({
+      expected_behaviors: STATEMENTS.map((behavior) => ({
         behavior,
         priority: "P0",
       })),
@@ -274,7 +285,7 @@ describe("push, against a real instance", () => {
     expect(refused.uploadedNothing).toBe(true);
     expect(refused.tests).toEqual([]);
     expect(refused.conflicts).toEqual([
-      { name: FILE.name, shown: held.shown, reason: "moved" },
+      { name: FILE.name, shown: held.shown, reason: "moved", said: null },
     ]);
 
     // Nothing was merged and nothing was lost: the dashboard's version stands,
@@ -292,9 +303,13 @@ describe("push, against a real instance", () => {
     await boundAgent(signedIn);
     const fetchImpl = fetchThrough(api.app);
 
+    // Both tokens, because a file carrying a pin and no identity revision is
+    // refused a step earlier for the shape it is in — a real refusal with its
+    // own sentence, and not the one this check is about.
     await writeTestFile(fileAt("reschedules.md"), {
       ...FILE,
       version: newId("tstv"),
+      identityRevision: newId("rev"),
     });
 
     const report = await pushTests({ signedIn, paths: folder, fetchImpl });
@@ -305,6 +320,7 @@ describe("push, against a real instance", () => {
         name: FILE.name,
         shown: "egma/tests/reschedules.md",
         reason: "unknown",
+        said: null,
       },
     ]);
   });
@@ -345,12 +361,20 @@ describe("push, against a real instance", () => {
     const answer = await editTestOnPlatform(
       signedIn,
       onPlatform.id,
-      onPlatform.version_id,
+      { versionId: onPlatform.version_id, revision: "", agentId: null },
       {
         name: FILE.name,
+        description: "",
         scenario: "The file's own words.",
-        expectedBehaviors: [...FILE.expectedBehaviors],
+        // A write always says a priority; the file's `null` — a line that
+        // claimed none — means the P0 it has always meant.
+        expectedBehaviors: FILE.expectedBehaviors.map((one) => ({
+          behavior: one.behavior,
+          priority: one.priority ?? ("P0" as const),
+        })),
         personas: [],
+        graders: [],
+        requiredCapabilities: [],
         mockTools: [],
       },
       fetchImpl,
@@ -372,7 +396,7 @@ describe("push, against a real instance", () => {
 
     await writeTestFile(fileAt("reschedules.md"), {
       ...FILE,
-      personas: ["Nobody At All"],
+      personas: [{ id: "", name: "Nobody At All" }],
     });
 
     const report = await pushTests({ signedIn, paths: folder, fetchImpl });
@@ -408,18 +432,13 @@ describe("pull, against a real instance", () => {
       payload: {
         name: FILE.name,
         scenario: FILE.scenario,
-        // The wire carries each statement with the priority it holds; a folder's
-      // file writes statements, and a statement with no marker is a P0.
-      expected_behaviors: FILE.expectedBehaviors.map((behavior) => ({
-        behavior,
-        priority: "P0",
-      })),
+        expected_behaviors: [...STATEMENTS],
       },
     });
     expect(authored.statusCode, authored.body).toBe(201);
     const onPlatform = authored.json() as {
       version_id: string;
-      personas: { name: string }[];
+      personas: { id: string; name: string }[];
     };
 
     const report = await pullTests({ signedIn, paths: folder, fetchImpl });
@@ -432,8 +451,13 @@ describe("pull, against a real instance", () => {
     expect(written?.test.scenario).toBe(FILE.scenario);
     expect(written?.test.version).toBe(onPlatform.version_id);
     // Personas cross the wire by name, so the file a team reads holds names.
+    // Personas travel by identity with the display name beside them: the id is
+    // what a push resolves and the name is what a reviewer reads.
     expect(written?.test.personas).toEqual(
-      onPlatform.personas.map((persona) => persona.name),
+      onPlatform.personas.map((persona) => ({
+        id: persona.id,
+        name: persona.name,
+      })),
     );
   });
 

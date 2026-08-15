@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   createPersona,
   archivePersona,
+  PersonaNameAmbiguousError,
   resolvePersonaNames,
   type AuthContext,
   type Role,
@@ -198,15 +199,45 @@ describe("a name only an archived persona answers to", () => {
 });
 
 describe("a name that is not one persona", () => {
+  /**
+   * Its own class, and the sentence that says where the identifier goes.
+   *
+   * The usual reader is a repository file rather than a form: a version-1 test
+   * file carries persona *names* and nothing else, and the fix is to put the
+   * stable identifier in the file — an instruction no browser would be given.
+   * Nothing picks one of the two, ever: there is no uniqueness rule on a
+   * persona's name, so choosing by list order would put somebody in a test that
+   * nobody chose and the run would be about a caller the author never named.
+   */
   it("is refused when two personas answer to it, rather than one being picked", async () => {
-    await seedPersona(actingIn(acme.project), "Twice Over");
-    await seedPersona(actingIn(acme.project), "Twice Over");
+    const first = await seedPersona(actingIn(acme.project), "Twice Over");
+    const second = await seedPersona(actingIn(acme.project), "Twice Over");
 
-    await expect(
-      resolvePersonaNames(actingIn(acme.project), ["Twice Over"]),
-    ).rejects.toThrow(
-      'this project has more than one persona called "Twice Over", so egma cannot tell which one this test means. Name the one you want by its prs_ identifier.',
+    const refused = await resolvePersonaNames(actingIn(acme.project), [
+      "Twice Over",
+    ]).then(
+      (resolved) => ({ resolved }),
+      (thrown: unknown) => ({ thrown }),
     );
+
+    expect(refused, `resolved to ${JSON.stringify(refused)}`).not.toHaveProperty(
+      "resolved",
+    );
+    const thrown = (refused as { thrown: unknown }).thrown;
+    expect(thrown).toBeInstanceOf(PersonaNameAmbiguousError);
+    expect((thrown as PersonaNameAmbiguousError).personaName).toBe("Twice Over");
+    expect((thrown as Error).message).toBe(
+      "Persona name Twice Over matches more than one active persona in this " +
+        "project. Put the intended persona's stable ID in the file and try " +
+        "again; for a pinned file, egma pull can write the IDs after the file " +
+        "is safe to migrate.",
+    );
+
+    // Either identifier still resolves, which is what the sentence tells the
+    // writer to reach for.
+    for (const id of [first, second]) {
+      expect(await resolvePersonaNames(actingIn(acme.project), [id])).toEqual([id]);
+    }
   });
 
   it("is refused when one persona is named twice, however they were spelled", async () => {

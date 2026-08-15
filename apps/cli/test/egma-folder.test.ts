@@ -45,33 +45,153 @@ afterEach(async () => {
 
 /** The format as it was written down, byte for byte. */
 const GENERATED = `---
+format: 2
 name: missed-appointment-reschedule
-personas: [impatient-caller]
+description: The caller missed Thursday and wants any afternoon next week.
 version: tstv_01K3XQ7M4E8YB2FVN0H9TZQWER
+identity_revision: rev_01K3XQ7M4E8YB2FVN0H9TZQWES
+graders: [grd_01K3XQ7M4E8YB2FVN0H9TZQWET]
+required_capabilities: [dtmf]
+personas:
+  - id: prs_01K3XQ7M4E8YB2FVN0H9TZQWEU
+    name: impatient-caller
 ---
 ## Scenario
 The caller missed yesterday's appointment and wants to
 reschedule this week. They are short on time and irritated.
 ## Expected behaviors
+1. [P0] The agent acknowledges the missed appointment without blame.
+2. [P1] The agent offers at least two concrete alternative slots.
+3. [P0] The agent confirms the new booking before ending the call.
+`;
+
+/**
+ * The shape that shipped before this one, byte for byte.
+ *
+ * It is still read, and reading it is the whole of what lets a folder somebody
+ * committed last month be worked in today: no format line, personas as a flow
+ * list of names, no priority markers, and nothing at all about the live half.
+ * Everything egma *writes* is the shape above.
+ */
+const VERSION_ONE = `---
+name: missed-appointment-reschedule
+personas: [impatient-caller]
+version: tstv_01K3XQ7M4E8YB2FVN0H9TZQWER
+---
+## Scenario
+The caller missed yesterday's appointment.
+## Expected behaviors
 1. The agent acknowledges the missed appointment without blame.
 2. The agent offers at least two concrete alternative slots.
-3. The agent confirms the new booking before ending the call.
 `;
+
+/** A statement written with an explicit `[P0]` marker, as egma writes one. */
+function blocking(...statements: readonly string[]): TestFile["expectedBehaviors"] {
+  return statements.map((behavior) => ({ behavior, priority: "P0" as const }));
+}
+
+/**
+ * A statement written with no marker at all, as every version-1 file wrote one.
+ *
+ * It *means* P0 wherever a priority is needed, and it is kept apart from an
+ * explicit `[P0]` because only the explicit one is a claim — which is the whole
+ * of what lets a pull tell a faithful old copy from a draft somebody has typed
+ * a priority into.
+ */
+function unmarked(...statements: readonly string[]): TestFile["expectedBehaviors"] {
+  return statements.map((behavior) => ({ behavior, priority: null }));
+}
 
 describe("the test file format", () => {
   it("reads the file the format was written down as", () => {
     const test = parseTestFile(GENERATED, "missed-appointment-reschedule.md", "fallback");
 
+    expect(test.format).toBe(2);
     expect(test.name).toBe("missed-appointment-reschedule");
-    expect(test.personas).toEqual(["impatient-caller"]);
+    expect(test.description).toBe(
+      "The caller missed Thursday and wants any afternoon next week.",
+    );
+    expect(test.personas).toEqual([
+      { id: "prs_01K3XQ7M4E8YB2FVN0H9TZQWEU", name: "impatient-caller" },
+    ]);
     expect(test.version).toBe("tstv_01K3XQ7M4E8YB2FVN0H9TZQWER");
+    expect(test.identityRevision).toBe("rev_01K3XQ7M4E8YB2FVN0H9TZQWES");
+    expect(test.graders).toEqual(["grd_01K3XQ7M4E8YB2FVN0H9TZQWET"]);
+    expect(test.requiredCapabilities).toEqual(["dtmf"]);
     expect(test.scenario).toBe(
       "The caller missed yesterday's appointment and wants to\nreschedule this week. They are short on time and irritated.",
     );
     expect(test.expectedBehaviors).toEqual([
-      "The agent acknowledges the missed appointment without blame.",
-      "The agent offers at least two concrete alternative slots.",
-      "The agent confirms the new booking before ending the call.",
+      {
+        behavior: "The agent acknowledges the missed appointment without blame.",
+        priority: "P0",
+      },
+      {
+        behavior: "The agent offers at least two concrete alternative slots.",
+        priority: "P1",
+      },
+      {
+        behavior: "The agent confirms the new booking before ending the call.",
+        priority: "P0",
+      },
+    ]);
+  });
+
+  /**
+   * The old shape, read exactly as generously as it was written.
+   *
+   * Every field the format has gained since is absent, and each has to read as
+   * the thing that shape already meant: no priority marker is a P0, because
+   * every behavior blocked before priorities existed; a persona is a name with
+   * no identity, because names were all there were; and the live half has no
+   * token, which is the fact that decides whether this file may update a test.
+   */
+  it("reads a version-1 file as what that shape already meant", () => {
+    const test = parseTestFile(VERSION_ONE, "missed-appointment-reschedule.md", "x");
+
+    expect(test.format).toBe(1);
+    expect(test.identityRevision).toBeNull();
+    expect(test.description).toBeNull();
+    expect(test.graders).toEqual([]);
+    expect(test.requiredCapabilities).toEqual([]);
+    expect(test.personas).toEqual([{ id: "", name: "impatient-caller" }]);
+    // Null rather than P0: the lines claimed nothing, which is a different fact
+    // from claiming P0 and the one a safe pull turns on.
+    expect(test.expectedBehaviors.map((one) => one.priority)).toEqual([null, null]);
+  });
+
+  /**
+   * Reading is forgiving in both directions.
+   *
+   * A file a person edited by hand may carry a priority marker without ever
+   * saying `format: 2`, and may name a persona as a bare item in the block
+   * sequence egma writes. Neither is a shape egma produces, and both are shapes
+   * somebody types — so both are read rather than refused.
+   */
+  it("reads a marker and a bare persona in a file that claims no format", () => {
+    const typed = [
+      "---",
+      "name: hand-written",
+      "personas:",
+      "  - impatient-caller",
+      "  - id: prs_01K3XQ7M4E8YB2FVN0H9TZQWEU",
+      "---",
+      "## Scenario",
+      "Something happens.",
+      "## Expected behaviors",
+      "1. [p2] worth knowing",
+      "2. must happen",
+      "",
+    ].join("\n");
+
+    const test = parseTestFile(typed, "hand-written.md", "x");
+    expect(test.personas).toEqual([
+      { id: "", name: "impatient-caller" },
+      { id: "prs_01K3XQ7M4E8YB2FVN0H9TZQWEU", name: "" },
+    ]);
+    expect(test.expectedBehaviors).toEqual([
+      { behavior: "worth knowing", priority: "P2" },
+      { behavior: "must happen", priority: null },
     ]);
   });
 
@@ -82,11 +202,16 @@ describe("the test file format", () => {
 
   it("leaves out what a fresh file leaves out", () => {
     const fresh: TestFile = {
+      format: 2,
       name: "after-hours-emergency",
+      description: null,
       personas: [],
       version: null,
+      identityRevision: null,
+      graders: [],
+      requiredCapabilities: [],
       scenario: "The caller has an emergency at 2am.",
-      expectedBehaviors: ["The agent gives the emergency number."],
+      expectedBehaviors: blocking("The agent gives the emergency number."),
       mockTools: [],
     };
 
@@ -94,20 +219,73 @@ describe("the test file format", () => {
     expect(document).toBe(
       [
         "---",
+        "format: 2",
         "name: after-hours-emergency",
         "---",
         "## Scenario",
         "The caller has an emergency at 2am.",
         "## Expected behaviors",
-        "1. The agent gives the emergency number.",
+        "1. [P0] The agent gives the emergency number.",
         "",
       ].join("\n"),
     );
-    // No persona named takes the default, and nothing has synced it yet, so
-    // there is nothing to pin.
-    expect(document).not.toContain("personas:");
-    expect(document).not.toContain("version:");
+    // No persona named takes the default, nothing has synced it yet so there
+    // is nothing to pin, and a key with an empty list under it would read as a
+    // claim this test does not make.
+    for (const absent of [
+      "personas:",
+      "version:",
+      "identity_revision:",
+      "description:",
+      "graders:",
+      "required_capabilities:",
+    ]) {
+      expect(document, absent).not.toContain(absent);
+    }
+    // The format is the one thing always written, including on a file nothing
+    // has ever synced: it is what an older egma reads to know it is looking at
+    // bytes it does not fully understand.
+    expect(document).toContain("format: 2");
     expect(parseTestFile(document, "a.md", "x")).toEqual(fresh);
+  });
+
+  /**
+   * The one shape reading and writing deliberately do not round-trip.
+   *
+   * A line that claimed nothing is written as the `[P0]` it has always meant,
+   * and reading that back gives a line that claims P0 — because it now does.
+   * That is the migration, and it is a fixed point from the second write on.
+   */
+  it("turns a line that claimed nothing into one that claims P0, once", () => {
+    const typed = ["## Expected behaviors", "1. must happen", ""].join("\n");
+    const read = parseTestFile(typed, "a.md", "x");
+    expect(read.expectedBehaviors).toEqual([{ behavior: "must happen", priority: null }]);
+
+    const written = serializeTestFile(read);
+    expect(written).toContain("1. [P0] must happen");
+    expect(parseTestFile(written, "a.md", "x").expectedBehaviors).toEqual([
+      { behavior: "must happen", priority: "P0" },
+    ]);
+    expect(serializeTestFile(parseTestFile(written, "a.md", "x"))).toBe(written);
+  });
+
+  /**
+   * The one thing writing an old file does: it becomes a new one.
+   *
+   * Nothing is invented on the way through — a version-1 file names no graders
+   * and no capabilities, and it comes out naming none — but the shape it comes
+   * out in is the shape everything egma writes is in.
+   */
+  it("writes a version-1 file back out as a version-2 file", () => {
+    const document = serializeTestFile(parseTestFile(VERSION_ONE, "a.md", "x"));
+
+    expect(document).toContain("format: 2");
+    expect(document).toContain("1. [P0] The agent acknowledges");
+    expect(document).toContain("  - name: impatient-caller");
+    expect(document).not.toContain("personas: [");
+    // And the second time round it is a fixed point, exactly as everything
+    // else egma writes is.
+    expect(serializeTestFile(parseTestFile(document, "a.md", "x"))).toBe(document);
   });
 
   it("is stable however many times it goes round", () => {
@@ -138,10 +316,12 @@ describe("the test file format", () => {
     expect(test.name).toBe("refund-request");
     expect(test.version).toBeNull();
     expect(test.scenario).toBe("The caller wants a refund.");
-    expect(test.expectedBehaviors).toEqual([
-      "The agent checks the order number before saying anything about money.",
-      "The agent never promises a date.",
-    ]);
+    expect(test.expectedBehaviors).toEqual(
+      unmarked(
+        "The agent checks the order number before saying anything about money.",
+        "The agent never promises a date.",
+      ),
+    );
 
     // And once egma has written it, it is in egma's shape and stays there.
     const written = serializeTestFile(test);
@@ -161,11 +341,16 @@ describe("the test file format", () => {
 
   it("quotes a name that would not read back as itself", () => {
     const awkward: TestFile = {
+      format: 2,
       name: "caller: refuses to give a name",
-      personas: ["persona #2"],
+      description: null,
+      personas: [{ id: "", name: "persona #2" }],
       version: null,
+      identityRevision: null,
+      graders: [],
+      requiredCapabilities: [],
       scenario: "s",
-      expectedBehaviors: ["b"],
+      expectedBehaviors: blocking("b"),
       mockTools: [],
     };
 
@@ -195,13 +380,22 @@ describe("the test file format", () => {
    */
   describe("content that is awkward and entirely allowed", () => {
     const plain: TestFile = {
+      format: 2,
       name: "a-test",
+      description: null,
       personas: [],
       version: null,
+      identityRevision: null,
+      graders: [],
+      requiredCapabilities: [],
       scenario: "The situation.",
-      expectedBehaviors: ["The agent does a thing."],
+      expectedBehaviors: blocking("The agent does a thing."),
       mockTools: [],
     };
+
+    /** One persona named the way a file that has never been pulled names one. */
+    const byName = (...names: readonly string[]): TestFile["personas"] =>
+      names.map((name) => ({ id: "", name }));
 
     const held: readonly (readonly [string, TestFile])[] = [
       ["a name with a colon", { ...plain, name: "caller: refuses to give a name" }],
@@ -218,13 +412,13 @@ describe("the test file format", () => {
       ["a name with a comma", { ...plain, name: "late, then rude" }],
       ["a name with brackets", { ...plain, name: "[after hours]" }],
       ["a name in another script", { ...plain, name: "réservé — 予約 🎧" }],
-      ["a persona with a comma", { ...plain, personas: ["impatient, rushed"] }],
-      ["a persona with an apostrophe", { ...plain, personas: ["the caller's friend"] }],
-      ["a persona with brackets", { ...plain, personas: ["caller [angry]"] }],
-      ["a persona with a colon", { ...plain, personas: ["caller: angry"] }],
-      ["a persona with a hash", { ...plain, personas: ["caller #2"] }],
-      ["a persona in another script", { ...plain, personas: ["予約 🎧"] }],
-      ["two personas", { ...plain, personas: ["first-caller", "second-caller"] }],
+      ["a persona with a comma", { ...plain, personas: byName("impatient, rushed") }],
+      ["a persona with an apostrophe", { ...plain, personas: byName("the caller's friend") }],
+      ["a persona with brackets", { ...plain, personas: byName("caller [angry]") }],
+      ["a persona with a colon", { ...plain, personas: byName("caller: angry") }],
+      ["a persona with a hash", { ...plain, personas: byName("caller #2") }],
+      ["a persona in another script", { ...plain, personas: byName("予約 🎧") }],
+      ["two personas", { ...plain, personas: byName("first-caller", "second-caller") }],
       ["prose with a hash", { ...plain, scenario: "They ask about shift #2." }],
       ["prose with a colon", { ...plain, scenario: "They say: no." }],
       ["prose with quotation marks", { ...plain, scenario: `He said "no" and 'left'.` }],
@@ -239,12 +433,12 @@ describe("the test file format", () => {
       ["prose that looks like frontmatter", { ...plain, scenario: "name: not-frontmatter" }],
       ["prose with a bullet in it", { ...plain, scenario: "- a bullet\n- another" }],
       ["prose in another script", { ...plain, scenario: "予約を逃した — 🎧" }],
-      ["a statement with a colon", { ...plain, expectedBehaviors: ["The agent says: hello."] }],
-      ["a statement that looks like frontmatter", { ...plain, expectedBehaviors: ["name: value"] }],
-      ["a statement opening with a dash", { ...plain, expectedBehaviors: ["- a dash first"] }],
-      ["a statement already numbered", { ...plain, expectedBehaviors: ["1. already numbered"] }],
-      ["a statement that is a heading", { ...plain, expectedBehaviors: ["## Expected behaviors"] }],
-      ["a statement in another script", { ...plain, expectedBehaviors: ["予約 🎧 — done"] }],
+      ["a statement with a colon", { ...plain, expectedBehaviors: blocking("The agent says: hello.") }],
+      ["a statement that looks like frontmatter", { ...plain, expectedBehaviors: blocking("name: value") }],
+      ["a statement opening with a dash", { ...plain, expectedBehaviors: blocking("- a dash first") }],
+      ["a statement already numbered", { ...plain, expectedBehaviors: blocking("1. already numbered") }],
+      ["a statement that is a heading", { ...plain, expectedBehaviors: blocking("## Expected behaviors") }],
+      ["a statement in another script", { ...plain, expectedBehaviors: blocking("予約 🎧 — done") }],
       ["nothing to check at all", { ...plain, expectedBehaviors: [] }],
       ["a pinned version", { ...plain, version: "tstv_01K3XQ7M4E8YB2FVN0H9TZQWER" }],
       [
@@ -322,18 +516,18 @@ describe("the test file format", () => {
       ],
       [
         "a statement with a line break in it",
-        { ...plain, expectedBehaviors: ["The agent checks the number\nbefore saying anything."] },
-        { ...plain, expectedBehaviors: ["The agent checks the number before saying anything."] },
+        { ...plain, expectedBehaviors: blocking("The agent checks the number\nbefore saying anything.") },
+        { ...plain, expectedBehaviors: blocking("The agent checks the number before saying anything.") },
       ],
       [
         "space wrapped around a statement",
-        { ...plain, expectedBehaviors: ["  The agent does a thing.  "] },
-        { ...plain, expectedBehaviors: ["The agent does a thing."] },
+        { ...plain, expectedBehaviors: blocking("  The agent does a thing.  ") },
+        { ...plain, expectedBehaviors: blocking("The agent does a thing.") },
       ],
       [
         "a persona with nothing in it",
-        { ...plain, personas: ["first-caller", "   ", "second-caller"] },
-        { ...plain, personas: ["first-caller", "second-caller"] },
+        { ...plain, personas: byName("first-caller", "   ", "second-caller") },
+        { ...plain, personas: byName("first-caller", "second-caller") },
       ],
     ];
 
@@ -644,6 +838,41 @@ describe("the egma folder", () => {
       connection: null,
       suite: null,
     });
+  });
+
+  /**
+   * The one shape this reader gained for the version-2 file: a block of `- `
+   * items under a key.
+   *
+   * It is here rather than only through the format's round trip because the
+   * round trip only ever exercises what egma itself writes, and these files are
+   * typed by people and generated by coding agents too. A comment on an item, a
+   * quoted value that needs its spaces, and one item written with no mapping at
+   * all are all shapes somebody produces.
+   */
+  it("reads a block of items under a key, however they were typed", () => {
+    const document = [
+      "personas:",
+      "  - id: prs_01K3XQ7M4E8YB2FVN0H9TZQWEU  # the one who calls",
+      '    name: "  Impatient Rita  "',
+      "  - somebody-in-a-hurry",
+      "graders: [grd_01K3XQ7M4E8YB2FVN0H9TZQWET]",
+      "",
+    ].join("\n");
+
+    expect(readYaml(document, "a.md")).toEqual({
+      personas: [
+        { id: "prs_01K3XQ7M4E8YB2FVN0H9TZQWEU", name: "  Impatient Rita  " },
+        "somebody-in-a-hurry",
+      ],
+      graders: ["grd_01K3XQ7M4E8YB2FVN0H9TZQWET"],
+    });
+  });
+
+  it("refuses a list inside a list by name and line number, rather than reading half of it", () => {
+    const nested = ["personas:", "  - id: prs_one", "    - nested", ""].join("\n");
+
+    expect(() => readYaml(nested, "a.md")).toThrow(/a\.md, line 3/u);
   });
 
   it("writes a name that needs quoting, and reads it back with its own spaces", () => {

@@ -26,6 +26,7 @@ export const RULE_NAMES = [
   "one-place-reads-a-membership",
   "every-exported-call-carries-an-auth-context",
   "only-the-seam-knows-the-auth-provider",
+  "no-private-package-in-a-published-one",
 ] as const;
 
 export type RuleName = (typeof RULE_NAMES)[number];
@@ -225,6 +226,24 @@ const NAMES_A_CUSTOMER = /\b(organizationId|projectId)\b/;
  * than the vendor's.
  */
 const AUTH_PROVIDER_PACKAGES = ["better-auth", "@better-auth/core"];
+
+/**
+ * The packages this repository publishes, by the source they ship.
+ *
+ * **A published package's `src` may not import a workspace package that is
+ * never published.** `apps/cli` ships `dist/` unbundled, so an import written
+ * in `src` is still an import in the file `npx @egma/cli` runs — and a
+ * `private: true` workspace package is not on npm for it to resolve. The
+ * command installs, starts, and then fails at the first line that needs it, on
+ * somebody else's machine.
+ *
+ * This shipped once, as `import { newId } from "@egma/ids"` in the CLI's run
+ * client. TypeScript caught it, but only by luck: nothing built that package
+ * first, so the module was missing at build time too. **The natural repair for
+ * that build error is to add a project reference — which makes the build pass
+ * and ships the crash.** That is what this rule is for.
+ */
+const PUBLISHED_PACKAGES = ["apps/cli/src/"];
 
 /**
  * The only files that may name the auth provider.
@@ -448,6 +467,86 @@ function isDatastoreDriver(specifier: string): boolean {
   return DATASTORE_DRIVERS.some(
     (driver) => specifier === driver || specifier.startsWith(`${driver}/`),
   );
+}
+
+/**
+ * The workspace package an import names, or nothing when it names none.
+ *
+ * `@egma/ids` and `@egma/ids/mint.ts` both belong to `@egma/ids`; a relative
+ * path and an ordinary npm package belong to nobody.
+ */
+function workspaceNameOf(specifier: string): string | undefined {
+  if (!specifier.startsWith("@egma/")) return undefined;
+  const [scope, name] = specifier.split("/");
+  return name === undefined ? undefined : `${scope}/${name}`;
+}
+
+/**
+ * Every workspace package marked `private`, read from the manifests rather than
+ * listed here. A list would be one more thing to keep, and what it would be
+ * forgotten about is whether a package is safe to ship.
+ */
+/**
+ * The directories the workspace keeps its packages in, read from
+ * `pnpm-workspace.yaml`.
+ *
+ * Read rather than listed, for the same reason the manifests are. The first
+ * version of this rule named `packages` and `apps` and missed `fixtures` and
+ * `sdks` — where two private packages live — so a rule written against a list
+ * was already wrong on the day it was written. The workspace file is the one
+ * place that decides, so it is the one place to ask.
+ *
+ * Only the leading directory of each entry is taken: `apps/*` and any deeper
+ * glob both mean "look under `apps`", and a manifest is either directly in
+ * there or it is not a workspace package this rule can judge.
+ */
+async function workspaceRootsIn(root: string): Promise<string[]> {
+  let file: string;
+  try {
+    file = await readFile(path.join(root, "pnpm-workspace.yaml"), "utf8");
+  } catch {
+    return [];
+  }
+  const roots = new Set<string>();
+  let inPackages = false;
+  for (const line of file.split("\n")) {
+    if (/^packages:/.test(line)) {
+      inPackages = true;
+      continue;
+    }
+    if (inPackages && /^\S/.test(line)) break;
+    const entry = /^\s+-\s*['"]?([^'"\s]+)/.exec(line);
+    if (inPackages && entry?.[1] !== undefined) {
+      const first = entry[1].split("/")[0];
+      if (first !== undefined && first !== "" && first !== ".") roots.add(first);
+    }
+  }
+  return [...roots];
+}
+
+async function privateWorkspacePackagesIn(root: string): Promise<Set<string>> {
+  const held = new Set<string>();
+  for (const where of await workspaceRootsIn(root)) {
+    let entries: string[];
+    try {
+      entries = await readdir(path.join(root, where));
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      try {
+        const manifest = JSON.parse(
+          await readFile(path.join(root, where, entry, "package.json"), "utf8"),
+        ) as { name?: unknown; private?: unknown };
+        if (manifest.private === true && typeof manifest.name === "string") {
+          held.add(manifest.name);
+        }
+      } catch {
+        // A directory with no readable manifest is not a workspace package.
+      }
+    }
+  }
+  return held;
 }
 
 function isAuthProvider(specifier: string): boolean {
@@ -722,6 +821,7 @@ async function checkExportedCallShapes(root: string): Promise<Violation[]> {
 /** Every violation in the tree rooted at `root`, in file order. */
 export async function check(root: string): Promise<Violation[]> {
   const violations: Violation[] = await checkExportedCallShapes(root);
+  const privateWorkspacePackages = await privateWorkspacePackagesIn(root);
 
   for (const absolute of await collectSourceFiles(root)) {
     const file = relative(root, absolute);
@@ -733,6 +833,23 @@ export async function check(root: string): Promise<Violation[]> {
     const bypassesDeliberately = DELIBERATE_BYPASSES.includes(file);
 
     for (const record of imports) {
+      if (
+        PUBLISHED_PACKAGES.some((where) => file.startsWith(where)) &&
+        privateWorkspacePackages.has(workspaceNameOf(record.specifier) ?? "")
+      ) {
+        violations.push({
+          file,
+          line: record.line,
+          rule: "no-private-package-in-a-published-one",
+          detail:
+            `imports "${record.specifier}", which this repository never ` +
+            `publishes. This package ships its source compiled rather than ` +
+            `bundled, so the import survives into what somebody installs and ` +
+            `cannot be resolved there. Use the standard library, or what the ` +
+            `platform already sends.`,
+        });
+      }
+
       if (
         isDatastoreDriver(record.specifier) &&
         !insideModule &&

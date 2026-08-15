@@ -39,6 +39,7 @@ import {
   NO_DEFAULT_PLATFORM,
   type Workspace,
 } from "./support/workspace.ts";
+import { aTestFile, blocking } from "./support/test-file.ts";
 
 const PLATFORM_KEY = "egma_sk_for-the-built-in-address";
 const PROVIDER_KEY = "synthetic-retell-key-for-the-built-in-address";
@@ -150,14 +151,14 @@ describe("a repository that names no platform", () => {
       });
       for (let number = 1; number <= DEFAULT_TEST_COUNT; number += 1) {
         const name = `moves-appointment-${number}`;
-        await writeTestFile(path.join(paths.tests, `${name}.md`), {
+        await writeTestFile(path.join(paths.tests, `${name}.md`), aTestFile({
           name,
           personas: [],
           version: null,
           scenario: `The persona needs a different appointment time in case ${number}.`,
-          expectedBehaviors: ["The agent confirms the new time."],
+          expectedBehaviors: blocking("The agent confirms the new time."),
           mockTools: [],
-        });
+        }));
       }
 
       const before = own.records.length;
@@ -225,14 +226,14 @@ describe("a repository that names no platform", () => {
       expect(started.code, started.stderr).toBe(0);
       expect((await readConfig(paths.config)).platform).toBeNull();
 
-      await writeTestFile(path.join(paths.tests, "moves-appointment.md"), {
+      await writeTestFile(path.join(paths.tests, "moves-appointment.md"), aTestFile({
         name: "moves-appointment",
         personas: [],
         version: null,
         scenario: "The persona needs a different appointment time.",
-        expectedBehaviors: ["The agent confirms the new time."],
+        expectedBehaviors: blocking("The agent confirms the new time."),
         mockTools: [],
-      });
+      }));
 
       for (const [verb, args] of [
         ["login", ["login"]],
@@ -403,14 +404,14 @@ describe("a repository that names no platform", () => {
         },
       });
       const pinned = path.join(paths.tests, "moves-appointment.md");
-      await writeTestFile(pinned, {
+      await writeTestFile(pinned, aTestFile({
         name: "moves-appointment",
         personas: [],
         version: "tv_01K3XQ7M4E8YB2FVN0H9TZQWEU",
         scenario: "The persona needs a different appointment time.",
-        expectedBehaviors: ["The agent confirms the new time."],
+        expectedBehaviors: blocking("The agent confirms the new time."),
         mockTools: [],
-      });
+      }));
 
       /** One line of egma's list, and the edit it asks for. */
       const deletions: readonly {

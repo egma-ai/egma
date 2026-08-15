@@ -633,3 +633,93 @@ describe("listing tests", () => {
     expect(byAgent.items).toHaveLength(0);
   });
 });
+
+/**
+ * The precondition a repository's own edit carries, checked under the lock the
+ * edit already takes.
+ *
+ * One folder is bound to one agent, and which agents a test applies to is a set
+ * the browser owns. So a repository edit asks a question rather than saying
+ * anything — *does this test still apply to me?* — and the answer is a refusal
+ * that writes nothing. It cannot be asked outside the transaction: the last
+ * link could be removed between the answer and the write, and the whole worth
+ * of the refusal is that neither side moved.
+ */
+describe("the agent a repository is bound to", () => {
+  it("lets the edit through while the test still applies to it", async () => {
+    const subject = await aTest("Edited from a repository", {
+      agentIds: [frontDesk],
+    });
+
+    const edited = await editTest(actingAsAcme(), subject.id, {
+      scenario: "The file's own words.",
+      expectedVersionId: subject.versionId,
+      repositoryAgentId: frontDesk,
+    });
+
+    expect(edited?.scenario).toBe("The file's own words.");
+    // It asked a question and said nothing: the links and their revision are
+    // exactly what they were.
+    expect(edited?.agents.map((one) => one.id)).toEqual([frontDesk]);
+    expect(edited?.applicabilityRevision).toBe(subject.applicabilityRevision);
+  });
+
+  it("refuses the edit once the link is gone, and writes nothing at all", async () => {
+    const other = await seedAgent(actingAsAcme(), "Repository's other desk");
+    const subject = await aTest("Unlinked from a repository", {
+      agentIds: [frontDesk, other],
+    });
+    await setTestAgents(actingAsAcme(), subject.id, { agentIds: [other] });
+
+    const refused = await editTest(actingAsAcme(), subject.id, {
+      scenario: "The file's own words.",
+      name: "Renamed from a repository",
+      expectedVersionId: subject.versionId,
+      repositoryAgentId: frontDesk,
+    }).then(
+      (written) => ({ written }),
+      (thrown: unknown) => ({ thrown }),
+    );
+
+    expect(refused).not.toHaveProperty("written");
+    const thrown = (refused as { thrown: unknown }).thrown;
+    expect(thrown).toBeInstanceOf(TestAgentRefusedError);
+    expect((thrown as TestAgentRefusedError).reason).toBe(
+      "repository_agent_not_applicable",
+    );
+    expect((thrown as TestAgentRefusedError).agentId).toBe(frontDesk);
+
+    // Neither half of the test moved — not the content, and not the name the
+    // same request would have written.
+    const held = await getTest(actingAsAcme(), subject.id);
+    expect(held?.versionId).toBe(subject.versionId);
+    expect(held?.name).toBe("Unlinked from a repository");
+  });
+
+  /**
+   * Answered ahead of the two expectations, because it is the only one of the
+   * three a pull cannot fix. Telling a repository its content had moved on
+   * would send somebody to pull a test their folder is no longer entitled to
+   * write, and the same refusal would meet them afterwards.
+   */
+  it("is answered before a stale version, because pulling would not help", async () => {
+    const other = await seedAgent(actingAsAcme(), "Ahead-of-the-version desk");
+    const subject = await aTest("Unlinked and moved on", {
+      agentIds: [frontDesk, other],
+    });
+    await setTestAgents(actingAsAcme(), subject.id, { agentIds: [other] });
+    const moved = await editTest(actingAsAcme(), subject.id, {
+      scenario: "Somebody else's words.",
+      expectedVersionId: subject.versionId,
+    });
+    expect(moved?.versionId).not.toBe(subject.versionId);
+
+    await expect(
+      editTest(actingAsAcme(), subject.id, {
+        scenario: "The file's own words.",
+        expectedVersionId: subject.versionId,
+        repositoryAgentId: frontDesk,
+      }),
+    ).rejects.toBeInstanceOf(TestAgentRefusedError);
+  });
+});
