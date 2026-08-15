@@ -640,8 +640,11 @@ leaves it out and `test:browser` is the only thing that runs it. Nothing falls
 between the two — `pnpm test` runs both, then the simulator, SDK and fixture
 suites, and fails if any part failed. Every run prints which lane it chose
 before it starts, so a green run can be read back to the proof it stands for.
-[`tools/test-lanes.ts`](tools/test-lanes.ts) is where a lane is defined, and the
-tests beside it hold each lane to what it claims to select.
+[`vitest.config.ts`](vitest.config.ts) is where a lane is defined, as two Vitest
+projects. A lane is described by what it leaves out rather than by a list of
+what it holds: the fast lane declares no `include` at all, so it is Vitest's own
+search minus the one real-browser file, and a new test file joins it by
+existing.
 
 Tests run against a real Postgres and a real ClickHouse — never a substitute,
 because every guarantee under test is one of theirs. Each test file creates a
