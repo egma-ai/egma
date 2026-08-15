@@ -311,8 +311,10 @@ describe("a simulation born from no test", () => {
     const verdicts = await verdictsOn(world, simulationId, 1);
 
     expect(await behaviorRows(verdicts)).toEqual([]);
+    // The latency copy's one config entry, by its position — the only row on a
+    // conversation with no expectations written down about it.
     expect(verdicts.map((verdict) => verdict.assertion)).toEqual([
-      PREDEFINED_GRADERS.latency,
+      "assertion_1",
     ]);
     expect(judge.asked).toEqual([]);
   });

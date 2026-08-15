@@ -147,3 +147,73 @@ describe("getting to the Library screen", () => {
     expect(page).not.toMatch(/state\.status === "loading"[\s\S]*?return <StatePage/);
   });
 });
+
+/**
+ * **Use**: the one act on this screen, and the form drawn from the entry it is
+ * opened on.
+ *
+ * What is checked here is the property the whole arrangement exists for — that
+ * this page holds **no list of measures of its own**. A dropdown typed into a
+ * browser page would be a second copy of egma's measure catalog: stale the first
+ * time a measure joined or left, and its first symptom a write refused for
+ * offering exactly what the form offered. The options ride the entry, the write
+ * door checks the catalog they were built from, and neither can drift.
+ */
+describe("pressing Use", () => {
+  it("writes the copy at the path this instance rewrites", async () => {
+    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
+    const form = await readFile(path.join(WEB, "app/graders/use-form.tsx"), "utf8");
+
+    expect(rewrites).toContain("/api/graders");
+    expect(form).toContain('fetch("/api/graders"');
+    expect(form).toContain('method: "POST"');
+    expect(form).toContain("library_id");
+  });
+
+  it("draws its controls from the entry's own declaration, and names no measure", async () => {
+    const form = await readFile(path.join(WEB, "app/graders/use-form.tsx"), "utf8");
+
+    // The dropdown is whatever the entry published, rendered.
+    expect(form).toContain("parameter.options");
+    // And the control follows the declared kind, so what a person may type and
+    // what a write will take are one decision made on the entry.
+    expect(form).toContain('parameter.kind === "number"');
+
+    // Not one measure name in the code this screen runs — nor the parameter
+    // names the latency entry happens to use, which are equally the entry's
+    // business. The comments are read past on purpose: prose explaining why the
+    // list is not here is the opposite of the list being here.
+    const running = form.replaceAll(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/gu, "");
+    for (const named of [
+      "turn_response_latency",
+      "first_response_latency",
+      "time_to_first_word",
+      "milliseconds",
+      "latency",
+      "metric",
+      "bound",
+    ]) {
+      expect(running, `the form names ${named} itself`).not.toContain(named);
+    }
+  });
+
+  /**
+   * A bound arriving as `"2000"` is refused by the write door with a message
+   * about types — correct, and useless to somebody who typed a perfectly good
+   * number. The conversion happens at the edge that knows the control was
+   * numeric.
+   */
+  it("sends a number as a number", async () => {
+    const form = await readFile(path.join(WEB, "app/graders/use-form.tsx"), "utf8");
+    expect(form).toContain("Number(typed)");
+  });
+
+  /**
+   * `required` is v0's only loudness switch and neither reading is obvious from
+   * the flag's name, so the form says both out loud beside the control.
+   */
+  it("says what required means, in both positions", () => {
+    expect(copy.USE.requiredOn).toContain("cannot pass");
+    expect(copy.USE.requiredOff.toLowerCase()).toContain("diagnostic");
+  });
+});

@@ -261,9 +261,15 @@ export async function seedJudge(
  * A copy of the `latency` entry: a measure from the catalog and a bound, which
  * is the whole of what its form asks.
  *
- * It is the one entry v0 ships that egma does not execute yet, so a copy of it
- * answers `errored` — which is exactly what several of these files are about,
- * and what makes it the right stand-in for "a second grader on this project".
+ * **The bound is above what a conducted conversation measures**, so a case that
+ * only wants a second grader on the project gets one that passes rather than one
+ * that fails for reasons its own case never mentions. `A_CONVERSATION_HAPPENED`
+ * measures 900 and 1100 milliseconds, and the worst of those is what a bound is
+ * held against — a case that wants a failure lowers it and says so.
+ *
+ * It is the one entry v0 ships that egma computes rather than asks a model, so
+ * it is also how these files put a second grader on a project without a second
+ * scripted judge answer.
  */
 export function aLatencyCopy(
   overrides: Partial<UseLibraryEntry> = {},
@@ -673,6 +679,17 @@ export async function conductProductionTrace(
     readonly rootCloses?: boolean;
     readonly said?: readonly { speaker: "human" | "agent"; text: string }[];
     readonly calledTool?: string | undefined;
+    /**
+     * What this conversation measured, in the milliseconds the catalog names —
+     * each sample its own timing span, whose duration *is* the number.
+     *
+     * **A real caller's telemetry can carry these**, and the only reason most of
+     * it does not is that most frameworks emit no timings. Egma reads whatever
+     * arrives with the same code either way, so a case can file the same
+     * measurements as a simulation and as production and hold the two answers
+     * against each other — which is the whole of "one source, both worlds".
+     */
+    readonly measured?: Readonly<Record<string, readonly number[]>> | undefined;
   } = {},
 ): Promise<ConductedTrace> {
   nextTraceOrdinal += 1;
@@ -720,6 +737,25 @@ export async function conductProductionTrace(
       );
     }
   });
+
+  // The measurements, filed exactly as a simulation's are: one timing span per
+  // sample, named for the measure, its duration the number. The only difference
+  // from the simulator's is the row's `source`, which is the point.
+  let takenAt = 0n;
+  for (const [measure, samples] of Object.entries(conducting.measured ?? {})) {
+    for (const milliseconds of samples) {
+      takenAt += 500_000n;
+      spans.push(
+        spanning({
+          name: measure,
+          kind: "timing",
+          startedAtMicroseconds:
+            BigInt(startedAt.getTime()) * 1_000n + takenAt,
+          durationNanoseconds: BigInt(Math.round(milliseconds * 1_000_000)),
+        }),
+      );
+    }
+  }
 
   // While the conversation is still happening: the turns, and nothing that
   // closes it.

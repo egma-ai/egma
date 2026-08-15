@@ -332,6 +332,14 @@ export type DetailSpan = {
   readonly spans: DetailSpan[];
 };
 
+/** One measure this exchange produced, computed from its own spans. */
+export type DetailMeasure = {
+  readonly measure: string;
+  readonly unit: string;
+  readonly samples: readonly number[];
+  readonly span_ids: readonly string[];
+};
+
 export type TraceDetailBody = {
   readonly trace: ListedTrace;
   readonly turns: DetailSpan[];
@@ -339,6 +347,8 @@ export type TraceDetailBody = {
   readonly spans_truncated: boolean;
   /** The simulation this trace is, or `null` for a customer's own telemetry. */
   readonly simulation_id: string | null;
+  /** What was measured — the metrics display's read path. Empty, never absent. */
+  readonly measures: readonly DetailMeasure[];
 };
 
 export type ReadQuery = {

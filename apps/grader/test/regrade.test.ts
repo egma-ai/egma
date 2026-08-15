@@ -1,6 +1,5 @@
 import {
   editGrader,
-  PREDEFINED_GRADERS,
   listGradingJobsForSimulation,
   readVerdicts,
   regrade,
@@ -93,12 +92,15 @@ describe("editing a grader", () => {
 
     before = await verdictsOn(world, judged.simulationId, 1);
     alsoBefore = await verdictsOn(world, alsoJudged.simulationId, 1);
-    // `errored` rather than a judgment about the agent: egma ships the latency
-    // grader on the shelf and does not compute it from spans yet, so a copy of
-    // it says so out loud. What this file is about is the verdict store's
+    // Inside the two seconds this copy asks for: the conversation's worst turn
+    // took 1100 milliseconds. What this file is about is the verdict store's
     // mechanics — which version decided a row, and what a re-grade does to the
-    // rows already there — and those are the same whatever the word is.
-    expect(before[0]).toMatchObject({ verdict: "errored" });
+    // rows already there — and the tightening below is what makes the same
+    // conversation answer differently at the next version.
+    expect(before[0]).toMatchObject({
+      assertion: "assertion_1",
+      verdict: "passed",
+    });
 
     // The edit: a tighter bound, which is what somebody does after deciding the
     // grader was wrong.
@@ -148,11 +150,12 @@ describe("editing a grader", () => {
       // The old grading, untouched and still fetchable — the same row, not a
       // rewrite of it.
       expect(older).toEqual(first);
-      // And the new one beside it, at the version that decided it.
+      // And the new one beside it, at the version that decided it — the same
+      // conversation, now over the bound somebody tightened to a second.
       expect(newer).toMatchObject({
         graderId,
-        assertion: PREDEFINED_GRADERS.latency,
-        verdict: "errored",
+        assertion: "assertion_1",
+        verdict: "failed",
         source: "simulation",
       });
       expect(newer?.graderVersionId).not.toBe(first?.graderVersionId);
@@ -168,8 +171,9 @@ describe("editing a grader", () => {
       // **One voice per check, and it is the newest grading's** — computed over
       // rows that both still exist. The older row is not deleted and not
       // rewritten; it simply stops speaking, which is what keeps "what did we
-      // think last week" answerable at all.
-      expect(read.outcome.counts).toMatchObject({ errored: 1, total: 1 });
+      // think last week" answerable at all. The headline is the tightened
+      // grader's `failed`, and the `passed` underneath it is still readable.
+      expect(read.outcome.counts).toMatchObject({ failed: 1, total: 1 });
       expect(read.verdicts).toHaveLength(2);
     });
 
@@ -324,8 +328,8 @@ describe("a re-grade that names one grader", () => {
         (row) => row.graderVersionId === tightened,
       ),
     ).toMatchObject({
-      verdict: "errored",
-      assertion: PREDEFINED_GRADERS.latency,
+      verdict: "failed",
+      assertion: "assertion_1",
     });
 
     // And nothing else was asked anything. Row for row, byte for byte — the

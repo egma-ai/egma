@@ -78,12 +78,12 @@ export const USE = {
   /** Said above the form, because pressing Use is what switching on means. */
   lead:
     "This puts a running copy of the grader on your project. It starts " +
-    "judging the conversations in its scope straight away; nothing else has " +
-    "to be switched on.",
+    "judging everything in its scope straight away; nothing else has to be " +
+    "switched on.",
   /** An entry whose assertions come from the test asks for nothing at all. */
   asksNothing:
     "This grader asks for nothing. Its assertions are each test's own expected " +
-    "behaviors, read when a conversation is judged.",
+    "behaviors, read at the moment it judges.",
   required: "Can fail a run",
   requiredOn:
     "A test cannot pass while this grader does not.",
@@ -94,7 +94,7 @@ export const USE = {
   submitting: "Starting…",
   cancel: "Cancel",
   started: (name: string): string =>
-    `${name} is running on this project now. It judges the conversations in its scope from here on; what it has already judged is unchanged.`,
+    `${name} is running on this project now. It judges everything in its scope from here on; what has already been judged is unchanged.`,
   seeRunning: "See the running graders",
   /** A refusal the platform did not explain — the network, or a proxy. */
   unreachable:

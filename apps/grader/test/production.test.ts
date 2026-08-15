@@ -196,11 +196,12 @@ describe("a production trace whose root span closes", () => {
    * The read path itself, from real spans in a real store.
    *
    * Everything else in this file asserts verdict rows, which is the seam that
-   * matters — but nothing egma executes on a production trace today reads a
-   * transcript, so no row can show whether the conversation the engine
+   * matters — but nothing egma executes on a production trace reads a
+   * *transcript*, so no row can show whether the conversation the engine
    * assembled is the one the spans describe. This asserts it where it can be
    * seen: the store's own read, through the constructor, exactly as the engine
-   * does it.
+   * does it. The measures are the half a verdict row can speak for, and the
+   * case below does that.
    */
   it("reads the conversation from its spans — the transcript and the tool calls", async () => {
     const { traceId, startedAt } = await conductProductionTrace(world, {
@@ -255,17 +256,73 @@ describe("a production trace whose root span closes", () => {
       },
     ]);
 
-    // And no measures, honestly. What a threshold grader names is the
-    // simulator's own measurement of a conversation it conducted; a production
-    // trace is the agent's telemetry from the inside, and the two are different
-    // measurements. A grader asked for one it does not have answers `skipped`,
-    // which leaves the score's denominator.
-    expect(conversation.metrics).toEqual({});
+    // And no measures — not because this is production, but because these spans
+    // carry none. The shared measure module is handed the trace and knows
+    // nothing about who conducted it; most agents' telemetry emits no timings,
+    // so most production traces measure nothing, and a grader asked for one
+    // answers `skipped`, which leaves the score's denominator. A production
+    // trace that *does* carry timing spans measures exactly what a simulation's
+    // identical spans measure, which the case below is about.
+    expect(conversation.measures).toEqual([]);
 
     // Empty, and honestly so: a trace that arrived at the OTLP door was not
     // started by egma, so there is no run and no agent row behind it.
     expect(conversation.runId).toBe("");
     expect(conversation.agentId).toBe("");
+  });
+
+  /**
+   * **One source, both worlds — asserted where a customer would feel it.**
+   *
+   * The same measurements are filed twice: once by egma's own simulator as a
+   * conversation it conducted, and once at the OTLP door as a real caller's.
+   * The latency copies come back with the same verdict and the same rationale,
+   * because the number they were decided by came out of one module that never
+   * learns which source it is reading.
+   *
+   * That is what makes "passes in simulation, fails in production" a fact about
+   * the agent rather than about two readers. If the two paths could disagree,
+   * the whole comparison the product is built on would be measuring egma.
+   */
+  it("measures a real caller's spans exactly as it measures a simulation's", async () => {
+    const MEASURED = { turn_response_latency: [900, 1_100] };
+
+    const watching = await seedGrader(
+      world,
+      aLatencyCopy({ name: "The same bound in the wild", scope: "production" }),
+    );
+    const testing = await seedGrader(
+      world,
+      aLatencyCopy({ name: "The same bound in a test", scope: "simulations" }),
+    );
+
+    const { traceId } = await conductProductionTrace(world, {
+      measured: MEASURED,
+    });
+    const { simulationId } = await conductSimulation(world, {
+      spans: { measured: MEASURED },
+    });
+
+    const inTheWild = (await verdictsOn(world, traceId, 1)).find(
+      (verdict) => verdict.graderId === watching,
+    );
+    const inATest = (await verdictsOn(world, simulationId, 1)).find(
+      (verdict) => verdict.graderId === testing,
+    );
+
+    // Two different conversations, conducted by two different things, filed
+    // under two different sources.
+    expect(inTheWild?.source).toBe("production");
+    expect(inATest?.source).toBe("simulation");
+
+    // And one answer, down to the sentence — which can only be true if one
+    // piece of arithmetic produced both.
+    expect(inTheWild?.verdict).toBe("passed");
+    expect(inTheWild?.verdict).toBe(inATest?.verdict);
+    expect(inTheWild?.score).toBe(inATest?.score);
+    expect(inTheWild?.assertion).toBe(inATest?.assertion);
+    expect(inTheWild?.rationale).toBe(inATest?.rationale);
+    expect(inTheWild?.rationale).toContain("1100 milliseconds at its worst");
   });
 });
 

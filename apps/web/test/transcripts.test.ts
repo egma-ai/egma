@@ -468,3 +468,46 @@ describe("the transcript pages", () => {
     }
   });
 });
+
+/**
+ * The metrics display: what this exchange measured, shown beside the exchange.
+ *
+ * **The page derives no number.** Every figure it shows arrived already computed
+ * by the platform's one shared measure module — the same module a `latency`
+ * grader is judged through — so a duration worked out in a browser would be a
+ * second answer about one exchange and exactly what that module exists to
+ * prevent. What the page decides is which of the samples to lead with, and it
+ * says which one that is.
+ */
+describe("what the exchange measured", () => {
+  it("is read from the answer, and never worked out from the timings", async () => {
+    const page = await readFile(
+      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      "utf8",
+    );
+
+    // Rendered from the answer's own field.
+    expect(page).toContain("detail.measures");
+    // With the unit the answer carried, never one this page assumed — a page
+    // that said "ms" would be wrong the moment a measure is not a duration.
+    expect(page).toContain("one.unit");
+    // And separate from the verdicts, because a measure measures and a grader
+    // judges: nothing here is green or red.
+    expect(page).toContain("MEASURES.label");
+  });
+
+  /**
+   * The worst sample, because that is the number a bound is held against. A mean
+   * shown here would be a different figure from the one a verdict was decided
+   * by, on the same page, about the same exchange.
+   */
+  it("leads with the worst measurement, and says that is what it is", () => {
+    expect(copy.MEASURES.worst).toBe("worst");
+    expect(copy.MEASURES.counted(1)).toContain("1 measurement");
+    expect(copy.MEASURES.counted(11)).toContain("11 measurements");
+  });
+
+  it("says nothing was measured rather than showing a blank", () => {
+    expect(copy.MEASURES.none.length).toBeGreaterThan(40);
+  });
+});

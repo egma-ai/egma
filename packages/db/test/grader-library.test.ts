@@ -1,4 +1,8 @@
 import { newId } from "@egma/ids";
+import {
+  CATALOGED_MEASURES,
+  SPAN_DERIVED_MEASURES,
+} from "@egma/simulation-contract";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -195,15 +199,56 @@ describe("seeding egma's own graders", () => {
     expect(latency?.prompt).toBeNull();
     expect(latency?.output_definition).toBeNull();
 
-    const params = latency?.params as readonly { name: string; kind: string }[];
+    const params = latency?.params as readonly {
+      name: string;
+      kind: string;
+      options?: readonly { value: string; label: string; unit: string }[];
+    }[];
     expect(params.map((one) => one.name)).toEqual(["metric", "bound"]);
     // The measure is its own kind rather than a string with a note attached:
     // the catalog is the only list the form may offer, so the dropdown and the
     // check behind it cannot drift apart.
     expect(params[0]?.kind).toBe("measure");
-    // Unitless on purpose: the unit is the chosen measure's own, and the
-    // measure catalog is where that is already written down.
+    // Unitless on the parameter itself: the unit is the chosen measure's own,
+    // and it rides each option below rather than being fixed here.
     expect(params[1]?.kind).toBe("number");
+    expect(params[1]?.options).toBeUndefined();
+  });
+
+  /**
+   * **The dropdown's own values, on the entry.** The Library screen is a browser
+   * page with no way to read egma's packages, so a list of measures typed there
+   * would be a second copy of the measure catalog — stale the first time a
+   * measure joined or left, and its first symptom a write refused for offering
+   * exactly what the form offered.
+   *
+   * They are exactly the measures egma computes from a conversation's spans,
+   * which is the same list the write door accepts and the same list the shared
+   * measure module implements. Narrower than the catalog on purpose: a measure
+   * that arrives on the terminal transition is a real number a grader reading a
+   * trace would never find.
+   */
+  it("publishes the measures a copy may bound, straight off the measure catalog", async () => {
+    const rows = await shelf();
+    const latency = rows.find((row) => row.name === "latency");
+    const params = latency?.params as readonly {
+      name: string;
+      options?: readonly { value: string; label: string; unit: string; means: string }[];
+    }[];
+
+    const offered = params[0]?.options ?? [];
+    expect(offered.map((one) => one.value)).toEqual([...SPAN_DERIVED_MEASURES]);
+    // Not the whole catalog: a measure no span carries is not offerable.
+    expect(offered.length).toBeLessThan(CATALOGED_MEASURES.length);
+
+    for (const option of offered) {
+      // Words a person reads, and the unit a bound beside it is counted in —
+      // both from the catalog, so a form never has an opinion of its own.
+      expect(option.label).not.toBe("");
+      expect(option.label).not.toContain("_");
+      expect(option.unit).not.toBe("");
+      expect(option.means.length).toBeGreaterThan(20);
+    }
   });
 
   it("changes nothing on a second run, so every boot is safe", async () => {

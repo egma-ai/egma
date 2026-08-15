@@ -25,6 +25,13 @@ import {
  * two stores it was only told the URLs of, and works. Everything between
  * `docker compose up` and this is the Dockerfile, which the deployment test
  * reads and which builds the same command.
+ *
+ * The grader it judges with is `latency`, which makes this the end-to-end proof
+ * of the whole measure path: the simulator's spans go into ClickHouse, the
+ * process claims the job a terminal transition minted, the shared measure module
+ * computes the number, the bound is applied, and the verdict comes back out of
+ * the read a results page uses — in a process whose environment provably holds
+ * nothing key-shaped.
  */
 
 const ROOT = path.resolve(fileURLToPath(new URL("../../..", import.meta.url)));
@@ -81,15 +88,24 @@ afterAll(async () => {
 
 describe("the process the image runs", () => {
   /**
-   * **The claim is about the process, not about the judgment.** What the
-   * container has to prove is that it boots, reads its configuration out of the
-   * environment, reaches two stores it was only given the URLs of, claims the
-   * work a terminal transition minted, and writes a row. The grader it judges
-   * with is a copy of `latency` — on the shelf, pressable today, and not yet
-   * something egma computes — so the row it writes says exactly that, in egma's
-   * own words, with no account behind it and no model asked anything.
+   * **The whole of the latency path, in the process the image runs.** The
+   * container boots, reads its configuration out of the environment, reaches two
+   * stores it was only given the URLs of, claims the work a terminal transition
+   * minted, computes a measure off the conversation's spans, holds it to the
+   * bound its copy carries, and writes the row — with no account behind it and
+   * no model asked anything.
+   *
+   * That last part is the point of judging with `latency` here rather than with
+   * the behaviors grader: a computed grader never resolves a judge, so a
+   * verdict landing in an environment with nothing key-shaped in it is the
+   * strongest form of that claim, made against the real process rather than
+   * against a seam.
+   *
+   * The verdict is read back through `readVerdicts`, which is the run read
+   * path's own function — so what this asserts is that the row is visible where
+   * a results page reads it, not merely that a row exists.
    */
-  it("judges a conversation, with no model key in its environment", async () => {
+  it("judges a conversation with a measure it computes, and no model key in its environment", async () => {
     // Stated as an assertion rather than as a comment: nothing that could be a
     // key is in this process's environment, so nothing it wrote came from one.
     for (const [name, value] of Object.entries(environmentWithoutSecrets())) {
@@ -100,25 +116,30 @@ describe("the process the image runs", () => {
       spans: { measured: { turn_response_latency: [900, 1_100] } },
     });
 
-    const verdicts = await eventually(
+    const read = await eventually(
       "the process to write a verdict",
       async () => {
-        const read = await readVerdicts(world.auth, simulationId);
-        return read.verdicts.length > 0 ? read.verdicts : undefined;
+        const answer = await readVerdicts(world.auth, simulationId);
+        return answer.verdicts.length > 0 ? answer : undefined;
       },
       30_000,
     );
 
-    expect(verdicts).toHaveLength(1);
-    expect(verdicts[0]).toMatchObject({
+    expect(read.verdicts).toHaveLength(1);
+    expect(read.verdicts[0]).toMatchObject({
       traceId: simulationId,
       runId,
       source: "simulation",
-      // `errored` and never `passed`: this check applies perfectly well and
-      // egma did not make it, which is a sentence a page has to be able to
-      // show rather than a green tick nobody earned.
-      verdict: "errored",
+      // The config entry's position, and the bound held: 1100 milliseconds at
+      // its worst, inside the two seconds the copy asks for.
+      assertion: "assertion_1",
+      verdict: "passed",
+      score: 1,
     });
+    expect(read.verdicts[0]?.rationale).toContain("turn_response_latency");
+    // And the folded answer a results page shows above the rows agrees with
+    // them, because it is computed from exactly these rows at read time.
+    expect(read.outcome.verdict).toBe("passed");
   });
 
   it("says what it did on standard output, one JSON line at a time", async () => {

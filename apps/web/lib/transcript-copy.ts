@@ -214,12 +214,12 @@ export const FACTS = {
 export const MEASURES = {
   label: "What was measured",
   lead:
-    "Computed from this exchange's own spans — the same numbers a grader " +
+    "Computed from this exchange's own timings — the same numbers a grader " +
     "reads when it is asked to hold one to a bound.",
   /** Nothing measured is an ordinary answer, and it says which two ways. */
   none:
-    "Nothing was measured here. egma's own simulations time their turns; a " +
-    "production exchange carries whatever its agent's telemetry emitted, which " +
+    "Nothing was measured here. egma's own simulations time their turns; an " +
+    "exchange your agent had carries whatever its telemetry emitted, which " +
     "for most frameworks is no timings at all.",
   /** One measurement is the number; several are the worst of them. */
   worst: "worst",
