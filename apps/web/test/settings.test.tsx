@@ -198,6 +198,49 @@ afterEach(() => {
 
 /* ------------------------------------------------------------------------ */
 
+/**
+ * The three Settings pages whose subject is the organization rather than the
+ * project the address names, and the sentence each one says about that.
+ *
+ * Every one of them is here rather than one standing in for the rest: the note
+ * is written per page, in that page's own words about that page's own subject,
+ * so a page that lost it would go on passing a test written against a sibling.
+ */
+const ORGANIZATION_WIDE: readonly {
+  readonly page: string;
+  readonly answers: Record<string, Stubbed | readonly Stubbed[]>;
+  readonly open: () => void;
+  readonly says: RegExp;
+}[] = [
+  {
+    page: "Organization",
+    answers: {
+      "/api/organization": { status: 200, body: ORGANIZATION },
+      "/api/judge-credentials": { status: 200, body: { items: [] } },
+    },
+    open: () => render(<OrganizationSettingsPage />),
+    says: /Everything on this page belongs to the whole organization/,
+  },
+  {
+    page: "People",
+    answers: {
+      "/api/members": {
+        status: 200,
+        body: { members: [], may_manage_members: true },
+      },
+      "/api/invitations": { status: 200, body: { invitations: [] } },
+    },
+    open: () => render(<PeoplePage />),
+    says: /Membership belongs to the whole organization/,
+  },
+  {
+    page: "API keys",
+    answers: { "/api/keys": { status: 200, body: { keys: [] } } },
+    open: () => render(<ApiKeysPage />),
+    says: /Keys belong to the organization/,
+  },
+];
+
 describe("the Settings navigation", () => {
   it("says which settings belong to the project and which to the organization", async () => {
     apiAnswers({
@@ -224,22 +267,35 @@ describe("the Settings navigation", () => {
    * The note is the whole reason an organization-wide page can live under a
    * project's address. The selector is still on screen and still naming a
    * project; without a sentence saying otherwise, that reads as a claim.
+   *
+   * Both halves of that are asserted here, because the arrangement only works
+   * if both are true at once: a selector with no note is a page making a claim
+   * about a project, and a note with no selector is a page nobody can leave.
    */
-  it("says on an organization-wide page that the project shown is not its subject", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/api/members": {
-        status: 200,
-        body: { members: [], may_manage_members: true },
-      },
-      "/api/invitations": { status: 200, body: { invitations: [] } },
-    });
-    render(<PeoplePage />);
+  it.each(ORGANIZATION_WIDE)(
+    "keeps the selector on $page and says the project it names is not the subject",
+    async ({ answers, open, says }) => {
+      apiAnswers({
+        "/api/me": { status: 200, body: meWith("admin") },
+        ...answers,
+      });
+      open();
 
-    expect(
-      await screen.findByText(/belongs to the whole organization/),
-    ).toBeTruthy();
-  });
+      // The note is drawn only once the page's own read has answered, so
+      // finding it is also what says the page is showing itself rather than a
+      // loading or a failure state.
+      expect(await screen.findByText(says)).toBeTruthy();
+
+      // And the selector is still on screen, naming the project the address
+      // does. Waited for rather than read on sight: the shell draws the
+      // control before `/api/me` lands and it says "No organization" until
+      // then, so an immediate read would pass on a session nobody had.
+      const selectors = await screen.findAllByRole("button", {
+        name: /^Organization Acme, project Default\./,
+      });
+      expect(selectors.length).toBeGreaterThan(0);
+    },
+  );
 });
 
 /* ------------------------------------------------------------------------ */
@@ -1119,6 +1175,32 @@ const BOB = {
   deactivated_at: null,
 };
 
+/**
+ * Two invitations differing in exactly one thing: whether their day has passed.
+ *
+ * Measured from now rather than written out as a date, so what is asserted is
+ * the page's reading of the field and not the calendar the suite happens to be
+ * run on. A fixed date would make this test pass until it silently stopped
+ * testing anything.
+ */
+const A_WEEK = 7 * 24 * 60 * 60 * 1000;
+
+const WAITING_INVITATION = {
+  id: "inv_1",
+  email: "cleo@acme.example",
+  role: "member",
+  expires_at: new Date(Date.now() + A_WEEK).toISOString(),
+  created_at: new Date(Date.now() - A_WEEK).toISOString(),
+};
+
+const DEAD_INVITATION = {
+  id: "inv_2",
+  email: "dev@acme.example",
+  role: "viewer",
+  expires_at: new Date(Date.now() - A_WEEK).toISOString(),
+  created_at: new Date(Date.now() - 2 * A_WEEK).toISOString(),
+};
+
 describe("people and invitations", () => {
   function open(
     role = "admin",
@@ -1287,6 +1369,89 @@ describe("people and invitations", () => {
       await screen.findByText(/on its way to bob@acme.example/),
     ).toBeTruthy();
     expect(screen.queryByText(/Here is the link/)).toBeNull();
+  });
+
+  /**
+   * The list route answers with every invitation nobody has accepted, and the
+   * ones whose day has passed are in it. Drawn the same as the rest, they read
+   * as waiting when nothing is coming — so somebody waits for a person who can
+   * no longer accept, and the invitation that would let them in is never sent.
+   */
+  it("tells an invitation nobody can accept any more from one still waiting", async () => {
+    open("admin", true, [ADA], [WAITING_INVITATION, DEAD_INVITATION]);
+
+    fireEvent.click(await screen.findByRole("radio", { name: "Invitations" }));
+
+    // The invitations are their own read, answered after the roster that drew
+    // this tab. Finding the table is what says that second answer landed —
+    // and the *absence* asserted at the end is only worth anything once it
+    // has, because an empty page has no control on it either.
+    const table = await screen.findByRole("table", { name: "Invitations" });
+    const rows = await within(table).findAllByRole("row");
+    const waiting = rows.find((row) =>
+      row.textContent?.includes(WAITING_INVITATION.email),
+    )!;
+    const dead = rows.find((row) =>
+      row.textContent?.includes(DEAD_INVITATION.email),
+    )!;
+
+    expect(waiting.textContent).toContain("Pending");
+    expect(waiting.textContent).not.toContain("Expired");
+    expect(dead.textContent).toContain("Expired");
+
+    // And what each one offers matches what it is. A live invitation is waited
+    // on and carries no control; a dead one cannot be waited on, so the one
+    // move left is on it and only on it.
+    expect(within(dead).getByRole("button", { name: "Send again" })).toBeTruthy();
+    expect(
+      within(waiting).queryByRole("button", { name: "Send again" }),
+    ).toBeNull();
+  });
+
+  /**
+   * Sending again goes the same way a first invitation does, which is what
+   * makes it worth offering: on an install with no mail transport the new link
+   * comes back to the person who asked for it, exactly as the form's does.
+   */
+  it("sends another invitation for a dead one, and hands the new link back", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/members": {
+        status: 200,
+        body: { members: [ADA], may_manage_members: true },
+      },
+      // Named in the order the page asks: the list it opens with, the new
+      // invitation, and the list again once one has been sent.
+      "/api/invitations": [
+        { status: 200, body: { invitations: [DEAD_INVITATION] } },
+        {
+          status: 201,
+          body: {
+            ...DEAD_INVITATION,
+            id: "inv_9",
+            delivered: false,
+            accept_url: "http://egma.test/invite?token=xyz",
+          },
+        },
+        { status: 200, body: { invitations: [DEAD_INVITATION] } },
+      ],
+    });
+    render(<PeoplePage />);
+
+    fireEvent.click(await screen.findByRole("radio", { name: "Invitations" }));
+
+    const table = await screen.findByRole("table", { name: "Invitations" });
+    fireEvent.click(within(table).getByRole("button", { name: "Send again" }));
+
+    expect(await screen.findByText(/Here is the link/)).toBeTruthy();
+    expect(document.body.textContent).toContain(
+      "http://egma.test/invite?token=xyz",
+    );
+    // The same person, at the same role, and nothing retyped to get there.
+    expect(sent.find((one) => one.method === "POST")?.body).toEqual({
+      email: DEAD_INVITATION.email,
+      role: DEAD_INVITATION.role,
+    });
   });
 
   it("shows the refusal in its own words when the last admin is protected", async () => {
