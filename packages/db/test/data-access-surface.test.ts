@@ -168,6 +168,10 @@ const CONTEXT_REQUIRING = [
   "deactivateUser",
   "deleteAgent",
   "deleteGrader",
+  // The library's delete, which in v0 exists to refuse: every entry on the
+  // shelf is one egma ships, and egma's are undeletable because the next boot
+  // writes them again.
+  "deleteGraderLibraryEntry",
   "deleteMockTool",
   "deletePersona",
   "deleteTest",
@@ -187,6 +191,10 @@ const CONTEXT_REQUIRING = [
   "getAgent",
   "getConnection",
   "getGrader",
+  // The shelf: one entry, and one page of it. Both answer egma's entries
+  // beside the caller's own, with owner derived from tenancy rather than
+  // stored — which is the whole reason that one table's tenancy is nullable.
+  "getGraderLibraryEntry",
   "getGraderVersion",
   "getGradingJob",
   "getGradingJobForTrace",
@@ -201,6 +209,7 @@ const CONTEXT_REQUIRING = [
   "listAgents",
   "listApiKeys",
   "listConnections",
+  "listGraderLibrary",
   "listGraders",
   "listGradingJobsForSimulation",
   "listMembers",
@@ -259,6 +268,11 @@ const CONTEXT_REQUIRING = [
   "resolveSimulationConnection",
   "revokeApiKey",
   "seedDefaultJudge",
+  // egma's own graders, written onto the shelf from egma's own catalog at
+  // start-up. The deployment configuring itself again, one table over: no
+  // user, no customer — a predefined entry belongs to none — and an upsert, so
+  // running it on every boot writes only what a release changed.
+  "seedGraderLibrary",
   "seedPlatformSettings",
   "setJudgeConfiguration",
   "startRun",
@@ -290,6 +304,26 @@ const PERMISSION = [
  */
 const THE_PLATFORMS_SETTINGS = ["PLATFORM_SETTINGS"];
 
+/**
+ * What egma ships on the shelf, and the vocabulary a library entry is written
+ * in.
+ *
+ * The catalog is exported because it is the source of truth for what a
+ * predefined grader *is* — the seeding writes from it, and a test that wants to
+ * watch a version move hands in an edited copy of it. The two type lists are
+ * exported for the reason every closed vocabulary in this schema is: the words
+ * a refusal names have to be the words the constraint takes, and a list written
+ * twice is a list that will one day disagree with itself. `RESERVED_LIBRARY_TYPES`
+ * is the other half of that — the words that are spoken for and refused, so a
+ * refusal can say "not yet" rather than "never heard of it".
+ */
+const THE_GRADER_LIBRARY = [
+  "GRADER_LIBRARY_CATALOG",
+  "LARGEST_GRADER_SOURCE_CODE_BYTES",
+  "LIBRARY_TYPES",
+  "RESERVED_LIBRARY_TYPES",
+];
+
 /** Vocabulary: the table definitions, how a caller proved who they are, and the refusals. */
 const VALUES = [
   // The agent factory's own refusal, carrying which of its three rules turned
@@ -307,6 +341,10 @@ const VALUES = [
   "MockToolTakenError",
   "NotPermittedError",
   "PersonaNamedByTestsError",
+  // A delete that named one of egma's own graders. Its own class because
+  // nothing about the request is wrong and nothing is in the way — the entry
+  // simply is not anybody's to remove.
+  "PredefinedGraderError",
   "ProjectOutsideOrganizationError",
   // A run turned away, carrying which rule turned it away: a connection
   // nobody can see, one that is not on the agent that was named, a type no
@@ -407,6 +445,7 @@ describe("the data-access module's surface", () => {
         ...THE_FOLD,
         ...THE_MOCKED_WORLD,
         ...THE_PLATFORMS_SETTINGS,
+        ...THE_GRADER_LIBRARY,
       ].sort(),
     );
   });

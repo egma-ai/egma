@@ -115,6 +115,7 @@ export {
   MockToolTakenError,
   NotPermittedError,
   PersonaNamedByTestsError,
+  PredefinedGraderError,
   ProjectOutsideOrganizationError,
   RunWriteRefusedError,
   TestMovedOnError,
@@ -377,6 +378,46 @@ export {
   type TestPersona,
   type TestVersion,
 } from "./tests.ts";
+
+/**
+ * The grader library: the shelf of definitions, one level above the running
+ * copies below.
+ *
+ * `seedGraderLibrary` is the third deployment-configuring export, on
+ * `seedPlatformSettings`' exact terms: it writes egma's own graders from egma's
+ * own catalog in the same breath as applying migrations, names no customer
+ * because a predefined entry belongs to none, and is an upsert — so a second
+ * boot writes nothing at all and a release that improved a judge prompt
+ * refreshes the row and bumps its version.
+ *
+ * The reads take the context like everything else and answer egma's entries
+ * beside the caller's own. **Owner is derived from tenancy** rather than stored,
+ * which is why null tenancy is a state this one table has at all.
+ */
+export {
+  deleteGraderLibraryEntry,
+  getGraderLibraryEntry,
+  listGraderLibrary,
+  seedGraderLibrary,
+  type DeletedLibraryEntry,
+  type LibraryEntry,
+  type LibraryOutputDefinition,
+  type LibraryOwner,
+  type LibraryPage,
+  type LibraryParameter,
+  type PredefinedGrader,
+  type SeededGrader,
+} from "./grader-library.ts";
+export {
+  GRADER_LIBRARY_CATALOG,
+  type LibraryParameterKind,
+} from "../grader-library/catalog.ts";
+export type { LibraryType, ReservedLibraryType } from "../schema/graders.ts";
+export {
+  LARGEST_GRADER_SOURCE_CODE_BYTES,
+  LIBRARY_TYPES,
+  RESERVED_LIBRARY_TYPES,
+} from "../schema/graders.ts";
 
 export {
   advanceProductionSampling,

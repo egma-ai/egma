@@ -101,6 +101,7 @@ describe("the provider's footprint on the schema", () => {
     "connection",
     "device_code",
     "grader",
+    "grader_library",
     "grader_version",
     "grading_job",
     "invitation",

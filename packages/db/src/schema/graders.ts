@@ -8,6 +8,7 @@ import {
   pgTable,
   text,
   unique,
+  uniqueIndex,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
@@ -89,6 +90,218 @@ export type Priority = (typeof PRIORITIES)[number];
  */
 export const GRADER_SCOPES = ["simulations", "production", "both"] as const;
 export type GraderScope = (typeof GRADER_SCOPES)[number];
+
+/**
+ * What a **library entry** is, which is a different question from what the
+ * running copy above is — one word decides what the entry's definition holds
+ * and which engine executes it.
+ *
+ * Two words in v0. `llm_as_judge` carries a `prompt` and an `output_definition`
+ * and is executed by asking a model; `code` carries parameters a person fills
+ * in at **Use** time and is executed by egma's own engine.
+ *
+ * Three more are **reserved and refused by the constraint below**, so a row can
+ * never quietly hold one before the machinery that executes it exists — a
+ * grader that nothing can run is a check somebody believes in that can never
+ * fire, which is the false trust this product exists to kill. `human` is the
+ * return path for corrections, writing verdict rows under its own grader id;
+ * `ml_model` is unspecified; `external` is egma calling a customer's endpoint
+ * and storing no code. Each is named here so the day one arrives is the day
+ * this list grows by one word, rather than the day somebody invents a spelling.
+ */
+export const LIBRARY_TYPES = ["llm_as_judge", "code"] as const;
+export type LibraryType = (typeof LIBRARY_TYPES)[number];
+
+/**
+ * The words the constraint turns away, written down beside the ones it takes.
+ *
+ * They are here rather than only in prose because a refusal has to be able to
+ * say *this word is spoken for, and this is what it will mean* — which is a
+ * different sentence from "egma has never heard of that".
+ */
+export const RESERVED_LIBRARY_TYPES = ["human", "ml_model", "external"] as const;
+export type ReservedLibraryType = (typeof RESERVED_LIBRARY_TYPES)[number];
+
+/**
+ * How much source a custom `code` entry may carry, in bytes.
+ *
+ * Null in v0 — nothing writes it and no dispatcher exists to run it — and the
+ * cap is written down now for the reason the mock tool's answer cap is: a limit
+ * discovered at execution time is a limit somebody meets after they have
+ * written the thing. A quarter of a mebibyte is the reference implementation's
+ * (Langfuse stores customer eval code in a text column of this size), and code
+ * that needs more than this is a service rather than a grader.
+ */
+export const LARGEST_GRADER_SOURCE_CODE_BYTES = 256 * 1024;
+
+/**
+ * The shelf: every grader definition, egma's own and — when custom authoring
+ * arrives — a team's, in one table.
+ *
+ * **This is the one table whose tenancy is nullable and *means* it, and the
+ * exception is the whole point.** Everywhere a customer's data lives, an
+ * `organization_id` is `not null`, because a row belonging to nobody is a row
+ * no permission can describe. Here, *belonging to nobody* is a real and
+ * permanent state: **null tenancy means egma owns the entry**, which is what a
+ * predefined grader is, and it is where the Owner label on the Library screen
+ * is derived from rather than from a flag somebody could set the other way. The
+ * alternative — a `predefined` boolean beside a tenancy pointing at some house
+ * organization — would need a house organization on every deployment and would
+ * let the two disagree.
+ *
+ * (`device_code` also leaves the pair null and means the opposite thing by it:
+ * a terminal nobody has aimed yet, filled in at approval. Null as *not yet* and
+ * null as *never* are two different decisions, which is why the schema's shape
+ * suite names both tables and refuses a third.)
+ *
+ * The two columns move together, held by a check — the device code's own
+ * arrangement, borrowed whole: an entry belongs to a project inside an
+ * organization, or to egma. There is no third state, because a definition owned
+ * by an organization and by no project would be a grader nothing could scope —
+ * graders belong to a project, as tests and personas do.
+ *
+ * **Predefined entries are seeded by a deterministic upsert from a catalog in
+ * egma's code** (`grader-library/catalog.ts`), so an egma release that improves
+ * a judge prompt upgrades every project. That places predefined definitions
+ * deliberately outside run pinning: they are product behaviour, release-tracked
+ * exactly as the engine code executing beside them, and which definition judged
+ * a given verdict is reconstructable from the catalog's git history plus this
+ * row's `version`. Run pinning protects customer-authored meaning — test
+ * versions and the running copy's filled-in config, both pinned — and custom
+ * entries version and pin when authoring arrives.
+ *
+ * **The table name is plural-ish on purpose and is a recorded exception** to
+ * the schema's singular naming: it names the shelf rather than one thing on it,
+ * exactly as the reference implementation's `eval_templates` does.
+ *
+ * The definition is never copied down onto a running copy. A copy points here
+ * by `library_id` and the definition is read through that pointer at judging
+ * time — a copied definition drifts from the one on screen, which is the
+ * documented failure this two-level shape exists to make unreachable.
+ */
+export const graderLibrary = pgTable(
+  "grader_library",
+  {
+    id: idText("id").primaryKey(),
+    /**
+     * Null for an entry egma owns. See the table's own note: this is the
+     * schema's one deliberate exception to hard-required tenancy, and the
+     * Owner label is derived from it.
+     */
+    organizationId: idText("organization_id").references(
+      () => organization.id,
+      { onDelete: "cascade" },
+    ),
+    /** Null for an entry egma owns, and never null on its own. */
+    projectId: idText("project_id"),
+    /** What a person calls it: `expected_behaviors`, `latency`. */
+    name: text("name").notNull(),
+    description: text("description"),
+    /** `llm_as_judge` or `code`; the reserved three are refused below. */
+    type: text("type").notNull(),
+    /**
+     * How many times this definition has been written.
+     *
+     * **Bumped by the catalog upsert, and only when something actually
+     * changed.** It is what makes "which prompt judged this verdict" answerable
+     * against the catalog's history: the release that changed the words is the
+     * release that moved this number. A run does not pin it, deliberately — see
+     * the table's note.
+     */
+    version: integer("version").notNull().default(1),
+    /**
+     * The judge prompt, with its variable slots, for an `llm_as_judge` entry.
+     * Null for a `code` entry, which is executed rather than asked.
+     *
+     * It lives on the row rather than only in the engine so that the Library
+     * screen can show a developer the words their conversations are judged by.
+     */
+    prompt: text("prompt"),
+    /**
+     * The schema of what **Use** asks for, as an ordered list of parameter
+     * declarations — latency declares a measure from the catalog and a bound;
+     * expected_behaviors declares nothing, because its assertions are the
+     * test's own sentences and wire themselves at judging time.
+     *
+     * jsonb rather than columns for the reason a persona's traits are: two
+     * entries shape it two ways today and a third will shape it a third way,
+     * and a field promoted to a column later is a cheap migration.
+     */
+    params: jsonb("params").notNull(),
+    /**
+     * The shape an `llm_as_judge` entry's judge must **reply** in — the
+     * decision, its one-sentence reason, and the turns it rests on — so that
+     * what the prompt above commands, what the engine parses, and what the
+     * Library screen promises are one statement. Null for a `code` entry.
+     *
+     * It describes the *judge's answer*, not the verdict row written from it:
+     * a row carries a verdict and a score, exists for assertions no judge was
+     * ever asked about, and turns `cannot_determine` into `skipped`. Two
+     * documents, and this column is the first one.
+     */
+    outputDefinition: jsonb("output_definition"),
+    /**
+     * A custom `code` entry's own source, and the language it is written in.
+     *
+     * **Both null in v0**, and reserved rather than speculative: `code` today
+     * means egma's own engine executing a parameterised definition with no
+     * stored source, and customer code arrives with a dispatcher seam to run it
+     * safely. The columns are here so that arriving is an insert rather than a
+     * migration, and the cap beside them is the reference implementation's.
+     */
+    sourceCode: text("source_code"),
+    sourceCodeLanguage: text("source_code_language"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    prefixCheck("grader_library_id_prefix", table.id, "grl"),
+    // Two words, and the reserved three refused by name: a row holding a type
+    // no engine executes is a grader that can never fire.
+    oneOf("grader_library_type_allowed", table.type, [...LIBRARY_TYPES]),
+    // The nullable-tenancy exception, bounded: an entry belongs to a project
+    // inside an organization, or it belongs to egma. Written as a check rather
+    // than left to convention, because "owned by nobody" is a real state here
+    // and only the database can keep it from becoming three states.
+    check(
+      "grader_library_tenancy_is_whole_or_egmas",
+      sql`(${table.organizationId} is null) = (${table.projectId} is null)`,
+    ),
+    // The cap on a custom entry's source, held where a hand-written insert
+    // meets it too.
+    check(
+      "grader_library_source_code_within_budget",
+      sql`${table.sourceCode} is null or octet_length(${table.sourceCode}) <= ${sql.raw(
+        String(LARGEST_GRADER_SOURCE_CODE_BYTES),
+      )}`,
+    ),
+    // A language names source, and source names a language: a row carrying one
+    // without the other is half a definition.
+    check(
+      "grader_library_source_code_columns_agree",
+      sql`(${table.sourceCode} is null) = (${table.sourceCodeLanguage} is null)`,
+    ),
+    // The pairing, not each column on its own: an entry cannot name one
+    // organization and another organization's project. Both null skips it,
+    // which is exactly the egma-owned row.
+    foreignKey({
+      name: "grader_library_project_organization_fk",
+      columns: [table.projectId, table.organizationId],
+      foreignColumns: [project.id, project.organizationId],
+    }).onDelete("cascade"),
+    // One predefined entry per name, held by the database rather than by the
+    // catalog's author: two egma-owned entries called `latency` would be two
+    // shelves' worth of one thing, and the second would be seeded by an id
+    // somebody duplicated.
+    uniqueIndex("grader_library_predefined_name_unique")
+      .on(table.name)
+      .where(sql`${table.organizationId} is null`),
+    index("grader_library_organization_id_project_id_idx").on(
+      table.organizationId,
+      table.projectId,
+    ),
+  ],
+);
 
 /**
  * The judges egma can ask. It grows one provider at a time, behind one seam,
