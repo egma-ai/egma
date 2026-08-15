@@ -85,6 +85,18 @@ export type TestApiOptions = {
   readonly trustProxy?: boolean;
   /** Whether the transport claims a message actually reaches anybody. */
   readonly emailDelivers?: boolean;
+  /**
+   * Something the fake transport waits on before its `send` finishes — for the
+   * one test whose claim is that **nothing waits for it**. A real transport
+   * takes a quarter of a second to reach an SMTP server, and a fake one that
+   * returns the instant it is called cannot tell a flow that waits for delivery
+   * from one that does not.
+   *
+   * The message is recorded the moment it is handed over, before the wait, so
+   * every other test reads `mail` exactly as it did before. It is asked for
+   * once per message, so a test can arm it after the messages it is not about.
+   */
+  readonly emailSendCompletesOn?: () => Promise<void> | undefined;
   /** A budget small enough to reach, for the tests about reaching it. */
   readonly rateLimit?: RateLimit;
   /** A sweep cadence short enough to observe, for the tests about the sweep. */
@@ -141,6 +153,7 @@ export async function createApi(
     delivers: options.emailDelivers ?? false,
     async send(email) {
       mail.push(email);
+      await options.emailSendCompletesOn?.();
     },
   };
 

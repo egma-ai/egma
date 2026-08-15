@@ -27,7 +27,7 @@ import { findTheAgent } from "./discovery.ts";
 import { openDrivenAgentLog, type DrivenAgentLog } from "./driven-agent-log.ts";
 import type { ExitReport } from "./exit-line.ts";
 import { generateStep } from "./generate-step.ts";
-import { logInStep, type PlatformAccess } from "./login-step.ts";
+import { logInStep, type PlatformAccess, type WalkPlatform } from "./login-step.ts";
 import { runStep } from "./run-step.ts";
 import { stopReport, untilAborted } from "./stop.ts";
 
@@ -43,7 +43,7 @@ export type WalkOptions = {
    * in to nothing — which is how the checks that are only about driving a
    * coding agent stay about that.
    */
-  readonly platform?: PlatformAccess;
+  readonly platform?: WalkPlatform;
   /** Where Retell is. Retell's own address when omitted. */
   readonly retell?: ConnectOptions["retell"];
   /** How many tests a first suite holds. egma's own default when omitted. */
@@ -101,6 +101,12 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
   const log = options.log ?? openDrivenAgentLog();
   ui.setDrivenAgentLog(log.file);
 
+  // Which egma, said before the keystroke that agrees to all of it and before
+  // egma has asked that address anything. A bare command now reaches egma's own
+  // platform by default, so where a repository's identifiers are going is the
+  // developer's to read first, not to find out afterwards.
+  ui.setPlatform(options.platform?.url ?? null);
+
   await untilAborted(ui.waitForGate("begin"), signal);
   if (signal.aborted) {
     const report = stopReport(signal, launch.name);
@@ -110,8 +116,17 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
 
   // Before anything is driven: who this is. Nothing else in the walk can name
   // an agent, a connection or a test until egma knows whose they are.
+  //
+  // Asking the address who it is happens here, on the far side of the gate, so
+  // that a developer who reads the first screen and closes the wizard has sent
+  // nothing anywhere. A refusal from it leaves the walk entirely: it is not the
+  // walk failing, it is egma declining to talk to an address, and it is
+  // answered in the same plain sentence and the same number every verb answers
+  // with.
+  let platform: PlatformAccess | undefined;
   if (options.platform !== undefined) {
-    const refusal = await logInStep(options.platform, ui, signal);
+    platform = await options.platform.verify();
+    const refusal = await logInStep(platform, ui, signal);
     if (refusal !== null) {
       ui.setExit(refusal);
       return refusal;
@@ -125,7 +140,7 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
   // an egma to register on and an agent to register: a run that only drives a
   // coding agent has neither, and asking it for a provider key would be asking
   // for a secret nothing was going to use.
-  if (found.report.kind !== "found-agent" || options.platform === undefined) {
+  if (found.report.kind !== "found-agent" || platform === undefined) {
     ui.setExit(found.report);
     return found.report;
   }
@@ -137,7 +152,7 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
   // binding, in a repository the developer had decided not to connect.
   const connected = await connectStep({
     ui,
-    platform: options.platform,
+    platform,
     cwd,
     // What the coding agent said about where the words live, carried forward
     // so the two prompts can be compared once the provider's is in hand.
@@ -148,7 +163,7 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
 
   // Nothing after this can name what a test is about, so a connect that did not
   // connect is where the walk stops.
-  const signedIn = await signedInAt(options.platform);
+  const signedIn = await signedInAt(platform);
   if (connected.connected === null || signedIn === null) {
     ui.setExit(connected.report);
     return connected.report;

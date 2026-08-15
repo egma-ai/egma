@@ -24,8 +24,15 @@ import { enterAlternateScreen, leaveAlternateScreen } from "./terminal.ts";
 export type TuiHandle = {
   readonly ui: WizardUI;
   readonly store: WizardStore;
-  /** Leaves the alternate screen and prints the one line that survives. */
-  close(report: ExitReport): void;
+  /**
+   * Leaves the alternate screen and prints the one line that survives.
+   *
+   * `null` leaves nothing behind: the wizard is handing the last word to
+   * whoever called it, which is what happens when egma declines to talk to a
+   * platform at all. That sentence is not the wizard's to say, and saying it
+   * here as well would print it twice.
+   */
+  close(report: ExitReport | null): void;
 };
 
 export type StartTuiOptions = {
@@ -52,11 +59,12 @@ export function startTui(options: StartTuiOptions): TuiHandle {
   );
 
   let closed = false;
-  const close = (report: ExitReport): void => {
+  const close = (report: ExitReport | null): void => {
     if (closed) return;
     closed = true;
     instance.unmount();
     leaveAlternateScreen(stdout);
+    if (report === null) return;
     const notice = buildExitNotice(report);
     if (notice !== null) stdout.write(`${notice}\n\n`);
     stdout.write(`${exitLines(report).join("\n")}\n`);

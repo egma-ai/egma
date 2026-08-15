@@ -39,6 +39,10 @@ export class InkUI implements WizardUI {
     this.store.setDrivenAgentLog(file);
   }
 
+  setPlatform(url: string | null): void {
+    this.store.setPlatform(url);
+  }
+
   setDetection(detection: Detection | null): void {
     this.store.setDetection(detection);
   }
