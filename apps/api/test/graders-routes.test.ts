@@ -54,6 +54,7 @@ type Listed = {
   readonly library_id: string;
   readonly name: string;
   readonly type: string;
+  readonly description: string | null;
   readonly required: boolean;
   readonly scope: string;
   readonly version: number;
@@ -631,6 +632,236 @@ describe("changing a running copy", () => {
     });
 
     expect(edited.statusCode).toBe(403);
+  });
+});
+
+/**
+ * The three fields that arrive as words, and what happens when they arrive as
+ * something else.
+ *
+ * **Refused, because the alternative is a project configured differently from
+ * what somebody wrote down.** These used to be read through a helper that turns
+ * anything but a string into the empty string, which the door then read as
+ * silence — so `{"scope": 123}` answered 200 with the copy still judging
+ * simulations, and `{"description": 123}` answered 200 having *erased* a note a
+ * person had typed. It is `production_sample_rate: "10"` one field along, and
+ * the group's own unknown-key gate exists to refuse exactly this shape of
+ * mistake.
+ *
+ * **Absent stays absent.** An edit is partial, and every case in this block
+ * that leaves a key out has to keep meaning "keep what is there" — which the
+ * settings and values cases above rely on and would fail loudly without.
+ */
+describe("the fields a body sends as words", () => {
+  /** A copy with something in every field this block is about. */
+  async function aNamedCopy(key: string): Promise<Listed> {
+    const copy = await aLatencyCopy(key);
+    expect(copy.description).toBe("The number the support team argues about");
+    return copy;
+  }
+
+  /** What the copy looks like now, read back through the list. */
+  async function nowReading(key: string, id: string): Promise<Listed> {
+    const found = itemsOf(await request("GET", "/api/graders", key)).find(
+      (one) => one.id === id,
+    );
+    if (found === undefined) throw new Error(`${id} is no longer running`);
+    return found;
+  }
+
+  it("refuses a name that is not text, and renames nothing", async () => {
+    api = await createApi("graders_edit_name_shape");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const copy = await aNamedCopy(key);
+
+    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+      name: 123,
+    });
+
+    expect(edited.statusCode, JSON.stringify(edited.body)).toBe(422);
+    expect(String(edited.body.message)).toContain("name");
+    expect(String(edited.body.message)).toContain("number");
+    expect((await nowReading(key, copy.id)).name).toBe(copy.name);
+  });
+
+  /**
+   * **A copy has to be called something**, so an empty name is a refusal rather
+   * than a rename this door quietly drops. It is the factory's rule and the
+   * factory's sentence: this door checks that a word arrived, not what it says.
+   */
+  it("refuses an empty name rather than ignoring it", async () => {
+    api = await createApi("graders_edit_name_empty");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const copy = await aNamedCopy(key);
+
+    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+      name: "   ",
+    });
+
+    expect(edited.statusCode, JSON.stringify(edited.body)).toBe(422);
+    expect(String(edited.body.message)).toContain("name");
+    expect((await nowReading(key, copy.id)).name).toBe(copy.name);
+  });
+
+  it("refuses a scope that is not text, and moves nothing", async () => {
+    api = await createApi("graders_edit_scope_shape");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const copy = await aNamedCopy(key);
+
+    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+      scope: 123,
+    });
+
+    expect(edited.statusCode, JSON.stringify(edited.body)).toBe(422);
+    expect(String(edited.body.message)).toContain("scope");
+    // Still judging what it was judging, which is the half a status code
+    // cannot say: a developer who believed they pointed this at live traffic
+    // would otherwise find out when nothing was ever judged there.
+    expect((await nowReading(key, copy.id)).scope).toBe("simulations");
+  });
+
+  /**
+   * **The scope's vocabulary is the factory's gate, not this door's.** The route
+   * casts the word it read into the scope union, which is safe precisely
+   * because `validScope` refuses a word egma has never heard of and names the
+   * three it knows. This is that claim checked rather than asserted.
+   */
+  it("refuses a scope egma has never heard of, naming the ones it knows", async () => {
+    api = await createApi("graders_edit_scope_word");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const copy = await aNamedCopy(key);
+
+    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+      scope: "banana",
+    });
+
+    expect(edited.statusCode, JSON.stringify(edited.body)).toBe(422);
+    expect(String(edited.body.message)).toContain("simulations");
+    expect((await nowReading(key, copy.id)).scope).toBe("simulations");
+  });
+
+  /**
+   * **The worst of the three, because it destroyed something.** A number here
+   * used to be read as the empty string, then as "clear it", so a request that
+   * answered 200 erased a note a person had typed and said nothing about it.
+   */
+  it("refuses a description that is not text, and leaves the note where it was", async () => {
+    api = await createApi("graders_edit_note_shape");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const copy = await aNamedCopy(key);
+
+    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+      description: 123,
+    });
+
+    expect(edited.statusCode, JSON.stringify(edited.body)).toBe(422);
+    expect(String(edited.body.message)).toContain("description");
+    expect((await nowReading(key, copy.id)).description).toBe(copy.description);
+  });
+
+  /**
+   * And the intent that has to keep working: there is no note. Both ways of
+   * saying it mean it — a form submitting a blank box, and a client sending
+   * JSON's own word for nothing.
+   */
+  it("clears the note for an empty string and for null alike", async () => {
+    api = await createApi("graders_edit_note_cleared");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+
+    for (const emptied of ["", null]) {
+      const copy = await aNamedCopy(key);
+      const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+        description: emptied,
+      });
+
+      expect(edited.statusCode, JSON.stringify(edited.body)).toBe(200);
+      expect(edited.body.description).toBeNull();
+      expect((await nowReading(key, copy.id)).description).toBeNull();
+    }
+  });
+
+  /** Leaving it out is not clearing it, which is what makes an edit partial. */
+  it("keeps the note, the name and the scope when the body leaves them out", async () => {
+    api = await createApi("graders_edit_partial");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const copy = await aNamedCopy(key);
+
+    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+      required: false,
+    });
+
+    expect(edited.statusCode, JSON.stringify(edited.body)).toBe(200);
+    expect(edited.body).toMatchObject({
+      name: copy.name,
+      description: copy.description,
+      scope: copy.scope,
+      required: false,
+    });
+  });
+
+  /**
+   * The project a write names is read the same way, and for a worse version of
+   * the same reason: a number quietly ignored is a write that lands in whatever
+   * project the credential happens to act in rather than the one the request
+   * named.
+   */
+  it("refuses a project that is not text, on either verb", async () => {
+    api = await createApi("graders_project_shape");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const copy = await aNamedCopy(key);
+
+    const used = await request("POST", "/api/graders", key, {
+      library_id: PREDEFINED_GRADERS.expectedBehaviors,
+      project: 123,
+    });
+    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+      project: 123,
+      required: false,
+    });
+
+    expect(used.statusCode, JSON.stringify(used.body)).toBe(422);
+    expect(edited.statusCode, JSON.stringify(edited.body)).toBe(422);
+    expect(String(edited.body.message)).toContain("project");
+    expect((await nowReading(key, copy.id)).required).toBe(true);
+  });
+
+  /**
+   * The same three on the way in. A Use cannot erase anything — there is
+   * nothing there yet — but a `scope` that does not arrive as text would
+   * quietly become `simulations`, which is the same trap one step earlier:
+   * somebody switches a grader on for live traffic and it never judges any.
+   */
+  it("refuses each of them on the way in, and writes nothing", async () => {
+    api = await createApi("graders_use_word_shapes");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+
+    for (const wrong of [
+      { name: 123 },
+      { scope: 123 },
+      { description: 123 },
+    ]) {
+      const used = await request("POST", "/api/graders", key, {
+        library_id: PREDEFINED_GRADERS.latency,
+        params: { metric: "turn_response_latency", bound: 2000 },
+        ...wrong,
+      });
+
+      expect(used.statusCode, JSON.stringify(used.body)).toBe(422);
+      expect(String(used.body.message)).toContain(Object.keys(wrong)[0] ?? "");
+    }
+
+    // Nothing was switched on: the project still holds only the copy it was
+    // created with.
+    expect(itemsOf(await request("GET", "/api/graders", key))).toHaveLength(1);
   });
 });
 

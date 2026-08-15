@@ -268,6 +268,94 @@ function sampleRateIn(body: Body): WrittenRate {
   return { value: body.production_sample_rate };
 }
 
+/**
+ * What a body actually sent, for a refusal that has to name it.
+ *
+ * `typeof null` is `"object"` and `typeof []` is `"object"` too, and neither
+ * tells the person reading the sentence anything they can act on — which is the
+ * whole job of these refusals.
+ */
+function sortOf(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "a list";
+  return typeof value;
+}
+
+/** Text a body sent, refused rather than read as silence: `123` is not a name. */
+type WrittenText =
+  | { readonly value: string | undefined }
+  | { readonly refusal: string };
+
+/**
+ * A word this door takes, as a body sends it.
+ *
+ * **Refused rather than read as absent, which is the trap this replaces.** A
+ * key that arrived as a number used to be trimmed into the empty string and
+ * then read as though nobody had sent it — so `{"scope": 123}` answered 200
+ * with the copy still judging simulations, and the developer who thinks they
+ * pointed it at live traffic finds out when nothing is ever judged there. It is
+ * `production_sample_rate: "10"` again, one field along: quietly ignoring a key
+ * is how a project comes to be configured differently from what somebody wrote
+ * down, and this group's unknown-key gate exists to refuse exactly that.
+ *
+ * **Absent stays absent**, because that is what makes an edit partial. Only a
+ * key that is *there* and is not text is refused.
+ *
+ * The shape is checked here and the meaning is not: an empty name and a scope
+ * egma has never heard of are the factory's rules, refused in the factory's own
+ * words, on `sampleRateIn`'s exact terms.
+ */
+function textIn(body: Body, key: string, takes: string): WrittenText {
+  if (!(key in body) || body[key] === undefined) return { value: undefined };
+  if (typeof body[key] !== "string") {
+    return {
+      refusal: `${key} ${takes}. Send it as text, and this request sent ${sortOf(body[key])}.`,
+    };
+  }
+  return { value: body[key].trim() };
+}
+
+/**
+ * The note on a copy, which is the one field here that can be emptied.
+ *
+ * **Three answers rather than two, because "there is no note" is a thing
+ * somebody means.** Leaving the key out keeps whatever is there; sending `null`
+ * or an empty string clears it, both of them, because a form submitting a blank
+ * box and a client sending JSON's own word for nothing mean the same thing and
+ * a door that took one and refused the other would be arbitrary. Anything else
+ * present is refused — a number here used to erase the note and answer 200,
+ * which is this group's only write that ever destroyed something a person had
+ * typed.
+ */
+type WrittenNote =
+  | { readonly value: string | null | undefined }
+  | { readonly refusal: string };
+
+function descriptionIn(body: Body): WrittenNote {
+  if (!("description" in body) || body.description === undefined) {
+    return { value: undefined };
+  }
+  if (body.description === null) return { value: null };
+  if (typeof body.description !== "string") {
+    return {
+      refusal:
+        "description is a note your team leaves on this grader, saying why it " +
+        "is switched on. Send it as text, send null or an empty string to " +
+        `clear it, or leave it out to keep it — and this request sent ${sortOf(body.description)}.`,
+    };
+  }
+  const said = body.description.trim();
+  return { value: said === "" ? null : said };
+}
+
+/** What each of the three text fields takes, said once for both verbs. */
+const NAME_TAKES = "is what this project calls its copy of the grader";
+const SCOPE_TAKES =
+  "is where this grader judges — one of simulations, production or both";
+const PROJECT_TAKES =
+  "names the project this is about, as its prj_ identifier; leave it out to " +
+  "use the one this credential already acts in";
+
 export async function graderRoutes(
   app: FastifyInstance,
   options: GraderRoutesOptions,
@@ -356,20 +444,40 @@ export async function graderRoutes(
     const sampleRate = sampleRateIn(body);
     if ("refusal" in sampleRate) return unprocessable(reply, sampleRate.refusal);
 
-    const acting = await actingIn(auth, given(text(body.project)));
+    const name = textIn(body, "name", NAME_TAKES);
+    if ("refusal" in name) return unprocessable(reply, name.refusal);
+
+    const note = descriptionIn(body);
+    if ("refusal" in note) return unprocessable(reply, note.refusal);
+
+    const scope = textIn(body, "scope", SCOPE_TAKES);
+    if ("refusal" in scope) return unprocessable(reply, scope.refusal);
+
+    const project = textIn(body, "project", PROJECT_TAKES);
+    if ("refusal" in project) return unprocessable(reply, project.refusal);
+
+    const acting = await actingIn(auth, given(project.value));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const created = await useLibraryEntry(acting.auth, {
       libraryId,
       ...(params.params === undefined ? {} : { params: params.params }),
-      ...(given(text(body.name)) === undefined ? {} : { name: text(body.name) }),
-      ...(given(text(body.description)) === undefined
+      // Absent leaves the copy named after the entry it is a copy of; an empty
+      // one is the factory's refusal to make, in the factory's own words.
+      ...(name.value === undefined ? {} : { name: name.value }),
+      // Use has nothing to clear, so the two ways of saying "no note" both
+      // arrive here as no note at all.
+      ...(note.value === undefined || note.value === null
         ? {}
-        : { description: text(body.description) }),
+        : { description: note.value }),
       ...(required.value === undefined ? {} : { required: required.value }),
-      ...(given(text(body.scope)) === undefined
+      // Cast rather than checked: `GraderScope` is a closed vocabulary and the
+      // factory's `validScope` is the gate — a word egma has never heard of is
+      // refused there, naming the three it knows, and this door holds no second
+      // opinion about the list. What is checked here is only that a word arrived.
+      ...(scope.value === undefined
         ? {}
-        : { scope: text(body.scope) as Grader["scope"] }),
+        : { scope: scope.value as Grader["scope"] }),
       ...(sampleRate.value === undefined
         ? {}
         : { productionSampleRate: sampleRate.value }),
@@ -430,21 +538,35 @@ export async function graderRoutes(
     const sampleRate = sampleRateIn(body);
     if ("refusal" in sampleRate) return unprocessable(reply, sampleRate.refusal);
 
-    const acting = await actingIn(auth, given(text(body.project)));
+    const name = textIn(body, "name", NAME_TAKES);
+    if ("refusal" in name) return unprocessable(reply, name.refusal);
+
+    const note = descriptionIn(body);
+    if ("refusal" in note) return unprocessable(reply, note.refusal);
+
+    const scope = textIn(body, "scope", SCOPE_TAKES);
+    if ("refusal" in scope) return unprocessable(reply, scope.refusal);
+
+    const project = textIn(body, "project", PROJECT_TAKES);
+    if ("refusal" in project) return unprocessable(reply, project.refusal);
+
+    const acting = await actingIn(auth, given(project.value));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const edited = await editGrader(acting.auth, graderId, {
       ...(params.params === undefined ? {} : { params: params.params }),
-      ...(given(text(body.name)) === undefined ? {} : { name: text(body.name) }),
-      // A description is the one field an edit can empty, and `null` is how it
-      // says so — which is a different act from leaving the key out.
-      ...("description" in body
-        ? { description: given(text(body.description)) ?? null }
-        : {}),
+      // An empty name is not a rename this door drops — a copy has to be
+      // called something, and the factory says so in its own words.
+      ...(name.value === undefined ? {} : { name: name.value }),
+      // The note is the one field an edit can empty, and `null` is what both
+      // ways of saying so arrive as — a different act from leaving the key out.
+      ...(note.value === undefined ? {} : { description: note.value }),
       ...(required.value === undefined ? {} : { required: required.value }),
-      ...(given(text(body.scope)) === undefined
+      // Cast rather than checked, on the Use door's terms: `validScope` is the
+      // gate, and a word egma has never heard of is refused there.
+      ...(scope.value === undefined
         ? {}
-        : { scope: text(body.scope) as Grader["scope"] }),
+        : { scope: scope.value as Grader["scope"] }),
       ...(sampleRate.value === undefined
         ? {}
         : { productionSampleRate: sampleRate.value }),
