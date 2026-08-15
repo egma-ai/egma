@@ -36,10 +36,12 @@ export type JudgeCredentialPage = {
  * What the project's judge is, or the explicit state of having none.
  *
  * `needs_setup` is a state and not a failure: a project in it still runs every
- * deterministic grader it has, and what it cannot do is ask a model anything —
- * which means the built-in expected-behaviors grader cannot judge, and a run
- * started this way would produce errored verdicts after real calls had been
- * paid for. So a page says so plainly rather than showing an empty form.
+ * grader it has that is computed rather than judged, and what it cannot do is
+ * ask a model anything — so the predefined expected-behaviors copy, which every
+ * project is created holding, cannot judge, and a run carrying it would produce
+ * errored verdicts after real calls had been paid for. So a page says so
+ * plainly rather than showing an empty form. A project that deleted every
+ * grader asking a model needs no judge and starts its runs without one.
  */
 export type ProjectJudge =
   | {

@@ -6,6 +6,9 @@
  * to — and a flat list of hrefs could not say that.
  */
 
+import { GRADERS_SECTION } from "./graders.ts";
+import { projectPath } from "./project-context.ts";
+
 export type Theme = "light" | "dark";
 
 export const THEME_STORAGE_KEY = "egma-theme";
@@ -31,18 +34,34 @@ export function nextTheme(theme: Theme): Theme {
  * lived in one of the two pages would be a page naming its sibling — and the
  * tab that is not current has to be named by something neither page owns.
  *
- * **Nothing in the product navigation points at either address, on purpose.**
- * Both screens are organization-wide, and the shell reads the project out of
- * the path — so on an address with no project in it the selector falls back to
- * whichever project is first in the viewer's list, and a person with three
- * projects would press Use on the wrong one with nothing saying so. The pages
- * stay in the tree as the working reference for their copy and their Use form;
- * wave two rebuilds them project-scoped and gives the section its navigation
- * back. `apps/web/lib/navigation.ts` is where that entry goes.
+ * **Both addresses carry the project, and that is a function rather than a
+ * constant for exactly that reason.** The pair that arrived from `main` sat at
+ * `/graders` and `/graders/running` with no project in either address, while
+ * this shell reads the project out of the path — so the selector fell back to
+ * whichever project came first in the viewer's list, and pressing Use put a
+ * running copy on a project nobody was looking at. A constant href cannot say
+ * which project it means; this asks.
  */
-export const GRADER_TABS = [
-  { id: "library", label: "Library", href: "/graders" },
-  { id: "running", label: "Running", href: "/graders/running" },
-] as const;
+const GRADER_TABS = [
+  { id: "library", label: "Library", rest: [] },
+  { id: "running", label: "Running", rest: ["running"] },
+] as const satisfies readonly {
+  readonly id: string;
+  readonly label: string;
+  readonly rest: readonly string[];
+}[];
 
 export type GraderTab = (typeof GRADER_TABS)[number]["id"];
+
+/** The two tabs of one project's Graders section, in reading order. */
+export function graderTabsFor(projectId: string): readonly {
+  readonly id: GraderTab;
+  readonly label: string;
+  readonly href: string;
+}[] {
+  return GRADER_TABS.map((tab) => ({
+    id: tab.id,
+    label: tab.label,
+    href: projectPath(projectId, GRADERS_SECTION, ...tab.rest),
+  }));
+}

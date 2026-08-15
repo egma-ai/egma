@@ -63,6 +63,9 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedJudge({ ...auth, role: "admin" });
+  // No running graders: what races here is two claimants over one queue, and
+  // the guarantee under test is Postgres's locking. Nothing in this file is
+  // ever judged.
 
   const created = await createAgent(auth, {
     name: "Front desk",

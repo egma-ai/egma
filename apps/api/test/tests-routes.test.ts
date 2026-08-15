@@ -698,6 +698,43 @@ describe("editing a test", () => {
     expect(await versionCount(testId)).toBe(2);
   });
 
+  /**
+   * **An edit never changes which agents a test applies to**, and the door says
+   * so rather than taking the key and dropping it.
+   *
+   * Applicability is edited on its own: it mints no version and carries its own
+   * revision, so an `agents` key riding an ordinary edit would either be
+   * silently ignored — a link somebody believes they changed and did not — or
+   * would change a set under a token that says nothing about it. The refusal is
+   * the platform half of ticket 08's "updating a test never changes its
+   * applicable-agent links", and it had no test at any layer.
+   */
+  it("refuses an edit that names agents, and says where the set is sent", async () => {
+    api = await createApi("tests_edit_names_agents");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const agentId = await agentFor(ada);
+    const key = await projectKeyFor(api.app, ada);
+    const created = await createTestThrough(key, { ...RESCHEDULING });
+    const testId = String(created.body.id);
+
+    const refused = await request("PATCH", `/api/tests/${testId}`, key, {
+      ...RESCHEDULING,
+      expected_version_id: created.body.version_id,
+      agents: [agentId],
+    });
+
+    expect(refused.statusCode).toBe(422);
+    expect(String(refused.body.message)).toContain(
+      `POST /api/tests/${testId}/agents`,
+    );
+    expect(String(refused.body.message)).toContain(
+      "expected_applicability_revision",
+    );
+    // Refused whole: no version was minted, so the scenario in the same body
+    // did not land either.
+    expect(await versionCount(testId)).toBe(1);
+  });
+
   it("refuses an edit that names no version, before it reads anything", async () => {
     api = await createApi("tests_edit_no_token");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");

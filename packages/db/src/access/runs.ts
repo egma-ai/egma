@@ -1207,13 +1207,19 @@ export async function startRun(
 
       /**
        * What will judge this run, and whose account pays — resolved before a row
-       * is written, because a project with no judge is refused here.
+       * is written, because a run that would ask a model this project has not
+       * configured is refused here.
        *
-       * **Every run carries the expected-behaviors built-in**, and the built-in
-       * asks a model. A project in `needs_setup` would therefore dial real
-       * conversations and then write `errored` against every behavior, which is
+       * **A run whose plan asks a model, in a project holding none, would dial
+       * real simulations and then write `errored` against every assertion** —
        * egma's own configuration reported as an agent's failure. Refusing before
        * the money is spent is the whole point.
+       *
+       * It is the plan that decides, not the project: the expected-behaviors
+       * copy is an ordinary deletable row now, so a project judging only with
+       * `latency` — or with nothing at all — asks no model and is refused
+       * nothing. `demandJudge` holds that rule in one place, beside the plan it
+       * reads.
        */
       const { groups } = await resolveRunPlan(tx, auth, projectId, versions);
 

@@ -7,20 +7,20 @@ import { projectPath, sectionIn } from "./project-context.ts";
  * under test, the tests, and the runs that executed them. Everything else earns
  * its place separately:
  *
- * - **Graders has no item, and this is wave one's decision.** The grader
- *   redesign shelved the authoring surface this effort built at
- *   `/projects/:id/graders`, and the screens that replace it — the library and
- *   the running copies — are organization-wide: their addresses carry no
- *   project, and the shell reads the project out of the address. An item
- *   pointing at them would show whichever project is first in the viewer's
- *   list, and pressing **Use** would put a copy on a project nobody was
- *   looking at. Wave two rebuilds them project-scoped and the item comes back
- *   here.
+ * - **Personas and Graders have direct paths and not primary slots.** A persona
+ *   is authored on its own and reused across tests; a grader is switched on
+ *   once and then judges everything in its scope without anybody visiting it
+ *   again. Neither is one of the things a team works on all day — and neither
+ *   may be reachable only from inside something else, which is how a reusable
+ *   thing quietly becomes a field and how judging quietly becomes invisible.
  *
- * - **Personas has a direct path and not a primary slot.** A persona is
- *   authored on its own, reused across tests, and visited far less often than
- *   the four — but it must never be reachable only from inside a test form,
- *   which is how a reusable thing quietly becomes a field.
+ *   **Graders had no item at all until wave two**, because the screens that
+ *   replaced this effort's authoring surface arrived organization-wide: their
+ *   addresses carried no project while the shell reads the project out of the
+ *   address, so an item pointing at them would have shown whichever project was
+ *   first in the viewer's list and pressing **Use** would have put a running
+ *   copy on a project nobody was looking at. They are project-scoped now, so
+ *   the item is back.
  * - **Settings is in the account menu.** Administration is not a product area
  *   and crowding it into the same list makes the list mean two things.
  * - **A simulation has no navigation item at all.** It is evidence, reached
@@ -31,7 +31,7 @@ import { projectPath, sectionIn } from "./project-context.ts";
  * no navigation to a page that is not in a project.
  */
 
-export type SectionId = "agents" | "tests" | "runs" | "personas";
+export type SectionId = "agents" | "tests" | "runs" | "personas" | "graders";
 
 export type NavigationItem = {
   readonly id: SectionId;
@@ -48,6 +48,7 @@ export const PRIMARY_NAVIGATION: readonly NavigationItem[] = [
 
 export const SECONDARY_NAVIGATION: readonly NavigationItem[] = [
   { id: "personas", label: "Personas" },
+  { id: "graders", label: "Graders" },
 ];
 
 const EVERY_SECTION: readonly SectionId[] = [

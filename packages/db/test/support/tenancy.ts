@@ -71,14 +71,28 @@ export async function seedUser(
 }
 
 /**
- * A judge for a seeded project, because every run needs one.
+ * A judge for a seeded project, as provisioning would have given it one.
  *
  * These fixtures build their tenants by raw SQL rather than through signup
  * provisioning, so they skip the transaction that gives a real project its
- * judge. Run creation refuses a project in `needs_setup` — every run is judged
- * by the project's copy of the predefined expected-behaviors grader, which asks
- * a model — so a fixture that wants to start a run has to do what provisioning
- * would have done.
+ * judge — and the transaction that gives it the seeded expected-behaviors copy,
+ * which is `seedGraderCopies` above.
+ *
+ * **The two used to be one requirement and are not any more.** Run creation
+ * refused every project in `needs_setup`, on the reasoning that every run
+ * carries the judge-backed expected-behaviors grader; that grader is a deletable
+ * running copy now, so what the run door actually demands is a judge for a plan
+ * that *holds* a grader asking a model. A fixture that seeds neither therefore
+ * starts runs perfectly well — which is why this call sits in files whose runs
+ * would run without it.
+ *
+ * **It is kept in those files on purpose.** A real project has a judge, and a
+ * fixture that dropped this would be describing a project no deployment
+ * creates; keeping it also means a file that later seeds a copy does not have
+ * to rediscover why its runs suddenly refuse. What a file must not do is read
+ * this call as "and therefore something judges here": nothing does until
+ * `seedGraderCopies` is called, and a file whose claims are about what a run
+ * judges has to call it.
  *
  * It goes through the module's own door rather than by raw SQL, so the key is
  * sealed the way a real one is and nothing here has to know the envelope's

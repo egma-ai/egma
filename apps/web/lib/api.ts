@@ -191,6 +191,42 @@ export async function writeJson<T>(
 }
 
 /**
+ * One delete, with the project named in it and the same four answers a read
+ * gets.
+ *
+ * **It sends no body at all**, which is what separates it from `writeJson`
+ * rather than a shorter spelling of it. A delete says everything it has to say
+ * in its address, and a request carrying `content-type: application/json` with
+ * nothing after it is refused by the server's own body parser — a refusal about
+ * an empty body, in place of the act somebody asked for.
+ *
+ * A 404 arrives as `missing`, exactly as it does on a read, and that is the
+ * honest answer for a delete: the thing is not there, whether it never was,
+ * whether it belongs to somebody else, or whether it went a moment ago.
+ */
+export async function deleteJson<T>(
+  path: string,
+  options: { readonly project?: string; readonly signal?: AbortSignal } = {},
+): Promise<Answer<T>> {
+  const address =
+    options.project === undefined
+      ? path
+      : `${path}${path.includes("?") ? "&" : "?"}project=${encodeURIComponent(options.project)}`;
+
+  try {
+    const response = await fetch(address, {
+      method: "DELETE",
+      cache: "no-store",
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    });
+    const body = await response.json().catch(() => null);
+    return answerFor<T>(response.status, body);
+  } catch {
+    return unreachable<T>();
+  }
+}
+
+/**
  * The refusal codes a form has to answer differently from every other refusal.
  *
  * A stale write is not a failure to show and forget: the person's typing is

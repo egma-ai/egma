@@ -72,6 +72,9 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedJudge({ ...auth, role: "admin" });
+  // No running graders: what races here is two sweeps over one set of orphans,
+  // and the guarantee under test is Postgres's. The grading jobs the sweep
+  // leaves behind are counted, never read for what would judge them.
 
   const created = await createAgent(auth, {
     name: "Front desk",

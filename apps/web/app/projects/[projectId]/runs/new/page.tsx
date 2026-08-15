@@ -15,6 +15,7 @@ import { roleOf } from "../../../../../lib/me.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import {
+  judgesNothing,
   plannedSimulationCount,
   preselectedAgent,
   runPlanQuery,
@@ -856,6 +857,25 @@ function Review({
       >
         <TextInput id="run-label" value={label} onChange={onLabel} />
       </Field>
+
+      {/*
+       * A run that would judge nothing, said before it is started and never as
+       * a refusal.
+       *
+       * A project's graders are all deletable, the seeded expected-behaviors
+       * copy included, so a project judging with nothing is a decision somebody
+       * took on the Graders screen rather than a state to protect them from.
+       * What they are owed is the consequence in advance: this run happens,
+       * records everything it sees, and comes back with no verdicts at all —
+       * which on a results page looks very like everything having passed.
+       */}
+      {blocked === null && judgesNothing(plan) ? (
+        <Problem>
+          No grader is running in this project, so this run will conduct every
+          simulation and come back with nothing judged. Press Use on a grader in
+          the library to judge it.
+        </Problem>
+      ) : null}
 
       {blocked === null ? null : <Problem>{blocked}</Problem>}
       {refused === null ? null : (

@@ -50,10 +50,12 @@ import { within } from "./within.ts";
  * a test that could not run says nothing about the agent.
  *
  * **What will judge it.** The grading plan groups items under a tagged test
- * reference — one group per pinned test version — and each group holds the
- * expected-behaviors built-in plus the authored graders that apply. Frozen at
- * start, so editing or archiving a grader tomorrow cannot rewrite what this run
- * meant.
+ * reference — one group per pinned test version — and each group holds every
+ * live running copy of the project whose scope reaches simulations, the seeded
+ * expected-behaviors copy among them and never special-cased. Frozen at start,
+ * so editing or deleting a grader tomorrow cannot rewrite what this run meant —
+ * and a group holding nothing is a run that judges nothing, which is a project's
+ * decision to take.
  *
  * **Who pays for the judging.** Every judge choice is tagged, and a configured
  * one stores the provider, the model, and the *reference* to a credential —
@@ -460,12 +462,14 @@ export function capabilitiesFromRow(row: {
  * Never a secret, at any point: the grader service resolves the current one
  * when it claims, which is what makes a rotation reach work already frozen.
  *
- * `unavailable_at_capture` exists only for work upgraded across the migration
- * that added plans, whose project had no judge at the moment the plan was
- * captured. It records the honest no-judge state rather than inventing a
- * credential reference that would resolve to somebody else's key. **New work
- * never starts in it** — a project with no judge is refused before a run is
- * written, because every run carries the judge-backed built-in.
+ * `unavailable_at_capture` records the honest no-judge state rather than
+ * inventing a credential reference that would resolve to somebody else's key.
+ * It is written for work upgraded across the migration that added plans, whose
+ * project had no judge when the plan was captured — and it is also what a
+ * *review* shows a project with no judge, before anything is started, which is
+ * how `demandJudge` recognises a plan that would ask a model and has nobody to
+ * ask. **New work never starts in it**: a run whose plan holds one of these is
+ * refused before the run is written.
  */
 export type JudgeChoice =
   | { readonly tag: "not_required" }
@@ -1046,11 +1050,41 @@ export async function planRun(
 }
 
 /**
- * The refusal a run start owes a project with no judge, raised where both the
- * review and the writer can reach it.
+ * The refusal a run start owes a project with no judge — **and only when
+ * something in the plan would actually ask a model.**
+ *
+ * It used to refuse every run in a project with no judge, on the reasoning that
+ * *every run carries the expected-behaviors built-in, and the built-in asks a
+ * model*. That sentence was true while the built-in was a rowless implicit
+ * grader nobody could remove. ADR-0009 made it an ordinary seeded copy, and
+ * deleting a copy is how a grader is switched off — there is no other switch.
+ * So a project may honestly run nothing that asks a model: only `latency`,
+ * which is computed from spans, or nothing at all. The old rule refused those
+ * runs for missing a key they would never have spent.
+ *
+ * **The plan is what answers, rather than a second count taken here.** Every
+ * item already carries its judge choice, and `judgeFor` marks exactly the items
+ * that need a model and cannot have one — `unavailable_at_capture`. A grader
+ * that is `code` reads `not_required` and is unaffected by any of this. Asking
+ * the plan means the refusal and the frozen record can never disagree about
+ * which items needed a judge.
+ *
+ * What is *not* refused is the other half of the same decision: a project whose
+ * plan holds no items at all starts its run, conducts every simulation, and
+ * comes back with nothing judged. That is a state the product now allows, said
+ * plainly on the running-graders screen, rather than a refusal invented here to
+ * protect somebody from a decision they took.
  */
-export function demandJudge(judge: PlanJudge, projectId: string): void {
-  if (judge.state === "needs_setup") {
+export function demandJudge(
+  judge: PlanJudge,
+  projectId: string,
+  groups: readonly PlanGroup[],
+): void {
+  if (judge.state !== "needs_setup") return;
+  const asksAModel = groups.some((group) =>
+    group.items.some((item) => item.judge.tag === "unavailable_at_capture"),
+  );
+  if (asksAModel) {
     throw new JudgeNotConfiguredError(projectId);
   }
 }
@@ -1069,9 +1103,12 @@ export async function resolveRunPlan(
   readonly groups: readonly PlanGroup[];
 }> {
   const judge = await planJudgeOn(on, auth, projectId);
-  demandJudge(judge, projectId);
   const graders = await applicableGraders(on, auth, projectId);
-  return { judge, groups: planGroupsFor(versions, graders, judge) };
+  const groups = planGroupsFor(versions, graders, judge);
+  // After the plan rather than before it: what decides the refusal is whether
+  // anything in this plan would ask a model, and only the plan knows.
+  demandJudge(judge, projectId, groups);
+  return { judge, groups };
 }
 
 /* ------------------------------------------------------------------- *

@@ -13,6 +13,7 @@ import {
   getGradingPlan,
   IdempotencyConflictError,
   listGradingJobsForSimulation,
+  listGraders,
   JudgeCredentialInUseError,
   JudgeNotConfiguredError,
   listSimulations,
@@ -489,6 +490,41 @@ describe("the grading plan a run freezes", () => {
 
     expect(item).toBeDefined();
     expect(item?.required).toBe(false);
+    // And where it applies, frozen beside the flag. A page drawing the plan
+    // reads both off the item; nothing recomputes them from the copy, which
+    // may have been deleted by the time somebody opens the run.
+    expect(item?.scope).toBe("simulations");
+  });
+
+  /**
+   * A copy whose scope reaches live traffic is planned for the simulations too,
+   * and the item says `both` rather than the half this run is.
+   *
+   * The scope on a frozen item is what the copy was set to, not a note about
+   * which side of it produced this run — a plan that narrowed it would describe
+   * a grader the project never configured.
+   */
+  it("freezes a both-scoped copy with its own scope, not the run's half", async () => {
+    const copy = await useLibraryEntry(actingAsAcme(), {
+      libraryId: PREDEFINED_GRADERS.latency,
+      name: "Watches both sides",
+      scope: "both",
+      productionSampleRate: 10,
+      params: { metric: "turn_response_latency", bound: 1_500 },
+    });
+
+    const started = await startRun(actingAsAcme(), {
+      agentId,
+      connectionId: measured,
+      testVersionIds: [plain],
+      idempotencyKey: newId("run"),
+    });
+    const plan = await getGradingPlan(actingAsAcme(), started.id);
+    const item = itemsFor(plan?.groups ?? [], 0).find(
+      (one) => one.graderId === copy.id,
+    );
+
+    expect(item?.scope).toBe("both");
   });
 
   it("keeps two items for one grader across two selected versions", async () => {
@@ -530,6 +566,53 @@ describe("the grading plan a run freezes", () => {
     expect(started.status).toBe("pending");
   });
 
+  /**
+   * The other judge source, and the one nobody could point at: the deployment's
+   * own key, named by the `platform` sentinel rather than by a `jcr_` row.
+   *
+   * A plan that stored an id for it would name a row no customer can reach, and
+   * a plan that stored the key would be the one thing this whole shape exists to
+   * prevent. So the frozen item carries the word, and the run builder draws it
+   * as "this deployment's own key".
+   */
+  it("names the deployment's own judge by its sentinel, and never a key", async () => {
+    await setProjectJudge(actingAsAcme("admin"), {
+      provider: "openai",
+      model: "gpt-4o",
+      source: "platform",
+      platformJudge: {
+        provider: "openai",
+        model: "gpt-4o",
+        key: "sk-the-deployments-own-key-0002",
+      },
+    });
+
+    const started = await startRun(actingAsAcme(), {
+      agentId,
+      connectionId: measured,
+      testVersionIds: [plain],
+      idempotencyKey: newId("run"),
+    });
+    const plan = await getGradingPlan(actingAsAcme(), started.id);
+    const item = behaviorsItem(itemsFor(plan?.groups ?? [], 0));
+
+    expect(item?.judge).toEqual({
+      tag: "configured",
+      provider: "openai",
+      model: "gpt-4o",
+      source: "platform",
+    });
+
+    // The whole plan, as bytes, with the deployment's key nowhere in it — and
+    // no credential id invented to stand in for a row that does not exist.
+    const { rows } = await database.sql<{ groups: string }>(
+      "select groups::text as groups from grading_plan where run_id = $1",
+      [started.id],
+    );
+    expect(rows[0]?.groups).not.toContain("sk-the-deployments-own-key-0002");
+    expect(rows[0]?.groups).not.toContain("jcr_");
+  });
+
   it("names the credential a judged grader spends from, and never a key", async () => {
     const credential = await createJudgeCredential(actingAsAcme("admin"), {
       label: "The team's key",
@@ -567,19 +650,41 @@ describe("the grading plan a run freezes", () => {
   });
 });
 
+/**
+ * A project with no judge, and the three different runs it can ask for.
+ *
+ * **The rule used to be "no judge, no run", and it stopped being true.** It
+ * rested on the expected-behaviors grader being a built-in that was never a row
+ * — every run carried it, it asks a model, so every run needed a judge. ADR-0009
+ * made it an ordinary seeded copy, and deleting a copy is how a grader is
+ * switched off. So the honest rule is about the plan rather than the project:
+ * a run is refused when something in it would ask a model this project has not
+ * configured, and nothing else about a missing judge refuses anything.
+ *
+ * The three cases below are that rule, and the second and third are the ones
+ * the old rule got wrong — it refused runs for a key they would never have
+ * spent.
+ */
 describe("a project with no judge", () => {
-  it("cannot start a run at all, because every run judges its behaviors", async () => {
-    const other = { organization: newId("org"), project: newId("prj") };
+  /** A judge-less project with an agent, a persona and a test, and nothing else. */
+  async function judgelessProject(slug: string): Promise<{
+    readonly auth: AuthContext;
+    readonly projectId: string;
+    readonly agentId: string;
+    readonly connectionId: string;
+    readonly versionId: string;
+  }> {
+    const made = { organization: newId("org"), project: newId("prj") };
     const grace = newId("usr");
-    await seedOrganization(database, other.organization, [
-      { id: other.project, slug: "default" },
+    await seedOrganization(database, made.organization, [
+      { id: made.project, slug },
     ]);
-    await seedUser(database, grace, "grace@globex.example");
+    await seedUser(database, grace, `grace-${slug}@globex.example`);
 
     const auth: AuthContext = {
       userId: grace,
-      organizationId: other.organization,
-      projectId: other.project,
+      organizationId: made.organization,
+      projectId: made.project,
       role: "member",
       via: "session",
     };
@@ -589,8 +694,8 @@ describe("a project with no judge", () => {
       connection: {
         type: "retell",
         modality: "chat",
-        config: { retellAgentId: "agent_in_retell_9" },
-        credentials: { apiKey: "a-key-for-the-unjudged-project" },
+        config: { retellAgentId: `agent_in_retell_${slug}` },
+        credentials: { apiKey: `a-key-for-${slug}` },
       },
     });
     const persona = await createPersona(auth, {
@@ -604,11 +709,28 @@ describe("a project with no judge", () => {
       personaIds: [persona.id],
     });
 
+    return {
+      auth,
+      projectId: made.project,
+      agentId: agent.id,
+      connectionId: agent.connection?.id ?? "",
+      versionId: test.versionId,
+    };
+  }
+
+  it("cannot start a run whose plan holds a grader that asks a model", async () => {
+    const made = await judgelessProject("asks-a-model");
+    // The copy a real project is created with. These fixtures build tenants by
+    // raw SQL and skip the transaction that writes it, so the claim below —
+    // that the expected-behaviors copy is what needs the judge — has to be
+    // proved against a project that actually holds one.
+    await seedGraderCopies();
+
     await expect(
-      startRun(auth, {
-        agentId: agent.id,
-        connectionId: agent.connection?.id ?? "",
-        testVersionIds: [test.versionId],
+      startRun(made.auth, {
+        agentId: made.agentId,
+        connectionId: made.connectionId,
+        testVersionIds: [made.versionId],
         idempotencyKey: newId("run"),
       }),
     ).rejects.toBeInstanceOf(JudgeNotConfiguredError);
@@ -616,18 +738,82 @@ describe("a project with no judge", () => {
     // Nothing was written: not the run, and not a simulation to explain.
     const { rows } = await database.sql<{ count: string }>(
       "select count(*) as count from run where project_id = $1",
-      [other.project],
+      [made.projectId],
     );
     expect(Number(rows[0]?.count)).toBe(0);
 
     // And the review answers it as a state, so a page can draw it rather than
     // meeting a refusal it cannot render.
-    const plan = await planRun(auth, {
-      agentId: agent.id,
-      connectionId: agent.connection?.id ?? "",
-      testVersionIds: [test.versionId],
+    const plan = await planRun(made.auth, {
+      agentId: made.agentId,
+      connectionId: made.connectionId,
+      testVersionIds: [made.versionId],
     });
     expect(plan.judge).toEqual({ state: "needs_setup" });
+    expect(behaviorsItem(itemsFor(plan.groups, 0))?.judge).toEqual({
+      tag: "unavailable_at_capture",
+    });
+  });
+
+  /**
+   * A project judging only by computation never asks a model, so a missing
+   * judge is nothing to it. The old rule refused this run, which is the shape
+   * of the whole reconciliation: a sentence that was true about a built-in
+   * nobody could remove, left standing over a row anybody can delete.
+   */
+  it("starts a run whose graders are all computed rather than judged", async () => {
+    const made = await judgelessProject("computed-only");
+    await seedGraderCopies();
+    const [seeded] = (await listGraders(made.auth, {})).items;
+    if (seeded === undefined) throw new Error("the project has no graders");
+    await deleteGrader(made.auth, seeded.id);
+
+    const latency = await useLibraryEntry(made.auth, {
+      libraryId: PREDEFINED_GRADERS.latency,
+      params: { metric: "turn_response_latency", bound: 2_000 },
+    });
+
+    const started = await startRun(made.auth, {
+      agentId: made.agentId,
+      connectionId: made.connectionId,
+      testVersionIds: [made.versionId],
+      idempotencyKey: newId("run"),
+    });
+
+    expect(started.status).toBe("pending");
+    const plan = await getGradingPlan(made.auth, started.id);
+    const items = itemsFor(plan?.groups ?? [], 0);
+    expect(items.map((one) => one.graderId)).toEqual([latency.id]);
+    // Nothing here asks a model, so nothing here needed a key.
+    expect(items[0]?.judge).toEqual({ tag: "not_required" });
+  });
+
+  /**
+   * And a project judged by nothing at all runs too, and comes back with no
+   * verdicts. That is a decision somebody took on the Graders screen — deleting
+   * a copy is how a grader is switched off, and there is no other switch — so
+   * it is warned about where it is taken, and never refused here.
+   */
+  it("starts a run for a project judged by nothing, and freezes an empty plan", async () => {
+    const made = await judgelessProject("judged-by-nothing");
+    await seedGraderCopies();
+    for (const copy of (await listGraders(made.auth, {})).items) {
+      await deleteGrader(made.auth, copy.id);
+    }
+
+    const started = await startRun(made.auth, {
+      agentId: made.agentId,
+      connectionId: made.connectionId,
+      testVersionIds: [made.versionId],
+      idempotencyKey: newId("run"),
+    });
+
+    expect(started.status).toBe("pending");
+    // A group for the version, holding nothing: the run happens, and judges
+    // nothing. An empty plan and a missing plan are different facts.
+    const plan = await getGradingPlan(made.auth, started.id);
+    expect(plan?.groups).toHaveLength(1);
+    expect(itemsFor(plan?.groups ?? [], 0)).toEqual([]);
   });
 });
 

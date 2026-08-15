@@ -1,5 +1,6 @@
 import {
   authorize,
+  deleteGrader,
   listGraders,
   NotPermittedError,
   ProjectOutsideOrganizationError,
@@ -14,15 +15,22 @@ import type { FastifyInstance } from "fastify";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
-import { invalid, notPermitted, unprocessable } from "../http/refusals.ts";
+import {
+  invalid,
+  notFound,
+  notPermitted,
+  REFUSALS,
+  unprocessable,
+} from "../http/refusals.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
 
 /**
- * The running graders: the copies a project actually judges with, and the one
- * act that makes another — pressing **Use** on a library entry.
+ * The running graders: the copies a project actually judges with, the one act
+ * that makes another — pressing **Use** on a library entry — and the one act
+ * that stops one.
  *
- * **Two verbs, and the missing ones are the product decision.** There is no
+ * **Three verbs, and the missing one is the product decision.** There is no
  * create taking a type and criteria, because a grader is always a copy *of*
  * something: the entry decides what kind of judgment it is and what the form
  * asks for, and the copy holds the answers. The custom-grader authoring surface
@@ -30,6 +38,18 @@ import { given, text } from "../http/reading.ts";
  * behind it stays, versioning and all, and hosts egma's own two entries — so a
  * team meets a small shelf of graders that already work rather than a blank
  * form on their first day.
+ *
+ * **Delete is not part of that authoring surface, and it took a wave to notice
+ * that it was being treated as though it were.** ADR-0009 shelved *defining*
+ * graders; it made switching one off the plainest act in the area — "dormant is
+ * no copy at all; there is no enable switch and no `none` value". The data
+ * access module has said so since the redesign landed, the start-up backfill is
+ * built around a person having taken that decision, and the door that would let
+ * anybody take it was never registered. So a product whose only loudness
+ * control is delete had no delete, and the screens that displayed the running
+ * copies could only display them. It is a verb here now. Edit is still absent,
+ * because editing a copy's values is the authoring surface, and that is what
+ * was shelved.
  *
  * **A copy's definition never crosses this door.** What a read answers is the
  * pointer, the filled-in values, and where the grader applies. The judge prompt
@@ -49,6 +69,7 @@ export type GraderRoutesOptions = {
 };
 
 export const GRADERS_PATH = "/api/graders";
+export const GRADER_PATH = "/api/graders/:graderId";
 
 type Body = Record<string, unknown>;
 
@@ -293,6 +314,59 @@ export async function graderRoutes(
     });
 
     return reply.code(201).send(described(created));
+  });
+
+  /**
+   * Stop judging with a copy.
+   *
+   * **This is the whole of the off switch, and there is deliberately no
+   * other.** A copy that exists judges everything in its scope; there is no
+   * enabled flag to clear and no `none` scope to choose, so switching a grader
+   * off is deleting the row that was doing the judging. Pressing Use on the
+   * same library entry starts a new copy whenever somebody wants one back.
+   *
+   * **What has already been judged does not move.** The copy is marked deleted
+   * rather than removed: its version rows stay exactly where they are, so every
+   * verdict that named one stays interpretable for as long as it is kept, and a
+   * run that froze this copy into its plan keeps judging with what it froze.
+   * The row simply stops entering new plans.
+   *
+   * **Including the seeded expected-behaviors copy**, which is the sentence
+   * this door exists to make true. A project may end up judged by nothing at
+   * all — the run door lets that project start runs, and they come back with
+   * nothing judged — because a copy somebody may delete cannot also be a thing
+   * every run is assumed to carry.
+   *
+   * A copy this credential cannot see reads exactly as one that is not there:
+   * to this caller those are the same thing, and confirming that somebody
+   * else's row exists is itself a leak.
+   */
+  app.delete(GRADER_PATH, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const { graderId } = request.params as { graderId: string };
+    const query = (request.query ?? {}) as Query;
+
+    // The role first, before anything is read — the factory's own stance, so a
+    // viewer is refused for being a viewer rather than after a read that tells
+    // them what is there.
+    authorize(auth, "author_definitions", {
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+    });
+
+    const acting = await actingIn(auth, given(query.project));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+
+    const removed = await deleteGrader(acting.auth, graderId);
+    if (removed === undefined) {
+      return notFound(reply, REFUSALS.notFound("grader", graderId));
+    }
+
+    return reply.send({
+      id: removed.id,
+      name: removed.name,
+      deleted_at: removed.deletedAt.toISOString(),
+    });
   });
 
   /**

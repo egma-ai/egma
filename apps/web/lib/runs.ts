@@ -203,26 +203,66 @@ export function plannedSimulationCount(plan: RunPlan): number {
 }
 
 /**
+ * Whether any grader in this plan would ask a model and find none configured.
+ *
+ * **The plan says so itself, on every item.** A grader that asks a model in a
+ * project holding none is frozen `unavailable_at_capture`; one that never asks
+ * — `latency`, computed from spans — is `not_required` whatever the project's
+ * judge setting says. So this is a read of what the server already decided
+ * rather than a second rule about which graders need a judge, which is the
+ * shape everything in this module takes.
+ */
+function asksAModelWithNone(plan: RunPlan): boolean {
+  return plan.tests.some((test) =>
+    test.graders.some((grader) => grader.judge.tag === "unavailable_at_capture"),
+  );
+}
+
+/**
  * Whether this plan could be started at all, and what to say when it could not.
  *
- * **Two blockers, and only two, and both are states rather than mistakes.** A
- * project with no judge cannot start any run, because every run carries the
- * judge-backed expected-behaviors built-in. And a plan in which every
- * conversation would be skipped is a run with nothing to conduct — it would
- * complete immediately having judged nothing, and offering Start for it would
- * be offering somebody a green tick nobody earned.
+ * **Two blockers, and only two, and both are states rather than mistakes.**
  *
- * The server refuses the first for itself, so this is the page saying so early
- * rather than the page being the check.
+ * The first is a plan that would ask a model this project has not configured.
+ * It used to be *any* run in a project with no judge, because every run carried
+ * the judge-backed expected-behaviors built-in — and that grader is an ordinary
+ * deletable copy now, so the sentence stopped being true. A project judging
+ * only with `latency`, or with nothing at all, asks no model and starts
+ * perfectly well; what it must not do is dial real simulations for a judgment
+ * nobody can pay for. The server refuses on exactly the same reading, so this
+ * is the page saying so early rather than the page being the check.
+ *
+ * The second is a plan in which every simulation would be skipped: a run with
+ * nothing to conduct, completing immediately having judged nothing. Offering
+ * Start for it would be offering somebody a green tick nobody earned.
+ *
+ * **A plan that would judge nothing is not a blocker**, and deliberately so.
+ * A project whose graders have all been deleted still runs, still records every
+ * transcript, outcome and metric, and comes back with nothing judged — which is
+ * a decision the project took on the Graders screen, not a mistake for a run
+ * builder to overrule.
  */
 export function whyNotStartable(plan: RunPlan): string | null {
-  if (plan.judge.state === "needs_setup") {
-    return "This project has no LLM judge configured, and every run judges its test's expected behaviors with one. An organization admin can set it in project Settings.";
+  if (plan.judge.state === "needs_setup" && asksAModelWithNone(plan)) {
+    return "This project has no LLM judge configured, and a grader in this plan judges by asking a model. An organization admin can set the judge in project Settings, or you can delete that grader in Graders.";
   }
   if (plan.runnable_simulation_count === 0) {
     return "Every simulation in this selection would be skipped, so this run would conduct nothing. Choose a connection that supports what these tests require, or choose tests that require less.";
   }
   return null;
+}
+
+/**
+ * Whether this plan would judge anything at all, said where Start is offered.
+ *
+ * Not a blocker and not a refusal — a run in a project with no running graders
+ * is a run somebody may legitimately want, and it still produces every
+ * transcript, outcome and metric. It is worth saying out loud all the same,
+ * because "no verdicts" and "everything passed" look identical on a results
+ * page that has nothing red on it.
+ */
+export function judgesNothing(plan: RunPlan): boolean {
+  return plan.tests.every((test) => test.graders.length === 0);
 }
 
 /* ------------------------------------------------------------------------ *

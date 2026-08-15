@@ -963,13 +963,18 @@ export class NoCapabilityAdapterError extends Error {
  * A run could not start because the project has no LLM judge.
  *
  * **Its own refusal rather than one of the run factory's, because it is a fact
- * about the project rather than about the selection.** Every run carries the
- * expected-behaviors built-in — applying it is part of what running a test
- * means — and that built-in asks a model. A project in `needs_setup` therefore
- * cannot produce an honest run at all: it would dial real conversations, spend
- * real telephony, and then write `errored` against every behavior because there
- * was nobody to ask. Refusing before the money is spent is the whole point, and
- * the sentence sends an admin to the one page that fixes it.
+ * about the project rather than about the selection.** A run whose plan holds a
+ * grader that judges by asking a model cannot produce an honest result in a
+ * project with no judge: it would dial real simulations, spend real telephony,
+ * and then write `errored` against every assertion because there was nobody to
+ * ask. Refusing before the money is spent is the whole point, and the sentence
+ * sends an admin to the one page that fixes it.
+ *
+ * **It is raised on the plan and not on the project.** Every project is created
+ * holding a copy of the expected-behaviors grader, which asks a model — so this
+ * is what a project that has configured nothing meets. A project that deleted
+ * that copy, and judges only by computation or not at all, asks no model and is
+ * refused nothing.
  *
  * It carries the project because the sentence names it: somebody looking at a
  * run builder may hold several, and "this project" is not enough to act on.

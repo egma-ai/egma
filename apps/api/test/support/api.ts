@@ -70,17 +70,21 @@ export type TestApiOptions = {
    * `egma self-host setup` supplies one.
    *
    * **A deployment has one unless a test says otherwise**, and that default
-   * moved when runs began requiring a judge. Every run carries the judge-backed
-   * expected-behaviors built-in, so a project in `needs_setup` is refused
-   * before anything is dialed — which would make every test that starts a run
-   * fail on a configuration nobody in it is writing about. A real self-hosted
-   * deployment is set up with one key that covers the persona's brain, its
-   * voice and the default judge, so the configured deployment is the ordinary
-   * one and this default says so.
+   * moved when runs began requiring a judge. Every project is created holding
+   * the predefined expected-behaviors copy, which judges by asking a model, so
+   * a run planned in a project with no judge is refused before anything is
+   * dialed — which would make every test that starts a run fail on a
+   * configuration nobody in it is writing about. A real self-hosted deployment
+   * is set up with one key that covers the persona's brain, its voice and the
+   * default judge, so the configured deployment is the ordinary one and this
+   * default says so.
    *
    * Pass `null` for a deployment that configured none. That is the state a
    * project lands in `needs_setup` from, and it is what the run door's refusal
-   * is proved against.
+   * is proved against. The refusal is about the plan rather than the project:
+   * a project that deleted every grader asking a model starts its runs with no
+   * judge at all, which `run-planning.test.ts` in the data-access package
+   * proves.
    */
   readonly defaultJudge?: Config["defaultJudge"] | null;
   /**

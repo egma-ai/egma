@@ -961,14 +961,37 @@ describe("judge settings", () => {
 
   /**
    * `needs_setup` is a state and not an empty form. A project in it cannot ask a
-   * model anything, which means the built-in cannot judge — so a run started
-   * this way comes back errored after real calls have been paid for.
+   * model anything, so the predefined expected-behaviors copy every project is
+   * created holding cannot judge — and a run carrying it comes back errored
+   * after real simulations have been paid for.
+   *
+   * **And the sentence stops short of claiming the project cannot run**, which
+   * is the half wave two settled: every grader is a deletable running copy, so
+   * a project judging only by computation needs no judge and starts perfectly
+   * well.
    */
   it("says plainly that a project with no judge cannot grade with a model", async () => {
     open();
 
     expect(await screen.findByText(/Needs setup/)).toBeTruthy();
-    expect(screen.getByText(/LLM grading is unavailable/)).toBeTruthy();
+    expect(
+      screen.getByText(/a grader that judges by asking a model cannot run/),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/A project running no such grader needs no judge/),
+    ).toBeTruthy();
+  });
+
+  /**
+   * The way back to what the judge is for. It was taken off the page when the
+   * project-scoped graders route was deleted, rather than left pointing at an
+   * address that answered nothing; it returns with the route.
+   */
+  it("offers the way back to this project's graders", async () => {
+    open();
+
+    const back = await screen.findByRole("link", { name: "Back to graders" });
+    expect(back.getAttribute("href")).toBe("/projects/prj_1/graders");
   });
 
   /**

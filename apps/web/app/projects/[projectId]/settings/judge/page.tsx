@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { sendJson, type Refusal } from "../../../../../lib/api.ts";
+import { GRADERS_SECTION } from "../../../../../lib/graders.ts";
 import {
   credentialLabel,
   credentialsFor,
@@ -18,6 +19,7 @@ import {
   type ProjectJudge,
 } from "../../../../../lib/judge.ts";
 import { roleOf } from "../../../../../lib/me.ts";
+import { projectPath } from "../../../../../lib/project-context.ts";
 import {
   Badge,
   Button,
@@ -51,10 +53,18 @@ import {
  * the old one first, and there is no route that would let them.
  *
  * **`needs_setup` is a state, said plainly.** A project without a judge still
- * runs every deterministic grader it has; what it cannot do is ask a model
- * anything — and the predefined expected-behaviors grader asks a model, so a run
- * started this way would come back with errored verdicts after real calls had
- * been paid for. A page that showed an empty form would hide that.
+ * runs every grader it has that is computed rather than judged; what it cannot
+ * do is ask a model anything — and the predefined expected-behaviors grader,
+ * which every project starts with, asks a model. A run whose plan holds one of
+ * those is refused rather than dialed and then reported as errored verdicts
+ * after real simulations had been paid for. A page that showed an empty form
+ * would hide that.
+ *
+ * **It is a state and not a fault, and the difference grew teeth in wave two.**
+ * Every grader is a deletable running copy now, so a project judging only by
+ * computation — or by nothing at all — needs no judge and starts its runs
+ * without one. `needs_setup` therefore describes what this project cannot ask
+ * for rather than a run door closed to it.
  *
  * Judge settings are administration: the credentials are the organization's and
  * the choice commits its account, so only an admin may change either. The page
@@ -201,6 +211,18 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
         eyebrow="Settings"
         title="Judge"
         lead="The model that decides an LLM judgment in this project, and the organization key it is asked with."
+        /*
+         * Back to the graders this judge is for. It points at the project's own
+         * Graders section, which is where a person arriving from a run's "no
+         * judge configured" message came from and where the graders that ask a
+         * model are listed. The action was removed when that route was, and
+         * comes back with it.
+         */
+        action={
+          <ButtonLink href={projectPath(projectId, GRADERS_SECTION)}>
+            Back to graders
+          </ButtonLink>
+        }
       />
       <PageBody>
         <SettingsNav projectId={projectId} current="judge" />
@@ -209,9 +231,11 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
           {judge.value.state === "needs_setup" ? (
             <p>
               <Badge tone="warn">Needs setup</Badge> This project has no judge, so
-              LLM grading is unavailable — including the predefined
-              expected-behaviors grader, which every test relies on. Add a judge
-              credential below and choose it, and grading works from the next run.
+              a grader that judges by asking a model cannot run — the predefined
+              expected-behaviors grader among them, which every project starts
+              with. Add a judge credential below and choose it, and grading works
+              from the next run. A project running no such grader needs no judge
+              and starts its runs without one.
             </p>
           ) : (
             <p>

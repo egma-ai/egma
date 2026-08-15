@@ -15,7 +15,6 @@ import {
   createAgent,
   createPersona,
   createTest,
-  deleteGrader,
   disconnectClickHouse,
   editTest,
   failSimulation,
@@ -185,6 +184,13 @@ beforeAll(async () => {
   await seedUser(database, grace, "grace@globex.example");
   await seedJudge(actingAsAcme("admin"));
   await seedJudge({ ...actingAsGlobex(), role: "admin" });
+  // **No running graders here, and this file genuinely does not want any.**
+  // Every verdict below is appended by hand under an invented grader id, which
+  // is what lets one test write a passed row and a failed row and read the fold
+  // that comes of them. A seeded copy would put an item in each run's frozen
+  // plan that no verdict here ever names, and would prove nothing extra: what a
+  // run freezes is `run-planning.test.ts`'s subject, and what a fold makes of
+  // rows is this one's.
 
   const created = await createAgent(auth, {
     name: "Front desk",

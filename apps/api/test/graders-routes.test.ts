@@ -377,11 +377,17 @@ describe("pressing Use on a library entry", () => {
 describe("the authoring surface that is not here", () => {
   /**
    * v0 ships a small shelf of graders egma maintains rather than a form asking
-   * a team to design judgment logic on their first day. The routes that would
-   * have edited and deleted a grader are not registered, and this is where that
-   * decision is checkable rather than merely written down.
+   * a team to design judgment logic on their first day. The route that would
+   * have edited a grader is not registered, and this is where that decision is
+   * checkable rather than merely written down.
+   *
+   * **Delete used to be held here beside it, and that was the error.** What
+   * ADR-0009 shelved is *defining* graders; it made switching one off the
+   * plainest act in the area — dormant is no copy at all, and there is no
+   * enable switch — so a door that refused both refused the only loudness
+   * control the product has. The delete is registered now and proved below.
    */
-  it("answers nothing for an edit or a delete of a grader", async () => {
+  it("answers nothing for an edit of a grader", async () => {
     api = await createApi("graders_no_authoring");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
@@ -389,9 +395,120 @@ describe("the authoring surface that is not here", () => {
     const [only] = itemsOf(await request("GET", "/api/graders", key));
     if (only === undefined) throw new Error("the project has no graders");
 
-    for (const method of ["PATCH", "DELETE"] as const) {
-      const answered = await ask(api.app, method, `/api/graders/${only.id}`, key);
-      expect(answered.statusCode, method).toBe(404);
-    }
+    const answered = await ask(api.app, "PATCH", `/api/graders/${only.id}`, key);
+    expect(answered.statusCode).toBe(404);
+  });
+});
+
+/**
+ * Deleting a running copy: the whole of the off switch.
+ *
+ * **A copy that exists judges.** There is no enabled flag to clear and no
+ * `none` scope to choose, so this is how a project stops being judged by
+ * something — the seeded expected-behaviors copy included. The start-up
+ * backfill is built around exactly that: it asks whether a project has *ever*
+ * held a copy, deleted rows included, so a container restarting cannot write
+ * the grader back and overrule the person who deleted it.
+ */
+describe("deleting a running grader", () => {
+  it("stops the project being judged by it, and says what went", async () => {
+    api = await createApi("graders_delete");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+
+    const [only] = itemsOf(await request("GET", "/api/graders", key));
+    if (only === undefined) throw new Error("the project has no graders");
+
+    const deleted = await ask(
+      api.app,
+      "DELETE",
+      `/api/graders/${only.id}`,
+      key,
+    );
+
+    expect(deleted.statusCode, JSON.stringify(deleted.body)).toBe(200);
+    expect(deleted.body.id).toBe(only.id);
+    expect(deleted.body.deleted_at).toEqual(expect.any(String));
+
+    // And the project is judged by nothing at all, which is a state it is
+    // allowed to be in: a run started here conducts every simulation and comes
+    // back with no verdicts, rather than being refused.
+    expect(itemsOf(await request("GET", "/api/graders", key))).toHaveLength(0);
+  });
+
+  /**
+   * Pressing Use again is how it comes back — a new copy of the same entry,
+   * with a new identity, because the old one is what a verdict already written
+   * still names.
+   */
+  it("leaves Use as the way back, with a new copy", async () => {
+    api = await createApi("graders_delete_then_use");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+
+    const [only] = itemsOf(await request("GET", "/api/graders", key));
+    if (only === undefined) throw new Error("the project has no graders");
+    await ask(api.app, "DELETE", `/api/graders/${only.id}`, key);
+
+    const used = await request("POST", "/api/graders", key, {
+      library_id: PREDEFINED_GRADERS.expectedBehaviors,
+    });
+
+    expect(used.statusCode, JSON.stringify(used.body)).toBe(201);
+    expect(used.body.id).not.toBe(only.id);
+    expect(itemsOf(await request("GET", "/api/graders", key))).toHaveLength(1);
+  });
+
+  it("is refused to a viewer, per the permission table", async () => {
+    api = await createApi("graders_delete_viewer");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const grace = await colleagueOf(
+      api.app,
+      ada,
+      "grace@acme.example",
+      "viewer",
+    );
+
+    const [only] = itemsOf(await request("GET", "/api/graders", grace.secret));
+    if (only === undefined) throw new Error("the project has no graders");
+
+    const refused = await ask(
+      api.app,
+      "DELETE",
+      `/api/graders/${only.id}`,
+      grace.secret,
+    );
+
+    expect(refused.statusCode).toBe(403);
+    // And nothing went: reading it back is the only proof of that worth having.
+    expect(itemsOf(await request("GET", "/api/graders", grace.secret))).toHaveLength(
+      1,
+    );
+  });
+
+  /**
+   * Another customer's copy reads exactly as one that never existed. Confirming
+   * that somebody else's row is there is itself a leak, so both are 404 and
+   * both get the same sentence.
+   */
+  it("shows one customer nothing of another's, including its absence", async () => {
+    api = await createApi("graders_delete_tenants");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const grace = await signUp(api.app, "grace@globex.example", "Globex");
+
+    const [theirs] = itemsOf(
+      await request("GET", "/api/graders", await projectKeyFor(api.app, grace)),
+    );
+    if (theirs === undefined) throw new Error("the project has no graders");
+
+    const refused = await ask(
+      api.app,
+      "DELETE",
+      `/api/graders/${theirs.id}`,
+      await projectKeyFor(api.app, ada),
+    );
+
+    expect(refused.statusCode).toBe(404);
+    expect(String(refused.body.message)).toContain("available in this project");
   });
 });

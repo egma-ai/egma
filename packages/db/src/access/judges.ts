@@ -590,12 +590,14 @@ export async function getJudgeConfiguration(
  * `needs_setup` state.
  *
  * **An absent row is a state and not a fault.** A project with no judge still
- * runs every deterministic grader it has; what it cannot do is ask a model
- * anything, which means the built-in expected-behaviors grader cannot judge —
- * so a run started in this state would produce `errored` verdicts after real
- * calls had been paid for. Saying `needs_setup` out loud is what lets a page
- * tell somebody that LLM grading is unavailable until an admin finishes setup,
- * and what lets the run door refuse before the money is spent.
+ * runs every grader it has that is computed rather than judged; what it cannot
+ * do is ask a model anything — so the predefined expected-behaviors copy, which
+ * every project is created holding, cannot judge, and a run carrying it would
+ * produce `errored` verdicts after real calls had been paid for. Saying
+ * `needs_setup` out loud is what lets a page tell somebody that LLM grading is
+ * unavailable until an admin finishes setup, and what lets the run door refuse
+ * before the money is spent. A project that deleted every grader asking a model
+ * is in this state too, and runs perfectly well in it.
  *
  * The two are one type rather than an optional value so that no caller can read
  * "no judge" as "the read failed", and so that adding a third state later is a

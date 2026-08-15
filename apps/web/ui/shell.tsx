@@ -277,10 +277,25 @@ export function AppShell({
   }, [pathname]);
 
   const projects: readonly Project[] = me?.projects ?? [];
-  const named = projectIdIn(pathname);
-  // The fallback, and the only one left: a page that has not been converted to
-  // explicit project context still has to draw navigation somewhere.
-  const shown = named ?? projects[0]?.id ?? null;
+  /**
+   * The project this address names, and **nothing at all when it names none.**
+   *
+   * There used to be a fallback here — `named ?? projects[0]?.id` — left over
+   * from the pages that had not yet been converted to explicit project context.
+   * It is gone with the last of them, and it had to go rather than be left
+   * harmlessly unused: what it did was draw a project's navigation on an
+   * address that is not in that project, so a person with three projects met
+   * links into whichever came first in their list, with nothing saying so. The
+   * grader screens were the last pages it was standing in for, and they are
+   * under `/projects/:projectId/graders` now.
+   *
+   * One page still names no project on purpose — `/new-project`, which is where
+   * an organization holding none has to be able to go — and it draws no product
+   * navigation, which is the honest answer for an address that is inside no
+   * project. The selector stays on screen throughout, so the way into one is
+   * never lost.
+   */
+  const shown = projectIdIn(pathname);
   /**
    * **Null until the session read answers, and never `viewer` in the meantime.**
    * A cautious default reads as a fact: every admin would be shown the
@@ -295,7 +310,7 @@ export function AppShell({
     <ProjectSelector
       organization={organization}
       projects={projects}
-      projectId={named}
+      projectId={shown}
       compact={compact}
     />
   );

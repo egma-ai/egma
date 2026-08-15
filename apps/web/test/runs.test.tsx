@@ -490,9 +490,39 @@ describe("the review", () => {
     await screen.findByText(/openai\/gpt-4\.1-mini · credential jcr_1/u);
   });
 
-  it("says a project with no judge cannot start a run, and disables Start", async () => {
+  /**
+   * **A plan that would ask a model, in a project holding no judge.** The two
+   * halves are one answer and the fixture says both: the project reads
+   * `needs_setup`, and every item that judges by asking a model is frozen
+   * `unavailable_at_capture`, which is exactly what the server answers. A plan
+   * naming a configured judge on its items *and* `needs_setup` on the project is
+   * a shape no server produces, and a test built from one would prove a rule
+   * against a plan that cannot exist.
+   */
+  it("says a plan that would ask a model with no judge cannot start, and disables Start", async () => {
     builder({
-      plan: { status: 200, body: planBody({ judge: { state: "needs_setup" } }) },
+      plan: {
+        status: 200,
+        body: planBody({
+          judge: { state: "needs_setup" },
+          tests: [
+            plannedTest({
+              graders: [
+                {
+                  kind: "authored",
+                  grader_id: "grd_seeded",
+                  grader_version_id: "grv_1",
+                  name: "Expected behaviors",
+                  library_id: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
+                  required: true,
+                  scope: "simulations",
+                  judge: { tag: "unavailable_at_capture" },
+                },
+              ],
+            }),
+          ],
+        }),
+      },
     });
     render(<NewRunPage />);
     await chooseEverything();
@@ -503,6 +533,79 @@ describe("the review", () => {
         (screen.getByRole("button", { name: "Start run" }) as HTMLButtonElement)
           .disabled,
       ).toBe(true);
+    });
+  });
+
+  /**
+   * And the half the old rule got wrong. Every grader is a deletable running
+   * copy now, so a project may judge only by computation — nothing asks a model,
+   * nothing needs a key, and refusing the run would refuse it for a key it would
+   * never have spent.
+   */
+  it("offers Start with no judge when nothing in the plan asks a model", async () => {
+    builder({
+      plan: {
+        status: 200,
+        body: planBody({
+          judge: { state: "needs_setup" },
+          tests: [
+            plannedTest({
+              graders: [
+                {
+                  kind: "authored",
+                  grader_id: "grd_latency",
+                  grader_version_id: "grv_9",
+                  name: "Answers inside two seconds",
+                  library_id: "grl_01M01MH8KBE00TESCGQHVH0T8G",
+                  required: true,
+                  scope: "simulations",
+                  judge: { tag: "not_required" },
+                },
+              ],
+            }),
+          ],
+        }),
+      },
+    });
+    render(<NewRunPage />);
+    await chooseEverything();
+
+    await screen.findByText("Answers inside two seconds");
+    expect(screen.queryByText(/no LLM judge configured/u)).toBeNull();
+    await waitFor(() => {
+      expect(
+        (screen.getByRole("button", { name: "Start run" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+    });
+  });
+
+  /**
+   * A project judged by nothing at all is a decision somebody took on the
+   * Graders screen — deleting a copy is how a grader is switched off. So the
+   * consequence is said in advance and Start is still offered: on a results page
+   * with nothing red on it, "no verdicts" and "everything passed" look
+   * identical.
+   */
+  it("warns that a run would judge nothing, and still offers Start", async () => {
+    builder({
+      plan: {
+        status: 200,
+        body: planBody({
+          judge: { state: "needs_setup" },
+          tests: [plannedTest({ graders: [] })],
+        }),
+      },
+    });
+    render(<NewRunPage />);
+    await chooseEverything();
+
+    await screen.findByText(/come back with nothing judged/u);
+    await waitFor(() => {
+      expect(
+        (screen.getByRole("button", { name: "Start run" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
     });
   });
 

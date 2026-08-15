@@ -471,8 +471,8 @@ const VALUES = [
   // grading job about to resolve its secret. It carries every blocking use,
   // because the fix for each is somewhere different.
   "JudgeCredentialInUseError",
-  // A run refused before anything was dialed, because the project has no LLM
-  // judge and every run carries the judge-backed built-in.
+  // A run refused before anything was dialed, because its plan holds a grader
+  // that judges by asking a model and the project has configured none.
   "JudgeNotConfiguredError",
   "PersonaNamedByTestsError",
   // A delete that named one of egma's own graders. Its own class because

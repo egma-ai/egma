@@ -171,13 +171,15 @@ export async function makeWorld(label: string): Promise<World> {
   });
 
   /**
-   * A judge, because a run cannot start without one.
+   * A judge, because a run in this world cannot start without one.
    *
-   * Every run carries the judge-backed expected-behaviors built-in, so a
-   * project in `needs_setup` is refused before anything is conducted — which
-   * makes "a provisioned project" and "a project with a judge" the same thing.
-   * A test about the *absence* of a judge clears the row after its run exists,
-   * which is also the only way that state can arise now.
+   * The world above seeds the project's expected-behaviors copy, which judges by
+   * asking a model — so a run planned here in `needs_setup` is refused before
+   * anything is conducted, and "a provisioned project" and "a project with a
+   * judge" are the same thing for these files. A test about the *absence* of a
+   * judge clears the row after its run exists, which is also the only way that
+   * state can arise now: a project that deleted the copy needs no judge, and is
+   * refused nothing.
    */
   await setJudgeConfiguration(
     { ...auth, role: "admin" },

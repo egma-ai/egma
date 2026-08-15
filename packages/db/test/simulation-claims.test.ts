@@ -174,6 +174,10 @@ beforeAll(async () => {
   await seedUser(database, grace, "grace@globex.example");
   await seedJudge({ ...actingAsAcme(), role: "admin" });
   await seedJudge({ ...actingAsGlobex(), role: "admin" });
+  // No running graders: a claim carries identifiers and no content, and nothing
+  // about who may claim what changes with a project's judging. The one grading
+  // job this file reads is the one a terminal conversation always leaves
+  // behind, whatever will judge it.
 
   acmeSeed = await seedCustomer(actingAsAcme(), "retell-secret-A1B2C3D4WXYZ");
   globexSeed = await seedCustomer(actingAsGlobex(), "retell-secret-E5F6G7H8UVWX");

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RunDetailPage from "../app/projects/[projectId]/runs/[runId]/page.tsx";
 import RunsPage from "../app/projects/[projectId]/runs/page.tsx";
 import type { Me } from "../lib/me.ts";
+import { retryKeyFor } from "../lib/runs.ts";
 
 /**
  * The run history and one run's page, rendered and driven.
@@ -845,7 +846,15 @@ describe("one run's page", () => {
       expect(sentWith("/api/runs/run_1/retry", "POST")).toHaveLength(1);
     });
     const [asked] = sentWith("/api/runs/run_1/retry", "POST");
-    expect(String(asked?.body?.idempotency_key)).not.toBe("");
+    /*
+     * **The key is derived from the run, not minted fresh on every press.** A
+     * non-empty assertion passes for a per-press random key, which is exactly
+     * the failure the idempotency fix was written about: two presses on a slow
+     * answer would become two runs against a real agent. So the key is asserted
+     * by value, against the one function that decides it.
+     */
+    expect(asked?.body?.idempotency_key).toBe(retryKeyFor("run_1"));
+    expect(retryKeyFor("run_1")).toBe(retryKeyFor("run_1"));
     // The new run is where somebody lands, and the old one is not touched.
     expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/runs/run_9");
   });

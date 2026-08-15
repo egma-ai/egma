@@ -50,12 +50,20 @@ export function ProjectSelector({
   const shown = projectsMatching(projects, query);
   const organizationName = organization?.name ?? "No organization";
 
-  // An address naming a project this membership does not hold says so. Falling
-  // back to the first project's name would tell somebody they are working in
-  // Default while the page beside it refuses everything they ask for.
+  /**
+   * What this control says it is showing — and it never says a project the
+   * address does not name.
+   *
+   * Two ways that could go wrong and both are closed. An address naming a
+   * project this membership does not hold says **Unknown project**: falling
+   * back to the first project's name would tell somebody they are working in
+   * Default while the page beside it refuses everything they ask for. And an
+   * address naming no project at all says **No project** — it used to say the
+   * first project's name, which is the same lie told on the one page that is
+   * deliberately outside every project.
+   */
   const projectName =
-    current?.name ??
-    (projectId === null ? (projects[0]?.name ?? "No project") : "Unknown project");
+    current?.name ?? (projectId === null ? "No project" : "Unknown project");
 
   function choose(project: Project, close: () => void): void {
     close();

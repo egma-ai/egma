@@ -44,7 +44,12 @@ import {
   createConnectedDatabase,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
+import {
+  seedGraderCopies,
+  seedJudge,
+  seedOrganization,
+  seedUser,
+} from "./support/tenancy.ts";
 
 /**
  * The whole lifecycle at the db seam, through the module: a run and its
@@ -193,12 +198,19 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, grace, "grace@globex.example");
-  // Every run needs a judge, because every run carries the judge-backed
-  // expected-behaviors built-in. Provisioning gives a real project one; these
-  // fixtures build their tenants by raw SQL, so they have to.
+  // A judge, as provisioning gives a real project one. These fixtures build
+  // their tenants by raw SQL and skip that transaction.
   await seedJudge(actingAsAcme("admin"));
   await seedJudge({ ...actingAsAcme("admin"), projectId: acme.outbound });
   await seedJudge({ ...actingAsGlobex(), role: "admin" });
+  // And the copy of the predefined expected-behaviors grader a real project is
+  // born with, for the same reason: every run started in this file freezes a
+  // grading plan, and a fixture with no copy would freeze an empty one. Nothing
+  // here asserts what is in that plan — `run-planning.test.ts` does — but every
+  // run in this file is meant to be an ordinary run, and an ordinary run judges
+  // something. It is also what makes the judge above load-bearing: with no copy
+  // asking a model, the run door demands no judge at all.
+  await seedGraderCopies();
 
   const created = await createAgent(actingAsAcme(), {
     name: "Front desk",

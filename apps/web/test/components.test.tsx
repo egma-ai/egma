@@ -164,6 +164,32 @@ describe("the organization and project selector", () => {
   });
 
   /**
+   * The other half of the same rule, and the one the expand-contract change was
+   * finished by removing. An address inside no project used to make this
+   * control announce the *first* project in the list — on `/new-project`, the
+   * one page deliberately outside every project, a person was told they were in
+   * Default while they were in nothing.
+   */
+  it("names no project on an address that names none, rather than the first", () => {
+    render(
+      <ProjectSelector
+        organization={ACME}
+        projects={PROJECTS}
+        projectId={null}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: /^Organization Acme/ });
+    expect(trigger.textContent).toContain("No project");
+    expect(trigger.textContent).not.toContain("Default");
+    // And the way into one is never lost: every project is still offered.
+    fireEvent.click(trigger);
+    const panel = within(screen.getByRole("dialog"));
+    expect(panel.getByText("Default")).toBeTruthy();
+    expect(panel.getByText("Outbound")).toBeTruthy();
+  });
+
+  /**
    * Typing filters, and Enter takes what is left. This is the whole of the
    * keyboard path a person uses to change project, and it never touches a
    * pointer.
@@ -439,6 +465,60 @@ describe("the role the shell shows", () => {
 
     expect(await screen.findAllByText("ada@acme.example")).not.toHaveLength(0);
     expect(screen.getAllByText(/view only/i).length).toBeGreaterThan(0);
+  });
+
+  /**
+   * **The last of the first-project fallback, and the reason ticket 12 could
+   * not tick its first two criteria until now.**
+   *
+   * The shell reads the project out of the address. Where the address named
+   * none it used to fall back to `projects[0]`, which drew a project's whole
+   * navigation on a page that is not in that project — so every link in the
+   * sidebar went somewhere the person was not, and the one page that names no
+   * project on purpose was the page it happened on. Every product area is under
+   * `/projects/:projectId/…` now, the graders screens last, so the fallback has
+   * nothing left to stand in for.
+   */
+  it("draws no product navigation on an address inside no project", async () => {
+    routed.pathname = "/new-project";
+    apiAnswers({ "/api/me": { status: 200, body: meWith("admin") } });
+    render(
+      <AppShell>
+        <p>page</p>
+      </AppShell>,
+    );
+
+    expect(await screen.findByText("page")).toBeDefined();
+    // No link into a project the address never named — not Agents, not Tests,
+    // not Runs, and no href under /projects at all.
+    for (const item of ["Agents", "Tests", "Runs", "Personas", "Graders"]) {
+      expect(screen.queryByRole("link", { name: item })).toBeNull();
+    }
+    const hrefs = screen
+      .getAllByRole("link")
+      .map((link) => link.getAttribute("href") ?? "");
+    expect(hrefs.filter((href) => href.startsWith("/projects"))).toEqual([]);
+  });
+
+  it("keeps every navigation item on an address that does name one", async () => {
+    routed.pathname = "/projects/prj_2/agents";
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/agents": "never",
+    });
+    render(
+      <AppShell>
+        <p>page</p>
+      </AppShell>,
+    );
+
+    expect(await screen.findByText("page")).toBeDefined();
+    // And every one of them under the project in the address, never the first
+    // in the list.
+    for (const item of ["Agents", "Tests", "Runs", "Personas", "Graders"]) {
+      const link = screen.getAllByRole("link", { name: item })[0];
+      expect(link?.getAttribute("href")).toContain("/projects/prj_2/");
+    }
   });
 
   it("says the session is unavailable rather than that somebody is signed in", async () => {

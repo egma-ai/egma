@@ -19,30 +19,27 @@
  * The URL is deliberately not copy. `/api/graders` is a machine surface — it is
  * the endpoint's own path, and matching it is how somebody reading the network
  * tab finds the request — and no page ever prints it as a word.
+ *
+ * **Nothing here is a sentence the screen cannot reach**, for the reason its
+ * sibling gives: a copy file holding words nobody renders reads as a screen
+ * whose whole vocabulary is checked, and is not one.
  */
 
 export const RUNNING = {
   title: "Running graders",
   lead: "What this project judges with. Every one of them is a copy of something on the library shelf.",
-  loading: "Loading…",
-  signedOut: "Sign in first",
-  signedOutLead: "This page is about your project.",
-  signIn: "Sign in",
-  setUp: "Set up egma",
-  unreachable: "egma could not be reached. Is the API running?",
+  /** What the page says it is waiting for, never merely that it is waiting. */
+  loading: "running graders",
   /**
    * An empty list is a real state and a bad one: every project is given the
    * expected-behaviors grader when it is created, so nothing here means a run
-   * would be reported with nothing checked. Saying so is the whole value of the
+   * would be reported with nothing judged. Saying so is the whole value of the
    * sentence.
    */
   empty:
     "Nothing is judging this project, so a run would finish with nothing " +
     "judged. Every project is given egma's expected-behaviors grader when it " +
     "is created — if it is gone, pick it from the library and press Use.",
-  counted: (howMany: number): string =>
-    `${howMany} ${howMany === 1 ? "grader" : "graders"}`,
-  order: "Newest first",
 } as const;
 
 /** The table's headings. */
@@ -99,6 +96,47 @@ export const CONFIG = {
    */
   counted: (howMany: number): string =>
     `${howMany} ${howMany === 1 ? "assertion" : "assertions"}`,
+} as const;
+
+/**
+ * Deleting a running copy: the one act on this screen, and every word it says.
+ *
+ * **Deleting the copy is how a grader is switched off, and there is no other
+ * switch.** There is no enable flag, no `none` scope and no archive here:
+ * pressing Use is the switching on, and this is the switching off. So the words
+ * have to carry what a person is actually deciding — this project stops being
+ * judged by it — rather than sounding like a row is being tidied away.
+ *
+ * **What has already been judged does not move**, and saying so is what makes
+ * the act safe to take. A run froze its plan when it started, so it keeps
+ * judging with what it froze; every verdict already written stays exactly as it
+ * is, and its version rows stay where they are so it can still be read.
+ *
+ * **The last one gets its own sentence.** A project may run no graders at all —
+ * that is a decision it is allowed to take, and the run door lets it through
+ * rather than refusing — so nothing stops somebody deleting the last copy. What
+ * a page owes them is the consequence in advance: the run still happens, and it
+ * comes back with nothing judged.
+ */
+export const REMOVE = {
+  open: "Delete",
+  title: (name: string): string => `Delete ${name}?`,
+  lead:
+    "This project stops being judged by it. Runs already started keep the " +
+    "graders they froze, and every verdict already written is unchanged. " +
+    "Pressing Use on the library shelf starts a new copy whenever you want one.",
+  /** Said above the two buttons when this copy is the only one left. */
+  theLastOne:
+    "This is the only grader running here. Delete it and runs still happen, " +
+    "and come back with nothing judged.",
+  confirm: "Delete grader",
+  confirming: "Deleting…",
+  cancel: "Keep it",
+  gone: (name: string): string =>
+    `${name} is no longer judging this project. What it already judged is unchanged.`,
+  /** Why the control is not this person's, in their own role's words. */
+  notYours: (role: string): string =>
+    `Your ${role} role cannot delete a grader. Ask an organization admin.`,
 } as const;
 
 /** What a row says where the answer carried nothing. */

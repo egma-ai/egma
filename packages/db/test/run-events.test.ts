@@ -153,6 +153,10 @@ beforeAll(async () => {
   await seedUser(database, grace, "grace@globex.example");
   await seedJudge({ ...actingAsAcme(), role: "admin" });
   await seedJudge({ ...actingAsGlobex(), role: "admin" });
+  // No running graders: what is recorded here is a run's lifecycle and the
+  // numbering of its feed, neither of which a grader takes any part in. A
+  // verdict never appears in this file — the one place it could, the ending
+  // event, is asserted to be empty.
 
   const created = await createAgent(actingAsAcme(), {
     name: "Front desk",

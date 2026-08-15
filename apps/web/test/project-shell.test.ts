@@ -95,17 +95,6 @@ describe("which project a tab is looking at", () => {
 });
 
 describe("the product navigation", () => {
-  /**
-   * **Graders is not among them, and its absence is deliberate.** The grader
-   * screens `main` built are organization-wide: they sit at `/graders`, carry
-   * no project in the address, and this shell reads the project out of the
-   * path — so a navigation item pointing at one would land a person with three
-   * projects on whichever came first in their list, and pressing Use there
-   * would make a running copy in a project they were not looking at, with
-   * nothing saying so. The pages stay in the tree as the working reference for
-   * their copy and their Use form. Wave two rebuilds them under
-   * `/projects/:projectId/graders` and the item comes back with them.
-   */
   it("offers Agents, Tests and Runs, in that order and no others", () => {
     expect(PRIMARY_NAVIGATION.map((item) => item.label)).toEqual([
       "Agents",
@@ -117,14 +106,39 @@ describe("the product navigation", () => {
 
   /**
    * A persona is reusable and must never be reachable only from inside a test
-   * form — but it is not one of the four things a team works on all day, so it
-   * has a direct path of its own rather than a primary slot.
+   * form; a grader is switched on once and then judges without anybody visiting
+   * it again. Neither is one of the things a team works on all day, so both
+   * have direct paths rather than primary slots.
+   *
+   * **Graders had no item at all until wave two.** The screens that replaced
+   * this effort's authoring surface arrived organization-wide — they sat at
+   * `/graders`, carried no project in the address, and this shell reads the
+   * project out of the path — so an item pointing at one would have landed a
+   * person with three projects on whichever came first in their list, and
+   * pressing Use there would have made a running copy in a project they were
+   * not looking at. They are under `/projects/:projectId/graders` now, which is
+   * what this asserts: the item is back, and its href carries the project.
    */
-  it("gives Personas a direct path outside the primary four", () => {
-    expect(SECONDARY_NAVIGATION.map((item) => item.id)).toEqual(["personas"]);
-    expect(navigationFor("prj_2").secondary[0]?.href).toBe(
+  it("gives Personas and Graders direct paths outside the primary three", () => {
+    expect(SECONDARY_NAVIGATION.map((item) => item.id)).toEqual([
+      "personas",
+      "graders",
+    ]);
+    expect(navigationFor("prj_2").secondary.map((link) => link.href)).toEqual([
       "/projects/prj_2/personas",
-    );
+      "/projects/prj_2/graders",
+    ]);
+  });
+
+  /**
+   * The section a grader screen is under, read out of the address like every
+   * other. The running-copies screen is a second page inside the same section
+   * rather than a section of its own, so the item stays lit while somebody is
+   * on it — which is the whole reason the two are tabs.
+   */
+  it("keeps both grader screens under one navigation item", () => {
+    expect(activeSectionIn("/projects/prj_1/graders")).toBe("graders");
+    expect(activeSectionIn("/projects/prj_1/graders/running")).toBe("graders");
   });
 
   it("has no item for a simulation, which is evidence reached from its run", () => {

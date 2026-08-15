@@ -309,11 +309,13 @@ export function buildApi(options: ServerOptions): Api {
     rateLimit,
   });
 
-  // The graders a project actually judges with, and the one act that makes
-  // another: pressing Use on an entry from the shelf above. Its own scope like
-  // every other group. Two verbs and no third — there is no create taking a
-  // type and criteria, because a grader is always a copy of a definition
-  // somebody can read.
+  // The graders a project actually judges with, the one act that makes another
+  // — pressing Use on an entry from the shelf above — and the one act that
+  // stops one, which is deleting it, because a copy that exists judges and
+  // there is no other switch. Its own scope like every other group. No create
+  // taking a type and criteria and no edit, because a grader is always a copy
+  // of a definition somebody can read, and defining one is the surface
+  // ADR-0009 shelved.
   void app.register(graderRoutes, { provider: identity.provider, rateLimit });
 
   // The mocked world a project's simulations run in: what egma answers with
