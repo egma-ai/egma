@@ -90,8 +90,8 @@ async function seedPersona(
   // transaction exactly as the application writes it.
   await db.sql("begin");
   await db.sql(
-    `insert into persona (id, organization_id, project_id, name, current_version_id)
-     values ($1, $2, $3, 'Impatient Rita', $4)`,
+    `insert into persona (id, organization_id, project_id, name, current_version_id, revision)
+     values ($1, $2, $3, 'Impatient Rita', $4, 'a-revision')`,
     [persona, organization, project, version],
   );
   await db.sql(

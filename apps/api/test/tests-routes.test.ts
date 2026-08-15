@@ -2,7 +2,7 @@ import {
   createPersona,
   createProject,
   createTest,
-  deletePersona,
+  archivePersona,
   editTest,
   type AuthContext,
   type PersonaTraits,
@@ -211,7 +211,7 @@ describe("creating a test", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
     const leaving = await personaFor(ada, "Leaving Soon");
-    await deletePersona(contextFor(ada, "admin"), leaving);
+    await archivePersona(contextFor(ada, "admin"), leaving);
 
     const byName = await createTestThrough(key, {
       ...RESCHEDULING,

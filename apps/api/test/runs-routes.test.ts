@@ -4,7 +4,7 @@ import {
   createPersona,
   createProject,
   createTest,
-  deletePersona,
+  archivePersona,
   editTest,
   failSimulation,
   markSimulationCanceled,
@@ -497,7 +497,7 @@ describe("starting a run", () => {
       personaIds: [],
       expectedVersionId: pinned.versionId,
     });
-    await deletePersona(auth, leaving.id);
+    await archivePersona(auth, leaving.id);
 
     const refused = await request("POST", "/api/runs", key, {
       connection: connectionId,

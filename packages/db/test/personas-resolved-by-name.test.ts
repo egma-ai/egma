@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createPersona,
-  deletePersona,
+  archivePersona,
   resolvePersonaNames,
   type AuthContext,
   type Role,
@@ -158,7 +158,7 @@ describe("a name this project cannot answer", () => {
 
 });
 
-describe("a name only a deleted persona answers to", () => {
+describe("a name only an archived persona answers to", () => {
   /**
    * A different problem from a name nothing answers to, and it gets different
    * words. The name was right when somebody wrote it, so reporting it as never
@@ -166,9 +166,9 @@ describe("a name only a deleted persona answers to", () => {
    */
   it("is refused in the factory's own words, by name and by identifier alike", async () => {
     const leaving = await seedPersona(actingIn(acme.project), "Leaving Soon");
-    await deletePersona(actingIn(acme.project), leaving);
+    await archivePersona(actingIn(acme.project), leaving);
 
-    const gone = `persona ${leaving} is deleted, and a test cannot name a deleted persona`;
+    const gone = `persona ${leaving} is archived, and a test cannot name an archived persona`;
     await expect(
       resolvePersonaNames(actingIn(acme.project), ["Leaving Soon"]),
     ).rejects.toThrow(gone);
@@ -179,7 +179,7 @@ describe("a name only a deleted persona answers to", () => {
 
   it("is still a persona nobody has, once another customer asks by that name", async () => {
     const leaving = await seedPersona(actingIn(acme.project), "Also Leaving");
-    await deletePersona(actingIn(acme.project), leaving);
+    await archivePersona(actingIn(acme.project), leaving);
 
     await expect(
       resolvePersonaNames(actingAsGlobex(), ["Also Leaving"]),
@@ -188,7 +188,7 @@ describe("a name only a deleted persona answers to", () => {
 
   it("does not shadow a living persona of the same name", async () => {
     const gone = await seedPersona(actingIn(acme.project), "Two Of Them");
-    await deletePersona(actingIn(acme.project), gone);
+    await archivePersona(actingIn(acme.project), gone);
     const living = await seedPersona(actingIn(acme.project), "Two Of Them");
 
     expect(

@@ -2,13 +2,14 @@ import { isId, newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  archivePersona,
   clonePersona,
   createPersona,
-  deletePersona,
   getPersona,
   getPersonaVersion,
   listPersonas,
   NotPermittedError,
+  restorePersona,
   type AuthContext,
   type Persona,
   type NewPersona,
@@ -22,7 +23,8 @@ import {
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
- * List, clone, delete — through the factory functions only, like the create
+ * List, clone, Archive and Restore — through the factory functions only, like
+ * the create
  * and fetch tests before them. Raw SQL appears in fixtures and in the one
  * count proving how many version rows a clone carries, which no seam lists
  * yet; every id an assertion needs comes off the seam itself.
@@ -37,7 +39,7 @@ const acme = {
   organization: newId("org"),
   listing: newId("prj"),
   cloning: newId("prj"),
-  deleting: newId("prj"),
+  archiving: newId("prj"),
 };
 const globex = { organization: newId("org"), project: newId("prj") };
 const ada = newId("usr");
@@ -87,7 +89,7 @@ beforeAll(async () => {
   await seedOrganization(database, acme.organization, [
     { id: acme.listing, slug: "listing" },
     { id: acme.cloning, slug: "cloning" },
-    { id: acme.deleting, slug: "deleting" },
+    { id: acme.archiving, slug: "deleting" },
   ]);
   await seedOrganization(database, globex.organization, [
     { id: globex.project, slug: "default" },
@@ -208,7 +210,7 @@ describe("listing personas", () => {
     const [three] = created.filter((item) => item.name === "Three");
     if (three === undefined) throw new Error("Three was never created");
 
-    await deletePersona(actingIn(acme.listing), three.id);
+    await archivePersona(actingIn(acme.listing), three.id);
 
     const page = await listPersonas(actingIn(acme.listing));
     expect(page.items.map((item) => item.name)).toEqual([
@@ -256,15 +258,15 @@ describe("cloning a persona", () => {
       await clonePersona(actingAsGlobex(), source.id),
     ).toBeUndefined();
     expect(
-      await clonePersona(actingIn(acme.deleting), source.id),
+      await clonePersona(actingIn(acme.archiving), source.id),
     ).toBeUndefined();
 
     // Neither refused clone created anything: globex still holds only the
     // Stranger, and the project the second attempt acted in is still empty.
     const globexPage = await listPersonas(actingAsGlobex());
     expect(globexPage.items.map((item) => item.name)).toEqual(["Stranger"]);
-    const deletingPage = await listPersonas(actingIn(acme.deleting));
-    expect(deletingPage.items).toEqual([]);
+    const archivingPage = await listPersonas(actingIn(acme.archiving));
+    expect(archivingPage.items).toEqual([]);
   });
 
   it("is refused to a viewer", async () => {
@@ -286,35 +288,42 @@ describe("cloning a persona", () => {
   });
 });
 
-describe("deleting a persona", () => {
+describe("archiving and restoring a persona", () => {
   let doomed: Persona;
 
   beforeAll(async () => {
-    doomed = await createPersona(actingIn(acme.deleting), personaNamed("Doomed"));
+    doomed = await createPersona(actingIn(acme.archiving), personaNamed("Doomed"));
   });
 
   it("is refused to a credential acting in no project, like create", async () => {
     await expect(
-      deletePersona(actingIn(undefined), doomed.id),
+      archivePersona(actingIn(undefined), doomed.id),
     ).rejects.toThrow(/project/);
 
-    const stillThere = await getPersona(actingIn(acme.deleting), doomed.id);
-    expect(stillThere?.id).toBe(doomed.id);
+    const stillThere = await getPersona(actingIn(acme.archiving), doomed.id);
+    expect(stillThere?.archivedAt).toBeNull();
   });
 
-  it("hides it from fetch and list, while its version rows stay readable", async () => {
-    const deleted = await deletePersona(actingIn(acme.deleting), doomed.id);
-    expect(deleted?.id).toBe(doomed.id);
-    expect(deleted?.deletedAt).toBeInstanceOf(Date);
+  it("takes them out of the authoring list and leaves everything else where it was", async () => {
+    const archived = await archivePersona(actingIn(acme.archiving), doomed.id);
+    expect(archived?.id).toBe(doomed.id);
+    expect(archived?.archivedAt).toBeInstanceOf(Date);
 
-    expect(
-      await getPersona(actingIn(acme.deleting), doomed.id),
-    ).toBeUndefined();
-    const page = await listPersonas(actingIn(acme.deleting));
-    expect(page.items.map((item) => item.id)).not.toContain(doomed.id);
+    // Still readable by identifier, because the detail page is where Restore
+    // is and a persona nobody can open is a persona nobody can bring back.
+    const fetched = await getPersona(actingIn(acme.archiving), doomed.id);
+    expect(fetched?.archivedAt).toBeInstanceOf(Date);
+
+    const active = await listPersonas(actingIn(acme.archiving));
+    expect(active.items.map((item) => item.id)).not.toContain(doomed.id);
+
+    const archive = await listPersonas(actingIn(acme.archiving), {
+      archived: true,
+    });
+    expect(archive.items.map((item) => item.id)).toContain(doomed.id);
 
     const version = await getPersonaVersion(
-      actingIn(acme.deleting),
+      actingIn(acme.archiving),
       doomed.versionId,
     );
     expect(version?.personaId).toBe(doomed.id);
@@ -322,10 +331,29 @@ describe("deleting a persona", () => {
     expect(version?.traits).toEqual(doomed.traits);
   });
 
-  it("deletes only once: a second delete finds nothing", async () => {
-    expect(
-      await deletePersona(actingIn(acme.deleting), doomed.id),
-    ).toBeUndefined();
+  it("moves the revision, so an edit written before it has to be read again", async () => {
+    const archived = await getPersona(actingIn(acme.archiving), doomed.id);
+    expect(archived?.revision).not.toBe(doomed.revision);
+  });
+
+  it("archives once: a second Archive changes nothing and says so", async () => {
+    const again = await archivePersona(actingIn(acme.archiving), doomed.id);
+    const first = await getPersona(actingIn(acme.archiving), doomed.id);
+    expect(again?.archivedAt?.getTime()).toBe(first?.archivedAt?.getTime());
+    expect(again?.revision).toBe(first?.revision);
+  });
+
+  it("restores them into the authoring list again", async () => {
+    const restored = await restorePersona(actingIn(acme.archiving), doomed.id);
+    expect(restored?.archivedAt).toBeNull();
+
+    const active = await listPersonas(actingIn(acme.archiving));
+    expect(active.items.map((item) => item.id)).toContain(doomed.id);
+
+    const archive = await listPersonas(actingIn(acme.archiving), {
+      archived: true,
+    });
+    expect(archive.items.map((item) => item.id)).not.toContain(doomed.id);
   });
 
   it("keeps the surviving version invisible to another customer", async () => {
@@ -334,23 +362,26 @@ describe("deleting a persona", () => {
     ).toBeUndefined();
   });
 
-  it("returns nothing for another customer's persona, and leaves it live", async () => {
+  it("returns nothing for another customer's persona, and leaves it active", async () => {
     const bystander = await createPersona(
-      actingIn(acme.deleting),
+      actingIn(acme.archiving),
       personaNamed("Bystander"),
     );
 
     expect(
-      await deletePersona(actingAsGlobex(), bystander.id),
+      await archivePersona(actingAsGlobex(), bystander.id),
     ).toBeUndefined();
 
-    const fetched = await getPersona(actingIn(acme.deleting), bystander.id);
-    expect(fetched?.id).toBe(bystander.id);
+    const fetched = await getPersona(actingIn(acme.archiving), bystander.id);
+    expect(fetched?.archivedAt).toBeNull();
   });
 
-  it("is refused to a viewer", async () => {
+  it("is refused to a viewer, both ways", async () => {
     await expect(
-      deletePersona(actingIn(acme.deleting, "viewer"), doomed.id),
+      archivePersona(actingIn(acme.archiving, "viewer"), doomed.id),
+    ).rejects.toThrow(NotPermittedError);
+    await expect(
+      restorePersona(actingIn(acme.archiving, "viewer"), doomed.id),
     ).rejects.toThrow(NotPermittedError);
   });
 });

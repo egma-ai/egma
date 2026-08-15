@@ -110,7 +110,9 @@ export { ROLES, VIA } from "./context.ts";
 export {
   AgentWriteRefusedError,
   AlreadyBelongsToAnOrganizationError,
+  DefaultPersonaReplacementError,
   GraderNamedByTestsError,
+  IdentityConflictError,
   LastAdminError,
   MockToolTakenError,
   NotPermittedError,
@@ -121,6 +123,7 @@ export {
   TraceStoreRefusedError,
   UnprocessableInputError,
   UnreadableTraceQueryError,
+  VersionConflictError,
   type AgentWriteRefusal,
   type RunWriteRefusal,
   type TestNamingGrader,
@@ -309,22 +312,28 @@ export type {
 } from "../schema/agents.ts";
 
 export {
+  archivePersona,
   clonePersona,
   createPersona,
-  deletePersona,
   editPersona,
   getPersona,
   getPersonaVersion,
   listPersonas,
+  listPersonaVersions,
   resolvePersonaNames,
+  restorePersona,
+  testsUsingPersona,
   VOICE_PROVIDERS,
-  type DeletedPersona,
+  type ArchiveRequest,
   type NewPersona,
   type Persona,
   type PersonaChanges,
+  type PersonaListRequest,
   type PersonaPage,
   type PersonaTraits,
   type PersonaVersion,
+  type PersonaVersionPage,
+  type RestoreRequest,
   type VoiceProvider,
 } from "./personas.ts";
 

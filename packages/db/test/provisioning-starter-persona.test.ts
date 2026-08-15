@@ -228,6 +228,10 @@ describe("the project provisioning creates", () => {
       "current_version_id",
       "name",
       "description",
+      // Two rows are two identities, so their revisions are two opaque tokens
+      // and are never equal. That both are *filled* is the claim worth making,
+      // and the filled-columns half above makes it.
+      "revision",
       "created_at",
       "updated_at",
     ]);
@@ -277,7 +281,7 @@ describe("a first test in a freshly provisioned project", () => {
     expect(created.personas.map((named) => named.id)).toEqual([
       await starterOf(wayne.projectId),
     ]);
-    expect(created.personas[0]?.deletedAt).toBeNull();
+    expect(created.personas[0]?.archivedAt).toBeNull();
   });
 });
 

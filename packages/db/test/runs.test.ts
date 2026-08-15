@@ -9,7 +9,7 @@ import {
   createAgent,
   createPersona,
   createTest,
-  deletePersona,
+  archivePersona,
   deleteTest,
   editPersona,
   editTest,
@@ -482,20 +482,20 @@ describe("starting a run", () => {
     expect(await rowCounts()).toEqual(before);
   });
 
-  it("refuses a version whose persona has since been deleted, rather than conducting one fewer", async () => {
+  it("refuses a version whose persona has since been archived, rather than conducting one fewer", async () => {
     const leaving = await seedPersona(actingAsAcme(), "Departing Dara");
     const pinned = await seedTestVersion(actingAsAcme(), "Asks twice", [leaving]);
 
-    // The test moves off them first: a live test naming somebody is what
-    // refuses their delete, and the old version goes on naming them.
+    // The test moves off them first: an active test naming somebody is what
+    // refuses their Archive, and the old version goes on naming them.
     await editTest(actingAsAcme(), await testOf(pinned), {
       personaIds: [rita],
     });
-    await deletePersona(actingAsAcme(), leaving);
+    await archivePersona(actingAsAcme(), leaving);
 
     await expect(
       startRun(actingAsAcme(), aRun({ testVersionIds: [pinned] })),
-    ).rejects.toThrow(`persona ${leaving} is deleted`);
+    ).rejects.toThrow(`persona ${leaving} is archived`);
   });
 
   it("refuses a connection that is not the named agent's", async () => {
