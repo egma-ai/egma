@@ -31,4 +31,19 @@ export const GRADING = {
    * it is beside it rather than in it.
    */
   diagnosticAside: "Judged and reported. Nothing here changed the verdict.",
+  /**
+   * What names the fraction inside that one line.
+   *
+   * The lane reports **passed ÷ counted** — the number the whole flag exists to
+   * produce, and the only reason somebody switches a grader on without letting
+   * it fail anything. It is not the same statement as the counts beside it: a
+   * skipped assertion leaves the fraction's denominator and stays in the counts,
+   * so the two say different true things and both belong here.
+   *
+   * The word earns its place because the lane's figures share one line. The
+   * required outcome has a `Score` heading of its own two facts to the left; a
+   * bare number in the middle of `failed · 0.5 · 1/3 passed` would read as one
+   * more count.
+   */
+  diagnosticScore: "score",
 } as const;

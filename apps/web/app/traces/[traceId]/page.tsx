@@ -306,6 +306,18 @@ function tallyOf(counts: Outcome["counts"]): string {
 }
 
 /**
+ * The fraction, as a person reads it: passed over counted, or a dash where
+ * there was nothing in the denominator.
+ *
+ * Written once for the same reason the tally is. A proportion of nothing is not
+ * a number, and both available lies are worse than saying so — so the store
+ * answers absent and this answers a dash, in both lanes identically.
+ */
+function shownScore(score: number | null): string {
+  return score === null ? "—" : String(Math.round(score * 1000) / 1000);
+}
+
+/**
  * What egma made of this exchange: the verdict, the number, and what was
  * counted — over the graders that can fail something.
  *
@@ -335,13 +347,19 @@ function OutcomeSummary({
       </div>
       <div className={styles.contextFact}>
         <span>Score</span>
-        <strong>{outcome.score === null ? "—" : String(Math.round(outcome.score * 1000) / 1000)}</strong>
+        <strong>{shownScore(outcome.score)}</strong>
       </div>
       <div className={styles.contextFact}>
         <span>Checks</span>
         <strong>{tallyOf(outcome.counts)}</strong>
       </div>
       {/*
+        **The fraction is the point of this lane, so it is on the line.** A
+        diagnostic is switched on to be read rather than to decide, and passed ÷
+        counted is the number that reading produces — the counts beside it are a
+        different true statement, because a skipped assertion leaves the
+        denominator and stays in the count.
+
         Deliberately uncoloured, whatever it says. `data-verdict` is what paints
         a fact red, and a red diagnostic here would read as a reason the verdict
         to its left is red — which is the one thing it can never be.
@@ -350,7 +368,8 @@ function OutcomeSummary({
         <div className={styles.contextFact} title={GRADING.diagnosticAside}>
           <span>{GRADING.diagnosticLane}</span>
           <strong>
-            {diagnostics.verdict} · {tallyOf(diagnostics.counts)}
+            {diagnostics.verdict} · {GRADING.diagnosticScore}{" "}
+            {shownScore(diagnostics.score)} · {tallyOf(diagnostics.counts)}
           </strong>
         </div>
       )}

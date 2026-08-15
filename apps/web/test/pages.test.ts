@@ -389,6 +389,30 @@ describe("the pages", () => {
     );
   });
 
+  /**
+   * **The fraction, which is the whole reason a diagnostic exists.** A grader
+   * carrying `required: false` is switched on to be read rather than to decide,
+   * and passed ÷ counted is what that reading produces. Its counts are a
+   * different statement — a skipped assertion leaves the fraction's denominator
+   * and stays in the counts — so showing only the counts would report something
+   * true and not the thing that was asked for.
+   *
+   * Both lanes go through one formatter, so the day the required score learns to
+   * round differently the diagnostic's cannot be left behind.
+   */
+  it("reports the diagnostic fraction, not only its counts", async () => {
+    const transcript = await readFile(
+      path.join(WEB, "app/traces/[traceId]/page.tsx"),
+      "utf8",
+    );
+
+    expect(transcript).toContain("shownScore(diagnostics.score)");
+    expect(transcript).toContain("GRADING.diagnosticScore");
+    // One formatter, both lanes: a proportion of nothing is a dash in each.
+    expect(transcript).toContain("shownScore(outcome.score)");
+    expect(transcript).toMatch(/function shownScore\(/u);
+  });
+
   it("reach the API for the device flow at paths this instance rewrites", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
     const approve = await readFile(
