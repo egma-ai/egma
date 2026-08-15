@@ -259,6 +259,27 @@ function PersonaDetail({
       return null;
     }
 
+    /**
+     * **What the server kept is what the editor shows from here on.**
+     *
+     * egma trims a described trait and drops one that is only whitespace, so
+     * `"  calm  "` is stored as `"calm"`. Leaving the draft as it was typed
+     * would put the author in front of text the system did not accept —
+     * agreeing with nothing on the page, disagreeing with the facts above it,
+     * and quietly not the thing the next save would compare against. The
+     * reply already carries the accepted values, so the draft takes them.
+     *
+     * This is the one moment the draft is overwritten, and it is safe for the
+     * reason the other moments are not: this is the answer to what this
+     * editor itself just sent.
+     */
+    setHeld({
+      personaId: written.value.id,
+      name: written.value.name,
+      description: written.value.description ?? "",
+      traits: draftOf(written.value.traits),
+    });
+
     reload();
     reloadHistory();
     return written.value;

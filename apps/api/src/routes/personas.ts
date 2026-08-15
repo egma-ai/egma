@@ -18,6 +18,7 @@ import {
   UnprocessableInputError,
   VersionConflictError,
   VOICE_PROVIDERS,
+  WriteAbortedError,
   type AuthContext,
   type Persona,
   type PersonaTraits,
@@ -136,6 +137,10 @@ const REFUSALS = {
   invalidCursor: (cursor: string): string =>
     `Cursor ${cursor} is not valid for this list. Remove it and start from ` +
     `the first page.`,
+
+  writeAborted: (): string =>
+    "Egma could not finish this change because another change to the same " +
+    "project was being made at the same time. Nothing was written; try again.",
 } as const;
 
 /** How a refusal names a persona nobody here can see. */
@@ -688,6 +693,19 @@ export async function personaRoutes(
           error.current,
         ),
       );
+    }
+
+    /**
+     * The store rolled the write back because another one got in its way.
+     *
+     * **Answered rather than thrown, which is the whole point of it having a
+     * class.** A deadlock or a serialization failure escaping here would reach
+     * whoever pressed Archive as an internal failure on a request that was
+     * valid — a fault they cannot act on and cannot reproduce. As a refusal it
+     * says the true thing: nothing was written, and pressing it again works.
+     */
+    if (error instanceof WriteAbortedError) {
+      return sendRefusal(reply, "write_aborted", REFUSALS.writeAborted());
     }
 
     // The factory turned the write away at its door, in its own words —

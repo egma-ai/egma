@@ -341,6 +341,10 @@ const VALUES = [
   // A versioned write that named the version it was written against, for every
   // versioned resource reached by identifier rather than by filename.
   "VersionConflictError",
+  // The store rolling a write back because another one got in its way. Its own
+  // class because it is the one refusal about nothing the caller did: the
+  // request was valid, nothing was written, and sending it again is the fix.
+  "WriteAbortedError",
   // The store's answer to a batch it will never take, told apart from a store
   // that is merely unreachable — a door has to answer those two differently,
   // and only the module that owns the client can tell them apart.

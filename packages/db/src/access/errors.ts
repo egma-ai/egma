@@ -245,6 +245,36 @@ export class VersionConflictError extends Error {
 }
 
 /**
+ * Postgres rolled the write back rather than let it wait forever, and it can
+ * be sent again unchanged.
+ *
+ * **Its own class because it is the one refusal that is about nothing the
+ * caller did.** A deadlock or a serialization failure is the store noticing
+ * two correct transactions have got in each other's way; the request that
+ * loses was valid on the way in and will be valid on the way back. Letting the
+ * driver's error escape would answer it as an internal failure, which tells
+ * whoever pressed the control that egma is broken rather than that they should
+ * press it again.
+ *
+ * Nothing here promises this is rare. It is what a store is entitled to do,
+ * and a surface that only worked while it never happened would be a surface
+ * with a fault nobody could reproduce.
+ */
+export class WriteAbortedError extends Error {
+  /** What was being written, as a refusal names it: "persona", "test". */
+  readonly resource: string;
+
+  constructor(resource: string, options?: ErrorOptions) {
+    super(
+      `this ${resource} write got in the way of another one and was rolled back; nothing was changed, and sending it again is safe`,
+      options,
+    );
+    this.name = "WriteAbortedError";
+    this.resource = resource;
+  }
+}
+
+/**
  * Archiving the project's default persona was refused, because no active
  * replacement was named to take the pointer.
  *

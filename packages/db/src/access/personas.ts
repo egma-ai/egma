@@ -26,6 +26,7 @@ import {
   ProjectOutsideOrganizationError,
   UnprocessableInputError,
   VersionConflictError,
+  WriteAbortedError,
   type TestNamingPersona,
 } from "./errors.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
@@ -563,124 +564,126 @@ export async function editPersona(
   if (changes.name !== undefined) validateName(changes.name);
   if (changes.traits !== undefined) validateTraits(changes.traits);
 
-  return db().transaction(async (tx) => {
-    const [locked] = await tx
-      .select({
-        ...COLUMNS,
-        currentVersionId: persona.currentVersionId,
-        defaultPersonaId: project.defaultPersonaId,
-      })
-      .from(persona)
-      .innerJoin(project, eq(persona.projectId, project.id))
-      .where(thePersona(auth, id))
-      .limit(1)
-      .for("update", { of: persona });
+  return writing(() =>
+    db().transaction(async (tx) => {
+      const [locked] = await tx
+        .select({
+          ...COLUMNS,
+          currentVersionId: persona.currentVersionId,
+          defaultPersonaId: project.defaultPersonaId,
+        })
+        .from(persona)
+        .innerJoin(project, eq(persona.projectId, project.id))
+        .where(thePersona(auth, id))
+        .limit(1)
+        .for("update", { of: persona });
 
-    if (locked === undefined) return undefined;
-    const { currentVersionId, defaultPersonaId, ...current } = locked;
-    const isDefault = defaultPersonaId === current.id;
+      if (locked === undefined) return undefined;
+      const { currentVersionId, defaultPersonaId, ...current } = locked;
+      const isDefault = defaultPersonaId === current.id;
 
-    // Both expectations are checked against the row this transaction has
-    // locked, so nothing can move between the check and the write.
-    expectRevision(current, changes.expectedRevision);
+      // Both expectations are checked against the row this transaction has
+      // locked, so nothing can move between the check and the write.
+      expectRevision(current, changes.expectedRevision);
 
-    // This select and the update below are the two `where`s in this file that
-    // start from a bare `eq` rather than `within`: each names an id that just
-    // came off the tenancy-checked row locked above, in this same transaction,
-    // so neither predicate can reach further than that check already did.
-    const [currentVersion] = await tx
-      .select({
-        id: personaVersion.id,
-        version: personaVersion.version,
-        traits: personaVersion.traits,
-      })
-      .from(personaVersion)
-      .where(eq(personaVersion.id, currentVersionId))
-      .limit(1);
-    if (currentVersion === undefined) {
-      throw new Error("the persona's current version is missing");
-    }
-
-    /**
-     * The content expectation, and where it is deliberately **not** applied.
-     *
-     * A trait write names the version it was written against. A save whose
-     * traits are byte-identical to what is stored is not a write at all — it
-     * mints nothing, so there is nothing for a stale expectation to overwrite
-     * — but a stale one is still a caller working from an old read, and
-     * telling them so is what stops the next save silently landing on top of
-     * somebody else's. So it is checked whenever traits were sent.
-     */
-    if (changes.traits !== undefined && changes.expectedVersionId !== undefined) {
-      if (changes.expectedVersionId !== currentVersion.id) {
-        throw new VersionConflictError(
-          "persona",
-          changes.expectedVersionId,
-          currentVersion.id,
-        );
+      // This select and the update below are the two `where`s in this file that
+      // start from a bare `eq` rather than `within`: each names an id that just
+      // came off the tenancy-checked row locked above, in this same transaction,
+      // so neither predicate can reach further than that check already did.
+      const [currentVersion] = await tx
+        .select({
+          id: personaVersion.id,
+          version: personaVersion.version,
+          traits: personaVersion.traits,
+        })
+        .from(personaVersion)
+        .where(eq(personaVersion.id, currentVersionId))
+        .limit(1);
+      if (currentVersion === undefined) {
+        throw new Error("the persona's current version is missing");
       }
-    }
 
-    const storedTraits = traitsFromRow(currentVersion.traits, currentVersion.id);
-    const nextTraits =
-      changes.traits !== undefined && !sameTraits(storedTraits, changes.traits)
-        ? normalizedTraits(changes.traits)
-        : undefined;
-    const identityChanged =
-      changes.name !== undefined || changes.description !== undefined;
+      /**
+       * The content expectation, and where it is deliberately **not** applied.
+       *
+       * A trait write names the version it was written against. A save whose
+       * traits are byte-identical to what is stored is not a write at all — it
+       * mints nothing, so there is nothing for a stale expectation to overwrite
+       * — but a stale one is still a caller working from an old read, and
+       * telling them so is what stops the next save silently landing on top of
+       * somebody else's. So it is checked whenever traits were sent.
+       */
+      if (changes.traits !== undefined && changes.expectedVersionId !== undefined) {
+        if (changes.expectedVersionId !== currentVersion.id) {
+          throw new VersionConflictError(
+            "persona",
+            changes.expectedVersionId,
+            currentVersion.id,
+          );
+        }
+      }
 
-    if (nextTraits === undefined && !identityChanged) {
+      const storedTraits = traitsFromRow(currentVersion.traits, currentVersion.id);
+      const nextTraits =
+        changes.traits !== undefined && !sameTraits(storedTraits, changes.traits)
+          ? normalizedTraits(changes.traits)
+          : undefined;
+      const identityChanged =
+        changes.name !== undefined || changes.description !== undefined;
+
+      if (nextTraits === undefined && !identityChanged) {
+        return {
+          ...current,
+          version: currentVersion.version,
+          versionId: currentVersion.id,
+          traits: storedTraits,
+          isDefault,
+        };
+      }
+
+      let versionId = currentVersion.id;
+      let version = currentVersion.version;
+      if (nextTraits !== undefined) {
+        versionId = newId("prsv");
+        version = currentVersion.version + 1;
+        await tx.insert(personaVersion).values({
+          id: versionId,
+          personaId: current.id,
+          version,
+          traits: nextTraits,
+          createdBy: auth.userId,
+        });
+      }
+
+      const [updated] = await tx
+        .update(persona)
+        .set({
+          ...(changes.name === undefined ? {} : { name: changes.name }),
+          ...(changes.description === undefined
+            ? {}
+            : { description: changes.description }),
+          ...(nextTraits === undefined ? {} : { currentVersionId: versionId }),
+          // The identity moved, so the token that names it moves too — whichever
+          // half of the edit moved it. A caller holding the old one is holding a
+          // read taken before this write, and that is exactly what it is for.
+          revision: newRevision(),
+          updatedAt: new Date(),
+        })
+        .where(eq(persona.id, current.id))
+        .returning(COLUMNS);
+
+      if (updated === undefined) {
+        throw new Error("the persona was not written");
+      }
       return {
-        ...current,
-        version: currentVersion.version,
-        versionId: currentVersion.id,
-        traits: storedTraits,
+        ...updated,
+        version,
+        versionId,
+        traits: nextTraits ?? storedTraits,
         isDefault,
       };
-    }
-
-    let versionId = currentVersion.id;
-    let version = currentVersion.version;
-    if (nextTraits !== undefined) {
-      versionId = newId("prsv");
-      version = currentVersion.version + 1;
-      await tx.insert(personaVersion).values({
-        id: versionId,
-        personaId: current.id,
-        version,
-        traits: nextTraits,
-        createdBy: auth.userId,
-      });
-    }
-
-    const [updated] = await tx
-      .update(persona)
-      .set({
-        ...(changes.name === undefined ? {} : { name: changes.name }),
-        ...(changes.description === undefined
-          ? {}
-          : { description: changes.description }),
-        ...(nextTraits === undefined ? {} : { currentVersionId: versionId }),
-        // The identity moved, so the token that names it moves too — whichever
-        // half of the edit moved it. A caller holding the old one is holding a
-        // read taken before this write, and that is exactly what it is for.
-        revision: newRevision(),
-        updatedAt: new Date(),
-      })
-      .where(eq(persona.id, current.id))
-      .returning(COLUMNS);
-
-    if (updated === undefined) {
-      throw new Error("the persona was not written");
-    }
-    return {
-      ...updated,
-      version,
-      versionId,
-      traits: nextTraits ?? storedTraits,
-      isDefault,
-    };
-  });
+    }),
+  );
 }
 
 /**
@@ -969,6 +972,52 @@ export type RestoreRequest = {
   readonly expectedRevision?: string | undefined;
 };
 
+/**
+ * The two ways Postgres ends a transaction because of another one.
+ *
+ * `40P01` is a deadlock it broke; `40001` is the serialization failure a
+ * stricter isolation level produces instead. Neither says anything about the
+ * request, and both are safe to send again.
+ */
+const ABORTED_BY_THE_STORE = ["40P01", "40001"];
+
+/**
+ * The code the driver reported, walked out of whatever wrapped it. Capped, so
+ * a circular chain cannot spin.
+ */
+function postgresCodeOf(error: unknown): string | undefined {
+  let held = error;
+  for (let depth = 0; depth < 10; depth += 1) {
+    if (typeof held !== "object" || held === null) return undefined;
+    if ("code" in held) return String((held as { code: unknown }).code);
+    held = (held as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
+/**
+ * A write, with the store's own abort turned into something a surface can
+ * answer with.
+ *
+ * **The lock order in `archivePersona` is what stops a deadlock happening;
+ * this is what happens if one does anyway.** A path added later that takes a
+ * lock out of order, or an isolation level somebody raises, would otherwise
+ * surface as a driver error on a request that was valid — an internal failure
+ * a person cannot act on and cannot reproduce. `WriteAbortedError` says the
+ * true thing instead: nothing was written, and sending it again is safe.
+ */
+async function writing<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (thrown) {
+    const code = postgresCodeOf(thrown);
+    if (code !== undefined && ABORTED_BY_THE_STORE.includes(code)) {
+      throw new WriteAbortedError("persona", { cause: thrown });
+    }
+    throw thrown;
+  }
+}
+
 /** The revision check, written once for the three writes that make it. */
 function expectRevision(
   current: { readonly id: string; readonly revision: string },
@@ -1023,86 +1072,112 @@ export async function archivePersona(
   }
 
   const archivedAt = new Date();
-  return db().transaction(async (tx) => {
-    // Locked before the tests naming them are counted, and held until this
-    // transaction ends, so nothing can come to name them between the count and
-    // the write — which a count taken on this transaction's own snapshot could
-    // not promise. The other half is the shared lock a test being written takes
-    // on this same row, which `validateNamedPersonas` in `tests.ts`
-    // explains: the two modes conflict, so one of the two writes always waits
-    // for the other and then sees how it ended.
-    const [locked] = await tx
-      .select({
-        id: persona.id,
-        projectId: persona.projectId,
-        revision: persona.revision,
-        archivedAt: persona.archivedAt,
-      })
-      .from(persona)
-      .where(thePersona(auth, id))
-      .limit(1)
-      .for("update");
+  const { projectId } = auth;
 
-    if (locked === undefined) return undefined;
-    expectRevision(locked, request.expectedRevision);
-    if (locked.archivedAt !== null) return readPersonaOn(tx, auth, locked.id);
-
-    const blocking = await liveTestsNamingPersona(tx, locked.id);
-    if (blocking.length > 0) {
-      throw new PersonaNamedByTestsError(locked.id, blocking);
-    }
-
-    // The project's own row is locked next, so two people archiving the two
-    // personas a project could point at cannot both read "I am not the
-    // default" and both be right afterwards.
-    const [pointing] = await tx
-      .select({ defaultPersonaId: project.defaultPersonaId })
-      .from(project)
-      .where(eq(project.id, locked.projectId))
-      .limit(1)
-      .for("update");
-
-    if (pointing?.defaultPersonaId === locked.id) {
-      const replacement = request.replacementPersonaId;
-      if (replacement === undefined || replacement === locked.id) {
-        throw new DefaultPersonaReplacementError(locked.id, "none_named");
-      }
-
-      const [taking] = await tx
-        .select({ id: persona.id })
-        .from(persona)
-        .where(
-          and(
-            eq(persona.id, replacement),
-            eq(persona.projectId, locked.projectId),
-            notArchived,
-          ),
-        )
+  return writing(() =>
+    db().transaction(async (tx) => {
+      /**
+       * **The project first, always, and before any persona.**
+       *
+       * An archive can touch three rows: the persona leaving, the project
+       * whose pointer may have to move, and the persona taking that pointer.
+       * Two archives at once will therefore want two of each other's rows —
+       * somebody archives the default and names a colleague as the
+       * replacement while that colleague is being archived from another tab —
+       * and if the two take their locks in different orders, Postgres finds
+       * the cycle and kills one of them. That abort lands on a request that
+       * was valid, which is a fault nobody can reproduce and nobody can act
+       * on. `personas-archive-concurrency.test.ts` produced exactly that.
+       *
+       * So there is one order and every archive takes it. The project row is
+       * the one row both of them are certain to want, so taking it first
+       * leaves the second archive waiting before it holds anything at all —
+       * and a transaction holding nothing cannot be half of a cycle.
+       *
+       * It is locked within the caller's tenancy rather than by bare id: a
+       * predicate that reached any project would take a lock on a row this
+       * caller was never entitled to touch, which is a denial of service
+       * wearing a read's clothes.
+       */
+      const [pointing] = await tx
+        .select({ defaultPersonaId: project.defaultPersonaId })
+        .from(project)
+        .where(within(auth, project, eq(project.id, projectId)))
         .limit(1)
-        .for("share");
+        .for("update");
 
-      if (taking === undefined) {
-        throw new DefaultPersonaReplacementError(locked.id, "not_available");
+      if (pointing === undefined) return undefined;
+
+      // Locked before the tests naming them are counted, and held until this
+      // transaction ends, so nothing can come to name them between the count
+      // and the write — which a count taken on this transaction's own snapshot
+      // could not promise. The other half is the shared lock a test being
+      // written takes on this same row, which `validateNamedPersonas` in
+      // `tests.ts` explains: the two modes conflict, so one of the two writes
+      // always waits for the other and then sees how it ended.
+      const [locked] = await tx
+        .select({
+          id: persona.id,
+          projectId: persona.projectId,
+          revision: persona.revision,
+          archivedAt: persona.archivedAt,
+        })
+        .from(persona)
+        .where(thePersona(auth, id))
+        .limit(1)
+        .for("update");
+
+      if (locked === undefined) return undefined;
+      expectRevision(locked, request.expectedRevision);
+      if (locked.archivedAt !== null) return readPersonaOn(tx, auth, locked.id);
+
+      const blocking = await liveTestsNamingPersona(tx, locked.id);
+      if (blocking.length > 0) {
+        throw new PersonaNamedByTestsError(locked.id, blocking);
       }
 
-      await tx
-        .update(project)
-        .set({ defaultPersonaId: taking.id })
-        .where(eq(project.id, locked.projectId));
-    }
+      if (pointing.defaultPersonaId === locked.id) {
+        const replacement = request.replacementPersonaId;
+        if (replacement === undefined || replacement === locked.id) {
+          throw new DefaultPersonaReplacementError(locked.id, "none_named");
+        }
 
-    // A bare `eq` on an id that just came off the tenancy-checked row locked
-    // above, in this same transaction, so it reaches no further than that check
-    // already did — the move `editPersona` makes, for the same reason.
-    const [row] = await tx
-      .update(persona)
-      .set({ archivedAt, revision: newRevision(), updatedAt: archivedAt })
-      .where(eq(persona.id, locked.id))
-      .returning({ id: persona.id });
+        const [taking] = await tx
+          .select({ id: persona.id })
+          .from(persona)
+          .where(
+            and(
+              eq(persona.id, replacement),
+              eq(persona.projectId, locked.projectId),
+              notArchived,
+            ),
+          )
+          .limit(1)
+          .for("share");
 
-    if (row === undefined) throw new Error("the persona was not written");
-    return readPersonaOn(tx, auth, locked.id);
-  });
+        if (taking === undefined) {
+          throw new DefaultPersonaReplacementError(locked.id, "not_available");
+        }
+
+        await tx
+          .update(project)
+          .set({ defaultPersonaId: taking.id })
+          .where(eq(project.id, locked.projectId));
+      }
+
+      // A bare `eq` on an id that just came off the tenancy-checked row locked
+      // above, in this same transaction, so it reaches no further than that
+      // check already did — the move `editPersona` makes, for the same reason.
+      const [row] = await tx
+        .update(persona)
+        .set({ archivedAt, revision: newRevision(), updatedAt: archivedAt })
+        .where(eq(persona.id, locked.id))
+        .returning({ id: persona.id });
+
+      if (row === undefined) throw new Error("the persona was not written");
+      return readPersonaOn(tx, auth, locked.id);
+    }),
+  );
 }
 
 /**
@@ -1132,29 +1207,38 @@ export async function restorePersona(
   }
 
   const restoredAt = new Date();
-  return db().transaction(async (tx) => {
-    const [locked] = await tx
-      .select({
-        id: persona.id,
-        revision: persona.revision,
-        archivedAt: persona.archivedAt,
-      })
-      .from(persona)
-      .where(thePersona(auth, id))
-      .limit(1)
-      .for("update");
+  return writing(() =>
+    db().transaction(async (tx) => {
+      // One row, so there is no order to get wrong: Restore never touches the
+      // project, because taking the default pointer back is a decision nobody
+      // asked for.
+      const [locked] = await tx
+        .select({
+          id: persona.id,
+          revision: persona.revision,
+          archivedAt: persona.archivedAt,
+        })
+        .from(persona)
+        .where(thePersona(auth, id))
+        .limit(1)
+        .for("update");
 
-    if (locked === undefined) return undefined;
-    expectRevision(locked, request.expectedRevision);
-    if (locked.archivedAt === null) return readPersonaOn(tx, auth, locked.id);
+      if (locked === undefined) return undefined;
+      expectRevision(locked, request.expectedRevision);
+      if (locked.archivedAt === null) return readPersonaOn(tx, auth, locked.id);
 
-    await tx
-      .update(persona)
-      .set({ archivedAt: null, revision: newRevision(), updatedAt: restoredAt })
-      .where(eq(persona.id, locked.id));
+      await tx
+        .update(persona)
+        .set({
+          archivedAt: null,
+          revision: newRevision(),
+          updatedAt: restoredAt,
+        })
+        .where(eq(persona.id, locked.id));
 
-    return readPersonaOn(tx, auth, locked.id);
-  });
+      return readPersonaOn(tx, auth, locked.id);
+    }),
+  );
 }
 
 /**

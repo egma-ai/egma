@@ -1092,3 +1092,65 @@ describe("what this page does when something goes wrong underneath it", () => {
     );
   });
 });
+
+/* ------------------------------------------------------------------------ */
+
+/**
+ * What the editor shows after a save.
+ *
+ * egma trims a described trait and drops one that is only whitespace, so what
+ * a save stores is not always what was typed. Leaving the typed text in the
+ * field would put the author in front of words the system did not accept —
+ * disagreeing with the facts on the same page, and not what the next save
+ * would be compared against.
+ */
+describe("after a save lands", () => {
+  it("shows what egma kept, not what was typed at it", async () => {
+    const { asked } = apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("member") },
+      "GET /api/personas/prs_1": { status: 200, body: RITA },
+      "GET /api/personas/prs_1/versions": {
+        status: 200,
+        body: { items: [], next_cursor: null },
+      },
+      "GET /api/personas/prs_1/usage": { status: 200, body: { tests: [] } },
+      "GET /api/persona-form": {
+        status: 200,
+        body: { voice_providers: ["elevenlabs"] },
+      },
+      "PATCH /api/personas/prs_1": {
+        status: 200,
+        body: {
+          ...RITA,
+          version: 2,
+          version_id: "prsv_2",
+          revision: "revision-two",
+          traits: { ...RITA.traits, accent: "calm" },
+        },
+      },
+    });
+    render(<PersonaPage />);
+
+    fireEvent.change(await screen.findByLabelText("Accent"), {
+      target: { value: "  calm  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save traits" }));
+
+    // Sent as typed, because what may be trimmed is the server's rule.
+    const written = asked.find((one) => one.method === "PATCH")?.body as
+      | { traits: Record<string, unknown> }
+      | undefined;
+    expect(written?.traits.accent).toBe("  calm  ");
+
+    // Shown as kept, because that is what egma is holding now.
+    //
+    // The value is read off the element rather than matched through a query:
+    // a matcher normalizes whitespace, and whitespace is the whole difference
+    // this test is about. The element is looked up again on each attempt
+    // because the read that follows a save remounts the form.
+    await vi.waitFor(() => {
+      const field = screen.getByLabelText("Accent") as HTMLInputElement;
+      expect(field.value).toBe("calm");
+    });
+  });
+});

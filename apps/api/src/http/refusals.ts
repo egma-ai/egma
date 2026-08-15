@@ -36,6 +36,11 @@ export const CODES = {
   // the fix for each is somewhere else.
   persona_in_use: 409,
   default_persona_required: 409,
+  // The store rolled a write back because another one got in its way. Its own
+  // code because it is the one refusal that is about nothing the caller did:
+  // the request was valid on the way in, nothing was written, and sending it
+  // again is the whole of the fix — which a client can do by itself.
+  write_aborted: 409,
   unprocessable: 422,
   // A product request that named no project. Its own code because a browser
   // reading this has a selector on screen, and the sentence names it.

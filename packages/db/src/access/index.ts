@@ -124,6 +124,7 @@ export {
   UnprocessableInputError,
   UnreadableTraceQueryError,
   VersionConflictError,
+  WriteAbortedError,
   type AgentWriteRefusal,
   type RunWriteRefusal,
   type TestNamingGrader,
