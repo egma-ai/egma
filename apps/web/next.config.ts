@@ -59,6 +59,33 @@ const config: NextConfig = {
           source: "/api/agents/:path*",
           destination: `${api}/api/agents/:path*`,
         },
+        // What a connection can be, and what one turned out to be able to do.
+        // Both are read by the connection forms rather than posted to.
+        {
+          source: "/api/connection-types",
+          destination: `${api}/api/connection-types`,
+        },
+        {
+          source: "/api/capabilities",
+          destination: `${api}/api/capabilities`,
+        },
+        { source: "/api/personas", destination: `${api}/api/personas` },
+        {
+          source: "/api/personas/:path*",
+          destination: `${api}/api/personas/:path*`,
+        },
+        // The shape of the persona editor, which the server owns so a field can
+        // be added without shipping the browser again.
+        { source: "/api/persona-form", destination: `${api}/api/persona-form` },
+        { source: "/api/graders", destination: `${api}/api/graders` },
+        {
+          source: "/api/graders/:path*",
+          destination: `${api}/api/graders/:path*`,
+        },
+        {
+          source: "/api/grader-registry",
+          destination: `${api}/api/grader-registry`,
+        },
         { source: "/api/keys", destination: `${api}/api/keys` },
         { source: "/api/keys/:path*", destination: `${api}/api/keys/:path*` },
         { source: "/api/members", destination: `${api}/api/members` },

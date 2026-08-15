@@ -391,6 +391,66 @@ describe("the pages", () => {
   });
 
   /**
+   * Every API path the browser client names, held to a rewrite rule — read from
+   * the client rather than listed here.
+   *
+   * The tests above are the same claim written one feature at a time, and that
+   * is exactly how six paths came to be missing. `beforeFiles` is an allowlist
+   * with no catch-all, so a path with no rule is served by this process, which
+   * has no such route: the page reads Next's 404 **page** — HTML, not JSON,
+   * carrying no sentence — as though egma had refused it.
+   *
+   * Nothing else can catch this. Every component test stubs `fetch`, so it
+   * never meets a rewrite; the real-browser file drives the app under `next
+   * dev`, where a missing rule looks the same as a page nobody visits. It only
+   * appears in a deployment, as a working page that cannot load its own data.
+   *
+   * That is what happened: `/api/personas` and `/api/persona-form` shipped with
+   * ticket 04, `/api/graders` and `/api/grader-registry` with ticket 05, and
+   * `/api/connection-types` and `/api/capabilities` with ticket 03 — all merged,
+   * all unreachable outside a test. This reads the paths out of `lib/` so the
+   * list cannot go stale again, and so the next ticket's path is covered on the
+   * day it is written rather than when somebody remembers to add a line here.
+   */
+  it("rewrites every API path the browser client names", async () => {
+    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
+    const lib = await readdir(path.join(WEB, "lib"));
+
+    const named = new Set<string>();
+    for (const file of lib.filter((one) => one.endsWith(".ts"))) {
+      const source = await readFile(path.join(WEB, "lib", file), "utf8");
+      for (const [, named_] of source.matchAll(
+        /(?:_PATH|_ROUTE)\s*=\s*"(\/api\/[^"]+)"/g,
+      )) {
+        named.add(named_);
+      }
+    }
+
+    // A guard on the guard: if the constants are ever renamed out of this
+    // shape, the loop above finds nothing and every assertion below passes
+    // vacuously. Better to fail here and be rewritten.
+    expect(named.size).toBeGreaterThan(8);
+
+    const unforwarded = [...named]
+      .filter((one) => {
+        // A rule for the collection, or a `:path*` rule on any parent segment,
+        // covers it. `/api/judge/registry` rides `/api/judge/:path*`.
+        if (rewrites.includes(`source: "${one}"`)) return false;
+        const segments = one.split("/").filter(Boolean);
+        for (let depth = segments.length - 1; depth >= 2; depth -= 1) {
+          const parent = `/${segments.slice(0, depth).join("/")}`;
+          if (rewrites.includes(`source: "${parent}/:path*"`)) return false;
+        }
+        return true;
+      })
+      .sort();
+
+    // Named rather than counted: the fix is one rule per path, and a bare count
+    // sends somebody reading a config file to work out which.
+    expect(unforwarded).toEqual([]);
+  });
+
+  /**
    * Somewhere to click, and a path that reaches the API rather than this
    * process. Without the rewrite the button would post at Next, which has no
    * such route, and signing out would 404 while looking like a product bug.

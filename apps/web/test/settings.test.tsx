@@ -293,18 +293,16 @@ describe("project settings", () => {
    * project again rather than to retype anything.
    */
   it("keeps the draft when a stale save is refused, and offers a way to recover", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/api/projects/prj_1": { status: 200, body: PROJECT },
-    });
-    render(<ProjectSettingsPage />);
-
-    const name = (await screen.findByLabelText("Name")) as HTMLInputElement;
-    fireEvent.change(name, { target: { value: "My careful rename" } });
-
+    // Queued once, before the first render, rather than swapped after it.
+    // Swapping mid-test raced the page's own load: a read still in flight when
+    // the answers changed took the 409 meant for the save, the save then got
+    // the success behind it, and no conflict was ever shown. It failed about
+    // one run in four. The answers a test needs are all known before it starts,
+    // so there is no reason to change them while it is running.
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
       "/api/projects/prj_1": [
+        { status: 200, body: PROJECT },
         {
           status: 409,
           body: {
@@ -316,6 +314,15 @@ describe("project settings", () => {
         { status: 200, body: { ...PROJECT, revision: "rev_2" } },
       ],
     });
+    render(<ProjectSettingsPage />);
+
+    const name = (await screen.findByLabelText("Name")) as HTMLInputElement;
+    // The stored name arrives a render after the field exists, so the draft is
+    // typed only once the page is showing what it read. Typing sooner would be
+    // overwritten by the answer landing behind it.
+    await screen.findByDisplayValue(PROJECT.name as string);
+    fireEvent.change(name, { target: { value: "My careful rename" } });
+
     fireEvent.click(screen.getByRole("button", { name: "Save project" }));
 
     expect(
@@ -557,7 +564,12 @@ describe("organization settings", () => {
     });
     render(<OrganizationSettingsPage />);
 
-    fireEvent.change(await screen.findByLabelText("Name"), {
+    // Waited for the stored name, not just the field. The field exists on the
+    // first ready render and what was read lands on the next, so typing on
+    // sight let the answer overwrite the draft — the PATCH then carried "Acme"
+    // and the test failed on a name nobody had typed. About one run in eight.
+    await screen.findByDisplayValue(ORGANIZATION.name);
+    fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "Acme Voice" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save organization" }));
