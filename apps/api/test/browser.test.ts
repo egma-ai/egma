@@ -1596,6 +1596,102 @@ describe("pressing Use on a second grader while the first one's form is open", (
   );
 });
 
+/**
+ * Changing a running copy and switching one off, in a real browser.
+ *
+ * **The one thing about this screen a source scan cannot prove**, and it is the
+ * same shape as the Use form's above: the edit form is drawn from the library
+ * entry and pre-filled from the copy, so what a person sees when they open it
+ * is state assembled from two answers that arrived separately. A source scan
+ * settles that the right components are wired together; only a running page
+ * settles that the values come back.
+ *
+ * It is also the only place the **forwarding rule** for a copy's own address is
+ * exercised. `/api/graders/:path*` is a rewrite this Next process resolves at
+ * build time; without it the edit would post into this app's own file routing
+ * and read Next's 404 page as though egma had refused it — and every other test
+ * in the repository would still pass, because they all speak to the API
+ * directly.
+ *
+ * It runs after the Use flow above and depends on it: that flow left a copy of
+ * `latency` running on Ada's project, which is the row this one changes and
+ * then switches off.
+ */
+describe("changing a running grader and switching it off", () => {
+  /** One running copy's button, from the table rather than the mobile list. */
+  function on(named: string, button: string) {
+    return page
+      .locator("table")
+      .getByRole("row")
+      .filter({ hasText: named })
+      .getByRole("button", { name: button });
+  }
+
+  /**
+   * The bound, which is the entry's own question — named by what it is not,
+   * because what a grader asks for is the library entry's business and a test
+   * spelling the parameter would be the copy of egma's catalog this screen
+   * exists without.
+   */
+  const theEntrysNumber = 'form input[type="number"]:not(#edit-sample-rate)';
+
+  it(
+    "saves a new value and reads it back, and turns a blocker into a diagnostic",
+    async () => {
+      await page.goto(`${origin}/graders/running`);
+      await page.waitForSelector("text=latency");
+      // Blocking, as anything switched on is unless somebody said otherwise.
+      await page.waitForSelector("text=Blocks");
+
+      await on("latency", "Edit").click();
+      await page.waitForSelector("text=Edit latency");
+
+      // Filled in from the copy, which is the half a source scan cannot see:
+      // this is what was typed when Use was pressed, come back round.
+      expect(await page.locator(theEntrysNumber).inputValue()).toBe("2000");
+
+      await page.locator(theEntrysNumber).fill("1500");
+      await page.locator("#edit-required").uncheck();
+      await page.getByRole("button", { name: "Save" }).click();
+
+      await page.waitForSelector("text=is saved");
+      // The list was read again, so the row says what the copy now says.
+      await page.waitForSelector("text=Diagnostic");
+
+      // And opening it again shows the saved value rather than the old one —
+      // which is the whole round trip: the browser wrote it, the API versioned
+      // it, and the list handed it back.
+      await on("latency", "Edit").click();
+      await page.waitForSelector("text=Edit latency");
+      expect(await page.locator(theEntrysNumber).inputValue()).toBe("1500");
+    },
+    SETTLE,
+  );
+
+  it(
+    "says what a switched-off grader keeps before it switches one off",
+    async () => {
+      await page.goto(`${origin}/graders/running`);
+      await page.waitForSelector("text=latency");
+
+      await on("latency", "Switch off").click();
+
+      // The sentence that makes the button pressable: what stops is obvious,
+      // and what stays is the thing somebody is actually worried about.
+      await page.waitForSelector("text=already judged keeps exactly what it said");
+
+      await page.getByRole("button", { name: "Switch it off" }).click();
+      await page.waitForSelector("text=is switched off");
+
+      // Gone from the list, and the copy every project is created with is
+      // still there — only the one that was named stopped judging.
+      expect(await page.locator("table").getByRole("row").count()).toBe(2);
+      await page.waitForSelector("text=expected_behaviors");
+    },
+    SETTLE,
+  );
+});
+
 describe("recovering when a page cannot load", () => {
   it(
     "shows a retry for People and for an invitation lookup",

@@ -12,23 +12,26 @@ import {
 
 /**
  * The running graders, over real HTTP against real Postgres: what a project
- * judges with, and the one act that adds another — pressing **Use** on a
- * library entry.
+ * judges with, the act that adds another — pressing **Use** on a library entry
+ * — and the two that keep pressing Use from being a one-way door.
  *
- * **Two verbs, and the missing ones are the contract.** There is no create
+ * **Four verbs, and what is still missing is the contract.** There is no create
  * taking a type and criteria, because a grader is always a copy *of* something:
  * the entry decides what kind of judgment it is and what the form asks for, and
  * the copy holds the answers. The custom-grader authoring surface the grading
- * effort designed is shelved with this change, and this file is where its
- * absence is checkable.
+ * effort designed stays shelved, and this file is where its absence is
+ * checkable.
  *
- * The facts worth defending here are the two the door cannot get right by
+ * The facts worth defending here are the ones the door cannot get right by
  * accident. **A project answers a grader before anybody has configured one** —
  * it was created holding a copy of `expected_behaviors`, which is what "a first
- * run is judged with zero setup" means at this altitude. And **values are
- * checked against what the entry actually asked for**, so a bound sent to an
- * entry that asks for none, or a measure egma does not compute, is refused here
- * rather than becoming a grader that is `skipped` forever.
+ * run is judged with zero setup" means at this altitude. **Values are checked
+ * against what the entry actually asked for**, so a bound sent to an entry that
+ * asks for none, or a measure egma does not compute, is refused here rather
+ * than becoming a grader that is `skipped` forever — and refused in the same
+ * words whether it arrives on a Use or on an edit, because there is one check
+ * and not two. And **an edit is two acts wearing one verb**: values mint the
+ * next version, live settings do not, and the answer says which happened.
  */
 
 let api: TestApi;
@@ -38,7 +41,7 @@ afterEach(async () => {
 });
 
 function request(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   url: string,
   key: string,
   body?: Record<string, unknown>,
@@ -55,6 +58,21 @@ type Listed = {
   readonly scope: string;
   readonly config: { readonly assertions: readonly unknown[] };
 };
+
+/** A latency copy on the project, which is the one v0 entry that asks anything. */
+async function aLatencyCopy(key: string): Promise<Listed> {
+  const used = await request("POST", "/api/graders", key, {
+    library_id: PREDEFINED_GRADERS.latency,
+    params: { metric: "turn_response_latency", bound: 2000 },
+    name: "Answers inside two seconds",
+    description: "The number the support team argues about",
+  });
+  expect(used.statusCode, JSON.stringify(used.body)).toBe(201);
+  return used.body as unknown as Listed;
+}
+
+/** An id shaped like a grader's that no project ever minted. */
+const NOBODY_HAS_THIS = "grd_01M01MH8KAE8ZB19B0YJ7ZZZZZ";
 
 function itemsOf(answer: Answer): readonly Listed[] {
   return answer.body.items as readonly Listed[];
@@ -374,24 +392,288 @@ describe("pressing Use on a library entry", () => {
   });
 });
 
-describe("the authoring surface that is not here", () => {
+describe("changing a running copy", () => {
   /**
-   * v0 ships a small shelf of graders egma maintains rather than a form asking
-   * a team to design judgment logic on their first day. The routes that would
-   * have edited and deleted a grader are not registered, and this is where that
-   * decision is checkable rather than merely written down.
+   * **The live settings, and none of them re-interprets anything.** Where a
+   * copy applies, whether it can fail a run, how much live traffic it judges
+   * and what it is called change what the project lets a grader do from now on;
+   * they change nothing about a judgment already made. So they are written in
+   * place, the version number stands still, and every verdict already written
+   * still points at the values that decided it.
    */
-  it("answers nothing for an edit or a delete of a grader", async () => {
-    api = await createApi("graders_no_authoring");
+  it("changes where a copy applies and how loudly, without minting a version", async () => {
+    api = await createApi("graders_edit_settings");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const copy = await aLatencyCopy(key);
+
+    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+      name: "Watched while we tune it",
+      required: false,
+      scope: "both",
+      production_sample_rate: 25,
+    });
+
+    expect(edited.statusCode, JSON.stringify(edited.body)).toBe(200);
+    expect(edited.body).toMatchObject({
+      id: copy.id,
+      name: "Watched while we tune it",
+      required: false,
+      scope: "both",
+      production_sample_rate: 25,
+      // Version 1 still: nothing a verdict was decided by moved.
+      version: 1,
+      version_id: (copy as unknown as { version_id: string }).version_id,
+      config: { assertions: [{ metric: "turn_response_latency", bound: 2000 }] },
+    });
+
+    const listed = itemsOf(await request("GET", "/api/graders", key));
+    expect(listed.find((one) => one.id === copy.id)?.required).toBe(false);
+  });
+
+  /**
+   * **A bound is what a verdict is made of, so changing one starts the next
+   * version.** The version behind it is untouched, which is what makes last
+   * week's verdict still mean what it meant — and the version number on this
+   * answer is how a client finds out which of the two things it just did.
+   */
+  it("mints the next version when the filled-in values change", async () => {
+    api = await createApi("graders_edit_values");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const copy = await aLatencyCopy(key);
+
+    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+      params: { metric: "turn_response_latency", bound: 1200 },
+    });
+
+    expect(edited.statusCode, JSON.stringify(edited.body)).toBe(200);
+    expect(edited.body).toMatchObject({
+      version: 2,
+      config: { assertions: [{ metric: "turn_response_latency", bound: 1200 }] },
+      // What the body left out, the copy kept.
+      name: copy.name,
+      required: true,
+      scope: "simulations",
+    });
+    expect(edited.body.version_id).not.toBe(
+      (copy as unknown as { version_id: string }).version_id,
+    );
+  });
+
+  /**
+   * **The same sentence, because there is one check and not two.** An edit's
+   * values go through the code Use's values go through, against the entry this
+   * copy points at, read live — so a bound the entry never asked for is refused
+   * in the same words whichever door it arrived at. Two doors holding two
+   * opinions about what a bound is would be the drift the whole two-level shape
+   * exists to prevent.
+   */
+  it("refuses values the entry never asked for, in the words Use refuses them in", async () => {
+    api = await createApi("graders_edit_same_refusal");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const copy = await aLatencyCopy(key);
+
+    const wrong = { metric: "turn_response_latency", bound: 2000, aggregation: "p90" };
+
+    const used = await request("POST", "/api/graders", key, {
+      library_id: PREDEFINED_GRADERS.latency,
+      params: wrong,
+    });
+    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+      params: wrong,
+    });
+
+    expect(used.statusCode).toBe(422);
+    expect(edited.statusCode, JSON.stringify(edited.body)).toBe(422);
+    expect(String(edited.body.message)).toBe(String(used.body.message));
+    expect(String(edited.body.message)).toContain("aggregation");
+
+    // And nothing was written: the copy still judges by what it judged by.
+    const after = await request("GET", "/api/graders", key);
+    expect(itemsOf(after).find((one) => one.id === copy.id)?.config).toEqual({
+      assertions: [{ metric: "turn_response_latency", bound: 2000 }],
+    });
+  });
+
+  /** The measure rule is the same one door, said the same way, too. */
+  it("refuses a measure egma does not compute, in the words Use refuses it in", async () => {
+    api = await createApi("graders_edit_bad_measure");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const copy = await aLatencyCopy(key);
+
+    const used = await request("POST", "/api/graders", key, {
+      library_id: PREDEFINED_GRADERS.latency,
+      params: { metric: "turn_responze_latency", bound: 2000 },
+    });
+    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+      params: { metric: "turn_responze_latency", bound: 2000 },
+    });
+
+    expect(edited.statusCode, JSON.stringify(edited.body)).toBe(422);
+    expect(String(edited.body.message)).toBe(String(used.body.message));
+  });
+
+  /**
+   * The pointer is the one thing about a copy that cannot move: every version
+   * behind it holds values shaped by the type that pointer decided, so a copy
+   * pointed somewhere else would be a different grader wearing the old one's
+   * history. Refused by name, with the act that does want a second copy.
+   */
+  it("refuses to point a copy at another library entry, and says what to do instead", async () => {
+    api = await createApi("graders_edit_repoint");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const copy = await aLatencyCopy(key);
+
+    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+      library_id: PREDEFINED_GRADERS.expectedBehaviors,
+    });
+
+    expect(edited.statusCode).toBe(400);
+    expect(String(edited.body.message)).toContain("Use");
+  });
+
+  it("refuses a key the body has no business carrying", async () => {
+    api = await createApi("graders_edit_unknown_key");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const copy = await aLatencyCopy(key);
+
+    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+      type: "llm_rubric",
+    });
+
+    expect(edited.statusCode).toBe(400);
+    expect(String(edited.body.message)).toContain('"type"');
+  });
+
+  /**
+   * A grader this credential cannot see reads exactly as one that is not there,
+   * because to this caller those are the same thing.
+   */
+  it("answers a grader this project does not have as one that is not there", async () => {
+    api = await createApi("graders_edit_unknown");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const [only] = itemsOf(await request("GET", "/api/graders", key));
+    const edited = await request("PATCH", `/api/graders/${NOBODY_HAS_THIS}`, key, {
+      required: false,
+    });
+
+    expect(edited.statusCode).toBe(404);
+    expect(String(edited.body.message)).toContain(NOBODY_HAS_THIS);
+  });
+
+  it("is refused to a viewer, per the permission table", async () => {
+    api = await createApi("graders_edit_roles");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const copy = await aLatencyCopy(key);
+    const grace = await colleagueOf(api.app, ada, "grace@acme.example", "viewer");
+
+    const edited = await request("PATCH", `/api/graders/${copy.id}`, grace.secret, {
+      required: false,
+    });
+
+    expect(edited.statusCode).toBe(403);
+  });
+});
+
+describe("switching a running copy off", () => {
+  /**
+   * **Deleting is the switching off, and it is the only one there is.** No
+   * enable flag, no `none` scope: from the moment this returns, nothing the
+   * project runs is judged by the copy — and the answer says when, so a reader
+   * can tell which runs were before it.
+   */
+  it("takes the copy out of the list, and says when it stopped", async () => {
+    api = await createApi("graders_delete");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const copy = await aLatencyCopy(key);
+
+    expect(itemsOf(await request("GET", "/api/graders", key))).toHaveLength(2);
+
+    const removed = await request("DELETE", `/api/graders/${copy.id}`, key);
+
+    expect(removed.statusCode, JSON.stringify(removed.body)).toBe(200);
+    expect(removed.body).toMatchObject({ id: copy.id, name: copy.name });
+    expect(String(removed.body.deleted_at)).not.toBe("");
+
+    const left = itemsOf(await request("GET", "/api/graders", key));
+    expect(left.map((one) => one.id)).not.toContain(copy.id);
+    // The one every project is created with is still judging, because only the
+    // copy that was named was switched off.
+    expect(left).toHaveLength(1);
+  });
+
+  /**
+   * Including that one. Deleting the seeded copy is exactly how a project stops
+   * being judged against its own written-down expectations — there is no other
+   * switch, and the screen says so when the list comes back empty.
+   */
+  it("switches off the copy every project is created with, like any other", async () => {
+    api = await createApi("graders_delete_seeded");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+
+    const [seeded] = itemsOf(await request("GET", "/api/graders", key));
+    if (seeded === undefined) throw new Error("the project has no graders");
+
+    const removed = await request("DELETE", `/api/graders/${seeded.id}`, key);
+
+    expect(removed.statusCode, JSON.stringify(removed.body)).toBe(200);
+    expect(itemsOf(await request("GET", "/api/graders", key))).toHaveLength(0);
+  });
+
+  it("answers a second delete as a grader that is not there", async () => {
+    api = await createApi("graders_delete_twice");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const copy = await aLatencyCopy(key);
+
+    expect((await request("DELETE", `/api/graders/${copy.id}`, key)).statusCode).toBe(
+      200,
+    );
+
+    const again = await request("DELETE", `/api/graders/${copy.id}`, key);
+    expect(again.statusCode).toBe(404);
+    expect(String(again.body.message)).toContain("switched off");
+  });
+
+  it("is refused to a viewer, per the permission table", async () => {
+    api = await createApi("graders_delete_roles");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const copy = await aLatencyCopy(key);
+    const grace = await colleagueOf(api.app, ada, "grace@acme.example", "viewer");
+
+    const removed = await request(
+      "DELETE",
+      `/api/graders/${copy.id}`,
+      grace.secret,
+    );
+
+    expect(removed.statusCode).toBe(403);
+    expect(itemsOf(await request("GET", "/api/graders", key))).toHaveLength(2);
+  });
+
+  it("shows one customer nothing of another's, and switches nothing off there", async () => {
+    api = await createApi("graders_delete_tenants");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const grace = await signUp(api.app, "grace@globex.example", "Globex");
+    const theirs = await projectKeyFor(api.app, ada);
+    const others = await projectKeyFor(api.app, grace);
+
+    const [only] = itemsOf(await request("GET", "/api/graders", theirs));
     if (only === undefined) throw new Error("the project has no graders");
 
-    for (const method of ["PATCH", "DELETE"] as const) {
-      const answered = await ask(api.app, method, `/api/graders/${only.id}`, key);
-      expect(answered.statusCode, method).toBe(404);
-    }
+    const removed = await request("DELETE", `/api/graders/${only.id}`, others);
+
+    expect(removed.statusCode).toBe(404);
+    expect(itemsOf(await request("GET", "/api/graders", theirs))).toHaveLength(1);
   });
 });

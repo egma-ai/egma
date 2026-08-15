@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 import {
   CONFIG,
+  EDIT,
   NOTHING,
   REQUIRED,
   RUNNING,
   RUNNING_COLUMNS,
   SCOPES,
+  SWITCH_OFF,
 } from "../../../lib/grader-running-copy.ts";
 import {
   AppShell,
@@ -19,6 +21,8 @@ import {
   styles,
 } from "../../ui.tsx";
 import { GraderTabs } from "../tabs.tsx";
+import type { Parameter } from "../use-form.tsx";
+import { EditForm, SwitchOffPanel, type Copy } from "./edit-form.tsx";
 
 /**
  * The running graders: the copies this project is actually judged by.
@@ -30,10 +34,18 @@ import { GraderTabs } from "../tabs.tsx";
  * through that pointer rather than shown here, because it lives in exactly one
  * place and this screen is not it.
  *
- * **Read-only, like its sibling, and for a different reason.** There is nothing
- * to author here because the act that makes a row is pressing Use on the
- * library screen. What this page is for is the question a developer actually
- * has: what is judging my project, does it block, and where does it apply.
+ * **Two acts, and they are the ones the shelf cannot do.** Pressing Use over
+ * there makes a copy; changing what that copy judges by and switching it off
+ * are decisions about a grader that already exists, so they belong here. Before
+ * they did, a bound typed too tight was permanent — every run red for ever,
+ * with no way back short of somebody editing the database by hand.
+ *
+ * **The edit form is drawn from the library entry, not from this page.** What a
+ * grader asks for is the entry's own declaration, so this screen reads the
+ * shelf beside the copies and hands each copy its entry's parameters. That is
+ * why there is no measure name and no bound anywhere in this file: a form
+ * written per grader would be a second copy of the platform's declaration,
+ * drifting the first time one changed.
  *
  * **It reads the first page and stops there**, which is honest for a list that
  * starts at one row and grows by however many graders a team switches on. The
@@ -47,55 +59,88 @@ import { GraderTabs } from "../tabs.tsx";
  * be.
  */
 
-type Copy = {
-  readonly id: string;
-  readonly name: string;
-  readonly scope: string;
-  readonly required: boolean;
-  readonly config: { readonly assertions?: readonly unknown[] } | null;
-};
-
 type Answer = {
   readonly items: readonly Copy[];
+};
+
+/** One entry on the shelf, read for the one thing this screen needs off it. */
+type Entry = {
+  readonly id: string;
+  readonly params?: readonly Parameter[];
+};
+
+type Shelf = {
+  readonly items: readonly Entry[];
 };
 
 type State =
   | { status: "loading" }
   | { status: "signed-out" }
   | { status: "failed"; why: string }
-  | { status: "loaded"; rows: readonly Copy[] };
+  | {
+      status: "loaded";
+      rows: readonly Copy[];
+      /** What each entry asks for, by the entry's own id. */
+      asks: ReadonlyMap<string, readonly Parameter[]>;
+    };
+
+/** Which copy has a panel open under the heading, and which panel it is. */
+type Open =
+  | { readonly act: "edit"; readonly copy: Copy }
+  | { readonly act: "switch-off"; readonly copy: Copy }
+  | null;
 
 export default function RunningGradersPage() {
   const [state, setState] = useState<State>({ status: "loading" });
+  const [open, setOpen] = useState<Open>(null);
+  /** What the last act came to, kept after the panel closes so it can be read. */
+  const [said, setSaid] = useState<string | null>(null);
+
+  /**
+   * The copies and the shelf behind them, together.
+   *
+   * Both, because a row cannot be edited without knowing what its entry asks
+   * for — and one state rather than two, because a page that had the copies and
+   * not yet their entries would draw an edit form with no controls in it and
+   * look like a grader that asks nothing.
+   */
+  const read = useCallback(async (): Promise<void> => {
+    try {
+      const [listed, shelf] = await Promise.all([
+        fetch("/api/graders"),
+        fetch("/api/grader-library"),
+      ]);
+
+      if (listed.status === 401 || shelf.status === 401) {
+        setState({ status: "signed-out" });
+        return;
+      }
+      if (!listed.ok || !shelf.ok) {
+        const refused = listed.ok ? shelf : listed;
+        const why = (await refused.json().catch(() => ({}))) as {
+          message?: string;
+        };
+        setState({ status: "failed", why: why.message ?? RUNNING.unreachable });
+        return;
+      }
+
+      const page = (await listed.json()) as Answer;
+      const entries = (await shelf.json()) as Shelf;
+      setState({
+        status: "loaded",
+        rows: page.items,
+        asks: new Map(
+          entries.items.map((entry) => [entry.id, entry.params ?? []] as const),
+        ),
+      });
+    } catch {
+      setState({ status: "failed", why: RUNNING.unreachable });
+    }
+  }, []);
 
   useEffect(() => {
-    let current = true;
-
-    void fetch("/api/graders")
-      .then(async (answer) => {
-        if (!current) return;
-        if (answer.status === 401) {
-          setState({ status: "signed-out" });
-          return;
-        }
-        if (!answer.ok) {
-          const said = (await answer.json().catch(() => ({}))) as {
-            message?: string;
-          };
-          setState({ status: "failed", why: said.message ?? RUNNING.unreachable });
-          return;
-        }
-        const page = (await answer.json()) as Answer;
-        setState({ status: "loaded", rows: page.items });
-      })
-      .catch(() => {
-        if (current) setState({ status: "failed", why: RUNNING.unreachable });
-      });
-
-    return () => {
-      current = false;
-    };
-  }, []);
+    void read();
+  }, [read]);
 
   if (state.status === "signed-out") {
     return (
@@ -108,6 +153,12 @@ export default function RunningGradersPage() {
     );
   }
 
+  const settled = (sentence: string): void => {
+    setOpen(null);
+    setSaid(sentence);
+    void read();
+  };
+
   return (
     <AppShell active="graders">
       <ProductPage wide>
@@ -115,6 +166,52 @@ export default function RunningGradersPage() {
         <GraderTabs active="running" />
         {state.status === "failed" ? <Notice tone="error">{state.why}</Notice> : null}
         {state.status === "loading" ? <Notice>{RUNNING.loading}</Notice> : null}
+
+        {/*
+          What the last act came to, and it stays until the next one. Both
+          sentences say what changed *and* what did not, because the question
+          somebody has after saving a tighter bound or switching a grader off is
+          always about the runs they have already read.
+        */}
+        {said === null ? null : <Notice tone="success">{said}</Notice>}
+
+        {/*
+          The panel, opened on one copy at a time and keyed by it — the Use
+          form's rule, for the Use form's reason. The form's state is *this*
+          copy's answers, and React keeps a component's state across a re-render
+          when only its props change, so opening a second row's form over the
+          first would draw the second grader's controls over the first grader's
+          values.
+        */}
+        {open === null ? null : (
+          <section className={styles.settingsPanel} aria-labelledby="act-title">
+            <h2 id="act-title">
+              {open.act === "edit"
+                ? EDIT.title(open.copy.name)
+                : SWITCH_OFF.title(open.copy.name)}
+            </h2>
+            {open.act === "edit" ? (
+              <EditForm
+                key={`edit-${open.copy.id}`}
+                copy={open.copy}
+                params={
+                  (state.status === "loaded"
+                    ? state.asks.get(open.copy.library_id)
+                    : undefined) ?? []
+                }
+                onCancel={() => setOpen(null)}
+                onSaved={(name) => settled(EDIT.saved(name))}
+              />
+            ) : (
+              <SwitchOffPanel
+                key={`off-${open.copy.id}`}
+                copy={open.copy}
+                onCancel={() => setOpen(null)}
+                onSwitchedOff={(name) => settled(SWITCH_OFF.done(name))}
+              />
+            )}
+          </section>
+        )}
 
         {state.status === "loaded" ? (
           state.rows.length === 0 ? <Notice tone="error">{RUNNING.empty}</Notice> : (
@@ -125,8 +222,8 @@ export default function RunningGradersPage() {
               </div>
               <div className={styles.tableWrap}>
                 <table className={styles.dataTable}>
-                  <thead><tr>{COLUMN_ORDER.map(([heading]) => <th key={heading} scope="col">{heading}</th>)}</tr></thead>
-                  <tbody>{state.rows.map((row) => <tr key={row.id}>{COLUMN_ORDER.map(([heading, fill]) => <td key={heading}><span className={styles.tableCell}>{fill(row)}</span></td>)}</tr>)}</tbody>
+                  <thead><tr>{columnsOf(setOpen).map(([heading]) => <th key={heading} scope="col">{heading}</th>)}</tr></thead>
+                  <tbody>{state.rows.map((row) => <tr key={row.id}>{columnsOf(setOpen).map(([heading, fill]) => <td key={heading}><span className={styles.tableCell}>{fill(row)}</span></td>)}</tr>)}</tbody>
                 </table>
               </div>
               <div className={styles.mobileRows}>
@@ -135,6 +232,7 @@ export default function RunningGradersPage() {
                     <span><span>{scopeOf(row)}</span><span className={styles.muted}>{requiredOf(row)}</span></span>
                     <strong>{row.name}</strong>
                     <p>{configOf(row)}</p>
+                    <Acts copy={row} onOpen={setOpen} />
                   </div>
                 ))}
               </div>
@@ -180,25 +278,68 @@ function configOf(copy: Copy): string {
 }
 
 /**
+ * The two acts on a row, side by side and both opening a panel rather than
+ * doing anything.
+ *
+ * Switching off opens one for the same reason Use does: it says what stops and
+ * what stays before anybody presses the button, and a delete that happened on
+ * the first click would be a button that quietly removed a project's judging.
+ */
+function Acts({
+  copy,
+  onOpen,
+}: {
+  copy: Copy;
+  onOpen: (open: Open) => void;
+}) {
+  return (
+    <span className={styles.buttonRow}>
+      <button
+        className={styles.buttonSecondary}
+        type="button"
+        onClick={() => onOpen({ act: "edit", copy })}
+      >
+        {EDIT.open}
+      </button>
+      <button
+        className={styles.buttonDanger}
+        type="button"
+        onClick={() => onOpen({ act: "switch-off", copy })}
+      >
+        {SWITCH_OFF.open}
+      </button>
+    </span>
+  );
+}
+
+/**
  * The columns, in the order they are shown, each beside what fills it.
  *
  * One list rather than a header row and a body row kept in step by hand — a
  * table whose third heading names its fourth value is a bug nobody sees in a
  * diff. The order is a judgement about scanning: which grader this is, then
- * where it applies, then whether it can fail a run, and what it checks last
- * because it is the widest.
+ * where it applies, then whether it can fail a run, then what it checks because
+ * it is the widest, and the buttons last where a reader's eye ends up.
+ *
+ * A function rather than a constant because the last column presses something,
+ * and what it presses belongs to the page's state rather than to this module.
  */
-const COLUMN_ORDER: readonly (readonly [string, (row: Copy) => ReactNode])[] = [
-  [RUNNING_COLUMNS.name, (row) => <strong>{row.name}</strong>],
-  [RUNNING_COLUMNS.scope, (row) => scopeOf(row)],
-  [RUNNING_COLUMNS.required, (row) => requiredOf(row)],
-  [
-    RUNNING_COLUMNS.config,
-    (row) =>
-      row.config === null ? (
-        <span className={styles.muted}>{NOTHING}</span>
-      ) : (
-        <span>{configOf(row)}</span>
-      ),
-  ],
-];
+function columnsOf(
+  onOpen: (open: Open) => void,
+): readonly (readonly [string, (row: Copy) => ReactNode])[] {
+  return [
+    [RUNNING_COLUMNS.name, (row) => <strong>{row.name}</strong>],
+    [RUNNING_COLUMNS.scope, (row) => scopeOf(row)],
+    [RUNNING_COLUMNS.required, (row) => requiredOf(row)],
+    [
+      RUNNING_COLUMNS.config,
+      (row) =>
+        row.config === null ? (
+          <span className={styles.muted}>{NOTHING}</span>
+        ) : (
+          <span>{configOf(row)}</span>
+        ),
+    ],
+    [RUNNING_COLUMNS.actions, (row) => <Acts copy={row} onOpen={onOpen} />],
+  ];
+}

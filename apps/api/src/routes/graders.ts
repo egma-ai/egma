@@ -1,5 +1,7 @@
 import {
   authorize,
+  deleteGrader,
+  editGrader,
   listGraders,
   NotPermittedError,
   ProjectOutsideOrganizationError,
@@ -14,22 +16,47 @@ import type { FastifyInstance } from "fastify";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
-import { invalid, notPermitted, unprocessable } from "../http/refusals.ts";
+import {
+  invalid,
+  notFound,
+  notPermitted,
+  unprocessable,
+} from "../http/refusals.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
 
 /**
- * The running graders: the copies a project actually judges with, and the one
- * act that makes another — pressing **Use** on a library entry.
+ * The running graders: the copies a project actually judges with, the act that
+ * makes another — pressing **Use** on a library entry — and the two that keep
+ * pressing Use from being a one-way door.
  *
- * **Two verbs, and the missing ones are the product decision.** There is no
- * create taking a type and criteria, because a grader is always a copy *of*
+ * **Four verbs, and what is still missing is the product decision.** There is
+ * no create taking a type and criteria, because a grader is always a copy *of*
  * something: the entry decides what kind of judgment it is and what the form
  * asks for, and the copy holds the answers. The custom-grader authoring surface
- * that the grading effort designed is shelved with this change — the machinery
- * behind it stays, versioning and all, and hosts egma's own two entries — so a
- * team meets a small shelf of graders that already work rather than a blank
- * form on their first day.
+ * that the grading effort designed stays shelved — the machinery behind it
+ * stays, versioning and all, and hosts egma's own two entries — so a team meets
+ * a small shelf of graders that already work rather than a blank form on their
+ * first day.
+ *
+ * **An edit is two different acts wearing one verb, and the difference is
+ * whether anything already judged is being re-interpreted.** A name, a
+ * description, `required`, a scope and a sampling rate say where a copy applies
+ * and how loudly, and none of them changes what any verdict already written
+ * meant — so they are written in place and are true everywhere the moment they
+ * return. The filled-in values are what a judgment is *made of*, so changing
+ * one mints the next version and leaves the one behind it exactly where it was:
+ * last week's verdict still names the values it was decided by. Both rules live
+ * in the factory rather than here, and this door hands the whole body down in
+ * one call so no client has to know which of them it just tripped.
+ *
+ * **Deleting is switching off, and it is the only off switch there is.** There
+ * is no enable flag and no `none` scope: a copy either exists and judges
+ * everything in its scope, or it is deleted and judges nothing from that moment
+ * on. It is a soft delete, and that is not an implementation detail — the rows
+ * it already wrote stay readable and stay interpretable, because their versions
+ * outlive it, so an old run keeps its own meaning rather than quietly losing a
+ * grader's worth of evidence.
  *
  * **A copy's definition never crosses this door.** What a read answers is the
  * pointer, the filled-in values, and where the grader applies. The judge prompt
@@ -49,6 +76,7 @@ export type GraderRoutesOptions = {
 };
 
 export const GRADERS_PATH = "/api/graders";
+export const GRADER_PATH = "/api/graders/:graderId";
 
 type Body = Record<string, unknown>;
 
@@ -69,17 +97,47 @@ const USE_KEYS = [
 ] as const;
 
 /**
+ * What an edit may carry: everything Use takes except the pointer, which is the
+ * one thing about a copy that can never move.
+ */
+const EDIT_KEYS = USE_KEYS.filter((key) => key !== "library_id");
+
+/**
  * The unknown-key gate, the agent group's for the agent group's reason — and
  * with one more of its own here: every key in this body decides what a project
  * is judged by or how loudly, so a typo quietly ignored would be a grader
  * somebody believes they configured and did not.
  */
-function unknownKeyIn(body: Body): string | undefined {
+function unknownKeyIn(
+  body: Body,
+  door: string,
+  keys: readonly string[],
+): string | undefined {
   for (const key of Object.keys(body)) {
-    if ((USE_KEYS as readonly string[]).includes(key)) continue;
-    return `Use takes no key "${key}"; it takes ${USE_KEYS.join(", ")}`;
+    if (keys.includes(key)) continue;
+    return `${door} takes no key "${key}"; it takes ${keys.join(", ")}`;
   }
   return undefined;
+}
+
+/**
+ * The one key an edit refuses in its own words rather than as an unknown one.
+ *
+ * `library_id` is not a key an edit forgot to support — it is the pointer, and
+ * every version behind this copy holds values shaped by the type that pointer
+ * decided. A copy that could be moved to another entry would be a different
+ * grader wearing the old one's history, and its verdicts would name assertion
+ * keys nothing on the new shelf can read. Saying so beats "no such key",
+ * because somebody sending it wants a copy of the other entry and Use makes one.
+ */
+function repointing(body: Body): string | undefined {
+  if (!("library_id" in body)) return undefined;
+  return (
+    "a grader cannot be moved to another library entry: its type came from " +
+    "the entry it is a copy of, and every version behind it holds values that " +
+    "type shapes. Press Use on the entry you want, which makes a second copy " +
+    "and leaves this one's history saying what it always said."
+  );
 }
 
 /**
@@ -107,6 +165,21 @@ function described(one: Grader): Record<string, unknown> {
     created_at: one.createdAt.toISOString(),
     updated_at: one.updatedAt.toISOString(),
   };
+}
+
+/**
+ * What a caller is told about a grader that is not there.
+ *
+ * One sentence for three situations — never made, already switched off, or
+ * somebody else's — because from where this caller stands those are the same
+ * thing, and telling them apart would answer a question about another project.
+ */
+function noSuchGrader(graderId: string): string {
+  return (
+    `${graderId} is not a grader running on this project. It may never have ` +
+    `existed, or it may have been switched off — read the running graders to ` +
+    `see what is judging here now.`
+  );
 }
 
 /** The filled-in values a body sent, or a refusal saying what shape they take. */
@@ -252,7 +325,7 @@ export async function graderRoutes(
     // Everything answerable without reading anything is answered first, so a
     // body that could never be written is refused before it can learn what
     // this project holds.
-    const unknown = unknownKeyIn(body);
+    const unknown = unknownKeyIn(body, "Use", USE_KEYS);
     if (unknown !== undefined) return invalid(reply, unknown);
 
     const libraryId = text(body.library_id);
@@ -293,6 +366,122 @@ export async function graderRoutes(
     });
 
     return reply.code(201).send(described(created));
+  });
+
+  /**
+   * Change a copy: what it judges by, where it applies, and how loudly.
+   *
+   * **One verb for both, and the factory decides which happened.** Sending
+   * values mints the next version, because they are what a verdict was decided
+   * by and last week's has to keep meaning what it meant; sending a scope, a
+   * rate, a name or the `required` flag writes in place, because none of them
+   * re-interprets a judgment already made. A client that had to know which was
+   * which would be holding a second copy of a rule it cannot enforce, so it
+   * sends the body and reads the version number back.
+   *
+   * **`params` is the entry's form filled in, exactly as Use takes it** — the
+   * same key, the same shape, checked against the same entry by the same code.
+   * That is why a bound the entry never asked for is refused here in the words
+   * Use refuses it in, rather than in a second opinion this door invented.
+   *
+   * What the body leaves out, the copy keeps. A grader this credential cannot
+   * see reads exactly as one that is not there, because to this caller those
+   * are the same thing.
+   */
+  app.patch(GRADER_PATH, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const { graderId } = request.params as { graderId: string };
+    const body = (request.body ?? {}) as Body;
+
+    authorize(auth, "author_definitions", {
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+    });
+
+    // Everything answerable without reading anything is answered first, so a
+    // body that could never be written is refused before it can learn what
+    // this project holds.
+    const moved = repointing(body);
+    if (moved !== undefined) return invalid(reply, moved);
+
+    const unknown = unknownKeyIn(body, "an edit", EDIT_KEYS);
+    if (unknown !== undefined) return invalid(reply, unknown);
+
+    const params = paramsIn(body);
+    if ("refusal" in params) return unprocessable(reply, params.refusal);
+
+    const required = requiredIn(body);
+    if ("refusal" in required) return unprocessable(reply, required.refusal);
+
+    const sampleRate = sampleRateIn(body);
+    if ("refusal" in sampleRate) return unprocessable(reply, sampleRate.refusal);
+
+    const acting = await actingIn(auth, given(text(body.project)));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+
+    const edited = await editGrader(acting.auth, graderId, {
+      ...(params.params === undefined ? {} : { params: params.params }),
+      ...(given(text(body.name)) === undefined ? {} : { name: text(body.name) }),
+      // A description is the one field an edit can empty, and `null` is how it
+      // says so — which is a different act from leaving the key out.
+      ...("description" in body
+        ? { description: given(text(body.description)) ?? null }
+        : {}),
+      ...(required.value === undefined ? {} : { required: required.value }),
+      ...(given(text(body.scope)) === undefined
+        ? {}
+        : { scope: text(body.scope) as Grader["scope"] }),
+      ...(sampleRate.value === undefined
+        ? {}
+        : { productionSampleRate: sampleRate.value }),
+    });
+
+    if (edited === undefined) return notFound(reply, noSuchGrader(graderId));
+
+    return reply.send(described(edited));
+  });
+
+  /**
+   * Switch a copy off.
+   *
+   * **Deleting is the switching off**, and it is the only one there is: no
+   * enable flag, no `none` scope. From the moment this returns, nothing this
+   * project runs is judged by the copy — including the expected-behaviors one
+   * every project is created with, whose delete is how a team stops being
+   * judged against its own written-down expectations.
+   *
+   * **And nothing already judged moves.** The row is marked rather than
+   * removed, and its versions are not touched at all, so every verdict it wrote
+   * is still readable and still says which values decided it. An old run keeps
+   * its own meaning, which is the whole reason a soft delete is the right shape
+   * here rather than a tidier one.
+   *
+   * The library entry behind it is **not** released: a switched-off copy still
+   * points at its definition, and that definition has to outlive it for the
+   * verdicts to stay interpretable. Deleting the entry stays refused, which is
+   * what the foreign key underneath says too.
+   */
+  app.delete(GRADER_PATH, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const { graderId } = request.params as { graderId: string };
+    const query = (request.query ?? {}) as Query;
+
+    authorize(auth, "author_definitions", {
+      organizationId: auth.organizationId,
+      projectId: auth.projectId,
+    });
+
+    const acting = await actingIn(auth, given(query.project));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+
+    const removed = await deleteGrader(acting.auth, graderId);
+    if (removed === undefined) return notFound(reply, noSuchGrader(graderId));
+
+    return reply.send({
+      id: removed.id,
+      name: removed.name,
+      deleted_at: removed.deletedAt.toISOString(),
+    });
   });
 
   /**

@@ -203,3 +203,133 @@ describe("getting to the Running-graders screen", () => {
     expect(page).not.toMatch(/state\.status === "loading"[\s\S]*?return <StatePage/);
   });
 });
+
+/**
+ * The two acts this screen owns, and the ones the shelf beside it cannot do.
+ *
+ * Pressing Use makes a copy; changing what that copy judges by and switching it
+ * off are decisions about a grader that already exists. Before this screen had
+ * them, a bound typed too tight was permanent — every run red for ever, with no
+ * way back short of somebody editing the database by hand.
+ */
+describe("changing a running copy and switching one off", () => {
+  /**
+   * A path the page writes to and the config does not forward would be served
+   * by this process, which has no such route, and the screen would read Next's
+   * own 404 as though egma had refused the edit.
+   */
+  it("writes at the copy's own address, which this instance rewrites", async () => {
+    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
+    const form = await readFile(
+      path.join(WEB, "app/graders/running/edit-form.tsx"),
+      "utf8",
+    );
+
+    expect(rewrites).toContain("/api/graders/:path*");
+    expect(form).toContain("`/api/graders/${copy.id}`");
+    expect(form).toContain('method: "PATCH"');
+    expect(form).toContain('method: "DELETE"');
+  });
+
+  /**
+   * **The edit form is the Use form's controls.** What a grader asks for is the
+   * library entry's own declaration, and both forms render that one list
+   * through one component — so this file names no measure and no bound, and a
+   * parameter that learns a new kind of control learns it once. A second
+   * rendering here would be a second reading of the platform's declaration,
+   * drifting the first time one of them was changed.
+   */
+  it("draws its controls from the entry, through the form Use is drawn with", async () => {
+    const form = await readFile(
+      path.join(WEB, "app/graders/running/edit-form.tsx"),
+      "utf8",
+    );
+
+    expect(form).toContain("EntryFields");
+    expect(form).toContain('from "../use-form.tsx"');
+
+    // Not one measure name, nor the parameter names the latency entry happens
+    // to use. The comments are read past on purpose: prose explaining why the
+    // list is not here is the opposite of the list being here.
+    const running = form.replaceAll(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/gu, "");
+    for (const named of [
+      "turn_response_latency",
+      "first_response_latency",
+      "milliseconds",
+      "latency",
+      "metric",
+      "bound",
+    ]) {
+      expect(running, `the form names ${named} itself`).not.toContain(named);
+    }
+  });
+
+  /**
+   * The page needs the shelf as well as the copies: what a copy's form asks for
+   * is its entry's declaration, and a page holding the copies without their
+   * entries would draw an edit form with no controls in it — which reads as a
+   * grader that asks nothing rather than as a page still loading.
+   */
+  it("reads the shelf beside the copies, so a form can be drawn from an entry", async () => {
+    const page = await readFile(
+      path.join(WEB, "app/graders/running/page.tsx"),
+      "utf8",
+    );
+    expect(page).toContain('fetch("/api/grader-library")');
+    expect(page).toContain("library_id");
+  });
+
+  /**
+   * **The delete has to say what stays, not only what stops.**
+   *
+   * Deleting is the off switch — there is no enable flag and no scope that
+   * means nowhere — so the button removes a project's judging, and the fear it
+   * raises is about the runs already read. Every verdict the copy wrote stays
+   * readable because its versions outlive it, and saying so is what makes the
+   * button pressable by somebody whose grader is failing every run.
+   */
+  it("says plainly that what a switched-off grader already judged is unchanged", () => {
+    expect(copy.SWITCH_OFF.stops).toBeTruthy();
+    expect(copy.SWITCH_OFF.keeps.toLowerCase()).toContain("already judged");
+    expect(copy.SWITCH_OFF.done("Latency").toLowerCase()).toContain(
+      "already judged",
+    );
+    // And what pressing it cannot be undone into, since there is no other
+    // switch to put it back with.
+    expect(copy.SWITCH_OFF.again).toContain("Use");
+  });
+
+  /**
+   * An edit is two acts wearing one verb, and only one of them touches what a
+   * verdict was decided by. Somebody who did not know that would read a
+   * tightened bound as a rewriting of history.
+   */
+  it("says that changing a value starts a version and changes nothing already judged", () => {
+    expect(copy.EDIT.lead.toLowerCase()).toContain("version");
+    expect(copy.EDIT.saved("Latency").toLowerCase()).toContain("unchanged");
+  });
+
+  it("says what required means, in both positions", () => {
+    expect(copy.EDIT.requiredOn).toContain("cannot pass");
+    expect(copy.EDIT.requiredOff.toLowerCase()).toContain("diagnostic");
+  });
+
+  /**
+   * The buttons are the copy file's words like every other string on this
+   * screen, so the banned list above reaches them too.
+   */
+  it("is what the page and the form actually render", async () => {
+    const page = await readFile(
+      path.join(WEB, "app/graders/running/page.tsx"),
+      "utf8",
+    );
+    const form = await readFile(
+      path.join(WEB, "app/graders/running/edit-form.tsx"),
+      "utf8",
+    );
+
+    expect(page).toContain("EDIT.open");
+    expect(page).toContain("SWITCH_OFF.open");
+    expect(form).toContain("grader-running-copy.ts");
+  });
+});

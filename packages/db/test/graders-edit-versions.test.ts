@@ -237,6 +237,50 @@ describe("editing what a grader judges by", () => {
   });
 
   /**
+   * **The form filled in once is what a screen sends, and it means what it
+   * means on a Use.** `params` is the entry's questions answered — one set,
+   * which is one assertion — so the door that made a copy and the door that
+   * changes one send the same shape and go through the same check. Anything
+   * else would be a browser page holding its own idea of what a bound is.
+   */
+  it("takes the entry's form filled in, exactly as Use takes it", async () => {
+    const created = await useLibraryEntry(actingAsAcme(), latency);
+
+    const edited = await editGrader(actingAsAcme(), created.id, {
+      params: { metric: "turn_response_latency", bound: 1500 },
+    });
+
+    expect(edited?.version).toBe(2);
+    expect(edited?.config).toEqual(boundedAt(1500));
+
+    // And it is checked against the entry this copy points at, in the entry's
+    // own words — the same refusal Use answers with.
+    await expect(
+      editGrader(actingAsAcme(), created.id, {
+        params: { metric: "turn_response_latency", bound: 1500, aggregation: "p90" },
+      }),
+    ).rejects.toThrow(/does not ask for/);
+  });
+
+  /**
+   * Two names for one thing, so exactly one may be used. Ranking them would
+   * quietly decide which of two lists somebody meant, and the only honest
+   * answer to that is to ask.
+   */
+  it("refuses an edit that says its values twice", async () => {
+    const created = await useLibraryEntry(actingAsAcme(), latency);
+
+    await expect(
+      editGrader(actingAsAcme(), created.id, {
+        params: { metric: "turn_response_latency", bound: 1500 },
+        config: boundedAt(1200),
+      }),
+    ).rejects.toThrow(/once/);
+
+    expect((await getGrader(actingAsAcme(), created.id))?.version).toBe(1);
+  });
+
+  /**
    * The pointer and the type are set at Use time and are not on the change
    * surface at all: every version behind a copy holds values its type shapes, so
    * a copy that could change either would be a different grader wearing the old

@@ -173,6 +173,14 @@ export type Grader = {
  * either would leave the history holding answers to questions this grader no
  * longer asks — a different grader wearing the old one's history. Pressing Use
  * again costs one call and says what actually happened.
+ *
+ * **The values arrive by either of two names, and they mean one thing.**
+ * `params` is the entry's form filled in once — the shape **Use** takes, so a
+ * screen that drew the form to create a copy draws the same form to change it
+ * and sends the same body. `config` is the whole list, which is what a copy
+ * holding more than one assertion needs. Both go through the same check against
+ * the same entry; sending both at once is refused rather than ranked, because a
+ * precedence rule here would decide which of two things somebody meant.
  */
 export type GraderChanges = {
   readonly name?: string;
@@ -180,6 +188,8 @@ export type GraderChanges = {
   readonly required?: boolean;
   readonly scope?: GraderScope;
   readonly productionSampleRate?: number;
+  /** The entry's form filled in once, exactly as **Use** takes it. */
+  readonly params?: Readonly<Record<string, unknown>>;
   readonly config?: GraderConfigInput;
   readonly judgeModel?: JudgeModel | null;
 };
@@ -545,6 +555,52 @@ function measureNamedTwice(
 }
 
 /**
+ * A form filled in once, as the config it becomes.
+ *
+ * **One set of answers is one assertion**, because that is what the form is:
+ * the entry's questions, asked once. It is written here rather than at each
+ * door so that **Use** and an edit cannot come to disagree about what somebody
+ * filling that form in has said — which is the same reason both of them check
+ * what they were given against the entry through `validConfig` and neither
+ * holds an opinion of its own about a bound.
+ */
+function oneFilledInSet(
+  params: Readonly<Record<string, unknown>>,
+): GraderConfigInput {
+  return { assertions: [params] };
+}
+
+/**
+ * A form that asked nothing, filled in.
+ *
+ * **Empty is a complete answer, not an unfinished one**, and this is the shape
+ * a correct expected-behaviors copy keeps forever: its assertions are the
+ * test's own sentences, supplied per test at judging time, so there has never
+ * been anything here for anybody to type.
+ */
+const NOTHING_TO_FILL_IN: GraderConfigInput = { assertions: [] };
+
+/**
+ * The filled-in values an edit is asking for, or nothing where it is asking for
+ * none — which means keep what is stored.
+ *
+ * The two names are one thing said at two grains, so exactly one may be used.
+ * Refusing rather than ranking them: a precedence rule would quietly decide
+ * which of two lists somebody meant, and the only honest answer is to ask.
+ */
+function valuesIn(changes: GraderChanges): GraderConfigInput | undefined {
+  if (changes.params !== undefined && changes.config !== undefined) {
+    throw new UnprocessableInputError(
+      `an edit says a grader's filled-in values once: "params" is the entry's ` +
+        `form filled in, and "config" is the whole list of assertions. Send ` +
+        `whichever fits and not both.`,
+    );
+  }
+  if (changes.params !== undefined) return oneFilledInSet(changes.params);
+  return changes.config;
+}
+
+/**
  * The shape guard on every read. Stored jsonb comes back `unknown`, and a row
  * somebody hand-edited must fail here, loudly and naming itself, rather than
  * leak into a caller as a config that isn't one.
@@ -719,12 +775,12 @@ export async function useLibraryEntry(
 
   const written = await db().transaction(async (tx) => {
     const definition = await definitionOf(tx, auth, input.libraryId);
-    const config = validConfig(definition, {
-      // One filled-in set is one assertion, which is what the form produces.
-      // Nothing at all is an entry that asks nothing, and its copy is born with
-      // an empty list — the shape a correct expected-behaviors copy keeps.
-      assertions: input.params === undefined ? [] : [input.params],
-    });
+    const config = validConfig(
+      definition,
+      input.params === undefined
+        ? NOTHING_TO_FILL_IN
+        : oneFilledInSet(input.params),
+    );
 
     const [identity] = await tx
       .insert(grader)
@@ -852,6 +908,10 @@ export async function editGrader(
     changes.judgeModel === undefined || changes.judgeModel === null
       ? changes.judgeModel
       : validJudgeModel(changes.judgeModel);
+  // Which of the two names carried the values is settled before anything is
+  // read; what those values may hold is the entry's business and is checked
+  // below, inside the transaction, by the code Use goes through.
+  const written = valuesIn(changes);
 
   return db().transaction(async (tx) => {
     const [locked] = await tx
@@ -888,15 +948,12 @@ export async function editGrader(
       currentVersion.id,
     );
 
-    // Omitted means unchanged, and what a given config is checked against is
-    // the entry this copy points at rather than anything the caller said.
+    // Omitted means unchanged, and what given values are checked against is the
+    // entry this copy points at rather than anything the caller said.
     const config =
-      changes.config === undefined
+      written === undefined
         ? stored
-        : validConfig(
-            await definitionOf(tx, auth, current.libraryId),
-            changes.config,
-          );
+        : validConfig(await definitionOf(tx, auth, current.libraryId), written);
     const nextJudgeModel =
       judgeModel === undefined ? storedJudgeModel : judgeModel;
 
@@ -1085,6 +1142,16 @@ export type GraderFacts = {
  * — its versions outlive it so that they stay interpretable — and a diagnostic
  * that somebody switched off must not start failing a run's headline the moment
  * it goes. Whether the copy is still running is not what this question asks.
+ *
+ * That clause became load-bearing the day switching a copy off became something
+ * a person can do from a screen. The two rules it sits between pull opposite
+ * ways: an unresolvable grader is read as **required**, which is the safe
+ * direction for a row nobody can place, and a switched-off copy is perfectly
+ * placeable. Filtering it out here would hand every failing row a diagnostic
+ * ever wrote to the lane that decides — a run that passed last month turning
+ * red because somebody tidied up this morning. Deleting a copy says what judges
+ * from now on and nothing about what a past run meant, and
+ * `apps/grader/test/edited-and-switched-off.test.ts` is where that is pinned.
  *
  * **A copy this cannot see is simply absent**, and every caller reads that
  * absence the safe way: a copy it cannot see is required, and an unresolvable
