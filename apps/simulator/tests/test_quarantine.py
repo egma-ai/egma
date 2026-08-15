@@ -53,6 +53,9 @@ ALLOWED_DEPENDENCIES = {
 SPEECH_PROVIDER_MODULES = (
     "pipecat.services.deepgram.stt",
     "pipecat.services.elevenlabs.tts",
+    "pipecat.services.cartesia.tts",
+    "pipecat.services.openai.stt",
+    "pipecat.services.openai.tts",
     "pipecat.audio.vad.silero",
 )
 """The stock legs a configured deployment gets, and the modules a
@@ -327,6 +330,9 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
             )
             or name.startswith("pipecat.services.deepgram")
             or name.startswith("pipecat.services.elevenlabs")
+            or name.startswith("pipecat.services.cartesia")
+            or name.startswith("pipecat.services.openai.stt")
+            or name.startswith("pipecat.services.openai.tts")
             or name.startswith("pipecat.transports.livekit")
             or name == "pipecat.audio.vad.silero"
         )))

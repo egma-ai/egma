@@ -477,3 +477,83 @@ def test_a_media_backend_nobody_wrote_refuses_at_the_moment_of_dialling():
     with pytest.raises(ValueError) as refusal:
         settled.checked()
     assert "livekitt" in str(refusal.value)
+
+
+def test_the_work_orders_listening_model_replaces_this_containers(
+    a_container, env
+):
+    """The setting that used to have no way down here.
+
+    Every other speech answer was the platform's already; this one lived in
+    each simulator's environment alone, so moving the persona's mouth was a
+    settings page and moving its ears was editing a container and restarting
+    it. It arrives on the work order now, like the rest.
+    """
+    env.setenv("EGMA_SIMULATOR_STT_MODEL", "this-containers-listening-model")
+    config = SimulatorConfig.from_env()
+
+    providers = SpeechProviders.for_simulation(
+        config, PlatformSpeech(stt_model="the-platforms-listening-model")
+    )
+
+    assert providers.stt_model == "the-platforms-listening-model"
+
+
+def test_a_platform_silent_about_the_listening_model_leaves_this_containers(
+    a_container, env
+):
+    env.setenv("EGMA_SIMULATOR_STT_MODEL", "this-containers-listening-model")
+    config = SimulatorConfig.from_env()
+
+    providers = SpeechProviders.for_simulation(config, PlatformSpeech())
+
+    assert providers.stt_model == "this-containers-listening-model"
+
+
+def test_nobody_naming_a_model_leaves_it_for_the_built_leg_to_answer(
+    a_container, env
+):
+    """``None`` here is the whole point: a model name belongs to one
+    provider, so the leg that is really built is the only thing that can
+    say which default applies."""
+    config = SimulatorConfig.from_env()
+
+    providers = SpeechProviders.for_simulation(config, PlatformSpeech())
+
+    assert providers.stt_model is None
+    assert providers.tts_model is None
+    assert providers.tts_voice is None
+
+
+def test_the_work_orders_reasoning_effort_reaches_the_model_call(
+    a_container, env
+):
+    env.setenv("EGMA_SIMULATOR_MODEL_PROVIDER", "openai")
+    env.setenv("EGMA_SIMULATOR_MODEL_NAME", "a-model")
+    env.setenv("EGMA_SIMULATOR_MODEL_API_KEY", "a-key")
+    config = SimulatorConfig.from_env()
+
+    client = build_model_client(
+        config,
+        a_spec_with(
+            PlatformSettings(model=PlatformModel(reasoning_effort="none"))
+        ),
+    )
+
+    assert isinstance(client, OpenAICompatibleModel)
+    assert client._reasoning_effort == "none"
+
+
+def test_nobody_asking_for_reasoning_sends_no_such_field(a_container, env):
+    """Absent has to stay absent on the wire. A model that has never heard
+    of the field refuses a request carrying it, so a default here would
+    narrow which models a deployment can run to the ones egma knew about."""
+    env.setenv("EGMA_SIMULATOR_MODEL_PROVIDER", "openai")
+    env.setenv("EGMA_SIMULATOR_MODEL_NAME", "a-model")
+    env.setenv("EGMA_SIMULATOR_MODEL_API_KEY", "a-key")
+    config = SimulatorConfig.from_env()
+
+    client = build_model_client(config, a_spec_with(PlatformSettings()))
+
+    assert isinstance(client, OpenAICompatibleModel)
+    assert client._reasoning_effort is None

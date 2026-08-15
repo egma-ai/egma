@@ -67,6 +67,8 @@ from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.utils.time import time_now_iso8601
 
 from .config import (
+    DEFAULT_CARTESIA_TTS_MODEL,
+    DEFAULT_REALTIME_STT_MODEL,
     DEFAULT_STT_MODEL,
     DEFAULT_TTS_MODEL,
     DEFAULT_TTS_VOICE,
@@ -112,6 +114,22 @@ refused with ``paid_plan_required``: a default that only works once
 somebody has paid is not a default. A persona is authored for its
 behavior far more often than for its timbre, and one that named no voice
 must still be able to call."""
+
+DEFAULT_CARTESIA_VOICE_ID = "5ee9feff-1265-424a-9d7f-8e4d431a12c7"
+"""The English voice the cartesia mouth speaks with when traits name none.
+
+A voice id belongs to the provider that minted it, so this sits beside
+ElevenLabs' default rather than sharing one constant with it: handing
+either provider the other's identifier is a refusal at the first word.
+See :func:`_voice_from`, which is what keeps a persona authored for one
+provider from silencing itself on a deployment running another."""
+
+CARTESIA_SPEED_RANGE = (0.6, 1.5)
+"""What the cartesia mouth accepts as a speed multiplier, its own numbers.
+
+A persona's speed was authored against whichever provider it was written
+for, and one outside this is clamped rather than sent — see
+:func:`_cartesia_mouth`."""
 
 LISTENING_READY_SECONDS = 15.0
 """How long a listening leg may take to become able to hear.
@@ -448,9 +466,18 @@ class SpeechProviders:
     :meth:`for_simulation`.
     """
 
-    stt_model: str = DEFAULT_STT_MODEL
-    tts_model: str = DEFAULT_TTS_MODEL
-    tts_voice: str = DEFAULT_TTS_VOICE
+    stt_model: str | None = None
+    tts_model: str | None = None
+    tts_voice: str | None = None
+    """What somebody named for the built leg to ask for, or ``None``.
+
+    **``None`` means nobody named one, and the leg answers with its own
+    provider's default** — never with another provider's. These three
+    fields cross providers and a model name does not: a deployment that
+    moved its mouth to cartesia and named no model would otherwise ask
+    cartesia for an openai model, and be refused at the first word. Each
+    builder below therefore holds its own fallback, and what is here is
+    only ever what a person actually said."""
 
     @classmethod
     def for_simulation(
@@ -478,7 +505,7 @@ class SpeechProviders:
             vad=said.vad_provider or config.vad_provider,
             stt_key=said.stt_key or config.key_for(stt),
             tts_key=said.tts_key or config.key_for(tts),
-            stt_model=config.stt_model,
+            stt_model=said.stt_model or config.stt_model,
             tts_model=said.tts_model or config.tts_model,
             tts_voice=said.tts_voice or config.tts_voice,
         )
@@ -645,6 +672,8 @@ def _mouth(
 ) -> tuple[FrameProcessor, PersonaVoice, tuple[Callable[[], Awaitable[None]], ...]]:
     if providers.tts == "openai":
         return _openai_mouth(providers, voice, sample_rate_hz)
+    if providers.tts == "cartesia":
+        return _cartesia_mouth(providers, voice, sample_rate_hz)
     if providers.tts != "elevenlabs":
         return ScriptedTTS(voice=voice, sample_rate_hz=sample_rate_hz), voice, ()
 
@@ -691,6 +720,8 @@ def _ears(
 ) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None]:
     if providers.stt == "openai":
         return _openai_ears(providers, sample_rate_hz), None
+    if providers.stt == "openai_realtime":
+        return _openai_realtime_ears(providers, sample_rate_hz)
     if providers.stt != "deepgram":
         return ScriptedSTT(sample_rate_hz=sample_rate_hz), None
 
@@ -717,6 +748,79 @@ def _ears(
         await connection_ready.wait()
 
     return leg, connected
+
+
+def _cartesia_mouth(
+    providers: SpeechProviders, voice: PersonaVoice, sample_rate_hz: int
+) -> tuple[FrameProcessor, PersonaVoice, tuple[Callable[[], Awaitable[None]], ...]]:
+    """The persona's voice, through Cartesia, at the band the line carries.
+
+    **Three lines rather than the openai mouth's thirty, and the reason is
+    worth writing down: this provider is told the band and honors it.** It
+    is asked for raw 16-bit signed little-endian mono at the line's own
+    rate, so what arrives is already what the pipeline was assembled for
+    and there is nothing to convert and nothing to mislabel. The openai
+    mouth needs :class:`_BandCorrection` because its endpoint returns one
+    fixed band whatever it is asked for; that is a fact about that wire,
+    not a habit of this module.
+
+    The voice is a Cartesia identifier and belongs to Cartesia, so a
+    persona authored for another provider's voice speaks with the default
+    rather than failing on a timbre — :func:`_voice_from` again, on the
+    same terms as every other mouth here.
+    """
+    from pipecat.services.cartesia.tts import CartesiaTTSService, GenerationConfig
+    from pipecat.services.tts_service import TextAggregationMode
+
+    if not providers.tts_key:
+        raise SpeechFault("the cartesia speaking leg was chosen without a key")
+
+    spoken_with = _voice_from(
+        voice,
+        provider="cartesia",
+        default_voice_id=providers.tts_voice or DEFAULT_CARTESIA_VOICE_ID,
+    )
+    settings = CartesiaTTSService.Settings(
+        model=providers.tts_model or DEFAULT_CARTESIA_TTS_MODEL,
+        voice=spoken_with.voice_id,
+    )
+    if spoken_with.speed is not None:
+        # **Speed rides this provider's own block, not a flat field.**
+        # Assigning `settings.speed` here would land on a dataclass that
+        # has no such field, be carried nowhere, and leave a persona
+        # authored to speak quickly speaking at exactly the default with
+        # nothing said about it.
+        #
+        # Clamped rather than passed through, because the accepted range
+        # is this provider's and a persona's speed was authored against
+        # whichever provider it was written for. A refused request would
+        # fail a whole simulation over a timbre, which is the outcome
+        # `_voice_from` exists to avoid one line above.
+        wanted = spoken_with.speed
+        allowed = min(max(wanted, CARTESIA_SPEED_RANGE[0]), CARTESIA_SPEED_RANGE[1])
+        if allowed != wanted:
+            logger.info(
+                "the persona's speed of %s is outside what cartesia accepts; "
+                "speaking at %s instead",
+                wanted,
+                allowed,
+            )
+        settings.generation_config = GenerationConfig(speed=allowed)
+
+    leg = CartesiaTTSService(
+        api_key=providers.tts_key,
+        sample_rate=sample_rate_hz,
+        encoding="pcm_s16le",
+        container="raw",
+        settings=settings,
+        # One persona turn is one whole thing to say, so it goes over in
+        # one piece rather than a sentence at a time — the same choice the
+        # elevenlabs mouth makes above, for the same reason: the default
+        # waits for sentence-ending punctuation and adds that wait to
+        # every sentence of every turn.
+        text_aggregation_mode=TextAggregationMode.TOKEN,
+    )
+    return leg, spoken_with, ()
 
 
 # -- The openai pair, and the band it really speaks at ------------------------
@@ -755,10 +859,12 @@ def _openai_mouth(
         raise SpeechFault("the openai speaking leg was chosen without a key")
 
     spoken_with = _voice_from(
-        voice, provider="openai", default_voice_id=providers.tts_voice
+        voice,
+        provider="openai",
+        default_voice_id=providers.tts_voice or DEFAULT_TTS_VOICE,
     )
     settings = OpenAITTSService.Settings(
-        model=providers.tts_model, voice=spoken_with.voice_id
+        model=providers.tts_model or DEFAULT_TTS_MODEL, voice=spoken_with.voice_id
     )
     if spoken_with.speed is not None:
         settings.speed = spoken_with.speed
@@ -799,8 +905,100 @@ def _openai_ears(
     return OpenAISTTService(
         api_key=providers.stt_key,
         sample_rate=sample_rate_hz,
-        settings=OpenAISTTService.Settings(model=providers.stt_model),
+        settings=OpenAISTTService.Settings(
+            model=providers.stt_model or DEFAULT_STT_MODEL
+        ),
     )
+
+
+def _openai_realtime_ears(
+    providers: SpeechProviders, sample_rate_hz: int
+) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None]:
+    """What the agent said, transcribed while they are still saying it.
+
+    **The same account as the segmented leg above, and a different
+    transport.** That one posts a finished recording of a turn and waits;
+    this one holds a socket open and transcribes as the audio arrives. On
+    a phone line the difference is the whole of the listening latency: the
+    segmented leg cannot begin until the agent stops talking, so the
+    length of every agent turn is added to that turn's own delay before
+    the persona can even start thinking about a reply. A caller who worked
+    that way would be one nobody has ever spoken to.
+
+    **Turn boundaries stay egma's, not the provider's.** The service is
+    built in its local-VAD mode, so the detector that decides where a turn
+    ended is the same :class:`~egma_simulator.conductor._AgentEar` that
+    stamps the record's sample positions — one reading of the line, used
+    for both. Server-side detection would be a second opinion arriving on
+    a different clock, and the transcript and the timings would then
+    disagree about when the agent stopped talking. The ear sits directly
+    in front of this leg in the pipeline and pushes the frame it commits
+    on, so the two are wired together by the assembly order.
+
+    The band is the provider's own — its socket takes 24 kHz and nothing
+    else — and the service resamples what it is handed, so nothing here
+    has to correct a band the way the speaking leg does.
+    """
+    from pipecat.services.openai.stt import OpenAIRealtimeSTTService
+
+    if not providers.stt_key:
+        raise SpeechFault(
+            "the openai_realtime listening leg was chosen without a key"
+        )
+
+    leg = OpenAIRealtimeSTTService(
+        api_key=providers.stt_key,
+        sample_rate=sample_rate_hz,
+        # False is this service's word for "the detector is in the
+        # pipeline, not on the server". Named rather than left to the
+        # default, because a release changing it would move where a turn
+        # ends without moving anything in this repository.
+        turn_detection=False,
+        settings=OpenAIRealtimeSTTService.Settings(
+            model=providers.stt_model or DEFAULT_REALTIME_STT_MODEL
+        ),
+    )
+
+    opened = asyncio.Event()
+
+    @leg.event_handler("on_connected")
+    async def _opened(_leg: object) -> None:
+        opened.set()
+
+    async def connected() -> None:
+        # **Two gates, because an open socket is not yet able to hear.**
+        # The service opens the connection and only then asks the provider
+        # to configure a transcription session; audio handed over in
+        # between is sent to a session that does not exist yet, and
+        # `run_stt` does not hold it back. The first thing a voice
+        # simulation does is hand this leg the agent's greeting, so
+        # without the second gate the first turn of a real call would
+        # simply be missing — the failure LISTENING_READY_SECONDS exists
+        # for, and the one the deepgram leg waits out the same way.
+        #
+        # The first gate is the service's own public event. The second
+        # reads a private flag, exactly as the deepgram leg does and for
+        # the same reason: there is no public way to ask, and a pipecat
+        # release that renames it must be noticed here, loudly, rather
+        # than by first turns quietly going missing.
+        await opened.wait()
+        if not hasattr(leg, "_session_ready"):
+            raise SpeechFault(
+                "this pipecat release no longer says when the openai "
+                "realtime leg's transcription session is ready; a turn "
+                "spoken before it is would be lost"
+            )
+        # Polled rather than awaited, and the linter is right that an event
+        # would be better: the service registers `on_connected`,
+        # `on_disconnected` and `on_connection_error`, and none of them
+        # fires when the transcription session becomes configured. A flag
+        # is all this release offers, so a flag is what this reads. The
+        # caller bounds the whole wait — see LISTENING_READY_SECONDS — so a
+        # session that never becomes ready is a refusal rather than a hang.
+        while not leg._session_ready:  # noqa: ASYNC110
+            await asyncio.sleep(0.05)
+
+    return leg, connected
 
 
 class _BandCorrection(FrameProcessor):
