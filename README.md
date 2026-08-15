@@ -17,12 +17,30 @@ laptop that is often the same person, and the two directories are still
 separate, because one platform serves many repositories.
 
 ```bash
+cp .env.example .env      # then fill in the seven this command cannot make for you
 npx @egma/cli self-host up
 ```
 
 That starts the whole platform and prints the address an agent repository
 points at. Nobody runs a migration step, because there isn't one — the API
 applies its migrations while it boots.
+
+**The first step is not optional, and the deployment says so rather than
+guessing.** Ten values have no default anywhere, and `.env.example` marks every
+one REQUIRED. Three of them you never type — `egma self-host up` generates the
+media server's key and secret, and sets `EGMA_BASE_URL` to the address it
+prints. The other seven are yours: the key that seals every credential and
+setting you store, the secret that signs your sessions, the token a simulator
+claims work with, and the object store's two credential pairs. `openssl` makes
+each in a line, and `.env.example` gives the line.
+
+They lost their defaults because a default was the wrong answer. Each used to
+fall back to a value written in this repository, which every reader of it
+holds — so a deployment could seal its provider keys with a published key, sign
+its sessions with a published secret, and answer a claim for anybody who had
+read the source, and nothing anywhere said so. A start missing one now stops
+with that variable's name and how to make one, before a single container is
+created.
 
 The first `up` in a workspace also **generates the credential egma's media
 server, its simulator and its SIP gateway authenticate each other with**, and
@@ -42,14 +60,18 @@ platform's own database rather than in a file beside it, so a plain
 clone all bring the platform back configured. Nothing has to be set up again.
 
 **What a bare `docker compose up` does still lose is the media server's key and
-secret.** They are in `.egma-platform/platform.env`, nothing points compose at
-that file, and a container reads that pair when it is *created* — so it cannot
-come from the platform's database. The pair has no default anywhere, deliberately,
-so the media server refuses to start rather than run on a credential published in
-this repository. **That takes the simulator with it**, because the simulator
-waits for a healthy media server, and you are left with no simulator at all
-rather than merely no phone. `egma self-host up` reads the file and hands the
-pair over, which is why it is the way to start this platform.
+secret, and the address this platform answers as.** The first two are in
+`.egma-platform/platform.env`, nothing points compose at that file, and a
+container reads that pair when it is *created* — so it cannot come from the
+platform's database. The pair has no default anywhere, deliberately, so a
+deployment never runs on a credential published in this repository. `egma
+self-host up` reads the file, hands the pair over, and sets `EGMA_BASE_URL` to
+the address it prints, which is why it is the way to start this platform.
+
+Drive compose yourself and you supply those three, in `.env` like the rest.
+**Compose refuses and names the one it is missing** — it does not start a media
+server with no password and leave you with a simulator that waits for ever on a
+health check nothing will pass, which is what an empty value used to do.
 
 There is a second, smaller difference. `egma self-host up` waits for the
 platform to answer for itself, tells you what to type next, and tries once more
@@ -141,9 +163,18 @@ the container health checks poll.
 Ports, the two stores' credentials and the settings below come from the
 environment; see `.env.example` for the names and their defaults.
 
+**The division there is worth knowing.** What the deployment creates for itself
+— the two stores' own users and databases, every port, every bind — has a
+working default, so a self-hoster who sets none of them gets exactly the
+deployment this page documents. What the deployment *cannot* invent has no
+default at all: its own secrets, and its own address. Those are the ten marked
+REQUIRED in `.env.example`, and a start missing one of them is refused by name.
+Per-container tuning keeps its defaults too, because how many simulations one
+simulator takes at once is a property of your machine rather than of egma.
+
 **`EGMA_AUTH_SECRET` signs session cookies and the API refuses to start without
-one.** Compose supplies a development default so that `docker compose up` works
-out of the box. Change it before anybody else can reach your instance.
+one.** It has no default: one written into this repository is one every reader
+of it can mint a session with. `openssl rand -base64 32` makes one.
 
 **`EGMA_BASE_URL` is the whole address people reach this instance at, and
 nothing more than that** — scheme, host and port. It is what the pages, the
@@ -195,10 +226,13 @@ with a player that does nothing.
 **The store is published to this machine and no further**, and opening it is a
 decision rather than a default. What answers on that port is not only the
 recordings: it is the store's admin surface and its root credential, which can
-list, replace and delete every recording you hold — and this repository ships a
-development default for that credential, so on `0.0.0.0` a `docker compose up`
-on shared wifi hands every recording to the room, to read and to overwrite. A
-recording is evidence, and evidence somebody else can replace is not evidence.
+list, replace and delete every recording you hold — so on `0.0.0.0` a
+`docker compose up` on shared wifi hands every recording to the room, to read
+and to overwrite. A recording is evidence, and evidence somebody else can
+replace is not evidence. This repository used to ship a development default for
+that credential, which made the same sentence true on the machine's own network
+too; it has none now, and a deployment that states no credential of its own is
+refused at start.
 Loopback costs the default deployment nothing, because the default assumes the
 browser is on this machine. When it is not — a server, a colleague — set
 `EGMA_S3_BIND=0.0.0.0` and point `EGMA_BLOB_PUBLIC_URL` at the address those
@@ -221,9 +255,8 @@ an `amazonaws.com` address without one rather than signing everything for
 **`EGMA_SIMULATOR_SERVICE_TOKEN` is what the simulator shows the API to claim
 work, and the API refuses to start without one.** The answers to a claim carry
 your live provider credentials, and port 3100 is published on the host, so the
-check is always on. Compose supplies one development default to both
-containers so they match out of the box. Change it — one line in `.env` covers
-both — before anybody else can reach your instance:
+check is always on and there is no default. Both containers read the same
+variable, so one line in `.env` covers both and the two halves always match:
 `echo "egma_st_$(openssl rand -hex 32)"` makes one.
 
 Email is optional, and this is load-bearing rather than a convenience. See
@@ -602,6 +635,14 @@ database of its own in whichever store it uses and drops it afterwards, so
 `pnpm test` needs credentials that may create databases. `pnpm db:up` starts
 both; point `TEST_DATABASE_URL` and `TEST_CLICKHOUSE_URL` somewhere else if you
 would rather use your own.
+
+**Contributing costs you no `.env`.** The stores' own users, databases and
+ports keep their defaults, so a fresh checkout runs `pnpm db:up` and then
+`pnpm test`. The deployment's REQUIRED secrets are a different matter — running
+the platform needs them, and starting two stores does not — so `pnpm db:up`
+hands Compose a placeholder for each and neither container ever reads one. See
+`packages/db/test/support/start-stores.ts`, which explains why that wrapper
+exists at all.
 
 The object store is real for the same reason and asks you for nothing. The
 handful of tests that need one start their own MinIO container, on a port of

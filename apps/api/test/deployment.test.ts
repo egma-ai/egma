@@ -159,10 +159,15 @@ describe("the API's deployment story", () => {
     // The one port in this file whose default bind is a security decision.
     // What answers on it is the store's admin surface and its *root*
     // credential — which can list, replace and delete every recording a
-    // deployment holds — and the development default for that credential is
-    // written in this repository. Bound to 0.0.0.0, `docker compose up` on a
-    // shared network hands every customer's recording to the room, to read and
-    // to overwrite. This product calls a recording evidence.
+    // deployment holds. Bound to 0.0.0.0, `docker compose up` on a shared
+    // network offers every customer's recording to the room, to read and to
+    // overwrite. This product calls a recording evidence.
+    //
+    // That credential no longer has a default written in this repository, so
+    // the wide bind is no longer a hole anybody can walk through from reading
+    // the source. The loopback default stays, because the two are one pair: a
+    // password is one mistake away from a wide port, and closing the port by
+    // default is the half that costs nothing.
     //
     // Held as a test rather than as the comment beside it, because a comment
     // does not close a port. The publishing itself is required — a browser has

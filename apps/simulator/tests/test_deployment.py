@@ -300,6 +300,14 @@ def test_no_development_media_credential_is_left_in_the_deployment_description()
     default is left in the files a self-hoster copies, and that all three
     containers read the same two variables, so no two of them can end up
     holding different halves of one password.
+
+    **The form this pair is read in changed once the bootstrap work landed.**
+    It used to be asserted as the silent-empty `${VAR:-}` — no default, which
+    was the whole of the fix at the time — and an empty value still started
+    the media server with no password and took the simulator down with it,
+    naming neither variable. It is the required `${VAR:?…}` now, so Compose
+    refuses and says which of the two is missing. The rest of the bootstrap
+    set is held to the same form below.
     """
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     example = (ROOT / ".env.example").read_text(encoding="utf-8")
@@ -316,17 +324,234 @@ def test_no_development_media_credential_is_left_in_the_deployment_description()
         )
 
     for name in MEDIA_CREDENTIAL:
-        read = re.findall(rf"\$\{{{name}(:-[^}}]*)?\}}", compose)
+        read = interpolations(compose, name)
         assert len(read) == 3, (
             f"docker-compose.yml reads {name} {len(read)} time(s); the media "
             "server, the simulator and the SIP gateway all read it, and one "
             "of them left out is one container holding a different password"
         )
-        assert set(read) == {":-"}, (
-            f"{name} has a default in docker-compose.yml: {sorted(set(read))}. "
-            "This pair is generated per workspace and has no default; any "
-            "value written here is a credential the whole world already has"
+        assert set(read) == {":?"}, (
+            f"{name} does not use the required form in docker-compose.yml: "
+            f"{sorted(set(read))}. This pair is generated per workspace and "
+            "has no default anywhere; a value written here is a credential the "
+            "whole world already has, and an empty one is a media server that "
+            "starts on no password and a simulator that never starts at all"
         )
+
+
+REQUIRED_IN_THE_ENVIRONMENT = {
+    "EGMA_ENCRYPTION_KEY": (
+        "seals every stored credential and every platform setting. A default "
+        "is a deployment sealed with a key printed in a public repository, "
+        "which is not sealed"
+    ),
+    "EGMA_AUTH_SECRET": (
+        "signs browser sessions. A default is every reader of this repository "
+        "able to mint one"
+    ),
+    "EGMA_SIMULATOR_SERVICE_TOKEN": (
+        "is what a simulator shows to claim work, and a claim answer carries a "
+        "customer's live credentials to whoever holds it"
+    ),
+    "EGMA_LIVEKIT_API_KEY": "is half the password egma's own parts hold",
+    "EGMA_LIVEKIT_API_SECRET": "is the other half",
+    "EGMA_S3_ACCESS_KEY_ID": (
+        "opens the store every recording lives in, with rights to replace one"
+    ),
+    "EGMA_S3_SECRET_ACCESS_KEY": "is that credential's secret half",
+    "EGMA_S3_READ_ACCESS_KEY_ID": (
+        "is what playback links are signed with, and a leak of it reads every "
+        "recording a deployment holds"
+    ),
+    "EGMA_S3_READ_SECRET_ACCESS_KEY": "is that credential's secret half",
+    "EGMA_BASE_URL": (
+        "is the address this platform answers as, and every agent repository "
+        "binds to what it says"
+    ),
+}
+"""The bootstrap set: what a deployment must state before it may start.
+
+Each of these is a secret the deployment cannot invent, or the address it
+announces itself as. **Not one of them may have a default**, because a
+default here is a value every reader of this repository already holds — the
+finding that took the media pair's default away, one file wider.
+
+They are the required `${VAR:?…}` form, so an absent one stops Compose with
+the variable's name and what to do about it, rather than starting a platform
+that looks healthy and is not.
+
+What is deliberately **not** here is anything the deployment creates for
+itself. The stores' own users and databases, every port and every bind are
+values this file chooses and then uses consistently — a self-hoster who sets
+none of them gets the deployment the README documents, and the two binds
+default to loopback because that is a security decision this file makes
+rather than one it asks for. Per-container tuning is not here either, for
+the reason the spec gives: how many simulations one simulator takes at once
+is a property of the host, not of the deployment.
+
+**A store address is missing from this list on purpose, and is not
+unguarded.** `DATABASE_URL` and `CLICKHOUSE_URL` are what the API and the
+grader actually read, and this file builds each of them out of the store it
+starts beside them — so under Compose the address of a container this file
+creates cannot go missing. Both processes refuse to start without one and
+name it, which is what covers every other way of running them: a bare
+process, an override, somebody's managed Postgres. See the API's own
+configuration tests.
+"""
+
+MAY_BE_ABSENT = {
+    # The platform's own settings. They are seeded into the platform's store
+    # on boot for anything it does not already hold, and a platform holding
+    # none of them starts and reports `setup required` naming each one —
+    # which is the whole difference this effort made. Requiring them here
+    # would put readiness back behind carrier paperwork.
+    "EGMA_PERSONA_MODEL_PROVIDER": "seeded",
+    "EGMA_PERSONA_MODEL": "seeded",
+    "EGMA_PERSONA_MODEL_API_KEY": "seeded",
+    "EGMA_PERSONA_STT_PROVIDER": "seeded",
+    "EGMA_PERSONA_STT_API_KEY": "seeded",
+    "EGMA_PERSONA_TTS_PROVIDER": "seeded",
+    "EGMA_PERSONA_TTS_API_KEY": "seeded",
+    "EGMA_PERSONA_TTS_MODEL": "seeded",
+    "EGMA_PERSONA_TTS_VOICE": "seeded",
+    "EGMA_PERSONA_VAD_PROVIDER": "seeded",
+    "EGMA_MEDIA_BACKEND": "seeded",
+    "EGMA_PHONE_TRUNK_ADDRESS": "seeded",
+    "EGMA_PHONE_SOURCE_NUMBER": "seeded",
+    "EGMA_PHONE_TRUNK_USERNAME": "seeded",
+    "EGMA_PHONE_TRUNK_PASSWORD": "seeded",
+    # The default judge, which is a project's rather than the deployment's.
+    # All three or none, and none is an ordinary deployment: the
+    # deterministic graders judge for free either way.
+    "EGMA_JUDGE_PROVIDER": "a judge belongs to the project that chose it",
+    "EGMA_JUDGE_MODEL": "a judge belongs to the project that chose it",
+    "EGMA_JUDGE_API_KEY": "a judge belongs to the project that chose it",
+    # Mail, which is optional and load-bearing in being optional: with none,
+    # an invitation hands its link back to whoever sent it.
+    "EGMA_SMTP_URL": "optional by design",
+    "EGMA_MAIL_FROM": "optional by design",
+    # Per-container tuning. The spec puts these out of scope by name: how many
+    # simulations one simulator takes at once and how often the grader sweeps
+    # are properties of the host, not of the deployment.
+    "EGMA_SIMULATOR_CLAIMANT": "per-container tuning",
+    "EGMA_SIMULATOR_HEARTBEAT_SECONDS": "per-container tuning",
+    "EGMA_SIMULATOR_CLAIM_WAIT_SECONDS": "per-container tuning",
+    "EGMA_SIMULATOR_REPORT_DEADLINE_SECONDS": "per-container tuning",
+    "EGMA_GRADER_CLAIMANT": "per-container tuning",
+    "EGMA_GRADER_HEARTBEAT_SECONDS": "per-container tuning",
+    "EGMA_GRADER_LEASE_SECONDS": "per-container tuning",
+    "EGMA_GRADER_SWEEP_SECONDS": "per-container tuning",
+    "EGMA_GRADER_TRACE_IDLE_SECONDS": "per-container tuning",
+    # Facts about the network a container sits on rather than about the
+    # deployment, and each one's empty value is a real answer: egma's own
+    # default endpoint, egma's own default model, an address the server works
+    # out for itself.
+    "EGMA_SIMULATOR_MODEL_BASE_URL": "a property of this container's network",
+    "EGMA_SIMULATOR_STT_MODEL": "empty means egma's own default",
+    "EGMA_LIVEKIT_ADVERTISE_IP": "empty is right for every ordinary deployment",
+    "EGMA_LIVEKIT_SIP_EXTERNAL_IP": "empty means ask a STUN server",
+    # Empty is right for the MinIO this file runs, which ignores regions; the
+    # API refuses to start pointed at Amazon's own S3 without one.
+    "EGMA_S3_REGION": "empty is right for the store this file runs",
+}
+"""Every variable the deployment description may leave empty, and why.
+
+**This is the list the guard below is really about.** A variable written
+`${VAR:-}` is absent and empty at once, and nothing says so: the container
+starts, the health check passes, and the failure arrives minutes later as a
+provider or carrier refusal naming nothing about configuration. That was the
+original failure, and every setting in the deployment was written that way.
+
+So an empty default is now a decision somebody records here rather than a
+shape somebody reaches for. Each name above is one the platform, a project or
+the host answers for instead — never one a deployment needs in order to run.
+"""
+
+
+def interpolations(text: str, name: str) -> list[str]:
+    """How each `${NAME…}` in a compose file is written, in order.
+
+    One of `:-` (a default, silent when the default is empty), `:?` (required,
+    and the message after it is what Compose prints), or `}` for the bare
+    form. Enough to tell the three apart, which is the whole question here.
+    """
+    return re.findall(rf"\$\{{{re.escape(name)}(:-|:\?|\}})", text)
+
+
+@pytest.mark.parametrize("name", sorted(REQUIRED_IN_THE_ENVIRONMENT))
+def test_a_bootstrap_variable_refuses_to_start_the_platform_when_absent(name):
+    """The change that closes the original failure, held in the file it lives in.
+
+    A deployment started without one of these does not start at all, and
+    Compose names the variable and what to do about it. Before this, every one
+    of them had a default — a published development value, or nothing — so a
+    platform started any way but through the CLI came up hollow, reported
+    itself ready, and failed minutes later on the first simulation.
+    """
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    forms = interpolations(compose, name)
+    assert forms, (
+        f"docker-compose.yml never reads {name}, so no container can be given "
+        f"it: it {REQUIRED_IN_THE_ENVIRONMENT[name]}"
+    )
+    wrong = sorted({form for form in set(forms) if form != ":?"})
+    assert not wrong, (
+        f"{name} is read as {wrong} in docker-compose.yml rather than in the "
+        f"required ${{{name}:?…}} form. It {REQUIRED_IN_THE_ENVIRONMENT[name]}, "
+        "so a deployment that does not state it must be refused at start with "
+        "the variable's name — not started hollow and failed later by a "
+        "provider that names nothing about configuration"
+    )
+    for message in re.findall(rf"\$\{{{re.escape(name)}:\?([^}}]*)\}}", compose):
+        assert message.strip(), (
+            f"{name} is required with no message, so all a self-hoster is told "
+            "is the variable's name. Say what it is for and how to make one"
+        )
+
+
+def test_no_variable_in_the_deployment_description_has_a_silent_empty_default():
+    """The regression this whole seam exists for: a new bootstrap variable
+    written `${VAR:-}`.
+
+    That form is why the original failure was silent. It makes an absent
+    setting an empty setting, and an empty setting starts every container,
+    passes every health check, and reports the platform ready — so the first
+    anybody hears of it is a carrier refusal minutes later that names nothing
+    about configuration.
+
+    The guard is deliberately in this direction. Asserting that the ten
+    required variables are still required catches somebody undoing this work,
+    which is the unlikely half; nobody would notice a *new* variable arriving
+    with an empty default, which is exactly how this failure was built the
+    first time. So every empty default in the file has to be one of the ones
+    `MAY_BE_ABSENT` explains, and a name that is not there fails until
+    somebody writes down why the platform can run without it.
+    """
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    hollow = set(re.findall(r"\$\{([A-Z0-9_]+):-\}", compose))
+    unexplained = sorted(hollow - set(MAY_BE_ABSENT))
+    assert not unexplained, (
+        f"docker-compose.yml gives {unexplained} a silent empty default. An "
+        "absent one of those is an empty one, and nothing says so — every "
+        "container starts, every health check passes, and the platform reports "
+        "itself ready. Use the required ${VAR:?…} form and add it to "
+        "REQUIRED_IN_THE_ENVIRONMENT, or say in MAY_BE_ABSENT who answers for "
+        "it instead: the platform's own store, a project, or the host."
+    )
+
+
+def test_nothing_is_excused_that_no_longer_needs_excusing():
+    """The allow-list above tells a story about the file, and a story about a
+    variable that has moved on is a story nobody checks."""
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    hollow = set(re.findall(r"\$\{([A-Z0-9_]+):-\}", compose))
+    stale = sorted(set(MAY_BE_ABSENT) - hollow)
+    assert not stale, (
+        f"MAY_BE_ABSENT excuses {stale}, which docker-compose.yml no longer "
+        "leaves empty. Drop them, so the list stays the list of live decisions"
+    )
+    both = sorted(set(MAY_BE_ABSENT) & set(REQUIRED_IN_THE_ENVIRONMENT))
+    assert not both, f"{both} is called required and optional at once"
 
 
 OVERLAY_VARIABLE = re.compile(r"\$\{(EGMA_(?:LIVEKIT|WORKBENCH)_[A-Z0-9_]+)")

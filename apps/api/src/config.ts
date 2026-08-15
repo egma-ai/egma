@@ -75,8 +75,10 @@ export type Config = {
    * service will not start: the claim answers carry customers' live provider
    * credentials, port 3100 is published on the host, and a claim door that
    * quietly served whoever asked would hand those credentials to the LAN.
-   * The compose file has a development default on the `EGMA_AUTH_SECRET`
-   * pattern, so `docker compose up` still works with zero setup.
+   * The compose file has no default for it, on the `EGMA_AUTH_SECRET` pattern:
+   * a token written into a public repository is a token every reader of it
+   * holds, so a deployment that states none is refused at start by name rather
+   * than started with a claim door the world already has the key to.
    */
   readonly simulatorServiceToken: string;
   /**
