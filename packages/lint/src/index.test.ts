@@ -485,3 +485,78 @@ describe("this repository", () => {
     expect(manifest.scripts?.build).toContain("lint");
   });
 });
+
+/**
+ * A package this repository publishes may not import one it never publishes.
+ *
+ * `apps/cli` ships its source compiled rather than bundled, so an import
+ * written in `src` is still an import in the file `npx @egma/cli` runs. A
+ * `private: true` workspace package is not on npm for it to resolve, so the
+ * command installs, starts, and fails at the first line that needs it.
+ *
+ * This shipped once and the build caught it — but only because nothing had
+ * built that package first, so the module was missing at build time too. The
+ * natural repair for *that* error is to add a project reference, which makes
+ * the build pass and ships the crash. Hence a rule rather than a memory.
+ */
+describe("a published package importing one that is never published", () => {
+  async function workspace(): Promise<void> {
+    await write(
+      "packages/ids/package.json",
+      JSON.stringify({ name: "@egma/ids", private: true }),
+    );
+    await write(
+      "packages/wire/package.json",
+      JSON.stringify({ name: "@egma/wire", version: "1.2.3" }),
+    );
+  }
+
+  it("fails the build, and says what the reader would otherwise find out from a user", async () => {
+    await workspace();
+    await write(
+      "apps/cli/src/platform/runs.ts",
+      'import { newId } from "@egma/ids";\nexport const key = newId("run");\n',
+    );
+
+    const violations = await check(root);
+
+    expect(rules(violations)).toEqual(["no-private-package-in-a-published-one"]);
+    expect(violations[0]?.file).toBe("apps/cli/src/platform/runs.ts");
+    expect(violations[0]?.detail).toContain("never publishes");
+  });
+
+  it("catches a deep import of the same package", async () => {
+    await workspace();
+    await write(
+      "apps/cli/src/a.ts",
+      'import { newId } from "@egma/ids/mint.ts";\nexport { newId };\n',
+    );
+
+    expect(rules(await check(root))).toEqual([
+      "no-private-package-in-a-published-one",
+    ]);
+  });
+
+  it("allows a workspace package that is published", async () => {
+    await workspace();
+    await write(
+      "apps/cli/src/a.ts",
+      'import { ask } from "@egma/wire";\nexport { ask };\n',
+    );
+
+    expect(rules(await check(root))).toEqual([]);
+  });
+
+  it("leaves the private package alone everywhere this repository runs its own code", async () => {
+    await workspace();
+    // The API and the tests are this repository's own, installed from this
+    // repository. Only what is published has to stand on its own.
+    await write("apps/api/src/a.ts", 'import { newId } from "@egma/ids";\nexport { newId };\n');
+    await write(
+      "apps/cli/test/a.test.ts",
+      'import { newId } from "@egma/ids";\nexport { newId };\n',
+    );
+
+    expect(rules(await check(root))).toEqual([]);
+  });
+});
