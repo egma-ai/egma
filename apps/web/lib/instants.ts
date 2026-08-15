@@ -12,11 +12,3 @@ export function asDay(instant: string): string {
   const at = Date.parse(instant);
   return Number.isNaN(at) ? instant : new Date(at).toISOString().slice(0, 10);
 }
-
-/** The moment something happened, to the second, for a detail page. */
-export function asInstant(instant: string): string {
-  const at = Date.parse(instant);
-  return Number.isNaN(at)
-    ? instant
-    : `${new Date(at).toISOString().slice(0, 19).replace("T", " ")} UTC`;
-}

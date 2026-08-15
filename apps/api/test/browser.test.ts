@@ -306,11 +306,12 @@ describe("adding a colleague, with no mail configured", () => {
       // everybody else sees, and the control that would change data is
       // disabled rather than removed.
       //
-      // Waiting on the organization first, so this is his role and not the
-      // shell's cautious default while the session read is still in flight.
-      const hisSidebar = bob.locator("aside");
-      await expect.poll(() => hisSidebar.innerText()).toMatch(/acme/i);
-      expect(await hisSidebar.innerText()).toMatch(/view only/i);
+      // No waiting on anything else first. The shell claims no role until the
+      // session read answers — `components.test.tsx` holds that promise — so
+      // `View only` appearing here can only be Bob's actual role.
+      await expect
+        .poll(() => bob.locator("aside").innerText())
+        .toMatch(/view only/i);
 
       // Disabled for real: not a link he can follow, not focusable, and a
       // forced click goes nowhere. A control that looked disabled and still
@@ -750,31 +751,35 @@ describe("the list of what an organization recorded", () => {
   );
 
   /**
-   * The project is in the address and in the request, and nowhere else.
+   * Two tabs, two projects, and this is the only part of the project-context
+   * change that genuinely needs a browser.
    *
-   * This is the whole of what makes two tabs on two projects work, what makes a
-   * copied link reopen the project it was copied from, and what makes Back and
-   * Forward mean something. It is proved with two independent tabs because one
-   * tab could pass while a shared browser-wide choice quietly decided for both.
+   * **Everything else about the selector moved out.** Typing to filter, Enter
+   * to choose, Escape returning focus, `push` rather than `replace` so that
+   * Back means something, and the absence page a foreign project answers with
+   * are all in `apps/web/test/components.test.tsx`, where each costs
+   * milliseconds and none of them needs a database. What no fast test can
+   * reach is two *independent browser contexts*, each holding the same session
+   * and each looking at a different project — because one tab would pass while
+   * a browser-wide choice quietly decided for both.
    */
   it(
     "keeps two tabs on two projects, each reading its own",
     async () => {
-      // A second project for Acme, so that there is something to switch to.
-      const outboundId = newId("prj");
+      // A second project for Acme, so that there is something to differ about.
+      const outbound = newId("prj");
       await instance.database.sql(
         `insert into project (id, organization_id, name, slug)
            select $1, id, 'Outbound', 'outbound' from organization
             where slug = 'acme'`,
-        [outboundId],
+        [outbound],
       );
-      const outbound = { id: outboundId };
 
       await page.goto(`${origin}/`);
       await page.waitForURL(/\/projects\/prj_[^/]+\/agents$/);
       const first = /\/projects\/(prj_[^/]+)\//.exec(page.url())?.[1];
       expect(first).toBeDefined();
-      expect(first).not.toBe(outbound.id);
+      expect(first).not.toBe(outbound);
 
       // A second tab, opened on the other project by its address alone, with
       // this person's own session.
@@ -782,7 +787,7 @@ describe("the list of what an organization recorded", () => {
       await second.addCookies(await page.context().cookies());
       const other = await second.newPage();
       other.setDefaultTimeout(30_000);
-      await other.goto(`${origin}/projects/${outbound.id}/agents`);
+      await other.goto(`${origin}/projects/${outbound}/agents`);
       const otherSelector = other.locator(
         'aside button[aria-label^="Organization"]',
       );
@@ -790,7 +795,8 @@ describe("the list of what an organization recorded", () => {
       await expect.poll(() => otherSelector.innerText()).toContain("Outbound");
 
       // And the first tab did not move. Nothing about opening the second one
-      // changed which project the first one is in.
+      // changed which project the first one is in, and its own read is still
+      // its own project's.
       expect(page.url()).toContain(`/projects/${first}/agents`);
       await expect
         .poll(() =>
@@ -798,40 +804,41 @@ describe("the list of what an organization recorded", () => {
         )
         .toContain("Default");
 
-      // Choosing from the selector changes the address, which is what Back then
-      // undoes. Done entirely from the keyboard: opening puts focus in the
-      // search field, typing narrows the list, and Enter takes the one left.
-      const here = page.locator('aside button[aria-label^="Organization"]');
-      await here.focus();
-      await page.keyboard.press("Enter");
-      await page.keyboard.type("outb");
-      await page.keyboard.press("Enter");
-      await page.waitForURL(new RegExp(`/projects/${outbound.id}/agents$`));
-      await page.goBack();
-      await page.waitForURL(new RegExp(`/projects/${first}/agents$`));
-
-      // And Escape leaves a menu opened by accident, with focus back where it
-      // was rather than lost inside a panel that is no longer there.
-      await here.focus();
-      await page.keyboard.press("Enter");
-      await page.waitForSelector('[role="menu"]');
-      await page.keyboard.press("Escape");
-      expect(await page.locator('[role="menu"]').count()).toBe(0);
-      expect(
-        await page.evaluate(
-          "document.activeElement && document.activeElement.getAttribute('aria-label')",
-        ),
-      ).toMatch(/^Organization/);
-
-      // A project of another organization is an absence, in the API's own
-      // words, with a way back to one this membership holds.
-      await page.goto(`${origin}/projects/prj_01ELSEWHERES0MEB0DYELSE/agents`);
-      await page.waitForSelector("text=Not available here");
-      expect(await page.innerText("main")).toContain(
-        "available to this organization",
-      );
-
       await second.close();
+    },
+    SETTLE,
+  );
+
+  /**
+   * The window control is dressed as this product's own rather than as
+   * whatever the browser ships.
+   *
+   * Asserted through `getComputedStyle` in a real Chrome, because that is the
+   * only thing that can say whether the rule applied. A regex over
+   * `globals.css` proves a line was typed, not that a browser honoured it —
+   * and `appearance: base-select` is exactly the kind of rule a browser can
+   * decline.
+   */
+  it(
+    "dresses the window control as this product's own",
+    async () => {
+      await page.goto(`${origin}/traces`);
+      await page.waitForSelector("#window");
+
+      expect(
+        await page.locator("#window").evaluate((element) => {
+          const styleOf = Reflect.get(globalThis, "getComputedStyle") as
+            (target: unknown) => { readonly appearance: string };
+          return styleOf(element).appearance;
+        }),
+      ).toBe("base-select");
+      expect(
+        await page.locator("#window").evaluate((element) => {
+          const styleOf = Reflect.get(globalThis, "getComputedStyle") as
+            (target: unknown) => { readonly alignItems: string };
+          return styleOf(element).alignItems;
+        }),
+      ).toBe("center");
     },
     SETTLE,
   );

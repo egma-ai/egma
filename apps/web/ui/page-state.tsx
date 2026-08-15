@@ -19,7 +19,7 @@ import { Button } from "./controls.tsx";
 
 export type StateTone = "quiet" | "plain" | "bad";
 
-export function PageState({
+function PageState({
   tone = "plain",
   title,
   lead,

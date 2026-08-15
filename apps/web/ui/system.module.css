@@ -136,26 +136,16 @@
   background: var(--surface-soft);
 }
 
-@media (max-width: 900px) {
-  .shell {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .sidebar {
-    display: none;
-  }
-
-  .topbar {
-    display: flex;
-  }
-}
-
 /* ------------------------------------------------------------------- page */
 
 .page {
   width: 100%;
   max-width: var(--page-max);
   padding: var(--space-6) var(--page-gutter) var(--space-8);
+}
+
+.pageWide {
+  max-width: var(--page-max-wide);
 }
 
 .pageHeader {
@@ -766,7 +756,28 @@
   white-space: nowrap;
 }
 
+/*
+ * The one breakpoint, and the only `@media` in this file.
+ *
+ * It cannot be a token — custom properties do not exist when a media query is
+ * evaluated — so it is a constant, written once. Everything that changes when
+ * the shell stops being two columns changes here: the sidebar gives way to a
+ * top bar and a drawer, and every table becomes the list built from the same
+ * column definitions.
+ */
 @media (max-width: 900px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .topbar {
+    display: flex;
+  }
+
   .tableWrap {
     display: none;
   }

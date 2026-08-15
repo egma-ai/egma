@@ -180,7 +180,7 @@ export default function TranscriptPage({
 
   return (
     <AppShell>
-      <ProductPage>
+      <ProductPage wide>
         <Link className={styles.backLink} href="/traces">← {DETAIL.back}</Link>
         <header className={styles.detailHeader}>
           <div>

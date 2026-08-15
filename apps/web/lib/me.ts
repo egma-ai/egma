@@ -69,11 +69,6 @@ export function firstProjectOf(me: Me): Project | undefined {
   return me.projects[0];
 }
 
-/** The project with this id, when the membership reaches one. */
-export function projectOf(me: Me, projectId: string): Project | undefined {
-  return me.projects.find((project) => project.id === projectId);
-}
-
 /**
  * The projects a typed query leaves. Name and slug both, because a person who
  * knows a project by the word in its address should not have to know its

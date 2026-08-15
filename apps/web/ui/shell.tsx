@@ -139,18 +139,31 @@ function Navigation({
   );
 }
 
+/**
+ * Who is signed in, and — while nobody has answered that yet — the fact that
+ * nobody has answered it yet.
+ *
+ * **Three states, because there are three.** A session read that is still in
+ * flight is not the same as one that came back with nothing, and neither is the
+ * same as somebody. Collapsing the first two into "Signed in" tells a person
+ * something egma does not know.
+ */
 function AccountMenu({
   me,
+  settled,
   role,
   placement,
 }: {
   readonly me: Me | null;
-  readonly role: Role;
+  readonly settled: boolean;
+  /** Null until the session read says. Never guessed. */
+  readonly role: Role | null;
   readonly placement: "above" | "below";
 }) {
   const [signingOut, setSigningOut] = useState(false);
   const email = me?.user.email ?? "";
-  const initial = email.trim().slice(0, 1).toUpperCase() || "E";
+  const standing = me !== null ? email : settled ? "Session unavailable" : "Checking your session…";
+  const initial = me !== null ? (email.trim().slice(0, 1).toUpperCase() || "E") : "·";
 
   async function signOut(): Promise<void> {
     setSigningOut(true);
@@ -164,7 +177,7 @@ function AccountMenu({
 
   return (
     <Menu
-      label={`Account ${email}. Open the account menu`}
+      label={`Account ${standing}. Open the account menu`}
       triggerClassName={styles.account}
       openClassName={styles.accountOpen}
       placement={placement}
@@ -174,17 +187,19 @@ function AccountMenu({
             {initial}
           </span>
           <span className={styles.accountText}>
-            <span className={styles.accountEmail}>{email || "Signed in"}</span>
-            <span className={styles.accountRole}>
-              {canAuthor(role) ? role : VIEW_ONLY}
-            </span>
+            <span className={styles.accountEmail}>{standing}</span>
+            {role === null ? null : (
+              <span className={styles.accountRole}>
+                {canAuthor(role) ? role : VIEW_ONLY}
+              </span>
+            )}
           </span>
         </>
       }
     >
       {() => (
         <>
-          <MenuLabel>{email}</MenuLabel>
+          <MenuLabel>{standing}</MenuLabel>
           <MenuItem href="/members">Organization settings</MenuItem>
           <MenuDivider />
           <ThemeItem />
@@ -248,7 +263,14 @@ export function AppShell({
   // The fallback, and the only one left: a page that has not been converted to
   // explicit project context still has to draw navigation somewhere.
   const shown = named ?? projects[0]?.id ?? null;
-  const role = me === null ? "viewer" : roleOf(me);
+  /**
+   * **Null until the session read answers, and never `viewer` in the meantime.**
+   * A cautious default reads as a fact: every admin would be shown the
+   * `View only` badge on every page load, and told that their role cannot do
+   * things it can. Not knowing is its own answer, and the shell shows no claim
+   * at all while it holds.
+   */
+  const role = me === null ? null : roleOf(me);
   const organization = me === null ? undefined : organizationOf(me);
 
   const selector = (compact: boolean) => (
@@ -272,8 +294,15 @@ export function AppShell({
         {selector(false)}
         {shown === null ? null : <Navigation projectId={shown} pathname={pathname} />}
         <div className={styles.sidebarFoot}>
-          {canAuthor(role) ? null : <Badge title="Your role can read, not author">{VIEW_ONLY}</Badge>}
-          <AccountMenu me={me} role={role} placement="above" />
+          {role !== null && !canAuthor(role) ? (
+            <Badge title="Your role can read, not author">{VIEW_ONLY}</Badge>
+          ) : null}
+          <AccountMenu
+            me={me}
+            settled={session.settled}
+            role={role}
+            placement="above"
+          />
         </div>
       </aside>
 
@@ -290,8 +319,13 @@ export function AppShell({
           </button>
           {selector(true)}
           <span className={styles.topbarSpacer} />
-          {canAuthor(role) ? null : <Badge>{VIEW_ONLY}</Badge>}
-          <AccountMenu me={me} role={role} placement="below" />
+          {role !== null && !canAuthor(role) ? <Badge>{VIEW_ONLY}</Badge> : null}
+          <AccountMenu
+            me={me}
+            settled={session.settled}
+            role={role}
+            placement="below"
+          />
         </header>
 
         {drawer && shown !== null ? (
@@ -311,8 +345,26 @@ export function AppShell({
   );
 }
 
-export function ProductPage({ children }: { readonly children: ReactNode }) {
-  return <main className={styles.page}>{children}</main>;
+/**
+ * The page itself.
+ *
+ * `wide` is for a page whose subject is wide by nature — a transcript beside
+ * the timing of what happened during it, a run beside its simulations. It is a
+ * different maximum and not a different layout, so a page asks for room rather
+ * than styling itself.
+ */
+export function ProductPage({
+  wide = false,
+  children,
+}: {
+  readonly wide?: boolean;
+  readonly children: ReactNode;
+}) {
+  return (
+    <main className={`${styles.page} ${wide ? styles.pageWide : ""}`}>
+      {children}
+    </main>
+  );
 }
 
 export function PageHeader({

@@ -5,6 +5,9 @@ import { defineConfig } from "vitest/config";
 const resolve = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
 export default defineConfig({
+  // The web application's own tsconfig says `jsx: preserve`, because Next does
+  // the transform. Nothing does it here, so the component tests say who.
+  esbuild: { jsx: "automatic" },
   resolve: {
     alias: {
       "@egma/ids": resolve("./packages/ids/src/index.ts"),
@@ -28,6 +31,7 @@ export default defineConfig({
       "apps/api/test/**/*.test.ts",
       "apps/grader/test/**/*.test.ts",
       "apps/web/test/**/*.test.ts",
+      "apps/web/test/**/*.test.tsx",
       "apps/cli/test/**/*.test.ts",
     ],
     // The API logs a line per request, and a test run is thousands of them.

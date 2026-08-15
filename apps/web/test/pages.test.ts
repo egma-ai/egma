@@ -345,6 +345,9 @@ describe("coming back after signing in", () => {
     expect(DEFAULT_SIGNED_IN_PATH).toBe("/");
     for (const page of [signIn, signup, invite]) {
       expect(page).toContain("DEFAULT_SIGNED_IN_PATH");
+      // Through the constant, never by typing the address. The entrance is
+      // going to stop being the root the day somebody gives it a better one.
+      expect(page).not.toContain('window.location.assign("/")');
     }
   });
 

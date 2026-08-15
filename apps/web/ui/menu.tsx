@@ -30,6 +30,16 @@ import styles from "./system.module.css";
  * An item marked `data-menu-focus-first` takes focus when the panel opens. The
  * selector's search field uses it, which is what makes typing to filter work
  * without anybody reaching for the field first.
+ *
+ * **A panel holding a text field is not a `menu`.** `role="menu"` promises a
+ * list of commands, and neither ARIA nor a screen reader's menu mode expects a
+ * textbox inside one. A panel that has something to type in is a `dialog`
+ * holding ordinary controls; a panel that is only commands stays a `menu`.
+ * That is `panelRole`, and it is why `MenuItem` can leave its role off.
+ *
+ * **Home and End belong to the caret while somebody is typing.** Stealing them
+ * to jump to the ends of the list means the ends of the *text* cannot be
+ * reached, which is a worse trade than the one it buys.
  */
 
 export type MenuProps = {
@@ -40,9 +50,16 @@ export type MenuProps = {
   readonly openClassName?: string;
   /** Panels in a footer open upwards; panels at the top open downwards. */
   readonly placement?: "below" | "above";
+  /** `dialog` for a panel with a field in it; `menu` for commands alone. */
+  readonly panelRole?: "menu" | "dialog";
   readonly panelClassName?: string;
   readonly children: (close: () => void) => ReactNode;
 };
+
+/** Whether the caret is somewhere Home and End already mean something. */
+function typing(element: Element | null): boolean {
+  return element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement;
+}
 
 /** The focusable items inside a panel, in the order they are drawn. */
 function itemsIn(panel: HTMLElement | null): readonly HTMLElement[] {
@@ -56,6 +73,7 @@ export function Menu({
   triggerClassName,
   openClassName,
   placement = "below",
+  panelRole = "menu",
   panelClassName,
   children,
 }: MenuProps) {
@@ -114,6 +132,7 @@ export function Menu({
 
     if (event.key === "ArrowDown") move(here + 1);
     else if (event.key === "ArrowUp") move(here - 1);
+    else if (typing(document.activeElement)) return;
     else if (event.key === "Home") move(0);
     else if (event.key === "End") move(items.length - 1);
   }
@@ -129,7 +148,7 @@ export function Menu({
         className={`${triggerClassName ?? styles.menuItem} ${open ? (openClassName ?? "") : ""}`}
         ref={buttonRef}
         type="button"
-        aria-haspopup="menu"
+        aria-haspopup={panelRole}
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         aria-label={label}
@@ -142,7 +161,7 @@ export function Menu({
           className={`${styles.menuPanel} ${placement === "above" ? styles.menuAbove : styles.menuBelow} ${panelClassName ?? ""}`}
           id={panelId}
           ref={panelRef}
-          role="menu"
+          role={panelRole}
           aria-label={label}
         >
           {children(() => close(true))}
@@ -158,17 +177,20 @@ export function MenuItem({
   onClick,
   disabled,
   selected,
+  /** Left off inside a `dialog` panel, where `menuitem` would not be valid. */
+  role = "menuitem",
   children,
 }: {
   readonly href?: string;
   readonly onClick?: () => void;
   readonly disabled?: boolean;
   readonly selected?: boolean;
+  readonly role?: "menuitem" | "none";
   readonly children: ReactNode;
 }) {
   const shared = {
     className: styles.menuItem,
-    role: "menuitem" as const,
+    ...(role === "none" ? {} : { role }),
     "data-menu-item": "",
     ...(selected === undefined ? {} : { "aria-current": selected }),
   };

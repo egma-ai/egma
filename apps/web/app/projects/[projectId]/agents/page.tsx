@@ -75,7 +75,9 @@ const COLUMNS: readonly Column<ListedAgent>[] = [
 
 function Agents({ projectId }: { readonly projectId: string }) {
   const { me } = useShellSession();
-  const role = me === null ? "viewer" : roleOf(me);
+  // Null until the session read answers. A page that guessed would tell an
+  // admin their role cannot do something it can, on every load.
+  const role = me === null ? null : roleOf(me);
   const { answer, reload } = useProjectRead<AgentPage>(AGENTS_PATH, projectId);
 
   // Pages fetched after the first, kept beside it rather than folded into it,
@@ -99,22 +101,28 @@ function Agents({ projectId }: { readonly projectId: string }) {
    *
    * It is disabled for the same reason on a project this organization does not
    * hold: there is nothing to register an agent in.
+   *
+   * **While the role is unknown there is no control at all.** A disabled one
+   * would have to say why, and every sentence it could say would be a claim
+   * about somebody egma has not identified yet.
    */
-  const mayRegister = canAuthor(role) && answer?.status !== "missing";
-  const whyNot = canAuthor(role)
-    ? "There is no project here to register an agent in."
-    : `Your ${role} role cannot register agents. Ask an organization admin to change your role.`;
+  const mayRegister = role !== null && canAuthor(role) && answer?.status !== "missing";
+  const whyNot =
+    role !== null && canAuthor(role)
+      ? "There is no project here to register an agent in."
+      : `Your ${String(role)} role cannot register agents. Ask an organization admin to change your role.`;
 
-  const register = (weight: "strong" | "quiet") => (
-    <ButtonLink
-      href={projectPath(projectId, "agents", "new")}
-      weight={weight}
-      disabled={!mayRegister}
-      why={mayRegister ? undefined : whyNot}
-    >
-      Register agent
-    </ButtonLink>
-  );
+  const register = (weight: "strong" | "quiet") =>
+    role === null ? undefined : (
+      <ButtonLink
+        href={projectPath(projectId, "agents", "new")}
+        weight={weight}
+        disabled={!mayRegister}
+        why={mayRegister ? undefined : whyNot}
+      >
+        Register agent
+      </ButtonLink>
+    );
 
   const header = (
     <PageHeader

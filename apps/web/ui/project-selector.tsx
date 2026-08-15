@@ -69,6 +69,8 @@ export function ProjectSelector({
       label={`Organization ${organizationName}, project ${projectName}. Choose a project`}
       triggerClassName={`${styles.selector} ${compact ? styles.selectorCompact : ""}`}
       openClassName={styles.selectorOpen}
+      // A panel with a field to type in, so a dialog rather than a menu.
+      panelRole="dialog"
       trigger={
         <>
           <span className={styles.selectorText}>
@@ -108,6 +110,7 @@ export function ProjectSelector({
               shown.map((project) => (
                 <MenuItem
                   key={project.id}
+                  role="none"
                   selected={project.id === projectId}
                   onClick={() => choose(project, close)}
                 >

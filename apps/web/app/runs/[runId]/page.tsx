@@ -180,7 +180,7 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
 
   return (
     <AppShell>
-      <ProductPage>
+      <ProductPage wide>
         <Link className={styles.backLink} href="/traces">← Transcripts</Link>
 
         <header className={styles.detailHeader}>

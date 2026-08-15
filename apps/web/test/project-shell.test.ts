@@ -6,7 +6,6 @@ import { answerFor, PROJECT_OUTSIDE_ORGANIZATION, unreachable } from "../lib/api
 import {
   firstProjectOf,
   organizationOf,
-  projectOf,
   projectsMatching,
   roleOf,
   type Me,
@@ -24,7 +23,7 @@ import {
   projectPath,
   sectionIn,
 } from "../lib/project-context.ts";
-import { canAdminister, canAuthor, roleFrom } from "../lib/roles.ts";
+import { canAuthor, roleFrom } from "../lib/roles.ts";
 
 /**
  * The decisions the product shell makes for itself: which project a tab is in,
@@ -150,12 +149,6 @@ describe("what a role is offered", () => {
     expect(canAuthor("viewer")).toBe(false);
   });
 
-  it("keeps organization administration to admins", () => {
-    expect(canAdminister("admin")).toBe(true);
-    expect(canAdminister("member")).toBe(false);
-    expect(canAdminister("viewer")).toBe(false);
-  });
-
   /**
    * A role nobody recognizes reads as the least of them. The server is the
    * boundary either way, so the worst a wrong guess can do here is offer too
@@ -173,8 +166,6 @@ describe("the organization and project control", () => {
   it("has an organization to name, and the projects to choose between", () => {
     expect(organizationOf(ADA)?.name).toBe("Acme");
     expect(firstProjectOf(ADA)?.id).toBe("prj_1");
-    expect(projectOf(ADA, "prj_2")?.name).toBe("Outbound");
-    expect(projectOf(ADA, "prj_9")).toBeUndefined();
   });
 
   /**

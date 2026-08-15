@@ -234,7 +234,7 @@ export default function TranscriptsPage() {
 
   return (
     <AppShell>
-      <ProductPage>
+      <ProductPage wide>
         <PageHeader eyebrow="Current project" title={LIST.title} lead={LIST.lead} action={chooser} />
         {state.status === "failed" ? <Notice tone="error">{state.why}</Notice> : null}
         {state.status === "loading" ? <Notice>{LIST.loading}</Notice> : null}

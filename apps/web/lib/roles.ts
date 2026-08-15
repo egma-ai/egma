@@ -30,11 +30,6 @@ export function canAuthor(role: Role): boolean {
   return role === "member" || role === "admin";
 }
 
-/** Manages the organization itself: members, invitations, projects, custody. */
-export function canAdminister(role: Role): boolean {
-  return role === "admin";
-}
-
 /**
  * The badge a read-only member sees. Small, and worn by the person rather than
  * by each control, so a page is not filled with disabled buttons explaining

@@ -61,11 +61,19 @@
   --topbar-height: 44px;
   --page-gutter: var(--space-6);
   --page-max: 1280px;
+  /* Pages whose subject is wide by nature: a transcript beside its timing. */
+  --page-max-wide: 1440px;
 
   /* Depth, for the two things that float: a menu and a dialog. */
   --shadow-menu: 0 10px 30px rgb(0 0 0 / 0.14);
   --shadow-dialog: 0 24px 60px rgb(0 0 0 / 0.22);
-
-  /* Where the compact shell stops being two columns. */
-  --shell-breakpoint: 900px;
 }
+
+/*
+ * Where the compact shell stops being two columns is NOT here, and cannot be.
+ * A media query is evaluated before custom properties exist, so `@media
+ * (max-width: var(--x))` is not a thing any browser does — a token for it would
+ * be a dial connected to nothing, and somebody would turn it and lose an
+ * afternoon. There is exactly one `@media` in `system.module.css`, and that one
+ * line is the breakpoint.
+ */
