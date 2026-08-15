@@ -788,9 +788,18 @@ is not one of the characters a value may contain. Several SDKs pass an
 unencoded space straight through and the header arrives fine; others refuse the
 whole variable, and the failure looks like an agent that exports nothing.
 
-That is the API directly rather than the web application: the one-origin rule
-above exists so a browser's session cookie is valid for both, and telemetry
-carries no cookie. An exporter has no reason to be routed through a page server.
+**Point an exporter at the API itself, and not at the pages.** On a self-host
+that is the API's own port — `http://localhost:3100` above, or whatever address
+you publish it on. On hosted egma it is `https://api.egma.ai`, not
+`https://app.egma.ai`.
+
+The one-origin rule further up is about a browser: the pages proxy the API so
+that one session cookie is valid for both, which is what makes signing in depend
+on nothing you do not run. **This door is not a browser's.** It is authenticated
+by a Bearer key, carries no cookie, and is driven by an agent process — so the
+rule that governs the rest of the surface was never about it, and routing an
+exporter through a page server buys nothing but a hop and one more thing that
+can be down.
 
 `POST /v1/traces` accepts OTLP/HTTP in both encodings the specification defines
 — `application/x-protobuf` and `application/json`, gzipped or not — and answers
@@ -1021,10 +1030,43 @@ EGMA_SMTP_URL=smtp://user:password@smtp.example.com:587
 EGMA_MAIL_FROM='egma <egma@example.com>'   # optional
 ```
 
-Setting it changes two things at once, by itself: invitations are emailed rather
-than handed back, and signup asks for email verification. There is no second
-setting to keep in step, because there is no configuration in which egma should
-wait for a message it never sent.
+Setting it changes three things at once, by itself: invitations are emailed
+rather than handed back, signup asks for email verification, and a password
+reset link is posted to the person who asked for it. There is no second setting
+to keep in step, because there is no configuration in which egma should wait for
+a message it never sent.
+
+## Forgetting a password
+
+**Sign in, "Forgot your password?", and name your address.** Egma sends a link
+that opens one page asking for a new password, and nothing else. Set it, sign in
+with it, and the old password stops working.
+
+Nothing about this needs SMTP either. With no mail transport configured the
+whole message — link included — is written to the platform's log, exactly where
+an invitation's link comes back to whoever sent it, so a solo install still lets
+you back in.
+
+**Know what that means before you run an egma with no mail and a log other
+people can read.** An invitation's link creates an account; a reset link takes
+over one that already exists, an admin's included. Whoever can read the
+platform's log for the next hour can follow one. On a solo install that is you,
+which is the whole point of the arrangement — but a shipped log drain or a
+`docker compose logs` a colleague can run is a way into every account on the
+instance, so set `EGMA_SMTP_URL` before there is a second person to keep out.
+
+- The link works **once**, and runs out an hour after you asked for it. That
+  hour is one number and not two: it is what the link says and what the auth
+  provider underneath is configured with, so no door honours it for longer than
+  the message promises.
+- **A link somebody already used is refused with a message that says so**,
+  because "you already did this" and "nothing happened at all" are opposite
+  instructions. Once the hour is up egma can no longer tell which of the two a
+  dead link is — the provider forgot the token at the same moment egma stopped
+  honouring it — so it says exactly that, rather than guessing at one of them.
+- Asking about an address with no account here is answered exactly as one with
+  an account — same status, same words, and the same length of wait — so the
+  form never says who holds an account on this egma.
 
 ## Reading and writing data
 

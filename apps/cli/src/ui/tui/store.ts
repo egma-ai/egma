@@ -176,6 +176,10 @@ export class WizardStore {
     this.change({ drivenAgentLog });
   }
 
+  setPlatform(platform: string | null): void {
+    this.change({ platform });
+  }
+
   setDetection(detection: Detection | null): void {
     this.change({ detection });
   }

@@ -19,6 +19,7 @@ import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
 import { mockToolRoutes } from "./routes/mock-tools.ts";
+import { passwordResetRoutes } from "./routes/password-reset.ts";
 import { platformRoutes } from "./routes/platform.ts";
 import { platformSettingsRoutes } from "./routes/platform-settings.ts";
 import { recordingRoutes } from "./routes/recordings.ts";
@@ -113,8 +114,17 @@ export function buildApi(options: ServerOptions): Api {
     basePath: AUTH_BASE_PATH,
     secret: config.authSecret,
     emailSender,
+    // The provider says what happened in a sentence and hands the cause along
+    // beside it. Pino writes an `Error` as `{}` under any key but `err`, so
+    // putting a cause anywhere else leaves an operator reading "Failed to run
+    // background task:" with nothing under it. The cause goes where the
+    // serializer looks for it, and whatever else came with it stays beside it.
     log: (level, message, details) => {
-      app.log[level]({ details }, message);
+      const cause = details.find((detail) => detail instanceof Error);
+      app.log[level](
+        { err: cause, details: details.filter((detail) => detail !== cause) },
+        message,
+      );
     },
     hooks: {
       admitIdentity: admitIdentity(config.singleOrganization),
@@ -355,6 +365,18 @@ export function buildApi(options: ServerOptions): Api {
   // invitation has no membership, so there is no context to resolve them into
   // and no organization to key a budget on. The token is the credential there.
   void app.register(invitationRoutes, { provider: identity.provider });
+
+  // Beside it and outside the same scope, for the same reason turned around:
+  // somebody who cannot remember their password cannot sign in to ask for a
+  // new one, so this pair answers before anybody is anybody. Which transport
+  // the deployment has decides where the link goes and nothing else — the
+  // sender already decides that, and reset never gained a setting of its own.
+  void app.register(passwordResetRoutes, {
+    identity,
+    authBasePath: AUTH_BASE_PATH,
+    baseUrl: config.baseUrl,
+    secret: config.authSecret,
+  });
 
   // The standing orphan sweep, started with the server and stopped with it.
   // Its timer is unref'd, so a shutdown never waits on a sweep that has not

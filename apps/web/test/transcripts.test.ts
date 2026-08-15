@@ -523,8 +523,20 @@ describe("the transcript pages", () => {
    */
   it("reach the v1 read endpoints at paths this instance rewrites", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
-    expect(rewrites).toContain("/v1/traces");
     expect(rewrites).toContain("/v1/traces/:path*");
+
+    /**
+     * **And the bare path is a rule of its own**, rather than being left to the
+     * wildcard. `:path*` is documented as matching zero segments and does so in
+     * this process — but on the hosted deployment `POST /v1/traces` fell
+     * through it to this app's own routing and answered 404, while the API
+     * answered 401 for the same request. That is an exporter posting into
+     * nothing and reporting no fault, and `toContain("/v1/traces")` could never
+     * have caught it, because the wildcard rule contains that string.
+     */
+    expect(rewrites).toMatch(
+      /source: "\/v1\/traces", destination: `\$\{api\}\/v1\/traces`/,
+    );
 
     for (const page of [
       "app/traces/page.tsx",
