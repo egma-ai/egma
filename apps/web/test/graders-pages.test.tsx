@@ -652,6 +652,47 @@ describe("changing a running copy", () => {
   });
 
   /**
+   * **Opening a second copy's form over the first draws the second copy**, and
+   * the key is what makes that true.
+   *
+   * React keeps a component's state across a re-render when only its props
+   * change, so a form opened on one grader and then pointed at another would
+   * hold the first grader's answers under the second grader's controls. It is
+   * the failure the Use form has a real-browser walk for, one screen along —
+   * and here it is worse, because these forms open already filled in: the
+   * second copy's bound would read as the first copy's, and saving would write
+   * a number nobody typed.
+   */
+  it("draws the second copy's own values when a form is opened over another", async () => {
+    apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /api/graders": {
+        status: 200,
+        body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null },
+      },
+      "GET /api/grader-library": SHELF,
+    });
+    render(<RunningGradersPage />);
+
+    // The copy whose assertions are each test's own sentences: it asks nothing.
+    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+    expect(screen.getByText(runningCopy.EDIT.asksNothing)).toBeTruthy();
+
+    // And now the other one, without closing the first.
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[1]!);
+
+    expect(screen.getByText(runningCopy.EDIT.title("Latency"))).toBeTruthy();
+    expect(screen.queryByText(runningCopy.EDIT.asksNothing)).toBeNull();
+    // Its own filled-in values, not an empty form and not the first copy's.
+    expect((screen.getByLabelText("Bound") as HTMLInputElement).value).toBe(
+      "2000",
+    );
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      "Latency",
+    );
+  });
+
+  /**
    * **A number is sent as a number**, at the edge that knows the control was
    * numeric — and the project rides in the body, because an edit lands on
    * exactly one project and never on whichever the credential happens to act in.
