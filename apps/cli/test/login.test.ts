@@ -19,6 +19,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -424,24 +425,25 @@ describe("which egma a command talks to", () => {
   // never says which address ships. That is asserted in one place, on its own.
   const BUILT_IN = "http://built-in.example";
 
-  it("takes the flag, then the environment, then the binding, then egma's own", () => {
+  /** The published package, whose every written word is egma's to a reader. */
+  const CLI_PACKAGE = fileURLToPath(new URL("..", import.meta.url));
+
+  /** Every file under a folder, as full paths. */
+  async function filesIn(folder: string): Promise<readonly string[]> {
+    const entries = await readdir(folder, { recursive: true, withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile())
+      .map((entry) => path.join(entry.parentPath, entry.name));
+  }
+
+  it("takes the flag, then the binding, then egma's own", () => {
     expect(
       resolvePlatformUrl({
         flag: "http://flag.example/",
-        env: "http://env.example",
         binding: "http://bound.example",
         fallback: BUILT_IN,
       }),
     ).toBe("http://flag.example");
-
-    expect(
-      resolvePlatformUrl({
-        flag: null,
-        env: "http://env.example",
-        binding: "http://bound.example",
-        fallback: BUILT_IN,
-      }),
-    ).toBe("http://env.example");
 
     // The repository, not the latest login on the machine, is what makes the
     // selection stable after onboarding.
@@ -452,18 +454,18 @@ describe("which egma a command talks to", () => {
     // Nothing names a platform, so egma uses its own. This is the step ADR-0008
     // always had and the tree could not have while there was no hosted egma to
     // point at.
-    expect(resolvePlatformUrl({ flag: null, env: "", binding: null, fallback: BUILT_IN })).toBe(
+    expect(resolvePlatformUrl({ flag: null, binding: null, fallback: BUILT_IN })).toBe(
       BUILT_IN,
     );
 
-    // And it really is last: each of the three deliberate places still wins
-    // over it on its own.
+    // And it really is last: each of the two deliberate places still wins over
+    // it on its own.
     expect(resolvePlatformUrl({ flag: "http://flag.example", fallback: BUILT_IN })).toBe(
       "http://flag.example",
     );
-    expect(
-      resolvePlatformUrl({ flag: null, env: "http://env.example", fallback: BUILT_IN }),
-    ).toBe("http://env.example");
+    expect(resolvePlatformUrl({ binding: "http://bound.example", fallback: BUILT_IN })).toBe(
+      "http://bound.example",
+    );
   });
 
   it("refuses an address that is not one, and names where it came from", () => {
@@ -473,22 +475,51 @@ describe("which egma a command talks to", () => {
       expect(() =>
         resolvePlatformUrl({ flag: given, fallback: BUILT_IN }),
       ).toThrow(UnusableUrlError);
-      expect(() =>
-        resolvePlatformUrl({ flag: null, env: given, fallback: BUILT_IN }),
-      ).toThrow(UnusableUrlError);
     }
 
     expect(() =>
       resolvePlatformUrl({ flag: "ftp://egma.example", fallback: BUILT_IN }),
     ).toThrow(/--url/u);
-    expect(() =>
-      resolvePlatformUrl({ flag: null, env: "ftp://egma.example", fallback: BUILT_IN }),
-    ).toThrow(/EGMA_URL/u);
 
     // A committed binding is never stepped over in favour of egma's own.
     expect(() =>
       resolvePlatformUrl({ flag: null, binding: "javascript:alert(1)", fallback: BUILT_IN }),
     ).toThrow(/repository platform binding/u);
+  });
+
+  /**
+   * One explicit way, and the second one really gone.
+   *
+   * `EGMA_URL` was a whole-shell name for `--url`, and taking the rung out of
+   * resolution is only half of taking it out: a `--help` line, a README
+   * paragraph or a refusal that still tells somebody to set it is a setting
+   * egma no longer has, offered by egma. The one that would have survived a
+   * careful edit is the refusal — "Remove --url or EGMA_URL" is the sentence a
+   * developer meets at the exact moment they are least able to tell that half
+   * of it is fiction.
+   *
+   * So the whole of what egma ships is scanned rather than the places anybody
+   * remembered — the help text and every refusal are inside `src/`, so both are
+   * covered by reading it. The checks themselves are not scanned: proving the
+   * variable is inert means naming it.
+   */
+  it("offers one way to name a platform, and names the old one nowhere", async () => {
+    const written = [
+      ...(await filesIn(path.join(CLI_PACKAGE, "src"))),
+      ...(await filesIn(path.join(CLI_PACKAGE, "skills"))),
+      ...(await filesIn(path.join(CLI_PACKAGE, "smoke"))),
+      path.join(CLI_PACKAGE, "README.md"),
+      path.join(CLI_PACKAGE, "..", "..", "README.md"),
+    ];
+    expect(written.length).toBeGreaterThan(20);
+
+    const naming: string[] = [];
+    for (const file of written) {
+      if ((await readFile(file, "utf8")).includes("EGMA_URL")) {
+        naming.push(path.relative(CLI_PACKAGE, file));
+      }
+    }
+    expect(naming).toEqual([]);
   });
 });
 

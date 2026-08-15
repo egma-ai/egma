@@ -36,6 +36,7 @@ import {
   isSelfHostInvocation,
   runSelfHostCommand,
 } from "./commands/self-host.ts";
+import type { PlatformBinding } from "./folder/egma-folder.ts";
 import {
   BoundPlatformAddressError,
   BoundPlatformUnavailableError,
@@ -242,7 +243,9 @@ export function helpText(): string {
     "                           The key comes in on standard input or from the",
     "                           environment, never as an argument.",
     "  egma init [options]      Make the egma folder this repository's tests",
-    "                           live in. Safe to run again.",
+    "                           live in. Talks to nobody, unless --url names an",
+    "                           egma to bind this repository to. Safe to run",
+    "                           again.",
     "  egma pull [options]      Write egma's current test versions, and the mock",
     "                           tools it answers with, into it.",
     "  egma push [options]      Upload what is in it. Refuses, naming names,",
@@ -275,9 +278,12 @@ export function helpText(): string {
     "  --coding-agent <id>  Which coding agent to drive, named as the agent",
     `                       registry names it. Default: ${DEFAULT_DRIVEN_AGENT_ID}`,
     "  --cwd <path>         The folder to work in. Default: this folder.",
-    "  --url <address>      The egma to talk to. The wizard records its verified",
-    "                       identity in egma/config.yaml. EGMA_URL selects one",
-    "                       for a whole shell.",
+    "  --url <address>      Which egma this one command talks to. It is the only",
+    "                       way to name one, so a command that should reach that",
+    "                       egma carries it. With init and with the wizard: egma",
+    "                       asks that address who it is and records its verified",
+    "                       identity in egma/config.yaml, and every later command",
+    "                       in this repository then needs no address at all.",
     "  --force              With login: sign in again even when this machine",
     "                       already holds a key.",
     "  --no-follow          With run: start the run and return at once, without",
@@ -308,7 +314,6 @@ export function helpText(): string {
     "  -v, --version        Print the version.",
     "",
     "Environment:",
-    "  EGMA_URL             The egma to talk to, for a whole shell. Same as --url.",
     "  EGMA_HOME            The folder egma keeps this machine's keys in, one",
     "                       for each platform origin.",
     "                       Default: ~/.egma",
@@ -357,7 +362,8 @@ export function helpText(): string {
     "What egma init, pull and push print, one fact per line:",
     "  url, folder, and then one line per test: what happened to it, the file,",
     "  and the version the file now pins. push names every conflicting test on",
-    "  its own conflict: line.",
+    "  its own conflict: line. init adds a platform: line when --url gave it an",
+    "  egma to bind this repository to.",
     "",
     "What egma init, pull and push answer with:",
     "  0 done   1 no egma folder here   2 not signed in",
@@ -648,6 +654,8 @@ async function runFolderVerb(
   verb: "init" | "pull" | "push" | "run",
   invocation: Invocation,
   access: PlatformAccess,
+  /** For `init`: the verified platform to commit, when `--url` named one. */
+  binding: PlatformBinding | null = null,
 ): Promise<number> {
   const controller = new AbortController();
   const onSignal = (): void => controller.abort("interrupt");
@@ -670,6 +678,7 @@ async function runFolderVerb(
           connection: invocation.connectionName,
           suite: invocation.suiteName,
         },
+        binding,
       });
     }
     if (verb === "run") {
@@ -806,13 +815,20 @@ export async function main(argv: readonly string[]): Promise<void> {
 
   const cwd = path.resolve(invocation.cwd ?? process.cwd());
 
-  // `init` is only a local folder write. It never verifies a platform, signs
-  // in, or sends an identifier anywhere.
-  if (invocation.verb === "init") {
+  // `init` with no address named is only a local folder write. It never
+  // verifies a platform, signs in, or sends an identifier anywhere, so it is
+  // settled here rather than below and works with the network cable out.
+  //
+  // `init --url` is the one exception, and it falls through to the ordinary
+  // resolution below: it asks that address who it is and commits the answer.
+  // Sending it through the same path as every other verb is what makes a bound
+  // repository refuse a second, different address here exactly as it does
+  // everywhere else.
+  if (invocation.verb === "init" && invocation.url === null) {
     process.exitCode = await runFolderVerb(invocation.verb, invocation, {
-      // `init` writes a folder and talks to nothing, so there is no platform to
-      // name. Empty rather than a placeholder address: a real-looking one here
-      // would be a lie the next reader has to disprove.
+      // Nothing was asked of any address, so there is no platform to name.
+      // Empty rather than a placeholder address: a real-looking one here would
+      // be a lie the next reader has to disprove.
       url: "",
       credentialsFile: credentialsFileIn(process.env),
     });
@@ -887,6 +903,16 @@ export async function main(argv: readonly string[]): Promise<void> {
       }
       if (invocation.verb === "connect") {
         process.exitCode = await runConnect(invocation, access);
+        return;
+      }
+      // Only `init --url` reaches here: the flagless form was answered above.
+      // The address has already said who it is, so what is committed is a whole
+      // binding or the command has already refused and written nothing.
+      if (invocation.verb === "init") {
+        process.exitCode = await runFolderVerb(invocation.verb, invocation, access, {
+          origin: access.url,
+          instance: access.instanceId,
+        });
         return;
       }
       if (

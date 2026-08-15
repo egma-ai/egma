@@ -243,20 +243,22 @@ describe("verifying an Egma platform", () => {
     ]);
   });
 
-  it("takes the explicit URL before EGMA_URL, then verifies the selected instance", async () => {
-    const ambient = await startPlatform();
+  it("takes the explicit URL before egma's own, then verifies the selected instance", async () => {
+    const built = await startPlatform();
     try {
       const access = await resolvePlatformAccess({
-        env: workspace.env({ EGMA_URL: ambient.url }),
+        // The step below the flag, stood in for. Nothing else names a platform:
+        // this repository has no folder, so the flag is against the last step.
+        env: workspace.env({ EGMA_TEST_DEFAULT_URL: built.url }),
         flag: platform.url,
         cwd: workspace.dir,
       });
 
       expect(access.url).toBe(platform.url);
       expect(platform.records.map((record) => record.path)).toEqual(["/api/platform"]);
-      expect(ambient.records).toEqual([]);
+      expect(built.records).toEqual([]);
     } finally {
-      await ambient.close();
+      await built.close();
     }
   });
 
@@ -413,9 +415,10 @@ describe("verifying an Egma platform", () => {
       // answer". The spec's own further notes rely on a developer being told
       // about a redirect.
       expect(refusal.message, shape.what).toContain(shape.says);
-      // The one move that is theirs is always offered.
+      // The one move that is theirs is always offered — and it is one move,
+      // because naming a platform on the command is the only way to name one.
       expect(refusal.message, shape.what).toContain("--url <address>");
-      expect(refusal.message, shape.what).toContain("EGMA_URL");
+      expect(refusal.message, shape.what).not.toContain("EGMA_URL");
       expect(refusal.message, shape.what).toContain("Nothing was sent");
 
       // Not the underlying advice: none of it is the developer's to act on.

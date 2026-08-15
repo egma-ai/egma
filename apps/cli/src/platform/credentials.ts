@@ -35,11 +35,11 @@ import { PlatformUnreachableError, type Fetch } from "./device-flow.ts";
 /**
  * The egma an agent repository uses when nothing else names one.
  *
- * It is the last step of resolution and the only one nobody typed: a flag, the
- * environment and the repository's own binding all come first, and a bound
- * repository never falls back to it. A developer with nothing configured
- * reaches egma's own platform — and the wizard says which egma that is on its
- * first screen, before it asks that address anything at all.
+ * It is the last step of resolution and the only one nobody typed: `--url` and
+ * the repository's own binding both come first, and a bound repository never
+ * falls back to it. A developer with nothing configured reaches egma's own
+ * platform — and the wizard says which egma that is on its first screen, before
+ * it asks that address anything at all.
  */
 export const DEFAULT_PLATFORM_URL = "https://app.egma.ai";
 
@@ -49,8 +49,9 @@ export const DEFAULT_PLATFORM_URL = "https://app.egma.ai";
  *
  * It is not documented and it is not stable — the same treatment `main.ts`
  * gives the `-- <command>` seam that starts a scripted coding agent in place of
- * a real one. It is not a second way for a developer to select a platform:
- * `EGMA_URL` is that, and it sits above the built-in address in the order.
+ * a real one. It is not a way for a developer to select a platform either:
+ * `--url` is the one way to do that, and it sits above the built-in address in
+ * the order rather than replacing it.
  */
 export const TEST_DEFAULT_URL_VARIABLE = "EGMA_TEST_DEFAULT_URL";
 
@@ -344,8 +345,6 @@ export async function writeCredentials(
 export type PlatformChoice = {
   /** `--url`, which beats everything because it is the most deliberate. */
   readonly flag?: string | null;
-  /** `EGMA_URL`, which is how a self-hoster sets it for a whole shell. */
-  readonly env?: string | undefined;
   /** The platform committed in this agent repository. */
   readonly binding?: string | null;
   /**
@@ -369,7 +368,7 @@ export class UnusableUrlError extends Error {
 }
 
 /** Where a selected address came from. It decides who a refusal names. */
-export type PlatformSource = "--url" | "EGMA_URL" | "binding" | "default";
+export type PlatformSource = "--url" | "binding" | "default";
 
 export type SelectedPlatform = {
   readonly url: string;
@@ -378,17 +377,26 @@ export type SelectedPlatform = {
 
 const SOURCE_NAMES: Record<PlatformSource, string> = {
   "--url": "--url",
-  EGMA_URL: "EGMA_URL",
   binding: "the repository platform binding",
   default: "egma's built-in address",
 };
 
 /**
- * Which egma this command talks to, and which of the four places said so.
+ * Which egma this command talks to, and which of the three places said so.
  *
- * Deliberate beats ambient beats committed: a flag on the command, then the
- * environment, then the repository binding, then egma's own platform for an
- * unbound repository. A machine-level login never chooses a repository target.
+ * Said on the command beats committed in the repository beats egma's own: one
+ * explicit way to name a platform per invocation, one committed way per
+ * repository, one default, and nothing else. A machine-level login never
+ * chooses a repository target.
+ *
+ * There was a fourth place: an environment variable that was a second name for
+ * `--url` over a whole shell. Two ways to say one thing is two answers to
+ * "which egma is this" to keep straight — in a refusal, in a `--help` line, and
+ * in the head of whoever is debugging — so the shell-wide one went and the flag
+ * stayed. What it was for is served better by the rung below it: a script or a
+ * container that cannot type a flag on each command binds the repository once
+ * with `egma init --url`, and a binding is a committed file that travels with
+ * the checkout rather than a shell nobody else has.
  *
  * The source travels with the address because a refusal that names the wrong
  * platform sends a developer to fix something they did not ask for: told to
@@ -401,7 +409,6 @@ const SOURCE_NAMES: Record<PlatformSource, string> = {
 export function selectPlatform(choice: PlatformChoice): SelectedPlatform {
   const named: readonly [PlatformSource, string | null | undefined][] = [
     ["--url", choice.flag],
-    ["EGMA_URL", choice.env],
     ["binding", choice.binding],
     ["default", choice.fallback],
   ];
@@ -453,7 +460,7 @@ export class PlatformBindingMismatchError extends Error {
   constructor(binding: PlatformBinding, selected: PlatformIdentity) {
     super(
       teachingTheMove(
-        `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, but the selected address identifies platform ${selected.instanceId} at ${selected.origin}. Remove --url or EGMA_URL to use the bound platform. egma does not move a repository between platforms, and no repository identifiers were sent.`,
+        `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, but the selected address identifies platform ${selected.instanceId} at ${selected.origin}. Remove --url to use the bound platform. egma does not move a repository between platforms, and no repository identifiers were sent.`,
       ),
     );
     this.name = "PlatformBindingMismatchError";
@@ -528,8 +535,8 @@ export class DefaultPlatformUnusableError extends Error {
       [
         `This repository names no Egma platform, so egma used its own at ${url}, and ${answered.said}`,
         answered.worthRetrying
-          ? "Try again in a moment, or point egma at another platform with --url <address> or EGMA_URL."
-          : "That is egma's to fix and not yours, and waiting will not change it. To carry on now, point egma at another platform with --url <address> or EGMA_URL.",
+          ? "Try again in a moment, or point egma at another platform with --url <address>."
+          : "That is egma's to fix and not yours, and waiting will not change it. To carry on now, point egma at another platform with --url <address>.",
         "Nothing was sent.",
       ].join(" "),
       { cause },
@@ -632,7 +639,6 @@ export async function choosePlatform(choice: {
   const binding = committed?.platform ?? null;
   const selected = selectPlatform({
     flag: choice.flag,
-    env: choice.env.EGMA_URL,
     binding: binding?.origin ?? null,
     fallback: defaultPlatformUrlIn(choice.env),
   });
@@ -644,8 +650,8 @@ export async function choosePlatform(choice: {
   // binding is the bound address by definition — the committed origin is read
   // in the one shape origins are compared in, so a trailing slash or an
   // upper-case host in the file is the same platform and not a different one.
-  // Only the two places above it can raise this, which is also the only way
-  // this refusal can be about a move somebody is really making.
+  // Only `--url` above it can raise this, which is also the only way this
+  // refusal can be about a move somebody is really making.
   if (binding !== null && selected.source !== "binding" && selected.url !== binding.origin) {
     throw new BoundPlatformAddressError(binding, selected.source, selected.url);
   }
@@ -654,7 +660,7 @@ export async function choosePlatform(choice: {
   // folder that names no platform and is still holding one platform's
   // identifiers.
   //
-  // Whichever of the three places named the address, because the question this
+  // Whichever of the two places named the address, because the question this
   // asks is about the folder and not about the address. Once the platform block
   // is gone, egma cannot tell the platform that issued these identifiers from
   // any other — that is the one fact the deleted line held — so there is no
@@ -709,7 +715,7 @@ export async function verifyPlatform(
 
 /**
  * Resolved once, in one place, so the wizard and every verb read the same
- * answer from the same four places in the same order. Two copies of this would
+ * answer from the same three places in the same order. Two copies of this would
  * be two answers to "which egma is this", and the one that is wrong would be
  * the one that wrote the key.
  */

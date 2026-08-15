@@ -20,14 +20,14 @@ import { dispatchKey, hintBar, type KeyBinding } from "../keybindings.ts";
 import type { WizardState } from "../state.ts";
 
 /**
- * How to use a different egma, in the two ways that really select one.
+ * How to use a different egma, in the one way that selects one.
  *
- * `EGMA_TEST_DEFAULT_URL` is not among them and never will be: it is a test
+ * `EGMA_TEST_DEFAULT_URL` is not a second way and never will be: it is a test
  * seam that stands in for the built-in address, not a way for a developer to
  * choose a platform.
  */
 export const ANOTHER_PLATFORM =
-  "For a different egma, quit and run it again with --url <address>, or set EGMA_URL.";
+  "For a different egma, quit and run it again with --url <address>.";
 
 export type IntroScreenProps = {
   readonly state: WizardState;

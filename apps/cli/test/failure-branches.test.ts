@@ -144,10 +144,19 @@ describe("no coding agent on this machine", () => {
     const result = await new Promise<{ stdout: string; code: number }>((resolve) => {
       const child = spawn(
         process.execPath,
-        [CLI_ENTRY, "--headless", "--cwd", workspace.dir, "--", missing],
+        [
+          CLI_ENTRY,
+          "--url",
+          platform.url,
+          "--headless",
+          "--cwd",
+          workspace.dir,
+          "--",
+          missing,
+        ],
         {
           cwd: workspace.dir,
-          env: workspace.env({ EGMA_URL: platform.url }),
+          env: workspace.env(),
           stdio: ["ignore", "pipe", "pipe"],
         },
       );

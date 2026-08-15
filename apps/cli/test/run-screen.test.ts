@@ -144,6 +144,8 @@ async function toTheRun(cols = 100): Promise<TerminalRun> {
     command: process.execPath,
     args: [
       CLI_ENTRY,
+      "--url",
+      platform.url,
       "--cwd",
       workspace.dir,
       "--coding-agent",
@@ -155,7 +157,6 @@ async function toTheRun(cols = 100): Promise<TerminalRun> {
     ],
     cwd: workspace.dir,
     env: workspace.env({
-      EGMA_URL: platform.url,
       EGMA_RETELL_URL: retell?.url ?? "",
       EGMA_RETELL_API_KEY: KEY,
       // The home a global skill would land in. Never the real one.

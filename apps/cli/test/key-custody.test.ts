@@ -224,10 +224,9 @@ describe("a whole run, swept afterwards", () => {
   });
 
   it("never appears in the process table while the command is running", async () => {
-    const child = spawn(process.execPath, [CLI_ENTRY, "connect"], {
+    const child = spawn(process.execPath, [CLI_ENTRY, "connect", "--url", platform.url], {
       cwd: workspace.dir,
       env: workspace.env({
-        EGMA_URL: platform.url,
         EGMA_RETELL_URL: retell.url,
         EGMA_RETELL_API_KEY: KEY,
         EGMA_REACH: "text",

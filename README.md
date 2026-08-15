@@ -278,7 +278,7 @@ With an instance up and an account on it, the walk is one command:
 
 ```bash
 cd ~/your-voice-agent
-EGMA_URL=http://localhost:3101 npx @egma/cli
+npx @egma/cli --url http://localhost:3101
 ```
 
 To run it from this checkout instead — for development, or ahead of a release:
@@ -293,7 +293,7 @@ you signed up on:
 
 ```bash
 cd ~/your-voice-agent
-EGMA_URL=http://localhost:3101 node ~/egma/apps/cli/dist/bin.js
+node ~/egma/apps/cli/dist/bin.js --url http://localhost:3101
 ```
 
 `~/egma` is this checkout. The published package is `@egma/cli`; the command it installs is `egma`.

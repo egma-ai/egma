@@ -197,9 +197,19 @@ describe("the pane, while the files land", () => {
 
     const terminal = runInTerminal({
       command: process.execPath,
-      args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+      args: [
+        CLI_ENTRY,
+        "--url",
+        platform.url,
+        "--cwd",
+        workspace.dir,
+        "--",
+        process.execPath,
+        FAKE_AGENT,
+        script,
+      ],
       cwd: workspace.dir,
-      env: workspace.env({ EGMA_URL: platform.url, EGMA_RETELL_URL: retell.url }),
+      env: workspace.env({ EGMA_RETELL_URL: retell.url }),
       // Wide, because the ending under check here is lines rather than
       // sentences. A terminal wraps whatever will not fit, and a check that
       // read a wrapped line as two would be checking the terminal's width and
@@ -297,9 +307,19 @@ describe("the pane, while the files land", () => {
 
     const terminal = runInTerminal({
       command: process.execPath,
-      args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+      args: [
+        CLI_ENTRY,
+        "--url",
+        platform.url,
+        "--cwd",
+        workspace.dir,
+        "--",
+        process.execPath,
+        FAKE_AGENT,
+        script,
+      ],
       cwd: workspace.dir,
-      env: workspace.env({ EGMA_URL: platform.url, EGMA_RETELL_URL: retell.url }),
+      env: workspace.env({ EGMA_RETELL_URL: retell.url }),
       cols: 64,
     });
 

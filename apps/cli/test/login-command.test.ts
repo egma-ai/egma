@@ -127,7 +127,7 @@ describe("egma login", () => {
 
   it("does not use the most recent login as the next command's target", async () => {
     // A self-hoster selects the platform for this command.
-    const first = await egma(["login"], { EGMA_URL: platform.url });
+    const first = await egma(["login", "--url", platform.url]);
     expect(first.code).toBe(0);
     expect(facts(first.stdout).status).toBe("stored");
 
@@ -303,10 +303,13 @@ describe("egma login", () => {
     expect(help.stdout).toContain("4 egma did not answer, or refused");
   });
 
-  it("names the two things a self-hoster sets, in the help", async () => {
+  it("names what a self-hoster sets, in the help", async () => {
     const help = await egma(["--help"]);
 
-    expect(help.stdout).toContain("EGMA_URL");
+    // Which egma is said on the command and nowhere else, so the flag is the
+    // whole of that half. What is left in the environment is where the key it
+    // brings back is kept.
+    expect(help.stdout).toContain("--url <address>");
     expect(help.stdout).toContain("EGMA_HOME");
     expect(help.stdout).toContain("--force");
   });

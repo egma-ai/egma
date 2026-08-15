@@ -23,6 +23,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createEgmaFolder,
   parseMockToolsFile,
+  readConfig,
 } from "../src/folder/egma-folder.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { CLI_ENTRY, makeWorkspace, type Workspace } from "./support/workspace.ts";
@@ -49,17 +50,32 @@ afterEach(async () => {
 
 type Result = { stdout: string; stderr: string; code: number };
 
-async function egma(args: readonly string[], env: NodeJS.ProcessEnv = {}): Promise<Result> {
+/** The built command, exactly as the words are given, ended rather than thrown. */
+async function runEgma(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv = {},
+): Promise<Result> {
   try {
     const { stdout, stderr } = await run(process.execPath, [CLI_ENTRY, ...args], {
       cwd: workspace.dir,
-      env: workspace.env({ EGMA_URL: platform.url, ...env }),
+      env: workspace.env(env),
     });
     return { stdout, stderr, code: 0 };
   } catch (error) {
     const failure = error as { stdout?: string; stderr?: string; code?: number };
     return { stdout: failure.stdout ?? "", stderr: failure.stderr ?? "", code: failure.code ?? 1 };
   }
+}
+
+/**
+ * The same command, pointed at the fixture platform on every invocation.
+ *
+ * `--url` on each one rather than a shell that names it once: one explicit way
+ * to name a platform per invocation is the whole order, so a check that reached
+ * this platform any other way would be checking something egma does not offer.
+ */
+async function egma(args: readonly string[], env: NodeJS.ProcessEnv = {}): Promise<Result> {
+  return runEgma(["--url", platform.url, ...args], env);
 }
 
 /** Every printed line as the pair it is, in order, repeats and all. */
@@ -172,8 +188,10 @@ function freshFile(input: {
 }
 
 describe("egma init", () => {
+  const configFile = (): string => path.join(workspace.dir, "egma", "config.yaml");
+
   it("makes a folder whose every file is committable as it stands", async () => {
-    const result = await egma([
+    const result = await runEgma([
       "init",
       "--agent",
       "receptionist",
@@ -218,26 +236,182 @@ describe("egma init", () => {
   });
 
   it("recognises a folder that is already here, and touches nothing in it", async () => {
-    await egma(["init", "--agent", "receptionist"]);
-    const before = await readFile(path.join(workspace.dir, "egma", "config.yaml"), "utf8");
+    await runEgma(["init", "--agent", "receptionist"]);
+    const before = await readFile(configFile(), "utf8");
 
-    const again = await egma(["init", "--agent", "something-else"]);
+    const again = await runEgma(["init", "--agent", "something-else"]);
 
     expect(again.code).toBe(0);
     expect(factOf(again.stdout, "status")).toBe("already-there");
-    expect(await readFile(path.join(workspace.dir, "egma", "config.yaml"), "utf8")).toBe(before);
+    expect(await readFile(configFile(), "utf8")).toBe(before);
   });
 
-  it("needs no key, because nothing in it talks to egma", async () => {
+  it("needs no key and no network, because on its own it talks to nobody", async () => {
     const nowhere = await makeWorkspace();
     try {
       const result = await run(process.execPath, [CLI_ENTRY, "init"], {
         cwd: nowhere.dir,
+        // Every stand-in this workspace holds is a closed port, so a command
+        // that reached for any address at all would fail here rather than pass.
         env: nowhere.env(),
       });
       expect(result.stdout).toContain("status: created");
+      // And it names no platform, which is what makes the folder above safe to
+      // make before anybody has decided which egma this repository is on.
+      expect(
+        (await readConfig(path.join(nowhere.dir, "egma", "config.yaml"))).platform,
+      ).toBeNull();
+      expect(platform.records).toEqual([]);
     } finally {
       await nowhere.remove();
+    }
+  });
+
+  /**
+   * The one binding a repository can gain before anybody has signed in.
+   *
+   * The identity contract is unauthenticated by design, so `init` can ask an
+   * address who it is and commit the answer with no key in existence — which is
+   * what lets a developer who knows their platform's address say it once, here,
+   * instead of on every command afterwards.
+   */
+  it("writes the whole binding when the command names an address", async () => {
+    const result = await runEgma(["init", "--url", platform.url, "--agent", "receptionist"]);
+
+    expect(result.code, result.stderr).toBe(0);
+    expect(factOf(result.stdout, "url")).toBe(platform.url);
+    expect(factOf(result.stdout, "platform")).toBe(platform.instanceId);
+    expect(factOf(result.stdout, "status")).toBe("created");
+    expect((await readConfig(configFile())).platform).toEqual({
+      origin: platform.url,
+      instance: platform.instanceId,
+    });
+
+    // One question, and it is the public one that carries nothing. No key
+    // exists yet and none was needed.
+    expect(platform.records.map((record) => `${record.method} ${record.path}`)).toEqual([
+      "GET /api/platform",
+    ]);
+  });
+
+  it("leaves the committed binding byte for byte the same when it is run again", async () => {
+    await runEgma(["init", "--url", platform.url, "--agent", "receptionist"]);
+    const before = await readFile(configFile(), "utf8");
+
+    const again = await runEgma(["init", "--url", platform.url, "--agent", "receptionist"]);
+
+    expect(again.code, again.stderr).toBe(0);
+    expect(factOf(again.stdout, "status")).toBe("already-there");
+    expect(await readFile(configFile(), "utf8")).toBe(before);
+    expect((await readConfig(configFile())).platform).toEqual({
+      origin: platform.url,
+      instance: platform.instanceId,
+    });
+  });
+
+  /**
+   * The one thing a second run does change, and the reason it has to.
+   *
+   * A folder somebody else committed before this repository was on any platform
+   * is how a teammate ordinarily arrives: the folder is there, nothing in it
+   * names an egma, and `init --url` is what they are told to run. Recognising
+   * the folder and dropping the flag would be the silent no-op this command
+   * used to be, moved one case along.
+   */
+  it("binds a folder that was already here and named no platform", async () => {
+    await runEgma(["init", "--agent", "receptionist"]);
+    expect((await readConfig(configFile())).platform).toBeNull();
+
+    const bound = await runEgma(["init", "--url", platform.url]);
+
+    expect(bound.code, bound.stderr).toBe(0);
+    expect(factOf(bound.stdout, "status")).toBe("already-there");
+    expect(factOf(bound.stdout, "platform")).toBe(platform.instanceId);
+
+    const held = await readConfig(configFile());
+    expect(held.platform).toEqual({
+      origin: platform.url,
+      instance: platform.instanceId,
+    });
+    // And nothing else in the file moved: the name the first run wrote is the
+    // name that is still there.
+    expect(held.agent).toEqual({ name: "receptionist", id: null });
+    // Said out loud, because "already-there" on its own would read as a run
+    // that changed nothing.
+    expect(bound.stdout).toContain("note: the folder was already here, and gained the platform");
+  });
+
+  /**
+   * `init` is safe to run again, and that is not a licence to rebind.
+   *
+   * The flag naming another platform is how somebody says they want to move,
+   * and no command performs that move — so this is the same refusal every other
+   * verb answers it with, met here because `init --url` resolves through the
+   * same path they do rather than through one of its own.
+   */
+  it("refuses to move a folder that is already bound somewhere else", async () => {
+    const elsewhere = await startPlatform();
+    try {
+      await runEgma(["init", "--url", platform.url]);
+      const before = await readFile(configFile(), "utf8");
+
+      const refused = await runEgma(["init", "--url", elsewhere.url]);
+
+      expect(refused.code).toBe(4);
+      expect(refused.stdout).toContain("status: refused");
+      expect(refused.stderr).toContain("egma does not move a repository between platforms");
+      expect(await readFile(configFile(), "utf8")).toBe(before);
+      // Neither platform was asked so much as who it is: the file decided.
+      expect(elsewhere.records).toEqual([]);
+    } finally {
+      await elsewhere.close();
+    }
+  });
+
+  /**
+   * **Never a partial binding.** `bound` has to keep meaning `verified`, so an
+   * address that cannot say who it is leaves nothing behind at all — not an
+   * origin waiting for an instance, and not an empty folder either. Anything
+   * less would be a state somebody has to reason about for the rest of the
+   * product's life.
+   */
+  it("refuses an address that does not answer, and leaves no folder behind", async () => {
+    const dead = "http://127.0.0.1:1";
+
+    const refused = await runEgma(["init", "--url", dead]);
+
+    expect(refused.code).toBe(4);
+    expect(refused.stdout).toContain("status: unreachable");
+    expect(refused.stderr).toContain(dead);
+    await expect(stat(path.join(workspace.dir, "egma"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  /**
+   * The address-check refusal, met at the one moment it costs nothing.
+   *
+   * A platform that answers to an address other than the one it was asked at is
+   * a service door — the API's own origin, or a deployment whose `EGMA_BASE_URL`
+   * is not the address people reach it at. Binding to it would commit an origin
+   * every teammate who clones this repository would fail to reach.
+   */
+  it("refuses a platform that names an address other than the one asked", async () => {
+    const canonicalOrigin = "https://canonical.egma.example";
+    const alias = await startPlatform({ canonicalOrigin });
+    try {
+      const refused = await runEgma(["init", "--url", alias.url]);
+
+      expect(refused.code).toBe(4);
+      expect(refused.stdout).toContain("status: refused");
+      expect(refused.stderr).toContain(canonicalOrigin);
+      expect(refused.stderr).toContain("EGMA_BASE_URL");
+      expect(refused.stderr).toContain("Nothing was sent");
+      await expect(stat(path.join(workspace.dir, "egma"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    } finally {
+      await alias.close();
     }
   });
 });
@@ -1039,9 +1213,9 @@ describe("both verbs, run with nobody watching", () => {
     platform.tests.add({ name: "one", scenario: "s", expectedBehaviors: ["b"] });
     await makeFolder();
 
-    const child = spawn(process.execPath, [CLI_ENTRY, "pull"], {
+    const child = spawn(process.execPath, [CLI_ENTRY, "pull", "--url", platform.url], {
       cwd: workspace.dir,
-      env: workspace.env({ EGMA_URL: platform.url }),
+      env: workspace.env(),
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -1133,7 +1307,10 @@ describe("both verbs, run with nobody watching", () => {
    */
   it("never print the key, and never write it into the folder", async () => {
     platform.tests.add({ name: "one", scenario: "s", expectedBehaviors: ["b"] });
-    await egma(["init", "--agent", "receptionist"]);
+    // The folder, and deliberately no binding with it: what is under check
+    // below includes an egma that does not answer, and a bound repository
+    // would be refused for naming another address before it ever got there.
+    await runEgma(["init", "--agent", "receptionist"]);
     await egma(["pull"]);
 
     // A conflict, a refusal at the door, and an egma that does not answer.
@@ -1175,7 +1352,8 @@ describe("both verbs, run with nobody watching", () => {
     const BANNED = ["organization", "organisation", "project", "tenant"];
 
     platform.tests.add({ name: "one", scenario: "s", expectedBehaviors: ["b"] });
-    await egma(["init", "--agent", "receptionist"]);
+    // The folder alone: `init` needs no platform, so it is given none.
+    await runEgma(["init", "--agent", "receptionist"]);
     await egma(["pull"]);
     platform.tests.editInDashboard("one", { scenario: "s, changed" });
 

@@ -50,7 +50,7 @@ function asOneLine(screen: string): string {
     .replaceAll(/\s+/gu, " ");
 }
 
-/** The bare command: no verb, no `--url`, and no `EGMA_URL` in the shell. */
+/** The bare command: no verb, and no `--url`, which is the one way to say one. */
 function bareWizard(): TerminalRun {
   const args = [CLI_ENTRY, "--cwd", workspace.dir];
   expect(args).not.toContain("--url");
@@ -58,7 +58,6 @@ function bareWizard(): TerminalRun {
     // The stand-in for egma's own address. Nothing here dials the real one.
     EGMA_TEST_DEFAULT_URL: platform.url,
   });
-  expect(env.EGMA_URL).toBeUndefined();
 
   return runInTerminal({
     command: process.execPath,
@@ -81,13 +80,12 @@ describe("the wizard's first screen", () => {
         "[enter] begin",
       );
 
-      // The address, and the two ways to name a different one. This is the
+      // The address, and the one way to name a different one. This is the
       // screen the keystroke of consent is taken on: nothing else stands
       // between reading it and agreeing to the walk.
       const said = asOneLine(screen);
       expect(said).toContain("--url <address>");
-      expect(said).toContain("EGMA_URL");
-      // And the seam that stands the address in is not offered as a third way.
+      // And the seam that stands the address in is not offered as a second way.
       expect(said).not.toContain("EGMA_TEST_DEFAULT_URL");
 
       // Nothing has been asked of that address. The whole reason the screen is

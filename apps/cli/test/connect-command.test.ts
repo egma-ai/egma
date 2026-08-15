@@ -80,16 +80,16 @@ type Result = { stdout: string; stderr: string; code: number };
 /**
  * The built command, with everything it is allowed to read set on purpose.
  *
- * Both key variables are cleared unless a check sets one, so a machine that
- * happens to have a real Retell key in its environment cannot make a check
- * about a missing key pass.
+ * The platform is named on every invocation, because a flag on the command is
+ * the one way to name one. Both key variables are cleared unless a check sets
+ * one, so a machine that happens to have a real Retell key in its environment
+ * cannot make a check about a missing key pass.
  */
 function egma(
   args: readonly string[],
   options: { readonly env?: NodeJS.ProcessEnv; readonly stdin?: string } = {},
 ): Promise<Result> {
   const env = workspace.env({
-    EGMA_URL: platform.url,
     ...(retell === undefined ? {} : { EGMA_RETELL_URL: retell.url }),
     // Every check written before there was a choice is about the connection
     // egma made then, and that is the text one. The checks that are about the
@@ -98,7 +98,10 @@ function egma(
     ...options.env,
   });
 
-  const child = spawn(process.execPath, [CLI_ENTRY, ...args], { cwd: workspace.dir, env });
+  const child = spawn(process.execPath, [CLI_ENTRY, "--url", platform.url, ...args], {
+    cwd: workspace.dir,
+    env,
+  });
 
   let stdout = "";
   let stderr = "";
@@ -315,9 +318,9 @@ describe("egma connect", () => {
     retell = await startFakeRetell(ONE_AGENT);
     const fresh = await makeWorkspace();
     try {
-      const child = spawn(process.execPath, [CLI_ENTRY, "connect"], {
+      const child = spawn(process.execPath, [CLI_ENTRY, "connect", "--url", platform.url], {
         cwd: fresh.dir,
-        env: fresh.env({ EGMA_URL: platform.url, EGMA_RETELL_URL: retell.url }),
+        env: fresh.env({ EGMA_RETELL_URL: retell.url }),
       });
       child.stdin.end(KEY);
       let stdout = "";

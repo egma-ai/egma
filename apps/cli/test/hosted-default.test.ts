@@ -100,21 +100,26 @@ describe("the built-in address", () => {
   });
 
   /**
-   * The seam is not a second way for a developer to select a platform, and it
-   * does not behave like one: `EGMA_URL` sits above the built-in address in the
-   * order, so a shell that sets both is a shell that uses `EGMA_URL`.
+   * The seam is not a way for a developer to select a platform, and it does not
+   * behave like one: it stands in for the last step of the order rather than
+   * joining it, so both steps above it still win over whatever it holds.
    */
   it("is still the last step, whatever the seam holds", () => {
+    const seam = defaultPlatformUrlIn({
+      [TEST_DEFAULT_URL_VARIABLE]: "http://stood-in.example",
+    });
+
     expect(
       selectPlatform({
-        flag: null,
-        env: "http://named-for-this-shell.example",
+        flag: "http://named-on-this-command.example",
         binding: null,
-        fallback: defaultPlatformUrlIn({
-          [TEST_DEFAULT_URL_VARIABLE]: "http://stood-in.example",
-        }),
+        fallback: seam,
       }),
-    ).toEqual({ url: "http://named-for-this-shell.example", source: "EGMA_URL" });
+    ).toEqual({ url: "http://named-on-this-command.example", source: "--url" });
+
+    expect(
+      selectPlatform({ flag: null, binding: "http://committed.example", fallback: seam }),
+    ).toEqual({ url: "http://committed.example", source: "binding" });
   });
 
   /**

@@ -693,7 +693,6 @@ async function main(): Promise<void> {
       BROWSER: NO_BROWSER,
       EGMA_RETELL_URL: vendor.url,
     };
-    delete env.EGMA_URL;
     delete env[KEY_VARIABLE];
     delete env.EGMA_RETELL_API_KEY;
     delete env.EGMA_RETELL_AGENT_ID;
