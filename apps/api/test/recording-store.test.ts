@@ -7,7 +7,9 @@ import {
 } from "../src/recordings/signed-link.ts";
 import { createApi, type TestApi } from "./support/api.ts";
 import {
+  absentObjectStorage,
   aRecording,
+  REQUIRE_OBJECT_STORAGE,
   startObjectStorage,
   type ObjectStorage,
 } from "./support/object-storage.ts";
@@ -47,6 +49,42 @@ if (!storage.available) {
 
 afterAll(() => {
   if (storage.available) storage.stop();
+});
+
+/**
+ * The skip is a kindness to a contributor with no docker, and a lie in a gate.
+ *
+ * The final handoff run and the browser job in CI both exist to prove that a
+ * recording can be signed, fetched and played. Either of them going green
+ * because no store could be started would report the opposite of what happened,
+ * so those runs say `EGMA_REQUIRE_OBJECT_STORAGE` and a missing store fails
+ * loudly with the reason it is missing.
+ */
+describe("a run that requires an object store", () => {
+  const noDocker = "docker would not start minio";
+
+  it("skips with its reason where nobody asked for one", () => {
+    expect(absentObjectStorage(noDocker, {})).toEqual({
+      available: false,
+      why: noDocker,
+    });
+  });
+
+  it("refuses to skip, and keeps the reason, where a run asked for one", () => {
+    expect(() =>
+      absentObjectStorage(noDocker, { [REQUIRE_OBJECT_STORAGE]: "1" }),
+    ).toThrow(new RegExp(noDocker));
+  });
+
+  it("reads an empty or switched-off setting as nobody asking", () => {
+    for (const asked of ["", "0", "false", "off"]) {
+      expect(
+        absentObjectStorage(noDocker, { [REQUIRE_OBJECT_STORAGE]: asked })
+          .available,
+        `${REQUIRE_OBJECT_STORAGE}=${asked} was read as a request`,
+      ).toBe(false);
+    }
+  });
 });
 
 const A_REFERENCE = "sim_01JQ0A2B3C4D5E6F7G8H9J0K/dual-channel.wav";
