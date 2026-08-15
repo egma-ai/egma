@@ -1060,8 +1060,8 @@ describe("judge settings", () => {
       expect(
         within(
           screen.getByRole("region", { name: "Judge credentials" }),
-        ).getByText(/Acme production/),
-      ).toBeTruthy();
+        ).getAllByText(/Acme production/),
+      ).not.toHaveLength(0);
     });
     expect(
       (screen.getByLabelText("OpenAI key") as HTMLInputElement).value,
@@ -1141,7 +1141,8 @@ describe("judge settings", () => {
       },
     ]);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Replace key" }));
+    const keys = await screen.findByRole("table", { name: "Organization keys" });
+    fireEvent.click(within(keys).getByRole("button", { name: "Replace key" }));
 
     const field = screen.getByLabelText("New key") as HTMLInputElement;
     expect(field.value).toBe("");

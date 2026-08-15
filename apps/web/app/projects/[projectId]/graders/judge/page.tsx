@@ -21,7 +21,15 @@ import {
 } from "../../../../../lib/judge.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
-import { Badge, Button, ButtonLink, Field, TextInput } from "../../../../../ui/controls.tsx";
+import {
+  Badge,
+  Button,
+  ButtonLink,
+  Field,
+  Select,
+  TextInput,
+} from "../../../../../ui/controls.tsx";
+import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import {
@@ -252,63 +260,66 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
             />
           ) : (
             <>
-          <Field label="Provider" htmlFor="judge-provider">
-            <select
-              id="judge-provider"
-              value={provider}
-              disabled={!mayAdminister}
-              onChange={(event) => {
-                setProvider(event.target.value);
-                // A credential of the old provider cannot answer for the new
-                // one, so the choice is cleared rather than left pointing at
-                // something the server would refuse.
-                setSource("");
-              }}
-            >
-              {(registry?.status === "ready" ? registry.value.providers : []).map(
-                (one) => (
-                  <option key={one.provider} value={one.provider}>
-                    {one.provider}
-                  </option>
-                ),
-              )}
-            </select>
-          </Field>
+              <Field label="Provider" htmlFor="judge-provider">
+                <Select
+                  id="judge-provider"
+                  value={provider}
+                  options={(registry?.status === "ready"
+                    ? registry.value.providers
+                    : []
+                  ).map((one) => ({ value: one.provider, label: one.provider }))}
+                  disabled={!mayAdminister}
+                  onChange={(chosen) => {
+                    setProvider(chosen);
+                    // A credential of the old provider cannot answer for the
+                    // new one, so the choice is cleared rather than left
+                    // pointing at something the server would refuse.
+                    setSource("");
+                  }}
+                />
+              </Field>
 
-          <Field label="Key" htmlFor="judge-source">
-            <select
-              id="judge-source"
-              value={source}
-              disabled={!mayAdminister}
-              onChange={(event) => setSource(event.target.value)}
-            >
-              <option value="">Choose a key</option>
-              {choosable.map((credential) => (
-                <option key={credential.id} value={credential.id}>
-                  {credentialLabel(credential)}
-                </option>
-              ))}
-              {/*
-                * Offered when **the deployment has a judge**, and never when
-                * the project happens to be using one. Reading it off the
-                * project's current choice would make moving to a key of your
-                * own a one-way door — the option would vanish the moment you
-                * stopped using it, and the way back would be unreachable from
-                * the one page that exists to take it. The registry answers
-                * this because it is the deployment's fact to state.
-                */}
-              {platformJudge ? (
-                <option value={PLATFORM_SOURCE}>
-                  This deployment&apos;s own judge
-                </option>
-              ) : null}
-            </select>
-            {choosable.length === 0 ? (
-              <small>
-                This organization holds no {provider} key yet. Add one below.
-              </small>
-            ) : null}
-          </Field>
+              <Field
+                label="Key"
+                htmlFor="judge-source"
+                {...(choosable.length === 0
+                  ? {
+                      hint: `This organization holds no ${provider} key yet. Add one below.`,
+                    }
+                  : {})}
+              >
+                <Select
+                  id="judge-source"
+                  value={source}
+                  /*
+                   * The deployment's own judge is offered when **the deployment
+                   * has one**, and never when the project happens to be using
+                   * it. Reading it off the project's current choice would make
+                   * moving to a key of your own a one-way door — the option
+                   * would vanish the moment you stopped using it, and the way
+                   * back would be unreachable from the one page that exists to
+                   * take it. The registry answers this because it is the
+                   * deployment's fact to state.
+                   */
+                  options={[
+                    { value: "", label: "Choose a key" },
+                    ...choosable.map((credential) => ({
+                      value: credential.id,
+                      label: credentialLabel(credential),
+                    })),
+                    ...(platformJudge
+                      ? [
+                          {
+                            value: PLATFORM_SOURCE,
+                            label: "This deployment's own judge",
+                          },
+                        ]
+                      : []),
+                  ]}
+                  disabled={!mayAdminister}
+                  onChange={setSource}
+                />
+              </Field>
             </>
           )}
 
@@ -448,6 +459,48 @@ function Credentials({
     onChanged();
   }
 
+  /** The row whose replacement form is open, if the row is still on the list. */
+  const rotatingCredential = credentials.find(
+    (credential) => credential.id === rotating,
+  );
+
+  const columns: readonly Column<JudgeCredential>[] = [
+    {
+      key: "label",
+      header: "Key",
+      primary: true,
+      cell: (credential) => credential.label,
+    },
+    {
+      key: "provider",
+      header: "Provider",
+      width: "120px",
+      cell: (credential) => credential.provider,
+    },
+    {
+      key: "hint",
+      header: "Ends",
+      mono: true,
+      width: "90px",
+      cell: (credential) => `…${credential.hint}`,
+    },
+    {
+      key: "rotate",
+      header: "",
+      width: "150px",
+      cell: (credential) => (
+        <Button
+          disabled={!mayAdminister || busy}
+          onClick={() =>
+            setRotating(rotating === credential.id ? null : credential.id)
+          }
+        >
+          Replace key
+        </Button>
+      ),
+    },
+  ];
+
   return (
     <section aria-label="Judge credentials">
       <h2>Organization keys</h2>
@@ -468,46 +521,47 @@ function Credentials({
       {credentials.length === 0 ? (
         <p>No judge credentials yet.</p>
       ) : (
-        <ul>
-          {credentials.map((credential) => (
-            <li key={credential.id}>
-              {credential.label} · {credential.provider} · ends …{credential.hint}{" "}
-              <Button
-                disabled={!mayAdminister || busy}
-                onClick={() =>
-                  setRotating(rotating === credential.id ? null : credential.id)
-                }
+        <>
+          <DataTable
+            label="Organization keys"
+            columns={columns}
+            rows={credentials}
+            keyOf={(credential) => credential.id}
+          />
+
+          {/*
+           * The replacement form is drawn once, under the table, for whichever
+           * row asked for it — never inside a cell. A table draws every row
+           * twice, once wide and once narrow, so a form living in a cell would
+           * be two forms over one piece of state: two fields carrying one
+           * value, and whichever the browser focused would be the one somebody
+           * could not see.
+           */}
+          {rotatingCredential === undefined ? null : (
+            <>
+              <Field
+                label="New key"
+                htmlFor={`rotate-${rotatingCredential.id}`}
+                hint="Replaces the stored key whole. You do not need the old one, and egma will not show it to you."
               >
-                Replace key
+                <TextInput
+                  id={`rotate-${rotatingCredential.id}`}
+                  value={replacement}
+                  secret
+                  disabled={!mayAdminister || busy}
+                  onChange={setReplacement}
+                />
+              </Field>
+              <Button
+                weight="strong"
+                disabled={!mayAdminister || busy || replacement.trim() === ""}
+                onClick={() => void rotate(rotatingCredential)}
+              >
+                Save new key
               </Button>
-              {rotating === credential.id ? (
-                <>
-                  <Field label="New key" htmlFor={`rotate-${credential.id}`}>
-                    <input
-                      id={`rotate-${credential.id}`}
-                      type="password"
-                      value={replacement}
-                      autoComplete="off"
-                      disabled={!mayAdminister || busy}
-                      onChange={(event) => setReplacement(event.target.value)}
-                    />
-                    <small>
-                      Replaces the stored key whole. You do not need the old one,
-                      and egma will not show it to you.
-                    </small>
-                  </Field>
-                  <Button
-                    weight="strong"
-                    disabled={!mayAdminister || busy || replacement.trim() === ""}
-                    onClick={() => void rotate(credential)}
-                  >
-                    Save new key
-                  </Button>
-                </>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+            </>
+          )}
+        </>
       )}
 
       <h3>Add a key</h3>
@@ -515,13 +569,12 @@ function Credentials({
         <TextInput id="credential-label" value={label} onChange={setLabel} />
       </Field>
       <Field label="OpenAI key" htmlFor="credential-key">
-        <input
+        <TextInput
           id="credential-key"
-          type="password"
           value={key}
-          autoComplete="off"
+          secret
           disabled={!mayAdminister || busy}
-          onChange={(event) => setKey(event.target.value)}
+          onChange={setKey}
         />
       </Field>
       <Button
