@@ -120,6 +120,23 @@ grader, for a simulation and a production conversation alike — so the number o
 a screen and the number a verdict rests on are one piece of arithmetic and can
 never disagree. Nothing is stored: a measure is the spans, reduced, at read time.
 
+**The reduction is part of that**, and it is the half that is easy to lose. A
+bound is held against one number — `worstSampleOf`, the strictest reading, until
+the catalog's aggregations become something a grader can ask for — so the module
+reduces and every surface reads the reduced figure. A page taking the maximum
+for itself would look harmless and would be a second implementation of exactly
+the number a verdict rests on, correct until the day the two reductions differ
+and silent when they do. `packages/db/test/one-measure-path.test.ts` is the
+drift alarm over all of it: it scans the source for a second reader of the timing
+kind, a second nanosecond conversion, and a hand-rolled reduction, and it names
+the files allowed to do each.
+
+**A conversation egma holds only part of is judged by nobody.** A read over the
+store's span limit returns a prefix, and the worst measurement of a prefix is the
+worst of that part rather than of the call. Both sources refuse it with the same
+sentence; the read endpoint marks such measures `partial` rather than hiding
+them, because a display may show what there is and may not claim it is the whole.
+
 The module knows nothing about where a conversation came from. Identical spans
 therefore produce identical numbers whether egma conducted the conversation or a
 real caller had it, which is what makes "passes in simulation, fails in
