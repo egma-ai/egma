@@ -116,26 +116,30 @@ export function buildApi(options: ServerOptions): Api {
     },
     hooks: {
       admitIdentity: admitIdentity(config.singleOrganization),
-      // **The platform's own judge is only ever given away on a
-      // single-organization deployment**, and the guard is here rather than
-      // deeper because this is the only place that knows both facts.
+      // **The platform's own judge goes to every project this deployment
+      // creates**, whichever organization it belongs to. A deployment that
+      // names a default judge is offering a working grader, and the offer is
+      // the whole point: a new project's first simulation is graded before
+      // anybody has configured anything. Withhold it and a new customer's
+      // first run comes back ungraded — `errored` verdicts naming a missing
+      // judge, after real calls have been paid for.
       //
-      // That judge is the operator's own model credential. On a deployment
-      // holding one customer — a self-hoster, which is what this default is
-      // for — handing it to the project is the whole point: a first run has to
-      // be gradable before anybody has configured anything. On a deployment
-      // with open signup it is the opposite. Every stranger who signs up gets
-      // their own organization, and giving each one the operator's key means
-      // untrusted people's grading is billed to the operator, on a credential
-      // they never chose to share.
+      // **Said out loud, because it was weighed rather than missed.** On a
+      // deployment serving several organizations, that judge is the *operator's*
+      // own model credential, so every organization's new projects grade on the
+      // operator's account. That is what a hosted platform offering grading
+      // means, and an operator who does not want to pay for it names no default
+      // judge at all — then every project is ungraded until it configures its
+      // own, which is the honest failure rather than a quiet invoice.
       //
-      // So a multi-tenant deployment provisions no default judge, and a
-      // project there is ungraded until it configures its own. That is the
-      // honest failure: `errored` verdicts naming a missing judge, rather than
-      // a quiet invoice.
-      onIdentityCreated: onIdentityCreated(
-        config.singleOrganization ? config.defaultJudge : undefined,
-      ),
+      // Two things keep this safe and neither is this wiring's to give up. A
+      // project that has chosen a judge is never overwritten —
+      // `onConflictDoNothing` in the transaction that creates a project and
+      // again in the boot backfill. And that backfill has always seeded every
+      // unconfigured project across every organization, so gating this path
+      // alone never withheld the operator's key; it only delayed it to the next
+      // restart, which is the exact gap this hook exists to close.
+      onIdentityCreated: onIdentityCreated(config.defaultJudge),
     },
   });
 
