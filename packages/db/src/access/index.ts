@@ -497,6 +497,7 @@ export {
   listGraders,
   useLibraryEntry,
   type DeletedGrader,
+  type FilledInForm,
   type Grader,
   type GraderAssertion,
   type GraderChanges,

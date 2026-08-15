@@ -29,8 +29,16 @@ import {
  * The line every test in this file draws is between what a verdict was decided
  * by and where the decision applies. Tightening a bound changes what a verdict
  * means, so it mints a version and the old one stays exactly readable; making a
- * blocker into a diagnostic changes nothing already judged, so it writes in
- * place and is true the moment it returns.
+ * blocker into a diagnostic rewrites no verdict, so it writes in place and is
+ * true the moment it returns.
+ *
+ * **"Rewrites no verdict" is the whole claim, and it is narrower than it
+ * sounds.** Turning `required` off changes what those verdicts *add up to*: the
+ * fold reads the flag as it stands, so a run that failed on one grader alone
+ * reads as passed from that moment. That is the flag's job and it is proved in
+ * `apps/grader/test/lanes.test.ts`. Nothing in this file may be read as saying
+ * a live setting cannot reach a page about the past — only that it never
+ * touches a row.
  *
  * **The filled-in values are all a copy holds, and they are checked against the
  * entry it points at** — read live, on every edit, which is the same check Use
@@ -234,6 +242,118 @@ describe("editing what a grader judges by", () => {
     const fetched = await getGrader(actingAsAcme(), created.id);
     expect(fetched?.version).toBe(1);
     expect(fetched?.config).toEqual(latencyConfig);
+  });
+
+  /**
+   * **The form filled in once is what a screen sends, and it means what it
+   * means on a Use.** `params` is the entry's questions answered — one set,
+   * which is one assertion — so the door that made a copy and the door that
+   * changes one send the same shape and go through the same check. Anything
+   * else would be a browser page holding its own idea of what a bound is.
+   */
+  it("takes the entry's form filled in, exactly as Use takes it", async () => {
+    const created = await useLibraryEntry(actingAsAcme(), latency);
+
+    const edited = await editGrader(actingAsAcme(), created.id, {
+      params: { metric: "turn_response_latency", bound: 1500 },
+    });
+
+    expect(edited?.version).toBe(2);
+    expect(edited?.config).toEqual(boundedAt(1500));
+
+    // And it is checked against the entry this copy points at, in the entry's
+    // own words — the same refusal Use answers with.
+    await expect(
+      editGrader(actingAsAcme(), created.id, {
+        params: { metric: "turn_response_latency", bound: 1500, aggregation: "p90" },
+      }),
+    ).rejects.toThrow(/does not ask for/);
+  });
+
+  /**
+   * **One filled-in set cannot say two assertions, so it is refused rather than
+   * allowed to truncate.**
+   *
+   * `params` is the form asked once. On a copy holding one set — every copy the
+   * product can make today — replacing is complete and nothing is lost. On a
+   * copy holding two it is a silent truncation twice over: the second bound
+   * stops being judged, and the edit mints a version recording the loss as
+   * though somebody had asked for it. Nothing outside this module can build
+   * such a copy yet, which is exactly why the door is shut now: re-grade and
+   * custom authoring are what make one arrive.
+   */
+  it("refuses one filled-in set for a copy that holds more than one assertion", async () => {
+    const created = await useLibraryEntry(actingAsAcme(), {
+      ...latency,
+      name: "Two bounds, one form",
+    });
+    const grown = await editGrader(actingAsAcme(), created.id, {
+      config: {
+        assertions: [
+          { metric: "turn_response_latency", bound: 2000 },
+          { metric: "first_response_latency", bound: 900 },
+        ],
+      },
+    });
+    expect(grown?.version).toBe(2);
+
+    await expect(
+      editGrader(actingAsAcme(), created.id, {
+        params: { metric: "turn_response_latency", bound: 1500 },
+      }),
+    ).rejects.toThrow(/config/);
+
+    // Both bounds still there, and no version minted by the refusal.
+    const fetched = await getGrader(actingAsAcme(), created.id);
+    expect(fetched?.version).toBe(2);
+    expect(fetched?.config.assertions).toHaveLength(2);
+
+    // And the whole list, said as the whole list, goes through.
+    const narrowed = await editGrader(actingAsAcme(), created.id, {
+      config: { assertions: [{ metric: "turn_response_latency", bound: 1500 }] },
+    });
+    expect(narrowed?.version).toBe(3);
+    expect(narrowed?.config.assertions).toHaveLength(1);
+  });
+
+  /**
+   * The mirror of the "needs at least one" rule, which the module promised and
+   * did not enforce: an entry that asks nothing must hold none. An empty set of
+   * answers passes every rule about keys and stores an assertion holding
+   * nothing — a row the Running graders screen counts and nothing ever judges.
+   */
+  it("refuses an empty set of values on an entry that asks nothing", async () => {
+    const behaviors = await useLibraryEntry(actingAsAcme(), {
+      libraryId: PREDEFINED_GRADERS.expectedBehaviors,
+      name: "A second opinion on the behaviors",
+    });
+    expect(behaviors.config).toEqual({ assertions: [] });
+
+    await expect(
+      editGrader(actingAsAcme(), behaviors.id, { params: {} }),
+    ).rejects.toThrow(/asks for nothing/);
+
+    const fetched = await getGrader(actingAsAcme(), behaviors.id);
+    expect(fetched?.config).toEqual({ assertions: [] });
+    expect(fetched?.version).toBe(1);
+  });
+
+  /**
+   * Two names for one thing, so exactly one may be used. Ranking them would
+   * quietly decide which of two lists somebody meant, and the only honest
+   * answer to that is to ask.
+   */
+  it("refuses an edit that says its values twice", async () => {
+    const created = await useLibraryEntry(actingAsAcme(), latency);
+
+    await expect(
+      editGrader(actingAsAcme(), created.id, {
+        params: { metric: "turn_response_latency", bound: 1500 },
+        config: boundedAt(1200),
+      }),
+    ).rejects.toThrow(/once/);
+
+    expect((await getGrader(actingAsAcme(), created.id))?.version).toBe(1);
   });
 
   /**

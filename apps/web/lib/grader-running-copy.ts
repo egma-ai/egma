@@ -42,12 +42,134 @@ export const RUNNING = {
     "is created — if it is gone, pick it from the library and press Use.",
 } as const;
 
-/** The table's headings. */
+/** The table's headings. The last one is blank, because it holds the buttons. */
 export const RUNNING_COLUMNS = {
   name: "Name",
   scope: "Applies to",
   required: "Required",
   config: "Assertions",
+  actions: "",
+} as const;
+
+/**
+ * Changing a running copy: every word the edit form says.
+ *
+ * **The one thing this copy has to make plain is that an edit is two acts.**
+ * Changing a filled-in value changes what the grader *is*, so it starts the
+ * next version and the version behind it stays exactly as it was, which is what
+ * keeps last week's result meaning what it meant. Somebody who did not know
+ * that would read a tightened bound as a rewriting of history.
+ *
+ * **And the one sentence it must not shorten is what `required` does.** Turning
+ * a blocker into a diagnostic rewrites no verdict — and it does change what
+ * those verdicts add up to, because whether a grader can fail a run is read
+ * fresh every time somebody opens the page. A run that failed on this grader
+ * alone reads as passed from the moment the flag turns. That is the flag's
+ * whole job, and "nothing already judged changes" is the tempting short version
+ * that says the opposite of what the person will see next.
+ *
+ * The labels and the help text for the filled-in values are **not** here: they
+ * ride the library entry, and the form renders what it was handed. A list of
+ * measures typed into this file would be a second copy of egma's own catalog,
+ * wrong the first time one joined or left.
+ */
+export const EDIT = {
+  open: "Edit",
+  title: (name: string): string => `Edit ${name}`,
+  lead:
+    "What this grader judges by, and where it applies. Values are what a " +
+    "verdict is made of, so changing one starts the next version and leaves " +
+    "everything already judged saying exactly what it said.",
+  /** An entry whose assertions come from the test has nothing to fill in. */
+  asksNothing:
+    "This grader has nothing to fill in. Its assertions are each test's own " +
+    "expected behaviors, read at the moment it judges.",
+  name: "Name",
+  nameMeans: "What this project calls its copy.",
+  description: "Notes",
+  descriptionMeans: "Why your team switched it on. Leave it empty for none.",
+  scope: "Applies to",
+  scopeMeans: "Where this grader judges. Live traffic is sampled below.",
+  required: "Can fail a run",
+  /**
+   * Both positions carry the same warning, because turning the flag either way
+   * has the same reach: no verdict is rewritten, and every run already read is
+   * re-counted the next time somebody opens it.
+   */
+  requiredOn:
+    "A test cannot pass while this grader does not. Turning this off rewrites " +
+    "no verdict, and it does change what past ones add up to: a run that " +
+    "failed on this grader alone reads as passed from then on.",
+  requiredOff:
+    "A diagnostic: judged and shown with its fraction, and never able to fail " +
+    "anything. Turning this back on rewrites no verdict, and it does change " +
+    "what past ones add up to: a run this grader failed reads as failed again.",
+  sampleRate: "Share of live traffic judged",
+  sampleRateMeans:
+    "A whole percentage from 0 to 100. It counts only where this grader " +
+    "reaches live traffic, and it moves forward: raising it judges sooner and " +
+    "lowering it judges later, and neither reaches back.",
+  submit: "Save",
+  submitting: "Saving…",
+  cancel: "Cancel",
+  /**
+   * **Narrow on purpose.** It used to say "what has already been judged is
+   * unchanged", which is true of the verdicts and false of the runs they add
+   * up to — and it was shown at the exact moment somebody had turned `required`
+   * off, which is when it was most wrong. It now claims only what it can: no
+   * verdict was rewritten.
+   */
+  saved: (name: string): string =>
+    `${name} is saved. It judges everything in its scope from here on, and no verdict it has already written was rewritten.`,
+  /** Why the control is not this person's, in their own role's words. */
+  notYours: (role: string): string =>
+    `Your ${role} role cannot change a grader. Ask an organization admin.`,
+} as const;
+
+/**
+ * Switching a running copy off: every word the delete says.
+ *
+ * **Delete is the off switch, because there is no other one.** There is no
+ * enable flag and no "applies to nothing" setting — a grader either exists and
+ * judges everything in its scope, or it is gone. So this act has to read as
+ * switching off rather than as destroying something, and the two sentences
+ * below are how: one says what stops, and one says what stays.
+ *
+ * The second is the one that must never be dropped. Everything this grader
+ * already judged keeps saying exactly what it said, because the versions it
+ * judged by outlive it — so a result somebody read last week reads the same
+ * today. Without that sentence a person weighing this button is being asked to
+ * choose between a grader they cannot live with and a history they cannot lose.
+ *
+ * **The last one gets a sentence of its own.** A project may judge with nothing
+ * at all — that is a decision it is allowed to take, and the run door lets it
+ * through rather than refusing — so nothing stops somebody switching off the
+ * last copy. What a page owes them is the consequence in advance: the run still
+ * happens, and it comes back with nothing judged.
+ */
+export const SWITCH_OFF = {
+  open: "Switch off",
+  title: (name: string): string => `Switch ${name} off`,
+  stops: "Nothing this project runs from now on is judged by it.",
+  keeps:
+    "Everything it has already judged keeps exactly what it said. Every " +
+    "verdict it wrote stays readable, so a run you have already read still " +
+    "reads the same.",
+  again:
+    "There is no switching it back on. Pick the same grader from the library " +
+    "and press Use, which starts a fresh copy with its own settings.",
+  /** Said above the two buttons when this copy is the only one left. */
+  theLastOne:
+    "This is the only grader running here. Switch it off and runs still " +
+    "happen, and come back with nothing judged.",
+  confirm: "Switch it off",
+  confirming: "Switching off…",
+  cancel: "Keep it",
+  done: (name: string): string =>
+    `${name} is switched off. Nothing new is judged by it, and everything it already judged reads exactly as it did.`,
+  /** Why the control is not this person's, in their own role's words. */
+  notYours: (role: string): string =>
+    `Your ${role} role cannot switch a grader off. Ask an organization admin.`,
 } as const;
 
 /**
@@ -83,8 +205,8 @@ export const REQUIRED = {
  *
  * **An empty set of values is a complete grader, not a half-finished one**, and
  * this is the sentence that stops it reading as a gap: the expected-behaviors
- * grader checks whatever the test in front of it says, so there is nothing for
- * anybody to fill in and there never will be.
+ * grader judges whatever the test in front of it says it expects, so there is
+ * nothing for anybody to fill in and there never will be.
  */
 export const CONFIG = {
   fromTheTest: "Whatever the test says it expects",
@@ -96,47 +218,6 @@ export const CONFIG = {
    */
   counted: (howMany: number): string =>
     `${howMany} ${howMany === 1 ? "assertion" : "assertions"}`,
-} as const;
-
-/**
- * Deleting a running copy: the one act on this screen, and every word it says.
- *
- * **Deleting the copy is how a grader is switched off, and there is no other
- * switch.** There is no enable flag, no `none` scope and no archive here:
- * pressing Use is the switching on, and this is the switching off. So the words
- * have to carry what a person is actually deciding — this project stops being
- * judged by it — rather than sounding like a row is being tidied away.
- *
- * **What has already been judged does not move**, and saying so is what makes
- * the act safe to take. A run froze its plan when it started, so it keeps
- * judging with what it froze; every verdict already written stays exactly as it
- * is, and its version rows stay where they are so it can still be read.
- *
- * **The last one gets its own sentence.** A project may run no graders at all —
- * that is a decision it is allowed to take, and the run door lets it through
- * rather than refusing — so nothing stops somebody deleting the last copy. What
- * a page owes them is the consequence in advance: the run still happens, and it
- * comes back with nothing judged.
- */
-export const REMOVE = {
-  open: "Delete",
-  title: (name: string): string => `Delete ${name}?`,
-  lead:
-    "This project stops being judged by it. Runs already started keep the " +
-    "graders they froze, and every verdict already written is unchanged. " +
-    "Pressing Use on the library shelf starts a new copy whenever you want one.",
-  /** Said above the two buttons when this copy is the only one left. */
-  theLastOne:
-    "This is the only grader running here. Delete it and runs still happen, " +
-    "and come back with nothing judged.",
-  confirm: "Delete grader",
-  confirming: "Deleting…",
-  cancel: "Keep it",
-  gone: (name: string): string =>
-    `${name} is no longer judging this project. What it already judged is unchanged.`,
-  /** Why the control is not this person's, in their own role's words. */
-  notYours: (role: string): string =>
-    `Your ${role} role cannot delete a grader. Ask an organization admin.`,
 } as const;
 
 /** What a row says where the answer carried nothing. */

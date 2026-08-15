@@ -456,6 +456,63 @@ describe("the pages", () => {
   });
 
   /**
+   * **And every path the client *builds*, which the guard above cannot see.**
+   *
+   * That one reads `_PATH` constants, so it covers a collection and nothing
+   * under it. A page reaching one row asks at an address built by a function —
+   * `` `${GRADERS_PATH}/${graderId}` `` — and the collection's own rule does not
+   * forward it: `beforeFiles` matches a rule against the whole path, so
+   * `source: "/api/graders"` forwards `/api/graders` and stops there.
+   *
+   * That is not hypothetical. `DELETE /api/graders/:graderId` shipped on this
+   * branch with the screen calling it and no `:path*` rule beside it, and every
+   * test passed: the component tests stub `fetch`, so a rewrite is never in the
+   * path, and the API tests call the route directly. In a deployment the delete
+   * would have reached this process, which has no such route, and the screen
+   * would have shown Next's 404 **page** — HTML, no sentence — as egma refusing
+   * to switch a grader off.
+   *
+   * So the rule is read from the same place: a function under `lib/` that
+   * builds an address beneath a collection means that collection needs a
+   * `:path*` rule, and the day somebody writes the next such function it is
+   * covered without anybody remembering this file.
+   */
+  it("rewrites every path the browser client builds beneath a collection", async () => {
+    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
+    const lib = await readdir(path.join(WEB, "lib"));
+
+    /** Every collection a `lib/` function builds an address underneath. */
+    const beneath = new Set<string>();
+    for (const file of lib.filter((one) => one.endsWith(".ts"))) {
+      const source = await readFile(path.join(WEB, "lib", file), "utf8");
+
+      const collections = new Map<string, string>();
+      for (const [, named, at] of source.matchAll(
+        /(\w+_PATH)\s*=\s*"(\/api\/[^"]+)"/g,
+      )) {
+        if (named !== undefined && at !== undefined) collections.set(named, at);
+      }
+
+      for (const [, named] of source.matchAll(/`\$\{(\w+_PATH)\}\/\$\{/g)) {
+        const at = named === undefined ? undefined : collections.get(named);
+        if (at !== undefined) beneath.add(at);
+      }
+    }
+
+    // A guard on the guard, the neighbour's: if these functions are ever
+    // written another way the loop finds nothing and this passes vacuously.
+    expect(beneath.size).toBeGreaterThan(4);
+
+    const unforwarded = [...beneath]
+      .filter((one) => !rewrites.includes(`source: "${one}/:path*"`))
+      .sort();
+
+    // Named rather than counted: the fix is one rule per collection, and a bare
+    // count sends somebody reading a config file to work out which.
+    expect(unforwarded).toEqual([]);
+  });
+
+  /**
    * Somewhere to click, and a path that reaches the API rather than this
    * process. Without the rewrite the button would post at Next, which has no
    * such route, and signing out would 404 while looking like a product bug.

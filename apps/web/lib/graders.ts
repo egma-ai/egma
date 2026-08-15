@@ -100,7 +100,10 @@ export type RunningPage = {
 export const GRADER_LIBRARY_PATH = "/api/grader-library";
 export const GRADERS_PATH = "/api/graders";
 
-/** One running copy's own address, which only a delete names. */
+/**
+ * One running copy's own address: where an edit changes what it judges by and
+ * a delete switches it off.
+ */
 export function graderPath(graderId: string): string {
   return `${GRADERS_PATH}/${graderId}`;
 }

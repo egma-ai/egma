@@ -391,19 +391,39 @@ describe("the grader library, in one project", () => {
 
 /* ------------------------------------------------------------------------ */
 
+/**
+ * The shelf, as the running screen reads it: what each copy's entry asks for.
+ *
+ * Every case on that screen stubs it, because the page holds the copies and
+ * their entries as one state — a page with the copies and not yet the shelf
+ * would draw an edit form with no controls in it, which reads as a grader that
+ * asks nothing rather than as a page still loading.
+ */
+const SHELF = {
+  status: 200,
+  body: { items: [BEHAVIORS, LATENCY], next_cursor: null },
+} as const;
+
 describe("the running graders of one project", () => {
-  it("names its project, and says where each copy applies and whether it blocks", async () => {
+  it("names its project in both reads, and says where each copy applies and whether it blocks", async () => {
     const { asked } = apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
       "GET /api/graders": {
         status: 200,
         body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null },
       },
+      "GET /api/grader-library": SHELF,
     });
     render(<RunningGradersPage />);
 
     expect(await screen.findAllByText("Expected behaviors")).toHaveLength(2);
     expect(asked.map((one) => one.path)).toContain("/api/graders?project=prj_1");
+    // The shelf beside the copies, and in the same project: a copy's form is
+    // its entry's declaration rendered, and this page cannot draw one without
+    // having read the entry.
+    expect(asked.map((one) => one.path)).toContain(
+      "/api/grader-library?project=prj_1",
+    );
 
     // What `required` decides, rather than the flag's own value.
     expect(screen.getAllByText("Blocks")).not.toHaveLength(0);
@@ -417,17 +437,18 @@ describe("the running graders of one project", () => {
   });
 
   /**
-   * Deleting a copy is how a grader is switched off, and there is no other
-   * switch — so this is the one act on the screen, and it names the project it
-   * is taken in.
+   * Switching a copy off is deleting the row that was judging, because there is
+   * no enable flag and no scope meaning nowhere — so it is one of the two acts
+   * on this screen, and it names the project it is taken in.
    */
-  it("deletes a copy, in the project in the address, and reads the list again", async () => {
+  it("switches a copy off, in the project in the address, and reads the list again", async () => {
     const { asked } = apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
       "GET /api/graders": [
         { status: 200, body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null } },
         { status: 200, body: { items: [SEEDED], next_cursor: null } },
       ],
+      "GET /api/grader-library": SHELF,
       "DELETE /api/graders/grd_2": {
         status: 200,
         body: {
@@ -439,27 +460,57 @@ describe("the running graders of one project", () => {
     });
     render(<RunningGradersPage />);
 
-    const deletes = await screen.findAllByRole("button", { name: "Delete" });
+    const off = await screen.findAllByRole("button", { name: "Switch off" });
     // The table's rows are in answer order, so Latency's is the second.
-    fireEvent.click(deletes[1]!);
-    fireEvent.click(screen.getByRole("button", { name: "Delete grader" }));
+    fireEvent.click(off[1]!);
+    fireEvent.click(screen.getByRole("button", { name: "Switch it off" }));
 
     expect((await screen.findByRole("status")).textContent).toContain(
-      "Latency is no longer judging this project",
+      "Latency is switched off",
     );
     expect(asked.map((one) => one.path)).toContain(
       "/api/graders/grd_2?project=prj_1",
     );
     // Read again rather than edited here: what judges this project is the
-    // server's answer, and there are two reads for one delete.
+    // server's answer, and there are two reads of the list for one switch-off.
     expect(
       asked.filter((one) => one.path === "/api/graders?project=prj_1"),
     ).toHaveLength(2);
   });
 
   /**
+   * **What stays is the sentence that makes the button pressable**, and it is
+   * shown before the act rather than after it. A team whose grader is failing
+   * every run must not be asked to trade away the runs they have already read
+   * in order to stop it.
+   */
+  it("says what stops and, in its own sentence, what stays", async () => {
+    apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /api/graders": {
+        status: 200,
+        body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null },
+      },
+      "GET /api/grader-library": SHELF,
+    });
+    render(<RunningGradersPage />);
+
+    fireEvent.click(
+      (await screen.findAllByRole("button", { name: "Switch off" }))[0]!,
+    );
+
+    expect(screen.getByText(runningCopy.SWITCH_OFF.stops)).toBeTruthy();
+    expect(screen.getByText(runningCopy.SWITCH_OFF.keeps)).toBeTruthy();
+    expect(screen.getByText(runningCopy.SWITCH_OFF.again)).toBeTruthy();
+    // Not the last one, so the sentence about a project judged by nothing is
+    // not said — it is a warning about what this press would do, not a fact
+    // about switching graders off in general.
+    expect(screen.queryByText(runningCopy.SWITCH_OFF.theLastOne)).toBeNull();
+  });
+
+  /**
    * A project may end up judged by nothing — the run door allows it — so
-   * deleting the last copy is warned about and never refused.
+   * switching the last copy off is warned about and never refused.
    */
   it("warns before the last copy goes, and does not refuse it", async () => {
     apiAnswers({
@@ -468,6 +519,7 @@ describe("the running graders of one project", () => {
         { status: 200, body: { items: [SEEDED], next_cursor: null } },
         { status: 200, body: { items: [], next_cursor: null } },
       ],
+      "GET /api/grader-library": SHELF,
       "DELETE /api/graders/grd_1": {
         status: 200,
         body: {
@@ -480,11 +532,11 @@ describe("the running graders of one project", () => {
     render(<RunningGradersPage />);
 
     fireEvent.click(
-      (await screen.findAllByRole("button", { name: "Delete" }))[0]!,
+      (await screen.findAllByRole("button", { name: "Switch off" }))[0]!,
     );
-    expect(screen.getByText(runningCopy.REMOVE.theLastOne)).toBeTruthy();
+    expect(screen.getByText(runningCopy.SWITCH_OFF.theLastOne)).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete grader" }));
+    fireEvent.click(screen.getByRole("button", { name: "Switch it off" }));
 
     // Gone, and the page says what that means rather than pretending a project
     // with no graders is a project that has not finished setting up.
@@ -494,13 +546,14 @@ describe("the running graders of one project", () => {
     expect(screen.getByText(runningCopy.RUNNING.empty)).toBeTruthy();
   });
 
-  it("keeps the confirmation open and shows a refused delete", async () => {
+  it("keeps the confirmation open and shows a refused switch-off", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
       "GET /api/graders": {
         status: 200,
         body: { items: [SEEDED], next_cursor: null },
       },
+      "GET /api/grader-library": SHELF,
       "DELETE /api/graders/grd_1": {
         status: 403,
         body: {
@@ -512,9 +565,9 @@ describe("the running graders of one project", () => {
     render(<RunningGradersPage />);
 
     fireEvent.click(
-      (await screen.findAllByRole("button", { name: "Delete" }))[0]!,
+      (await screen.findAllByRole("button", { name: "Switch off" }))[0]!,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Delete grader" }));
+    fireEvent.click(screen.getByRole("button", { name: "Switch it off" }));
 
     expect(
       await screen.findByText("Your viewer role cannot author definitions."),
@@ -524,23 +577,289 @@ describe("the running graders of one project", () => {
     expect(screen.getAllByText("Expected behaviors")).not.toHaveLength(0);
   });
 
-  it("leaves Delete inert for a viewer, with the reason beside it", async () => {
+  it("leaves both acts inert for a viewer, with the reason beside them", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("viewer") },
       "GET /api/graders": {
         status: 200,
         body: { items: [SEEDED], next_cursor: null },
       },
+      "GET /api/grader-library": SHELF,
     });
     render(<RunningGradersPage />);
 
-    const pressed = (await screen.findAllByRole("button", {
-      name: "Delete",
+    const off = (await screen.findAllByRole("button", {
+      name: "Switch off",
     }))[0]!;
-    expect((pressed as HTMLButtonElement).disabled).toBe(true);
+    const edit = screen.getAllByRole("button", { name: "Edit" })[0]!;
+
+    expect((off as HTMLButtonElement).disabled).toBe(true);
+    expect((edit as HTMLButtonElement).disabled).toBe(true);
     expect(
-      screen.getAllByText(runningCopy.REMOVE.notYours("viewer")),
+      screen.getAllByText(runningCopy.SWITCH_OFF.notYours("viewer")),
     ).not.toHaveLength(0);
+    expect(
+      screen.getAllByText(runningCopy.EDIT.notYours("viewer")),
+    ).not.toHaveLength(0);
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Editing a running copy: the act that stops pressing **Use** being a one-way
+ * door.
+ *
+ * A developer who pressed Use on latency and typed a bound too tight used to
+ * live with it — every run red for ever, and the only way out a hand-written
+ * update against Postgres.
+ */
+describe("changing a running copy", () => {
+  /**
+   * **The edit form is the Use form's controls, filled in with what this copy
+   * holds.** What a grader asks for is the library entry's own declaration, and
+   * both forms render that one list through one component — so a bound opens
+   * showing the bound this copy judges by, and a measure opens on the measure
+   * it chose, rather than on the first option of a fresh form.
+   */
+  it("opens on what this copy holds, from its entry's own declaration", async () => {
+    apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /api/graders": {
+        status: 200,
+        body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null },
+      },
+      "GET /api/grader-library": SHELF,
+    });
+    render(<RunningGradersPage />);
+
+    // Latency's row is the second, and it is the one with values to fill in.
+    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[1]!);
+
+    expect((screen.getByLabelText("Bound") as HTMLInputElement).value).toBe(
+      "2000",
+    );
+    expect((screen.getByLabelText("Measure") as HTMLSelectElement).value).toBe(
+      "turn_response_latency",
+    );
+    // The live settings, which only a copy that already exists can have.
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      "Latency",
+    );
+    expect(
+      (screen.getByLabelText("Can fail a run") as HTMLInputElement).checked,
+    ).toBe(false);
+  });
+
+  /**
+   * **A number is sent as a number**, at the edge that knows the control was
+   * numeric — and the project rides in the body, because an edit lands on
+   * exactly one project and never on whichever the credential happens to act in.
+   */
+  it("sends one body carrying both kinds of change, in the project in the address", async () => {
+    routed.projectId = "prj_2";
+    const { asked } = apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /api/graders": [
+        { status: 200, body: { items: [DIAGNOSTIC], next_cursor: null } },
+        { status: 200, body: { items: [DIAGNOSTIC], next_cursor: null } },
+      ],
+      "GET /api/grader-library": SHELF,
+      "PATCH /api/graders/grd_2": {
+        status: 200,
+        body: { ...DIAGNOSTIC, config: { assertions: [{ bound: 1200 }] } },
+      },
+    });
+    render(<RunningGradersPage />);
+
+    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+    fireEvent.change(screen.getByLabelText("Bound"), {
+      target: { value: "1200" },
+    });
+    fireEvent.click(screen.getByLabelText("Can fail a run"));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await screen.findByRole("status");
+    const written = asked.find((one) => one.method === "PATCH");
+    expect(written?.path).toBe("/api/graders/grd_2");
+    expect(written?.body).toEqual({
+      name: "Latency",
+      // Null rather than the empty string: emptying a note is a real intent and
+      // the platform reads null as exactly that.
+      description: null,
+      scope: "both",
+      required: true,
+      production_sample_rate: 10,
+      params: { metric: "turn_response_latency", bound: 1200 },
+      project: "prj_2",
+    });
+  });
+
+  /**
+   * **The claim after a save is the narrow one.** "What has already been judged
+   * is unchanged" is true of the verdict rows and false of the runs they add up
+   * to — and it would be shown at the exact moment somebody had turned
+   * `required` off, which is when it is most wrong.
+   */
+  it("claims only that no verdict was rewritten, and reads the list again", async () => {
+    const { asked } = apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /api/graders": [
+        { status: 200, body: { items: [DIAGNOSTIC], next_cursor: null } },
+        { status: 200, body: { items: [DIAGNOSTIC], next_cursor: null } },
+      ],
+      "GET /api/grader-library": SHELF,
+      "PATCH /api/graders/grd_2": { status: 200, body: DIAGNOSTIC },
+    });
+    render(<RunningGradersPage />);
+
+    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    const said = (await screen.findByRole("status")).textContent ?? "";
+    expect(said).toContain("no verdict it has already written was rewritten");
+    expect(said.toLowerCase()).not.toContain("nothing already judged");
+    expect(
+      asked.filter((one) => one.path === "/api/graders?project=prj_1"),
+    ).toHaveLength(2);
+  });
+
+  /**
+   * An entry that asks nothing draws no controls, and says so rather than
+   * showing an empty form somebody would read as a page that failed to load.
+   */
+  it("asks nothing of a copy whose assertions are the test's own sentences", async () => {
+    apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /api/graders": {
+        status: 200,
+        body: { items: [SEEDED], next_cursor: null },
+      },
+      "GET /api/grader-library": SHELF,
+    });
+    render(<RunningGradersPage />);
+
+    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+
+    expect(screen.getByText(runningCopy.EDIT.asksNothing)).toBeTruthy();
+    expect(screen.queryByLabelText("Bound")).toBeNull();
+    // And the live settings are still there, because they belong to the copy
+    // rather than to what it asks for.
+    expect(screen.getByLabelText("Applies to")).toBeTruthy();
+  });
+
+  /**
+   * **The controls the real-browser walk drives, by the handles it drives them
+   * by.**
+   *
+   * That walk is the only proof that an edit survives the round trip, and it
+   * reaches these controls by their identifiers and their types rather than by
+   * their labels — `#edit-required`, `#edit-sample-rate`, and "the number field
+   * that is not the sample rate", which is how it names the entry's own bound
+   * without naming a measure. Those handles are a contract between two files
+   * and nothing else holds them, so a rename here would show up as a browser
+   * case timing out ten minutes into a lane rather than as a failure naming
+   * what moved.
+   *
+   * The types are the other half, and the reason this reads them rather than
+   * trusting the prop: a numeric parameter has to wear a numeric control, or a
+   * bound is typed on a phone keyboard with no digits on it.
+   */
+  it("gives the edit controls the handles the browser walk reaches them by", async () => {
+    apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /api/graders": {
+        status: 200,
+        body: { items: [DIAGNOSTIC], next_cursor: null },
+      },
+      "GET /api/grader-library": SHELF,
+    });
+    render(<RunningGradersPage />);
+
+    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+
+    // The panel names the copy, which is what the walk waits on before it
+    // touches anything.
+    expect(screen.getByText(runningCopy.EDIT.title("Latency"))).toBeTruthy();
+
+    const required = document.querySelector("#edit-required");
+    const rate = document.querySelector("#edit-sample-rate");
+    expect((required as HTMLInputElement | null)?.type).toBe("checkbox");
+    expect((rate as HTMLInputElement | null)?.type).toBe("number");
+
+    // Exactly one other number field, and it is the entry's own — a bound is a
+    // number because the catalog says the parameter is one.
+    const numbers = [
+      ...document.querySelectorAll('form input[type="number"]'),
+    ].filter((one) => one.id !== "edit-sample-rate");
+    expect(numbers).toHaveLength(1);
+    expect((numbers[0] as HTMLInputElement).value).toBe("2000");
+  });
+
+  /**
+   * **An emptied sample-rate box is not a rate of nought.**
+   *
+   * `Number("")` is `0`, and `0` is a perfectly good share of live traffic — so
+   * a cleared box sent as a number would be written as *stop judging live
+   * traffic*, accepted by the door, and reported back as saved. Nothing on the
+   * far side can catch it: the value is in range and the request is well
+   * formed. Leaving the key out is what the door reads as "keep what is there",
+   * and it is the same rule the entry's own values already follow.
+   */
+  it("leaves the sample rate out when the box says nothing, rather than sending nought", async () => {
+    const { asked } = apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /api/graders": [
+        { status: 200, body: { items: [DIAGNOSTIC], next_cursor: null } },
+        { status: 200, body: { items: [DIAGNOSTIC], next_cursor: null } },
+      ],
+      "GET /api/grader-library": SHELF,
+      "PATCH /api/graders/grd_2": { status: 200, body: DIAGNOSTIC },
+    });
+    render(<RunningGradersPage />);
+
+    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+    fireEvent.change(screen.getByLabelText(runningCopy.EDIT.sampleRate), {
+      target: { value: "" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await screen.findByRole("status");
+    const written = asked.find((one) => one.method === "PATCH");
+    expect(written?.body).not.toHaveProperty("production_sample_rate");
+  });
+
+  /** The refusal's own sentence, kept, with the typing still on screen. */
+  it("shows a refused edit without clearing the form", async () => {
+    apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /api/graders": {
+        status: 200,
+        body: { items: [DIAGNOSTIC], next_cursor: null },
+      },
+      "GET /api/grader-library": SHELF,
+      "PATCH /api/graders/grd_2": {
+        status: 422,
+        body: {
+          error: "unprocessable",
+          message: "egma does not compute a measure called that.",
+        },
+      },
+    });
+    render(<RunningGradersPage />);
+
+    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+    fireEvent.change(screen.getByLabelText("Bound"), {
+      target: { value: "1200" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByText("egma does not compute a measure called that."),
+    ).toBeTruthy();
+    expect((screen.getByLabelText("Bound") as HTMLInputElement).value).toBe(
+      "1200",
+    );
   });
 });
 
@@ -614,6 +933,199 @@ function everySentence(said: unknown): string[] {
   }
   return [];
 }
+
+/**
+ * The two sentences the screens must not shorten, held against the copy modules
+ * themselves.
+ *
+ * These are claims about words rather than about behaviour, which is why they
+ * are read off the module instead of out of the DOM: what is being defended is
+ * that a future edit cannot quietly make one of them shorter and truer-sounding.
+ */
+describe("what the two acts promise", () => {
+  /**
+   * An edit is two acts wearing one verb, and only one of them touches what a
+   * verdict was decided by. Somebody who did not know that would read a
+   * tightened bound as a rewriting of history.
+   */
+  it("says that changing a value starts a version", () => {
+    expect(runningCopy.EDIT.lead.toLowerCase()).toContain("version");
+  });
+
+  /**
+   * **`required` is the one live setting that reaches a page about the past.**
+   * It rewrites no verdict; it moves this grader's rows between the lane that
+   * decides a run and the lane that only reports, and the fold runs at read
+   * time — so a run that failed on this grader alone reads as passed from the
+   * moment the flag turns. Both positions have to say so, because turning it
+   * either way has the same reach.
+   */
+  it("says that turning the required flag round re-counts runs already read", () => {
+    expect(runningCopy.EDIT.requiredOn).toContain("cannot pass");
+    expect(runningCopy.EDIT.requiredOff.toLowerCase()).toContain("diagnostic");
+
+    for (const said of [
+      runningCopy.EDIT.requiredOn,
+      runningCopy.EDIT.requiredOff,
+    ]) {
+      expect(said.toLowerCase()).toContain("rewrites no verdict");
+      expect(said.toLowerCase()).toContain("add up to");
+    }
+  });
+
+  /** And the sentence after a save claims that and nothing wider. */
+  it("claims only that no verdict was rewritten, never that nothing changed", () => {
+    const saved = runningCopy.EDIT.saved("Latency").toLowerCase();
+    expect(saved).toContain("verdict");
+    expect(saved).not.toContain("is unchanged");
+    expect(saved).not.toContain("nothing already judged");
+  });
+
+  /**
+   * **Switching off has to say what stays, not only what stops.** It is the off
+   * switch — there is no enable flag and no scope meaning nowhere — so the
+   * button removes a project's judging, and the fear it raises is about the
+   * runs already read. Every verdict the copy wrote stays readable because its
+   * versions outlive it.
+   */
+  it("says plainly that what a switched-off grader already judged is unchanged", () => {
+    expect(runningCopy.SWITCH_OFF.stops).toBeTruthy();
+    expect(runningCopy.SWITCH_OFF.keeps.toLowerCase()).toContain(
+      "already judged",
+    );
+    expect(
+      runningCopy.SWITCH_OFF.done("Latency").toLowerCase(),
+    ).toContain("already judged");
+    // And what pressing it cannot be undone into, since there is no other
+    // switch to put it back with.
+    expect(runningCopy.SWITCH_OFF.again).toContain("Use");
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
+/**
+ * The one claim about these files a rendering cannot make: that the measure
+ * catalog is **not** in them.
+ *
+ * Every other case here drives a component and reads the DOM. This one reads
+ * the source, because what is being defended is an absence — a form that named
+ * a measure itself would render exactly the same today and go stale the first
+ * time egma's catalog changed. Both forms draw from the entry's declaration
+ * through one component, so a parameter that learns a new kind of control
+ * learns it once.
+ */
+describe("what the two forms are drawn from", () => {
+  const WEB = `${import.meta.dirname}/../`;
+
+  it("names no measure of its own, in either form", async () => {
+    const { readFile } = await import("node:fs/promises");
+
+    for (const file of [
+      "app/projects/[projectId]/graders/use-form.tsx",
+      "app/projects/[projectId]/graders/running/edit-form.tsx",
+    ]) {
+      const source = await readFile(`${WEB}${file}`, "utf8");
+
+      // The comments are read past on purpose: prose explaining why the list is
+      // not here is the opposite of the list being here.
+      const rendered = source.replaceAll(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/gu, "");
+      for (const named of [
+        "turn_response_latency",
+        "first_response_latency",
+        "milliseconds",
+        "latency",
+      ]) {
+        expect(rendered, `${file} names ${named} itself`).not.toContain(named);
+      }
+    }
+  });
+
+  /**
+   * And the edit form is the Use form's controls rather than a second copy of
+   * them: one reading of the entry's declaration, in one component.
+   */
+  it("draws the edit form through the component Use is drawn with", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const form = await readFile(
+      `${WEB}app/projects/[projectId]/graders/running/edit-form.tsx`,
+      "utf8",
+    );
+
+    expect(form).toContain("EntryFields");
+    expect(form).toContain('from "../use-form.tsx"');
+  });
+});
+
+/**
+ * **Nothing in either copy file is a sentence its screen cannot reach**, which
+ * is the rule both modules state about themselves and nothing enforced.
+ *
+ * A word nobody renders is worse than no word at all: the banned-list check
+ * below reads it, so the file goes on reading as a screen whose whole
+ * vocabulary is checked while part of that vocabulary is not on any screen. It
+ * is also how copy written for a different shell survives a merge — two
+ * `unreachable` sentences arrived with the edit-and-delete work, written for a
+ * page that did its own fetching, and on this shell a refusal keeps the API's
+ * own sentence and neither could ever be shown.
+ *
+ * Only the objects a screen addresses by name. `SCOPES`, `TYPES` and `OWNERS`
+ * are lookup tables read with a stored word as the key — `SCOPES[copy.scope]` —
+ * so no source file names their keys and none ever will. They are declared
+ * `Readonly<Record<string, string>>` rather than `as const`, which is exactly
+ * the difference, so the rule reads it off the declaration rather than holding
+ * a list of exceptions.
+ */
+describe("what both screens can reach", () => {
+  const WEB = `${import.meta.dirname}/../`;
+
+  /** Every `.ts`/`.tsx` file a screen is built from. */
+  async function everySource(): Promise<string> {
+    const { readdir, readFile } = await import("node:fs/promises");
+    const found: string[] = [];
+
+    async function walk(dir: string): Promise<void> {
+      for (const one of await readdir(dir, { withFileTypes: true })) {
+        if (one.name === "node_modules" || one.name === ".next") continue;
+        const at = `${dir}/${one.name}`;
+        if (one.isDirectory()) await walk(at);
+        else if (at.endsWith(".ts") || at.endsWith(".tsx")) found.push(at);
+      }
+    }
+
+    await walk(`${WEB}app`);
+    await walk(`${WEB}ui`);
+    return (await Promise.all(found.map((at) => readFile(at, "utf8")))).join(
+      "\n",
+    );
+  }
+
+  for (const file of ["grader-library-copy.ts", "grader-running-copy.ts"]) {
+    it(`renders every word ${file} holds`, async () => {
+      const { readFile } = await import("node:fs/promises");
+      const copy = await readFile(`${WEB}lib/${file}`, "utf8");
+      const source = await everySource();
+
+      const unrendered: string[] = [];
+      for (const [, constant, body] of copy.matchAll(
+        /export const (\w+) = \{([\s\S]*?)\n\} as const;/g,
+      )) {
+        for (const [, key] of (body ?? "").matchAll(/^ {2}(\w+):/gm)) {
+          if (!source.includes(`${constant ?? ""}.${key ?? ""}`)) {
+            unrendered.push(`${constant ?? ""}.${key ?? ""}`);
+          }
+        }
+      }
+
+      // A guard on the guard: a copy file rewritten out of this shape would
+      // find nothing and pass while saying nothing.
+      expect(copy).toContain("} as const;");
+      // Named rather than counted: the fix is to delete the line or render it,
+      // and a bare count sends somebody hunting for which.
+      expect(unrendered).toEqual([]);
+    });
+  }
+});
 
 describe("the words both screens say", () => {
   for (const [where, module] of [

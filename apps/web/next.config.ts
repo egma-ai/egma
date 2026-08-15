@@ -77,10 +77,6 @@ const config: NextConfig = {
         // The shape of the persona editor, which the server owns so a field can
         // be added without shipping the browser again.
         { source: "/api/persona-form", destination: `${api}/api/persona-form` },
-        // The running copies: a list, and the one act that makes another —
-        // pressing Use on a library entry. One rule and no `:path*`, because
-        // the group answers both at one address.
-        { source: "/api/graders", destination: `${api}/api/graders` },
         { source: "/api/keys", destination: `${api}/api/keys` },
         { source: "/api/keys/:path*", destination: `${api}/api/keys/:path*` },
         { source: "/api/members", destination: `${api}/api/members` },
@@ -133,6 +129,18 @@ const config: NextConfig = {
         {
           source: "/api/grader-library",
           destination: `${api}/api/grader-library`,
+        },
+        // The running copies beside the shelf: the list and Use at the group's
+        // own address, and one copy's own address beside it — where an edit
+        // changes what it judges by and a delete switches it off. Both rules,
+        // for the reason the traces pair below spells out: `:path*` is
+        // documented as matching zero segments and on the hosted deployment it
+        // did not, so the bare path is named outright rather than left to
+        // depend on how a host reads the wildcard.
+        { source: "/api/graders", destination: `${api}/api/graders` },
+        {
+          source: "/api/graders/:path*",
+          destination: `${api}/api/graders/:path*`,
         },
         { source: "/api/tests", destination: `${api}/api/tests` },
         { source: "/api/tests/:path*", destination: `${api}/api/tests/:path*` },

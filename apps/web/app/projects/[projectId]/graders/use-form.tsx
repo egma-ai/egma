@@ -55,6 +55,101 @@ import {
  * catalog says which, and the form repeats what it was told instead of assuming
  * every bound is a duration.
  */
+
+/**
+ * The entry's own questions, as controls — the block both forms in this section
+ * are built around.
+ *
+ * **It is one component because there is one form.** Switching a grader on and
+ * changing what it judges by ask exactly the same questions, in the same order,
+ * with the same meanings, because both are the entry's declaration rendered. A
+ * second copy of this for the edit screen would be a second reading of that
+ * declaration, and the day one of them learned a new kind of control the other
+ * would quietly go on drawing text boxes.
+ *
+ * `sentence` is the screen's own words for an entry that asks nothing, and it
+ * is a parameter rather than a constant here so each screen keeps its copy in
+ * its own file — which is what lets one test hold every word each screen says
+ * against the banned list.
+ *
+ * `named` prefixes the control identifiers, so two of these on one page — a
+ * form being filled in beside another — never label each other's inputs.
+ */
+export function EntryFields({
+  params,
+  filled,
+  onFilled,
+  named,
+  sentence,
+}: {
+  readonly params: readonly GraderParameter[];
+  readonly filled: Readonly<Record<string, string>>;
+  readonly onFilled: (name: string, value: string) => void;
+  readonly named: string;
+  readonly sentence: string;
+}) {
+  const unit = unitOf(params, filled);
+
+  if (params.length === 0) return <Help>{sentence}</Help>;
+
+  return (
+    <>
+      {params.map((parameter) => {
+        const control = `${named}-${parameter.name}`;
+        const chosen = filled[parameter.name] ?? "";
+        const write = (value: string): void =>
+          onFilled(parameter.name, value);
+
+        return (
+          <Field
+            key={parameter.name}
+            label={parameter.label}
+            /*
+              The unit, beside the control and not inside it. It used to be
+              the placeholder, which meant it vanished the instant somebody
+              typed — exactly when knowing whether the number is milliseconds
+              or turns starts to matter. It changes with the choice above,
+              because the unit belongs to the measure.
+            */
+            hint={
+              unit === undefined || parameter.options !== undefined
+                ? parameter.means
+                : `${parameter.means} In ${unit}.`
+            }
+            htmlFor={control}
+          >
+            {parameter.options === undefined ? (
+              <TextInput
+                id={control}
+                value={chosen}
+                /*
+                  The catalog says whether this parameter is a number, and it
+                  says so in one place: `kind` already decides that what is
+                  typed is sent as a number rather than a string. The control
+                  has to agree, or a person is asked for a bound on a keyboard
+                  that has no digits on it.
+                */
+                numeric={parameter.kind === "number"}
+                onChange={write}
+              />
+            ) : (
+              <Select
+                id={control}
+                value={chosen}
+                options={parameter.options.map((option) => ({
+                  value: option.value,
+                  label: option.label,
+                }))}
+                onChange={write}
+              />
+            )}
+          </Field>
+        );
+      })}
+    </>
+  );
+}
+
 export function UseForm({
   entry,
   projectId,
@@ -73,8 +168,6 @@ export function UseForm({
   const [required, setRequired] = useState(true);
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
-
-  const unit = unitOf(params, filled);
 
   async function start(): Promise<void> {
     setBusy(true);
@@ -112,62 +205,15 @@ export function UseForm({
       <Help>{USE.lead}</Help>
       {refused === null ? null : <Refused message={refused.message} />}
 
-      {params.length === 0 ? (
-        <Help>{USE.asksNothing}</Help>
-      ) : (
-        params.map((parameter) => {
-          const control = `use-${parameter.name}`;
-          const chosen = filled[parameter.name] ?? "";
-          const write = (value: string): void =>
-            setFilled((was) => ({ ...was, [parameter.name]: value }));
-
-          return (
-            <Field
-              key={parameter.name}
-              label={parameter.label}
-              /*
-                The unit, beside the control and not inside it. It used to be
-                the placeholder, which meant it vanished the instant somebody
-                typed — exactly when knowing whether the number is milliseconds
-                or turns starts to matter. It changes with the choice above,
-                because the unit belongs to the measure.
-              */
-              hint={
-                unit === undefined || parameter.options !== undefined
-                  ? parameter.means
-                  : `${parameter.means} In ${unit}.`
-              }
-              htmlFor={control}
-            >
-              {parameter.options === undefined ? (
-                <TextInput
-                  id={control}
-                  value={chosen}
-                  /*
-                    The catalog says whether this parameter is a number, and it
-                    says so in one place: `kind` already decides that what is
-                    typed is sent as a number rather than a string. The control
-                    has to agree, or a person is asked for a bound on a keyboard
-                    that has no digits on it.
-                  */
-                  numeric={parameter.kind === "number"}
-                  onChange={write}
-                />
-              ) : (
-                <Select
-                  id={control}
-                  value={chosen}
-                  options={parameter.options.map((option) => ({
-                    value: option.value,
-                    label: option.label,
-                  }))}
-                  onChange={write}
-                />
-              )}
-            </Field>
-          );
-        })
-      )}
+      <EntryFields
+        params={params}
+        filled={filled}
+        onFilled={(name, value) =>
+          setFilled((was) => ({ ...was, [name]: value }))
+        }
+        named="use"
+        sentence={USE.asksNothing}
+      />
 
       {/*
         `required` is the only loudness switch v0 has, so both readings are
