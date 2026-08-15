@@ -112,7 +112,7 @@ describe("a production trace whose root span closes", () => {
     const seeded = await theSeededGrader(world);
     expect(verdicts.map((verdict) => verdict.graderId)).not.toContain(seeded);
     expect(
-      verdicts.map((verdict) => verdict.dimension),
+      verdicts.map((verdict) => verdict.assertion),
     ).not.toContain("behavior_1");
     // Every row here was written by a grader somebody created and scoped to
     // production. Nothing else may write one.
@@ -131,7 +131,7 @@ describe("a production trace whose root span closes", () => {
   it("lands verdict rows carrying source production and no run id", async () => {
     const graderId = await seedGrader(
       world,
-      aLatencyCopy({ name: "Latency in the wild", scope: "production", priority: "P1" }),
+      aLatencyCopy({ name: "Latency in the wild", scope: "production" }),
     );
 
     const { traceId } = await conductProductionTrace(world);
@@ -142,8 +142,6 @@ describe("a production trace whose root span closes", () => {
       traceId,
       graderId,
       source: "production",
-      judgedBy: "engine",
-      priority: "P1",
       // Empty, honestly: a trace that arrived at the OTLP door was not started
       // by egma, so there is no run and no agent row behind it.
       runId: "",

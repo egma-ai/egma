@@ -114,8 +114,6 @@ describe("the process the image runs", () => {
       traceId: simulationId,
       runId,
       source: "simulation",
-      // egma's own engine, because no model was asked anything.
-      judgedBy: "engine",
       // `errored` and never `passed`: this check applies perfectly well and
       // egma did not make it, which is a sentence a page has to be able to
       // show rather than a green tick nobody earned.

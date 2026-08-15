@@ -25,11 +25,12 @@ import type { Judgment } from "./contract.ts";
  * and which nothing should have to edit: this is a helper the judged entries
  * share, and the next entry that judges with a model imports it the same way.
  *
- * Who decided it is the caller's to add — a fact about which judge answered
- * rather than about the answer.
+ * The answer says nothing about who gave it, and nothing downstream asks. Which
+ * judge answered was carried to the verdict row's `judged_by`, and that column
+ * retired with the human corrections it existed for.
  */
 export function judgmentOf(
-  dimension: string,
+  assertion: string,
   answer: JudgeAnswer,
   turns: number,
 ): Judgment {
@@ -41,7 +42,7 @@ export function judgmentOf(
         : "skipped";
 
   return {
-    dimension,
+    assertion,
     verdict,
     score: verdict === "passed" ? 1 : 0,
     rationale: answer.rationale,

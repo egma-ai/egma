@@ -4,7 +4,6 @@ import {
   PREDEFINED_GRADERS,
   useLibraryEntry,
   type AuthContext,
-  type ExpectedBehavior,
   type NewTest,
   type Role,
 } from "@egma/db";
@@ -75,17 +74,6 @@ export const rescheduling = {
     "confirms the new time back before finishing",
   ],
 } as const satisfies NewTest;
-
-/**
- * The fixture's behaviors as a read hands them back. A behavior written as a
- * bare string is a P0, so this is the same list said the other way round —
- * which is what every file that authors strings and reads objects asserts.
- */
-export function blocking(
-  behaviors: readonly string[],
-): readonly ExpectedBehavior[] {
-  return behaviors.map((behavior) => ({ behavior, priority: "P0" }));
-}
 
 /** Somebody plain, because who the persona is is not under test here. */
 export const neutralTraits = {

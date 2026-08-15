@@ -108,9 +108,8 @@ describe("a conversation reaching its terminal transition", () => {
       graderId: await theSeededGrader(world),
       // The behavior's position in the pinned test version, never its words:
       // what a reader sees is fetched from that version at display time.
-      dimension: "behavior_1",
+      assertion: "behavior_1",
       source: "simulation",
-      judgedBy: "openai/gpt-4.1-mini",
       verdict: "failed",
       score: 0,
       runId,
@@ -200,10 +199,9 @@ describe("a copy of an entry egma cannot execute yet", () => {
     const mine = verdicts.find((verdict) => verdict.graderId === waiting);
 
     expect(mine).toMatchObject({
-      dimension: "latency",
+      assertion: "latency",
       verdict: "errored",
       score: 0,
-      judgedBy: "engine",
     });
     expect(mine?.rationale).toContain("does not execute the latency grader yet");
   });

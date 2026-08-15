@@ -94,15 +94,14 @@
  * fills the run header's verdict counts at read time and keeps them incapable of
  * disagreeing with the page beneath.
  *
- * The two ways a judgment is ever revisited are exported beside them, and
- * neither is an edit: `regrade` reopens the queue so the engine judges a run or
- * a window again at each grader's current version — narrowed to one grader when
+ * The one way a judgment is ever revisited is exported beside them, and it is
+ * not an edit: `regrade` reopens the queue so the engine judges a run or a
+ * window again at each grader's current version — narrowed to one grader when
  * the ask names one, which is a decision about judge spend rather than about
- * what the rows come to say — and `correctVerdict` writes one person's
- * disagreement as a row of its own with the machine's still underneath it. Both
- * take the context like everything else, and both are the whole API for
- * revisiting a verdict today — there are no routes above them yet, and this
- * surface is the altitude the product is reachable at.
+ * what the rows come to say. A person's disagreement is not a door here at all:
+ * corrections leave v0 with the `judged_by` column that carried them, and return
+ * as the reserved `human` grader type, which writes ordinary verdict rows under
+ * a grader id of its own.
  */
 
 export type { AuthContext, Role, Via } from "./context.ts";
@@ -267,7 +266,6 @@ export {
 
 export {
   appendVerdicts,
-  correctVerdict,
   readRunVerdicts,
   readVerdicts,
   type AppendedVerdicts,
@@ -277,7 +275,6 @@ export {
   type RunVerdicts,
   type SimulationVerdicts,
   type TraceVerdicts,
-  type VerdictCorrection,
 } from "./verdicts.ts";
 
 export {
@@ -370,7 +367,6 @@ export {
   listTests,
   type DeletedTest,
   type ExpectedBehavior,
-  type ExpectedBehaviorInput,
   type MockOverride,
   type MockOverrideInput,
   type NewTest,
@@ -461,7 +457,7 @@ export {
   seedRunningGraders,
   type SeededGraderCopy,
 } from "./seeded-graders.ts";
-export type { GraderScope, Priority } from "../schema/graders.ts";
+export type { GraderScope } from "../schema/graders.ts";
 
 /**
  * The project's default judge. `resolveJudgeKey` is the one door to the

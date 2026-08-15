@@ -49,19 +49,6 @@ import {
  */
 
 /**
- * How loudly a judgment speaks: P0 blocks, P1 warns, P2 informs. A run's
- * headline reads "all P0 passed, two P1 warnings" rather than one
- * undifferentiated failure.
- *
- * The same three words carry the priority a test's expected behaviors each
- * carry, which is why they live here beside the grader rather than inside it —
- * one vocabulary for "how much does this matter", asked of authored logic and
- * of a written-down expectation alike.
- */
-export const PRIORITIES = ["P0", "P1", "P2"] as const;
-export type Priority = (typeof PRIORITIES)[number];
-
-/**
  * Which conversations a grader judges. The same grader judges simulations and
  * production traces — "tested against" and "monitored for" are one vocabulary —
  * and where it applies is its own setting.
@@ -347,9 +334,9 @@ export const grader = pgTable(
      * `true` — the default, and what a copy somebody switched on is for: the
      * test cannot pass unless this grader fully passes. `false` makes it a
      * **diagnostic**: judged, displayed with its fraction, and unable to fail
-     * anything. Those are the two roles v0 has, and they replace the P0/P1/P2
-     * ladder — a boolean rather than three words because binary scoring leaves
-     * a middle rung nothing to say.
+     * anything. Those are the two roles v0 has, and they are what is left where
+     * the P0/P1/P2 ladder was — a boolean rather than three words, because
+     * binary scoring leaves a middle rung nothing to say.
      *
      * A live setting rather than versioned content, on the scope's exact terms:
      * making a blocker into a diagnostic changes nothing about any judgment
@@ -357,7 +344,6 @@ export const grader = pgTable(
      * once. What the row said last week still says it.
      */
     required: boolean("required").notNull().default(true),
-    priority: text("priority").notNull(),
     scope: text("scope").notNull().default("simulations"),
     /** Per cent of production conversations judged; simulations are all judged. */
     productionSampleRate: integer("production_sample_rate")
@@ -408,7 +394,6 @@ export const grader = pgTable(
     // exactly as they are on the shelf: a copy is only ever made by copying a
     // type down, so the two lists are one list and the database says so.
     oneOf("grader_type_allowed", table.type, [...LIBRARY_TYPES]),
-    oneOf("grader_priority_allowed", table.priority, [...PRIORITIES]),
     oneOf("grader_scope_allowed", table.scope, [...GRADER_SCOPES]),
     // A sampling rate is a percentage of the traffic that arrives, so the two
     // ends are "none of it" and "all of it" and there is nothing outside them.

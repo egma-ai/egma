@@ -95,7 +95,6 @@ export async function insertSeededGrader(
     // Required, and simulations-only. Structurally: a production trace has no
     // test, so there are no expected behaviors for this grader to read there.
     required: true,
-    priority: "P0",
     scope: "simulations",
     currentVersionId: versionId,
     createdBy: values.createdBy,

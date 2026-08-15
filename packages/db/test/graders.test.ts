@@ -187,8 +187,8 @@ describe("using a library entry", () => {
       await connection.sql("begin");
       await connection.sql(
         `insert into grader
-           (id, organization_id, project_id, library_id, name, type, priority, current_version_id)
-         values ($1, $2, $3, $4, 'Halfway', 'code', 'P0', $5)`,
+           (id, organization_id, project_id, library_id, name, type, current_version_id)
+         values ($1, $2, $3, $4, 'Halfway', 'code', $5)`,
         [
           orphan,
           acme.organization,
@@ -221,8 +221,8 @@ describe("using a library entry", () => {
     await expect(
       database.sql(
         `insert into grader
-           (id, organization_id, project_id, library_id, name, type, priority, current_version_id)
-         values ($1, $2, $3, $4, 'Points at nothing', 'code', 'P0', $5)`,
+           (id, organization_id, project_id, library_id, name, type, current_version_id)
+         values ($1, $2, $3, $4, 'Points at nothing', 'code', $5)`,
         [
           newId("grd"),
           acme.organization,
@@ -246,8 +246,8 @@ describe("using a library entry", () => {
     await expect(
       database.sql(
         `insert into grader
-           (id, organization_id, project_id, library_id, name, type, priority, current_version_id)
-         values ($1, $2, $3, $4, 'Judged by a person', 'human', 'P0', $5)`,
+           (id, organization_id, project_id, library_id, name, type, current_version_id)
+         values ($1, $2, $3, $4, 'Judged by a person', 'human', $5)`,
         [
           newId("grd"),
           acme.organization,
@@ -548,8 +548,8 @@ describe("tenancy", () => {
     await expect(
       database.sql(
         `insert into grader
-           (id, organization_id, project_id, library_id, name, type, priority, current_version_id)
-         values ($1, $2, $3, $4, 'Smuggled', 'code', 'P0', $5)`,
+           (id, organization_id, project_id, library_id, name, type, current_version_id)
+         values ($1, $2, $3, $4, 'Smuggled', 'code', $5)`,
         [
           newId("grd"),
           acme.organization,

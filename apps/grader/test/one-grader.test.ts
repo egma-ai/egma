@@ -57,7 +57,6 @@ function grader(overrides: Partial<Grader> = {}): Grader {
     description: null,
     type: "code",
     required: true,
-    priority: "P0",
     scope: "simulations",
     productionSampleRate: 100,
     version: 1,
@@ -120,7 +119,7 @@ describe("a copy of an entry egma cannot execute yet", () => {
     );
 
     expect(only).toMatchObject({
-      dimension: "latency",
+      assertion: "latency",
       verdict: "errored",
       score: 0,
       citedSpanIds: [],
@@ -168,7 +167,7 @@ describe("a copy whose entry cannot be read", () => {
     const [only] = await judgmentsOf(grader(), undefined, judging());
 
     expect(only).toMatchObject({
-      dimension: "Answers inside two seconds",
+      assertion: "Answers inside two seconds",
       verdict: "errored",
       score: 0,
     });
@@ -204,7 +203,7 @@ describe("a grader whose execution falls over", () => {
 
     expect(judgments).toHaveLength(1);
     expect(judgments[0]).toMatchObject({
-      dimension: "expected_behaviors",
+      assertion: "expected_behaviors",
       verdict: "errored",
       score: 0,
       citedSpanIds: [],

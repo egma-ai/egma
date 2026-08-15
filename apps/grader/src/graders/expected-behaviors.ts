@@ -49,9 +49,9 @@ import { judgmentOf } from "./judged.ts";
  *
  * ## What each row says
  *
- * The key is the behavior's **position**, one-based, in the order the test's
- * author wrote them — never the sentence itself, which is read back from the
- * pinned test version when somebody looks at the row.
+ * The assertion key is the behavior's **position**, one-based, in the order the
+ * test's author wrote them — never the sentence itself, which is read back from
+ * the pinned test version when somebody looks at the row.
  *
  * A position is stable exactly as far as it needs to be. A conversation is
  * judged against the frozen test version it was *executed* against, so a test
@@ -141,16 +141,11 @@ export async function executeExpectedBehaviors(
   // test with five behaviors is one judge call rather than five.
   return Promise.all(
     behaviors.map(async (behavior, at): Promise<Judgment> => {
-      const question: JudgeQuestion = {
-        prompt,
-        criterion: behavior.behavior,
-        evidence,
-      };
+      // A behavior is a plain sentence: the per-behavior priority retired with
+      // the ladder, so there is nothing beside the words to read.
+      const question: JudgeQuestion = { prompt, criterion: behavior, evidence };
       try {
-        return {
-          ...judgmentOf(behaviorKey(at), await judge.ask(question), turns),
-          judgedBy: judge.name,
-        };
+        return judgmentOf(behaviorKey(at), await judge.ask(question), turns);
       } catch (error) {
         // One judge call falling over is one `errored` row. Every sibling's
         // answer still lands, and this one says out loud that egma could not
@@ -185,7 +180,7 @@ function behaviorKey(at: number): string {
 /** egma could not judge this. Never `failed`: nothing is said about the agent. */
 function couldNotJudge(at: number, rationale: string): Judgment {
   return {
-    dimension: behaviorKey(at),
+    assertion: behaviorKey(at),
     verdict: "errored",
     score: 0,
     rationale,

@@ -395,7 +395,6 @@ describe("every enumerated value", () => {
       { table: "connection", column: "topology" },
       { table: "grader", column: "type" },
       { table: "grader_library", column: "type" },
-      { table: "grader", column: "priority" },
       { table: "grader", column: "scope" },
       { table: "judge_configuration", column: "provider" },
       { table: "run", column: "status" },

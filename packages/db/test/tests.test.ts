@@ -19,7 +19,6 @@ import {
   acme,
   actingAsAcme,
   actingAsGlobex,
-  blocking,
   globex,
   pointProjectAt,
   rescheduling,
@@ -71,7 +70,7 @@ describe("creating a test", () => {
     expect(fetched?.version).toBe(1);
     expect(fetched?.scenario).toBe(rescheduling.scenario);
     expect(fetched?.expectedBehaviors).toEqual(
-      blocking(rescheduling.expectedBehaviors),
+      rescheduling.expectedBehaviors,
     );
     expect(fetched?.projectId).toBe(acme.project);
     expect(fetched?.personas).toEqual([
@@ -208,7 +207,7 @@ describe("a test that fails validation", () => {
     expect(fetched?.name).toBe("Padded");
     expect(fetched?.scenario).toBe("They want a refund and have no receipt.");
     expect(fetched?.expectedBehaviors).toEqual(
-      blocking(["states the refund policy"]),
+      ["states the refund policy"],
     );
   });
 });

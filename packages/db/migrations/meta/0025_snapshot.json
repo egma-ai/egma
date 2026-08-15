@@ -1,6 +1,6 @@
 {
-  "id": "98ef7eac-de80-47ec-97aa-d723a9df3a34",
-  "prevId": "2f73d914-05ed-4378-87a0-d9c00ac12419",
+  "id": "2f73d914-05ed-4378-87a0-d9c00ac12419",
+  "prevId": "8c72b53c-50bc-497b-be07-4ab9f4d65814",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2152,12 +2152,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "library_id": {
-          "name": "library_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
         "name": {
           "name": "name",
           "type": "text",
@@ -2175,13 +2169,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "required": {
-          "name": "required",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
         },
         "scope": {
           "name": "scope",
@@ -2259,21 +2246,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "grader_library_id_idx": {
-          "name": "grader_library_id_idx",
-          "columns": [
-            {
-              "expression": "library_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -2288,19 +2260,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "grader_library_id_grader_library_id_fk": {
-          "name": "grader_library_id_grader_library_id_fk",
-          "tableFrom": "grader",
-          "tableTo": "grader_library",
-          "columnsFrom": [
-            "library_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
           "onUpdate": "no action"
         },
         "grader_current_version_id_grader_version_id_fk": {
@@ -2355,7 +2314,7 @@
         },
         "grader_type_allowed": {
           "name": "grader_type_allowed",
-          "value": "\"grader\".\"type\" in ('llm_as_judge', 'code')"
+          "value": "\"grader\".\"type\" in ('llm_rubric', 'metric_threshold', 'tool_calls', 'phrase_match')"
         },
         "grader_scope_allowed": {
           "name": "grader_scope_allowed",

@@ -20,25 +20,27 @@ import type { JudgeMakers, JudgeResolution } from "../judge/index.ts";
  * One judged assertion, as the grader that judged it decided — before egma
  * stamps whose it was and when.
  *
- * How loudly it speaks is not here on purpose. What the grader decides is
- * whether the check passed; whether that can fail a test is `required` on the
- * running copy, read at judging time, and an executor that could see it would be
- * an executor that could be tempted to judge differently because of it.
+ * Nothing about how loudly it speaks is here, and there is nothing left to put
+ * here: scoring is binary, so every assertion of every applicable `required`
+ * grader has to pass and no judgment can be worth less than another. Whether a
+ * grader can fail a test at all is `required` on the running copy, and an
+ * executor that could see it would be an executor that could be tempted to
+ * judge differently because of it.
  */
 export type Judgment = {
   /**
-   * What inside the grader was judged: one expected behavior, or one filled-in
-   * entry of the copy's config.
+   * Which 0-or-1 check inside the grader was judged, as its **key**: one
+   * expected behavior's position, or one filled-in entry of the copy's config.
    *
    * **It is a key and never content**, and it must be stable across the
    * grader's versions — a hard constraint rather than a preference. The fold
-   * counts one of these once, keyed by the conversation, the grader and this
+   * counts one assertion once, keyed by the conversation, the grader and this
    * name, and prefers the latest grading of it. A name that changed when the
-   * config changed would make a re-grade at a tightened bound a *second* check,
-   * counted beside the first forever, with both of them speaking. So nothing
-   * derived from what a person wrote may appear here.
+   * config changed would make a re-grade at a tightened bound a *second*
+   * assertion, counted beside the first forever, with both of them speaking. So
+   * nothing derived from what a person wrote may appear here.
    */
-  readonly dimension: string;
+  readonly assertion: string;
   readonly verdict: Verdict;
   /** Between 0 and 1. A single check answers 1 or 0. */
   readonly score: number;
@@ -46,16 +48,6 @@ export type Judgment = {
   readonly rationale: string;
   /** The spans this judgment is about, by their own ids. */
   readonly citedSpanIds: readonly string[];
-  /**
-   * Who decided it, when it was not egma's own engine — `provider/model` for an
-   * entry a model judges, and absent for one egma computes.
-   *
-   * Absent means `engine`, and the engine fills that in, so an entry that needs
-   * no model never has to say so. Never a key, and there is nowhere here one
-   * could come from: what a grader module holds is a way to ask and a name to
-   * record.
-   */
-  readonly judgedBy?: string | undefined;
 };
 
 /**

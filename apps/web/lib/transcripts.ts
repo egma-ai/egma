@@ -67,14 +67,16 @@ export type Step = {
 /** One judge's answer about this exchange, as the read hands it over. */
 export type Judgment = {
   readonly grader_id: string;
-  readonly dimension: string;
+  /**
+   * Which 0-or-1 check inside the grader this answers, as its key — never the
+   * sentence, which is read from the pinned test version.
+   */
+  readonly assertion: string;
   readonly verdict: string;
   readonly score: number;
-  readonly priority: string;
   readonly rationale: string;
   /** Turn positions, as `turn:1`. What the judge read, in the judge's terms. */
   readonly cited_turns: readonly string[];
-  readonly judged_by: string;
   readonly judged_at: string;
 };
 
@@ -133,7 +135,7 @@ export function turnsCited(one: Judgment): readonly number[] {
   return at;
 }
 
-/** Turn a machine-written dimension into a label without hiding its meaning. */
+/** Turn a machine-written assertion key into a label without hiding its meaning. */
 export function humanizeIdentifier(value: string): string {
   const words = value.replaceAll(/[_-]+/g, " ").trim();
   return words === "" ? value : `${words.slice(0, 1).toUpperCase()}${words.slice(1)}`;

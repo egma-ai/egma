@@ -2,7 +2,7 @@ import { isId, newId } from "@egma/ids";
 import { and, asc, desc, eq, inArray, isNull, lt, type SQL } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
-import { grader, PRIORITIES, type Priority } from "../schema/graders.ts";
+import { grader } from "../schema/graders.ts";
 import { persona } from "../schema/personas.ts";
 import { project } from "../schema/tenancy.ts";
 import {
@@ -50,27 +50,20 @@ import { theProject, within } from "./within.ts";
  */
 
 /**
- * One statement about what should happen, and how much it matters. P0 blocks,
- * P1 warns, P2 informs — the same three words a grader carries, because "how
- * much does this matter" is one question whether it is asked of authored logic
- * or of a sentence somebody wrote down.
+ * One statement about what should happen: **a plain sentence, and nothing
+ * else.**
+ *
+ * Per-behavior priorities retired with the P0/P1/P2 ladder. Under binary scoring
+ * every behavior has to hold, so a priority had nothing left to say — and the
+ * rule it was propping up, that a test always keeps one blocking behavior,
+ * collapses back into the plain non-empty rule the falsifiability decision
+ * placed on the list.
+ *
+ * Each sentence is one **assertion** of the expected-behaviors grader, judged in
+ * isolation and written one verdict row each, keyed by its position in this
+ * list.
  */
-export type ExpectedBehavior = {
-  readonly behavior: string;
-  readonly priority: Priority;
-};
-
-/**
- * A behavior as it is written down. A bare string is the common case and means
- * a P0: what a developer types when they are stating what the agent must do,
- * which is nearly always the thing that must not ship broken.
- */
-export type ExpectedBehaviorInput =
-  | string
-  | {
-      readonly behavior: string;
-      readonly priority?: Priority | undefined;
-    };
+export type ExpectedBehavior = string;
 
 /**
  * One tool this test answers for itself, instead of however the project
@@ -127,7 +120,7 @@ export type NewTest = {
   readonly name: string;
   readonly description?: string | undefined;
   readonly scenario: string;
-  readonly expectedBehaviors: readonly ExpectedBehaviorInput[];
+  readonly expectedBehaviors: readonly ExpectedBehavior[];
   /**
    * Who calls about the scenario. Naming none — absent, or an empty list —
    * takes the project's default persona, so authoring a first test never waits
@@ -205,7 +198,7 @@ export type TestChanges = {
   readonly name?: string;
   readonly description?: string | null;
   readonly scenario?: string;
-  readonly expectedBehaviors?: readonly ExpectedBehaviorInput[];
+  readonly expectedBehaviors?: readonly ExpectedBehavior[];
   /**
    * Who calls about the scenario, as the next version should name them.
    *
@@ -290,13 +283,6 @@ const COLUMNS = {
 } as const;
 
 /**
- * What a behavior is worth when its author said nothing about it. Blocking, so
- * that stating what the agent must do is enough to make a test able to stop a
- * release — nobody has to learn about priorities to write a falsifiable test.
- */
-const DEFAULT_BEHAVIOR_PRIORITY: Priority = "P0";
-
-/**
  * The name as it will be stored: trimmed, so a test somebody has to recognise
  * in a list is not named by invisible characters.
  */
@@ -311,18 +297,14 @@ function validName(name: string): string {
  *
  * An empty behaviors list is refused rather than accepted, because a test with
  * nothing to check is a test that can never be red — and a suite of tests that
- * could never be red is the false confidence this product exists to kill.
- *
- * **A test always keeps at least one P0.** Priorities let a nice-to-have
- * behavior stop blocking a release, which is what they are for; a test whose
- * every behavior has been demoted is one nothing can hold back, and it got there
- * one edit at a time without anybody deciding to make it unfalsifiable. So the
- * rule that refuses an empty list refuses an all-demoted one on the same
- * grounds: falsifiability cannot be downgraded away.
+ * could never be red is the false confidence this product exists to kill. That
+ * is the whole of the falsifiability rule now: with priorities retired there is
+ * no way left to demote a test into never being able to fail, so non-empty is
+ * the only thing this has to hold.
  */
 function validContent(input: {
   readonly scenario: string;
-  readonly expectedBehaviors: readonly ExpectedBehaviorInput[];
+  readonly expectedBehaviors: readonly ExpectedBehavior[];
   readonly mockOverrides: readonly MockOverrideInput[];
 }): TestContent {
   const scenario = input.scenario.trim();
@@ -337,29 +319,24 @@ function validContent(input: {
       "a test needs at least one expected behavior, because a test that cannot fail is not a test",
     );
   }
-  const expectedBehaviors = input.expectedBehaviors.map((entry) => {
-    const written = typeof entry === "string" ? entry : entry.behavior;
-    const behavior = typeof written === "string" ? written.trim() : "";
+  const expectedBehaviors = input.expectedBehaviors.map((entry: unknown) => {
+    // The shape that retired with the P0/P1/P2 ladder, named rather than
+    // reported as an empty sentence: a writer sending last month's body should
+    // be told what changed, not told their behavior says nothing.
+    if (typeof entry === "object" && entry !== null && "behavior" in entry) {
+      throw new UnprocessableInputError(
+        'an expected behavior is a plain sentence now; the {"behavior", "priority"} ' +
+          "shape retired with the P0/P1/P2 ladder. Send the sentence on its own.",
+      );
+    }
+    const behavior = typeof entry === "string" ? entry.trim() : "";
     if (behavior === "") {
       throw new UnprocessableInputError(
         "an expected behavior needs to say something",
       );
     }
-    const priority =
-      typeof entry === "string" ? undefined : entry.priority;
-    if (priority !== undefined && !PRIORITIES.includes(priority)) {
-      throw new UnprocessableInputError(
-        `"${priority}" is not a priority egma knows; expected one of ${PRIORITIES.join(", ")}`,
-      );
-    }
-    return { behavior, priority: priority ?? DEFAULT_BEHAVIOR_PRIORITY };
+    return behavior;
   });
-
-  if (!expectedBehaviors.some((behavior) => behavior.priority === "P0")) {
-    throw new UnprocessableInputError(
-      "a test needs at least one P0 expected behavior, because falsifiability cannot be downgraded away",
-    );
-  }
 
   return {
     scenario,
@@ -458,11 +435,14 @@ function validateGraderIds(ids: readonly string[]): void {
  * leak into a caller as a `TestContent` that isn't one. Shape only,
  * deliberately: an old version must stay readable exactly as it was written.
  *
- * **A behavior stored as a bare string is a P0.** Every version written before
- * priorities existed holds one, and each says what the whole list used to say —
- * this must fail, and everything on it blocks. Reading them as P0 is therefore
- * not a default applied to old rows but the meaning they already had, which is
- * what lets priorities arrive as an additive change with no rewrite.
+ * **A behavior stored as `{behavior, priority}` is read as its sentence.** The
+ * versions written while priorities existed hold that shape, and every one of
+ * them said the same thing the sentence says now — a priority never changed what
+ * the behavior asked of the agent, only how loudly a failure spoke, and nothing
+ * speaks loudly or quietly any more. So the priority is dropped on the way out
+ * rather than migrated away: a version row is frozen the moment a run can pin
+ * it, and rewriting one to tidy a retired field would be exactly the edit the
+ * whole versioning exists to make impossible.
  */
 function contentFromRow(value: unknown, versionId: string): TestContent {
   const malformed = () =>
@@ -512,18 +492,14 @@ function contentFromRow(value: unknown, versionId: string): TestContent {
     expectedBehaviors: expectedBehaviors.map((entry): ExpectedBehavior => {
       if (typeof entry === "string") {
         if (entry.trim() === "") throw malformed();
-        return { behavior: entry, priority: DEFAULT_BEHAVIOR_PRIORITY };
+        return entry;
       }
       if (typeof entry !== "object" || entry === null) throw malformed();
-      const { behavior, priority } = entry as Record<string, unknown>;
+      const { behavior } = entry as Record<string, unknown>;
       if (typeof behavior !== "string" || behavior.trim() === "") {
         throw malformed();
       }
-      // The word itself is taken on trust once it is a string, exactly as a
-      // persona's voice provider is: the roster may grow, and an old version
-      // has to stay readable however it grows.
-      if (typeof priority !== "string" || priority === "") throw malformed();
-      return { behavior, priority: priority as Priority };
+      return behavior;
     }),
   };
 }
@@ -539,22 +515,19 @@ function sameOrderedList(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /**
- * The behaviors, compared as written: the same statements, in the same order,
- * each at the same priority. Demoting one from P0 to P1 changes what the test
- * can hold back, so it is an edit and mints a version like any other.
+ * The behaviors, compared as written: the same statements, in the same order.
+ *
+ * The comparison a persona list gets, because a behavior is a plain sentence
+ * now and there is nothing else on it to compare — but named separately,
+ * because the reason order matters here is its own: a verdict row is keyed by a
+ * behavior's **position**, so moving a sentence rekeys every row about it, and
+ * minting a version is what keeps the old rows readable.
  */
 function sameBehaviors(
   a: readonly ExpectedBehavior[],
   b: readonly ExpectedBehavior[],
 ): boolean {
-  return (
-    a.length === b.length &&
-    a.every(
-      (entry, index) =>
-        entry.behavior === b[index]?.behavior &&
-        entry.priority === b[index]?.priority,
-    )
-  );
+  return sameOrderedList(a, b);
 }
 
 /**
@@ -1076,7 +1049,7 @@ function selectWithCurrentVersion() {
 
 /**
  * One test with what it currently checks: its name and description, its
- * scenario, its expected behaviors and their priorities, the personas who call
+ * scenario, its expected behaviors, the personas who call
  * about it, and the graders it names — both in the order they were authored,
  * deleted ones included and marked.
  */
@@ -1396,7 +1369,7 @@ export async function listTests(
 
 /**
  * A new test whose version 1 carries the source's current content: the same
- * scenario, the same expected behaviors at the same priorities, the same
+ * scenario, the same expected behaviors, the same
  * personas and the same graders in the same order, under the same name — there
  * is no per-project name uniqueness, so the name copies verbatim exactly as the
  * persona factory copies it.

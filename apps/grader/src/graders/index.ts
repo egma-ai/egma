@@ -66,7 +66,7 @@ export async function execute(
     const nothingToJudge = execution.conversation.nothingToJudgeBecause;
     return [
       {
-        dimension: theOneCheck(execution.definition),
+        assertion: theOneCheck(execution.definition),
         verdict: "errored",
         score: 0,
         rationale:

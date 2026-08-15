@@ -9,6 +9,11 @@ export function JudgmentCard({
   judgment: Judgment;
   placement?: "inline" | "result";
 }) {
+  const cited =
+    placement === "inline" || judgment.cited_turns.length === 0
+      ? ""
+      : judgment.cited_turns.join(", ");
+
   return (
     <article
       className={placement === "result" ? styles.runJudgment : styles.judgmentCard}
@@ -16,16 +21,14 @@ export function JudgmentCard({
     >
       <div className={styles.judgmentHeading}>
         <span className={styles.verdictChip}>{judgment.verdict}</span>
-        <strong>{humanizeIdentifier(judgment.dimension)}</strong>
-        <span>{judgment.priority}</span>
+        <strong>{humanizeIdentifier(judgment.assertion)}</strong>
       </div>
       <p>{judgment.rationale}</p>
-      <small>
-        {DETAIL.judgedBy} <span className={styles.mono}>{judgment.judged_by}</span>
-        {placement === "inline" || judgment.cited_turns.length === 0
-          ? ""
-          : ` · ${judgment.cited_turns.join(", ")}`}
-      </small>
+      {cited === "" ? null : (
+        <small>
+          {DETAIL.citedTurns} <span className={styles.mono}>{cited}</span>
+        </small>
+      )}
     </article>
   );
 }

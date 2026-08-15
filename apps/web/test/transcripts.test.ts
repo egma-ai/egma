@@ -285,7 +285,7 @@ describe("what a stored kind is called where somebody reads it", () => {
     expect(copy.SPEAKERS).toEqual({ human: "human:", agent: "agent:" });
   });
 
-  it("makes a grader dimension readable without changing its words", () => {
+  it("makes a grader assertion key readable without changing its words", () => {
     expect(humanizeIdentifier("appointment_change_policy")).toBe(
       "Appointment change policy",
     );

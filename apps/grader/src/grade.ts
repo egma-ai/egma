@@ -421,7 +421,7 @@ export async function judgmentsOf(
   if (definition === undefined) {
     return [
       {
-        dimension: grader.name,
+        assertion: grader.name,
         verdict: "errored",
         score: 0,
         rationale:
@@ -449,7 +449,7 @@ export async function judgmentsOf(
     // reason `errored` is a word separate from `failed`.
     return [
       {
-        dimension: theOneCheck(definition),
+        assertion: theOneCheck(definition),
         verdict: "errored",
         score: 0,
         rationale: `this check could not be made: ${error instanceof Error ? error.message : String(error)}`,
@@ -479,20 +479,12 @@ function verdictRow(
     traceId: conversation.traceId,
     graderId: grader.id,
     graderVersionId: grader.versionId,
-    dimension: judgment.dimension,
+    assertion: judgment.assertion,
     source: conversation.source,
-    // The judge that answered, or `engine` when no model was asked anything —
-    // and `human` on the day a person disagrees, which is a row of their own
-    // rather than an edit to this one.
-    judgedBy: judgment.judgedBy ?? "engine",
     verdict: judgment.verdict,
     score: judgment.score,
     rationale: judgment.rationale,
     citedSpanIds: judgment.citedSpanIds,
-    // Snapshotted, never referenced, and on its way out: `required` on the copy
-    // carries how loudly a grader speaks now, and this column retires with the
-    // change that reshapes the verdict store.
-    priority: grader.priority,
     runId: conversation.runId,
     agentId: conversation.agentId,
     // Empty, and honestly so: egma does not version agents yet, and a made-up

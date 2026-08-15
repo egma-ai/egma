@@ -20,11 +20,9 @@ import {
   graderVersion,
   GRADER_SCOPES,
   JUDGE_PROVIDERS,
-  PRIORITIES,
   type GraderScope,
   type JudgeProvider,
   type LibraryType,
-  type Priority,
 } from "../schema/graders.ts";
 import type { AuthContext } from "./context.ts";
 import {
@@ -125,7 +123,6 @@ type LiveSettings = {
   readonly name?: string | undefined;
   readonly description?: string | undefined;
   readonly required?: boolean | undefined;
-  readonly priority?: Priority | undefined;
   readonly scope?: GraderScope | undefined;
   readonly productionSampleRate?: number | undefined;
 };
@@ -156,7 +153,6 @@ export type Grader = {
   readonly type: LibraryType;
   /** `false` makes this a diagnostic: judged, shown, never able to fail a test. */
   readonly required: boolean;
-  readonly priority: Priority;
   readonly scope: GraderScope;
   readonly productionSampleRate: number;
   readonly version: number;
@@ -183,7 +179,6 @@ export type GraderChanges = {
   readonly name?: string;
   readonly description?: string | null;
   readonly required?: boolean;
-  readonly priority?: Priority;
   readonly scope?: GraderScope;
   readonly productionSampleRate?: number;
   readonly config?: GraderConfigInput;
@@ -212,7 +207,6 @@ const COLUMNS = {
   description: grader.description,
   type: grader.type,
   required: grader.required,
-  priority: grader.priority,
   scope: grader.scope,
   productionSampleRate: grader.productionSampleRate,
   createdAt: grader.createdAt,
@@ -228,16 +222,6 @@ const COLUMNS = {
  * never blocked anything is a postmortem.
  */
 const DEFAULT_REQUIRED = true;
-
-/**
- * The priority column's value while the column is still there.
- *
- * It says nothing under binary scoring — `required` carries the whole of how
- * loudly a grader speaks — and it is written rather than removed because the
- * column and the verdict row that snapshots it retire together, in the change
- * that reshapes the verdict store.
- */
-const DEFAULT_PRIORITY: Priority = "P0";
 
 /** All of production, if production is ever in scope at all. */
 const DEFAULT_PRODUCTION_SAMPLE_RATE = 100;
@@ -260,10 +244,6 @@ function knownWord<Value extends string>(
     );
   }
   return value as Value;
-}
-
-function validPriority(priority: string): Priority {
-  return knownWord(PRIORITIES, priority, "priority");
 }
 
 function validScope(scope: string): GraderScope {
@@ -606,7 +586,6 @@ function answer(row: {
   readonly description: string | null;
   readonly type: string;
   readonly required: boolean;
-  readonly priority: string;
   readonly scope: string;
   readonly productionSampleRate: number;
   readonly version: number;
@@ -616,13 +595,12 @@ function answer(row: {
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }): Grader {
-  const { type, config, judgeModel, priority, scope, ...rest } = row;
+  const { type, config, judgeModel, scope, ...rest } = row;
   return {
     ...rest,
     // The identity row's own enumerated columns are pinned by check
     // constraints, so what comes back is one of the words this module writes.
     type: type as LibraryType,
-    priority: priority as Priority,
     scope: scope as GraderScope,
     config: configFromRow(config, row.versionId),
     judgeModel: judgeModelFromRow(judgeModel, row.versionId),
@@ -662,10 +640,6 @@ export async function useLibraryEntry(
   const judgeModel =
     input.judgeModel === undefined ? null : validJudgeModel(input.judgeModel);
   const required = input.required ?? DEFAULT_REQUIRED;
-  const priority =
-    input.priority === undefined
-      ? DEFAULT_PRIORITY
-      : validPriority(input.priority);
   const scope = input.scope === undefined ? "simulations" : validScope(input.scope);
   const productionSampleRate =
     input.productionSampleRate === undefined
@@ -701,7 +675,6 @@ export async function useLibraryEntry(
         description: input.description ?? null,
         type: definition.type,
         required,
-        priority,
         scope,
         productionSampleRate,
         currentVersionId: versionId,
@@ -726,7 +699,6 @@ export async function useLibraryEntry(
   return {
     ...written.identity,
     type: written.type,
-    priority,
     scope,
     version: 1,
     versionId,
@@ -805,8 +777,6 @@ export async function editGrader(
   // config is the one thing that cannot be judged yet: what it may hold depends
   // on the entry the row this edit has not read points at.
   const name = changes.name === undefined ? undefined : validName(changes.name);
-  const priority =
-    changes.priority === undefined ? undefined : validPriority(changes.priority);
   const scope =
     changes.scope === undefined ? undefined : validScope(changes.scope);
   const productionSampleRate =
@@ -872,7 +842,6 @@ export async function editGrader(
       changes.name !== undefined ||
       changes.description !== undefined ||
       changes.required !== undefined ||
-      priority !== undefined ||
       scope !== undefined ||
       productionSampleRate !== undefined;
 
@@ -880,7 +849,6 @@ export async function editGrader(
       ...current,
       type: current.type as LibraryType,
       required: changes.required ?? current.required,
-      priority: priority ?? (current.priority as Priority),
       scope: scope ?? (current.scope as GraderScope),
       productionSampleRate: productionSampleRate ?? current.productionSampleRate,
     };
@@ -918,7 +886,6 @@ export async function editGrader(
           ? {}
           : { description: changes.description }),
         ...(changes.required === undefined ? {} : { required: changes.required }),
-        ...(priority === undefined ? {} : { priority }),
         ...(scope === undefined ? {} : { scope }),
         ...(productionSampleRate === undefined ? {} : { productionSampleRate }),
         ...(mintsVersion ? { currentVersionId: versionId } : {}),

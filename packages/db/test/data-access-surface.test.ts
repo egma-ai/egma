@@ -132,12 +132,11 @@ const WORK_DISPATCHING = [
  * resolved, so nothing on the judging side ever has to ask across customers what
  * has finished.
  *
- * `regrade`, `reopenGradingJob` and `correctVerdict` are the two ways a judgment
- * is ever revisited, and neither is an edit — one reopens the queue so the
- * engine judges again at today's grader versions, narrowed to one grader when
- * the ask names one, the other writes a person's disagreement as a row of its
- * own. There are no routes above them yet, so this surface is the altitude
- * re-grading and correcting are reachable at.
+ * `regrade` and `reopenGradingJob` are the one way a judgment is ever revisited,
+ * and neither is an edit: they reopen the queue so the engine judges again at
+ * today's grader versions, narrowed to one grader when the ask names one. There
+ * are no routes above them yet, so this surface is the altitude re-grading is
+ * reachable at.
  */
 const CONTEXT_REQUIRING = [
   "addConnection",
@@ -156,7 +155,6 @@ const CONTEXT_REQUIRING = [
   // and nothing else, so what this widening lets out is a word from a closed
   // set and never a config or a credential.
   "connectionTypeOf",
-  "correctVerdict",
   "createAgent",
   "createApiKey",
   "createInvitation",
@@ -445,8 +443,6 @@ const THE_FOLD = [
   "foldVerdicts",
   "foldVerdictsByGrader",
   "speakingVerdicts",
-  "JUDGED_BY_HUMAN",
-  "PRIORITIES",
   "VERDICTS",
 ];
 
