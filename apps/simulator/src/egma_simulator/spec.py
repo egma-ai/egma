@@ -13,7 +13,7 @@ the fields at face value.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .contract import ContractViolation, validate_spec
@@ -47,6 +47,140 @@ class MockTool:
     def fails(self) -> bool:
         """Whether this answer is the failure branch."""
         return "error" in self.answer
+
+
+@dataclass(frozen=True)
+class PlatformModel:
+    """What the persona thinks with, as the platform has it configured.
+
+    Every field is optional, because a platform mid-setup holds some of
+    them and not others, and one that holds none is every platform before
+    anybody set it up. ``None`` here always means *the platform said
+    nothing about this*, never *the platform said nothing* — so a reader
+    leaves its own value standing rather than clearing it.
+    """
+
+    provider: str | None = None
+    model: str | None = None
+    key: str | None = field(default=None, repr=False)
+    """Kept out of the dataclass repr, like every other key in this
+    process: a log line carrying one is a log line that should not have."""
+
+
+@dataclass(frozen=True)
+class PlatformSpeech:
+    """What the persona speaks and hears with, as the platform has it.
+
+    A key per leg rather than one per provider, which is the shape the
+    contract carries and the shape :class:`~egma_simulator.speech.SpeechProviders`
+    holds: the two legs are two accounts as often as they are one, and a
+    shape that could not say so would make the second one unreachable.
+    """
+
+    stt_provider: str | None = None
+    stt_key: str | None = field(default=None, repr=False)
+    tts_provider: str | None = None
+    tts_key: str | None = field(default=None, repr=False)
+    tts_model: str | None = None
+    tts_voice: str | None = None
+    vad_provider: str | None = None
+
+
+@dataclass(frozen=True)
+class PlatformCarrier:
+    """How a call reaches the telephone network, as the platform has it.
+
+    The media server's own key and secret are deliberately not here: they
+    are read by a third-party container when it is created and cannot come
+    from the platform's store, so they stay in each simulator's
+    environment. What is here is the choice of bridge and the trunk the
+    carrier authenticates — the paperwork somebody did once with Twilio,
+    which is exactly the thing this effort exists to stop losing.
+    """
+
+    media_backend: str | None = None
+    trunk_address: str | None = None
+    trunk_number: str | None = None
+    trunk_username: str | None = None
+    trunk_password: str | None = field(default=None, repr=False)
+
+
+@dataclass(frozen=True)
+class PlatformSettings:
+    """What the deployment has been configured with, off the work order.
+
+    **These arrive per simulation and replace this container's own.** They
+    used to be each simulator's environment, which meant a second
+    simulator on another machine needed a file copied to it, and a
+    container started without one dialled nothing while reporting itself
+    healthy. They belong to the whole deployment, so the deployment holds
+    them and hands them down with the work.
+
+    Three groups, because the groups are what can be absent: a deployment
+    with no carrier is the ordinary deployment, and the whole phone half
+    then simply is not here. Absent everywhere is also ordinary and is
+    what every spec written before these existed carries — which is why
+    every field is optional and every reader treats ``None`` as *say
+    nothing*.
+    """
+
+    model: PlatformModel = field(default_factory=PlatformModel)
+    speech: PlatformSpeech = field(default_factory=PlatformSpeech)
+    carrier: PlatformCarrier = field(default_factory=PlatformCarrier)
+
+    @property
+    def secrets(self) -> tuple[str, ...]:
+        """Every secret these settings hold, for redaction.
+
+        One place to ask, exactly as the configuration's own secrets have
+        one, so a fourth key arriving cannot fall out of the scrubbing.
+        """
+        return tuple(
+            secret
+            for secret in (
+                self.model.key,
+                self.speech.stt_key,
+                self.speech.tts_key,
+                self.carrier.trunk_password,
+            )
+            if secret is not None
+        )
+
+    @classmethod
+    def from_document(cls, written: Any) -> PlatformSettings:
+        """The platform block of a validated spec, or the empty settings.
+
+        The schema has already refused a field nobody writes, so the reads
+        below take what is there at face value — the same bargain the rest
+        of this module makes.
+        """
+        block = written or {}
+        model = block.get("model") or {}
+        speech = block.get("speech") or {}
+        carrier = block.get("carrier") or {}
+        return cls(
+            model=PlatformModel(
+                provider=model.get("provider"),
+                model=model.get("model"),
+                key=model.get("key"),
+            ),
+            speech=PlatformSpeech(
+                stt_provider=speech.get("stt_provider"),
+                stt_key=speech.get("stt_key"),
+                tts_provider=speech.get("tts_provider"),
+                tts_key=speech.get("tts_key"),
+                tts_model=speech.get("tts_model"),
+                tts_voice=speech.get("tts_voice"),
+                vad_provider=speech.get("vad_provider"),
+            ),
+            carrier=PlatformCarrier(
+                media_backend=carrier.get("media_backend"),
+                trunk_address=carrier.get("trunk_address"),
+                trunk_number=carrier.get("trunk_number"),
+                trunk_username=carrier.get("trunk_username"),
+                trunk_password=carrier.get("trunk_password"),
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -101,6 +235,16 @@ class SimulationSpec:
     unobserved.
     """
 
+    platform: PlatformSettings = field(default_factory=PlatformSettings)
+    """What the deployment has been configured with — its persona's model,
+    its speech legs, its carrier — read afresh for this simulation.
+
+    Empty is an ordinary state and means the platform said nothing, so
+    this container's own configuration stands exactly as it did. It is
+    never *this simulation asked for nothing*: the settings belong to the
+    deployment, and a simulation has no opinion about them.
+    """
+
     @classmethod
     def from_document(cls, document: Any) -> SimulationSpec:
         """Hold a claimed document to the contract, then read it.
@@ -114,6 +258,7 @@ class SimulationSpec:
         limits = document["limits"]
         return cls(
             mock_tools=_mock_tools(document.get("mock_tools") or []),
+            platform=PlatformSettings.from_document(document.get("platform")),
             simulation_id=document["simulation_id"],
             modality=document["modality"],
             scenario_instructions=document["scenario"]["instructions"],

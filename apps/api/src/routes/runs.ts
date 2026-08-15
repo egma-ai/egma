@@ -6,6 +6,7 @@ import {
   listRunEvents,
   listSimulations,
   NotPermittedError,
+  platformFacts,
   ProjectOutsideOrganizationError,
   readRunVerdicts,
   readVerdicts,
@@ -39,8 +40,8 @@ import {
   unprocessable,
 } from "../http/refusals.ts";
 import {
+  phoneReadiness,
   phoneSetupRequiredMessage,
-  type PhoneReadiness,
 } from "../phone-readiness.ts";
 
 /**
@@ -92,16 +93,6 @@ export type RunRoutesOptions = {
   readonly rateLimit: RateLimit;
   /** Where this instance is, for the address a person opens results at. */
   readonly baseUrl: string;
-  /**
-   * Whether this deployment has been set up to place phone calls.
-   *
-   * Read here rather than in `@egma/db` because it is not a fact about the
-   * product at all — it is a fact about one installation's carrier, and it
-   * arrives as this process's configuration. The data-access package cannot
-   * see it and must not learn to: it would mean a package every test and every
-   * worker imports carrying a deployment's environment around.
-   */
-  readonly phone: PhoneReadiness;
 };
 
 /**
@@ -112,7 +103,7 @@ export type RunRoutesOptions = {
  * carrier-backed type is a line here instead of a condition somebody has to
  * find. What makes a type belong is not that it is telephony-shaped: it is that
  * conducting it spends the platform's *own* carrier, which is the thing
- * `egma self-host phone setup` provides.
+ * `egma self-host setup` provides.
  */
 const NEEDS_THE_PLATFORMS_CARRIER: readonly string[] = ["phone"];
 
@@ -471,22 +462,24 @@ export async function runRoutes(
      * Nothing is dialled from a platform that has no carrier, and the refusal
      * lands before the run exists.
      *
-     * **Only asked on a platform that is not ready**, so the ordinary case —
-     * a set-up deployment, which is every deployment that has ever placed a
-     * call — costs nothing at all. A read here would otherwise sit in front of
-     * every run creation to answer a question that has one answer.
+     * **Asked of the store on every run creation**, rather than of this
+     * process's configuration once at start. The carrier is one of the
+     * platform's own settings now, so an operator who finishes setup has their
+     * next run accepted with no container restarted — and, the other way
+     * round, a run started against a carrier somebody has since cleared is
+     * refused rather than dispatched at a trunk that is gone. It is one small
+     * select in front of an act that creates a whole run; the answer it used
+     * to be was fast and could be a day out of date.
      *
      * A connection this caller cannot see reads as `undefined` and falls
      * through untouched: `startRun` owns that sentence, and answering it here
      * would confirm somebody else's connection exists by refusing about it.
      */
-    if (options.phone.state !== "ready") {
+    const carrier = phoneReadiness(await platformFacts());
+    if (carrier.state !== "ready") {
       const type = await connectionTypeOf(acting.auth, text(body.connection));
       if (type !== undefined && NEEDS_THE_PLATFORMS_CARRIER.includes(type)) {
-        return phoneSetupRequired(
-          reply,
-          phoneSetupRequiredMessage(options.phone),
-        );
+        return phoneSetupRequired(reply, phoneSetupRequiredMessage(carrier));
       }
     }
 

@@ -482,7 +482,7 @@ export const CONNECTION_REGISTRY: Readonly<
     // deployment's configuration is known — this package cannot see it.
     //
     // That second question is asked, and it is asked in front of this one.
-    // `POST /api/runs` reads `phoneReadiness` off its own configuration and
+    // `POST /api/runs` reads `phoneReadiness` off the platform's own store and
     // refuses a run over a phone connection with `phone_setup_required` before
     // a row is written, so a platform nobody has given a carrier says so
     // instead of queueing a call it cannot place. The two refusals sit in two

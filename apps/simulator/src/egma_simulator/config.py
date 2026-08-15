@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .reporting import DELIVERY_DEADLINE_SECONDS
+from .spec import PlatformCarrier
 
 MODEL_PROVIDERS = ("scripted", "openai")
 DEFAULT_MODEL_BASE_URL = "https://api.openai.com/v1"
@@ -225,17 +226,23 @@ def _writable_directory(name: str, path: Path) -> Path:
 
 @dataclass(frozen=True)
 class MediaSettings:
-    """How this deployment places a phone call, read once at startup.
+    """How this deployment places a phone call.
 
     A phone call needs a bridge and — for a real one — a SIP trunk, and
-    both belong to the deployment rather than to any one simulation. So
-    they arrive here, are checked here, and a simulator that cannot place
-    calls says so on its first line naming the variable rather than
-    failing one claimed simulation after another with the same sentence.
+    both belong to the deployment rather than to any one simulation.
 
-    A deployment that names no backend gets no settings at all and starts
-    in silence: dialling is opt-in, and a simulator that never dials
-    should not have to explain a trunk it does not want.
+    **The two halves now arrive from two places, and that is the point.**
+    The bridge is the media server this container talks to: a third-party
+    binary that reads its own key and secret when it is created, so those
+    stay in this environment and are checked at startup as they always
+    were. The trunk is the carrier paperwork somebody did once with
+    Twilio, which belongs to the whole platform — so it rides each work
+    order, and a second simulator on another machine needs no file copied
+    to it. :meth:`for_simulation` is where the two meet.
+
+    A deployment that names no backend and is handed none gets no settings
+    at all and places no calls: dialling is opt-in, and a simulator that
+    never dials should not have to explain a trunk it does not want.
     """
 
     backend: str
@@ -265,27 +272,51 @@ class MediaSettings:
 
     @classmethod
     def from_env(cls) -> MediaSettings | None:
-        """This deployment's bridge, or ``None`` where it names none."""
+        """This deployment's bridge, or ``None`` where it names none.
+
+        **The trunk is read here and no longer required here.** It used to
+        be: a simulator that named a backend and no trunk refused to start,
+        because the trunk was this container's to have and half a
+        deployment was nobody's. It is the platform's now, and a simulator
+        waiting for a work order to bring it one is an ordinary and
+        supported deployment — so the sentence that used to stop the
+        container has moved to :meth:`checked`, which runs when a call is
+        actually about to be placed and can see both halves at once. What
+        a self-hoster with no carrier reads instead is the platform's own
+        readiness answer, which names the carrier as a setting it is
+        missing. That answer is the whole reason this effort exists.
+        """
         named = _text("EGMA_SIMULATOR_MEDIA_BACKEND")
         if named is None:
             return None
+        return cls.for_backend(named, because=f"EGMA_SIMULATOR_MEDIA_BACKEND={named}")
+
+    @classmethod
+    def for_backend(cls, named: str, *, because: str) -> MediaSettings:
+        """One backend's settings out of this container's environment.
+
+        ``because`` is what made the backend required, said the way a
+        refusal says it — the variable that named it, or the platform
+        setting that did. Which one it was is the whole of the difference,
+        and a self-hoster reading the refusal needs to know which of the
+        two to go and change.
+        """
         if named not in MEDIA_BACKENDS:
             raise ValueError(
-                "EGMA_SIMULATOR_MEDIA_BACKEND must be one of "
-                f"{', '.join(MEDIA_BACKENDS)}; got {named!r}"
+                f"{because} names a media backend this simulator does not "
+                f"have; it places calls through {', '.join(MEDIA_BACKENDS)}"
             )
         if named != "livekit":
             return cls(backend=named)
 
-        chosen = f"EGMA_SIMULATOR_MEDIA_BACKEND={named}"
         settings = cls(
             backend=named,
-            livekit_url=_needed("EGMA_SIMULATOR_LIVEKIT_URL", because=chosen),
+            livekit_url=_needed("EGMA_SIMULATOR_LIVEKIT_URL", because=because),
             livekit_api_key=_needed(
-                "EGMA_SIMULATOR_LIVEKIT_API_KEY", because=chosen
+                "EGMA_SIMULATOR_LIVEKIT_API_KEY", because=because
             ),
             livekit_api_secret=_needed(
-                "EGMA_SIMULATOR_LIVEKIT_API_SECRET", because=chosen
+                "EGMA_SIMULATOR_LIVEKIT_API_SECRET", because=because
             ),
             trunk_id=_text("EGMA_SIMULATOR_SIP_TRUNK_ID"),
             trunk_address=_text("EGMA_SIMULATOR_SIP_TRUNK_ADDRESS"),
@@ -293,23 +324,12 @@ class MediaSettings:
             trunk_username=_text("EGMA_SIMULATOR_SIP_TRUNK_USERNAME"),
             trunk_password=_text("EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"),
         )
-        if settings.trunk_id is None and settings.trunk_address is None:
-            raise ValueError(
-                "a phone call needs a trunk: set EGMA_SIMULATOR_SIP_TRUNK_ID "
-                "for a trunk already stored in LiveKit, or "
-                "EGMA_SIMULATOR_SIP_TRUNK_ADDRESS with "
-                "EGMA_SIMULATOR_SIP_TRUNK_USERNAME and "
-                "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD for an inline one"
-            )
-        # Credential auth is a pair. Neither half is a trunk the carrier
-        # authenticates some other way — by the address it came from — and
-        # that is a real deployment. One half is nobody's deployment: every
-        # call it places comes back 403, which reads as *wrong* credentials
-        # rather than as half of one, and it reads that way once per
-        # simulation until somebody looks here. The rule binds the inline
-        # trunk only: with a stored trunk selected the inline fields are
-        # never read, and refusing a working deployment over a leftover
-        # half would be the louder wrong.
+        # Half a trunk *in this environment* is still refused here, by name
+        # and at startup, even though the whole trunk is no longer required
+        # here. Which trunk a call goes over may now come from the platform,
+        # but a container holding one of these two variables and not the
+        # other is a mistake somebody made in this file, and the sentence
+        # that fixes it is the one naming both variables.
         if settings.trunk_id is None and (settings.trunk_username is None) != (
             settings.trunk_password is None
         ):
@@ -330,6 +350,161 @@ class MediaSettings:
                 "wrong one"
             )
         return settings
+
+    @classmethod
+    def for_simulation(
+        cls, standing: MediaSettings | None, carrier: PlatformCarrier
+    ) -> MediaSettings | None:
+        """The bridge and trunk one simulation is dialled over.
+
+        This container's own settings with the platform's carrier laid
+        over them, and it is the one place the two meet. ``None`` where
+        neither names a backend, which is every deployment that has never
+        been given a carrier and is the ordinary case.
+
+        **It never refuses.** This runs for every simulation, and most
+        simulations never dial: a platform whose carrier is half configured
+        still runs chat and text work perfectly well, and failing that work
+        over a trunk it was never going to use would be a broken phone
+        breaking the telephone-free half of the product. So what is
+        assembled here is whatever the two sides between them have, and
+        every refusal lives in :meth:`checked`, which the phone plug calls
+        when a call is really about to be placed.
+
+        **The platform's inline trunk replaces the container's whole
+        trunk, stored reference and all.** A container that still held
+        ``EGMA_SIMULATOR_SIP_TRUNK_ID`` would otherwise keep dialling its
+        own trunk while the platform's settings page showed another — the
+        exact shape of silent disagreement this effort exists to end. The
+        replacement is whole for the same reason: address, number,
+        username and password move together, so a platform trunk can never
+        be dialled with a leftover caller identity from this container.
+        """
+        backend = carrier.media_backend or (
+            None if standing is None else standing.backend
+        )
+        if backend is None:
+            return None
+
+        bridge = (
+            standing
+            if standing is not None and standing.backend == backend
+            # The platform names a backend this container did not, so the
+            # bridge it needs has not been read yet. Reading it here rather
+            # than at startup is what lets a simulator be given a carrier
+            # after it was started, which is the whole of "adding capacity
+            # is starting a container and nothing else". Read without
+            # demanding: a missing one is the phone's problem to report,
+            # and it is reported by `checked` at the moment of dialling.
+            else cls._bridge_this_container_offers(backend)
+        )
+        if backend != "livekit":
+            return cls(backend=backend)
+
+        platform_named_a_trunk = carrier.trunk_address is not None
+        trunk = carrier if platform_named_a_trunk else bridge
+        return cls(
+            backend=backend,
+            livekit_url=bridge.livekit_url,
+            livekit_api_key=bridge.livekit_api_key,
+            livekit_api_secret=bridge.livekit_api_secret,
+            trunk_id=None if platform_named_a_trunk else bridge.trunk_id,
+            trunk_address=trunk.trunk_address,
+            trunk_number=trunk.trunk_number,
+            trunk_username=trunk.trunk_username,
+            trunk_password=trunk.trunk_password,
+        )
+
+    @classmethod
+    def _bridge_this_container_offers(cls, backend: str) -> MediaSettings:
+        """The media server this container reaches, read without demanding.
+
+        The bridge is bootstrap configuration — a third-party binary reads
+        its own key and secret when it is created — so it is this
+        container's whatever the platform says. What is different from
+        :meth:`for_backend` is only the silence: an absent variable is left
+        absent rather than refused, because this is read for every
+        simulation and most of them never dial.
+        """
+        return cls(
+            backend=backend,
+            livekit_url=_text("EGMA_SIMULATOR_LIVEKIT_URL"),
+            livekit_api_key=_text("EGMA_SIMULATOR_LIVEKIT_API_KEY"),
+            livekit_api_secret=_text("EGMA_SIMULATOR_LIVEKIT_API_SECRET"),
+            trunk_id=_text("EGMA_SIMULATOR_SIP_TRUNK_ID"),
+            trunk_address=_text("EGMA_SIMULATOR_SIP_TRUNK_ADDRESS"),
+            trunk_number=_text("EGMA_SIMULATOR_SIP_TRUNK_NUMBER"),
+            trunk_username=_text("EGMA_SIMULATOR_SIP_TRUNK_USERNAME"),
+            trunk_password=_text("EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"),
+        )
+
+    def checked(self) -> MediaSettings:
+        """These settings, or the refusal a deployment that cannot dial earns.
+
+        **Every carrier refusal is here, and here is the moment a call is
+        about to be placed.** That is the whole of why it is a step of its
+        own: the same facts are assembled for every simulation, and only a
+        simulation that dials has any business failing over them.
+        """
+        if self.backend not in MEDIA_BACKENDS:
+            raise ValueError(
+                f"this deployment's media backend is {self.backend!r}, which "
+                "is not a bridge this simulator has; it places calls through "
+                f"{', '.join(MEDIA_BACKENDS)}"
+            )
+        if self.backend != "livekit":
+            return self
+        absent = [
+            variable
+            for variable, value in (
+                ("EGMA_SIMULATOR_LIVEKIT_URL", self.livekit_url),
+                ("EGMA_SIMULATOR_LIVEKIT_API_KEY", self.livekit_api_key),
+                ("EGMA_SIMULATOR_LIVEKIT_API_SECRET", self.livekit_api_secret),
+            )
+            if value is None
+        ]
+        if absent:
+            # Named as variables rather than as settings, because that is
+            # what they are: the media server is a container of its own that
+            # reads its key and secret when it is created, so these can never
+            # come from the platform's store and this container is where they
+            # are missing from.
+            raise ValueError(
+                f"this deployment dials through livekit and this container is "
+                f"missing {' and '.join(absent)}"
+            )
+        if self.trunk_id is None and self.trunk_address is None:
+            raise ValueError(
+                "a phone call needs a trunk, and this deployment has none. "
+                "Give the platform a carrier trunk — the setting is on its "
+                "settings page and `egma self-host setup` writes it — "
+                "or set EGMA_SIMULATOR_SIP_TRUNK_ID on this container for a "
+                "trunk already stored in LiveKit"
+            )
+        # Credential auth is a pair. Neither half is a trunk the carrier
+        # authenticates some other way — by the address it came from — and
+        # that is a real deployment. One half is nobody's deployment: every
+        # call it places comes back 403, which reads as *wrong* credentials
+        # rather than as half of one, and it reads that way once per
+        # simulation until somebody looks here. The rule binds the inline
+        # trunk only: with a stored trunk selected the inline fields are
+        # never read, and refusing a working deployment over a leftover
+        # half would be the louder wrong.
+        if self.trunk_id is None and (self.trunk_username is None) != (
+            self.trunk_password is None
+        ):
+            missing, given = (
+                ("password", "username")
+                if self.trunk_password is None
+                else ("username", "password")
+            )
+            raise ValueError(
+                f"this deployment's carrier trunk has a {given} and no "
+                f"{missing}: a trunk authenticated by credentials needs both "
+                "halves, and a carrier refuses half of one exactly the way it "
+                "refuses a wrong one"
+            )
+        return self
 
 
 def _needed(variable: str, *, because: str) -> str:
@@ -525,8 +700,8 @@ class SimulatorConfig:
     openai_api_key: str | None = field(default=None, repr=False)
     """The OpenAI key, for whichever of the two legs names ``openai``. The
     same key the persona's brain uses when the model provider is ``openai``
-    too — one account, one key, which is the whole of what phone setup
-    asks a self-hoster for."""
+    too — one account, one key, which is what a self-hoster supplies once at
+    `egma self-host setup` when both legs are on the same account."""
 
     stt_model: str = DEFAULT_STT_MODEL
     tts_model: str = DEFAULT_TTS_MODEL
@@ -583,6 +758,21 @@ class SimulatorConfig:
             )
             if key is not None
         )
+
+    def key_for(self, provider: str) -> str | None:
+        """The key this container holds for one speech provider, if any.
+
+        The environment names its speech keys after providers — one openai
+        key for both legs, because one account really does serve both — and
+        the legs are what a work order names its keys after. This is the
+        one translation between the two, so a reader of either shape never
+        has to know about the other.
+        """
+        return {
+            "deepgram": self.deepgram_api_key,
+            "elevenlabs": self.elevenlabs_api_key,
+            "openai": self.openai_api_key,
+        }.get(provider)
 
     @property
     def media_secrets(self) -> tuple[str, ...]:

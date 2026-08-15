@@ -3,6 +3,7 @@ import {
   connectClickHouse,
   disconnect,
   disconnectClickHouse,
+  seedPlatformSettings,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
@@ -52,18 +53,27 @@ export type TestApiOptions = {
   readonly singleOrganization?: boolean;
   /**
    * The judge this deployment gives a project that has configured none, as
-   * `egma self-host phone setup` supplies one. Absent by default, because most
+   * `egma self-host setup` supplies one. Absent by default, because most
    * tests are not about grading configuration at all.
    */
   readonly defaultJudge?: Config["defaultJudge"];
   /**
-   * What `egma self-host phone setup` left behind, for a test about a platform
-   * that can dial. Absent by default, and absent is the honest default: a
-   * deployment nobody has given a carrier is what every egma is on its first
-   * morning, and a suite that quietly started every instance phone-ready would
-   * never have noticed the run door letting a phone run through.
+   * Settings this instance starts holding, seeded exactly as a deployment's own
+   * environment seeds them — through `seedPlatformSettings`, sealed, into the
+   * real table.
+   *
+   * Absent by default, and absent is the honest default: a deployment nobody
+   * has configured is what every egma is on its first morning, and a suite that
+   * quietly started every instance phone-ready would never have noticed the run
+   * door letting a phone run through.
+   *
+   * This replaced a `phone` block handed straight to the configuration. The
+   * carrier is one of the platform's own settings now, so a test that wants a
+   * platform able to dial has to put the settings where the platform keeps
+   * them — which is the same path the product takes and no longer a shortcut
+   * around it.
    */
-  readonly phone?: Config["phone"];
+  readonly platformSettings?: Config["platformSettings"];
   /**
    * The object store recordings are resolved against. Absent by default, and
    * absent is the honest default: an egma nobody has pointed at a store is
@@ -139,12 +149,19 @@ export async function createApi(
     ...(traceStore === undefined ? {} : { clickhouseUrl: traceStore.url }),
     singleOrganization: options.singleOrganization ?? false,
     trustProxy: options.trustProxy ?? false,
-    ...(options.phone === undefined ? {} : { phone: options.phone }),
     ...(options.blob === undefined ? {} : { blob: options.blob }),
     ...(options.defaultJudge === undefined
       ? {}
       : { defaultJudge: options.defaultJudge }),
   });
+
+  // Through the deployment's own seeding door rather than written straight
+  // into the table: what a test then reads back has been sealed and hinted the
+  // way the product seals and hints it, and a suite that inserted rows itself
+  // would be proving something about rows nothing produces.
+  if (options.platformSettings !== undefined) {
+    await seedPlatformSettings(options.platformSettings);
+  }
 
   const { app, identity } = buildApi({
     config,

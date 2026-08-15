@@ -97,14 +97,14 @@ async function signedInAs(person: Customer): Promise<SignedIn> {
 }
 
 /**
- * A deployment `egma self-host phone setup` has finished with: somewhere to
+ * A deployment `egma self-host setup` has finished with: somewhere to
  * route a call, a number it comes from, and a voice to speak with. Non-secret,
  * all three — see `phone-readiness.ts`.
  */
 const PHONE_IS_SET_UP = {
-  trunkAddress: "egma-simulator-106e37f8.pstn.twilio.com",
-  sourceNumber: "+18885550123",
-  speechProvider: "openai",
+  carrier_trunk_address: "egma-simulator-106e37f8.pstn.twilio.com",
+  carrier_trunk_number: "+18885550123",
+  text_to_speech_provider: "openai",
 } as const;
 
 /** A number egma dials, registered the way the wizard registers one. */
@@ -130,7 +130,9 @@ async function readyToRun(
 }> {
   api = await createApi(
     label,
-    options.phoneIsSetUp === true ? { phone: PHONE_IS_SET_UP } : {},
+    options.phoneIsSetUp === true
+      ? { platformSettings: PHONE_IS_SET_UP }
+      : {},
   );
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const signedIn = await signedInAs(ada);
@@ -308,9 +310,10 @@ describe("starting a run from the terminal's own code", () => {
     expect(answer.reason).toBe(
       "this egma has not been set up to place phone calls, so nothing was " +
         "dialled and nothing was charged. It is missing the carrier trunk " +
-        "and the source number and the speech provider. Whoever runs this " +
-        "platform makes it ready with one command in the platform workspace: " +
-        "egma self-host phone setup.",
+        "and the source number and the text-to-speech provider. Whoever runs " +
+        "this platform makes it ready with one command in the platform " +
+        "workspace: " +
+        "egma self-host setup.",
     );
   });
 
