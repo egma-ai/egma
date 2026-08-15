@@ -146,11 +146,26 @@ export default function GraderLibraryPage() {
           declaration. Inline rather than in a dialog: it is the one act on this
           screen, and a modal over a two-row table hides the thing being acted
           on for no benefit.
+
+          **Keyed by the entry, which is what makes switching between two of them
+          safe.** The form's state is the answers to *this* entry's questions —
+          which measure is chosen, what was typed — and React keeps a component's
+          state across a re-render when only its props change. So pressing Use on
+          a second entry while the first one's form was open would draw the second
+          entry's controls over the first entry's answers: the measure dropdown
+          would exist with nothing selected, and a bound typed under it would be
+          submitted with the measure missing, which the write door refuses with a
+          message about a field the person can see is filled in.
+
+          The key makes the two forms two components, so the second one starts
+          from its own entry's defaults. It is one attribute instead of an effect
+          that re-initialises state after the wrong thing has already rendered.
         */}
         {using === null ? null : (
           <section className={styles.settingsPanel} aria-labelledby="use-title">
             <h2 id="use-title">{USE.title(using.name)}</h2>
             <UseForm
+              key={using.id}
               entry={using}
               onCancel={() => setUsing(null)}
               onStarted={(name) => {

@@ -132,7 +132,7 @@ describe("the process the image runs", () => {
       source: "simulation",
       // The config entry's position, and the bound held: 1100 milliseconds at
       // its worst, inside the two seconds the copy asks for.
-      assertion: "assertion_1",
+      assertion: "turn_response_latency",
       verdict: "passed",
       score: 1,
     });

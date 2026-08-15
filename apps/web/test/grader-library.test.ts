@@ -198,6 +198,26 @@ describe("pressing Use", () => {
   });
 
   /**
+   * **The form is keyed by the entry it is filling.**
+   *
+   * Its state is the answers to *this* entry's questions, and React keeps a
+   * component's state when only its props change — so pressing Use on a second
+   * entry while the first one's form was open drew the second entry's controls
+   * over the first entry's answers. A measure dropdown displays its first option
+   * whether or not one is chosen, so the field looked answered, and submitting
+   * sent a bound with no measure for the write door to refuse.
+   *
+   * What the page actually does is proved in a real browser, in
+   * `apps/api/test/browser.test.ts` — two presses, a submission, and a copy at
+   * the end of it. This is the cheap half: the attribute that makes the two
+   * forms two components rather than one wearing new props.
+   */
+  it("gives the form a key of its own entry, so switching starts it over", async () => {
+    const page = await readFile(path.join(WEB, "app/graders/page.tsx"), "utf8");
+    expect(page).toContain("key={using.id}");
+  });
+
+  /**
    * A bound arriving as `"2000"` is refused by the write door with a message
    * about types — correct, and useless to somebody who typed a perfectly good
    * number. The conversion happens at the edge that knows the control was

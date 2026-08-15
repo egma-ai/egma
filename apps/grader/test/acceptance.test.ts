@@ -209,7 +209,7 @@ describe("a latency copy", () => {
       // The config entry's position, one-based. Never the measure and never the
       // bound: a re-grade at a tightened bound has to write *over* this row
       // rather than beside it, and a key made of what somebody typed would not.
-      assertion: "assertion_1",
+      assertion: "turn_response_latency",
       verdict: "passed",
       score: 1,
     });
@@ -263,7 +263,7 @@ describe("a latency copy", () => {
     const mine = verdicts.find((verdict) => verdict.graderId === strict);
 
     expect(mine).toMatchObject({
-      assertion: "assertion_1",
+      assertion: "turn_response_latency",
       verdict: "failed",
       score: 0,
     });
@@ -296,7 +296,7 @@ describe("a latency copy", () => {
     const verdicts = await verdictsOn(world, simulationId, 2);
     const mine = verdicts.find((verdict) => verdict.graderId === voiceOnly);
 
-    expect(mine).toMatchObject({ assertion: "assertion_1", verdict: "skipped" });
+    expect(mine).toMatchObject({ assertion: "time_to_first_word", verdict: "skipped" });
     expect(mine?.rationale).toContain("nothing in this conversation measured time_to_first_word");
 
     const read = await readVerdicts(world.auth, simulationId);
@@ -337,7 +337,7 @@ describe("a latency copy", () => {
     expect(copy?.required).toBe(false);
 
     const mine = verdicts.find((verdict) => verdict.graderId === watching);
-    expect(mine).toMatchObject({ verdict: "failed", assertion: "assertion_1" });
+    expect(mine).toMatchObject({ verdict: "failed", assertion: "turn_response_latency" });
 
     // **Its failure is its own.** The rows fold per grader, so a diagnostic
     // going red changes nothing about what any other copy answered — which is

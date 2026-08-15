@@ -314,7 +314,7 @@ describe("a simulation born from no test", () => {
     // The latency copy's one config entry, by its position — the only row on a
     // conversation with no expectations written down about it.
     expect(verdicts.map((verdict) => verdict.assertion)).toEqual([
-      "assertion_1",
+      "turn_response_latency",
     ]);
     expect(judge.asked).toEqual([]);
   });

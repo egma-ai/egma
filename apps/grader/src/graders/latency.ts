@@ -18,12 +18,12 @@ import type { Execution, Judgment } from "./contract.ts";
  * entry's `params`, so what arrives here has a measure egma computes and a
  * number. Each entry is one 0-or-1 check and one verdict row.
  *
- * **The assertion key is the entry's index, never what it names.** A key derived
- * from the measure or the bound would make a re-grade at a tightened bound a
- * *second* assertion, counted beside the first forever with both of them
- * speaking. The position is stable across the copy's versions, which is exactly
- * what the fold's key needs, and the values a row was decided by are readable
- * from the frozen version the row names.
+ * **The assertion key is the measure the entry bounds** — not its position, and
+ * not the bound. `assertionKey` below argues the whole of it out: a copy's
+ * config is not pinned by a run, so a position names a different check after an
+ * edit, while a bound in the key would make a re-grade at a tightened bound a
+ * second assertion counted beside the first forever. The measure survives both,
+ * and the write door keeps it unique inside a copy so that it is an identity.
  *
  * **The worst measurement decides.** A bound is "the most this measure may be",
  * so a conversation holds it only if every measurement held it. A mean would
@@ -75,7 +75,7 @@ type Bounded = {
  * not check this" must not be the path that breaks.
  */
 export function latencyAssertions(execution: Execution): readonly string[] {
-  return execution.config.assertions.map((_, at) => assertionKey(at));
+  return execution.config.assertions.map(keyOf);
 }
 
 export function executeLatency(execution: Execution): readonly Judgment[] {
@@ -86,10 +86,11 @@ export function executeLatency(execution: Execution): readonly Judgment[] {
   // two things a reader could be told about one conversation.
   const nothingToJudge = execution.conversation.nothingToJudgeBecause;
   if (nothingToJudge !== null) {
-    return entries.map((_, at) => couldNotCheck(at, nothingToJudge));
+    return entries.map((entry, at) => couldNotCheck(keyOf(entry, at), nothingToJudge));
   }
 
   return entries.map((entry, at) => {
+    const key = keyOf(entry, at);
     const asked = boundIn(entry);
     if (asked === undefined) {
       // Unreachable through the write door, which checks every value against
@@ -98,7 +99,7 @@ export function executeLatency(execution: Execution): readonly Judgment[] {
       // its own database — and `errored` rather than `failed`, because egma
       // could not make the check and the agent did nothing.
       return couldNotCheck(
-        at,
+        key,
         "this check holds no measure and bound egma can read, so it was not made.",
       );
     }
@@ -109,7 +110,7 @@ export function executeLatency(execution: Execution): readonly Judgment[] {
     const worst = measured === undefined ? undefined : worstSampleOf(measured);
     if (measured === undefined || worst === undefined) {
       return {
-        assertion: assertionKey(at),
+        assertion: key,
         // Not applicable rather than not passed. It leaves the score's
         // denominator, so a chat conversation is never marked down for having
         // no audio and a production trace is never marked down for telemetry
@@ -126,7 +127,7 @@ export function executeLatency(execution: Execution): readonly Judgment[] {
 
     const held = worst.value <= asked.bound;
     return {
-      assertion: assertionKey(at),
+      assertion: key,
       verdict: held ? "passed" : "failed",
       score: held ? 1 : 0,
       rationale: rationaleFor(asked, measured, worst.value, held),
@@ -140,14 +141,84 @@ export function executeLatency(execution: Execution): readonly Judgment[] {
 }
 
 /**
- * What each verdict row files this check under: the entry's position, one-based.
+ * One config entry's key, decided in **one** place so that `execute` and
+ * `assertions` cannot answer differently.
  *
- * Written as a function rather than as a template at each site, so the string a
- * row is filed under is decided in one place — and named for the domain word,
- * because a config entry *is* one assertion.
+ * The two are asked at different moments — one when egma judged, one when egma
+ * could not — and a row filed under a key the other never produces is a row no
+ * re-grade can reach. Sharing this function is what makes them the same list
+ * rather than two lists that agree today.
+ *
+ * The position survives as a last resort, for an entry holding values egma
+ * cannot read. It cannot arrive through the write door, and a key is needed
+ * anyway; the position is the only thing such an entry has.
  */
-function assertionKey(at: number): string {
-  return `assertion_${at + 1}`;
+function keyOf(
+  entry: Readonly<Record<string, string | number>>,
+  at: number,
+): string {
+  const asked = boundIn(entry);
+  return asked === undefined ? `assertion_${at + 1}` : assertionKey(asked);
+}
+
+/**
+ * What each verdict row files this check under: **the measure it bounds.**
+ *
+ * ## Why not the entry's position, which is what this used to be
+ *
+ * A copy's config is **not pinned by a run**. Judging reads the grader through
+ * `grader.current_version_id` every time — `applicableGraders` → `listGraders`,
+ * and the same on a re-grade — so a conversation judged last week and re-judged
+ * today is judged by *today's* config, at a new version, writing rows beside the
+ * old ones. Meanwhile the fold counts one assertion once per
+ * `[trace, grader, assertion, source]` and deliberately **not** per version,
+ * because that is what makes a re-grade supersede rather than double.
+ *
+ * Put those two together and a position is not an identity. A copy holding
+ * `[turn_response_latency, first_response_latency]`, edited to drop the first,
+ * re-grades to a config whose *first* entry is `first_response_latency` — so the
+ * key `assertion_1` named one measure on Monday and a different one on Tuesday,
+ * and Tuesday's row silently replaced Monday's. A verdict about one measure
+ * overwritten by a verdict about another is not a stale answer; it is a wrong
+ * one, filed under a name that says it is about something else.
+ *
+ * ## Why the measure is an identity where a position is not
+ *
+ * `contract.ts` says an assertion key is never content, and the reason it gives
+ * is precise: a key that moved when the config moved would make a re-grade at a
+ * **tightened bound** a second assertion, counted beside the first forever. The
+ * measure survives exactly that — tightening 2000 to 500 leaves
+ * `turn_response_latency` alone — while the position does not survive an edit
+ * the rule never contemplated. So this honours the rule's reason where the
+ * position honoured only its letter.
+ *
+ * And a measure is not really "what a person wrote": it is one of a closed list
+ * egma owns, refused at the write door if it is anything else. What a person
+ * wrote is the bound, and the bound is deliberately not in here.
+ *
+ * **It is unique within a copy because the write door makes it so** — a second
+ * entry bounding a measure the copy already bounds is refused, and it has to be:
+ * two entries sharing a key would share a row in the verdict store's sorting key
+ * as well, and one of the two checks would vanish inside a single grading.
+ *
+ * ## Why `expected_behaviors` still keys by position, and is right to
+ *
+ * Its assertions live on the **test version**, and a simulation *is* pinned to
+ * the test version it was executed against. Position is stable there because the
+ * list it indexes into cannot change under that conversation. The latency
+ * grader's list can, which is the whole difference.
+ *
+ * ## What this does not fix, and cannot
+ *
+ * Removing an entry still leaves its old verdict in the store with nothing to
+ * supersede it, and no keying scheme changes that: the row exists, the fold
+ * ignores the version, and nothing writes that key again. It is the same shape
+ * as a **deleted grader**, whose rows keep speaking by an explicit product
+ * decision — "what it already said stays readable" (`resolve.ts`). A test pins
+ * this behaviour so it stays a decision rather than a surprise.
+ */
+function assertionKey(entry: Bounded): string {
+  return entry.metric;
 }
 
 /**
@@ -192,9 +263,9 @@ function rationaleFor(
 }
 
 /** egma could not make this check. Never `failed`: nothing is said about the agent. */
-function couldNotCheck(at: number, rationale: string): Judgment {
+function couldNotCheck(assertion: string, rationale: string): Judgment {
   return {
-    assertion: assertionKey(at),
+    assertion,
     verdict: "errored",
     score: 0,
     rationale,

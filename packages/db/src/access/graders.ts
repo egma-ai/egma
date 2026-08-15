@@ -475,6 +475,21 @@ function validAssertion(
  * no assertions reads nothing, judges nothing, and is a row on the Running
  * graders screen that says a project is checking something it is not. An entry
  * that asks nothing must have none, for the mirror-image reason.
+ *
+ * **And no measure twice, which is the rule that makes an assertion knowable.**
+ * A verdict row is filed under the measure its check bounds, because a copy's
+ * config is not pinned by a run and a position therefore names a different check
+ * after an edit. That key has to be unique inside a copy or it is not a key: two
+ * entries bounding one measure would write two judgments under one name, and the
+ * verdict store's sorting key ends at the assertion — so the two would collapse
+ * into one row and a check somebody wrote down would vanish inside a single
+ * grading, silently.
+ *
+ * It is a small product restriction and an honest one. What a second bound on
+ * one measure usually means is a second *copy* — a strict one that blocks and a
+ * looser one that only reports — and `required` lives on the copy rather than on
+ * an assertion, so that is where the difference has to be expressed anyway. The
+ * refusal says so.
  */
 function validConfig(
   definition: Definition,
@@ -491,7 +506,44 @@ function validConfig(
         .join('", "')}" — because a copy that checks nothing can never fail`,
     );
   }
+
+  const twice = measureNamedTwice(definition, assertions);
+  if (twice !== undefined) {
+    throw new UnprocessableInputError(
+      `this grader already bounds "${twice}", and a copy checks each measure once — its verdicts are filed under the measure they are about, so a second check on the same one could not be told from the first. Press Use again for a second copy, which is also where a different "required" belongs.`,
+    );
+  }
+
   return { assertions };
+}
+
+/**
+ * The first measure a copy names more than once, or nothing where each is named
+ * once.
+ *
+ * It reads the entry's own declaration to find *which* value is a measure rather
+ * than looking for a parameter called `metric`: what the parameters are is the
+ * library entry's business, and an entry that one day asks for a measure under
+ * another name is still an entry whose copies file verdicts under it.
+ */
+function measureNamedTwice(
+  definition: Definition,
+  assertions: readonly GraderAssertion[],
+): string | undefined {
+  const measures = definition.params
+    .filter((parameter) => parameter.kind === "measure")
+    .map((parameter) => parameter.name);
+
+  const named = new Set<string>();
+  for (const assertion of assertions) {
+    for (const parameter of measures) {
+      const measure = assertion[parameter];
+      if (typeof measure !== "string") continue;
+      if (named.has(measure)) return measure;
+      named.add(measure);
+    }
+  }
+  return undefined;
 }
 
 /**

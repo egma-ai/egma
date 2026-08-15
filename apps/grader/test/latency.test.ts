@@ -111,7 +111,7 @@ describe("one config entry, one assertion", () => {
     );
 
     expect(only).toMatchObject({
-      assertion: "assertion_1",
+      assertion: "turn_response_latency",
       verdict: "passed",
       score: 1,
     });
@@ -166,18 +166,25 @@ describe("one config entry, one assertion", () => {
 
 describe("several config entries", () => {
   /**
-   * One row each, keyed by **position** — never by the measure or the bound.
-   * The fold counts a verdict once per conversation, grader and key, and prefers
-   * the latest grading of that key; a key made of what somebody typed would turn
-   * a re-grade at a tightened bound into a second assertion counted beside the
-   * first forever, with both of them speaking.
+   * One row each, keyed by **the measure it bounds** — never by its position,
+   * and never by the bound.
+   *
+   * Not the position, because a copy's config is not pinned by a run: an edit
+   * that removes an entry makes the next one first, and the key would then name
+   * a different measure than it did before while the fold, which ignores the
+   * grader version, silently let the new row replace the old one.
+   *
+   * Not the bound, because the fold prefers the latest grading of a key and a
+   * re-grade at a **tightened** bound must write over the row it supersedes
+   * rather than beside it.
+   *
+   * The measure is what survives both.
    */
-  it("are one assertion each, keyed by their position and nothing else", () => {
+  it("are one assertion each, named for the measure they bound", () => {
     const judgments = executeLatency(
       execution(
         [
           { metric: "turn_response_latency", bound: 2_000 },
-          { metric: "turn_response_latency", bound: 500 },
           { metric: "first_response_latency", bound: 1_000 },
         ],
         {
@@ -190,15 +197,35 @@ describe("several config entries", () => {
     );
 
     expect(judgments.map((one) => one.assertion)).toEqual([
-      "assertion_1",
-      "assertion_2",
-      "assertion_3",
+      "turn_response_latency",
+      "first_response_latency",
     ]);
-    expect(judgments.map((one) => one.verdict)).toEqual([
-      "passed",
-      "failed",
-      "failed",
-    ]);
+    expect(judgments.map((one) => one.verdict)).toEqual(["passed", "failed"]);
+  });
+
+  /**
+   * **Reordering the config changes nothing about what a row says.** The rows
+   * come back in the config's order, because that is the order somebody wrote
+   * them in — but each carries its own measure's name, so the same conversation
+   * judged before and after a reorder produces the same two verdicts under the
+   * same two keys, and the fold has nothing to confuse.
+   */
+  it("say the same thing about the same conversation however they are ordered", () => {
+    const measures = [
+      measured("turn_response_latency", [900, 1_100]),
+      measured("first_response_latency", [1_214]),
+    ];
+    const entries = [
+      { metric: "turn_response_latency", bound: 2_000 },
+      { metric: "first_response_latency", bound: 1_000 },
+    ];
+
+    const said = (order: readonly Readonly<Record<string, string | number>>[]) =>
+      executeLatency(execution(order, { measures }))
+        .map((one) => `${one.assertion}=${one.verdict}`)
+        .sort();
+
+    expect(said(entries)).toEqual(said([...entries].reverse()));
   });
 
   /**
@@ -245,7 +272,9 @@ describe("a conversation a measure cannot be computed for", () => {
       );
 
       expect(only).toMatchObject({
-        assertion: "assertion_1",
+        // Named for the measure it could not read, so a reader knows which
+        // check did not apply without resolving a position into a config.
+        assertion: cataloged.measure,
         verdict: "skipped",
         // Zero, and it decides nothing: a skipped assertion leaves the
         // denominator, so this number is never divided by anything.
@@ -306,9 +335,11 @@ describe("a conversation there is nothing to judge", () => {
       ),
     );
 
+    // The same keys a successful judging writes, which is what makes these rows
+    // ones a later grading can write over.
     expect(judgments.map((one) => one.assertion)).toEqual([
-      "assertion_1",
-      "assertion_2",
+      "turn_response_latency",
+      "first_response_latency",
     ]);
     for (const judgment of judgments) {
       expect(judgment).toMatchObject({ verdict: "errored", score: 0 });
@@ -324,6 +355,12 @@ describe("a config row nothing could have written", () => {
    * than thrown over anyway, because a grading service is not the place to fall
    * over a row that came out of its own database — and the word is `errored`,
    * because egma could not make the check and the agent did nothing.
+   *
+   * **Its key falls back to the position**, which is the one thing an entry
+   * holding nothing readable has. It is the last resort rather than the rule,
+   * and both halves of the seam fall back the same way — `latencyAssertions`
+   * answers the same string — so even a row like this stays one a re-grade can
+   * write over.
    */
   it("is errored rather than thrown over, and never failed", () => {
     for (const broken of [
@@ -332,15 +369,17 @@ describe("a config row nothing could have written", () => {
       { bound: 2_000 },
       { metric: "", bound: 2_000 },
     ]) {
-      const [only] = executeLatency(
-        execution([broken as Readonly<Record<string, string | number>>]),
-      );
+      const asked = execution([
+        broken as Readonly<Record<string, string | number>>,
+      ]);
+      const [only] = executeLatency(asked);
 
       expect(only).toMatchObject({
         assertion: "assertion_1",
         verdict: "errored",
         score: 0,
       });
+      expect(latencyAssertions(asked)).toEqual([only?.assertion]);
     }
   });
 });

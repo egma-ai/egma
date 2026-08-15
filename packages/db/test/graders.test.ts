@@ -436,6 +436,69 @@ describe("values that do not answer what the entry asked", () => {
     }
   });
 
+  /**
+   * **One measure, one check, per copy — because the key has to be an
+   * identity.**
+   *
+   * A latency verdict is filed under the measure its check bounds, and a copy's
+   * config is not pinned by a run, so a position could not be the name (an edit
+   * makes the next entry the first, and the key would name a different measure
+   * than it did before). That makes the measure the key — and a key has to be
+   * unique inside a copy or it is not one: the verdict store's sorting key ends
+   * at the assertion, so two entries on one measure would collapse into a single
+   * row and one of the two checks would vanish inside a single grading.
+   *
+   * The refusal points at the thing a second bound usually wants to be, which is
+   * a second copy — `required` lives on the copy, so a blocking bound and a
+   * reporting one are two copies whatever this rule said.
+   */
+  it("is refused a second check on a measure the copy already bounds", async () => {
+    const refusal = await useLibraryEntry(actingAsAcme(), {
+      libraryId: PREDEFINED_GRADERS.latency,
+      params: { metric: "turn_response_latency", bound: 2_000 },
+    })
+      .then((created) =>
+        editGrader(actingAsAcme(), created.id, {
+          config: {
+            assertions: [
+              { metric: "turn_response_latency", bound: 2_000 },
+              { metric: "turn_response_latency", bound: 500 },
+            ],
+          },
+        }),
+      )
+      .then(
+        () => "the grader was written",
+        (error: unknown) =>
+          error instanceof Error ? error.message : String(error),
+      );
+
+    expect(refusal).toContain('already bounds "turn_response_latency"');
+    expect(refusal).toContain("Press Use again for a second copy");
+  });
+
+  it("takes two checks on two different measures, which is the ordinary case", async () => {
+    const created = await useLibraryEntry(actingAsAcme(), {
+      libraryId: PREDEFINED_GRADERS.latency,
+      name: "Two measures, one copy",
+      params: { metric: "turn_response_latency", bound: 2_000 },
+    });
+
+    const edited = await editGrader(actingAsAcme(), created.id, {
+      config: {
+        assertions: [
+          { metric: "turn_response_latency", bound: 2_000 },
+          { metric: "first_response_latency", bound: 1_000 },
+        ],
+      },
+    });
+
+    expect(edited?.config.assertions).toEqual([
+      { metric: "turn_response_latency", bound: 2_000 },
+      { metric: "first_response_latency", bound: 1_000 },
+    ]);
+  });
+
   it("takes every measure a conversation's spans can carry", async () => {
     for (const cataloged of SPAN_DERIVED_MEASURES) {
       const created = await useLibraryEntry(actingAsAcme(), {

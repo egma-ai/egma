@@ -286,7 +286,7 @@ describe("a grader whose execution falls over", () => {
       // The config entry's position, one-based — never the measure or the
       // bound, which a person may edit and which a re-grade must write over
       // rather than beside.
-      assertion: "assertion_1",
+      assertion: "turn_response_latency",
       verdict: "passed",
       score: 1,
     });

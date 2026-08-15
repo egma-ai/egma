@@ -108,7 +108,7 @@ describe("editing a grader", () => {
     // rows already there — and the tightening below is what makes the same
     // conversation answer differently at the next version.
     expect(before[0]).toMatchObject({
-      assertion: "assertion_1",
+      assertion: "turn_response_latency",
       verdict: "passed",
     });
 
@@ -164,7 +164,7 @@ describe("editing a grader", () => {
       // conversation, now over the bound somebody tightened to a second.
       expect(newer).toMatchObject({
         graderId,
-        assertion: "assertion_1",
+        assertion: "turn_response_latency",
         verdict: "failed",
         source: "simulation",
       });
@@ -244,6 +244,171 @@ describe("a re-grade of a window", () => {
     expect(speakingVerdicts(read.verdicts)[0]?.graderVersionId).toBe(
       edited?.versionId,
     );
+  });
+});
+
+/**
+ * **A copy whose list of checks changes shape underneath a conversation.**
+ *
+ * This is the case that decides how a latency verdict is keyed, and the premise
+ * is worth stating because it is the opposite of what the spec's phrase "copy
+ * config pinned" suggests: **a run pins no grader version.** A simulation pins
+ * its test version and its persona version and nothing else, and judging always
+ * reads the copy through `grader.current_version_id` — `applicableGraders` →
+ * `listGraders` → the join on that column — so a re-grade of an old run judges
+ * it by *today's* config, at a new version, writing rows beside the old ones.
+ *
+ * The fold then counts one assertion once per `[trace, grader, assertion,
+ * source]`, deliberately without the version, which is what makes a re-grade
+ * supersede rather than double. So two config versions really do meet in one
+ * fold for one conversation, and whatever the key is has to survive that.
+ *
+ * A **position** does not. Drop the first of two entries and the second becomes
+ * the first: the key that meant `turn_response_latency` on Monday means
+ * `first_response_latency` on Tuesday, and Tuesday's row silently replaces
+ * Monday's. That is a verdict about one measure overwritten by a verdict about
+ * another, filed under a name saying it is about something else.
+ *
+ * The **measure** does survive it, which is why it is the key.
+ */
+describe("a copy that loses one of its checks", () => {
+  /** The copy and the conversation the second case reads back. */
+  let twoChecks: string;
+  let conducted: ConductedSimulation;
+
+  it("never lets one measure's verdict be replaced by another's", async () => {
+    // A copy checking two measures, and a conversation that measures both.
+    twoChecks = await seedGrader(
+      world,
+      aLatencyCopy({
+        name: "Two measures, one copy",
+        params: { metric: "turn_response_latency", bound: 2_000 },
+      }),
+    );
+    const both = await editGrader(world.auth, twoChecks, {
+      config: {
+        assertions: [
+          { metric: "turn_response_latency", bound: 2_000 },
+          { metric: "first_response_latency", bound: 1_000 },
+        ],
+      },
+    });
+    expect(both?.version).toBe(2);
+
+    conducted = await conductSimulation(world, {
+      spans: {
+        measured: {
+          // Inside its bound, and the first response is well outside its own.
+          turn_response_latency: [900],
+          first_response_latency: [4_000],
+        },
+      },
+    });
+    await jobFor(world, { simulationId: conducted.simulationId }, "graded");
+
+    const before = (await readVerdicts(world.auth, conducted.simulationId))
+      .verdicts.filter((row) => row.graderId === twoChecks);
+
+    // **Named for what they are about**, which is the whole change: two rows,
+    // one per measure, and neither of them a position.
+    expect(before.map((row) => row.assertion).sort()).toEqual([
+      "first_response_latency",
+      "turn_response_latency",
+    ]);
+    expect(
+      before.find((row) => row.assertion === "turn_response_latency")?.verdict,
+    ).toBe("passed");
+    expect(
+      before.find((row) => row.assertion === "first_response_latency")?.verdict,
+    ).toBe("failed");
+
+    // Now the edit that used to break this: **the first entry is removed**, so
+    // what was the second check is now the copy's first.
+    const narrowed = await editGrader(world.auth, twoChecks, {
+      config: { assertions: [{ metric: "first_response_latency", bound: 1_000 }] },
+    });
+    expect(narrowed?.version).toBe(3);
+
+    const asked = await regrade(world.auth, {
+      runId: conducted.runId,
+      graderId: twoChecks,
+    });
+    expect(asked?.reopened).toHaveLength(1);
+
+    const after = await eventually(
+      `${twoChecks} judged again at ${narrowed?.versionId}`,
+      async () => {
+        const read = await readVerdicts(world.auth, conducted.simulationId);
+        const mine = read.verdicts.filter((row) => row.graderId === twoChecks);
+        return mine.some((row) => row.graderVersionId === narrowed?.versionId)
+          ? mine
+          : undefined;
+      },
+    );
+
+    /**
+     * **Nothing was mis-attributed.** Every row still says which measure it is
+     * about, and every row about a measure agrees about that measure: the
+     * `turn_response_latency` rows all say `passed`, the
+     * `first_response_latency` rows all say `failed`. Under a positional key the
+     * new `assertion_1` would be the first-response check landing on top of the
+     * turn-latency verdict, and this is the assertion that would fail.
+     */
+    for (const row of after) {
+      expect(
+        row.assertion,
+        `${row.assertion} at ${row.graderVersionId} said ${row.verdict}`,
+      ).toBe(
+        row.verdict === "passed"
+          ? "turn_response_latency"
+          : "first_response_latency",
+      );
+    }
+
+    // The re-graded check superseded its own earlier row rather than landing
+    // beside it: one voice per measure.
+    const speaking = speakingVerdicts(after);
+    expect(speaking.map((row) => row.assertion).sort()).toEqual([
+      "first_response_latency",
+      "turn_response_latency",
+    ]);
+    expect(
+      speaking.find((row) => row.assertion === "first_response_latency")
+        ?.graderVersionId,
+    ).toBe(narrowed?.versionId);
+  });
+
+  /**
+   * **And what a removed check leaves behind, pinned as a decision.**
+   *
+   * The row a deleted entry already wrote keeps speaking, because nothing writes
+   * that key again and the fold does not know the entry is gone. **No keying
+   * scheme changes this** — position, measure, or a minted id all leave the same
+   * row — so it is not a defect in the key; it is the same shape a **deleted
+   * grader** has, whose verdicts keep speaking by an explicit product decision:
+   * "a grader deleted after a run keeps its versions, so what it already said
+   * stays readable" (`resolve.ts`).
+   *
+   * Written down here so it stays a decision somebody made rather than a
+   * surprise somebody finds. If the founders would rather a removed check stop
+   * counting, that is a change to the fold or a tombstone row, and it belongs to
+   * whoever owns the fold.
+   */
+  it("keeps what a removed check already said, exactly as a deleted grader does", async () => {
+    const read = await readVerdicts(world.auth, conducted.simulationId);
+    const mine = read.verdicts.filter((row) => row.graderId === twoChecks);
+
+    // The removed check's row is still in the store and still speaking, at the
+    // version that wrote it — the copy has one entry now and two voices.
+    const speaking = speakingVerdicts(mine);
+    expect(speaking.map((row) => row.assertion).sort()).toEqual([
+      "first_response_latency",
+      "turn_response_latency",
+    ]);
+    const removed = speaking.find(
+      (row) => row.assertion === "turn_response_latency",
+    );
+    expect(removed?.verdict).toBe("passed");
   });
 });
 
@@ -339,7 +504,7 @@ describe("a re-grade that names one grader", () => {
       ),
     ).toMatchObject({
       verdict: "failed",
-      assertion: "assertion_1",
+      assertion: "turn_response_latency",
     });
 
     // And nothing else was asked anything. Row for row, byte for byte — the
