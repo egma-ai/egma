@@ -21,6 +21,14 @@ export type WizardState = {
   readonly drivenAgent: DrivenAgent | null;
   /** Where the coding agent's own output is kept, for a screen that tails it. */
   readonly drivenAgentLog: string | null;
+  /**
+   * Which egma this walk will use, or `null` when it will use none.
+   *
+   * Set before the intro is dismissed, so the screen that takes the keystroke
+   * of consent is the screen that says where this repository's identifiers are
+   * about to go.
+   */
+  readonly platform: string | null;
   /** What egma worked out about this machine for itself, or `null` before it has. */
   readonly detection: Detection | null;
   /** What has to be approved in a browser, while it still has to be. */
@@ -72,6 +80,7 @@ export function emptyState(): WizardState {
   return {
     drivenAgent: null,
     drivenAgentLog: null,
+    platform: null,
     detection: null,
     login: null,
     loginTyping: "",

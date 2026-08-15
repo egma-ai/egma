@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { MASKED, RetellKey } from "../src/retell/key.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
+import { alreadyAsked } from "../src/wizard/login-step.ts";
 import { walk } from "../src/wizard/walk.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
@@ -146,11 +147,11 @@ describe("a whole run, swept afterwards", () => {
         launch: workspace.launch(script),
         cwd: workspace.dir,
         signal: new AbortController().signal,
-        platform: {
+        platform: alreadyAsked({
           url: platform.url,
           instanceId: platform.instanceId,
           credentialsFile: workspace.credentialsFile,
-        },
+        }),
         retell: { url: retell.url },
         home: path.join(workspace.dir, "pretend-home"),
         runPollMs: 20,

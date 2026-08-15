@@ -9,19 +9,43 @@
  */
 
 /**
+ * Somewhere for the parser to stand, and nothing else.
+ *
+ * A name RFC 2606 reserves so that it can never resolve anywhere. Nothing is
+ * ever fetched from it: it is only what a candidate is measured against, and
+ * the measurement is that resolving must not move the origin.
+ */
+const HERE = "https://egma.invalid";
+
+/**
  * A return path that cannot leave this origin, or nothing.
  *
- * One leading slash and no second one: `//elsewhere.example/x` is a URL a
- * browser reads as another host, and `https://elsewhere.example` obviously is.
- * A backslash is refused too, because some browsers have historically read it
- * as a slash.
+ * **The candidate is resolved, and it has to land back where it started.**
+ * `//elsewhere.example/x` is a URL a browser reads as another host, and
+ * `https://elsewhere.example` obviously is — but listing the shapes that leave
+ * is a list somebody finds the next entry in. `/<TAB>/elsewhere.example` was
+ * one: a URL parser strips tab, carriage return and newline *before* it parses,
+ * so a browser reads that as `//elsewhere.example` and goes there. Asking the
+ * parser instead of guessing at it cannot be enumerated around.
+ *
+ * The API applies the same rule before it writes a path into a reset link, and
+ * the suite holds the two copies to the same answers.
  */
 export function safeReturnPath(raw: string | null | undefined): string | null {
   if (raw === null || raw === undefined) return null;
-  const path = raw.trim();
-  if (!path.startsWith("/")) return null;
-  if (path.startsWith("//") || path.startsWith("/\\")) return null;
-  return path;
+  const asked = raw.trim();
+  // Somewhere, rather than something: `device/approve` means whatever page is
+  // reading it, which is not a promise a link can carry.
+  if (!asked.startsWith("/")) return null;
+
+  let landed: URL;
+  try {
+    landed = new URL(asked, HERE);
+  } catch {
+    return null;
+  }
+  if (landed.origin !== HERE) return null;
+  return `${landed.pathname}${landed.search}${landed.hash}`;
 }
 
 /** The same path, with somewhere to come back to attached. */

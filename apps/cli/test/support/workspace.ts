@@ -119,6 +119,17 @@ export const NO_BROWSER = "/usr/bin/true";
  */
 export const NO_RETELL = "http://127.0.0.1:1";
 
+/**
+ * An egma that is not hosted egma.
+ *
+ * The built-in address a repository falls back to is the real hosted platform,
+ * and a check that reached it would sign in to production, create real
+ * organizations there, and fail whenever the network did. So every run started
+ * from here stands a closed port in its place unless the check itself names a
+ * platform to stand there — which is what the tests of the unbound path do.
+ */
+export const NO_DEFAULT_PLATFORM = "http://127.0.0.1:1";
+
 export async function makeWorkspace(
   files: Readonly<Record<string, string>> = {},
   options: WorkspaceOptions = {},
@@ -144,6 +155,7 @@ export async function makeWorkspace(
         EGMA_HOME: egmaFolder,
         BROWSER: NO_BROWSER,
         EGMA_RETELL_URL: NO_RETELL,
+        EGMA_TEST_DEFAULT_URL: NO_DEFAULT_PLATFORM,
         ...extra,
       };
       // Whatever the person running the suite has set, a check talks to the

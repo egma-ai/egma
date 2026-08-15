@@ -7,6 +7,12 @@ import { DEVICE_CLIENT_ID } from "./device.ts";
 import type { EmailSender } from "./email.ts";
 import { currentIntent } from "./intent.ts";
 import {
+  passwordResetLink,
+  sealResetLink,
+  PASSWORD_RESET_LIFETIME_MINUTES,
+  RETURN_TO_HEADER,
+} from "./password-reset.ts";
+import {
   SignupRefusedError,
   type DeviceGrant,
   type DevicePollOutcome,
@@ -256,6 +262,33 @@ export function createIdentity(options: IdentityOptions): Identity {
         // referencing row, so two formats would be two formats forever.
         generateId: ({ model }) => identityId(model),
       },
+
+      /**
+       * Work the answer must not wait for, and **the reason it must not is
+       * that waiting is itself an answer.**
+       *
+       * The provider defers exactly the kind of work whose duration gives
+       * something away, and with nowhere to defer it to it simply waits
+       * instead. Asking for a password reset is the case that matters: for an
+       * address nobody holds the provider answers immediately, and for one
+       * somebody does it first posts a message — a quarter of a second to reach
+       * an SMTP server. The two answers are byte for byte identical and one of
+       * them takes twenty times longer, so one unauthenticated request tells a
+       * stranger who has an account here. That is the one thing the reset flow
+       * promises not to say.
+       *
+       * So the message is handed over and the answer goes back. What is left on
+       * the path is a row read and a row written, which is what the provider
+       * already evens out on purpose.
+       *
+       * Nothing is dropped and nothing is added here. The provider attaches its
+       * own failure handling to the promise before handing it over, and writes
+       * what went wrong to the log this instance keeps rather than to a person
+       * who is waiting — so all this has to do is decline to wait for it.
+       */
+      backgroundTasks: {
+        handler: () => {},
+      },
     },
 
     emailAndPassword: {
@@ -264,6 +297,66 @@ export function createIdentity(options: IdentityOptions): Identity {
       // configured, signup completes and verification is not a step.
       requireEmailVerification: options.emailSender.delivers,
       autoSignIn: true,
+
+      // The same hour the link says, in the seconds this option is written in.
+      // **One number and not two**: the seal on a link is signed rather than
+      // encrypted, so the provider's raw token reads straight out of any link,
+      // and the provider's whole surface is served under this instance's
+      // origin. A provider deadline longer than the stated one would be a way
+      // in past the hour egma names — so there is no longer one to find. See
+      // `password-reset.ts`.
+      resetPasswordTokenExpiresIn: PASSWORD_RESET_LIFETIME_MINUTES * 60,
+
+      /**
+       * The reset message, through the one email seam.
+       *
+       * It sits beside the verification message on purpose: **nothing here
+       * decides whether mail is delivered**, because `delivers` on the sender
+       * already does. On a platform with SMTP the link is posted; on one
+       * without, the same message is written to the log and a self-hoster reads
+       * it there. There is no second setting for the two to disagree over.
+       *
+       * The provider's `url` is not used. It points at the provider's own
+       * callback, which would redirect a browser to a page with the raw token
+       * on it; egma sends a link to its own page carrying the token and the
+       * deadline sealed together, so the refusals behind it can say which of
+       * the two things happened.
+       *
+       * **Where to go afterwards travels on the request egma built**, in a
+       * header of egma's own. Somebody who was approving a terminal's login
+       * when they discovered they had forgotten their password has to land back
+       * on that page, and the message is the one hop nothing else survives: a
+       * new tab, minutes later, with no page left holding it. The provider's
+       * body has no field for it and widening what egma asks the provider for
+       * is the cost this seam exists to avoid — so it travels beside the
+       * request, exactly as the names a person chose at signup do.
+       */
+      sendResetPassword: async ({ user, token }, request) => {
+        const link = passwordResetLink(
+          options.baseUrl,
+          sealResetLink(
+            {
+              token,
+              expiresAt: new Date(
+                Date.now() + PASSWORD_RESET_LIFETIME_MINUTES * 60_000,
+              ),
+            },
+            options.secret,
+          ),
+          request?.headers.get(RETURN_TO_HEADER),
+        );
+
+        await options.emailSender.send({
+          to: user.email,
+          subject: "Reset your egma password",
+          body:
+            `Somebody asked to set a new password for your egma account. ` +
+            `Set one here: ${link}\n\n` +
+            `The link works once, and runs out ${PASSWORD_RESET_LIFETIME_MINUTES} ` +
+            `minutes after it was asked for. If it was not you, nothing has ` +
+            `changed and there is nothing to do.`,
+        });
+      },
     },
 
     emailVerification: {
