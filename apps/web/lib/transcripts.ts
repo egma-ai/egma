@@ -72,6 +72,22 @@ export type Judgment = {
    * sentence, which is read from the pinned test version.
    */
   readonly assertion: string;
+  /**
+   * The words behind that key, resolved by the read from the version this
+   * conversation was executed against.
+   *
+   * `null` where nothing could place the key — a grader whose keys are its own
+   * business, a conversation with no test — and absent from an older answer that
+   * never resolved one. Both mean the same thing here and the key is shown
+   * instead: a bare `behavior_3` is terse, and an invented sentence would be
+   * unfalsifiable.
+   */
+  readonly assertion_text?: string | null;
+  /**
+   * Whether this judgment can fail anything — `false` for a diagnostic copy,
+   * which reports and never decides. Absent on a read that does not carry lanes.
+   */
+  readonly required?: boolean;
   readonly verdict: string;
   readonly score: number;
   readonly rationale: string;
@@ -139,6 +155,23 @@ export function turnsCited(one: Judgment): readonly number[] {
 export function humanizeIdentifier(value: string): string {
   const words = value.replaceAll(/[_-]+/g, " ").trim();
   return words === "" ? value : `${words.slice(0, 1).toUpperCase()}${words.slice(1)}`;
+}
+
+/**
+ * What to head a judgment with: the sentence somebody wrote, where the read
+ * resolved one, and the key itself where it did not.
+ *
+ * The fallback is the whole reason this is a function. A key that could not be
+ * placed is shown as the key — `Behavior 3` — which says exactly as much as egma
+ * actually knows. Putting the live test's third sentence there instead would be
+ * a plausible sentence that might be about a different check entirely, and
+ * nobody looking at the page could tell.
+ */
+export function assertionHeading(one: Judgment): string {
+  const said = one.assertion_text ?? null;
+  return said === null || said.trim() === ""
+    ? humanizeIdentifier(one.assertion)
+    : said;
 }
 
 export type Window = { readonly from: string; readonly to: string };

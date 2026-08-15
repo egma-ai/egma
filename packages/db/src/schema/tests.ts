@@ -11,7 +11,6 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
-import { grader } from "./graders.ts";
 import { persona } from "./personas.ts";
 import { organization, project } from "./tenancy.ts";
 import { user } from "./identity.ts";
@@ -160,56 +159,18 @@ export const testPersona = pgTable(
 );
 
 /**
- * The graders this version's scenario asks for on top of the project's, and in
- * which order. Every grader in the project already judges every test, so these
- * rows are the scenario-specific additions: "the refund tool must fire" judges
- * the refund test and nothing else.
+ * **A test names no graders, and there is no junction to name them through.**
  *
- * Which graders judge a version is part of what the version checks, so the
- * array is content and belongs here rather than on the identity row — editing
- * it mints a version exactly as editing the caller set does.
+ * There was one — `test_grader`, the persona junction's shape verb for verb —
+ * and it is gone. Which graders judge a simulation is answered entirely by the
+ * project's running copies and their scope: every active copy whose scope
+ * covers the source judges everything in it. Attachment through test content
+ * forced a scenario-specific decision through the wrong object, when "where does
+ * this grader apply" is the grader's own setting.
  *
- * The persona junction's shape, verb for verb, because the two ask the same
- * question of the same version and answering them two ways would be two things
- * to learn. **By identity, never by version**, for the same reason: sharpening a
- * rubric must not mint a false new version of every test that names the grader,
- * and a run resolves each one and pins the version it actually met.
+ * A version's content is therefore the scenario, the expected behaviors and the
+ * mock overrides, and nothing else. Scenario-specific grading returns as
+ * Langfuse-shaped **filters on the running copy** — `{field, operator, values}`
+ * over test and agent — in the custom-grader era, where the same question is
+ * asked once per grader rather than once per test.
  */
-export const testGrader = pgTable(
-  "test_grader",
-  {
-    testVersionId: idText("test_version_id")
-      .notNull()
-      .references(() => testVersion.id, { onDelete: "cascade" }),
-    /**
-     * No `on delete` clause on purpose, exactly as the persona junction has
-     * none. A version that named a grader goes on naming it for as long as any
-     * run that pinned the version is kept, so removing the row outright is
-     * refused rather than quietly emptying a version of what judges it.
-     */
-    graderId: idText("grader_id")
-      .notNull()
-      .references(() => grader.id),
-    /** Where in the authored order this grader sits, counting from one. */
-    position: integer("position").notNull(),
-  },
-  (table) => [
-    primaryKey({
-      name: "test_grader_pk",
-      columns: [table.testVersionId, table.graderId],
-    }),
-    prefixCheck(
-      "test_grader_test_version_id_prefix",
-      table.testVersionId,
-      "tstv",
-    ),
-    // Authored order is a fact about the version, so two graders on one version
-    // can never claim the same place in it.
-    unique("test_grader_version_id_position_unique").on(
-      table.testVersionId,
-      table.position,
-    ),
-    // What answers "which tests name this grader" when deleting one has to say.
-    index("test_grader_grader_id_idx").on(table.graderId),
-  ],
-);

@@ -110,7 +110,6 @@ export {
   AgentWriteRefusedError,
   AlreadyBelongsToAnOrganizationError,
   GraderLibraryEntryInUseError,
-  GraderNamedByTestsError,
   LastAdminError,
   MockToolTakenError,
   NotPermittedError,
@@ -126,7 +125,6 @@ export {
   type AgentWriteRefusal,
   type GraderUsingLibraryEntry,
   type RunWriteRefusal,
-  type TestNamingGrader,
   type TestNamingPersona,
 } from "./errors.ts";
 
@@ -277,6 +275,15 @@ export {
   type TraceVerdicts,
 } from "./verdicts.ts";
 
+/**
+ * The other half of a verdict row: a key is what the store keeps, and this is
+ * how a page turns one back into the words somebody wrote.
+ */
+export {
+  readAssertionWords,
+  type AssertionWords,
+} from "./assertions.ts";
+
 export {
   addConnection,
   connectionTypeOf,
@@ -372,7 +379,6 @@ export {
   type NewTest,
   type Test,
   type TestChanges,
-  type TestGrader,
   type TestPage,
   type TestPersona,
   type TestVersion,

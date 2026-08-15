@@ -2,6 +2,8 @@ import { traceStore } from "../clickhouse/client.ts";
 import {
   foldVerdicts,
   foldVerdictsByGrader,
+  verdictLanes,
+  type Diagnostics,
   type FoldedOutcome,
   type FoldableVerdict,
   type GraderOutcome,
@@ -9,6 +11,7 @@ import {
   type VerdictSource,
 } from "../verdicts/fold.ts";
 import type { AuthContext } from "./context.ts";
+import { graderFacts } from "./graders.ts";
 import { authorize, here } from "./permissions.ts";
 
 /**
@@ -42,6 +45,16 @@ import { authorize, here } from "./permissions.ts";
  * grain up — a run's outcome and each of its conversations', both from the same
  * fold over the same rows — because a run header is a thing computed and never
  * a thing stored.
+ *
+ * **Two lanes, and the outcome is the required one.** A running copy carrying
+ * `required: false` is a diagnostic: judged like any other, its rows written and
+ * returned like any other, and never able to fail a conversation or a run. Which
+ * copies those are is read from Postgres at the moment of asking — the flag is a
+ * live setting on the copy, so a project that makes a blocker a diagnostic reads
+ * its whole history that way from that moment on — and the split is handed to
+ * the shared fold rather than done a second way here. The diagnostic lane's own
+ * answer comes back beside the outcome, because a check whose fraction nobody
+ * could see would be a check judging in silence.
  */
 
 /* ------------------------------------------------------------------- *
@@ -240,9 +253,25 @@ export type TraceVerdicts = {
    * below are already folded over exactly those.
    */
   readonly verdicts: readonly RecordedVerdict[];
-  /** The conversation's own answer, computed here and stored nowhere. */
+  /**
+   * The conversation's own answer, computed here and stored nowhere — folded
+   * over the **required** copies alone, because those are the ones a failure of
+   * which means the conversation failed.
+   */
   readonly outcome: FoldedOutcome;
-  /** And the same answer per grader, so a page can say which check failed. */
+  /**
+   * The same fold over the diagnostic copies, or **absent** where none of them
+   * judged this conversation.
+   *
+   * Absent rather than an empty outcome, so a reader shows a lane that exists
+   * and says nothing at all about one that does not — a "0/0 diagnostics" line
+   * on every page would be furniture describing a feature nobody switched on.
+   */
+  readonly diagnostics: FoldedOutcome | undefined;
+  /**
+   * And the same answer per grader, so a page can say which check failed —
+   * every grader that judged, each saying which lane it is in.
+   */
   readonly byGrader: readonly GraderOutcome[];
 };
 
@@ -303,20 +332,54 @@ export async function readVerdicts(
     column: "trace_id",
     value: traceId,
   });
+  const diagnostics = await onlyReporting(auth, verdicts);
+  const lanes = verdictLanes(verdicts, diagnostics);
 
   return {
     verdicts,
-    outcome: foldVerdicts(verdicts),
-    byGrader: foldVerdictsByGrader(verdicts),
+    outcome: foldVerdicts(lanes.required),
+    diagnostics:
+      lanes.diagnostic.length === 0
+        ? undefined
+        : foldVerdicts(lanes.diagnostic),
+    byGrader: foldVerdictsByGrader(verdicts, diagnostics),
   };
+}
+
+/**
+ * Which of the copies that wrote these rows only report.
+ *
+ * One read for a whole answer, asked of the graders actually named by the rows
+ * rather than of the project — so a run judged by two copies costs one lookup of
+ * two ids, whatever else the project has switched on.
+ *
+ * **A copy that came back with nothing gates**, which is the safe direction: a
+ * row nobody could resolve must not quietly stop being able to fail anything.
+ */
+async function onlyReporting(
+  auth: AuthContext,
+  rows: readonly RecordedVerdict[],
+): Promise<Diagnostics> {
+  const facts = await graderFacts(
+    auth,
+    rows.map((row) => row.graderId),
+  );
+
+  return new Set(
+    [...facts.entries()]
+      .filter(([, its]) => !its.required)
+      .map(([graderId]) => graderId),
+  );
 }
 
 /** One conversation of a run, and what its rows add up to. */
 export type SimulationVerdicts = {
   /** The conversation, by the id its verdict rows are filed under. */
   readonly simulationId: string;
-  /** Folded over that conversation's rows alone. */
+  /** Folded over that conversation's required rows alone. */
   readonly outcome: FoldedOutcome;
+  /** And over its diagnostic ones, where any judged it. */
+  readonly diagnostics: FoldedOutcome | undefined;
 };
 
 export type RunVerdicts = {
@@ -335,8 +398,14 @@ export type RunVerdicts = {
    * business.
    */
   readonly simulations: readonly SimulationVerdicts[];
-  /** The run's own answer, folded over every row beneath it. */
+  /**
+   * The run's own answer, folded over every **required** row beneath it. A run
+   * fails when a copy that can fail one did; nothing a diagnostic said reaches
+   * this.
+   */
   readonly outcome: FoldedOutcome;
+  /** The diagnostic lane across the whole run, where anything reported. */
+  readonly diagnostics: FoldedOutcome | undefined;
   /** And per grader across the whole run, so a header can say which check failed. */
   readonly byGrader: readonly GraderOutcome[];
 };
@@ -346,10 +415,11 @@ export type RunVerdicts = {
  * asking.
  *
  * **It is the same fold, twice, over the same rows.** A run's answer is
- * `foldVerdicts` over every row the run holds; a simulation's is `foldVerdicts`
- * over that conversation's. Those two agree by construction rather than by care:
- * supersession is decided inside one conversation's assertions, so folding the
- * run whole and folding each conversation and adding the counts up are the same
+ * `foldVerdicts` over every required row the run holds; a simulation's is
+ * `foldVerdicts` over that conversation's. Those two agree by construction
+ * rather than by care: supersession is decided inside one conversation's
+ * assertions and the lane split is decided per grader, so folding the run whole
+ * and folding each conversation and adding the counts up are the same
  * arithmetic. That is what makes a run header and the rows on the page beneath
  * it incapable of disagreeing — and it is why there is no second algebra here,
  * no aggregate in the query, and no stored rollup anywhere for either to drift
@@ -382,6 +452,8 @@ export async function readRunVerdicts(
     column: "run_id",
     value: runId,
   });
+  const diagnostics = await onlyReporting(auth, verdicts);
+  const lanes = verdictLanes(verdicts, diagnostics);
 
   const byConversation = new Map<string, RecordedVerdict[]>();
   for (const row of verdicts) {
@@ -394,12 +466,23 @@ export async function readRunVerdicts(
     runId,
     simulations: [...byConversation.entries()]
       .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .map(([simulationId, its]) => ({
-        simulationId,
-        outcome: foldVerdicts(its),
-      })),
-    outcome: foldVerdicts(verdicts),
-    byGrader: foldVerdictsByGrader(verdicts),
+      .map(([simulationId, its]) => {
+        const apart = verdictLanes(its, diagnostics);
+        return {
+          simulationId,
+          outcome: foldVerdicts(apart.required),
+          diagnostics:
+            apart.diagnostic.length === 0
+              ? undefined
+              : foldVerdicts(apart.diagnostic),
+        };
+      }),
+    outcome: foldVerdicts(lanes.required),
+    diagnostics:
+      lanes.diagnostic.length === 0
+        ? undefined
+        : foldVerdicts(lanes.diagnostic),
+    byGrader: foldVerdictsByGrader(verdicts, diagnostics),
   };
 }
 

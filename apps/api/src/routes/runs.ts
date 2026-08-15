@@ -8,12 +8,15 @@ import {
   NotPermittedError,
   platformFacts,
   ProjectOutsideOrganizationError,
+  readAssertionWords,
   readRunVerdicts,
   readVerdicts,
   RunWriteRefusedError,
   startRun,
+  type AssertionWords,
   type AuthContext,
   type ConductedSimulation,
+  type FoldedOutcome,
   type MockToolCoverage,
   type MockToolSnapshot,
   type Run,
@@ -169,11 +172,17 @@ const NO_SUCH_RUN =
  * executed and never moves, and `test_id` is what to go and edit.
  *
  * `verdict` is what the graders make of the conversation, folded over every
- * assertion judged against it. It is `null` for a conversation nobody has
- * judged **yet** — which is not the same as one judged and found wanting, and
- * the two must never read alike. `grading` carries that distinction: a
- * conversation with no rows says `pending`, and one with rows says `graded`
- * beside whatever the fold came to.
+ * assertion judged against it by a **required** grader. It is `null` for a
+ * conversation nobody has judged **yet** — which is not the same as one judged
+ * and found wanting, and the two must never read alike. `grading` carries that
+ * distinction: a conversation with no rows says `pending`, and one with rows
+ * says `graded` beside whatever the fold came to.
+ *
+ * `diagnostics` is the other lane, reported apart and never added in. A copy
+ * somebody made `required: false` is judged exactly like any other and writes
+ * exactly the same rows — its fraction is the whole reason it was switched on —
+ * and it can never fail this conversation. Folding the two together would make a
+ * diagnostic a blocker; leaving the second lane out would make it silent.
  *
  * Execution and grading are separate facts and are reported separately. A
  * conversation can be `completed` and ungraded, and a reader that collapsed the
@@ -191,6 +200,8 @@ function describedSimulation(
   one: ConductedSimulation,
   judged: SimulationVerdicts | undefined,
   rows: readonly RecordedVerdict[],
+  words: AssertionWords | undefined,
+  diagnostic: ReadonlySet<string>,
 ): Record<string, unknown> {
   return {
     id: one.id,
@@ -209,18 +220,30 @@ function describedSimulation(
     // failing agent, and a summary that hid either would say the opposite of
     // what happened.
     counts: judged === undefined ? null : judged.outcome.counts,
+    // What only reported, beside what decided. Null where nothing diagnostic
+    // judged this conversation — an empty lane described anyway would be
+    // furniture about a feature nobody switched on.
+    diagnostics: describedOutcome(judged?.diagnostics),
     // Every judged assertion, whole. The fold above says how many passed; this
     // says which ones and why, because "2 of 3 passed" without the rationale
     // sends somebody to read a transcript to work out what egma already knew.
     //
-    // **`assertion` is a key and nothing else** — a behavior's position in the
-    // pinned test version, a config entry's index. Resolving it back into the
-    // sentence somebody wrote is display-time work that is not built yet, so a
-    // caller reading this today gets `behavior_1` and has to fetch the pinned
-    // version itself to learn what behavior 1 says.
+    // **`assertion` is the key the store keeps, and `assertion_text` is what a
+    // person reads.** The key is a behavior's position in the pinned test
+    // version, or a config entry's index; the words behind it are fetched from
+    // that pinned version here, at display time, because a row keyed by content
+    // would make an edited sentence a second assertion counted beside the first
+    // forever. Both are sent: the key is what a client filters and groups by,
+    // and the text is what it shows. A key nothing can place — a grader whose
+    // keys are its own business, a version somebody has since shortened —
+    // carries `null` and is shown as itself rather than as a guess.
     verdicts: rows.map((its) => ({
       grader_id: its.graderId,
       assertion: its.assertion,
+      assertion_text: words?.of(its.graderId, its.assertion) ?? null,
+      // Which lane this row is in, said on the row so a reader can mark a
+      // diagnostic judgment without going and matching grader ids.
+      required: !diagnostic.has(its.graderId),
       verdict: its.verdict,
       score: its.score,
       rationale: its.rationale,
@@ -239,6 +262,24 @@ function describedSimulation(
     // player at all, which is the difference between an honest absence and a
     // disabled control that reads as a broken feature.
     has_recording: one.recordingReference !== null,
+  };
+}
+
+/**
+ * One folded answer as the wire carries it, or null where there is none.
+ *
+ * Written once and used at both grains, so a run's diagnostic lane and a
+ * conversation's are the same three keys — a reader that learned the shape on
+ * one has learned it on the other.
+ */
+function describedOutcome(
+  outcome: FoldedOutcome | undefined,
+): Record<string, unknown> | null {
+  if (outcome === undefined) return null;
+  return {
+    verdict: outcome.verdict,
+    score: outcome.score ?? null,
+    counts: outcome.counts,
   };
 }
 
@@ -306,11 +347,20 @@ function describedRun(
   baseUrl: string,
   judged?: RunVerdicts,
   rowsBySimulation?: ReadonlyMap<string, readonly RecordedVerdict[]>,
+  wordsBySimulation?: ReadonlyMap<string, AssertionWords>,
 ): Record<string, unknown> {
   const bySimulation = new Map(
     (judged?.simulations ?? []).map((its) => [its.simulationId, its] as const),
   );
   const gradedCount = simulations.filter((one) => bySimulation.has(one.id)).length;
+  // Which graders only report, off the run's own per-grader fold rather than
+  // read a second time: one answer about `required`, computed where the lanes
+  // were split, so a row's marking and the header's arithmetic cannot disagree.
+  const diagnostic = new Set(
+    (judged?.byGrader ?? [])
+      .filter((its) => !its.required)
+      .map((its) => its.graderId),
+  );
   return {
     id: one.id,
     status: one.status,
@@ -341,11 +391,20 @@ function describedRun(
     // two counts settle at different moments and a reader has to be able to see
     // which one it is waiting on.
     graded_count: gradedCount,
+    // The run's own answer, over the required copies alone: a run fails when a
+    // grader that can fail one did. What a diagnostic said is beside it and
+    // never in it.
     verdict: judged?.outcome.verdict ?? null,
     score: judged?.outcome.score ?? null,
     counts: judged?.outcome.counts ?? null,
+    diagnostics: describedOutcome(judged?.diagnostics),
+    // Every grader that judged, both lanes, each saying which it is in. A
+    // diagnostic's fraction is exactly what somebody switched it on to read, so
+    // leaving it off this list would make it judge in silence — and folding it
+    // into the headline above would make it a blocker.
     by_grader: (judged?.byGrader ?? []).map((its) => ({
       grader_id: its.graderId,
+      required: its.required,
       verdict: its.outcome.verdict,
       score: its.outcome.score ?? null,
       counts: its.outcome.counts,
@@ -355,6 +414,8 @@ function describedRun(
         its,
         bySimulation.get(its.id),
         rowsBySimulation?.get(its.id) ?? [],
+        wordsBySimulation?.get(its.id),
+        diagnostic,
       ),
     ),
   };
@@ -410,15 +471,40 @@ async function runAsItStands(
   // does not carry them — a run of two hundred conversations would be a page
   // nobody asked for — so they are gathered only for the conversations this run
   // actually has, and only for the ones something has judged.
+  //
+  // The words behind their assertion keys come with them, from the version each
+  // conversation was pinned to. It is the same trip: a conversation with rows is
+  // a conversation whose keys are about to be shown, and resolving them
+  // afterwards would be a second pass over the same list.
   const rowsBySimulation = new Map<string, readonly RecordedVerdict[]>();
+  const wordsBySimulation = new Map<string, AssertionWords>();
   await Promise.all(
     (judged?.simulations ?? []).map(async (its) => {
       const read = await readVerdicts(auth, its.simulationId).catch(() => undefined);
-      if (read !== undefined) rowsBySimulation.set(its.simulationId, read.verdicts);
+      if (read === undefined) return;
+      rowsBySimulation.set(its.simulationId, read.verdicts);
+
+      // The pinned version is in Postgres and the rows are in the verdict
+      // store, so this failing is a different outage from that one — and the
+      // page is still worth sending with the keys unresolved, which is exactly
+      // what a caller saw before anything resolved them at all.
+      const words = await readAssertionWords(
+        auth,
+        its.simulationId,
+        read.verdicts.map((row) => row.graderId),
+      ).catch(() => undefined);
+      if (words !== undefined) wordsBySimulation.set(its.simulationId, words);
     }),
   );
 
-  return describedRun(header, simulations, baseUrl, judged, rowsBySimulation);
+  return describedRun(
+    header,
+    simulations,
+    baseUrl,
+    judged,
+    rowsBySimulation,
+    wordsBySimulation,
+  );
 }
 
 export async function runRoutes(

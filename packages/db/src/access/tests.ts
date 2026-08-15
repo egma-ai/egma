@@ -2,22 +2,15 @@ import { isId, newId } from "@egma/ids";
 import { and, asc, desc, eq, inArray, isNull, lt, type SQL } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
-import { grader } from "../schema/graders.ts";
 import { persona } from "../schema/personas.ts";
 import { project } from "../schema/tenancy.ts";
-import {
-  test,
-  testGrader,
-  testPersona,
-  testVersion,
-} from "../schema/tests.ts";
+import { test, testPersona, testVersion } from "../schema/tests.ts";
 import type { MockToolAnswer } from "../mock-tools/resolve.ts";
 import type { AuthContext } from "./context.ts";
 import {
   ProjectOutsideOrganizationError,
   TestMovedOnError,
   UnprocessableInputError,
-  type TestNamingGrader,
   type TestNamingPersona,
 } from "./errors.ts";
 import {
@@ -47,6 +40,11 @@ import { theProject, within } from "./within.ts";
  * non-empty at write time, and judging a simulation against them is part of
  * what running a test means, so there is no window in which a stored test could
  * pass without ever having been able to fail.
+ *
+ * **A test names no graders.** What judges a simulation is the project's
+ * running copies and their scope, decided grader-side and never through test
+ * content — so a version's content is the scenario, the behaviors and the mock
+ * overrides, and there is nothing else in here for a writer to name.
  */
 
 /**
@@ -128,13 +126,6 @@ export type NewTest = {
    */
   readonly personaIds?: readonly string[] | undefined;
   /**
-   * The graders this scenario asks for on top of the project's own, in the
-   * order they were authored. Naming none is the ordinary case and means
-   * exactly that: every grader in the project already judges this test, and its
-   * expected behaviors are judged whatever else happens.
-   */
-  readonly graderIds?: readonly string[] | undefined;
-  /**
    * The tools this scenario answers for itself, on top of however the project
    * answers for them. Naming none is the ordinary case: the project's mock
    * tools are the world, and a test overrides one only when the branch it is
@@ -155,20 +146,6 @@ export type TestPersona = {
   readonly deletedAt: Date | null;
 };
 
-/**
- * A grader as a test names it: by identity, with its current name, and saying
- * plainly whether it has since been deleted — the persona's shape, for the
- * persona's reason. A live test can never reach this state, because a grader's
- * delete is refused while one names it; a frozen version can, and a reader of
- * one has to be told.
- */
-export type TestGrader = {
-  readonly id: string;
-  readonly name: string;
-  /** Set once it is deleted; the version goes on naming it either way. */
-  readonly deletedAt: Date | null;
-};
-
 export type Test = {
   readonly id: string;
   readonly projectId: string;
@@ -181,8 +158,6 @@ export type Test = {
   readonly expectedBehaviors: readonly ExpectedBehavior[];
   /** In the order they were authored. */
   readonly personas: readonly TestPersona[];
-  /** In the order they were authored. */
-  readonly graders: readonly TestGrader[];
   /** The tools this scenario answers for itself; usually none. */
   readonly mockOverrides: readonly MockOverride[];
   readonly createdAt: Date;
@@ -210,15 +185,6 @@ export type TestChanges = {
    * could never run. Leaving the set alone is what leaving the field out does.
    */
   readonly personaIds?: readonly string[];
-  /**
-   * The graders the next version should name, in the order it should name them.
-   *
-   * An empty list means here what it means on a create — name none — because
-   * naming none is a state a test can be in and stay falsifiable: the project's
-   * graders and its own expected behaviors judge it either way. So `[]` clears
-   * the array, and leaving the field out keeps it.
-   */
-  readonly graderIds?: readonly string[];
   /**
    * The tools the next version should answer for itself.
    *
@@ -263,8 +229,6 @@ export type TestVersion = {
   readonly expectedBehaviors: readonly ExpectedBehavior[];
   /** By identity, in the order they were authored. */
   readonly personas: readonly TestPersona[];
-  /** By identity, in the order they were authored. */
-  readonly graders: readonly TestGrader[];
   /** The tools this version answers for itself, as it was frozen. */
   readonly mockOverrides: readonly MockOverride[];
   readonly createdAt: Date;
@@ -411,25 +375,6 @@ function validatePersonaIds(ids: readonly string[]): void {
 }
 
 /**
- * The same, for the graders a version names: every one is a grader's
- * identifier, and each one is named once. Naming the same grader twice would
- * ask for the same judgment twice, which produces one verdict either way, so
- * the second naming says nothing and is refused rather than silently collapsed.
- */
-function validateGraderIds(ids: readonly string[]): void {
-  const seen = new Set<string>();
-  for (const id of ids) {
-    if (!isId("grd", id)) {
-      throw new Error(`"${id}" is not a grader id`);
-    }
-    if (seen.has(id)) {
-      throw new Error(`grader ${id} is named twice on one test`);
-    }
-    seen.add(id);
-  }
-}
-
-/**
  * The shape guard on every read. Stored jsonb comes back `unknown`, and a row
  * somebody hand-edited must fail here, loudly and naming itself, rather than
  * leak into a caller as a `TestContent` that isn't one. Shape only,
@@ -506,9 +451,9 @@ function contentFromRow(value: unknown, versionId: string): TestContent {
 
 /**
  * Two ordered lists of strings, compared as written. Order is content
- * everywhere this is asked: the personas and the graders are named in the order
- * they were authored, so a version that reorders either says something the
- * version before it did not.
+ * everywhere this is asked: the personas are named in the order they were
+ * authored, so a version that reorders them says something the version before
+ * it did not.
  */
 function sameOrderedList(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((entry, index) => entry === b[index]);
@@ -541,10 +486,10 @@ function sameBehaviors(
  * versions identical, and an edit would vanish without a version — the one loss
  * the whole versioning exists to rule out.
  *
- * The jsonb content is all this table covers. The personas and the graders a
- * version names are content too and version on exactly the same terms, but they
- * are rows rather than fields, so they are compared beside this rather than
- * inside it — `editTest` asks all three questions and mints on any answer.
+ * The jsonb content is all this table covers. The personas a version names are
+ * content too and version on exactly the same terms, but they are rows rather
+ * than fields, so they are compared beside this rather than inside it —
+ * `editTest` asks both questions and mints on either answer.
  */
 const sameContentField: {
   readonly [K in keyof TestContent]: (a: TestContent, b: TestContent) => boolean;
@@ -658,60 +603,6 @@ async function validateNamedPersonas(
     if (found.get(id) !== null) {
       throw new UnprocessableInputError(
         `persona ${id} is deleted, and a test cannot name a deleted persona`,
-      );
-    }
-  }
-}
-
-/**
- * Whether the ids a write names are graders this project can use: each one
- * exists, is alive, and is this project's.
- *
- * The persona check's shape, for the persona check's reasons — one read for the
- * whole set, one refusal per id that did not come back whole, and a grader of
- * another customer or another project refused in the same words as one that
- * never existed, because confirming that somebody else's row exists is itself a
- * leak.
- *
- * **The read takes a shared lock on every row it finds**, and this write's
- * transaction holds it until it commits, which is the other half of the delete's
- * exclusive lock in `graders.ts`: the two modes conflict, so a delete and a
- * write naming the same grader cannot walk past each other. Without it both
- * could pass their own check and a live test would end up naming a deleted
- * grader — a test quietly checking one thing fewer than it says it checks, which
- * is the one state this rule exists to make impossible.
- */
-async function validateNamedGraders(
-  on: Queryable,
-  auth: AuthContext,
-  projectId: string,
-  ids: readonly string[],
-): Promise<void> {
-  if (ids.length === 0) return;
-
-  const found = new Map(
-    (
-      await on
-        .select({ id: grader.id, deletedAt: grader.deletedAt })
-        .from(grader)
-        .where(
-          within(
-            auth,
-            grader,
-            and(inArray(grader.id, [...ids]), eq(grader.projectId, projectId)),
-          ),
-        )
-        .for("share")
-    ).map((row) => [row.id, row.deletedAt] as const),
-  );
-
-  for (const id of ids) {
-    if (!found.has(id)) {
-      throw new Error(`there is no grader ${id} in this project`);
-    }
-    if (found.get(id) !== null) {
-      throw new Error(
-        `grader ${id} is deleted, and a test cannot name a deleted grader`,
       );
     }
   }
@@ -837,33 +728,12 @@ async function namePersonasOn(
 }
 
 /**
- * The same for the graders — and unlike the personas, this list is allowed to
- * be empty, so a version that names none writes no rows rather than an insert
- * with nothing in it.
- */
-async function nameGradersOn(
-  on: Queryable,
-  versionId: string,
-  graderIds: readonly string[],
-): Promise<void> {
-  if (graderIds.length === 0) return;
-
-  await on.insert(testGrader).values(
-    graderIds.map((graderId, index) => ({
-      testVersionId: versionId,
-      graderId,
-      position: index + 1,
-    })),
-  );
-}
-
-/**
- * The test, its first version and the version's personas and graders, or none
- * of them. The identity row goes in first naming a version that does not exist
- * yet — its pointer's constraint is deferred, so Postgres checks it at commit —
- * and anything that fails on the way out takes the whole write with it.
+ * The test, its first version and the version's personas, or none of them. The
+ * identity row goes in first naming a version that does not exist yet — its
+ * pointer's constraint is deferred, so Postgres checks it at commit — and
+ * anything that fails on the way out takes the whole write with it.
  *
- * Both sets are resolved inside the transaction, so what was checked is what the
+ * The set is resolved inside the transaction, so what was checked is what the
  * join rows name.
  */
 export async function createTest(
@@ -888,8 +758,6 @@ export async function createTest(
   });
   const named = input.personaIds ?? [];
   validatePersonaIds(named);
-  const namedGraders = input.graderIds ?? [];
-  validateGraderIds(namedGraders);
 
   if (!(await isProjectOfOrganization(auth, projectId))) {
     throw new ProjectOutsideOrganizationError(auth.organizationId, projectId);
@@ -900,7 +768,6 @@ export async function createTest(
 
   const written = await db().transaction(async (tx) => {
     const personaIds = await personaIdsFor(tx, auth, projectId, named);
-    await validateNamedGraders(tx, auth, projectId, namedGraders);
 
     const [identity] = await tx
       .insert(test)
@@ -926,16 +793,11 @@ export async function createTest(
     });
 
     await namePersonasOn(tx, versionId, personaIds);
-    await nameGradersOn(tx, versionId, namedGraders);
 
     // Read back inside the transaction, so what the create answers with is what
     // the transaction wrote and checked, rather than whatever the table holds
     // by the time it has committed.
-    return {
-      ...identity,
-      personas: await personasOf(tx, versionId),
-      graders: await gradersOf(tx, versionId),
-    };
+    return { ...identity, personas: await personasOf(tx, versionId) };
   });
 
   return { ...written, version: 1, versionId, ...content };
@@ -992,46 +854,6 @@ async function personasOf(
 }
 
 /**
- * The graders of several versions at once, on exactly the terms the personas
- * are read on: keyed by version, each list in the order it was authored, one
- * read for a whole page.
- */
-async function gradersOfVersions(
-  on: Queryable,
-  versionIds: readonly string[],
-): Promise<Map<string, TestGrader[]>> {
-  const byVersion = new Map<string, TestGrader[]>();
-  if (versionIds.length === 0) return byVersion;
-
-  const rows = await on
-    .select({
-      versionId: testGrader.testVersionId,
-      id: grader.id,
-      name: grader.name,
-      deletedAt: grader.deletedAt,
-    })
-    .from(testGrader)
-    .innerJoin(grader, eq(testGrader.graderId, grader.id))
-    .where(inArray(testGrader.testVersionId, [...versionIds]))
-    .orderBy(asc(testGrader.testVersionId), asc(testGrader.position));
-
-  for (const { versionId, ...named } of rows) {
-    const already = byVersion.get(versionId);
-    if (already === undefined) byVersion.set(versionId, [named]);
-    else already.push(named);
-  }
-  return byVersion;
-}
-
-/** The one version's graders, in the order they were authored. */
-async function gradersOf(
-  on: Queryable,
-  versionId: string,
-): Promise<readonly TestGrader[]> {
-  return (await gradersOfVersions(on, [versionId])).get(versionId) ?? [];
-}
-
-/**
  * The identity row joined to its current version — the shape every read of a
  * whole test answers with, written once so two readers can never drift.
  */
@@ -1049,9 +871,8 @@ function selectWithCurrentVersion() {
 
 /**
  * One test with what it currently checks: its name and description, its
- * scenario, its expected behaviors, the personas who call
- * about it, and the graders it names — both in the order they were authored,
- * deleted ones included and marked.
+ * scenario, its expected behaviors, and the personas who call about it — in the
+ * order they were authored, deleted ones included and marked.
  */
 export async function getTest(
   auth: AuthContext,
@@ -1070,30 +891,28 @@ export async function getTest(
     ...rest,
     ...contentFromRow(content, row.versionId),
     personas: await personasOf(db(), row.versionId),
-    graders: await gradersOf(db(), row.versionId),
   };
 }
 
 /**
  * One door for every change, so no caller needs the version rules to pick a
  * function — the rules live here. Name and description write in place and
- * version nothing. The scenario, the expected behaviors, the personas and the
- * graders are what the test checks: any of them differing from the current
- * version inserts the next version, with its own join rows, and moves the
- * pointer — all in one transaction with the identity row locked, so two
- * concurrent edits number one after the other rather than fighting over the same
- * version number. The rows of the version being left behind are never touched,
- * because a run that pinned it must still say what it executed. Content
- * byte-identical to the current version is not an edit at all: nothing is
- * written, not even `updated_at`, and the current version comes back.
+ * version nothing. The scenario, the expected behaviors and the personas are
+ * what the test checks: any of them differing from the current version inserts
+ * the next version, with its own join rows, and moves the pointer — all in one
+ * transaction with the identity row locked, so two concurrent edits number one
+ * after the other rather than fighting over the same version number. The rows of
+ * the version being left behind are never touched, because a run that pinned it
+ * must still say what it executed. Content byte-identical to the current version
+ * is not an edit at all: nothing is written, not even `updated_at`, and the
+ * current version comes back.
  *
  * What an edit leaves out, it keeps. A field absent from the changes is read
  * off the current version and carried into the next one, which is what lets an
  * edit to the scenario alone stay an edit to the scenario alone. Carried
- * forward is not a way past validation, though: the personas and the graders a
- * version is about to name are checked whether the edit typed them or inherited
- * them, so no version can come to name one that is missing, deleted, or another
- * project's.
+ * forward is not a way past validation, though: the personas a version is about
+ * to name are checked whether the edit typed them or inherited them, so no
+ * version can come to name one that is missing, deleted, or another project's.
  *
  * **`expectedVersionId` is compared inside that same transaction, on the row
  * this edit has already locked**, and a mismatch refuses the whole edit with
@@ -1117,8 +936,6 @@ export async function editTest(
   const name = changes.name === undefined ? undefined : validName(changes.name);
   const named = changes.personaIds;
   if (named !== undefined) validatePersonaIds(named);
-  const namedGraders = changes.graderIds;
-  if (namedGraders !== undefined) validateGraderIds(namedGraders);
 
   return db().transaction(async (tx) => {
     const [locked] = await tx
@@ -1164,8 +981,6 @@ export async function editTest(
     const storedContent = contentFromRow(currentVersion.content, currentVersion.id);
     const storedPersonas = await personasOf(tx, currentVersion.id);
     const storedIds = storedPersonas.map((named) => named.id);
-    const storedGraders = await gradersOf(tx, currentVersion.id);
-    const storedGraderIds = storedGraders.map((named) => named.id);
 
     // Omitted means unchanged: what the edit did not mention is read off the
     // current version, and the whole is then held to what a create is held to.
@@ -1189,13 +1004,9 @@ export async function editTest(
       current.projectId,
       named ?? storedIds,
     );
-    const graderIds = namedGraders ?? storedGraderIds;
-    await validateNamedGraders(tx, auth, current.projectId, graderIds);
-
     const mintsVersion =
       !sameContent(storedContent, content) ||
-      !sameOrderedList(storedIds, personaIds) ||
-      !sameOrderedList(storedGraderIds, graderIds);
+      !sameOrderedList(storedIds, personaIds);
     const identityChanged =
       changes.name !== undefined || changes.description !== undefined;
 
@@ -1206,14 +1017,12 @@ export async function editTest(
         versionId: currentVersion.id,
         ...storedContent,
         personas: storedPersonas,
-        graders: storedGraders,
       };
     }
 
     let versionId = currentVersion.id;
     let version = currentVersion.version;
     let personas = storedPersonas;
-    let graders = storedGraders;
     if (mintsVersion) {
       versionId = newId("tstv");
       version = currentVersion.version + 1;
@@ -1225,11 +1034,9 @@ export async function editTest(
         createdBy: auth.userId,
       });
       await namePersonasOn(tx, versionId, personaIds);
-      await nameGradersOn(tx, versionId, graderIds);
       // Read back inside the transaction, for the reason create reads back
       // inside it: the answer is what this transaction wrote and checked.
       personas = await personasOf(tx, versionId);
-      graders = await gradersOf(tx, versionId);
     }
 
     const [updated] = await tx
@@ -1246,17 +1053,21 @@ export async function editTest(
       .returning(COLUMNS);
 
     if (updated === undefined) throw new Error("the test was not written");
-    return { ...updated, version, versionId, ...content, personas, graders };
+    return { ...updated, version, versionId, ...content, personas };
   });
 }
 
 /**
  * One frozen version, by its own `tstv_` id — the read a run uses to stay
- * interpretable after the test moves on, and the read grading resolves what to
- * judge from: the scenario and expected behaviors as they were, and the personas
- * and graders the version named, by identity and in the order they were
- * authored. Which version of each of them a simulation met is the run's to pin,
- * never this row's.
+ * interpretable after the test moves on, and the read a verdict row's assertion
+ * key is resolved back into words through: the scenario and expected behaviors
+ * as they were, and the personas the version named, by identity and in the order
+ * they were authored. Which version of each of them a simulation met is the
+ * run's to pin, never this row's.
+ *
+ * **Which graders judged is not here and never was a version's business again.**
+ * A running copy's scope decides where it applies, so what judged a conversation
+ * is answered from the copies rather than from the frozen content of a test.
  *
  * It also answers the two things about the test itself that whoever holds only a
  * version id cannot get anywhere else: what the test is called, and whether it
@@ -1304,7 +1115,6 @@ export async function getTestVersion(
     current: currentVersionId === row.id,
     ...contentFromRow(content, row.id),
     personas: await personasOf(db(), row.id),
-    graders: await gradersOf(db(), row.id),
   };
 }
 
@@ -1349,19 +1159,19 @@ export async function listTests(
     .orderBy(desc(test.id))
     .limit(limit + 1);
 
-  // A page's personas and graders come back in one read each, not one per row:
-  // a page of two hundred tests is three queries, the same as a page of one.
+  // A page's personas come back in one read, not one per row: a page of two
+  // hundred tests is two queries, the same as a page of one.
   const { items: wanted, nextCursor } = pageOf(rows, limit);
-  const versionIds = wanted.map((row) => row.versionId);
-  const personasByVersion = await personasOfVersions(db(), versionIds);
-  const gradersByVersion = await gradersOfVersions(db(), versionIds);
+  const personasByVersion = await personasOfVersions(
+    db(),
+    wanted.map((row) => row.versionId),
+  );
 
   return {
     items: wanted.map(({ content, ...rest }) => ({
       ...rest,
       ...contentFromRow(content, rest.versionId),
       personas: personasByVersion.get(rest.versionId) ?? [],
-      graders: gradersByVersion.get(rest.versionId) ?? [],
     })),
     nextCursor,
   };
@@ -1369,10 +1179,9 @@ export async function listTests(
 
 /**
  * A new test whose version 1 carries the source's current content: the same
- * scenario, the same expected behaviors, the same
- * personas and the same graders in the same order, under the same name — there
- * is no per-project name uniqueness, so the name copies verbatim exactly as the
- * persona factory copies it.
+ * scenario, the same expected behaviors and the same personas in the same
+ * order, under the same name — there is no per-project name uniqueness, so the
+ * name copies verbatim exactly as the persona factory copies it.
  *
  * A clone is a create with the retyping saved: fresh `tst_` and `tstv_` ids,
  * version numbering starting over at 1, and no link back — the source's history
@@ -1380,16 +1189,15 @@ export async function listTests(
  * the same seam as `getTest`, so a clone can only be taken of what the caller
  * could have fetched: same customer, same acting project, not deleted.
  *
- * The personas and the graders are handed on exactly as the source names them,
- * and `createTest` is the only thing that judges them — one rule about what a
- * version may name, in one place. So a source whose current version names a
- * deleted one of either is refused by that same validation, rather than quietly
- * cloned without it or quietly given the project's default; neither silence
- * would be a copy, and a clone that checked something the source does not is
- * worse than no clone. That refusal is out of reach in practice: both deletes
- * are refused while a live test's current version names the row, and a test that
- * cannot be fetched cannot be cloned, so no clonable source can name a deleted
- * persona or a deleted grader.
+ * The personas are handed on exactly as the source names them, and `createTest`
+ * is the only thing that judges them — one rule about what a version may name,
+ * in one place. So a source whose current version names a deleted persona is
+ * refused by that same validation, rather than quietly cloned without them or
+ * quietly given the project's default; neither silence would be a copy, and a
+ * clone that checked something the source does not is worse than no clone. That
+ * refusal is out of reach in practice: a persona's delete is refused while a
+ * live test's current version names them, and a test that cannot be fetched
+ * cannot be cloned.
  *
  * Authorization is layered on purpose, not by accident of delegation. The
  * leading check refuses a viewer before anything is read, and a credential
@@ -1418,7 +1226,6 @@ export async function cloneTest(
     scenario: source.scenario,
     expectedBehaviors: source.expectedBehaviors,
     personaIds: source.personas.map((named) => named.id),
-    graderIds: source.graders.map((named) => named.id),
     mockOverrides: source.mockOverrides,
   });
 }
@@ -1555,30 +1362,13 @@ export async function liveTestsNamingPersona(
 }
 
 /**
- * The live tests whose current version names this grader — the set that refuses
- * the grader's own delete, and the set that refusal names.
+ * **There is no companion asking which tests name a grader.** There was one, and
+ * it refused a grader's delete while a live test's current version pointed at
+ * it. A test names no graders now, so nothing here can stand in a delete's way:
+ * switching a running copy off is a decision about the project, made once,
+ * without hunting for the tests that would quietly stop checking something.
  *
- * The persona question, asked of the other junction and answered on identical
- * terms: current versions of live tests and nothing else, walked from the join
- * table where `grader_id` is indexed for exactly this, and with no tenancy
- * predicate because whether the delete is refused is a fact about the grader
- * rather than about who is asking. The grader's own delete has checked its
- * tenancy on that row before asking this, and a version may only ever name a
- * grader of its own project, so every row this can return is a test of that same
- * project.
- *
- * Exported to the module, not from the package: this answers a question the
- * grader factory has to ask before it deletes, and the test tables have one
- * owner, which is this file.
+ * The persona question above stands untouched, because a persona is still named
+ * by test content and losing one really would empty a test of somebody who calls
+ * about it.
  */
-export async function liveTestsNamingGrader(
-  on: Queryable,
-  graderId: string,
-): Promise<readonly TestNamingGrader[]> {
-  return on
-    .select({ id: test.id, name: test.name })
-    .from(testGrader)
-    .innerJoin(test, eq(test.currentVersionId, testGrader.testVersionId))
-    .where(and(eq(testGrader.graderId, graderId), notDeleted))
-    .orderBy(asc(test.id));
-}

@@ -38,12 +38,15 @@ export {
   foldVerdicts,
   foldVerdictsByGrader,
   speakingVerdicts,
+  verdictLanes,
   VERDICTS,
+  type Diagnostics,
   type FoldableVerdict,
   type FoldedOutcome,
   type GraderOutcome,
   type Verdict,
   type VerdictCounts,
+  type VerdictLanes,
   type VerdictSource,
 } from "./verdicts/fold.ts";
 /**

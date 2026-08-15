@@ -2,9 +2,11 @@ import {
   listTraces,
   MAXIMUM_LIST_LIMIT,
   NotPermittedError,
+  readAssertionWords,
   readTrace,
   readVerdicts,
   UnreadableTraceQueryError,
+  type AssertionWords,
   type TimeWindow,
   type TraceDetail,
   type TraceFacts,
@@ -363,6 +365,20 @@ export async function traceReadRoutes(
       () => undefined,
     );
 
+    // The words behind the assertion keys, from the version this conversation
+    // was pinned to. Only a simulation has one — a production trace is in
+    // nobody's scenario — and this is the same resolution a run's results make,
+    // through the same call, so the one judgment card cannot read two ways
+    // depending on which page it is drawn on.
+    const words: AssertionWords | undefined =
+      detail.source === "simulation" && (judged?.verdicts.length ?? 0) > 0
+        ? await readAssertionWords(
+            auth,
+            filedUnder,
+            (judged?.verdicts ?? []).map((its) => its.graderId),
+          ).catch(() => undefined)
+        : undefined;
+
     return reply.send({
       ...describedDetail(detail),
       // The same derivation again, and this time as an answer rather than as a
@@ -386,15 +402,21 @@ export async function traceReadRoutes(
         detail.source === "simulation"
           ? simulationIdOfTrace(traceId) ?? null
           : null,
+      // `assertion` is the key the store keeps; `assertion_text` is what a
+      // person reads, fetched from the pinned version at display time and null
+      // wherever nothing can place the key.
       verdicts: (judged?.verdicts ?? []).map((its) => ({
         grader_id: its.graderId,
         assertion: its.assertion,
+        assertion_text: words?.of(its.graderId, its.assertion) ?? null,
         verdict: its.verdict,
         score: its.score,
         rationale: its.rationale,
         cited_turns: [...its.citedSpanIds],
         judged_at: its.judgedAt,
       })),
+      // The required lane, as everywhere: a diagnostic copy reports and never
+      // decides.
       outcome:
         judged === undefined
           ? null

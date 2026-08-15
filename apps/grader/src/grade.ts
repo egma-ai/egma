@@ -43,12 +43,13 @@ import { applicableGraders, applicableProductionGraders } from "./resolve.ts";
  * **The source decides the first two steps and nothing after them.** Both are
  * read from their spans; what differs is what egma knows besides. A simulation
  * names its own row, which says whose conversation it was and how the simulator
- * said it ended, and it is judged by the project's graders plus its test's; a
- * production trace has no row and is judged by the project's production-scoped
- * graders, sampled. From the moment a `Conversation` and a grader list exist
- * there is one path — one executor seam, one verdict row builder, one write —
- * because a second judging path would be a second set of answers that could one
- * day disagree about the same agent.
+ * said it ended, and it is judged by the project's copies scoped to simulations;
+ * a production trace has no row and is judged by the project's production-scoped
+ * copies, sampled. Neither resolution reads a test: which graders apply is the
+ * copies' own scope and nothing else. From the moment a `Conversation` and a
+ * grader list exist there is one path — one executor seam, one verdict row
+ * builder, one write — because a second judging path would be a second set of
+ * answers that could one day disagree about the same agent.
  *
  * **The verdicts are written in one call.** A conversation's judgments land
  * together or not at all as far as any reader is concerned, and a job that fails
@@ -273,9 +274,7 @@ async function theSimulation(claim: GradingClaim): Promise<Resolved> {
       simulation,
       await theSimulationsTrace(claim.auth, simulation),
     ),
-    graders: await judgingGraders(claim, () =>
-      applicableGraders(claim.auth, simulation),
-    ),
+    graders: await judgingGraders(claim, () => applicableGraders(claim.auth)),
     simulationId: simulation.id,
   };
 }
