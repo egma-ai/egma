@@ -7,16 +7,19 @@ import {
   MEASURE_CATALOG_VERSION,
   type MeasureAggregation,
 } from "@egma/simulation-contract";
-import { and, desc, eq, isNull, lt, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, lt, sql, type SQL } from "drizzle-orm";
 
 import { db } from "../client.ts";
+import { MODALITIES, type Modality } from "../schema/agents.ts";
 import {
   grader,
   graderVersion,
+  GRADER_READS,
   GRADER_SCOPES,
   GRADER_TYPES,
   JUDGE_PROVIDERS,
   PRIORITIES,
+  type GraderRead,
   type GraderScope,
   type GraderType,
   type JudgeProvider,
@@ -25,7 +28,11 @@ import {
 import type { AuthContext } from "./context.ts";
 import {
   GraderNamedByTestsError,
+  IdentityConflictError,
   ProjectOutsideOrganizationError,
+  UnprocessableInputError,
+  VersionConflictError,
+  type TestNamingGrader,
 } from "./errors.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
@@ -109,6 +116,18 @@ export type JudgeModel = {
   readonly model: string;
 };
 
+/**
+ * The same, as a caller writes one down: the provider is still only ever a word
+ * egma knows, and this door is where that is decided rather than at the
+ * caller's keyboard. A route reading a body has a string, and asking it to
+ * narrow one before it can write would put a second copy of the provider list
+ * outside this module.
+ */
+export type JudgeModelInput = {
+  readonly provider: string;
+  readonly model: string;
+};
+
 /** The criteria a judge reads, in the words the team wrote them in. */
 export type LlmRubricConfig = {
   readonly rubric: string;
@@ -160,6 +179,108 @@ export type GraderConfig =
   | MetricThresholdConfig
   | ToolCallsConfig
   | PhraseMatchConfig;
+
+export type { GraderRead };
+
+/**
+ * What each grader type reads and can score, before its author says anything.
+ *
+ * **One registry, on the server, and the browser never invents an entry.** A
+ * form that held its own copy of these would be a second vocabulary that could
+ * disagree with the engine about what a `metric_threshold` looks at — and the
+ * disagreement would show up as a grader that reads the transcript and judges a
+ * measure, which is a check that can never fire.
+ *
+ * **The three deterministic types have their reads fixed here.** A threshold
+ * reads measures because that is what a threshold *is*; a tool-call check reads
+ * tool calls; a phrase check reads the transcript. There is no author decision
+ * in any of them, and offering one would only let somebody build a grader that
+ * cannot work. `llm_rubric` is the exception and the reason the field exists at
+ * all: only the person who wrote the criteria knows whether they are about what
+ * was said, what happened, which tools fired, or what was measured.
+ *
+ * **Every type may narrow its modalities, and every type starts at both.**
+ * Narrowing is the honest way to say "this check is meaningless on chat", and
+ * the consequence is `skipped` rather than `failed`.
+ */
+export type GraderTypeDefinition = {
+  readonly type: GraderType;
+  /** The reads a new grader of this type gets when its author names none. */
+  readonly reads: readonly GraderRead[];
+  /**
+   * Whether the registry fixes the set. True for the deterministic three: a
+   * write naming anything else is refused rather than silently corrected, so an
+   * author is never told their choice was taken and then given another.
+   */
+  readonly readsAreFixed: boolean;
+  /** The modalities a new grader of this type gets when it narrows none. */
+  readonly modalities: readonly Modality[];
+  /** Whether this type asks a model, and therefore needs the project's judge. */
+  readonly judged: boolean;
+};
+
+const BOTH_MODALITIES: readonly Modality[] = MODALITIES;
+
+export const GRADER_TYPE_REGISTRY: {
+  readonly [K in GraderType]: GraderTypeDefinition;
+} = {
+  llm_rubric: {
+    type: "llm_rubric",
+    reads: ["transcript"],
+    readsAreFixed: false,
+    modalities: BOTH_MODALITIES,
+    judged: true,
+  },
+  metric_threshold: {
+    type: "metric_threshold",
+    reads: ["measures"],
+    readsAreFixed: true,
+    modalities: BOTH_MODALITIES,
+    judged: false,
+  },
+  tool_calls: {
+    type: "tool_calls",
+    reads: ["tool_calls"],
+    readsAreFixed: true,
+    modalities: BOTH_MODALITIES,
+    judged: false,
+  },
+  phrase_match: {
+    type: "phrase_match",
+    reads: ["transcript"],
+    readsAreFixed: true,
+    modalities: BOTH_MODALITIES,
+    judged: false,
+  },
+};
+
+/**
+ * The built-in that judges a simulation against its test's own expected
+ * behaviors, as anything asking "what judgments can egma make" is told about
+ * it.
+ *
+ * **Not a row, and this is not a row either.** It is a description of something
+ * implicit: applying it is part of what running a test means, so it is never
+ * attached, never detached, never archived and never edited (ADR-0004). A shelf
+ * that listed only authored graders would leave somebody believing a project
+ * with none of them makes no judgments at all, which is the opposite of true —
+ * and a shelf that made it look like a row would invite somebody to try to
+ * remove it.
+ *
+ * The key is the reserved one a frozen grading plan names it by, so the word a
+ * plan stores and the word a shelf shows are one word.
+ */
+export const EXPECTED_BEHAVIORS_GRADER = {
+  key: "expected_behaviors_v1",
+  name: "Expected behaviors",
+  description:
+    "Judges every simulation against the expected behaviors its own test " +
+    "wrote down, one judgment per behavior. It applies to every test in every " +
+    "project, always.",
+  reads: ["transcript", "outcome", "tool_calls", "measures"] as const,
+  modalities: BOTH_MODALITIES,
+  judged: true,
+} as const;
 
 /** What each type's config is, so the pair can never come apart. */
 type ConfigOf = {
@@ -230,7 +351,14 @@ type LiveSettings = {
 };
 
 export type NewGrader = LiveSettings & {
-  readonly judgeModel?: JudgeModel | undefined;
+  readonly judgeModel?: JudgeModelInput | undefined;
+  /**
+   * What this grader may look at. Omitted takes the type's registry default;
+   * a set that differs from a fixed one is refused rather than corrected.
+   */
+  readonly reads?: readonly string[] | undefined;
+  /** Which modalities it can score. Omitted is both. */
+  readonly modalities?: readonly string[] | undefined;
 } & NewGraderJudgment;
 
 export type Grader = {
@@ -245,6 +373,14 @@ export type Grader = {
   /** The current version's own `grv_` id — what a verdict row names. */
   readonly versionId: string;
   readonly judgeModel: JudgeModel | null;
+  /** This version's evidence boundary; versioned content, never live. */
+  readonly reads: readonly GraderRead[];
+  /** This version's scoreable modalities; versioned content, never live. */
+  readonly modalities: readonly Modality[];
+  /** The opaque revision of the live half. Hand back as `expectedRevision`. */
+  readonly revision: string;
+  /** When it was archived, or null while it is active. */
+  readonly archivedAt: Date | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 } & GraderJudgment;
@@ -267,7 +403,28 @@ export type GraderChanges = {
   readonly scope?: GraderScope;
   readonly productionSampleRate?: number;
   readonly config?: GraderConfigInput;
-  readonly judgeModel?: JudgeModel | null;
+  readonly judgeModel?: JudgeModelInput | null | undefined;
+  readonly reads?: readonly string[] | undefined;
+  readonly modalities?: readonly string[] | undefined;
+};
+
+/**
+ * What an edit says it was written against.
+ *
+ * **Two independent answers, and never one.** The live half and the versioned
+ * half of a grader move on their own — promoting a P1 to P0 mints no version,
+ * and tightening a rubric changes no live setting — so a rename must not make a
+ * rubric edit somebody is still typing stale, and vice versa. A single
+ * "expected state" would tie them together and refuse edits that never
+ * conflicted with anything.
+ *
+ * Either may be left out, and leaving one out is a deliberate write that does
+ * not care. The browser always sends both, because a form somebody has had open
+ * always has both in front of it.
+ */
+export type ExpectedGraderState = {
+  readonly expectedRevision?: string | undefined;
+  readonly expectedVersionId?: string | undefined;
 };
 
 /** One version, frozen: the grader exactly as some verdict was decided by it. */
@@ -276,6 +433,8 @@ export type GraderVersion = {
   readonly graderId: string;
   readonly version: number;
   readonly judgeModel: JudgeModel | null;
+  readonly reads: readonly GraderRead[];
+  readonly modalities: readonly Modality[];
   readonly createdAt: Date;
 } & GraderJudgment;
 
@@ -291,6 +450,8 @@ const COLUMNS = {
   priority: grader.priority,
   scope: grader.scope,
   productionSampleRate: grader.productionSampleRate,
+  revision: grader.revision,
+  archivedAt: grader.deletedAt,
   createdAt: grader.createdAt,
   updatedAt: grader.updatedAt,
 } as const;
@@ -350,7 +511,72 @@ function validProductionSampleRate(rate: number): number {
   return rate;
 }
 
-function validJudgeModel(judgeModel: JudgeModel): JudgeModel {
+/**
+ * A nonempty set drawn from a settled list, in that list's own order.
+ *
+ * The order is the list's rather than the caller's, and duplicates collapse, so
+ * that two writes naming the same set in two orders are one set and not two
+ * versions. Sorting a versioned field is the difference between a no-op save
+ * and a history full of edits nobody made.
+ */
+function validSet<Value extends string>(
+  allowed: readonly Value[],
+  given: readonly string[],
+  what: string,
+): readonly Value[] {
+  if (given.length === 0) {
+    throw new UnprocessableInputError(
+      `a grader needs at least one ${what}; one that names none could never fire, so the empty set is refused rather than stored`,
+    );
+  }
+  for (const value of given) {
+    if (!(allowed as readonly string[]).includes(value)) {
+      throw new UnprocessableInputError(
+        `"${value}" is not a ${what} egma knows; expected one of ${allowed.join(", ")}`,
+      );
+    }
+  }
+  return allowed.filter((value) => given.includes(value));
+}
+
+/**
+ * What this grader reads, settled against its type's registry entry.
+ *
+ * A deterministic type's set is the registry's, and a write naming a different
+ * one is **refused rather than corrected**: silently replacing somebody's choice
+ * would leave them believing a `metric_threshold` reads the transcript because
+ * they asked it to. Naming exactly the fixed set is accepted, because that is
+ * what a form round-tripping what it read sends back.
+ */
+function validReads(
+  type: GraderType,
+  given: readonly string[] | undefined,
+): readonly GraderRead[] {
+  const definition = GRADER_TYPE_REGISTRY[type];
+  if (given === undefined) return definition.reads;
+
+  const asked = validSet(GRADER_READS, given, "read");
+  if (!definition.readsAreFixed) return asked;
+
+  const fixed = definition.reads;
+  const same =
+    asked.length === fixed.length &&
+    asked.every((read, index) => read === fixed[index]);
+  if (!same) {
+    throw new UnprocessableInputError(
+      `a ${type} grader reads ${fixed.join(", ")}, and that is fixed by the type rather than chosen: it is what this kind of judgment is made of. Author an llm_rubric grader to choose what a check reads.`,
+    );
+  }
+  return fixed;
+}
+
+function validModalities(
+  given: readonly string[] | undefined,
+): readonly Modality[] {
+  return given === undefined ? BOTH_MODALITIES : validSet(MODALITIES, given, "modality");
+}
+
+function validJudgeModel(judgeModel: JudgeModelInput): JudgeModel {
   const provider = knownWord(
     JUDGE_PROVIDERS,
     judgeModel.provider,
@@ -693,6 +919,28 @@ function judgmentFromRow(
   return judgmentFromRowOfType[known](config, malformed);
 }
 
+/**
+ * A stored set, read back in the settled list's order and checked against it.
+ *
+ * The column has the same check constraint, so this is the second line rather
+ * than the first — but it is the line that turns `text[]` into the vocabulary
+ * the engine dispatches on, and a row somebody hand-edited must fail here
+ * naming itself rather than reach an executor as a modality nothing handles.
+ */
+function setFromRow<Value extends string>(
+  allowed: readonly Value[],
+  value: unknown,
+  malformed: () => Error,
+): readonly Value[] {
+  if (!Array.isArray(value) || value.length === 0) throw malformed();
+  for (const entry of value) {
+    if (typeof entry !== "string" || !(allowed as readonly string[]).includes(entry)) {
+      throw malformed();
+    }
+  }
+  return allowed.filter((entry) => (value as string[]).includes(entry));
+}
+
 function judgeModelFromRow(
   value: unknown,
   versionId: string,
@@ -810,6 +1058,16 @@ function sameJudgeModel(a: JudgeModel | null, b: JudgeModel | null): boolean {
   return a.provider === b.provider && a.model === b.model;
 }
 
+/**
+ * Two settled sets, compared. Both sides are already in the settled list's
+ * order — every door into this module puts them there — so this is a walk
+ * rather than a sort, and two writes naming one set in two orders are one set
+ * and mint no version.
+ */
+function sameSet(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
 /** Acting in a project narrows to it; acting in none reaches the customer. */
 function inActingProject(auth: AuthContext): SQL | undefined {
   return auth.projectId === undefined
@@ -817,12 +1075,29 @@ function inActingProject(auth: AuthContext): SQL | undefined {
     : eq(grader.projectId, auth.projectId);
 }
 
-/** The named grader, alive, within the caller's tenancy and scope. */
-function theGrader(auth: AuthContext, id: string): SQL {
+/**
+ * The named grader, within the caller's tenancy and scope — **alive by
+ * default**, because every write and nearly every read is about a grader that
+ * still applies.
+ *
+ * `includeArchived` is asked for by name at the two doors that legitimately
+ * reach an archived one: reading a detail page for something somebody archived,
+ * and restoring it. Nothing else may, so an archived grader cannot be edited
+ * back into a run's plan by an ordinary write.
+ */
+function theGrader(
+  auth: AuthContext,
+  id: string,
+  options: { readonly includeArchived?: boolean } = {},
+): SQL {
   return within(
     auth,
     grader,
-    and(eq(grader.id, id), notDeleted, inActingProject(auth)),
+    and(
+      eq(grader.id, id),
+      options.includeArchived === true ? undefined : notDeleted,
+      inActingProject(auth),
+    ),
   );
 }
 
@@ -836,14 +1111,20 @@ function answer(row: {
   readonly priority: string;
   readonly scope: string;
   readonly productionSampleRate: number;
+  readonly revision: string;
+  readonly archivedAt: Date | null;
   readonly version: number;
   readonly versionId: string;
   readonly config: unknown;
   readonly judgeModel: unknown;
+  readonly reads: unknown;
+  readonly modalities: unknown;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }): Grader {
-  const { type, config, judgeModel, priority, scope, ...rest } = row;
+  const { type, config, judgeModel, reads, modalities, priority, scope, ...rest } =
+    row;
+  const malformed = malformedAt(row.versionId);
   return {
     ...rest,
     // The identity row's own enumerated columns are pinned by check
@@ -852,6 +1133,8 @@ function answer(row: {
     scope: scope as GraderScope,
     ...judgmentFromRow(type, config, row.versionId),
     judgeModel: judgeModelFromRow(judgeModel, row.versionId),
+    reads: setFromRow(GRADER_READS, reads, malformed),
+    modalities: setFromRow(MODALITIES, modalities, malformed),
   };
 }
 
@@ -878,6 +1161,8 @@ export async function createGrader(
   // worth writing costs the project-membership read below.
   const name = validName(input.name);
   const judgment = validJudgment(input.type, input.config);
+  const reads = validReads(judgment.type, input.reads);
+  const modalities = validModalities(input.modalities);
   const judgeModel =
     input.judgeModel === undefined ? null : validJudgeModel(input.judgeModel);
   const priority =
@@ -911,6 +1196,7 @@ export async function createGrader(
         scope,
         productionSampleRate,
         currentVersionId: versionId,
+        revision: newId("rev"),
         createdBy: auth.userId,
       })
       .returning(COLUMNS);
@@ -923,6 +1209,8 @@ export async function createGrader(
       version: 1,
       config: judgment.config,
       judgeModel,
+      reads: [...reads],
+      modalities: [...modalities],
       createdBy: auth.userId,
     });
 
@@ -937,7 +1225,49 @@ export async function createGrader(
     versionId,
     ...judgment,
     judgeModel,
+    reads,
+    modalities,
   };
+}
+
+/**
+ * The same grader again under a new identity: current live settings, current
+ * versioned content, and **no history at all**.
+ *
+ * **A clone is a new grader that happens to start where another one is now.**
+ * Copying the lineage would make two identities share a past, and the first
+ * question anybody asks of a version history — *what did this check mean when
+ * that run was judged* — would have two answers. So the copy starts at version
+ * 1, and nothing anywhere records that it came from somewhere.
+ *
+ * The type comes with it and cannot be chosen, because a clone that changed
+ * type would be a new grader wearing an inherited config. The name is the
+ * caller's, because two graders in a project may share one and telling them
+ * apart is the whole reason somebody cloned.
+ */
+export async function cloneGrader(
+  auth: AuthContext,
+  id: string,
+  changes: { readonly name?: string } = {},
+): Promise<Grader | undefined> {
+  authorize(auth, "author_definitions", here(auth));
+
+  const source = await getGrader(auth, id);
+  if (source === undefined) return undefined;
+
+  return createGrader(auth, {
+    name: validName(changes.name ?? `${source.name} copy`),
+    ...(source.description === null ? {} : { description: source.description }),
+    priority: source.priority,
+    scope: source.scope,
+    productionSampleRate: source.productionSampleRate,
+    ...(source.judgeModel === null ? {} : { judgeModel: source.judgeModel }),
+    reads: source.reads,
+    modalities: source.modalities,
+    // The pair travels together, exactly as every other read of a grader hands
+    // it over, so a clone can never end up holding another type's config.
+    ...({ type: source.type, config: source.config } as NewGraderJudgment),
+  });
 }
 
 /**
@@ -952,6 +1282,8 @@ function selectWithCurrentVersion() {
       versionId: graderVersion.id,
       config: graderVersion.config,
       judgeModel: graderVersion.judgeModel,
+      reads: graderVersion.reads,
+      modalities: graderVersion.modalities,
     })
     .from(grader)
     .innerJoin(graderVersion, eq(grader.currentVersionId, graderVersion.id));
@@ -961,19 +1293,77 @@ function selectWithCurrentVersion() {
  * One grader with what it currently judges by: its type and config, the judge it
  * insists on if any, and the live settings saying where it applies and how
  * loudly.
+ *
+ * An archived grader is reachable only when the caller asks for one by name.
+ * Its detail page and its history stay readable after Archive — a verdict that
+ * named it must stay interpretable — while everything that resolves graders for
+ * work to be done sees only the active ones, by default and without deciding.
  */
 export async function getGrader(
   auth: AuthContext,
   id: string,
+  options: { readonly includeArchived?: boolean } = {},
 ): Promise<Grader | undefined> {
   authorize(auth, "read", here(auth));
 
   const [row] = await selectWithCurrentVersion()
-    .where(theGrader(auth, id))
+    .where(theGrader(auth, id, options))
     .limit(1);
 
   if (row === undefined) return undefined;
   return answer(row);
+}
+
+/**
+ * Every version of one grader, newest first — what a detail page's history is
+ * and what an older-version read comes from.
+ *
+ * Deliberately reachable for an archived grader: a run pinned one of these and
+ * a verdict names one, and a record that stopped being readable the moment
+ * somebody tidied up would make removal destroy evidence.
+ */
+export async function listGraderVersions(
+  auth: AuthContext,
+  id: string,
+): Promise<readonly GraderVersion[] | undefined> {
+  authorize(auth, "read", here(auth));
+
+  const [identity] = await db()
+    .select({ id: grader.id, type: grader.type })
+    .from(grader)
+    .where(theGrader(auth, id, { includeArchived: true }))
+    .limit(1);
+
+  if (identity === undefined) return undefined;
+
+  const rows = await db()
+    .select({
+      id: graderVersion.id,
+      graderId: graderVersion.graderId,
+      version: graderVersion.version,
+      config: graderVersion.config,
+      judgeModel: graderVersion.judgeModel,
+      reads: graderVersion.reads,
+      modalities: graderVersion.modalities,
+      createdAt: graderVersion.createdAt,
+    })
+    .from(graderVersion)
+    // A bare `eq` on an id that just came off the tenancy-checked row above, so
+    // it reaches no further than that check already did.
+    .where(eq(graderVersion.graderId, identity.id))
+    .orderBy(desc(graderVersion.version));
+
+  return rows.map((row) => {
+    const malformed = malformedAt(row.id);
+    const { config, judgeModel, reads, modalities, ...rest } = row;
+    return {
+      ...rest,
+      ...judgmentFromRow(identity.type, config, row.id),
+      judgeModel: judgeModelFromRow(judgeModel, row.id),
+      reads: setFromRow(GRADER_READS, reads, malformed),
+      modalities: setFromRow(MODALITIES, modalities, malformed),
+    };
+  });
 }
 
 /**
@@ -1000,6 +1390,7 @@ export async function editGrader(
   auth: AuthContext,
   id: string,
   changes: GraderChanges,
+  expected: ExpectedGraderState = {},
 ): Promise<Grader | undefined> {
   authorize(auth, "author_definitions", here(auth));
 
@@ -1032,6 +1423,30 @@ export async function editGrader(
     if (locked === undefined) return undefined;
     const { currentVersionId, ...current } = locked;
 
+    // **Refused before anything is read further, and long before anything is
+    // written.** A stale edit must change nothing at all, including the row's
+    // modified time — a write that was refused and still moved something is a
+    // write that half happened.
+    if (
+      expected.expectedRevision !== undefined &&
+      expected.expectedRevision !== current.revision
+    ) {
+      throw new IdentityConflictError("Grader", current.id, {
+        expected: expected.expectedRevision,
+        current: current.revision,
+      });
+    }
+    if (
+      expected.expectedVersionId !== undefined &&
+      expected.expectedVersionId !== currentVersionId
+    ) {
+      throw new VersionConflictError(
+        "grader",
+        expected.expectedVersionId,
+        currentVersionId,
+      );
+    }
+
     // This select and the update below are the two `where`s in this file that
     // start from a bare `eq` rather than `within`: each names an id that just
     // came off the tenancy-checked row locked above, in this same transaction,
@@ -1042,6 +1457,8 @@ export async function editGrader(
         version: graderVersion.version,
         config: graderVersion.config,
         judgeModel: graderVersion.judgeModel,
+        reads: graderVersion.reads,
+        modalities: graderVersion.modalities,
       })
       .from(graderVersion)
       .where(eq(graderVersion.id, currentVersionId))
@@ -1059,6 +1476,24 @@ export async function editGrader(
       currentVersion.judgeModel,
       currentVersion.id,
     );
+    const malformed = malformedAt(currentVersion.id);
+    const storedReads = setFromRow(
+      GRADER_READS,
+      currentVersion.reads,
+      malformed,
+    );
+    const storedModalities = setFromRow(
+      MODALITIES,
+      currentVersion.modalities,
+      malformed,
+    );
+    const type = knownWord(GRADER_TYPES, current.type, "grader type");
+    const nextReads =
+      changes.reads === undefined ? storedReads : validReads(type, changes.reads);
+    const nextModalities =
+      changes.modalities === undefined
+        ? storedModalities
+        : validModalities(changes.modalities);
 
     // Omitted means unchanged, and the type is the row's rather than the
     // caller's: an edit says what the grader judges by, never what kind of
@@ -1072,7 +1507,9 @@ export async function editGrader(
 
     const mintsVersion =
       !sameJudgment(stored, judgment) ||
-      !sameJudgeModel(storedJudgeModel, nextJudgeModel);
+      !sameJudgeModel(storedJudgeModel, nextJudgeModel) ||
+      !sameSet(storedReads, nextReads) ||
+      !sameSet(storedModalities, nextModalities);
     const settingsChanged =
       changes.name !== undefined ||
       changes.description !== undefined ||
@@ -1094,6 +1531,8 @@ export async function editGrader(
         versionId: currentVersion.id,
         ...stored,
         judgeModel: storedJudgeModel,
+        reads: storedReads,
+        modalities: storedModalities,
       };
     }
 
@@ -1108,6 +1547,8 @@ export async function editGrader(
         version,
         config: judgment.config,
         judgeModel: nextJudgeModel,
+        reads: [...nextReads],
+        modalities: [...nextModalities],
         createdBy: auth.userId,
       });
     }
@@ -1123,6 +1564,10 @@ export async function editGrader(
         ...(scope === undefined ? {} : { scope }),
         ...(productionSampleRate === undefined ? {} : { productionSampleRate }),
         ...(mintsVersion ? { currentVersionId: versionId } : {}),
+        // A fresh revision on every write that changed anything, including one
+        // that only minted a version: what a caller holds after reading must
+        // stop being current the moment anything about the row does.
+        revision: newId("rev"),
         updatedAt: new Date(),
       })
       .where(eq(grader.id, current.id))
@@ -1135,6 +1580,8 @@ export async function editGrader(
       versionId,
       config: judgment.config,
       judgeModel: nextJudgeModel,
+      reads: [...nextReads],
+      modalities: [...nextModalities],
     });
   });
 }
@@ -1161,6 +1608,8 @@ export async function getGraderVersion(
       type: grader.type,
       config: graderVersion.config,
       judgeModel: graderVersion.judgeModel,
+      reads: graderVersion.reads,
+      modalities: graderVersion.modalities,
       createdAt: graderVersion.createdAt,
     })
     .from(graderVersion)
@@ -1176,11 +1625,14 @@ export async function getGraderVersion(
 
   if (row === undefined) return undefined;
 
-  const { type, config, judgeModel, ...rest } = row;
+  const malformed = malformedAt(row.id);
+  const { type, config, judgeModel, reads, modalities, ...rest } = row;
   return {
     ...rest,
     ...judgmentFromRow(type, config, row.id),
     judgeModel: judgeModelFromRow(judgeModel, row.id),
+    reads: setFromRow(GRADER_READS, reads, malformed),
+    modalities: setFromRow(MODALITIES, modalities, malformed),
   };
 }
 
@@ -1198,9 +1650,22 @@ export type GraderPage = {
   readonly nextCursor: string | undefined;
 };
 
+/**
+ * Which graders a list is about.
+ *
+ * **Active by default, and archived only when somebody asks**, because every
+ * caller that resolves graders for work to be done wants the active ones and
+ * none of them should have to remember to say so. The archived filter is a
+ * product surface — a page somebody opened to find what they removed — rather
+ * than a widening of what judges.
+ */
+export type GraderListing = PageRequest & {
+  readonly archived?: boolean | undefined;
+};
+
 export async function listGraders(
   auth: AuthContext,
-  page?: PageRequest,
+  page?: GraderListing,
 ): Promise<GraderPage> {
   authorize(auth, "read", here(auth));
 
@@ -1211,13 +1676,15 @@ export async function listGraders(
   });
   const olderThanCursor =
     cursor === undefined ? undefined : lt(grader.id, cursor);
+  const archiveState =
+    page?.archived === true ? isNotNull(grader.deletedAt) : notDeleted;
 
   const rows = await selectWithCurrentVersion()
     .where(
       within(
         auth,
         grader,
-        and(notDeleted, inActingProject(auth), olderThanCursor),
+        and(archiveState, inActingProject(auth), olderThanCursor),
       ),
     )
     .orderBy(desc(grader.id))
@@ -1314,6 +1781,7 @@ export type DeletedGrader = {
 export async function deleteGrader(
   auth: AuthContext,
   id: string,
+  expected: { readonly expectedRevision?: string | undefined } = {},
 ): Promise<DeletedGrader | undefined> {
   authorize(auth, "author_definitions", here(auth));
 
@@ -1331,13 +1799,23 @@ export async function deleteGrader(
     // not promise. The other half is the shared lock a test being written takes
     // on this same row, which `validateNamedGraders` in `tests.ts` explains.
     const [locked] = await tx
-      .select({ id: grader.id })
+      .select({ id: grader.id, revision: grader.revision })
       .from(grader)
       .where(theGrader(auth, id))
       .limit(1)
       .for("update");
 
     if (locked === undefined) return undefined;
+
+    if (
+      expected.expectedRevision !== undefined &&
+      expected.expectedRevision !== locked.revision
+    ) {
+      throw new IdentityConflictError("Grader", locked.id, {
+        expected: expected.expectedRevision,
+        current: locked.revision,
+      });
+    }
 
     const blocking = await liveTestsNamingGrader(tx, locked.id);
     if (blocking.length > 0) {
@@ -1349,15 +1827,111 @@ export async function deleteGrader(
     // already did — the move `editGrader` makes, for the same reason.
     const [row] = await tx
       .update(grader)
-      .set({ deletedAt, updatedAt: deletedAt })
+      .set({ deletedAt, revision: newId("rev"), updatedAt: deletedAt })
       .where(eq(grader.id, locked.id))
       .returning({
         id: grader.id,
         projectId: grader.projectId,
         name: grader.name,
+        revision: grader.revision,
       });
 
     if (row === undefined) throw new Error("the grader was not written");
     return { ...row, deletedAt };
   });
+}
+
+/**
+ * An archived grader put back, and judging again from now on.
+ *
+ * **Nothing blocks it, and that asymmetry with Archive is deliberate.** Archive
+ * is refused while a live test names the grader directly, because letting it
+ * through would leave that test quietly checking one thing fewer than it says
+ * it checks. Restore cannot create that problem: putting a grader back adds a
+ * check rather than removes one, and a project that has moved on simply gains a
+ * judgment it once wrote down and asked for.
+ *
+ * **Forward only, like every live setting.** A restored grader judges the next
+ * run and says nothing about the ones that happened while it was archived: runs
+ * already holding a frozen plan keep it, verdicts already written stay written,
+ * and nothing is re-judged. Archive and Restore are a decision about what
+ * applies from now on, never a rewrite of what a past run meant.
+ */
+export async function restoreGrader(
+  auth: AuthContext,
+  id: string,
+  expected: { readonly expectedRevision?: string | undefined } = {},
+): Promise<Grader | undefined> {
+  authorize(auth, "author_definitions", here(auth));
+
+  if (auth.projectId === undefined) {
+    throw new Error(
+      "restoring a grader happens inside its project, and this credential is for the whole organization and acting in none",
+    );
+  }
+
+  const restored = await db().transaction(async (tx) => {
+    const [locked] = await tx
+      .select({
+        id: grader.id,
+        revision: grader.revision,
+        deletedAt: grader.deletedAt,
+      })
+      .from(grader)
+      .where(theGrader(auth, id, { includeArchived: true }))
+      .limit(1)
+      .for("update");
+
+    if (locked === undefined) return undefined;
+
+    if (
+      expected.expectedRevision !== undefined &&
+      expected.expectedRevision !== locked.revision
+    ) {
+      throw new IdentityConflictError("Grader", locked.id, {
+        expected: expected.expectedRevision,
+        current: locked.revision,
+      });
+    }
+
+    // Already active: nothing to do, and nothing written. A restore that minted
+    // a revision anyway would make somebody else's open form stale for a change
+    // that never happened.
+    if (locked.deletedAt === null) return locked.id;
+
+    await tx
+      .update(grader)
+      .set({ deletedAt: null, revision: newId("rev"), updatedAt: new Date() })
+      .where(eq(grader.id, locked.id));
+
+    return locked.id;
+  });
+
+  return restored === undefined ? undefined : getGrader(auth, restored);
+}
+
+/**
+ * The active tests whose **current version names this grader directly**, and
+ * therefore the tests standing in the way of archiving it.
+ *
+ * Read on its own rather than only inside Archive because a detail page has to
+ * be able to say what would block before somebody presses the button — and
+ * because the answer is worth knowing on its own: it is the list of scenarios
+ * that asked for this check by name, as distinct from the whole project, which
+ * gets it by default and is not a usage that blocks anything.
+ */
+export async function testsNamingGrader(
+  auth: AuthContext,
+  id: string,
+): Promise<readonly TestNamingGrader[] | undefined> {
+  authorize(auth, "read", here(auth));
+
+  const [identity] = await db()
+    .select({ id: grader.id })
+    .from(grader)
+    .where(theGrader(auth, id, { includeArchived: true }))
+    .limit(1);
+
+  if (identity === undefined) return undefined;
+  return liveTestsNamingGrader(db(), identity.id);
 }

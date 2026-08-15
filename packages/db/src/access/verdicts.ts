@@ -83,8 +83,24 @@ export type NewVerdict = {
   readonly verdict: Verdict;
   /** Between 0 and 1. The store refuses anything else. */
   readonly score: number;
-  /** One line saying why. */
+  /** One line saying why, in words a person reads. */
   readonly rationale: string;
+  /**
+   * Why this verdict is what it is, as a **stable word a reader may branch
+   * on** — `modality_unsupported` on a grader that cannot score this
+   * conversation, and empty when there is nothing to say beyond the rationale.
+   *
+   * It is separate from the rationale on purpose. The rationale is prose,
+   * written to be read and free to be reworded whenever it reads badly; a page
+   * that had to recognise a case would have to match on that wording, and the
+   * first person to improve a sentence would break the page. So the machine's
+   * word and the person's sentence are two fields, and each is free to be good
+   * at its own job.
+   *
+   * Not part of a row's identity: two gradings of one dimension are still one
+   * row and the later one still wins, whatever either of them says here.
+   */
+  readonly reason?: string | undefined;
   /** The spans this judgment is about, by their own ids. */
   readonly citedSpanIds: readonly string[];
   /** As it stood when the judgment was made, never as it stands now. */
@@ -160,6 +176,7 @@ function rowFor(auth: AuthContext, verdict: NewVerdict): Record<string, unknown>
     verdict: verdict.verdict,
     score: verdict.score,
     rationale: verdict.rationale,
+    reason: verdict.reason ?? "",
     cited_span_ids: [...verdict.citedSpanIds],
     priority: verdict.priority,
     run_id: verdict.runId,
@@ -218,6 +235,8 @@ export async function appendVerdicts(
 export type RecordedVerdict = FoldableVerdict & {
   readonly score: number;
   readonly rationale: string;
+  /** The stable word, or empty where nothing beyond the rationale was said. */
+  readonly reason: string;
   readonly citedSpanIds: readonly string[];
   readonly priority: Priority;
   readonly runId: string;
@@ -264,6 +283,7 @@ type VerdictRow = {
   readonly verdict: Verdict;
   readonly score: number;
   readonly rationale: string;
+  readonly reason: string;
   readonly cited_span_ids: readonly string[];
   readonly priority: Priority;
   readonly run_id: string;
@@ -451,6 +471,7 @@ async function verdictsFiledUnder(
               verdict,
               score,
               rationale,
+              reason,
               cited_span_ids,
               priority,
               run_id,
@@ -611,6 +632,10 @@ export async function correctVerdict(
 
   return {
     ...row,
+    // A person's disagreement states no machine reason: what they wrote is the
+    // whole of what they said, and inventing a word for it would be egma
+    // classifying somebody else's judgment.
+    reason: row.reason ?? "",
     citedSpanIds: [...row.citedSpanIds],
     judgedAt: rfc3339(row.judgedAtMicroseconds),
   };
@@ -649,6 +674,7 @@ function verdictOf(row: VerdictRow): RecordedVerdict {
     verdict: row.verdict,
     score: row.score,
     rationale: row.rationale,
+    reason: row.reason,
     citedSpanIds: row.cited_span_ids,
     priority: row.priority,
     runId: row.run_id,

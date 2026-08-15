@@ -47,6 +47,13 @@ export const ID_PREFIXES = [
   "prsv",
   "grd",
   "grv",
+  /**
+   * An organization's judge credential: the label, the provider and the sealed
+   * key an LLM judge is asked with. Its own identity because one organization
+   * may hold several, and because a project's judge setting stores a
+   * *reference* to one rather than a second copy of the secret.
+   */
+  "jcr",
   "mck",
   "ste",
   "run",

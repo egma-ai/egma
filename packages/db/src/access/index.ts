@@ -115,6 +115,7 @@ export {
   DefaultPersonaReplacementError,
   GraderNamedByTestsError,
   IdentityConflictError,
+  JudgeProviderMismatchError,
   LastAdminError,
   MockToolTakenError,
   NoCapabilityAdapterError,
@@ -400,13 +401,23 @@ export {
 
 export {
   advanceProductionSampling,
+  cloneGrader,
   createGrader,
   deleteGrader,
   editGrader,
   getGrader,
   getGraderVersion,
+  listGraderVersions,
   listGraders,
+  restoreGrader,
+  testsNamingGrader,
+  EXPECTED_BEHAVIORS_GRADER,
+  GRADER_TYPE_REGISTRY,
   type DeletedGrader,
+  type ExpectedGraderState,
+  type GraderListing,
+  type GraderRead,
+  type GraderTypeDefinition,
   type Grader,
   type GraderChanges,
   type GraderConfig,
@@ -415,6 +426,7 @@ export {
   type GraderPage,
   type GraderVersion,
   type JudgeModel,
+  type JudgeModelInput,
   type JudgeProvider,
   type LlmRubricConfig,
   type MeasureAggregation,
@@ -438,6 +450,13 @@ export type {
   GraderType,
   Priority,
 } from "../schema/graders.ts";
+export {
+  GRADER_READS,
+  GRADER_SCOPES,
+  JUDGE_PROVIDERS,
+  JUDGE_SOURCES,
+  PRIORITIES,
+} from "../schema/graders.ts";
 
 /**
  * The project's default judge. `resolveJudgeKey` is the one door to the
@@ -447,12 +466,33 @@ export type {
  */
 export {
   getJudgeConfiguration,
+  getProjectJudge,
   resolveJudgeKey,
   seedDefaultJudge,
   setJudgeConfiguration,
+  setProjectJudge,
+  PLATFORM_JUDGE,
   type JudgeConfiguration,
   type NewJudgeConfiguration,
+  type ProjectJudge,
+  type ProjectJudgeChoice,
 } from "./judges.ts";
+
+/**
+ * The organization's judge credentials. Write-only by construction: nothing
+ * exported here can answer with a stored key, and the one door to a plaintext
+ * one lives behind the grading engine's own context.
+ */
+export {
+  createJudgeCredential,
+  editJudgeCredential,
+  getJudgeCredential,
+  listJudgeCredentials,
+  type JudgeCredential,
+  type JudgeCredentialChanges,
+  type NewJudgeCredential,
+} from "./judge-credentials.ts";
+export type { JudgeSource } from "../schema/graders.ts";
 
 export {
   cancelRun,

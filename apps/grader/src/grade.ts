@@ -423,10 +423,45 @@ export async function judgmentsOf(
   conversation: Conversation,
   judging: Judging,
 ): Promise<readonly Judgment[]> {
+  /**
+   * **Nothing-to-judge wins over modality, and the order is a decision.**
+   *
+   * A voice simulation that never happened, judged by a grader that only scores
+   * chat, could honestly be called either: `errored`, because egma could not
+   * read a conversation it should have; or `skipped`, because this check was
+   * never about that conversation anyway. It answers `errored`.
+   *
+   * The reason is which fact a reader has to act on. A conversation egma could
+   * not read is an operational failure — a flush that never landed, a runtime
+   * that broke — and somebody has to go and look at it. A modality mismatch is
+   * a settled fact about a grader that needs nobody's attention at all. Letting
+   * the mismatch answer first would hide the failure behind it: the run would
+   * report a check that quietly did not apply, and the broken telemetry would
+   * be visible only on whichever graders happened to score voice. So the fault
+   * is reported wherever it is known, and a check that would not have applied
+   * says `errored` on a conversation that did not happen rather than the run
+   * losing the evidence that it did not happen.
+   */
   const nothingToJudge = conversation.nothingToJudgeBecause;
   if (nothingToJudge !== null) {
     return [couldNotJudge(grader, nothingToJudge)];
   }
+
+  /**
+   * **A grader that cannot score this modality is `skipped`, and asked
+   * nothing.** The check is here rather than inside each executor for the
+   * reason the one above it is: no grader type, today's or tomorrow's, can get
+   * it wrong, and a judged type is never asked — so a rubric written about
+   * speech costs no model call on a chat conversation.
+   *
+   * `skipped` and never `failed`: "didn't interrupt the caller" is not a thing
+   * a chat agent did badly, it is a thing that was never about that
+   * conversation, and it leaves the score's denominator rather than reddening
+   * a run. It is not `errored` either — nothing went wrong, and egma did not
+   * fail to make a check it was able to make.
+   */
+  const unsupported = modalityUnsupported(grader, conversation);
+  if (unsupported !== null) return [unsupported];
 
   try {
     // The grader *is* its judgment plus its identity and its live settings — the
@@ -446,6 +481,50 @@ export async function judgmentsOf(
       ),
     ];
   }
+}
+
+/**
+ * The stable reason a modality skip carries, in the verdict row's own `reason`
+ * column.
+ *
+ * Two things are `skipped` and neither is a failure: a grader that cannot score
+ * this conversation's modality, and a threshold whose measure the conversation
+ * never produced. A results page has to tell them apart — "this check was never
+ * about this conversation" and "egma had nothing to measure" send a reader to
+ * two different places — and it cannot do that from prose without making the
+ * prose contract.
+ */
+export const MODALITY_UNSUPPORTED = "modality_unsupported";
+
+/**
+ * Whether this grader can score this conversation, and the `skipped` judgment
+ * when it cannot.
+ *
+ * A conversation whose modality is unstated — every production trace — is
+ * scored by everything. Guessing which layer a real caller used would mean
+ * silently dropping checks on evidence egma does not have, and a check quietly
+ * not made is exactly the hole this product exists to close.
+ */
+function modalityUnsupported(
+  grader: Grader,
+  conversation: Conversation,
+): Judgment | null {
+  const { modality } = conversation;
+  if (modality === null || grader.modalities.includes(modality)) return null;
+
+  return {
+    dimension: theOneCheck(grader.type),
+    verdict: "skipped",
+    score: 0,
+    // The word goes in the column beside the sentence, not inside it. A page
+    // recognises the case by the word and shows a person the sentence, and
+    // rewording the sentence breaks nothing.
+    reason: MODALITY_UNSUPPORTED,
+    rationale:
+      `This grader scores ${grader.modalities.join(" and ")} conversations, ` +
+      `and this one was ${modality}, so no judgment was made about the agent.`,
+    citedSpanIds: [],
+  };
 }
 
 /** egma could not judge this. Never `failed`: nothing is being said about the agent. */
@@ -499,6 +578,7 @@ function verdictRow(
     verdict: judgment.verdict,
     score: judgment.score,
     rationale: judgment.rationale,
+    ...(judgment.reason === undefined ? {} : { reason: judgment.reason }),
     citedSpanIds: judgment.citedSpanIds,
     priority: by.priority,
     runId: conversation.runId,

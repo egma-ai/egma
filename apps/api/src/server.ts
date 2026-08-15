@@ -12,8 +12,10 @@ import { agentRoutes } from "./routes/agents.ts";
 import { apiKeyRoutes } from "./routes/api-keys.ts";
 import { claimRoutes } from "./routes/claims.ts";
 import { deviceRoutes } from "./routes/device.ts";
+import { graderRoutes } from "./routes/graders.ts";
 import { heartbeatRoutes } from "./routes/heartbeats.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
+import { judgeRoutes } from "./routes/judge.ts";
 import { meRoutes } from "./routes/me.ts";
 import { memberRoutes } from "./routes/members.ts";
 import { personaRoutes } from "./routes/personas.ts";
@@ -269,6 +271,30 @@ export function buildApi(options: ServerOptions): Api {
   // this project already answers for among them — never reach another group's
   // error handler.
   void app.register(mockToolRoutes, { provider: identity.provider, rateLimit });
+
+  // The judgments a project can make: the authored graders, and the shelf that
+  // also describes the built-in nobody attaches. Its own scope like every other
+  // group, so its two conflicts — a live edit written against a revision the
+  // grader has left behind, and a versioned edit written against a version it
+  // has minted past — never reach another group's error handler.
+  void app.register(graderRoutes, { provider: identity.provider, rateLimit });
+
+  // Which model judges here, and which of the organization's keys it is asked
+  // with. Its own scope for the reason above, and separate from the grader
+  // group because the two answer to different roles: authoring a grader is a
+  // member's act, and committing the organization's account to a provider is an
+  // admin's.
+  void app.register(judgeRoutes, {
+    provider: identity.provider,
+    rateLimit,
+    // The same judge the seeding path gives a project that has configured none.
+    // It is handed here so that a project which moved to a key of its own can
+    // move back: the deployment's judge lives in this process's configuration,
+    // and nowhere a project could have thrown away.
+    ...(config.defaultJudge === undefined
+      ? {}
+      : { defaultJudge: config.defaultJudge }),
+  });
 
   // What a terminal starts and then watches: a run over one connection,
   // pinning exact versions, and the numbered feed a follower resumes from.

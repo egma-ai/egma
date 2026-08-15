@@ -44,6 +44,17 @@ export type Judgment = {
   readonly score: number;
   /** One line saying why, in words somebody reading the record can use. */
   readonly rationale: string;
+  /**
+   * A **stable word a reader may branch on**, where there is one to say beyond
+   * the rationale — `modality_unsupported` on a grader that cannot score this
+   * conversation. Absent means the sentence is the whole of it.
+   *
+   * Separate from the rationale for the reason the dimension is separate from
+   * the config: the rationale is prose, free to be reworded whenever it reads
+   * badly, and a page that had to recognise a case by matching on that wording
+   * would break the first time somebody improved a sentence.
+   */
+  readonly reason?: string | undefined;
   /** The spans this judgment is about, by their own ids. */
   readonly citedSpanIds: readonly string[];
   /**

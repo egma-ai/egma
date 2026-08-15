@@ -434,6 +434,34 @@ export class GraderNamedByTestsError extends Error {
 }
 
 /**
+ * A project's judge named a credential belonging to another provider.
+ *
+ * Its own refusal rather than a general validation error because the fix is
+ * specific and can be named: a key issued by OpenAI cannot answer for a judge
+ * configured to ask somebody else, whatever either of them is called. It
+ * carries both providers so the sentence can say which is which.
+ */
+export class JudgeProviderMismatchError extends Error {
+  readonly credentialId: string;
+  readonly credentialProvider: string;
+  readonly judgeProvider: string;
+
+  constructor(
+    credentialId: string,
+    credentialProvider: string,
+    judgeProvider: string,
+  ) {
+    super(
+      `judge credential ${credentialId} is for ${credentialProvider}, and this project's judge uses ${judgeProvider}`,
+    );
+    this.name = "JudgeProviderMismatchError";
+    this.credentialId = credentialId;
+    this.credentialProvider = credentialProvider;
+    this.judgeProvider = judgeProvider;
+  }
+}
+
+/**
  * A mock tool was written for a tool this project already answers for.
  *
  * Matching is by tool name and strictly by it — no arguments are read — so two

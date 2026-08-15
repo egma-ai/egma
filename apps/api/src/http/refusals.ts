@@ -42,6 +42,12 @@ export const CODES = {
   // the request was valid on the way in, nothing was written, and sending it
   // again is the whole of the fix — which a client can do by itself.
   write_aborted: 409,
+  /**
+   * A grader an active test names directly, refused Archive. Its own code
+   * because the fix is specific — go and take it off those tests — and the
+   * refusal names them.
+   */
+  grader_in_use: 409,
   unprocessable: 422,
   credential_required: 422,
   credential_forbidden: 422,
@@ -53,10 +59,27 @@ export const CODES = {
   // A cursor this list never issued. Its own code so a client can drop it and
   // start again rather than showing somebody a broken page forever.
   invalid_cursor: 422,
+  /**
+   * A project's judge pointed at a credential issued by a different provider.
+   * Nothing about the request is malformed and nothing is missing — the two
+   * settings simply cannot both be true — so it is its own answer.
+   */
+  judge_credential_provider_mismatch: 422,
   unsignable_reference: 422,
   no_adapter: 422,
   phone_setup_required: 422,
   too_many_requests: 429,
+  /**
+   * A fault, answered without relaying whatever the fault said.
+   *
+   * Every other code here is a sentence somebody wrote to be read. This one is
+   * for what nobody wrote — a driver error, a constraint name, a query layer's
+   * wrapper — on the routes where the query that failed is one that selected a
+   * sealed envelope. Echoing such a message would put ciphertext and SQL into a
+   * browser response, so the caller gets a sentence this module chose and the
+   * detail goes to the log.
+   */
+  unavailable: 500,
   capability_check_failed: 502,
   no_object_store: 503,
 } as const;
@@ -125,6 +148,63 @@ export function identityConflict(resource: string, resourceId: string): string {
     `set to its new revision.`
   );
 }
+
+/**
+ * The exact sentences the product surface answers with, written once.
+ *
+ * **These are contract.** A page shows them word for word and a client branches
+ * on the code beside them, so the wording is filled in rather than composed:
+ * every placeholder is a value dropped into a fixed sentence, and the sentence
+ * around it never changes shape. Two copies of one of these is two things to
+ * keep in step, which is the whole reason they are here and not in each route.
+ */
+export const REFUSALS = {
+  projectRequired:
+    "This request did not name a project. Choose a project from the " +
+    "selector and try again.",
+
+  /**
+   * Missing and cross-organization data get the same sentence, because to this
+   * caller they are the same thing: following a stranger's link must never
+   * reveal whether the thing on the other end exists.
+   */
+  notFound: (resource: string, resourceId: string): string =>
+    `There is no ${resource} ${resourceId} available in this project. ` +
+    "Check the link, or choose it from the current project.",
+
+  notPermitted: (role: string, action: string): string =>
+    `Your ${role} role cannot ${action}. Ask an organization admin to change ` +
+    "your role, then try again.",
+
+  /**
+   * The same sentence the free function above composes, reached through this
+   * table so the route groups that read their wording off it do not carry a
+   * second copy of a sentence that is contract.
+   */
+  identityConflict,
+
+  versionConflict: (
+    resource: string,
+    expected: string,
+    current: string,
+  ): string =>
+    `this ${resource} edit was written against version ${expected}, and it ` +
+    `has moved on to ${current}. Read the ${resource} again, keep or reapply ` +
+    `your edits, and send them with expected_version_id set to ${current}.`,
+
+  graderInUse: (graderId: string, tests: string): string =>
+    `Grader ${graderId} is added directly to active tests ${tests}. Remove ` +
+    "it from those tests, or archive the tests, then archive this grader.",
+
+  judgeCredentialProviderMismatch: (
+    credentialId: string,
+    credentialProvider: string,
+    judgeProvider: string,
+  ): string =>
+    `Judge credential ${credentialId} is for ${credentialProvider}, but this ` +
+    `project judge uses ${judgeProvider}. Choose a credential for ` +
+    `${judgeProvider} and save the judge setting again.`,
+} as const;
 
 /** The body could never be written, whatever is there. */
 export function invalid(reply: FastifyReply, message: string): FastifyReply {
