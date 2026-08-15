@@ -7,11 +7,12 @@ import { connect, disconnect, db } from "../client.ts";
 import {
   cloneTest,
   createTest,
-  deleteTest,
+  archiveTest,
   editTest,
   getTest,
   getTestVersion,
   listTests,
+  restoreTest,
 } from "../access/tests.ts";
 import type { AuthContext } from "../access/context.ts";
 import { projectsOf } from "../access/projects.ts";
@@ -109,7 +110,8 @@ function usage(): never {
       "  test.js get-version <tstv_id>",
       "  test.js list [--limit <n>] [--cursor <tst_id>]",
       "  test.js clone <tst_id>",
-      "  test.js delete <tst_id>",
+      "  test.js archive <tst_id>",
+      "  test.js restore <tst_id> [--agent <agt_id> …]",
     ].join("\n"),
   );
   process.exit(1);
@@ -218,9 +220,21 @@ async function main(): Promise<void> {
   } else if (command === "clone") {
     const id = requiredId(rest);
     printTest(id, await cloneTest(auth, id));
-  } else if (command === "delete") {
+  } else if (command === "archive") {
     const id = requiredId(rest);
-    printTest(id, await deleteTest(auth, id));
+    printTest(id, await archiveTest(auth, id));
+  } else if (command === "restore") {
+    const id = requiredId(rest);
+    const { values } = parseArgs({
+      args: rest.slice(1),
+      options: { agent: { type: "string", multiple: true } },
+    });
+    printTest(
+      id,
+      await restoreTest(auth, id, {
+        ...(values.agent === undefined ? {} : { agentIds: values.agent }),
+      }),
+    );
   } else {
     usage();
   }

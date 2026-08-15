@@ -120,9 +120,11 @@ describe("judge keys moving to the organization (0026)", () => {
       );
     }
 
-    // Then the upgrade.
+    // Then the upgrade. It leads what is still pending rather than being the
+    // whole of it: whatever is numbered after this migration follows it here,
+    // and the assertion is that 0026 arrives over the rows above.
     const upgraded = await runMigrations(database.url);
-    expect(upgraded.applied).toEqual([migrations[subject]?.name]);
+    expect(upgraded.applied[0]).toBe(migrations[subject]?.name);
 
     const { rows: credentials } = await client.sql<{
       id: string;

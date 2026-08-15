@@ -128,9 +128,17 @@ describe("creating a test", () => {
       await connection.sql("begin");
       await connection.sql(
         `insert into test
-           (id, organization_id, project_id, name, current_version_id)
-         values ($1, $2, $3, 'Halfway', $4)`,
-        [orphan, acme.organization, acme.project, newId("tstv")],
+           (id, organization_id, project_id, name, current_version_id,
+            revision, applicability_revision)
+         values ($1, $2, $3, 'Halfway', $4, $5, $6)`,
+        [
+          orphan,
+          acme.organization,
+          acme.project,
+          newId("tstv"),
+          newId("rev"),
+          newId("rev"),
+        ],
       );
 
       await expect(connection.sql("commit")).rejects.toSatisfy(
@@ -403,9 +411,17 @@ describe("tenancy", () => {
     await expect(
       database.sql(
         `insert into test
-           (id, organization_id, project_id, name, current_version_id)
-         values ($1, $2, $3, 'Smuggled', $4)`,
-        [newId("tst"), acme.organization, globex.project, newId("tstv")],
+           (id, organization_id, project_id, name, current_version_id,
+            revision, applicability_revision)
+         values ($1, $2, $3, 'Smuggled', $4, $5, $6)`,
+        [
+          newId("tst"),
+          acme.organization,
+          globex.project,
+          newId("tstv"),
+          newId("rev"),
+          newId("rev"),
+        ],
       ),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,

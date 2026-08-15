@@ -57,6 +57,10 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // test junctions have, for the same reason.
   mock_tool_agent: "mck",
   test: "tst",
+  // The applicability junction, pinning the test it links — the shape the mock
+  // tool's scope junction has, for the same reason: the row's identity is the
+  // pair, and its leading half is the one this table owns.
+  test_agent: "tst",
   test_version: "tstv",
   test_persona: "tstv",
   test_grader: "tstv",
@@ -210,7 +214,14 @@ describe("every table", () => {
    * and a revision is not one — it says which *state* was read, and a row goes
    * through many.
    */
-  const REVISION_COLUMNS: readonly string[] = ["grader", "judge_credential"];
+  const REVISION_COLUMNS: Readonly<Record<string, number>> = {
+    grader: 1,
+    judge_credential: 1,
+    // Two, because a test carries two live tokens that guard two different
+    // losses: the identity revision an edit to the name is written against, and
+    // the applicability revision a link edit is written against.
+    test: 2,
+  };
 
   it("pins a prefix that is one of the ones egma mints", () => {
     const pinned = checks
@@ -219,7 +230,8 @@ describe("every table", () => {
       .map((match) => match[1]);
 
     expect(pinned.length).toBe(
-      Object.keys(TABLE_PREFIX).length + REVISION_COLUMNS.length,
+      Object.keys(TABLE_PREFIX).length +
+        Object.values(REVISION_COLUMNS).reduce((all, one) => all + one, 0),
     );
     for (const prefix of pinned) {
       expect(ID_PREFIXES).toContain(prefix);
@@ -227,13 +239,13 @@ describe("every table", () => {
   });
 
   it("pins the revision format wherever a row carries one", () => {
-    for (const table of REVISION_COLUMNS) {
+    for (const [table, how_many] of Object.entries(REVISION_COLUMNS)) {
       const pinned = checks.filter(
         (check) =>
           check.table_name === table &&
           check.definition.includes(idCheckPattern("rev")),
       );
-      expect(pinned, `${table} pins rev_`).toHaveLength(1);
+      expect(pinned, `${table} pins rev_`).toHaveLength(how_many);
     }
   });
 });

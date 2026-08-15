@@ -8,6 +8,7 @@ import {
   createAgent,
   createPersona,
   createTest,
+  setTestAgents,
   failSimulationDispatch,
   getPersonaVersion,
   getRun,
@@ -91,6 +92,7 @@ type Seeded = {
   readonly agentId: string;
   readonly connectionId: string;
   readonly personaId: string;
+  readonly testId: string;
   readonly testVersionId: string;
 };
 
@@ -113,20 +115,19 @@ async function seedCustomer(
     await createPersona(auth, { name: "Impatient Rita", traits: NEUTRAL_TRAITS })
   ).id;
 
-  const testVersionId = (
-    await createTest(auth, {
-      name: "Reschedules",
-      scenario: SCENARIO,
-      expectedBehaviors: ["confirms the new time back before finishing"],
-      personaIds: [personaId],
-    })
-  ).versionId;
+  const authored = await createTest(auth, {
+    name: "Reschedules",
+    scenario: SCENARIO,
+    expectedBehaviors: ["confirms the new time back before finishing"],
+    personaIds: [personaId],
+  });
 
   return {
     agentId: created.id,
     connectionId: created.connection?.id ?? "",
     personaId,
-    testVersionId,
+    testId: authored.id,
+    testVersionId: authored.versionId,
   };
 }
 
@@ -429,6 +430,12 @@ describe("the connection door", () => {
         config: { retellAgentId: "agent_restored_1" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
       },
+    });
+    // The seeded test applied to the agent that has just been left behind, and
+    // a run may only pair an agent with a test linked to it — so the coverage
+    // moves with the connection.
+    await setTestAgents(actingAsAcme(), acmeSeed.testId, {
+      agentIds: [restored.id],
     });
     acmeSeed = {
       ...acmeSeed,

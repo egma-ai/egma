@@ -5,7 +5,7 @@ import {
   archivePersona,
   createTest,
   DefaultPersonaReplacementError,
-  deleteTest,
+  archiveTest,
   editTest,
   getPersona,
   getTestVersion,
@@ -178,7 +178,7 @@ describe("a persona only archived tests name", () => {
 
     await refusalFrom(archivePersona(actingAsAcme(), dana));
 
-    await deleteTest(actingAsAcme(), created.id);
+    await archiveTest(actingAsAcme(), created.id);
 
     expect((await archivePersona(actingAsAcme(), dana))?.id).toBe(dana);
 
@@ -224,9 +224,18 @@ async function writeTestNaming(
   const versionId = newId("tstv");
 
   await connection.sql(
-    `insert into test (id, organization_id, project_id, name, current_version_id)
-     values ($1, $2, $3, $4, $5)`,
-    [testId, acme.organization, named.projectId, named.name, versionId],
+    `insert into test (id, organization_id, project_id, name, current_version_id,
+                       revision, applicability_revision)
+     values ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      testId,
+      acme.organization,
+      named.projectId,
+      named.name,
+      versionId,
+      newId("rev"),
+      newId("rev"),
+    ],
   );
   await connection.sql(
     `insert into test_version (id, test_id, version, content)
@@ -356,7 +365,7 @@ describe("the persona a project points at by default", () => {
     // Nothing moved, so a test naming nobody still gets Pia.
     const taking = await createTest(inOutbound, rescheduling);
     expect(taking.personas.map((one) => one.id)).toEqual([pia]);
-    await deleteTest(inOutbound, taking.id);
+    await archiveTest(inOutbound, taking.id);
   });
 
   it("takes the replacement in the same write, so the project is never pointing at nobody", async () => {
@@ -374,7 +383,7 @@ describe("the persona a project points at by default", () => {
     // rather than refused — and it is written naming the replacement.
     const written = await createTest(inOutbound, rescheduling);
     expect(written.personas.map((one) => one.id)).toEqual([taking]);
-    await deleteTest(inOutbound, written.id);
+    await archiveTest(inOutbound, written.id);
   });
 
   it("refuses a replacement that is not an active persona of this project", async () => {

@@ -1,7 +1,7 @@
 import {
   createProject,
   createTest,
-  deleteTest,
+  archiveTest,
   editTest,
   type PersonaTraits,
 } from "@egma/db";
@@ -766,7 +766,7 @@ describe("archiving a persona", () => {
     expect(blocked.statusCode).toBe(409);
     expect(blocked.body.error).toBe("persona_in_use");
 
-    await deleteTest(author, named.id);
+    await archiveTest(author, named.id);
 
     const archived = await browse(
       "POST",

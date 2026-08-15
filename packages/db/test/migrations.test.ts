@@ -2139,3 +2139,240 @@ describe("the agent and connection lifecycle over installed data (0025)", () => 
     await expect(second(newId("con"))).resolves.toBeDefined();
   });
 });
+
+/**
+ * A test says which agents it applies to, over a database that already holds
+ * tests (0027).
+ *
+ * **This is the migration whose generated body would have been wrong**, and the
+ * two ways it would have been wrong are what this block is for. `ADD COLUMN …
+ * NOT NULL` fails outright on a table that holds rows, and a diff moves no
+ * data — so every installed test would have arrived at the new schema with no
+ * applicable agent, which is the one state the relation exists to rule out.
+ *
+ * So the seeding here is deliberately awkward: two projects, one with agents
+ * and one without, an agent already archived, and a test somebody had already
+ * archived themselves. Every one of those is a row the backfill has to treat
+ * differently, and an empty database can prove none of it.
+ */
+describe("tests gaining applicable agents over installed data (0027)", () => {
+  let database: EmptyDatabase;
+  let before: string;
+  let client: pg.Client;
+
+  const organizationId = newId("org");
+  /** The project that has agents to be linked to. */
+  const staffed = newId("prj");
+  /** And the one that has none, whose tests have nowhere to run. */
+  const bare = newId("prj");
+
+  const liveAgent = newId("agt");
+  const secondAgent = newId("agt");
+  /** Archived before the upgrade: it must receive no link at all. */
+  const goneAgent = newId("agt");
+
+  const rescheduling = newId("tst");
+  const reschedulingVersion = newId("tstv");
+  /** Somebody archived this one themselves, before any of this existed. */
+  const retired = newId("tst");
+  const retiredVersion = newId("tstv");
+  /** In the project with no agent, so the upgrade has to archive it. */
+  const stranded = newId("tst");
+  const strandedVersion = newId("tstv");
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("tests_apply_to_agents");
+
+    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0027-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0027") {
+        await writeFile(path.join(before, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, before);
+
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query(
+      "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
+      [organizationId],
+    );
+    for (const [id, slug] of [
+      [staffed, "staffed"],
+      [bare, "bare"],
+    ] as const) {
+      await client.query(
+        "insert into project (id, organization_id, name, slug) values ($1, $2, $3, $3)",
+        [id, organizationId, slug],
+      );
+    }
+
+    // 0025 has already run, so agents carry a revision and an archive marker.
+    const agent = async (id: string, name: string, project: string, archived: boolean) =>
+      client.query(
+        `insert into agent (id, organization_id, project_id, name, revision, archived_at)
+         values ($1, $2, $3, $4, $5, ${archived ? "now()" : "null"})`,
+        [id, organizationId, project, name, newId("rev")],
+      );
+
+    await agent(liveAgent, "Front desk", staffed, false);
+    await agent(secondAgent, "Front desk v2", staffed, false);
+    await agent(goneAgent, "Retired desk", staffed, true);
+
+    const test = async (
+      id: string,
+      versionId: string,
+      name: string,
+      project: string,
+      archived: boolean,
+    ) => {
+      await client.query("begin");
+      await client.query(
+        `insert into test (id, organization_id, project_id, name, current_version_id, deleted_at)
+         values ($1, $2, $3, $4, $5, ${archived ? "now()" : "null"})`,
+        [id, organizationId, project, name, versionId],
+      );
+      await client.query(
+        `insert into test_version (id, test_id, version, content)
+         values ($1, $2, 1, '{"scenario": "Moves a booking", "expectedBehaviors": ["confirms the new time"]}'::jsonb)`,
+        [versionId, id],
+      );
+      await client.query("commit");
+    };
+
+    await test(rescheduling, reschedulingVersion, "Reschedules", staffed, false);
+    await test(retired, retiredVersion, "An old idea", staffed, true);
+    await test(stranded, strandedVersion, "Nowhere to run", bare, false);
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(before, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("is what is still pending on a database that already holds tests", async () => {
+    const upgrade = (await readMigrations()).find((migration) =>
+      migration.name.startsWith("0027_"),
+    );
+    if (upgrade === undefined) throw new Error("0027 is missing");
+    await writeFile(path.join(before, upgrade.name), upgrade.sql);
+
+    const { applied } = await runMigrations(database.url, before);
+    expect(applied).toEqual([upgrade.name]);
+  });
+
+  it("links every existing test to every active agent in its own project", async () => {
+    const { rows } = await client.query<{ agent_id: string }>(
+      "select agent_id from test_agent where test_id = $1 order by agent_id",
+      [rescheduling],
+    );
+    // Both active agents and neither of them chosen: before this migration any
+    // test of a project could be run against any agent of that project, and
+    // picking one would be egma authoring somebody's coverage on no evidence.
+    expect(rows.map((row) => row.agent_id).sort()).toEqual(
+      [liveAgent, secondAgent].sort(),
+    );
+  });
+
+  it("links no test to an agent that was already archived", async () => {
+    const { rows } = await client.query<{ test_id: string }>(
+      "select test_id from test_agent where agent_id = $1",
+      [goneAgent],
+    );
+    // A link a run can never use is a promise egma cannot keep, and writing one
+    // would make Archive mean nothing on the day the relation arrived.
+    expect(rows).toEqual([]);
+  });
+
+  it("links an archived test too, so restoring it finds the coverage it would have had", async () => {
+    const { rows } = await client.query<{ agent_id: string }>(
+      "select agent_id from test_agent where test_id = $1 order by agent_id",
+      [retired],
+    );
+    expect(rows.map((row) => row.agent_id).sort()).toEqual(
+      [liveAgent, secondAgent].sort(),
+    );
+  });
+
+  it("archives the test whose project has no active agent, and says why", async () => {
+    const { rows } = await client.query<{
+      archived_at: Date | null;
+      archive_reason: string | null;
+    }>("select archived_at, archive_reason from test where id = $1", [stranded]);
+
+    expect(rows[0]?.archived_at).toBeInstanceOf(Date);
+    // The reason is owed to whoever finds it in the archive: they did not do
+    // this, and the fix is to link an agent rather than to wonder who removed
+    // it.
+    expect(rows[0]?.archive_reason).toBe("needs_agent");
+  });
+
+  it("keeps that test's history, which is the whole difference from a delete", async () => {
+    const { rows } = await client.query<{ id: string; version: number }>(
+      "select id, version from test_version where test_id = $1",
+      [stranded],
+    );
+    expect(rows).toEqual([{ id: strandedVersion, version: 1 }]);
+  });
+
+  it("leaves a test somebody archived themselves carrying no reason", async () => {
+    const { rows } = await client.query<{
+      archived_at: Date | null;
+      archive_reason: string | null;
+    }>("select archived_at, archive_reason from test where id = $1", [retired]);
+
+    expect(rows[0]?.archived_at).toBeInstanceOf(Date);
+    // They know why. A reason invented for them would say the upgrade did this.
+    expect(rows[0]?.archive_reason).toBeNull();
+  });
+
+  it("leaves the test that had a target active", async () => {
+    const { rows } = await client.query<{ archived_at: Date | null }>(
+      "select archived_at from test where id = $1",
+      [rescheduling],
+    );
+    expect(rows[0]?.archived_at).toBeNull();
+  });
+
+  it("gives every test two revisions, each its own, and never the same one twice", async () => {
+    const { rows } = await client.query<{
+      revision: string;
+      applicability_revision: string;
+    }>("select revision, applicability_revision from test");
+
+    expect(rows.length).toBe(3);
+    for (const row of rows) {
+      expect(row.revision).toMatch(/^rev_[0-9A-HJKMNP-TV-Z]{26}$/);
+      expect(row.applicability_revision).toMatch(/^rev_[0-9A-HJKMNP-TV-Z]{26}$/);
+      // A test whose two tokens matched would accept an edit written against
+      // one in place of the other, which is the confusion two tokens exist to
+      // prevent.
+      expect(row.revision).not.toBe(row.applicability_revision);
+    }
+    const minted = new Set(
+      rows.flatMap((row) => [row.revision, row.applicability_revision]),
+    );
+    expect(minted.size).toBe(rows.length * 2);
+  });
+
+  it("refuses a link between a test and an agent of another project", async () => {
+    // The tenancy triangle, one level across: the composite key means a
+    // cross-project link cannot be written at all, whatever writes it.
+    await expect(
+      client.query(
+        "insert into test_agent (test_id, agent_id, project_id) values ($1, $2, $3)",
+        [stranded, liveAgent, bare],
+      ),
+    ).rejects.toThrow(/test_agent_agent_project_fk/u);
+  });
+
+  it("refuses an archive reason on a test nothing archived", async () => {
+    await expect(
+      client.query(
+        "update test set archive_reason = 'needs_agent' where id = $1",
+        [rescheduling],
+      ),
+    ).rejects.toThrow(/test_archive_reason_needs_an_archive/u);
+  });
+});

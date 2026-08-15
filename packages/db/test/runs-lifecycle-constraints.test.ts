@@ -111,9 +111,10 @@ async function seedTest(
   // The current-version pointer is deferred here too, for the same reason.
   await db.sql("begin");
   await db.sql(
-    `insert into test (id, organization_id, project_id, name, current_version_id)
-     values ($1, $2, $3, 'Reschedules a booked appointment', $4)`,
-    [id, organization, project, version],
+    `insert into test (id, organization_id, project_id, name, current_version_id,
+                       revision, applicability_revision)
+     values ($1, $2, $3, 'Reschedules a booked appointment', $4, $5, $6)`,
+    [id, organization, project, version, newId("rev"), newId("rev")],
   );
   await db.sql(
     `insert into test_version (id, test_id, version, content)

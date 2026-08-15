@@ -1,5 +1,6 @@
 import { newId } from "@egma/ids";
 import {
+  createAgent,
   createPersona,
   createTest,
   editPersona,
@@ -270,6 +271,9 @@ describe("the project provisioning creates", () => {
 describe("a first test in a freshly provisioned project", () => {
   it("is created naming no persona, and receives the starter", async () => {
     const wayne = await signUp("wayne", "lucius@wayne.example");
+    // A new project has a starter persona and no agent, so registering one is
+    // the step before authoring a test: a test always applies to a target.
+    await createAgent(wayne.auth, { name: "Front desk" });
 
     const created = await createTest(wayne.auth, {
       name: "Reschedules a booked appointment",
