@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   aConversation,
+  aJudgedCopy,
   capturedLog,
   conductSimulation,
   eventually,
@@ -19,6 +20,7 @@ import {
   seedJudge,
   seedTest,
   testConfig,
+  theSeededGrader,
   THE_JUDGE_KEY,
   type World,
 } from "./support/world.ts";
@@ -43,10 +45,16 @@ const service = oneServiceAtATime();
 
 const BEHAVIOR = "confirms the new time back before finishing";
 
-function behaviorRows(
+/**
+ * The behaviors' rows, found by the grader they name — the project's own copy
+ * of the `expected_behaviors` library entry, which is what a verdict row
+ * carries now that the built-in is a row like everything else.
+ */
+async function behaviorRows(
   verdicts: readonly RecordedVerdict[],
-): readonly RecordedVerdict[] {
-  return verdicts.filter((verdict) => verdict.graderId === "expected_behaviors");
+): Promise<readonly RecordedVerdict[]> {
+  const seeded = await theSeededGrader(world);
+  return verdicts.filter((verdict) => verdict.graderId === seeded);
 }
 
 /** What a grading claim resolves to, as the queue builds it. */
@@ -133,24 +141,24 @@ describe("the project's default judge", () => {
    *
    * This is the resolution alone, against a real grader version read back out
    * of Postgres with the project's real key behind it. What the override looks
-   * like once it has reached a verdict row — the `llm_rubric` executor asking on
-   * the grader's model and the row naming it — is `llm-rubric.test.ts`, through
-   * the whole service.
+   * like once it has reached a verdict row is the case below, through the whole
+   * service.
    */
   it("is overridden by a grader that names its own provider and model", async () => {
-    const graderId = await seedGrader(world, {
-      name: "Was the agent empathetic",
-      type: "llm_rubric",
-      config: { rubric: "The agent acknowledged the caller's frustration." },
-      judgeModel: { provider: "openai", model: "gpt-4.1" },
-    });
+    const graderId = await seedGrader(
+      world,
+      aJudgedCopy({
+        name: "A second opinion, on a stronger model",
+        judgeModel: { provider: "openai", model: "gpt-4.1" },
+      }),
+    );
 
     const grader = await getGrader(world.auth, graderId);
     const resolved = await projectJudge(theEngine());
     if (resolved instanceof NoJudge) throw resolved;
 
     const judge = scriptedJudge({ answers: {} });
-    const overridden = resolved.judging(grader?.judgeModel ?? null, judge.makers);
+    resolved.judging(grader?.judgeModel ?? null, judge.makers);
 
     // The model that reached the seam is the grader's, not the project's —
     // which is the whole of what an override does.
@@ -184,6 +192,17 @@ describe("the project's default judge", () => {
       log: captured.log,
     });
 
+    // A second judged copy, on a model of its own — pressed here rather than
+    // relied on from the case above, so this one says what it means when it is
+    // the only thing running.
+    await seedGrader(
+      world,
+      aJudgedCopy({
+        name: "A second opinion, on a stronger model, again",
+        judgeModel: { provider: "openai", model: "gpt-4.1" },
+      }),
+    );
+
     const testId = await seedTest(world, [], [BEHAVIOR]);
     const { simulationId } = await conductSimulation(world, {
       testId,
@@ -192,27 +211,38 @@ describe("the project's default judge", () => {
 
     const verdicts = await eventually("a behavior verdict", async () => {
       const read = await readVerdicts(world.auth, simulationId);
-      const rows = behaviorRows(read.verdicts);
+      const rows = await behaviorRows(read.verdicts);
       return rows.length > 0 ? rows : undefined;
     });
     await jobFor(world, { simulationId }, "graded");
 
     expect(verdicts[0]).toMatchObject({
-      graderId: "expected_behaviors",
+      graderId: await theSeededGrader(world),
       assertion: "behavior_1",
       verdict: "passed",
     });
     // Which judge answered is the resolution's own answer and is deliberately
     // on no row: `judged_by` retired with the human corrections it existed for.
-    expect(judge.configured.at(-1)?.model).toBe("gpt-4.1-mini");
+    // So the seam is where it is observable.
+    //
+    // Two judged copies asked about this conversation — the one the project was
+    // created with, on the project's own model, and the one seeded above on a
+    // model of its own. That is the whole of what an override is, and asking
+    // for the set says so without depending on which identifier sorts first.
+    expect(new Set(judge.configured.map((asked) => asked.model))).toEqual(
+      new Set(["gpt-4.1-mini", "gpt-4.1"]),
+    );
 
     /**
      * The acceptance box: **the key never appears in any verdict, log, or
      * report.** It reached the provider seam — asserted just below, so this is
      * not a claim about a key that was never resolved — and it is in none of
-     * the three places anything downstream reads.
+     * the three places anything downstream reads. One key, whichever model
+     * asked: an override names a provider and a model and never an account.
      */
-    expect(judge.configured.at(-1)?.key).toBe(THE_JUDGE_KEY);
+    for (const asked of judge.configured) {
+      expect(asked.key).toBe(THE_JUDGE_KEY);
+    }
 
     const everything = await readVerdicts(world.auth, simulationId);
     // Every field of every row, flattened — the microsecond stamps are BigInts,

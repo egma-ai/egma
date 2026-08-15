@@ -2,38 +2,44 @@ import { newId } from "@egma/ids";
 import {
   isCatalogedMeasure,
   CATALOGED_MEASURES,
-  MEASURE_AGGREGATIONS,
   MEASURE_CATALOG_DOCUMENT,
   MEASURE_CATALOG_VERSION,
-  type MeasureAggregation,
 } from "@egma/simulation-contract";
 import { and, desc, eq, isNull, lt, sql, type SQL } from "drizzle-orm";
 
-import { db } from "../client.ts";
+import { db, type Queryable } from "../client.ts";
+import {
+  GRADER_LIBRARY_CATALOG,
+  PREDEFINED_GRADERS,
+  type LibraryParameter,
+  type PredefinedGrader,
+} from "../grader-library/catalog.ts";
 import {
   grader,
+  graderLibrary,
   graderVersion,
   GRADER_SCOPES,
-  GRADER_TYPES,
   JUDGE_PROVIDERS,
   type GraderScope,
-  type GraderType,
   type JudgeProvider,
+  type LibraryType,
 } from "../schema/graders.ts";
 import type { AuthContext } from "./context.ts";
 import {
   GraderNamedByTestsError,
   ProjectOutsideOrganizationError,
+  UnknownGraderLibraryEntryError,
+  UnprocessableInputError,
 } from "./errors.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import { isProjectOfOrganization } from "./projects.ts";
 import { liveTestsNamingGrader } from "./tests.ts";
-import { within } from "./within.ts";
+import { inActingProject, within } from "./within.ts";
 
 /**
- * Reading and writing graders — what they are is the schema file's story
- * (`schema/graders.ts`); this file is how they are reached.
+ * Reading and writing the **running copies** — what they are is the schema
+ * file's story (`schema/graders.ts`); this file is how they are reached.
  *
  * Project scoping works as the persona and test factories' does, verb for verb.
  * A context acting in a project writes and reads there; a context acting in none
@@ -41,52 +47,24 @@ import { within } from "./within.ts";
  * nothing, because a grader belongs to a project and a credential for the whole
  * customer is acting in none.
  *
- * The line this factory holds that the two before it do not is **between what a
- * verdict was decided by and where the decision applies.** The rubric, the
- * threshold, the phrases, the judge model: those are what a judgment is made of,
- * so they live in immutable versions and an edit mints the next one, leaving
- * last week's run meaning exactly what it meant. The scope and the sampling rate
- * change nothing about any judgment already made, so they are written in place
- * and take effect everywhere at once. A developer tightening a threshold and a
- * developer pointing a grader at production are doing two different things, and
- * only one of them is rewriting history if it is versioned wrongly.
- */
-
-/**
- * How a measure is reduced to one number before the threshold is applied.
+ * **There is one door that makes a grader, and it is Use.** A copy is only ever
+ * made from a library entry: the entry decides the type and what the form asks
+ * for, the copy holds the answers. That is why nothing here takes a type, and
+ * why nothing here takes criteria — a grader nobody could point at a definition
+ * would be a check with no words behind it, and the whole two-level shape exists
+ * so that the words live in one place and are read through the pointer at
+ * judging time.
  *
- * The list belongs to the measure catalog rather than to this file: which
- * reductions make sense is a fact about what was measured, so the catalog is
- * where the measures and the aggregations they accept are written down
- * together. It is re-exported here because a `metric_threshold` config is where
- * anybody outside meets one.
+ * The line this factory holds that the two before it do not is **between what a
+ * verdict was decided by and where the decision applies.** The filled-in values
+ * and the judge model are what a judgment is made of, so they live in immutable
+ * versions and an edit mints the next one, leaving last week's run meaning
+ * exactly what it meant. The `required` flag, the scope and the sampling rate
+ * change nothing about any judgment already made, so they are written in place
+ * and take effect everywhere at once. A developer tightening a bound and a
+ * developer turning a blocker into a diagnostic are doing two different things,
+ * and only one of them is rewriting history if it is versioned wrongly.
  */
-export type { MeasureAggregation };
-
-/**
- * Which way the threshold points, in words rather than symbols: `<` and `<=`
- * differ by one character in a config file somebody reviews, and the difference
- * between them is whether a run is red.
- */
-const THRESHOLD_COMPARATORS = [
-  "below",
-  "at_most",
-  "above",
-  "at_least",
-] as const;
-export type ThresholdComparator = (typeof THRESHOLD_COMPARATORS)[number];
-
-/** Whether a phrase is looked for as written, or as a regular expression. */
-const PHRASE_MATCHES = ["contains", "regex"] as const;
-export type PhraseMatch = (typeof PHRASE_MATCHES)[number];
-
-/**
- * Whose turns are searched. The default is the agent's, because the agent is
- * what is under test — the persona is egma's own synthetic caller, and judging
- * what egma made it say would be judging egma.
- */
-const PHRASE_SPEAKERS = ["agent", "persona", "either"] as const;
-export type PhraseSpeaker = (typeof PHRASE_SPEAKERS)[number];
 
 /**
  * The judges egma can ask live beside the other closed vocabularies, in the
@@ -106,172 +84,117 @@ export type JudgeModel = {
   readonly model: string;
 };
 
-/** The criteria a judge reads, in the words the team wrote them in. */
-export type LlmRubricConfig = {
-  readonly rubric: string;
-};
-
 /**
- * A measurement turned into a judgment: "p90 of turn_response_latency under
- * 2000ms". The measure is named, not described — the measure catalog says what
- * the simulator emits, and a grader that guessed a string would silently never
- * fire.
+ * One **assertion's** filled-in values: the answers to what the library entry's
+ * form asked, keyed by the parameter names the entry declared.
+ *
+ * A latency copy's is `{ metric, bound }`. There is no shape here for anything
+ * else, and deliberately: what may be asked is the entry's decision, checked at
+ * the write door against the entry's own declaration, so a value nobody could
+ * have been asked for cannot be stored.
  */
-export type MetricThresholdConfig = {
-  readonly measure: string;
-  readonly aggregation: MeasureAggregation;
-  readonly comparator: ThresholdComparator;
-  readonly threshold: number;
-};
+export type GraderAssertion = Readonly<Record<string, string | number>>;
 
 /**
- * One tool, and optionally what it must have been called with. The arguments
- * are constraints on the call rather than the call itself: absent means the
- * call happening at all is the whole check.
+ * What a copy judges by: one filled-in set per assertion, in the order they
+ * were written.
+ *
+ * **Empty is a complete answer, not an unfinished one.** The expected-behaviors
+ * copy holds no assertions of its own because its assertions are the test's own
+ * sentences, supplied per test at judging time — so an empty list is what a
+ * correctly configured copy of it looks like, forever.
  */
-export type ToolExpectation = {
-  readonly tool: string;
-  readonly arguments: Readonly<Record<string, unknown>> | null;
+export type GraderConfig = {
+  readonly assertions: readonly GraderAssertion[];
 };
 
-/** What must have fired, and what must never have. */
-export type ToolCallsConfig = {
-  readonly required: readonly ToolExpectation[];
-  readonly forbidden: readonly ToolExpectation[];
-};
-
-export type Phrase = {
-  readonly text: string;
-  readonly match: PhraseMatch;
-};
-
-/** The compliance disclosure that must be said, and the promise that must not. */
-export type PhraseMatchConfig = {
-  readonly required: readonly Phrase[];
-  readonly banned: readonly Phrase[];
-  readonly speaker: PhraseSpeaker;
-};
-
-export type GraderConfig =
-  | LlmRubricConfig
-  | MetricThresholdConfig
-  | ToolCallsConfig
-  | PhraseMatchConfig;
-
-/** What each type's config is, so the pair can never come apart. */
-type ConfigOf = {
-  readonly llm_rubric: LlmRubricConfig;
-  readonly metric_threshold: MetricThresholdConfig;
-  readonly tool_calls: ToolCallsConfig;
-  readonly phrase_match: PhraseMatchConfig;
+/** The config as a caller writes one; the same shape, before it is checked. */
+export type GraderConfigInput = {
+  readonly assertions: readonly Readonly<Record<string, unknown>>[];
 };
 
 /**
- * A grader's type and the config that type shapes, as one inseparable pair —
- * every read hands both over together, so a caller who has narrowed the type has
- * narrowed the config with it and never has to guess what the jsonb holds.
- */
-export type GraderJudgment = {
-  [K in GraderType]: { readonly type: K; readonly config: ConfigOf[K] };
-}[GraderType];
-
-/** A phrase as a caller writes one; `match` defaults to looking for the words. */
-export type PhraseInput = {
-  readonly text: string;
-  readonly match?: PhraseMatch | undefined;
-};
-
-export type ToolExpectationInput = {
-  readonly tool: string;
-  readonly arguments?: Readonly<Record<string, unknown>> | undefined;
-};
-
-export type ToolCallsConfigInput = {
-  readonly required?: readonly ToolExpectationInput[] | undefined;
-  readonly forbidden?: readonly ToolExpectationInput[] | undefined;
-};
-
-export type PhraseMatchConfigInput = {
-  readonly required?: readonly PhraseInput[] | undefined;
-  readonly banned?: readonly PhraseInput[] | undefined;
-  readonly speaker?: PhraseSpeaker | undefined;
-};
-
-/**
- * A judgment as it is written down, before egma fills in what was left out.
- * What lands in the version row is always complete — every default resolved at
- * the write door — so no reader afterwards has to know what a missing field
- * used to mean, and two configs differing only in what they left implicit are
- * one config rather than two versions.
- */
-export type NewGraderJudgment =
-  | { readonly type: "llm_rubric"; readonly config: LlmRubricConfig }
-  | { readonly type: "metric_threshold"; readonly config: MetricThresholdConfig }
-  | { readonly type: "tool_calls"; readonly config: ToolCallsConfigInput }
-  | { readonly type: "phrase_match"; readonly config: PhraseMatchConfigInput };
-
-/** The config half of the above, for an edit that keeps the grader's type. */
-export type GraderConfigInput = NewGraderJudgment["config"];
-
-/**
- * The live settings: where the grader applies, plus what to call it. Every one
- * of them is optional on a create, and every one of them takes effect everywhere
- * the moment it is written.
+ * The live settings: where the copy applies, how loudly, and what to call it.
+ * Every one of them is optional at Use time, and every one of them takes effect
+ * everywhere the moment it is written.
  */
 type LiveSettings = {
-  readonly name: string;
+  /** Defaults to the entry's own name — what the shelf calls this grader. */
+  readonly name?: string | undefined;
   readonly description?: string | undefined;
+  readonly required?: boolean | undefined;
   readonly scope?: GraderScope | undefined;
   readonly productionSampleRate?: number | undefined;
 };
 
-export type NewGrader = LiveSettings & {
+/**
+ * Pressing **Use** on a library entry: the pointer, and the answers to whatever
+ * that entry's form asked.
+ *
+ * `params` is **one filled-in set**, because that is what the form is — one
+ * measure and one bound, typed once. It becomes the copy's first and only
+ * assertion. An entry that asks nothing takes nothing here, and the copy is born
+ * with an empty list.
+ */
+export type UseLibraryEntry = LiveSettings & {
+  readonly libraryId: string;
+  readonly params?: Readonly<Record<string, unknown>> | undefined;
   readonly judgeModel?: JudgeModel | undefined;
-} & NewGraderJudgment;
+};
 
 export type Grader = {
   readonly id: string;
   readonly projectId: string;
+  /** The entry this is a copy of. Never null, and never orphaned. */
+  readonly libraryId: string;
   readonly name: string;
   readonly description: string | null;
+  /** Copied from the entry at Use time and frozen there. */
+  readonly type: LibraryType;
+  /** `false` makes this a diagnostic: judged, shown, never able to fail a test. */
+  readonly required: boolean;
   readonly scope: GraderScope;
   readonly productionSampleRate: number;
   readonly version: number;
   /** The current version's own `grv_` id — what a verdict row names. */
   readonly versionId: string;
+  readonly config: GraderConfig;
   readonly judgeModel: JudgeModel | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
-} & GraderJudgment;
+};
 
 /**
  * What an edit may touch. The live settings write in place and version nothing;
- * the config and the judge model are what a verdict was decided by, and version
- * on any change. Absent means keep.
+ * the filled-in values and the judge model are what a verdict was decided by,
+ * and version on any change. Absent means keep.
  *
- * **The type is deliberately not here.** Every version of a grader holds a
- * config that its type shapes, so changing the type would leave the versions
- * behind it holding parameters for a kind of judgment this grader no longer
- * makes — a different grader wearing the old one's history. Making a second
- * grader costs one call and says what actually happened.
+ * **Neither the type nor the pointer is here.** A copy's type came from its
+ * entry and every version behind it holds values that type shapes, so changing
+ * either would leave the history holding answers to questions this grader no
+ * longer asks — a different grader wearing the old one's history. Pressing Use
+ * again costs one call and says what actually happened.
  */
 export type GraderChanges = {
   readonly name?: string;
   readonly description?: string | null;
+  readonly required?: boolean;
   readonly scope?: GraderScope;
   readonly productionSampleRate?: number;
   readonly config?: GraderConfigInput;
   readonly judgeModel?: JudgeModel | null;
 };
 
-/** One version, frozen: the grader exactly as some verdict was decided by it. */
+/** One version, frozen: the copy exactly as some verdict was decided by it. */
 export type GraderVersion = {
   readonly id: string;
   readonly graderId: string;
   readonly version: number;
+  readonly type: LibraryType;
+  readonly config: GraderConfig;
   readonly judgeModel: JudgeModel | null;
   readonly createdAt: Date;
-} & GraderJudgment;
+};
 
 const notDeleted: SQL = isNull(grader.deletedAt);
 
@@ -279,21 +202,33 @@ const notDeleted: SQL = isNull(grader.deletedAt);
 const COLUMNS = {
   id: grader.id,
   projectId: grader.projectId,
+  libraryId: grader.libraryId,
   name: grader.name,
   description: grader.description,
   type: grader.type,
+  required: grader.required,
   scope: grader.scope,
   productionSampleRate: grader.productionSampleRate,
   createdAt: grader.createdAt,
   updatedAt: grader.updatedAt,
 } as const;
 
+/**
+ * What a copy is worth when whoever pressed Use said nothing about it.
+ *
+ * Blocking, because a grader somebody bothered to switch on is a grader they
+ * expect to be believed, and one that quietly only reports is one whose failure
+ * a release walks past. Making it a diagnostic is one word; noticing that it
+ * never blocked anything is a postmortem.
+ */
+const DEFAULT_REQUIRED = true;
+
 /** All of production, if production is ever in scope at all. */
 const DEFAULT_PRODUCTION_SAMPLE_RATE = 100;
 
 function validName(name: string): string {
   const trimmed = name.trim();
-  if (trimmed === "") throw new Error("a grader needs a name");
+  if (trimmed === "") throw new UnprocessableInputError("a grader needs a name");
   return trimmed;
 }
 
@@ -304,7 +239,7 @@ function knownWord<Value extends string>(
   what: string,
 ): Value {
   if (!(allowed as readonly string[]).includes(value)) {
-    throw new Error(
+    throw new UnprocessableInputError(
       `"${value}" is not a ${what} egma knows; expected one of ${allowed.join(", ")}`,
     );
   }
@@ -322,7 +257,7 @@ function validScope(scope: string): GraderScope {
  */
 function validProductionSampleRate(rate: number): number {
   if (!Number.isInteger(rate) || rate < 0 || rate > 100) {
-    throw new Error(
+    throw new UnprocessableInputError(
       "a production sample rate is a whole percentage between 0 and 100",
     );
   }
@@ -337,7 +272,9 @@ function validJudgeModel(judgeModel: JudgeModel): JudgeModel {
   );
   const model = judgeModel.model.trim();
   if (model === "") {
-    throw new Error("a judge model override needs a model to name");
+    throw new UnprocessableInputError(
+      "a judge model override needs a model to name",
+    );
   }
   return { provider, model };
 }
@@ -349,327 +286,237 @@ function validJudgeModel(judgeModel: JudgeModel): JudgeModel {
  */
 function fields(value: unknown, what: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${what} has to be an object`);
+    throw new UnprocessableInputError(`${what} has to be an object`);
   }
   return value as Record<string, unknown>;
 }
 
-/** A list a caller may leave out entirely, which means it names nothing. */
-function listOf(value: unknown, type: GraderType, field: string): unknown[] {
-  if (value === undefined || value === null) return [];
-  if (!Array.isArray(value)) {
-    throw new Error(`a ${type} grader's ${field} has to be a list`);
-  }
-  return value;
-}
+/**
+ * What the write door needs off a library entry: the type it copies down, and
+ * the declaration every filled-in value is checked against.
+ */
+type Definition = {
+  readonly id: string;
+  readonly name: string;
+  readonly type: LibraryType;
+  readonly params: readonly LibraryParameter[];
+};
 
-function validLlmRubricConfig(config: unknown): LlmRubricConfig {
-  const { rubric } = fields(config, "an llm_rubric grader's config");
-  if (typeof rubric !== "string" || rubric.trim() === "") {
+/**
+ * The entry this copy is being made from, or a refusal naming it.
+ *
+ * **Read through the same door the Library screen reads**: egma's own entries,
+ * which belong to nobody and are therefore on everybody's shelf, plus the
+ * caller's own organization's when custom authoring arrives. An entry belonging
+ * to another customer is not refused differently from one that does not exist,
+ * because saying which it was would answer a question about somebody else's
+ * shelf.
+ */
+async function definitionOf(
+  on: Queryable,
+  auth: AuthContext,
+  libraryId: string,
+): Promise<Definition> {
+  const [row] = await on
+    .select({
+      id: graderLibrary.id,
+      organizationId: graderLibrary.organizationId,
+      name: graderLibrary.name,
+      type: graderLibrary.type,
+      params: graderLibrary.params,
+    })
+    .from(graderLibrary)
+    .where(
+      and(
+        eq(graderLibrary.id, libraryId),
+        sql`(${graderLibrary.organizationId} is null or ${graderLibrary.organizationId} = ${auth.organizationId})`,
+      ),
+    )
+    .limit(1);
+
+  if (row === undefined) throw new UnknownGraderLibraryEntryError(libraryId);
+
+  if (!Array.isArray(row.params)) {
     throw new Error(
-      "an llm_rubric grader needs a rubric: the criteria a judge reads, in words",
+      `library entry ${row.id} holds parameters in a shape egma never writes; the row needs repairing before anybody can use it`,
     );
   }
-  return { rubric: rubric.trim() };
+
+  return {
+    id: row.id,
+    name: row.name,
+    // Pinned by a check constraint on the way in, so what comes back is one of
+    // the two words the shelf writes.
+    type: row.type as LibraryType,
+    params: row.params as readonly LibraryParameter[],
+  };
 }
 
 /**
- * A measure the simulator actually emits, checked against the catalog.
+ * A measure the simulator actually produces, checked against the catalog.
  *
  * **The one write-door rule that is about the world rather than about the
- * shape.** A threshold grader names what it reads as a string, and a string
- * naming nothing produces a grader that reads nothing, judges nothing and is
- * `skipped` forever — a check somebody wrote, believes in, and that can never
- * fire. Nothing downstream can catch it: a missing measure is a legitimate
- * `skipped` on a chat conversation with no audio, so the engine has no way to
- * tell a typo from a modality. Only the moment of writing can.
+ * shape.** A copy names what it reads as a string, and a string naming nothing
+ * produces a grader that reads nothing, judges nothing and is `skipped` forever
+ * — a check somebody wrote, believes in, and that can never fire. Nothing
+ * downstream can catch it: a missing measure is a legitimate `skipped` on a
+ * conversation whose spans do not carry it, so the engine has no way to tell a
+ * typo from a modality. Only the moment of writing can.
  *
  * The refusal names the catalog rather than only the list, because the next
  * question after "that is not a measure" is always "then what is", and the
  * catalog is the document that answers it — and says what each measure means,
  * which a list of names cannot.
  */
-function validMeasure(measure: string): string {
+function validMeasure(measure: string, parameter: string): string {
   if (!isCatalogedMeasure(measure)) {
-    throw new Error(
-      `"${measure}" is not a measure egma's simulator produces, so a grader reading it could never fire; the measure catalog (${MEASURE_CATALOG_DOCUMENT}, version ${MEASURE_CATALOG_VERSION}) names ${CATALOGED_MEASURES.join(", ")}`,
+    throw new UnprocessableInputError(
+      `"${measure}" is not a measure egma computes, so a grader reading it could never fire; ${parameter} takes one of ${CATALOGED_MEASURES.join(", ")}, and the measure catalog (${MEASURE_CATALOG_DOCUMENT}, version ${MEASURE_CATALOG_VERSION}) says what each of them means`,
     );
   }
   return measure;
 }
 
-function validMetricThresholdConfig(config: unknown): MetricThresholdConfig {
-  const { measure, aggregation, comparator, threshold } = fields(
-    config,
-    "a metric_threshold grader's config",
-  );
-
-  if (typeof measure !== "string" || measure.trim() === "") {
-    throw new Error(
-      "a metric_threshold grader needs a measure: the name of what it reads",
-    );
-  }
-  validMeasure(measure.trim());
-  if (typeof aggregation !== "string") {
-    throw new Error(
-      `a metric_threshold grader needs an aggregation; expected one of ${MEASURE_AGGREGATIONS.join(", ")}`,
-    );
-  }
-  if (typeof comparator !== "string") {
-    throw new Error(
-      `a metric_threshold grader needs a comparator; expected one of ${THRESHOLD_COMPARATORS.join(", ")}`,
-    );
-  }
-  if (typeof threshold !== "number" || !Number.isFinite(threshold)) {
-    throw new Error(
-      "a metric_threshold grader needs a threshold, and it has to be a number",
-    );
-  }
-
-  return {
-    measure: measure.trim(),
-    aggregation: knownWord(MEASURE_AGGREGATIONS, aggregation, "aggregation"),
-    comparator: knownWord(THRESHOLD_COMPARATORS, comparator, "comparator"),
-    threshold,
-  };
-}
-
-function validToolExpectations(
+/**
+ * One value, checked against the parameter the entry declared it under.
+ *
+ * The `kind` decides the check exactly as it decides the control the form
+ * draws, so what a person could type and what a write will take are one
+ * decision. A kind this release has never heard of is refused rather than
+ * waved through: a value nothing can check is a value nothing can be judged by.
+ */
+function validValue(
+  parameter: LibraryParameter,
   value: unknown,
-  field: "required" | "forbidden",
-): readonly ToolExpectation[] {
-  return listOf(value, "tool_calls", field).map((entry) => {
-    const { tool, arguments: expected } = fields(
-      entry,
-      `a tool_calls grader's ${field} entry`,
+): string | number {
+  if (value === undefined || value === null) {
+    throw new UnprocessableInputError(
+      `this grader needs "${parameter.name}": ${parameter.means}`,
     );
-    if (typeof tool !== "string" || tool.trim() === "") {
-      throw new Error(
-        `a tool_calls grader needs a tool name on every ${field} entry`,
-      );
-    }
-    if (expected !== undefined && expected !== null) {
-      if (
-        typeof expected !== "object" ||
-        Array.isArray(expected)
-      ) {
-        throw new Error(
-          `a tool_calls grader's ${field} arguments have to be an object of argument names and the values they must carry`,
+  }
+
+  switch (parameter.kind) {
+    case "measure": {
+      if (typeof value !== "string" || value.trim() === "") {
+        throw new UnprocessableInputError(
+          `"${parameter.name}" is the name of a measure, so it has to be text`,
         );
       }
+      return validMeasure(value.trim(), `"${parameter.name}"`);
     }
-    return {
-      tool: tool.trim(),
-      arguments: (expected ?? null) as Readonly<Record<string, unknown>> | null,
-    };
-  });
-}
-
-function validToolCallsConfig(config: unknown): ToolCallsConfig {
-  const { required, forbidden } = fields(
-    config,
-    "a tool_calls grader's config",
-  );
-  const judgment = {
-    required: validToolExpectations(required, "required"),
-    forbidden: validToolExpectations(forbidden, "forbidden"),
-  };
-
-  if (judgment.required.length === 0 && judgment.forbidden.length === 0) {
-    throw new Error(
-      "a tool_calls grader needs at least one required or forbidden tool, because one that names neither can never fail",
-    );
-  }
-  return judgment;
-}
-
-function validPhrases(value: unknown, field: "required" | "banned"): readonly Phrase[] {
-  return listOf(value, "phrase_match", field).map((entry) => {
-    const { text, match } = fields(
-      entry,
-      `a phrase_match grader's ${field} phrase`,
-    );
-    if (typeof text !== "string" || text.trim() === "") {
+    case "number": {
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        throw new UnprocessableInputError(
+          `"${parameter.name}" has to be a number: ${parameter.means}`,
+        );
+      }
+      return value;
+    }
+    default: {
       throw new Error(
-        `a phrase_match grader needs text on every ${field} phrase`,
+        `library entry parameter "${parameter.name}" is a kind of value this release cannot check, so nothing may be written under it`,
       );
     }
-    return {
-      text: text.trim(),
-      match:
-        match === undefined || match === null
-          ? "contains"
-          : knownWord(PHRASE_MATCHES, String(match), "phrase match"),
-    };
-  });
-}
-
-function validPhraseMatchConfig(config: unknown): PhraseMatchConfig {
-  const { required, banned, speaker } = fields(
-    config,
-    "a phrase_match grader's config",
-  );
-  const judgment = {
-    required: validPhrases(required, "required"),
-    banned: validPhrases(banned, "banned"),
-    speaker:
-      speaker === undefined || speaker === null
-        ? ("agent" as PhraseSpeaker)
-        : knownWord(PHRASE_SPEAKERS, String(speaker), "speaker"),
-  };
-
-  if (judgment.required.length === 0 && judgment.banned.length === 0) {
-    throw new Error(
-      "a phrase_match grader needs at least one required or banned phrase, because one that names neither can never fail",
-    );
   }
-  return judgment;
 }
 
 /**
- * A type and its config, checked together — the one write-door rule this
- * factory exists to hold. One entry per type, in a table the compiler holds
- * exhaustive: a fifth type refuses to build until it is also told what its
- * config must hold. A type that fell through with no validator would accept any
- * jsonb at all, and the first anyone would hear of it is a grader that judges
- * nothing.
+ * One assertion's filled-in values, checked against what the entry asks for —
+ * every parameter answered, and nothing answered that was never asked.
+ *
+ * The second half matters as much as the first. A key the entry never declared
+ * is either a typo for one it did or a leftover from a definition that has moved
+ * on, and both become a grader quietly judging by less than somebody wrote
+ * down. Refusing names the keys the entry actually asks for, because the next
+ * question is always "then what should I have sent".
  */
-const judgmentOfType: {
-  readonly [K in GraderType]: (config: unknown) => GraderJudgment;
-} = {
-  llm_rubric: (config) => ({
-    type: "llm_rubric",
-    config: validLlmRubricConfig(config),
-  }),
-  metric_threshold: (config) => ({
-    type: "metric_threshold",
-    config: validMetricThresholdConfig(config),
-  }),
-  tool_calls: (config) => ({
-    type: "tool_calls",
-    config: validToolCallsConfig(config),
-  }),
-  phrase_match: (config) => ({
-    type: "phrase_match",
-    config: validPhraseMatchConfig(config),
-  }),
-};
+function validAssertion(
+  definition: Definition,
+  values: unknown,
+  what: string,
+): GraderAssertion {
+  const given = fields(values, what);
+  const asked = definition.params.map((parameter) => parameter.name);
 
-function validJudgment(type: string, config: unknown): GraderJudgment {
-  return judgmentOfType[knownWord(GRADER_TYPES, type, "grader type")](config);
+  const unexpected = Object.keys(given).filter((key) => !asked.includes(key));
+  if (unexpected.length > 0) {
+    throw new UnprocessableInputError(
+      asked.length === 0
+        ? `the ${definition.name} grader asks for nothing, so "${unexpected.join('", "')}" has nowhere to go — its assertions are the test's own expected behaviors`
+        : `the ${definition.name} grader does not ask for "${unexpected.join('", "')}"; it asks for "${asked.join('", "')}"`,
+    );
+  }
+
+  const filled: Record<string, string | number> = {};
+  for (const parameter of definition.params) {
+    filled[parameter.name] = validValue(parameter, given[parameter.name]);
+  }
+  return filled;
+}
+
+/**
+ * Every assertion a copy is being written with, checked together.
+ *
+ * **An entry that asks for something needs at least one.** A latency copy with
+ * no assertions reads nothing, judges nothing, and is a row on the Running
+ * graders screen that says a project is checking something it is not. An entry
+ * that asks nothing must have none, for the mirror-image reason.
+ */
+function validConfig(
+  definition: Definition,
+  config: GraderConfigInput,
+): GraderConfig {
+  const assertions = config.assertions.map((values, at) =>
+    validAssertion(definition, values, `assertion ${at + 1} of this grader`),
+  );
+
+  if (definition.params.length > 0 && assertions.length === 0) {
+    throw new UnprocessableInputError(
+      `the ${definition.name} grader needs at least one assertion — "${definition.params
+        .map((parameter) => parameter.name)
+        .join('", "')}" — because a copy that checks nothing can never fail`,
+    );
+  }
+  return { assertions };
 }
 
 /**
  * The shape guard on every read. Stored jsonb comes back `unknown`, and a row
  * somebody hand-edited must fail here, loudly and naming itself, rather than
- * leak into a caller as a config that isn't one. Shape only, deliberately: the
- * aggregations, the comparators and the allowed providers may all grow or
- * tighten later, and an old version must stay readable exactly as it was
- * written — so a word egma no longer offers is taken on trust once it is a
- * string.
+ * leak into a caller as a config that isn't one.
+ *
+ * Shape only, deliberately: what an entry asks for may grow or tighten later,
+ * and an old version must stay readable exactly as it was written — so a key
+ * nothing asks for any more is taken on trust once it is one of the two kinds
+ * of value a form can produce.
  */
-function malformedAt(versionId: string): () => Error {
-  return () =>
+function configFromRow(value: unknown, versionId: string): GraderConfig {
+  const malformed = (): Error =>
     new Error(
       `version ${versionId} holds a config in a shape egma never writes; the row needs repairing before anybody can read it`,
     );
-}
 
-function textFromRow(value: unknown, malformed: () => Error): string {
-  if (typeof value !== "string" || value.trim() === "") throw malformed();
-  return value;
-}
-
-function rowFields(
-  value: unknown,
-  malformed: () => Error,
-): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw malformed();
   }
-  return value as Record<string, unknown>;
-}
+  const { assertions } = value as Record<string, unknown>;
+  if (!Array.isArray(assertions)) throw malformed();
 
-function listFromRow(value: unknown, malformed: () => Error): unknown[] {
-  if (!Array.isArray(value)) throw malformed();
-  return value;
-}
-
-const judgmentFromRowOfType: {
-  readonly [K in GraderType]: (
-    value: unknown,
-    malformed: () => Error,
-  ) => GraderJudgment;
-} = {
-  llm_rubric: (value, malformed) => ({
-    type: "llm_rubric",
-    config: { rubric: textFromRow(rowFields(value, malformed).rubric, malformed) },
-  }),
-  metric_threshold: (value, malformed) => {
-    const { measure, aggregation, comparator, threshold } = rowFields(
-      value,
-      malformed,
-    );
-    if (typeof threshold !== "number" || !Number.isFinite(threshold)) {
-      throw malformed();
-    }
-    return {
-      type: "metric_threshold",
-      config: {
-        measure: textFromRow(measure, malformed),
-        aggregation: textFromRow(aggregation, malformed) as MeasureAggregation,
-        comparator: textFromRow(comparator, malformed) as ThresholdComparator,
-        threshold,
-      },
-    };
-  },
-  tool_calls: (value, malformed) => {
-    const { required, forbidden } = rowFields(value, malformed);
-    const tools = (entries: unknown): readonly ToolExpectation[] =>
-      listFromRow(entries, malformed).map((entry) => {
-        const { tool, arguments: expected } = rowFields(entry, malformed);
-        if (expected !== null && typeof expected !== "object") throw malformed();
-        if (Array.isArray(expected)) throw malformed();
-        return {
-          tool: textFromRow(tool, malformed),
-          arguments: expected as Readonly<Record<string, unknown>> | null,
-        };
-      });
-    return {
-      type: "tool_calls",
-      config: { required: tools(required), forbidden: tools(forbidden) },
-    };
-  },
-  phrase_match: (value, malformed) => {
-    const { required, banned, speaker } = rowFields(value, malformed);
-    const phrases = (entries: unknown): readonly Phrase[] =>
-      listFromRow(entries, malformed).map((entry) => {
-        const phrase = rowFields(entry, malformed);
-        return {
-          text: textFromRow(phrase.text, malformed),
-          match: textFromRow(phrase.match, malformed) as PhraseMatch,
-        };
-      });
-    return {
-      type: "phrase_match",
-      config: {
-        required: phrases(required),
-        banned: phrases(banned),
-        speaker: textFromRow(speaker, malformed) as PhraseSpeaker,
-      },
-    };
-  },
-};
-
-function judgmentFromRow(
-  type: string,
-  config: unknown,
-  versionId: string,
-): GraderJudgment {
-  const malformed = malformedAt(versionId);
-  const known = GRADER_TYPES.find((candidate) => candidate === type);
-  if (known === undefined) throw malformed();
-  return judgmentFromRowOfType[known](config, malformed);
+  return {
+    assertions: assertions.map((entry) => {
+      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+        throw malformed();
+      }
+      const filled: Record<string, string | number> = {};
+      for (const [key, held] of Object.entries(entry)) {
+        if (typeof held !== "string" && typeof held !== "number") {
+          throw malformed();
+        }
+        filled[key] = held;
+      }
+      return filled;
+    }),
+  };
 }
 
 function judgeModelFromRow(
@@ -677,111 +524,43 @@ function judgeModelFromRow(
   versionId: string,
 ): JudgeModel | null {
   if (value === null || value === undefined) return null;
-  const malformed = malformedAt(versionId);
-  const { provider, model } = rowFields(value, malformed);
-  return {
-    provider: textFromRow(provider, malformed) as JudgeProvider,
-    model: textFromRow(model, malformed),
-  };
+  const malformed = (): Error =>
+    new Error(
+      `version ${versionId} holds a judge model in a shape egma never writes; the row needs repairing before anybody can read it`,
+    );
+
+  if (typeof value !== "object" || Array.isArray(value)) throw malformed();
+  const { provider, model } = value as Record<string, unknown>;
+  if (typeof provider !== "string" || typeof model !== "string") {
+    throw malformed();
+  }
+  return { provider: provider as JudgeProvider, model };
 }
 
 /**
- * Two stored JSON values, compared as values rather than as text: key order is
- * whatever jsonb decided on the way in, and two argument constraints that
- * differ only in that order are one constraint. Written here rather than taken
- * from a serializer, for the reason every other comparator in this module is —
- * a serializer that reordered keys differently on two occasions would mint a
- * version out of nothing.
- */
-function sameJson(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (Array.isArray(a) || Array.isArray(b)) {
-    return (
-      Array.isArray(a) &&
-      Array.isArray(b) &&
-      a.length === b.length &&
-      a.every((entry, index) => sameJson(entry, b[index]))
-    );
-  }
-  if (typeof a === "object" && a !== null && typeof b === "object" && b !== null) {
-    const left = Object.keys(a).sort();
-    const right = Object.keys(b).sort();
-    return (
-      left.length === right.length &&
-      left.every((key, index) => key === right[index]) &&
-      left.every((key) =>
-        sameJson(
-          (a as Record<string, unknown>)[key],
-          (b as Record<string, unknown>)[key],
-        ),
-      )
-    );
-  }
-  return false;
-}
-
-/**
- * Byte-identical or not, decided field by field — the same answer canonical
+ * Byte-identical or not, decided value by value — the same answer canonical
  * serialization would give, without trusting any serializer to order keys the
  * way jsonb re-ordered them.
  *
- * One comparator per type, in a table the compiler holds exhaustive, and one
- * comparator per field inside each: a field added to a config refuses to build
- * until it is also told how to compare. A hand-maintained comparator that missed
- * a field would call two different configs identical, and an edit would vanish
- * without a version — the one loss the whole versioning exists to rule out.
+ * Assertions compare **in order and by position**, because position is what a
+ * verdict row keys an assertion by: reordering two bounds is a different grader
+ * from the reader's point of view even though the same two checks are made.
  */
-const sameConfigOfType: {
-  readonly [K in GraderType]: (a: ConfigOf[K], b: ConfigOf[K]) => boolean;
-} = {
-  llm_rubric: (a, b) => a.rubric === b.rubric,
-  metric_threshold: (a, b) =>
-    a.measure === b.measure &&
-    a.aggregation === b.aggregation &&
-    a.comparator === b.comparator &&
-    a.threshold === b.threshold,
-  tool_calls: (a, b) =>
-    sameTools(a.required, b.required) && sameTools(a.forbidden, b.forbidden),
-  phrase_match: (a, b) =>
-    a.speaker === b.speaker &&
-    samePhrases(a.required, b.required) &&
-    samePhrases(a.banned, b.banned),
-};
-
-function sameTools(
-  a: readonly ToolExpectation[],
-  b: readonly ToolExpectation[],
-): boolean {
+function sameConfig(stored: GraderConfig, next: GraderConfig): boolean {
   return (
-    a.length === b.length &&
-    a.every(
-      (entry, index) =>
-        entry.tool === b[index]?.tool &&
-        sameJson(entry.arguments, b[index]?.arguments),
-    )
+    stored.assertions.length === next.assertions.length &&
+    stored.assertions.every((assertion, at) => {
+      const other = next.assertions[at];
+      if (other === undefined) return false;
+      const keys = Object.keys(assertion).sort();
+      const otherKeys = Object.keys(other).sort();
+      return (
+        keys.length === otherKeys.length &&
+        keys.every((key, index) => key === otherKeys[index]) &&
+        keys.every((key) => assertion[key] === other[key])
+      );
+    })
   );
-}
-
-function samePhrases(a: readonly Phrase[], b: readonly Phrase[]): boolean {
-  return (
-    a.length === b.length &&
-    a.every(
-      (phrase, index) =>
-        phrase.text === b[index]?.text && phrase.match === b[index]?.match,
-    )
-  );
-}
-
-function sameJudgment(stored: GraderJudgment, next: GraderJudgment): boolean {
-  if (stored.type !== next.type) return false;
-  // A grader's type is set at creation and never edited, so both sides are
-  // always the same kind. The compiler cannot see that the entry keyed by one
-  // side's type is the entry the other side's config fits, so this says so.
-  const same = sameConfigOfType[stored.type] as (
-    a: GraderConfig,
-    b: GraderConfig,
-  ) => boolean;
-  return same(stored.config, next.config);
 }
 
 function sameJudgeModel(a: JudgeModel | null, b: JudgeModel | null): boolean {
@@ -789,19 +568,12 @@ function sameJudgeModel(a: JudgeModel | null, b: JudgeModel | null): boolean {
   return a.provider === b.provider && a.model === b.model;
 }
 
-/** Acting in a project narrows to it; acting in none reaches the customer. */
-function inActingProject(auth: AuthContext): SQL | undefined {
-  return auth.projectId === undefined
-    ? undefined
-    : eq(grader.projectId, auth.projectId);
-}
-
 /** The named grader, alive, within the caller's tenancy and scope. */
 function theGrader(auth: AuthContext, id: string): SQL {
   return within(
     auth,
     grader,
-    and(eq(grader.id, id), notDeleted, inActingProject(auth)),
+    and(eq(grader.id, id), notDeleted, inActingProject(auth, grader)),
   );
 }
 
@@ -809,9 +581,11 @@ function theGrader(auth: AuthContext, id: string): SQL {
 function answer(row: {
   readonly id: string;
   readonly projectId: string;
+  readonly libraryId: string;
   readonly name: string;
   readonly description: string | null;
   readonly type: string;
+  readonly required: boolean;
   readonly scope: string;
   readonly productionSampleRate: number;
   readonly version: number;
@@ -826,21 +600,30 @@ function answer(row: {
     ...rest,
     // The identity row's own enumerated columns are pinned by check
     // constraints, so what comes back is one of the words this module writes.
+    type: type as LibraryType,
     scope: scope as GraderScope,
-    ...judgmentFromRow(type, config, row.versionId),
+    config: configFromRow(config, row.versionId),
     judgeModel: judgeModelFromRow(judgeModel, row.versionId),
   };
 }
 
 /**
- * The grader and its first version, or neither. The identity row goes in first
- * naming a version that does not exist yet — its pointer's constraint is
- * deferred, so Postgres checks it at commit — and anything that fails on the way
- * out takes the whole write with it.
+ * **Use**: a running copy of a library entry, and its first version, or neither.
+ *
+ * The entry decides the type and what the form asked; the copy holds the
+ * answers and where they apply. The whole write is one transaction — the
+ * identity row goes in first naming a version that does not exist yet, its
+ * pointer's constraint being deferred so Postgres checks it at commit — and
+ * anything that fails on the way out takes both rows with it. A copy with no
+ * version is a grader nothing can read a config off, and a version with no copy
+ * is a config nothing judges by; neither is a state this door can leave behind.
+ *
+ * The entry is read **inside** the transaction, so the definition the type was
+ * copied from is the definition that existed when the copy was written.
  */
-export async function createGrader(
+export async function useLibraryEntry(
   auth: AuthContext,
-  input: NewGrader,
+  input: UseLibraryEntry,
 ): Promise<Grader> {
   authorize(auth, "author_definitions", here(auth));
 
@@ -852,11 +635,11 @@ export async function createGrader(
   }
 
   // Everything answerable without the database is answered first; only an input
-  // worth writing costs the project-membership read below.
-  const name = validName(input.name);
-  const judgment = validJudgment(input.type, input.config);
+  // worth writing costs the reads below.
+  const name = input.name === undefined ? undefined : validName(input.name);
   const judgeModel =
     input.judgeModel === undefined ? null : validJudgeModel(input.judgeModel);
+  const required = input.required ?? DEFAULT_REQUIRED;
   const scope = input.scope === undefined ? "simulations" : validScope(input.scope);
   const productionSampleRate =
     input.productionSampleRate === undefined
@@ -871,15 +654,27 @@ export async function createGrader(
   const versionId = newId("grv");
 
   const written = await db().transaction(async (tx) => {
+    const definition = await definitionOf(tx, auth, input.libraryId);
+    const config = validConfig(definition, {
+      // One filled-in set is one assertion, which is what the form produces.
+      // Nothing at all is an entry that asks nothing, and its copy is born with
+      // an empty list — the shape a correct expected-behaviors copy keeps.
+      assertions: input.params === undefined ? [] : [input.params],
+    });
+
     const [identity] = await tx
       .insert(grader)
       .values({
         id,
         organizationId: auth.organizationId,
         projectId,
-        name,
+        libraryId: definition.id,
+        // Defaulted from the entry, so a copy nobody renamed says on screen
+        // which grader it is a copy of.
+        name: name ?? definition.name,
         description: input.description ?? null,
-        type: judgment.type,
+        type: definition.type,
+        required,
         scope,
         productionSampleRate,
         currentVersionId: versionId,
@@ -893,22 +688,24 @@ export async function createGrader(
       id: versionId,
       graderId: id,
       version: 1,
-      config: judgment.config,
+      config,
       judgeModel,
       createdBy: auth.userId,
     });
 
-    return identity;
+    return { identity, config };
   });
 
-  return {
-    ...written,
-    scope,
+  // Through the same shaper every other read goes through, so what Use hands
+  // back and what a fetch hands back can never come to differ in a field one of
+  // them forgot.
+  return answer({
+    ...written.identity,
     version: 1,
     versionId,
-    ...judgment,
+    config: written.config,
     judgeModel,
-  };
+  });
 }
 
 /**
@@ -929,9 +726,9 @@ function selectWithCurrentVersion() {
 }
 
 /**
- * One grader with what it currently judges by: its type and config, the judge it
- * insists on if any, and the live settings saying where it applies and how
- * loudly.
+ * One running copy with what it currently judges by: the entry it points at,
+ * its type and filled-in values, the judge it insists on if any, and the live
+ * settings saying where it applies and whether it can fail anything.
  */
 export async function getGrader(
   auth: AuthContext,
@@ -951,18 +748,20 @@ export async function getGrader(
  * One door for every change, so no caller needs the version rules to pick a
  * function — the rules live here. The live settings write in place and version
  * nothing, and read back immediately, because none of them changes what any
- * verdict already written meant. The config and the judge model are what a
- * verdict was decided by: either of them differing from the current version
- * inserts the next version and moves the pointer, in one transaction with the
- * identity row locked, so two concurrent edits number one after the other rather
- * than fighting over the same version number. The version being left behind is
- * never touched, because a verdict that named it must still say what decided it.
- * Content byte-identical to the current version is not an edit at all: nothing
- * is written, not even `updated_at`, and the current version comes back.
+ * verdict already written meant. The filled-in values and the judge model are
+ * what a verdict was decided by: either of them differing from the current
+ * version inserts the next version and moves the pointer, in one transaction
+ * with the identity row locked, so two concurrent edits number one after the
+ * other rather than fighting over the same version number. The version being
+ * left behind is never touched, because a verdict that named it must still say
+ * what decided it. Content byte-identical to the current version is not an edit
+ * at all: nothing is written, not even `updated_at`, and the current version
+ * comes back.
  *
- * What an edit leaves out, it keeps — and a config it does give is checked
- * against the type the grader already has, which is the only type it will ever
- * have.
+ * What an edit leaves out, it keeps — and values it does give are checked
+ * against the **entry this copy points at**, read live, which is the same check
+ * Use made and the reason an edit cannot smuggle in a parameter the form never
+ * asked for.
  *
  * Editing what the caller cannot see returns what reading it would have:
  * `undefined`, with nothing disturbed.
@@ -975,9 +774,9 @@ export async function editGrader(
   authorize(auth, "author_definitions", here(auth));
 
   // Everything answerable without the database is answered first, exactly as
-  // create answers it, so an edit is refused on the same grounds a create is.
-  // The config is the one thing that cannot be judged yet: what it must hold
-  // depends on the type of the row this edit has not read.
+  // Use answers it, so an edit is refused on the same grounds a Use is. The
+  // config is the one thing that cannot be judged yet: what it may hold depends
+  // on the entry the row this edit has not read points at.
   const name = changes.name === undefined ? undefined : validName(changes.name);
   const scope =
     changes.scope === undefined ? undefined : validScope(changes.scope);
@@ -1019,37 +818,38 @@ export async function editGrader(
       throw new Error("the grader's current version is missing");
     }
 
-    const stored = judgmentFromRow(
-      current.type,
-      currentVersion.config,
-      currentVersion.id,
-    );
+    const stored = configFromRow(currentVersion.config, currentVersion.id);
     const storedJudgeModel = judgeModelFromRow(
       currentVersion.judgeModel,
       currentVersion.id,
     );
 
-    // Omitted means unchanged, and the type is the row's rather than the
-    // caller's: an edit says what the grader judges by, never what kind of
-    // grader it is.
-    const judgment =
+    // Omitted means unchanged, and what a given config is checked against is
+    // the entry this copy points at rather than anything the caller said.
+    const config =
       changes.config === undefined
         ? stored
-        : validJudgment(current.type, changes.config);
+        : validConfig(
+            await definitionOf(tx, auth, current.libraryId),
+            changes.config,
+          );
     const nextJudgeModel =
       judgeModel === undefined ? storedJudgeModel : judgeModel;
 
     const mintsVersion =
-      !sameJudgment(stored, judgment) ||
+      !sameConfig(stored, config) ||
       !sameJudgeModel(storedJudgeModel, nextJudgeModel);
     const settingsChanged =
       changes.name !== undefined ||
       changes.description !== undefined ||
+      changes.required !== undefined ||
       scope !== undefined ||
       productionSampleRate !== undefined;
 
     const settled = {
       ...current,
+      type: current.type as LibraryType,
+      required: changes.required ?? current.required,
       scope: scope ?? (current.scope as GraderScope),
       productionSampleRate: productionSampleRate ?? current.productionSampleRate,
     };
@@ -1059,7 +859,7 @@ export async function editGrader(
         ...settled,
         version: currentVersion.version,
         versionId: currentVersion.id,
-        ...stored,
+        config: stored,
         judgeModel: storedJudgeModel,
       };
     }
@@ -1073,7 +873,7 @@ export async function editGrader(
         id: versionId,
         graderId: current.id,
         version,
-        config: judgment.config,
+        config,
         judgeModel: nextJudgeModel,
         createdBy: auth.userId,
       });
@@ -1086,6 +886,7 @@ export async function editGrader(
         ...(changes.description === undefined
           ? {}
           : { description: changes.description }),
+        ...(changes.required === undefined ? {} : { required: changes.required }),
         ...(scope === undefined ? {} : { scope }),
         ...(productionSampleRate === undefined ? {} : { productionSampleRate }),
         ...(mintsVersion ? { currentVersionId: versionId } : {}),
@@ -1099,7 +900,7 @@ export async function editGrader(
       ...updated,
       version,
       versionId,
-      config: judgment.config,
+      config,
       judgeModel: nextJudgeModel,
     });
   });
@@ -1107,8 +908,8 @@ export async function editGrader(
 
 /**
  * One frozen version, by its own `grv_` id — the read that keeps a verdict
- * interpretable after the grader moves on: exactly what decided it, in the
- * words it was decided by.
+ * interpretable after the copy moves on: exactly what decided it, in the values
+ * it was decided by.
  *
  * Deliberately no deleted filter: versions outlive their grader's deletion, so a
  * verdict that named one can always say what judged it.
@@ -1135,7 +936,7 @@ export async function getGraderVersion(
       within(
         auth,
         grader,
-        and(eq(graderVersion.id, versionId), inActingProject(auth)),
+        and(eq(graderVersion.id, versionId), inActingProject(auth, grader)),
       ),
     )
     .limit(1);
@@ -1145,15 +946,16 @@ export async function getGraderVersion(
   const { type, config, judgeModel, ...rest } = row;
   return {
     ...rest,
-    ...judgmentFromRow(type, config, row.id),
+    type: type as LibraryType,
+    config: configFromRow(config, row.id),
     judgeModel: judgeModelFromRow(judgeModel, row.id),
   };
 }
 
 /**
- * One page of the graders the caller can reach — the acting project's, or the
- * whole customer's for a credential acting in none — and where the next page
- * starts.
+ * One page of the running copies the caller can reach — the acting project's,
+ * or the whole customer's for a credential acting in none — and where the next
+ * page starts.
  *
  * Newest first, on the id, which is the mint order; the page rules are the
  * three lists before this one's, written once in `pages.ts`.
@@ -1183,7 +985,7 @@ export async function listGraders(
       within(
         auth,
         grader,
-        and(notDeleted, inActingProject(auth), olderThanCursor),
+        and(notDeleted, inActingProject(auth, grader), olderThanCursor),
       ),
     )
     .orderBy(desc(grader.id))
@@ -1262,8 +1064,8 @@ export type DeletedGrader = {
 };
 
 /**
- * The soft-delete marker, and only the marker. The grader vanishes from lists
- * and fetches at once; the version rows stay exactly where they are, because a
+ * The soft-delete marker, and only the marker. The copy vanishes from lists and
+ * fetches at once; the version rows stay exactly where they are, because a
  * verdict that named one must stay interpretable for as long as it is kept.
  *
  * **Refused while the current version of a live test names it**, naming every
@@ -1273,8 +1075,8 @@ export type DeletedGrader = {
  * somebody wrote down, and a suite going green because a check disappeared is
  * the exact false trust this product exists to kill.
  *
- * Like create, this refuses a credential acting in no project. An edit lands on
- * a row that already names its own project; a delete decides the grader should
+ * Like Use, this refuses a credential acting in no project. An edit lands on a
+ * row that already names its own project; a delete decides the grader should
  * stop appearing in one, and emptying a project is an act taken from inside it.
  */
 export async function deleteGrader(

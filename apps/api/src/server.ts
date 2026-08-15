@@ -13,6 +13,7 @@ import { apiKeyRoutes } from "./routes/api-keys.ts";
 import { claimRoutes } from "./routes/claims.ts";
 import { deviceRoutes } from "./routes/device.ts";
 import { graderLibraryRoutes } from "./routes/grader-library.ts";
+import { graderRoutes } from "./routes/graders.ts";
 import { heartbeatRoutes } from "./routes/heartbeats.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
@@ -267,6 +268,13 @@ export function buildApi(options: ServerOptions): Api {
     provider: identity.provider,
     rateLimit,
   });
+
+  // The graders a project actually judges with, and the one act that makes
+  // another: pressing Use on an entry from the shelf above. Its own scope like
+  // every other group. Two verbs and no third — there is no create taking a
+  // type and criteria, because a grader is always a copy of a definition
+  // somebody can read.
+  void app.register(graderRoutes, { provider: identity.provider, rateLimit });
 
   // The mocked world a project's simulations run in: what egma answers with
   // when the agent calls one of its tools, so a test never books a real

@@ -209,17 +209,29 @@ const WORK_DISPATCHING = [
  * its one parameter is the catalog itself, so a test can hand in an edited copy
  * and watch a version move.
  *
+ * `seedRunningGraders` was added on 2026-08-14 with the running copies, and it
+ * is the other half of `seedGraderLibrary` one table down. A shelf full of
+ * definitions judges nothing: `expected_behaviors` has to be *running* in a
+ * project before that project's tests are checked against what they say. New
+ * projects are born with the copy, in the transaction that creates them; every
+ * project made before that change has none, and this writes it. It names no
+ * customer and takes no argument at all — a project missing its mandatory
+ * grading is missing it whoever owns it — and it asks whether a project has
+ * *ever* held a copy rather than whether it holds one now, so a team that
+ * switched theirs off is not overruled at the next start.
+ *
  * The rule enforces the second half of that the same way it does for work
  * dispatch: nothing here may be handed an `organizationId` or a `projectId`. A
  * function here that grew one would be an ordinary cross-tenant *write* wearing
  * an exemption, which is worse than the read work dispatch guards against.
  *
- * A fourth name here is a decision somebody has to make on purpose.
+ * A fifth name here is a decision somebody has to make on purpose.
  */
 const DEPLOYMENT_CONFIGURING = [
   "seedDefaultJudge",
   "seedGraderLibrary",
   "seedPlatformSettings",
+  "seedRunningGraders",
 ];
 
 /**

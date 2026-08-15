@@ -6,7 +6,7 @@ import { readVerdicts } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  aThreshold,
+  aLatencyCopy,
   conductSimulation,
   eventually,
   makeWorld,
@@ -52,7 +52,7 @@ function environmentWithoutSecrets(): NodeJS.ProcessEnv {
 
 beforeAll(async () => {
   world = await makeWorld("grader_entry_point");
-  await seedGrader(world, aThreshold());
+  await seedGrader(world, aLatencyCopy());
 
   const environment = environmentWithoutSecrets();
   service = spawn("node", [ENTRY], { cwd: ROOT, env: environment });
@@ -80,9 +80,18 @@ afterAll(async () => {
 });
 
 describe("the process the image runs", () => {
+  /**
+   * **The claim is about the process, not about the judgment.** What the
+   * container has to prove is that it boots, reads its configuration out of the
+   * environment, reaches two stores it was only given the URLs of, claims the
+   * work a terminal transition minted, and writes a row. The grader it judges
+   * with is a copy of `latency` — on the shelf, pressable today, and not yet
+   * something egma computes — so the row it writes says exactly that, in egma's
+   * own words, with no account behind it and no model asked anything.
+   */
   it("judges a conversation, with no model key in its environment", async () => {
-    // Stated as an assertion rather than as a comment: this is the acceptance
-    // box, and the whole claim is that grading v1 costs no account.
+    // Stated as an assertion rather than as a comment: nothing that could be a
+    // key is in this process's environment, so nothing it wrote came from one.
     for (const [name, value] of Object.entries(environmentWithoutSecrets())) {
       expect(`${name}=${value ?? ""}`).not.toMatch(/KEY|TOKEN|SECRET/i);
     }
@@ -105,7 +114,10 @@ describe("the process the image runs", () => {
       traceId: simulationId,
       runId,
       source: "simulation",
-      verdict: "passed",
+      // `errored` and never `passed`: this check applies perfectly well and
+      // egma did not make it, which is a sentence a page has to be able to
+      // show rather than a green tick nobody earned.
+      verdict: "errored",
     });
   });
 

@@ -33,10 +33,13 @@ import {
  * anybody's back; a grader deleted after a run keeps its versions, so what it
  * already said stays readable, and it simply stops appearing here.
  *
- * The built-in `expected_behaviors` grader is deliberately absent. It is never a
- * row and never attachable, so it is never resolved — it is applied because
- * running a test means judging it against what the test says, which is a
- * different fact from a grader being attached.
+ * **The expected-behaviors grader is resolved here like everything else.** It
+ * used to be absent — never a row, never attachable, applied because running a
+ * test meant judging it against what the test says. Every project is seeded with
+ * an active copy of the library entry now, so it arrives in this list, and
+ * deleting that copy is how a project stops being judged against its own
+ * expectations. It is simulations-only because its scope says so rather than
+ * because a branch somewhere leaves it out.
  *
  * **Sampling never happens here.** A simulation is a conversation somebody asked
  * for, one at a time, and judging nine of ten of them would mean a suite whose
@@ -74,10 +77,11 @@ export async function applicableGraders(
  *   scenario. There is no test version to read an array off, and inventing one
  *   would mean a customer's monitoring bill quietly depending on which tests
  *   somebody happened to write.
- * - **No built-in `expected_behaviors`.** It judges a test against the behaviors
- *   that test wrote down, and there is no test here to have written any. A
- *   built-in with nothing to check would either judge nothing at all or judge a
- *   real conversation against expectations somebody set for a different one.
+ * - **No `expected_behaviors`.** Its copy is scoped to simulations, which is the
+ *   setting saying this: it judges a test against the behaviors that test wrote
+ *   down, and there is no test here to have written any. A copy of it pointed at
+ *   production by hand would find no simulation and answer nothing, which is the
+ *   honest reply, but the scope is where the decision belongs.
  *
  * So the scope setting is the *whole* of the decision on this side, which is why
  * `production` and `both` are the only two words that reach here — a grader

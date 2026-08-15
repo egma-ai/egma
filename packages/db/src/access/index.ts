@@ -109,6 +109,7 @@ export { ROLES, VIA } from "./context.ts";
 export {
   AgentWriteRefusedError,
   AlreadyBelongsToAnOrganizationError,
+  GraderLibraryEntryInUseError,
   GraderNamedByTestsError,
   LastAdminError,
   MockToolTakenError,
@@ -119,9 +120,11 @@ export {
   RunWriteRefusedError,
   TestMovedOnError,
   TraceStoreRefusedError,
+  UnknownGraderLibraryEntryError,
   UnprocessableInputError,
   UnreadableTraceQueryError,
   type AgentWriteRefusal,
+  type GraderUsingLibraryEntry,
   type RunWriteRefusal,
   type TestNamingGrader,
   type TestNamingPersona,
@@ -406,6 +409,7 @@ export {
 } from "./grader-library.ts";
 export {
   GRADER_LIBRARY_CATALOG,
+  PREDEFINED_GRADERS,
   type LibraryParameterKind,
 } from "../grader-library/catalog.ts";
 export type { LibraryType, ReservedLibraryType } from "../schema/graders.ts";
@@ -415,42 +419,45 @@ export {
   RESERVED_LIBRARY_TYPES,
 } from "../schema/graders.ts";
 
+/**
+ * The running copies. **`useLibraryEntry` is the only door that makes one** —
+ * there is no create taking a type and criteria, because a grader with no
+ * library entry behind it would be a check with no words behind it. The rest is
+ * the shape every other factory here has: read, edit, list, soft-delete.
+ *
+ * `seedRunningGraders` is the fourth deployment-configuring export, and it is
+ * the other half of the library seeding above: egma's `expected_behaviors`
+ * grader has to be *running* in a project for that project's tests to be judged
+ * at all, so a deployment that shipped the change writes the copy into every
+ * project that has never had one. It names no customer and takes no argument,
+ * and it asks whether a project ever had a copy rather than whether it has one
+ * now — so somebody who switched theirs off is not overruled at the next boot.
+ */
 export {
   advanceProductionSampling,
-  createGrader,
   deleteGrader,
   editGrader,
   getGrader,
   getGraderVersion,
   listGraders,
+  useLibraryEntry,
   type DeletedGrader,
   type Grader,
+  type GraderAssertion,
   type GraderChanges,
   type GraderConfig,
   type GraderConfigInput,
-  type GraderJudgment,
   type GraderPage,
   type GraderVersion,
   type JudgeModel,
   type JudgeProvider,
-  type LlmRubricConfig,
-  type MeasureAggregation,
-  type MetricThresholdConfig,
-  type NewGrader,
-  type NewGraderJudgment,
-  type Phrase,
-  type PhraseInput,
-  type PhraseMatch,
-  type PhraseMatchConfig,
-  type PhraseMatchConfigInput,
-  type PhraseSpeaker,
-  type ThresholdComparator,
-  type ToolCallsConfig,
-  type ToolCallsConfigInput,
-  type ToolExpectation,
-  type ToolExpectationInput,
+  type UseLibraryEntry,
 } from "./graders.ts";
-export type { GraderScope, GraderType } from "../schema/graders.ts";
+export {
+  seedRunningGraders,
+  type SeededGraderCopy,
+} from "./seeded-graders.ts";
+export type { GraderScope } from "../schema/graders.ts";
 
 /**
  * The project's default judge. `resolveJudgeKey` is the one door to the

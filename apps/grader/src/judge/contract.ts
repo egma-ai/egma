@@ -22,6 +22,18 @@ import type { JudgeInput } from "./input.ts";
  * different, and it is the only thing that does.
  */
 export type JudgeQuestion = {
+  /**
+   * The words the judge is told it is working under — **the library entry's
+   * own**, read through the running copy's `library_id` at judging time.
+   *
+   * It rides the question rather than being held in this package because there
+   * is exactly one place a judge prompt lives, and it is not here. The engine
+   * used to hold a copy beside the entry's, and two copies of one text is a
+   * drift waiting to happen — silent in the worst way, because the Library
+   * screen would go on showing words that had stopped being the words a judge
+   * was sent. Now the screen and the request read one row.
+   */
+  readonly prompt: string;
   /** The one thing this call decides, in the words it was written in. */
   readonly criterion: string;
   /** What the judge may read, declared. */

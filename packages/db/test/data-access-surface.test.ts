@@ -157,7 +157,6 @@ const CONTEXT_REQUIRING = [
   "connectionTypeOf",
   "createAgent",
   "createApiKey",
-  "createGrader",
   "createInvitation",
   "createMockTool",
   "createPersona",
@@ -272,12 +271,20 @@ const CONTEXT_REQUIRING = [
   // running it on every boot writes only what a release changed.
   "seedGraderLibrary",
   "seedPlatformSettings",
+  // The other half of the library seeding, one table down: a shelf full of
+  // definitions judges nothing until a project is running a copy of one, so
+  // every project that has never had the expected-behaviors copy is given it.
+  // It names no customer and takes no argument at all.
+  "seedRunningGraders",
   "setJudgeConfiguration",
   "startRun",
   "startSimulation",
   "updateAgent",
   "updateConnection",
   "updateOrganizationSettings",
+  // The one door that makes a running grader: a pointer at a library entry
+  // and the answers to whatever that entry's form asked.
+  "useLibraryEntry",
   "writePlatformSettings",
 ];
 
@@ -319,6 +326,12 @@ const THE_GRADER_LIBRARY = [
   "GRADER_LIBRARY_CATALOG",
   "LARGEST_GRADER_SOURCE_CODE_BYTES",
   "LIBRARY_TYPES",
+  // The identifiers of the entries egma ships, by the name a person calls
+  // them. Exported because three things outside this module point at one — the
+  // copy every project is seeded with, the engine's roster of what it can
+  // execute, and the tests that press Use — and a repeated literal is an
+  // identifier somebody can mistype into a pointer at nothing.
+  "PREDEFINED_GRADERS",
   "RESERVED_LIBRARY_TYPES",
 ];
 
@@ -329,6 +342,11 @@ const VALUES = [
   // have to read the sentence to tell them apart.
   "AgentWriteRefusedError",
   "AlreadyBelongsToAnOrganizationError",
+  // A library entry cannot leave the shelf while graders point at it. A copy
+  // reads its definition through that pointer every time it judges, so an entry
+  // taken away underneath one would leave a grader that judges nothing while
+  // still appearing on screen — refusal, never `set null`, never orphaned.
+  "GraderLibraryEntryInUseError",
   // The grader factory's one refusal, beside the persona factory's: a delete
   // that would leave a live test checking one thing fewer than it says it does.
   "GraderNamedByTestsError",
@@ -355,6 +373,10 @@ const VALUES = [
   // carries both versions and the test's identity, because the caller's next
   // move is to go and read the test as it now stands.
   "TestMovedOnError",
+  // Use named an entry this caller cannot see, or none at all. One refusal for
+  // both, because telling them apart would answer a question about somebody
+  // else's shelf.
+  "UnknownGraderLibraryEntryError",
   // A write refused for what it says, told apart from a fault so that a layer
   // above can relay the factory's sentence instead of answering with a stack.
   "UnprocessableInputError",

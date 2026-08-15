@@ -4,16 +4,18 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { conversationOfSimulation } from "../src/conversation.ts";
 import {
-  aThreshold,
+  aLatencyCopy,
   conductSimulation,
   jobFor,
   makeWorld,
   oneServiceAtATime,
   seedGrader,
+  seedJudge,
   seedTest,
+  theSeededGrader,
   type World,
 } from "./support/world.ts";
-import type { NewGrader } from "@egma/db";
+import { met, type ScriptedJudge } from "./support/scripted-judge.ts";
 
 /**
  * A simulation read the way a production trace is read: from its spans.
@@ -21,10 +23,14 @@ import type { NewGrader } from "@egma/db";
  * **The seam is the verdict rows, and the assertions are on them.** What a
  * conversation was assembled out of is not something a grader knows, so every
  * case here conducts a conversation, lets the real service judge it, and reads
- * back what it said. One case reaches through to the constructor, for the same
- * reason the production suite does: no grader type egma executes prints a
- * transcript, so nothing in a verdict row can show that the turns are the ones
- * the spans describe.
+ * back what it said.
+ *
+ * **The judge is scripted, and what it was *shown* is the other half of the
+ * evidence.** A verdict row carries the turns a judgment rests on and nothing
+ * about the transcript behind them, so the cases that are about assembly look
+ * at the question the engine put — which is the one place the conversation egma
+ * built out of spans is visible in full. One case reaches further still, to the
+ * constructor itself, for the same reason the production suite does.
  *
  * **Nothing here is about the wire.** The spans are filed through the same
  * data-access call the ingest door files them through; the OTLP body, the
@@ -35,41 +41,31 @@ import type { NewGrader } from "@egma/db";
 let world: World;
 const service = oneServiceAtATime();
 
+/** The behavior every test in this file writes down, and the judge answers. */
+const THE_BEHAVIOR = "confirms the new time back before finishing";
+
 beforeAll(async () => {
   world = await makeWorld("grader_simulation_spans");
+  await seedJudge(world);
 });
+
+/**
+ * The service, judging with one scripted answer — and the judge handed back, so
+ * a case can see the conversation the engine assembled out of spans and put in
+ * front of it.
+ */
+async function judgingWith(
+  citedTurns: readonly number[] = [],
+): Promise<ScriptedJudge> {
+  return service.judgingWith({
+    [THE_BEHAVIOR]: met("the agent read the new time back.", citedTurns),
+  });
+}
 
 afterAll(async () => {
   await service.stop();
   await world.drop();
 });
-
-/** A phrase the agent has to have said: the one deterministic type that cites turns. */
-function aPhrase(overrides: Partial<NewGrader> = {}): NewGrader {
-  return {
-    name: "Reads the new time back",
-    type: "phrase_match",
-    config: {
-      required: [{ text: "Tuesday at four", match: "contains" }],
-      banned: [],
-      speaker: "agent",
-    },
-    ...overrides,
-  } as NewGrader;
-}
-
-/** A tool that has to have fired, judged from what egma observed and not said. */
-function aTool(overrides: Partial<NewGrader> = {}): NewGrader {
-  return {
-    name: "Actually reschedules",
-    type: "tool_calls",
-    config: {
-      required: [{ tool: "reschedule_appointment", arguments: null }],
-      forbidden: [],
-    },
-    ...overrides,
-  } as NewGrader;
-}
 
 /** The conversation every case in this file conducts, said once. */
 const A_CONVERSATION = [
@@ -80,19 +76,12 @@ const A_CONVERSATION = [
 ];
 
 describe("a simulation whose spans arrived complete", () => {
-  beforeAll(async () => {
-    await service.start();
-  });
-
   it("is graded end to end, its verdicts citing turns assembled from spans", async () => {
-    const phrase = await seedGrader(world, aPhrase());
-    const tool = await seedGrader(world, aTool());
-    const latency = await seedGrader(
-      world,
-      aThreshold({ name: "Answers inside two seconds from spans" }),
-    );
+    const judge = await judgingWith([4]);
+    const testId = await seedTest(world, [], [THE_BEHAVIOR]);
 
     const conducted = await conductSimulation(world, {
+      testId,
       spans: {
         said: A_CONVERSATION,
         calledTool: {
@@ -105,37 +94,45 @@ describe("a simulation whose spans arrived complete", () => {
     await jobFor(world, conducted, "graded");
 
     // The conversation exists as spans and nowhere else — the row has no
-    // field left that could hold one — so nothing a verdict says below can
-    // have come from anywhere but the trace store. That the columns are
-    // gone from the table itself is asserted where the schema is, in the
-    // API's own black-box walk.
+    // field left that could hold one — so nothing below can have come from
+    // anywhere but the trace store. That the columns are gone from the table
+    // itself is asserted where the schema is, in the API's own black-box walk.
     const { verdicts } = await readVerdicts(world.auth, conducted.simulationId);
-    const by = (graderId: string) =>
-      verdicts.find((verdict) => verdict.graderId === graderId);
+    const seeded = await theSeededGrader(world);
+    const mine = verdicts.find((verdict) => verdict.graderId === seeded);
 
-    // The transcript: found, and cited at the turn it was found in — which is
-    // the fourth thing said, counted through the span-assembled transcript.
-    expect(by(phrase)).toMatchObject({ verdict: "passed" });
-    expect(by(phrase)?.citedSpanIds).toEqual(["turn:4"]);
-    // The tool calls, read off the columns the door normalised them into.
-    expect(by(tool)).toMatchObject({ verdict: "passed" });
-    // And the measures, off the timing spans.
-    expect(by(latency)).toMatchObject({ verdict: "passed" });
+    // The transcript: judged, and cited at the turn the answer rests on —
+    // which is the fourth thing said, counted through the span-assembled
+    // transcript.
+    expect(mine).toMatchObject({ verdict: "passed" });
+    expect(mine?.citedSpanIds).toEqual(["turn:4"]);
+
+    // And what the judge was shown, which is the conversation egma built: the
+    // turns, the tool call read off the columns the door normalised it into,
+    // and the measures off the timing spans.
+    const [shown] = judge.asked;
+    expect(shown?.evidence.transcript).toHaveLength(A_CONVERSATION.length);
+    expect(shown?.evidence.toolCalls).toMatchObject([
+      { tool: "reschedule_appointment" },
+    ]);
+    expect(shown?.evidence.measures).toEqual([
+      { measure: "turn_response_latency", samples: [900, 1_100] },
+    ]);
   });
 
   it("files its verdicts under the simulation id, exactly as before", async () => {
-    const graderId = await seedGrader(
-      world,
-      aPhrase({ name: "Filed under the simulation" }),
-    );
+    await judgingWith();
+    const testId = await seedTest(world, [], [THE_BEHAVIOR]);
 
     const conducted = await conductSimulation(world, {
+      testId,
       spans: { said: A_CONVERSATION },
     });
     await jobFor(world, conducted, "graded");
 
     const { verdicts } = await readVerdicts(world.auth, conducted.simulationId);
-    const mine = verdicts.find((verdict) => verdict.graderId === graderId);
+    const seeded = await theSeededGrader(world);
+    const mine = verdicts.find((verdict) => verdict.graderId === seeded);
 
     // The trace id on a verdict row is the product's word for this
     // conversation, and it did not move: the derived hex names where the spans
@@ -151,6 +148,7 @@ describe("a simulation whose spans arrived complete", () => {
   });
 
   it("reads the conversation from its spans — the transcript, the tools and the measures", async () => {
+    await judgingWith();
     const conducted = await conductSimulation(world, {
       spans: {
         said: A_CONVERSATION,
@@ -211,39 +209,30 @@ describe("a simulation whose spans arrived complete", () => {
     });
   });
 
-  it("cites every turn it found, in the order the conversation said them", async () => {
-    const graderId = await seedGrader(
-      world,
-      aPhrase({
-        name: "Two phrases, two turns",
-        // Two phrases in two different turns, so what is proved is the order
-        // of the citations rather than there being one.
-        config: {
-          required: [
-            { text: "Tuesday at four", match: "contains" },
-            { text: "the diary", match: "contains" },
-          ],
-          banned: [],
-          speaker: "agent",
-        },
-      } as Partial<NewGrader>),
-    );
+  it("cites every turn a judgment rests on, in the order the answer gave them", async () => {
+    // Two turns in one answer, so what is proved is the order of the citations
+    // rather than there being one.
+    await judgingWith([2, 4]);
+    const testId = await seedTest(world, [], [THE_BEHAVIOR]);
 
     const conducted = await conductSimulation(world, {
+      testId,
       spans: { said: A_CONVERSATION },
     });
     await jobFor(world, conducted, "graded");
 
     const { verdicts } = await readVerdicts(world.auth, conducted.simulationId);
-    const mine = verdicts.find((verdict) => verdict.graderId === graderId);
+    const seeded = await theSeededGrader(world);
+    const mine = verdicts.find((verdict) => verdict.graderId === seeded);
 
-    // The second thing the agent said and the fourth, counted through the
-    // span-assembled transcript and cited in that order.
+    // The second thing said and the fourth, counted through the span-assembled
+    // transcript and cited in that order.
     expect(mine?.verdict).toBe("passed");
     expect(mine?.citedSpanIds).toEqual(["turn:2", "turn:4"]);
   });
 
   it("keeps two turns that cross in time, in the order they began", async () => {
+    await judgingWith();
     // What barge-in looks like: the persona starts answering before the agent
     // has stopped talking. The transcript has to hold both — a reader that
     // assumed turns take it in strict succession would drop one of them, or
@@ -300,80 +289,63 @@ describe("a simulation whose spans arrived complete", () => {
   });
 });
 
+/**
+ * What the simulator measured, as it reaches something that judges.
+ *
+ * A measure is a number a grader may read, and the only place it is visible
+ * from outside the engine is the evidence a judge is shown. What egma computes
+ * *from* those numbers is the shared measure module's story and lands with the
+ * grader that reads them.
+ */
 describe("what the simulator measured", () => {
-  beforeAll(async () => {
-    await service.start();
-  });
-
   it("is the timing span's own duration, and never a value beside it", async () => {
-    const graderId = await seedGrader(
-      world,
-      aThreshold({
-        name: "The first answer inside a second and a half",
-        config: {
-          measure: "first_response_latency",
-          aggregation: "max",
-          comparator: "below",
-          threshold: 1_500,
-        },
-      } as Partial<NewGrader>),
-    );
+    const judge = await judgingWith();
+    const testId = await seedTest(world, [], [THE_BEHAVIOR]);
 
     const conducted = await conductSimulation(world, {
+      testId,
       spans: { said: A_CONVERSATION, measured: { first_response_latency: [1_214] } },
     });
     await jobFor(world, conducted, "graded");
 
-    const { verdicts } = await readVerdicts(world.auth, conducted.simulationId);
-    const mine = verdicts.find((verdict) => verdict.graderId === graderId);
-
-    expect(mine?.verdict).toBe("passed");
     // The number the span's start and end bracket, read back to the
     // millisecond — nothing on the span carries it a second time.
-    expect(mine?.rationale).toContain("1214");
+    expect(judge.asked[0]?.evidence.measures).toEqual([
+      { measure: "first_response_latency", samples: [1_214] },
+    ]);
   });
 
-  it("leaves a voice measure absent on a chat simulation — skipped, never failed", async () => {
-    const graderId = await seedGrader(
-      world,
-      aThreshold({
-        name: "How long the agent spoke for",
-        config: {
-          measure: "agent_speech_duration",
-          aggregation: "p90",
-          comparator: "below",
-          threshold: 20_000,
-        },
-      } as Partial<NewGrader>),
-    );
+  it("leaves a voice measure absent on a chat simulation rather than inventing one", async () => {
+    const judge = await judgingWith();
+    const testId = await seedTest(world, [], [THE_BEHAVIOR]);
 
     const conducted = await conductSimulation(world, {
+      testId,
       spans: { said: A_CONVERSATION, measured: { turn_response_latency: [900] } },
     });
     await jobFor(world, conducted, "graded");
 
-    const { verdicts } = await readVerdicts(world.auth, conducted.simulationId);
-    const mine = verdicts.find((verdict) => verdict.graderId === graderId);
-
-    // A chat conversation has no audio, so it measured no speech. The check did
-    // not apply; it did not fail, and it did not error either — the fold leaves
-    // a skipped check out of the score's denominator.
-    expect(mine?.verdict).toBe("skipped");
+    // A chat conversation has no audio, so it measured no speech — and what
+    // reaches a judge says so by being absent rather than by carrying a zero,
+    // which a reader would take for a measurement.
+    const measures = judge.asked[0]?.evidence.measures ?? [];
+    expect(measures.map((one) => one.measure)).toEqual([
+      "turn_response_latency",
+    ]);
   });
 });
 
 describe("a simulation whose trace never closed", () => {
-  beforeAll(async () => {
-    await service.start();
-  });
-
   it("is errored for every grader — a partial record judges nobody", async () => {
+    const judge = await judgingWith();
     const graderId = await seedGrader(
       world,
-      aPhrase({ name: "Asked about a conversation egma holds half of" }),
+      aLatencyCopy({ name: "Asked about a conversation egma holds half of" }),
     );
+    const testId = await seedTest(world, [], [THE_BEHAVIOR]);
 
     const conducted = await conductSimulation(world, {
+      testId,
       spans: { rootCloses: false, said: A_CONVERSATION },
     });
     await jobFor(world, conducted, "graded");
@@ -381,15 +353,18 @@ describe("a simulation whose trace never closed", () => {
     const { verdicts } = await readVerdicts(world.auth, conducted.simulationId);
     const mine = verdicts.find((verdict) => verdict.graderId === graderId);
 
-    // Never `failed`. The required phrase is genuinely absent from what egma
-    // holds, and an agent that said it perfectly would be marked down for a
-    // flush that never landed.
+    // Never `failed`. What egma holds is genuinely half a conversation, and an
+    // agent that behaved perfectly would be marked down for a flush that never
+    // landed.
     expect(mine?.verdict).toBe("errored");
     expect(mine?.rationale).toContain("only part of this conversation");
     expect(verdicts.every((verdict) => verdict.verdict === "errored")).toBe(true);
+    // And no judge was asked anything: there was nothing to ask about.
+    expect(judge.asked).toEqual([]);
   });
 
   it("refuses to judge a reading the span limit cut short, root or no root", async () => {
+    await judgingWith();
     const conducted = await conductSimulation(world, {
       spans: { said: A_CONVERSATION },
     });
@@ -424,14 +399,11 @@ describe("a simulation whose trace never closed", () => {
 });
 
 describe("a simulation with no spans at all", () => {
-  beforeAll(async () => {
-    await service.start();
-  });
-
   it("is errored for every grader, and for every expected behavior", async () => {
+    await judgingWith();
     const graderId = await seedGrader(
       world,
-      aPhrase({ name: "Asked about a conversation egma has no record of" }),
+      aLatencyCopy({ name: "Asked about a conversation egma has no record of" }),
     );
     const testId = await seedTest(world, [], [
       "confirms the new time back before finishing",
@@ -455,10 +427,12 @@ describe("a simulation with no spans at all", () => {
       verdicts.find((verdict) => verdict.graderId === graderId)?.rationale,
     ).toContain("no record of this conversation");
 
-    // The built-in says the same thing, once per behavior, so a page shows the
-    // same list of checks whether egma could read the conversation or not.
+    // The expected-behaviors copy says the same thing, once per behavior, so a
+    // page shows the same list of checks whether egma could read the
+    // conversation or not.
+    const seeded = await theSeededGrader(world);
     const behaviors = verdicts.filter(
-      (verdict) => verdict.graderId === "expected_behaviors",
+      (verdict) => verdict.graderId === seeded,
     );
     expect(behaviors).toHaveLength(2);
     for (const behavior of behaviors) {

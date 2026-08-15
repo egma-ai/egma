@@ -1,7 +1,8 @@
 import { newId } from "@egma/ids";
 import {
-  createGrader,
   createPersona,
+  PREDEFINED_GRADERS,
+  useLibraryEntry,
   type AuthContext,
   type NewTest,
   type Role,
@@ -92,18 +93,24 @@ export async function seedPersona(
 }
 
 /**
- * A grader for a test to name. Deterministic and cheap to state, because what
- * the grader judges by is the grader factory's business — here it is only
- * something a test's array can point at.
+ * A grader for a test to name. Made the one way a grader is ever made — by
+ * pressing Use on a library entry — and cheap to state, because what the grader
+ * judges by is the grader factory's business; here it is only something a
+ * test's array can point at.
+ *
+ * The `latency` entry rather than the judged one, so that each call makes a
+ * grader with values of its own: two copies differing only in their name would
+ * still be two rows, but a bound a caller can vary is what lets a file put two
+ * distinguishable graders on one project.
  */
 export async function seedGrader(
   auth: AuthContext,
   name: string,
 ): Promise<string> {
-  const created = await createGrader(auth, {
+  const created = await useLibraryEntry(auth, {
+    libraryId: PREDEFINED_GRADERS.latency,
     name,
-    type: "phrase_match",
-    config: { banned: [{ text: "I promise" }] },
+    params: { metric: "turn_response_latency", bound: 2_000 },
   });
   return created.id;
 }

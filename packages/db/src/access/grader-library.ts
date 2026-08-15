@@ -8,11 +8,15 @@ import {
   type PredefinedGrader,
 } from "../grader-library/catalog.ts";
 import {
+  grader,
   graderLibrary,
   type LibraryType,
 } from "../schema/graders.ts";
 import type { AuthContext } from "./context.ts";
-import { PredefinedGraderError } from "./errors.ts";
+import {
+  GraderLibraryEntryInUseError,
+  PredefinedGraderError,
+} from "./errors.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import { inActingProject, within } from "./within.ts";
@@ -385,12 +389,30 @@ export type DeletedLibraryEntry = {
 };
 
 /**
- * Take a team's entry off the shelf — and refuse to take one of egma's.
+ * Take a team's entry off the shelf — and refuse to take one of egma's, or one
+ * anything is still judging with.
  *
- * **The refusal is the part that matters in v0**, because egma's two are the
- * only entries that exist: there is no authoring surface yet, so every row here
- * was written by the catalog and every one of them is written again at the next
- * start. `PredefinedGraderError` says so in the words a person reads.
+ * **Two refusals, and both are about a copy that would be left holding
+ * nothing.** A copy reads its definition through `library_id` every time it
+ * judges; the words are never written down onto it, precisely so that the
+ * screen and the judge cannot drift. That is what makes an entry's delete a
+ * question about the copies rather than about the entry:
+ *
+ * - **egma's own entries are undeletable at all.** They are written again at
+ *   the next start, so a delete that appeared to work would be a grader that
+ *   vanished until somebody restarted a container. `PredefinedGraderError` says
+ *   so in the words a person reads, and it is asked first because it is true
+ *   whether or not anything is using the entry.
+ * - **A referenced entry is refused**, naming the copies in the way — including
+ *   the ones somebody switched off, because a copy's versions outlive its
+ *   deletion so that verdicts stay interpretable, and the definition has to
+ *   outlive them in turn. `GraderLibraryEntryInUseError`. Never `set null` and
+ *   never a cascade: the first would leave a grader with no definition to read,
+ *   the second would delete judging somebody set up without them asking.
+ *
+ * The database holds the same rule with `on delete restrict`, which is what
+ * makes it true of a hand-written statement too. This is the half that can name
+ * what is standing in the way, which is what somebody about to fix it needs.
  *
  * Deleting what the caller cannot see returns what reading it would have:
  * `undefined`, with nothing disturbed and nothing confirmed about whether such
@@ -419,6 +441,31 @@ export async function deleteGraderLibraryEntry(
     if (locked === undefined) return undefined;
     if (locked.organizationId === null) {
       throw new PredefinedGraderError(locked.id, locked.name);
+    }
+
+    // **Every copy, anywhere, deleted ones included.**
+    //
+    // Not only the caller's own project's, because an entry belongs to the
+    // organization and a copy of it in another project is just as much a grader
+    // that would stop having a definition.
+    //
+    // And not only the living ones, which is the part worth arguing. Deleting a
+    // copy is a soft delete: the row stays, and so do its versions, precisely so
+    // that a verdict written under one is still interpretable. That chain runs
+    // verdict → version → copy → entry, so the definition has to outlive the
+    // copies that used it or the chain breaks at its last link. It is also what
+    // the database enforces underneath — `on delete restrict` counts the rows
+    // that are there, not the ones still switched on — and a module that
+    // disagreed with its own foreign key would refuse in one place and raise a
+    // driver error in the other.
+    const using = await tx
+      .select({ id: grader.id, name: grader.name })
+      .from(grader)
+      .where(eq(grader.libraryId, locked.id))
+      .orderBy(asc(grader.id));
+
+    if (using.length > 0) {
+      throw new GraderLibraryEntryInUseError(locked.id, locked.name, using);
     }
 
     // A bare `eq` on an id that just came off the tenancy-checked row locked
