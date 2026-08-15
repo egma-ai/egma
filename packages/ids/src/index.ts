@@ -53,6 +53,13 @@ export const ID_PREFIXES = [
   "sim",
   "gjb",
   "del",
+  /**
+   * A live resource's revision: what an edit says it was written against, and
+   * a fresh one after every change that lands. It is an identifier rather than
+   * a counter so that nothing can guess the next one and so that it is opaque
+   * on its face — a caller who read `3` would sooner or later send `4`.
+   */
+  "rev",
 ] as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[number];

@@ -66,5 +66,50 @@ export {
   type SnapshotEntry,
 } from "./mock-tools/resolve.ts";
 
+/**
+ * The two catalogs a form is drawn from, and the readers that hold a key to
+ * them.
+ *
+ * They are here beside the verdict fold and for the fold's reason: they reach
+ * no store, take no context, and have no tenancy to stamp. The connection
+ * registry decides what a connection type is made of and the capability catalog
+ * decides which capability names exist; both are code rather than tables,
+ * because a table could claim a type no adapter can run or a capability no test
+ * could require.
+ *
+ * Exported all the same, and from this entry point, because a browser form has
+ * to be drawn from them. **What crosses is labels, field shapes, the credential
+ * rule and the adapter facts** — never a gate, a hint function, a refusal
+ * sentence or a credential. A second handwritten copy of any of it in a web
+ * application would be a second opinion able to disagree with the gate.
+ */
+export {
+  connectionTypeMetadata,
+  credentialRuleOf,
+  variantById,
+  variantIdOf,
+  type ConfigFieldKind,
+  type ConfigFieldMetadata,
+  type ConnectionTypeMetadata,
+  type CredentialFieldKind,
+  type CredentialFieldMetadata,
+  type CredentialRuleName,
+  type VariantMetadata,
+} from "./access/connection-registry.ts";
+export {
+  admittedCapabilities,
+  capabilityCheckFailedMessage,
+  CAPABILITY_CATALOG,
+  CAPABILITY_KEYS,
+  hasCapabilityDiscovery,
+  isCapabilityKey,
+  noCapabilityAdapterMessage,
+  registerCapabilityDiscovery,
+  unknownCapabilityMessage,
+  type CapabilityDiscovery,
+  type CapabilityEntry,
+  type ConnectionCapabilities,
+  type DiscoveryTarget,
+} from "./access/capabilities.ts";
 export * from "./access/index.ts";
 export * as schema from "./schema/index.ts";

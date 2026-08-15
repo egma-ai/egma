@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createAgent,
-  deleteAgent,
+  archiveAgent,
   getAgent,
   NotPermittedError,
   ProjectOutsideOrganizationError,
@@ -173,15 +173,19 @@ describe("an agent's name", () => {
     expect(elsewhere.projectId).toBe(globex.project);
   });
 
-  it("is released by a deleted agent, which also vanishes from fetch", async () => {
+  it("is released by an archived agent, which still reads on its own", async () => {
     const retiring = await createAgent(actingAsAcme(), { name: "Retiring" });
 
-    await deleteAgent(actingAsAcme(), retiring.id);
-
-    expect(await getAgent(actingAsAcme(), retiring.id)).toBeUndefined();
+    await archiveAgent(actingAsAcme(), retiring.id);
 
     const successor = await createAgent(actingAsAcme(), { name: "Retiring" });
     expect(successor.id).not.toBe(retiring.id);
+
+    // Archive frees the name and keeps the row: two agents can carry the same
+    // name as long as only one of them is active.
+    const filed = await getAgent(actingAsAcme(), retiring.id);
+    expect(filed?.name).toBe("Retiring");
+    expect(filed?.archivedAt).toBeInstanceOf(Date);
   });
 });
 
@@ -213,8 +217,8 @@ describe("the database itself", () => {
   it("rejects an agent row pairing one customer with another customer's project", async () => {
     await expect(
       database.sql(
-        `insert into agent (id, organization_id, project_id, name)
-         values ($1, $2, $3, 'Mismatched')`,
+        `insert into agent (id, organization_id, project_id, name, revision)
+         values ($1, $2, $3, 'Mismatched', 'rev_00000000000000000000000001')`,
         [newId("agt"), acme.organization, globex.project],
       ),
     ).rejects.toSatisfy(
@@ -228,8 +232,8 @@ describe("the database itself", () => {
     await expect(
       database.sql(
         `insert into connection
-           (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
-         values ($1, $2, $3, $4, 'staging', 'retell', 'chat', 'hosted-broker', '{}')`,
+           (id, organization_id, project_id, agent_id, name, type, modality, topology, variant_id, config, revision)
+         values ($1, $2, $3, $4, 'staging', 'retell', 'chat', 'hosted-broker', 'retell.api_key', '{}', 'rev_00000000000000000000000001')`,
         [newId("con"), acme.organization, globex.project, anchor.id],
       ),
     ).rejects.toSatisfy(
@@ -246,8 +250,8 @@ describe("the database itself", () => {
     await expect(
       database.sql(
         `insert into connection
-           (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
-         values ($1, $2, $3, $4, 'astray', 'retell', 'chat', 'hosted-broker', '{}')`,
+           (id, organization_id, project_id, agent_id, name, type, modality, topology, variant_id, config, revision)
+         values ($1, $2, $3, $4, 'astray', 'retell', 'chat', 'hosted-broker', 'retell.api_key', '{}', 'rev_00000000000000000000000001')`,
         [newId("con"), acme.organization, acme.secondProject, homed.id],
       ),
     ).rejects.toSatisfy(
@@ -261,8 +265,8 @@ describe("the database itself", () => {
     const halfSealed = (credentials: string | null, hint: string | null) =>
       database.sql(
         `insert into connection
-           (id, organization_id, project_id, agent_id, name, type, modality, topology, config, credentials, credentials_hint)
-         values ($1, $2, $3, $4, $5, 'retell', 'chat', 'hosted-broker', '{}', $6, $7)`,
+           (id, organization_id, project_id, agent_id, name, type, modality, topology, variant_id, config, revision, credentials, credentials_hint)
+         values ($1, $2, $3, $4, $5, 'retell', 'chat', 'hosted-broker', 'retell.api_key', '{}', 'rev_00000000000000000000000001', $6, $7)`,
         [
           newId("con"),
           acme.organization,
@@ -282,14 +286,14 @@ describe("the database itself", () => {
     );
   });
 
-  it("refuses a second live connection holding a name, and a removed one releases it", async () => {
+  it("refuses a second active connection holding a name, and an archived one releases it", async () => {
     const wired = await createAgent(actingAsAcme(), { name: "Wired" });
 
     const staging = (id: string) =>
       database.sql(
         `insert into connection
-           (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
-         values ($1, $2, $3, $4, 'staging', 'retell', 'chat', 'hosted-broker', '{}')`,
+           (id, organization_id, project_id, agent_id, name, type, modality, topology, variant_id, config, revision)
+         values ($1, $2, $3, $4, 'staging', 'retell', 'chat', 'hosted-broker', 'retell.api_key', '{}', 'rev_00000000000000000000000001')`,
         [id, acme.organization, acme.project, wired.id],
       );
 
@@ -301,10 +305,60 @@ describe("the database itself", () => {
     );
 
     await database.sql(
-      "update connection set deleted_at = now() where id = $1",
+      "update connection set archived_at = now() where id = $1",
       [first],
     );
     await expect(staging(newId("con"))).resolves.toBeDefined();
+  });
+
+  /**
+   * The state and its evidence are one fact or the row is refused. Half a
+   * measurement — a time with nothing measured, or keys with no time on them —
+   * reads as evidence and is not, and the state is what a run's skip reason is
+   * decided from.
+   */
+  it("refuses a capability record that is half a measurement", async () => {
+    const measured = await createAgent(actingAsAcme(), { name: "Measured" });
+
+    const halfKnown = (
+      state: string,
+      supported: string | null,
+      checkedAt: string | null,
+      source: string | null,
+    ) =>
+      database.sql(
+        `insert into connection
+           (id, organization_id, project_id, agent_id, name, type, modality, topology, variant_id, config, revision,
+            capability_state, capabilities_supported, capabilities_checked_at, capability_source)
+         values ($1, $2, $3, $4, $5, 'retell', 'chat', 'hosted-broker', 'retell.api_key', '{}', 'rev_00000000000000000000000001',
+            $6, $7, $8, $9)`,
+        [
+          newId("con"),
+          acme.organization,
+          acme.project,
+          measured.id,
+          `half-${state}-${String(supported)}-${String(checkedAt)}`,
+          state,
+          supported,
+          checkedAt,
+          source,
+        ],
+      );
+
+    // Known, with nothing to show for it.
+    await expect(halfKnown("known", null, null, null)).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+    // Known, measured, but with no time on the measurement.
+    await expect(
+      halfKnown("known", '["dtmf"]', null, "retell adapter"),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+    // Unknown, carrying evidence it cannot have.
+    await expect(
+      halfKnown("unknown", '["dtmf"]', "now()", "retell adapter"),
+    ).rejects.toSatisfy((error) => errorCodeOf(error) !== undefined);
   });
 
   it("carries UNIQUE (id, agent_id) on connection — the future run table's composite-FK target", async () => {

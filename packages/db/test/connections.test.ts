@@ -4,11 +4,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   addConnection,
   createAgent,
-  deleteAgent,
+  archiveAgent,
   getConnection,
   listConnections,
   NotPermittedError,
-  removeConnection,
+  archiveConnection,
   updateConnection,
   type AuthContext,
   type NewConnection,
@@ -138,8 +138,11 @@ describe("adding a connection", () => {
       topology: "hosted-broker",
       environment: "staging",
       config: { retellAgentId: "agent_abc" },
+      variantId: "retell.api_key",
       credentialsHint: "WXYZ",
-      capabilities: null,
+      // Nobody has measured this target, and that is written down as its own
+      // state rather than as an empty list of what it can do.
+      capabilities: { state: "unknown" },
     });
   });
 
@@ -447,12 +450,18 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
   });
 
   /**
-   * A credential belongs to the shape its config is in. An edit that moved a
-   * connection between the two shapes and left the credential behind would
-   * write a row that is half of each — a config asking egma to fetch a token,
-   * over a sealed key pair nothing will ever open again.
+   * The shape a connection is in is written down when it is created and never
+   * derived again, so there is no edit that moves one between the shapes.
+   *
+   * This used to be allowed when the new shape's credentials came along, and
+   * that was one rule short: the credential rule a Restore is held to is read
+   * from the stored shape, so a connection that changed shape underneath its
+   * stored id would be held to one shape's rule while carrying the other's
+   * credential. The two shapes hold different config keys and different
+   * credentials, which is what makes them a different connection rather than a
+   * different setting.
    */
-  it("refuses an edit that moves a connection between the shapes on its own", async () => {
+  it("refuses an edit that moves a connection between the shapes", async () => {
     const agentId = await agentNamed("LiveKit Shape Change");
     const added = await addConnection(actingAsAcme(), agentId, livekitConnection());
 
@@ -464,10 +473,11 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
         },
       }),
     ).rejects.toThrow(
-      "a connection's credentials belong to the shape its config is in, and " +
-        "this change moves it from a livekit connection to a token-endpoint " +
-        "livekit connection. Send the credentials the new shape needs in the " +
-        "same change.",
+      "a connection's shape is fixed when it is created, and this change " +
+        "moves it from LiveKit project key pair to LiveKit token endpoint. " +
+        "The two hold different config keys and different credentials, so " +
+        "this is a new connection rather than an edit — add one, and archive " +
+        "this.",
     );
 
     // Nothing moved: the row is the shape it was, with the credential it had.
@@ -476,21 +486,23 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
     ).toEqual({ url: "wss://acme.livekit.cloud" });
   });
 
-  it("takes the same edit when the new shape's credentials come with it", async () => {
+  it("refuses it even when the new shape's credentials come with it", async () => {
     const agentId = await agentNamed("LiveKit Shape Moved");
     const added = await addConnection(actingAsAcme(), agentId, livekitConnection());
 
-    const moved = await updateConnection(actingAsAcme(), agentId, added?.id ?? "", {
-      config: {
-        url: "wss://acme.livekit.cloud",
-        tokenEndpoint: "https://acme.example/egma/livekit-token",
-      },
-      credentials: { headers: HEADERS },
-    });
+    await expect(
+      updateConnection(actingAsAcme(), agentId, added?.id ?? "", {
+        config: {
+          url: "wss://acme.livekit.cloud",
+          tokenEndpoint: "https://acme.example/egma/livekit-token",
+        },
+        credentials: { headers: HEADERS },
+      }),
+    ).rejects.toThrow(/shape is fixed when it is created/);
 
-    // The hint is what a reader may see of the new shape; that the headers
-    // themselves come back whole is the claim door's story, told beside it.
-    expect(moved?.credentialsHint).toBe("Authorization");
+    const untouched = await getConnection(actingAsAcme(), agentId, added?.id ?? "");
+    expect(untouched?.variantId).toBe("livekit.key_pair");
+    expect(untouched?.config).toEqual({ url: "wss://acme.livekit.cloud" });
   });
 
   /**
@@ -670,7 +682,7 @@ describe("a connection's name", () => {
     expect(twin?.name).toBe("ci");
   });
 
-  it("is released by a removed connection", async () => {
+  it("is released by an archived connection", async () => {
     const agentId = await agentNamed("Recycler");
 
     const retiring = await addConnection(
@@ -678,7 +690,7 @@ describe("a connection's name", () => {
       agentId,
       retellConnection({ name: "staging" }),
     );
-    await removeConnection(actingAsAcme(), agentId, retiring?.id ?? "");
+    await archiveConnection(actingAsAcme(), agentId, retiring?.id ?? "");
 
     const successor = await addConnection(
       actingAsAcme(),
@@ -690,8 +702,8 @@ describe("a connection's name", () => {
   });
 });
 
-describe("removing a connection", () => {
-  it("vanishes from fetch and list, and answers what was removed", async () => {
+describe("archiving a connection", () => {
+  it("leaves the active list, stays readable, and answers where it went", async () => {
     const agentId = await agentNamed("Shrinking");
     const keeper = await addConnection(
       actingAsAcme(),
@@ -704,13 +716,25 @@ describe("removing a connection", () => {
       retellConnection({ name: "goner" }),
     );
 
-    const removed = await removeConnection(actingAsAcme(), agentId, goner?.id ?? "");
-    expect(removed?.id).toBe(goner?.id);
-    expect(removed?.deletedAt).toBeInstanceOf(Date);
+    const archived = await archiveConnection(
+      actingAsAcme(),
+      agentId,
+      goner?.id ?? "",
+    );
+    expect(archived?.connection.id).toBe(goner?.id);
+    expect(archived?.connection.archivedAt).toBeInstanceOf(Date);
 
-    expect(await getConnection(actingAsAcme(), agentId, goner?.id ?? "")).toBeUndefined();
     const remaining = await listConnections(actingAsAcme(), agentId);
     expect(remaining?.map((connection) => connection.id)).toEqual([keeper?.id]);
+
+    // Readable on its own and under the archived filter — Archive stops it
+    // being used, it does not make it disappear.
+    const still = await getConnection(actingAsAcme(), agentId, goner?.id ?? "");
+    expect(still?.id).toBe(goner?.id);
+    const filed = await listConnections(actingAsAcme(), agentId, {
+      archived: true,
+    });
+    expect(filed?.map((connection) => connection.id)).toEqual([goner?.id]);
   });
 });
 
@@ -729,7 +753,7 @@ describe("reaching a connection through the wrong door", () => {
       }),
     ).toBeUndefined();
     expect(
-      await removeConnection(actingAsAcme(), neighbour, added?.id ?? ""),
+      await archiveConnection(actingAsAcme(), neighbour, added?.id ?? ""),
     ).toBeUndefined();
   });
 
@@ -750,7 +774,7 @@ describe("reaching a connection through the wrong door", () => {
       }),
     ).toBeUndefined();
     expect(
-      await removeConnection(actingAsGlobex(), agentId, added?.id ?? ""),
+      await archiveConnection(actingAsGlobex(), agentId, added?.id ?? ""),
     ).toBeUndefined();
   });
 
@@ -763,16 +787,23 @@ describe("reaching a connection through the wrong door", () => {
     expect(fetched?.id).toBe(added?.id);
   });
 
-  it("vanishes with its agent: a deleted agent's connections answer nothing", async () => {
+  it("goes archived with its agent, and stays readable under the filter", async () => {
     const agentId = await agentNamed("Doomed");
     const added = await addConnection(actingAsAcme(), agentId, retellConnection());
 
-    await deleteAgent(actingAsAcme(), agentId);
+    await archiveAgent(actingAsAcme(), agentId);
 
-    expect(await listConnections(actingAsAcme(), agentId)).toBeUndefined();
-    expect(
-      await getConnection(actingAsAcme(), agentId, added?.id ?? ""),
-    ).toBeUndefined();
+    expect(await listConnections(actingAsAcme(), agentId)).toEqual([]);
+    const filed = await listConnections(actingAsAcme(), agentId, {
+      archived: true,
+    });
+    expect(filed?.map((one) => one.id)).toEqual([added?.id]);
+
+    // A new way into an archived agent is new work over something taken out of
+    // new work, so it is refused rather than quietly written.
+    await expect(
+      addConnection(actingAsAcme(), agentId, retellConnection({ name: "late" })),
+    ).rejects.toThrow(/archived/);
   });
 });
 

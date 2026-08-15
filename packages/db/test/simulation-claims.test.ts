@@ -16,7 +16,7 @@ import {
   listGradingJobsForSimulation,
   listRunEvents,
   recordSimulationHeartbeat,
-  removeConnection,
+  archiveConnection,
   resolveSimulationConnection,
   startRun,
   startSimulation,
@@ -411,11 +411,11 @@ describe("the connection door", () => {
     await claimOne(simulationId);
   });
 
-  it("answers nothing once the connection is gone", async () => {
+  it("answers nothing once the connection is archived", async () => {
     const { simulationId } = await oneQueuedSimulation(actingAsAcme(), acmeSeed);
     const claim = await claimOne(simulationId);
 
-    await removeConnection(actingAsAcme(), acmeSeed.agentId, acmeSeed.connectionId);
+    await archiveConnection(actingAsAcme(), acmeSeed.agentId, acmeSeed.connectionId);
     expect(
       await resolveSimulationConnection(claim.auth, claim.id),
     ).toBeUndefined();

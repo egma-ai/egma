@@ -1,20 +1,27 @@
 "use client";
 
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { readJson, type Refusal } from "../../../../lib/api.ts";
 import {
-  AGENTS_PATH,
-  agentsAfter,
+  agentsQuery,
   type AgentPage,
+  type ArchiveFilter,
   type ListedAgent,
 } from "../../../../lib/agents.ts";
 import { asDay } from "../../../../lib/instants.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
-import { ButtonLink } from "../../../../ui/controls.tsx";
+import {
+  Badge,
+  ButtonLink,
+  Choice,
+  TextInput,
+  Toolbar,
+} from "../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
@@ -38,9 +45,11 @@ import {
  * Forward, a copied link and a second tab on a second project all work for the
  * same reason: there is no chosen project anywhere except the address.
  *
- * Registering, editing, archiving and connections arrive with Agents proper.
- * What this page owns is the read, its five states, and the fact that a viewer
- * is offered no control they may not use.
+ * **The search and the archive filter are asked of the server, never applied to
+ * what came back.** A filter that only reached the page already fetched would
+ * answer differently depending on how far somebody had scrolled — a list of
+ * four hundred agents would find nothing in the three hundred it had not
+ * loaded, and would say so as though the project did not hold it.
  */
 export default function AgentsPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -51,26 +60,50 @@ export default function AgentsPage() {
   );
 }
 
-const COLUMNS: readonly Column<ListedAgent>[] = [
-  {
-    key: "name",
-    header: "Agent",
-    primary: true,
-    cell: (agent) => agent.name,
-  },
-  {
-    key: "description",
-    header: "Description",
-    cell: (agent) => agent.description ?? "—",
-  },
-  { key: "id", header: "Identifier", mono: true, width: "220px", cell: (agent) => agent.id },
-  {
-    key: "created",
-    header: "Registered",
-    mono: true,
-    width: "120px",
-    cell: (agent) => asDay(agent.created_at),
-  },
+function columnsFor(projectId: string): readonly Column<ListedAgent>[] {
+  return [
+    {
+      key: "name",
+      header: "Agent",
+      primary: true,
+      cell: (agent) => (
+        <Link href={projectPath(projectId, "agents", agent.id)}>
+          {agent.name}
+        </Link>
+      ),
+    },
+    {
+      key: "description",
+      header: "Description",
+      cell: (agent) => agent.description ?? "—",
+    },
+    {
+      key: "state",
+      header: "State",
+      width: "110px",
+      cell: (agent) =>
+        agent.archived ? <Badge tone="warn">Archived</Badge> : <Badge>Active</Badge>,
+    },
+    {
+      key: "id",
+      header: "Identifier",
+      mono: true,
+      width: "220px",
+      cell: (agent) => agent.id,
+    },
+    {
+      key: "created",
+      header: "Registered",
+      mono: true,
+      width: "120px",
+      cell: (agent) => asDay(agent.created_at),
+    },
+  ];
+}
+
+const FILTERS: readonly { value: ArchiveFilter; label: string }[] = [
+  { value: "active", label: "Active" },
+  { value: "archived", label: "Archived" },
 ];
 
 function Agents({ projectId }: { readonly projectId: string }) {
@@ -78,7 +111,25 @@ function Agents({ projectId }: { readonly projectId: string }) {
   // Null until the session read answers. A page that guessed would tell an
   // admin their role cannot do something it can, on every load.
   const role = me === null ? null : roleOf(me);
-  const { answer, reload } = useProjectRead<AgentPage>(AGENTS_PATH, projectId);
+
+  const [typed, setTyped] = useState("");
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<ArchiveFilter>("active");
+
+  /**
+   * The typed text is debounced into the text the request is made from, so
+   * every keystroke is not a request. Both are kept: the box shows what
+   * somebody typed the instant they typed it, and the list follows.
+   */
+  useEffect(() => {
+    const settle = setTimeout(() => setSearch(typed), 250);
+    return () => clearTimeout(settle);
+  }, [typed]);
+
+  const { answer, reload } = useProjectRead<AgentPage>(
+    agentsQuery({ search, filter }),
+    projectId,
+  );
 
   /**
    * Pages fetched after the first, kept beside it rather than folded into it,
@@ -190,7 +241,23 @@ function Agents({ projectId }: { readonly projectId: string }) {
     const cursor = carried === null ? answer.value.next_cursor : carried.next_cursor;
 
     if (items.length === 0) {
-      return (
+      // Three different absences, and they point somewhere different: a
+      // project with nothing in it, a search that matched nothing, and an
+      // archive nobody has put anything in.
+      if (search.trim() !== "") {
+        return (
+          <Empty
+            title={`No ${filter} agents match “${search.trim()}”`}
+            lead="Try part of another name, or clear the search."
+          />
+        );
+      }
+      return filter === "archived" ? (
+        <Empty
+          title="No archived agents in this project"
+          lead="Archiving an agent takes it out of new work and keeps its history readable. Nothing here has been archived."
+        />
+      ) : (
         <Empty
           title="No agents in this project yet"
           lead="Register the voice agent you want to test, then give egma a way to reach it."
@@ -216,9 +283,10 @@ function Agents({ projectId }: { readonly projectId: string }) {
       setMoreRefused(null);
       setLoadingMore(true);
 
-      const next = await readJson<AgentPage>(agentsAfter(cursor), {
-        project: asked,
-      });
+      const next = await readJson<AgentPage>(
+        agentsQuery({ search, filter, cursor }),
+        { project: asked },
+      );
 
       setLoadingMore(false);
       if (showing.current !== asked) return;
@@ -246,7 +314,7 @@ function Agents({ projectId }: { readonly projectId: string }) {
       <>
         <DataTable
           label="Agents in this project"
-          columns={COLUMNS}
+          columns={columnsFor(projectId)}
           rows={items}
           keyOf={(agent) => agent.id}
           {...(cursor === null
@@ -273,7 +341,24 @@ function Agents({ projectId }: { readonly projectId: string }) {
   return (
     <ProductPage>
       {header}
-      <PageBody>{body()}</PageBody>
+      <PageBody>
+        <Toolbar>
+          <TextInput
+            id="agent-search"
+            value={typed}
+            label="Search agents by name"
+            placeholder="Search by name"
+            onChange={setTyped}
+          />
+          <Choice
+            label="Which agents"
+            value={filter}
+            options={FILTERS}
+            onChange={setFilter}
+          />
+        </Toolbar>
+        {body()}
+      </PageBody>
     </ProductPage>
   );
 }
