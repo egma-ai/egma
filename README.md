@@ -637,12 +637,19 @@ both; point `TEST_DATABASE_URL` and `TEST_CLICKHOUSE_URL` somewhere else if you
 would rather use your own.
 
 **Contributing costs you no `.env`.** The stores' own users, databases and
-ports keep their defaults, so a fresh checkout runs `pnpm db:up` and then
-`pnpm test`. The deployment's REQUIRED secrets are a different matter — running
-the platform needs them, and starting two stores does not — so `pnpm db:up`
-hands Compose a placeholder for each and neither container ever reads one. See
-`packages/db/test/support/start-stores.ts`, which explains why that wrapper
-exists at all.
+ports keep their defaults, so a fresh checkout runs `pnpm db:up`, then
+`pnpm test`, then `pnpm db:down`. The deployment's REQUIRED secrets are a
+different matter — running the platform needs them, and operating two stores
+does not — so both of those scripts hand Compose a placeholder for each, and
+neither container ever reads one. See `packages/db/test/support/compose.ts`,
+which explains why the wrapper exists at all.
+
+**Plain `docker compose` in a checkout is a different story, and it should be.**
+Compose reads the whole file before it does anything — `ps` and `down` included
+— so every subcommand refuses until this deployment's ten REQUIRED values are
+set, which is right for a deployment and merely inconvenient in a checkout
+nobody runs the platform from. Use the two scripts above, or fill in `.env` and
+drive Compose directly the way a self-hoster does.
 
 The object store is real for the same reason and asks you for nothing. The
 handful of tests that need one start their own MinIO container, on a port of

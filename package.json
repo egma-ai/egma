@@ -13,7 +13,7 @@
     "typecheck": "pnpm build && tsc -p tsconfig.tests.json && pnpm --filter @egma/web typecheck",
     "clean": "tsc -b --clean packages/ids packages/db packages/lint apps/api apps/grader apps/cli",
     "db:up": "node packages/db/test/support/start-stores.ts && node packages/db/test/support/sweep-stale-databases.ts",
-    "db:down": "docker compose down",
+    "db:down": "node packages/db/test/support/stop-stores.ts",
     "db:generate": "pnpm --filter @egma/db generate",
     "test": "pnpm db:up && { vitest run; ts=$?; pnpm test:simulator; sim=$?; pnpm test:sdk; sdk=$?; pnpm test:fixture; fix=$?; exit $(( ts || sim || sdk || fix )); }",
     "test:simulator": "pnpm --filter @egma/simulator test",
