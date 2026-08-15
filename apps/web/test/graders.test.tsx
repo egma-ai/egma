@@ -1060,8 +1060,8 @@ describe("judge settings", () => {
       expect(
         within(
           screen.getByRole("region", { name: "Judge credentials" }),
-        ).getByText(/Acme production/),
-      ).toBeTruthy();
+        ).getAllByText(/Acme production/),
+      ).not.toHaveLength(0);
     });
     expect(
       (screen.getByLabelText("OpenAI key") as HTMLInputElement).value,
@@ -1141,12 +1141,162 @@ describe("judge settings", () => {
       },
     ]);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Replace key" }));
+    const keys = await screen.findByRole("table", { name: "Organization keys" });
+    fireEvent.click(within(keys).getByRole("button", { name: "Replace key" }));
 
     const field = screen.getByLabelText("New key") as HTMLInputElement;
     expect(field.value).toBe("");
     expect(field.type).toBe("password");
     expect(screen.getByText(/egma will not show it to you/)).toBeTruthy();
+  });
+
+  /**
+   * One form under the table means one field for every row, so opening another
+   * credential has to empty it.
+   *
+   * A key typed for one credential and left in the field when somebody opens
+   * another is not a cosmetic carry-over: Save sends whatever the field holds
+   * to whichever credential is open, so the wrong one is rotated to a key its
+   * owner never chose for it, and the key its owner did choose is now on a
+   * credential they were not looking at. Nothing on the page would say so.
+   *
+   * Retyping is the cost, and it is the right one to pay.
+   */
+  it("empties the replacement field when a different credential is opened", async () => {
+    settings("admin", undefined as never, [
+      {
+        id: "jcr_1",
+        label: "Acme production",
+        provider: "openai",
+        hint: "1234",
+        revision: "rev_1",
+        created_at: "2026-08-01T10:00:00.000Z",
+        updated_at: "2026-08-01T10:00:00.000Z",
+      },
+      {
+        id: "jcr_2",
+        label: "Acme staging",
+        provider: "openai",
+        hint: "5678",
+        revision: "rev_2",
+        created_at: "2026-08-02T10:00:00.000Z",
+        updated_at: "2026-08-02T10:00:00.000Z",
+      },
+    ]);
+
+    const keys = await screen.findByRole("table", { name: "Organization keys" });
+    const [openFirst, openSecond] = within(keys).getAllByRole("button", {
+      name: "Replace key",
+    });
+
+    fireEvent.click(openFirst as HTMLElement);
+    const forProduction = screen.getByLabelText("New key") as HTMLInputElement;
+    fireEvent.change(forProduction, { target: { value: "sk-meant-for-production" } });
+    expect(
+      (screen.getByLabelText("New key") as HTMLInputElement).value,
+    ).toBe("sk-meant-for-production");
+
+    fireEvent.click(openSecond as HTMLElement);
+
+    expect((screen.getByLabelText("New key") as HTMLInputElement).value).toBe("");
+    // And with nothing typed for this one, there is nothing to send.
+    expect(
+      screen.getByRole("button", { name: "Save new key" }).hasAttribute("disabled"),
+    ).toBe(true);
+  });
+
+  /**
+   * A failed rotation leaves a Try again behind, and that retry has to go when
+   * a different credential is opened.
+   *
+   * The retry is bound to the credential that failed, but the rotation it calls
+   * reads the field as it stands when the button is pressed. So a failure on
+   * one credential, then opening another and typing its key, leaves a Try again
+   * that writes this row's key to the other row — and then reports success for
+   * a credential nobody was looking at.
+   *
+   * This is the same defect as the one above wearing different clothes: state
+   * that means "for the open row", with nothing making it true. It is written
+   * separately because clearing the field does not clear this, and the first
+   * fix for the field left it standing.
+   */
+  it("drops a failed rotation's retry when a different credential is opened", async () => {
+    const twoKeys = [
+      {
+        id: "jcr_1",
+        label: "Acme production",
+        provider: "openai",
+        hint: "1234",
+        revision: "rev_1",
+        created_at: "2026-08-01T10:00:00.000Z",
+        updated_at: "2026-08-01T10:00:00.000Z",
+      },
+      {
+        id: "jcr_2",
+        label: "Acme staging",
+        provider: "openai",
+        hint: "5678",
+        revision: "rev_2",
+        created_at: "2026-08-02T10:00:00.000Z",
+        updated_at: "2026-08-02T10:00:00.000Z",
+      },
+    ];
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/judge": {
+        status: 200,
+        body: {
+          state: "needs_setup",
+          provider: null,
+          model: null,
+          source: null,
+          credential_id: null,
+          hint: null,
+        },
+      },
+      "/api/judge/registry": {
+        status: 200,
+        body: {
+          providers: [{ provider: "openai", model_is_free_text: true }],
+          platform_sentinel: "platform",
+          platform_judge_available: false,
+        },
+      },
+      "/api/judge-credentials": { status: 200, body: { items: twoKeys } },
+      "/api/judge-credentials/jcr_1": {
+        status: 422,
+        body: {
+          error: "unprocessable",
+          message: "a judge key is at least 8 characters.",
+        },
+      },
+    });
+    render(<JudgeSettingsPage />);
+
+    const keys = await screen.findByRole("table", { name: "Organization keys" });
+    const [openProduction, openStaging] = within(keys).getAllByRole("button", {
+      name: "Replace key",
+    });
+
+    fireEvent.click(openProduction as HTMLElement);
+    fireEvent.change(screen.getByLabelText("New key"), {
+      target: { value: "sk-short" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save new key" }));
+
+    expect(
+      await screen.findByText("Egma did not replace the key for Acme production."),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+
+    // Opening another credential takes the retry with it. Anything else leaves
+    // a button that writes staging's key to production.
+    fireEvent.click(openStaging as HTMLElement);
+
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(
+      screen.queryByText("Egma did not replace the key for Acme production."),
+    ).toBeNull();
   });
 
   /**
