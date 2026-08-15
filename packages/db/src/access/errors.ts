@@ -332,6 +332,74 @@ export class PredefinedGraderError extends Error {
 }
 
 /**
+ * A delete named a library entry that graders still point at.
+ *
+ * **Refusal, and never `set null`.** A copy's `library_id` is the whole of what
+ * says what it judges by — the definition is read through it every time a
+ * conversation is judged, and never written down onto the copy — so an entry
+ * taken off the shelf underneath one would leave a grader that resolves to
+ * nothing and judges nothing while still appearing on the Running graders
+ * screen. That is a check somebody believes in that can never fire, which is the
+ * false trust this product exists to kill. The database says the same thing with
+ * `on delete restrict`; this is the half that can name what is in the way.
+ *
+ * **A copy somebody switched off still counts**, and that is not an oversight.
+ * Deleting a copy is a soft delete: the row stays and so do its versions, so
+ * that a verdict written under one is still interpretable — and that chain runs
+ * verdict → version → copy → entry. Taking the entry away would break it at the
+ * last link, leaving old verdicts naming a definition nobody can read.
+ *
+ * It carries the copies, because the fix is to deal with each of them and a
+ * refusal that only said "something uses it" would send somebody hunting.
+ */
+export class GraderLibraryEntryInUseError extends Error {
+  readonly libraryId: string;
+  /** Every copy pointing at it, oldest first, switched off ones included. */
+  readonly graders: readonly GraderUsingLibraryEntry[];
+
+  constructor(
+    libraryId: string,
+    graderName: string,
+    graders: readonly GraderUsingLibraryEntry[],
+  ) {
+    super(
+      `"${graderName}" (${libraryId}) is still pointed at by ${graders.length} ${
+        graders.length === 1 ? "grader" : "graders"
+      } (${spelledOutAndCounted(graders)}), and a grader reads its definition through that pointer every time it judges — including one that was switched off, whose past verdicts are still read through it; an entry can only leave the shelf once nothing points at it at all`,
+    );
+    this.name = "GraderLibraryEntryInUseError";
+    this.libraryId = libraryId;
+    this.graders = graders;
+  }
+}
+
+/** One running copy standing in the way of its entry's delete. */
+export type GraderUsingLibraryEntry = {
+  readonly id: string;
+  readonly name: string;
+};
+
+/**
+ * A write named a library entry the caller cannot see, or none at all.
+ *
+ * The two are one refusal on purpose: an entry belonging to another customer
+ * and an entry that was never written are indistinguishable from outside, and
+ * they have to be — telling them apart would answer a question about somebody
+ * else's shelf.
+ */
+export class UnknownGraderLibraryEntryError extends Error {
+  readonly libraryId: string;
+
+  constructor(libraryId: string) {
+    super(
+      `${libraryId} is not a grader on this shelf, so there is nothing to make a copy of; read the library to see what egma ships`,
+    );
+    this.name = "UnknownGraderLibraryEntryError";
+    this.libraryId = libraryId;
+  }
+}
+
+/**
  * A mock tool was written for a tool this project already answers for.
  *
  * Matching is by tool name and strictly by it — no arguments are read — so two

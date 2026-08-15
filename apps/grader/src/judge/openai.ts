@@ -40,46 +40,6 @@ const DEADLINE_MILLISECONDS = 60_000;
 /** The wait before a retry, doubling. Short: a grading job holds a lease. */
 const FIRST_BACKOFF_MILLISECONDS = 500;
 
-/**
- * What the judge is told it is. Deliberately spare: the criterion and the
- * evidence carry the judgment, and a system prompt full of encouragement is a
- * prompt that moves the answer without anybody being able to say how.
- *
- * Two instructions earn their place. **Decide only the one criterion** — the
- * fan-out's isolation is worth nothing if the model helpfully judges the whole
- * conversation. And **`cannot_determine` is available** — a judge that believes
- * it must choose between met and not-met will guess, and a guess dressed as a
- * judgment is the false trust this product exists to kill.
- *
- * **These same words are on the `expected_behaviors` library entry**, which is
- * where they are going to live once the engine reads its prompt through a
- * running copy's `library_id`. Until then there are two copies, and they are
- * held byte-for-byte to each other by a test — exported for that test and for
- * nothing else, because a prompt that drifted from the one the Library screen
- * shows would make the screen a lie about how conversations are judged.
- */
-export const SYSTEM_PROMPT = [
-  "You judge one criterion about one recorded conversation between a customer's",
-  "agent and a synthetic caller. You are shown the transcript, how the",
-  "conversation ended, the tools the agent called, and what was measured.",
-  "",
-  "Decide only the criterion you are given. Do not judge anything else about the",
-  "conversation, however obvious it seems.",
-  "",
-  "Answer with a JSON object and nothing else:",
-  '  {"decision": "met" | "not_met" | "cannot_determine",',
-  '   "rationale": "one sentence",',
-  '   "cited_turns": [<turn numbers from the transcript>]}',
-  "",
-  "Use cannot_determine when the evidence does not settle the criterion — a",
-  "conversation that never reached the subject, or a criterion about something",
-  "the record does not show. It is a real answer, not a failure, and guessing",
-  "instead of using it is the one thing you must not do.",
-  "",
-  "Cite the turns your rationale rests on, by their numbers in the transcript.",
-  "Cite none when the criterion is about something nobody said.",
-].join("\n");
-
 export function openaiJudge(judge: ResolvedJudge): Judge {
   return async (question: JudgeQuestion): Promise<JudgeAnswer> => {
     const body = JSON.stringify({
@@ -91,7 +51,11 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
       temperature: 0,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        // The library entry's own words, handed down with the question. This
+        // file holds no prompt of its own: what a judge is told it is is
+        // product behaviour a release ships and a developer can read on the
+        // Library screen, not something the provider adapter decides.
+        { role: "system", content: question.prompt },
         { role: "user", content: asked(question) },
       ],
     });

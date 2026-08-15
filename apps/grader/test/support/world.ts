@@ -6,7 +6,6 @@ import {
   connect,
   connectClickHouse,
   createAgent,
-  createGrader,
   createPersona,
   createTest,
   disconnect,
@@ -18,14 +17,18 @@ import {
   listGradingJobsForSimulation,
   readVerdicts,
   recordProductionTraces,
+  PREDEFINED_GRADERS,
+  seedGraderLibrary,
+  seedRunningGraders,
   setJudgeConfiguration,
   startRun,
   startSimulation,
+  useLibraryEntry,
   type AuthContext,
   type ExpectedBehaviorInput,
   type GradingJob,
-  type NewGrader,
   type NewSpan,
+  type UseLibraryEntry,
   type RecordedVerdict,
   type Simulation,
   type SimulationFailure,
@@ -106,6 +109,10 @@ export async function makeWorld(label: string): Promise<World> {
   });
   connectClickHouse({ clickhouseUrl: store.url, maxOpenConnections: 4 });
 
+  // egma's own graders, on the shelf before anything points at one — what a
+  // real deployment writes in the same breath as applying its migrations.
+  await seedGraderLibrary();
+
   const organizationId = newId("org");
   const projectId = newId("prj");
 
@@ -132,6 +139,13 @@ export async function makeWorld(label: string): Promise<World> {
     role: "member",
     via: "session",
   };
+
+  // The project's mandatory grading. On a real deployment this row is written
+  // inside the transaction that creates the project; the tenancy here is raw
+  // SQL, for the reason every data-access test's is, so the standing backfill
+  // does the same job — which is also what these files are exercising when they
+  // expect a conversation to be judged against its test's own behaviors.
+  await seedRunningGraders();
 
   const agent = await createAgent(auth, {
     name: "Front desk",
@@ -183,12 +197,37 @@ export async function makeWorld(label: string): Promise<World> {
   };
 }
 
-/** A grader on the project, judging everything the project runs. */
+/**
+ * A grader on the project, judging everything the project runs — made the one
+ * way a grader is ever made, by pressing Use on a library entry.
+ */
 export async function seedGrader(
   world: World,
-  grader: NewGrader,
+  grader: UseLibraryEntry,
 ): Promise<string> {
-  return (await createGrader(world.auth, grader)).id;
+  return (await useLibraryEntry(world.auth, grader)).id;
+}
+
+/**
+ * The copy of `expected_behaviors` every project is given, found by the entry
+ * it points at.
+ *
+ * Tests reach for it constantly — it is what judges a test against its own
+ * expectations, and its identifier is what its verdict rows name — and it is
+ * found rather than remembered, because the seeding is the thing under test in
+ * half of them.
+ */
+export async function theSeededGrader(world: World): Promise<string> {
+  const [row] = (
+    await world.database.sql<{ id: string }>(
+      "select id from grader where project_id = $1 and library_id = $2 and deleted_at is null",
+      [world.projectId, PREDEFINED_GRADERS.expectedBehaviors],
+    )
+  ).rows;
+  if (row === undefined) {
+    throw new Error("this project has no expected-behaviors grader");
+  }
+  return row.id;
 }
 
 /**
@@ -218,37 +257,40 @@ export async function seedJudge(
   });
 }
 
-/** A latency threshold: the deterministic type, parameterized. */
-export function aThreshold(
-  overrides: Partial<NewGrader> = {},
-): NewGrader {
+/**
+ * A copy of the `latency` entry: a measure from the catalog and a bound, which
+ * is the whole of what its form asks.
+ *
+ * It is the one entry v0 ships that egma does not execute yet, so a copy of it
+ * answers `errored` — which is exactly what several of these files are about,
+ * and what makes it the right stand-in for "a second grader on this project".
+ */
+export function aLatencyCopy(
+  overrides: Partial<UseLibraryEntry> = {},
+): UseLibraryEntry {
   return {
-    name: "Answers inside two seconds",
-    type: "metric_threshold",
-    config: {
-      measure: "turn_response_latency",
-      aggregation: "p90",
-      comparator: "below",
-      threshold: 2_000,
-    },
+    libraryId: PREDEFINED_GRADERS.latency,
+    params: { metric: "turn_response_latency", bound: 2_000 },
     ...overrides,
-  } as NewGrader;
+  };
 }
 
 /**
- * The criteria a team wrote in their own words, which is the one authored type
- * that asks a model anything — and the only one that carries a judge model of
- * its own.
+ * A second copy of the `expected_behaviors` entry: judged, and asking for
+ * nothing at Use time.
+ *
+ * Allowed and pointless in the product — two copies of one entry judge the same
+ * thing twice until filters arrive — and useful here, because it is the only way
+ * to put a second *judged* grader on a project.
  */
-export const A_RUBRIC = "The agent acknowledged the caller's frustration.";
-
-export function aRubric(overrides: Partial<NewGrader> = {}): NewGrader {
+export function aJudgedCopy(
+  overrides: Partial<UseLibraryEntry> = {},
+): UseLibraryEntry {
   return {
-    name: "Was the agent empathetic",
-    type: "llm_rubric",
-    config: { rubric: A_RUBRIC },
+    libraryId: PREDEFINED_GRADERS.expectedBehaviors,
+    name: "A second opinion on the behaviors",
     ...overrides,
-  } as NewGrader;
+  };
 }
 
 export type ConductedSimulation = {

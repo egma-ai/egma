@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   foreignKey,
   index,
@@ -24,47 +25,28 @@ import {
 } from "./columns.ts";
 
 /**
- * A grader is authored logic that produces a verdict. A metric measures and a
- * grader judges: nobody decided that a call took four minutes, but somebody had
- * to decide that verifying identity before disclosing a balance matters and
- * write the criteria down. These tables hold that decision.
+ * A grader is a **running copy** of a library entry: the row that judges, and
+ * the thing a verdict row names. A metric measures and a grader judges — nobody
+ * decided that a call took four minutes, but somebody had to decide that
+ * verifying identity before disclosing a balance matters and write the criteria
+ * down. The criteria live on the shelf below; these tables hold the decision to
+ * run them here.
  *
- * Graders belong to a project and apply to every one of its tests by default,
- * and to production conversations when their scope says so. A test's own grader
- * array adds scenario-specific ones on top; there is no second kind of grader
- * and none of this is ever attached to a suite, so a test's verdict can never
- * depend on which suite it was run from.
+ * Graders belong to a project and apply to every one of its tests inside their
+ * scope, and to production conversations when their scope says so. There is no
+ * per-test attachment and none of this is ever attached to a suite, so a test's
+ * verdict can never depend on which suite it was run from.
  *
  * Two tables, the persona's and the test's shape exactly, so that two different
  * things can be pointed at — and here the split carries more weight than
  * anywhere else in the schema. **What a grader judges by is versioned; where and
- * how loudly it applies is not.** Tightening a threshold changes what a verdict
+ * how loudly it applies is not.** Tightening a bound changes what a verdict
  * means, so it mints an immutable version and takes effect from now on, leaving
- * last week's run saying exactly what it said. Promoting a grader from P1 to P0,
+ * last week's run saying exactly what it said. Making a grader a diagnostic,
  * pointing it at production, or sampling it differently changes nothing about
  * any judgment already made, so those live on the identity row and take effect
  * everywhere the moment they are written.
  */
-
-/**
- * What kind of judgment this is. Anthropic's nomenclature, at the dev's
- * direction, and flat rather than nested: one word decides what the config
- * holds and how the engine executes it.
- *
- * `expected_behaviors` is deliberately absent. The built-in that judges a test
- * against its own expected behaviors is implicit and always-on — applying it is
- * part of what running a test means — so it is never attached, never detached,
- * and never a row here (ADR-0004). Reserved and named for later: `state_check`,
- * which verifies the end state through a customer's own hooks, and `code`, which
- * runs a customer's own logic.
- */
-export const GRADER_TYPES = [
-  "llm_rubric",
-  "metric_threshold",
-  "tool_calls",
-  "phrase_match",
-] as const;
-export type GraderType = (typeof GRADER_TYPES)[number];
 
 /**
  * How loudly a judgment speaks: P0 blocks, P1 warns, P2 informs. A run's
@@ -92,9 +74,9 @@ export const GRADER_SCOPES = ["simulations", "production", "both"] as const;
 export type GraderScope = (typeof GRADER_SCOPES)[number];
 
 /**
- * What a **library entry** is, which is a different question from what the
- * running copy above is — one word decides what the entry's definition holds
- * and which engine executes it.
+ * What a **library entry** is, and what the running copy that was made from it
+ * is too — one word, copied down at Use time and frozen there, deciding what
+ * the entry's definition holds and which engine executes it.
  *
  * Two words in v0. `llm_as_judge` carries a `prompt` and an `output_definition`
  * and is executed by asking a model; `code` carries parameters a person fills
@@ -312,6 +294,21 @@ export const graderLibrary = pgTable(
 export const JUDGE_PROVIDERS = ["openai"] as const;
 export type JudgeProvider = (typeof JUDGE_PROVIDERS)[number];
 
+/**
+ * The running copies: one row per grader a project actually judges with.
+ *
+ * A copy is made by pressing **Use** on a library entry, or seeded at project
+ * creation. It carries the *deployment* — where it applies, how loudly, how
+ * often — and its **filled-in values** in immutable versions. It does not carry
+ * the definition, and that is the shape's whole reason for existing: the judge
+ * prompt and the code are read through `library_id` at judging time, so what
+ * the Library screen shows and what a judge is sent can never be two different
+ * strings. A definition copied down drifts from the one on screen, which is the
+ * documented failure this arrangement makes unreachable.
+ *
+ * **Dormant is no row at all.** There is no enable switch and no `none` scope:
+ * pressing Use is the enabling, and deleting the copy is the switching off.
+ */
 export const grader = pgTable(
   "grader",
   {
@@ -320,15 +317,46 @@ export const grader = pgTable(
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
     projectId: idText("project_id").notNull(),
+    /**
+     * The entry this is a copy of — **the connecting tissue, and never null**.
+     *
+     * A grader with no entry would be a row with no definition to read at
+     * judging time, which is not a grader at all. `restrict` rather than
+     * `set null` for the same reason: an entry somebody deleted while a project
+     * was judging with it must be refused, not quietly orphaned, because the
+     * copy would go on being resolved and would find nothing to judge by. The
+     * refusal is written in the access layer too, where it can name the copies
+     * standing in the way; this is the backstop that makes the rule true of the
+     * database rather than only of the code above it.
+     */
+    libraryId: idText("library_id")
+      .notNull()
+      .references(() => graderLibrary.id, { onDelete: "restrict" }),
     name: text("name").notNull(),
     description: text("description"),
     /**
-     * Set at creation and never edited. The config in every version is shaped
-     * by this word, so changing it would leave the versions behind it holding
-     * parameters for a kind of judgment this grader no longer makes — which is
-     * a different grader wearing the old one's history.
+     * Copied from the entry at Use time and never edited. The config in every
+     * version is shaped by this word, so changing it would leave the versions
+     * behind it holding parameters for a kind of judgment this grader no longer
+     * makes — which is a different grader wearing the old one's history.
      */
     type: text("type").notNull(),
+    /**
+     * Whether a test can pass while this copy does not.
+     *
+     * `true` — the default, and what a copy somebody switched on is for: the
+     * test cannot pass unless this grader fully passes. `false` makes it a
+     * **diagnostic**: judged, displayed with its fraction, and unable to fail
+     * anything. Those are the two roles v0 has, and they replace the P0/P1/P2
+     * ladder — a boolean rather than three words because binary scoring leaves
+     * a middle rung nothing to say.
+     *
+     * A live setting rather than versioned content, on the scope's exact terms:
+     * making a blocker into a diagnostic changes nothing about any judgment
+     * already made, so it is written in place and takes effect everywhere at
+     * once. What the row said last week still says it.
+     */
+    required: boolean("required").notNull().default(true),
     priority: text("priority").notNull(),
     scope: text("scope").notNull().default("simulations"),
     /** Per cent of production conversations judged; simulations are all judged. */
@@ -376,7 +404,10 @@ export const grader = pgTable(
   },
   (table) => [
     prefixCheck("grader_id_prefix", table.id, "grd"),
-    oneOf("grader_type_allowed", table.type, [...GRADER_TYPES]),
+    // The entry's own two words, and the reserved three refused by name here
+    // exactly as they are on the shelf: a copy is only ever made by copying a
+    // type down, so the two lists are one list and the database says so.
+    oneOf("grader_type_allowed", table.type, [...LIBRARY_TYPES]),
     oneOf("grader_priority_allowed", table.priority, [...PRIORITIES]),
     oneOf("grader_scope_allowed", table.scope, [...GRADER_SCOPES]),
     // A sampling rate is a percentage of the traffic that arrives, so the two
@@ -401,6 +432,10 @@ export const grader = pgTable(
     index("grader_organization_id_project_id_idx")
       .on(table.organizationId, table.projectId)
       .where(sql`${table.deletedAt} is null`),
+    // Which copies point at an entry, asked every time somebody tries to take
+    // that entry off the shelf, and asked again by the backfill that gives a
+    // project the one copy it must have.
+    index("grader_library_id_idx").on(table.libraryId),
   ],
 );
 
@@ -480,11 +515,20 @@ export const graderVersion = pgTable(
       .references(() => grader.id, { onDelete: "cascade" }),
     version: integer("version").notNull(),
     /**
-     * Everything the judgment is made by: the rubric text for an `llm_rubric`,
-     * the parameters for a deterministic type. Deliberately jsonb, for the
-     * reason a persona's traits and a test's content are: four types shape it
-     * four ways today and reserved types will shape it more, and a field
-     * promoted to a column later is a cheap migration.
+     * The copy's **filled-in values** — one set per assertion, each answering
+     * the parameters its library entry declares. Latency's are a measure and a
+     * bound; expected_behaviors' are empty, because its assertions are the
+     * test's own sentences and arrive at judging time.
+     *
+     * **The definition is never in here.** No prompt, no code, no criteria: the
+     * entry holds those and is read through `library_id` when a conversation is
+     * judged. What a version freezes is what somebody typed, which is exactly
+     * what a run pins and what a verdict has to stay readable against.
+     *
+     * Deliberately jsonb, for the reason a persona's traits and a test's
+     * content are: what an entry asks for is the entry's own decision and grows
+     * with the shelf, and a field promoted to a column later is a cheap
+     * migration.
      */
     config: jsonb("config").notNull(),
     /**

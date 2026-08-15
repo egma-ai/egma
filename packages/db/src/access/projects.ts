@@ -5,6 +5,7 @@ import { db } from "../client.ts";
 import { project } from "../schema/tenancy.ts";
 import type { AuthContext } from "./context.ts";
 import { authorize, here } from "./permissions.ts";
+import { insertSeededGrader } from "./seeded-graders.ts";
 import { theProject, within } from "./within.ts";
 
 /**
@@ -116,6 +117,13 @@ export type NewProject = {
  * signup, which provisions one before anybody has a context at all. A row of
  * the permission table with no call site is a row that reads as coverage and
  * refuses nobody, which is worse than not having written it.
+ *
+ * **A project and its mandatory grading are one transaction**, exactly as they
+ * are inside provisioning: the row and the active copy of egma's
+ * `expected_behaviors` grader land together or neither lands. A project that
+ * existed for even a moment with no grader in it would be a project whose first
+ * run could come back green having judged nothing, and "it depends when you
+ * looked" is not an answer a trust product may give.
  */
 export async function createProject(
   auth: AuthContext,
@@ -123,18 +131,31 @@ export async function createProject(
 ): Promise<Project> {
   authorize(auth, "manage_projects", here(auth));
 
-  const [row] = await db()
-    .insert(project)
-    .values({
-      id: newId("prj"),
-      organizationId: auth.organizationId,
-      name: input.name,
-      slug: input.slug,
-      createdBy: auth.userId,
-    })
-    .returning(COLUMNS);
+  const projectId = newId("prj");
 
-  if (row === undefined) throw new Error("the project was not written");
+  const row = await db().transaction(async (tx) => {
+    const [written] = await tx
+      .insert(project)
+      .values({
+        id: projectId,
+        organizationId: auth.organizationId,
+        name: input.name,
+        slug: input.slug,
+        createdBy: auth.userId,
+      })
+      .returning(COLUMNS);
+
+    if (written === undefined) throw new Error("the project was not written");
+
+    await insertSeededGrader(tx, {
+      organizationId: auth.organizationId,
+      projectId,
+      createdBy: auth.userId ?? null,
+    });
+
+    return written;
+  });
+
   return row;
 }
 

@@ -2,13 +2,17 @@ import { newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  deleteGrader,
   deleteGraderLibraryEntry,
+  getGrader,
   getGraderLibraryEntry,
   GRADER_LIBRARY_CATALOG,
+  GraderLibraryEntryInUseError,
   listGraderLibrary,
   PredefinedGraderError,
   RESERVED_LIBRARY_TYPES,
   seedGraderLibrary,
+  useLibraryEntry,
   type AuthContext,
   type LibraryEntry,
   type PredefinedGrader,
@@ -106,7 +110,13 @@ async function insertTeamEntry(tenant: {
 }
 
 beforeAll(async () => {
-  database = await createConnectedDatabase("grader_library");
+  // The one file that starts with an empty shelf, because filling it is what
+  // this file is about: every other harness seeds the library the way a
+  // deployment does, and a first run that found the rows already there could
+  // never watch them arrive.
+  database = await createConnectedDatabase("grader_library", {
+    seedGraders: false,
+  });
   await seedOrganization(database, acme.organization, [
     { id: acme.project, slug: "default" },
   ]);
@@ -431,5 +441,102 @@ describe("deleting from the shelf", () => {
     expect(await deleteGraderLibraryEntry(actingIn(acme), theirs)).toBeUndefined();
     // Untouched, and its existence never confirmed to the wrong customer.
     expect(await getGraderLibraryEntry(actingIn(globex), theirs)).toBeDefined();
+  });
+});
+
+/**
+ * **An entry a project is judging with cannot leave the shelf.**
+ *
+ * A running copy reads its definition through `library_id` every time it
+ * judges — the words are never written down onto the copy, precisely so that
+ * the screen and the judge cannot drift — so an entry taken away underneath one
+ * would leave a grader that resolves to nothing and judges nothing while still
+ * appearing on the Running graders screen. That is a check somebody believes in
+ * that can never fire, which is the false trust this product exists to kill.
+ *
+ * **Refusal, never `set null` and never a cascade.** The first would leave the
+ * grader with no definition to read; the second would delete judging somebody
+ * set up without them asking.
+ */
+describe("deleting an entry that copies still point at", () => {
+  it("is refused, naming the copies standing in the way", async () => {
+    const theirs = await insertTeamEntry(acme);
+    const copy = await useLibraryEntry(actingIn(acme), {
+      libraryId: theirs,
+      name: "Judging with our own",
+    });
+
+    await expect(
+      deleteGraderLibraryEntry(actingIn(acme), theirs),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof GraderLibraryEntryInUseError &&
+        error.libraryId === theirs &&
+        error.graders.length === 1 &&
+        error.graders[0]?.id === copy.id &&
+        // The fix is to stop running each of them, so the sentence has to name
+        // them: a refusal that only said "something uses it" would send
+        // somebody hunting.
+        error.message.includes(copy.id) &&
+        error.message.includes(copy.name),
+    );
+
+    // And it is still there afterwards, still readable, still judging.
+    expect(await getGraderLibraryEntry(actingIn(acme), theirs)).toBeDefined();
+    expect(await getGrader(actingIn(acme), copy.id)).toBeDefined();
+  });
+
+  /**
+   * The database says the same thing, which is what makes "never orphaned" true
+   * of a hand-written statement rather than only of the module above it.
+   */
+  it("is refused by the foreign key too, for raw SQL that bypasses the module", async () => {
+    const theirs = await insertTeamEntry(acme);
+    await useLibraryEntry(actingIn(acme), {
+      libraryId: theirs,
+      name: "Judging with our own, again",
+    });
+
+    await expect(
+      database.sql("delete from grader_library where id = $1", [theirs]),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.restrictViolation,
+    );
+  });
+
+  /**
+   * **Switching a copy off is not enough**, and the reason is what keeps old
+   * verdicts readable.
+   *
+   * Deleting a copy is a soft delete: the row stays and so do its versions,
+   * precisely so that a verdict written under one still says what decided it.
+   * That chain runs verdict → version → copy → entry, and taking the entry away
+   * would break it at the last link. So the shelf keeps the definition for as
+   * long as anything points at it — which is also what the foreign key
+   * underneath counts, so the module and the database say one thing.
+   */
+  it("is still refused after the copies have been switched off", async () => {
+    const theirs = await insertTeamEntry(acme);
+    const copy = await useLibraryEntry(actingIn(acme), {
+      libraryId: theirs,
+      name: "Switched off in a moment",
+    });
+
+    await deleteGrader(actingIn(acme), copy.id);
+    expect(await getGrader(actingIn(acme), copy.id)).toBeUndefined();
+
+    await expect(
+      deleteGraderLibraryEntry(actingIn(acme), theirs),
+    ).rejects.toBeInstanceOf(GraderLibraryEntryInUseError);
+    expect(await getGraderLibraryEntry(actingIn(acme), theirs)).toBeDefined();
+  });
+
+  /** And an entry nothing has ever pointed at leaves without complaint. */
+  it("goes through for an entry no grader was ever made from", async () => {
+    const theirs = await insertTeamEntry(acme);
+
+    const removed = await deleteGraderLibraryEntry(actingIn(acme), theirs);
+    expect(removed?.id).toBe(theirs);
+    expect(await getGraderLibraryEntry(actingIn(acme), theirs)).toBeUndefined();
   });
 });

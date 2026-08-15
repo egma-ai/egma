@@ -4,11 +4,10 @@ import type { Judgment } from "./contract.ts";
 /**
  * What a judge's answer becomes, for every grader that asks one.
  *
- * The built-in behaviors grader and the rubric type ask about different things —
- * one expectation a test's author wrote down, one criterion a team wrote down —
- * and they file the answers under different dimensions, different versions and
- * different priorities. What each does with the answer *itself* is identical,
- * and it is three decisions that must not be made twice:
+ * One judged entry ships today and more will follow, each asking about its own
+ * kind of thing and filing the answers under its own keys. What each does with
+ * the answer *itself* has to be identical, and it is three decisions that must
+ * not be made twice:
  *
  * - **`cannot_determine` is `skipped`, and never `failed`.** A judge that could
  *   only say yes or no would guess, and a guess dressed as a judgment is the
@@ -22,13 +21,12 @@ import type { Judgment } from "./contract.ts";
  *   citing turn nine of a seven-turn conversation is pointing a reader at
  *   nothing, and dropping it is better than filing evidence nobody can look up.
  *
- * Deliberately here rather than in `contract.ts`, which every type imports and
- * which nothing should have to edit: this is a helper the judged types share,
- * and the next type that judges with a model imports it the same way.
+ * Deliberately here rather than in `contract.ts`, which every executor imports
+ * and which nothing should have to edit: this is a helper the judged entries
+ * share, and the next entry that judges with a model imports it the same way.
  *
- * Who decided it is the caller's to add. The built-in records one judge for the
- * whole fan-out, an authored grader records its own — that is a fact about the
- * grader rather than about the answer.
+ * Who decided it is the caller's to add — a fact about which judge answered
+ * rather than about the answer.
  */
 export function judgmentOf(
   dimension: string,

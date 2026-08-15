@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   aConversation,
-  aThreshold,
+  aLatencyCopy,
   conductSimulation,
   jobFor,
   makeWorld,
@@ -11,6 +11,7 @@ import {
   seedGrader,
   seedJudge,
   seedTest,
+  theSeededGrader,
   verdictsOn,
   type World,
 } from "./support/world.ts";
@@ -23,7 +24,14 @@ import {
 } from "./support/scripted-judge.ts";
 
 /**
- * The built-in grader: a test's expected behaviors, judged one at a time.
+ * The expected-behaviors grader: a test's expected behaviors, judged one at a
+ * time.
+ *
+ * **It is an ordinary running copy now.** It used to be implicit — never a row,
+ * never resolved, and writing the word `expected_behaviors` where a verdict row
+ * wants a grader id. Every project is created with an active copy of the
+ * library entry instead, so it is resolved like anything else and its rows name
+ * a real grader and the version that decided them.
  *
  * **The contract is the seam.** A finished conversation and a test's behaviors
  * go in; the assertions are on the verdict rows and on the folded answer over
@@ -44,19 +52,26 @@ const FIRST = "confirms the new time back before finishing";
 const SECOND = "never quotes a price";
 const THIRD = "offers to send a reminder";
 
-/** The three behaviors, each with its own priority, in the authored order. */
+/** The three behaviors, in the authored order. */
 const THREE = [
   { behavior: FIRST, priority: "P0" as const },
   { behavior: SECOND, priority: "P1" as const },
   { behavior: THIRD, priority: "P2" as const },
 ];
 
-/** The behaviors' rows, in dimension order, whatever else judged the same run. */
-function behaviorRows(
+/**
+ * The behaviors' rows, in key order, whatever else judged the same run.
+ *
+ * Found by the grader they name, which is the project's own copy of the library
+ * entry — the id a verdict row carries now that the built-in is a row like
+ * everything else.
+ */
+async function behaviorRows(
   verdicts: readonly RecordedVerdict[],
-): readonly RecordedVerdict[] {
+): Promise<readonly RecordedVerdict[]> {
+  const seeded = await theSeededGrader(world);
   return [...verdicts]
-    .filter((verdict) => verdict.graderId === "expected_behaviors")
+    .filter((verdict) => verdict.graderId === seeded)
     .sort((left, right) => left.dimension.localeCompare(right.dimension));
 }
 
@@ -111,7 +126,7 @@ describe("a test with three expected behaviors", () => {
       [THIRD]: notMet("no reminder was offered."),
     });
 
-    const rows = behaviorRows(verdicts);
+    const rows = await behaviorRows(verdicts);
     expect(rows.map((row) => row.dimension)).toEqual([
       "behavior_1",
       "behavior_2",
@@ -169,15 +184,20 @@ describe("a test with three expected behaviors", () => {
     ]);
   });
 
-  it("lands each behavior's own priority, snapshotted, and the turns it cited", async () => {
+  it("lands the copy's own settings, and the turns each judge cited", async () => {
     const { verdicts } = await judgedWith({
       [FIRST]: met("the agent read the new time back at turn 5.", [5]),
       [SECOND]: met("no price was mentioned."),
       [THIRD]: notMet("no reminder was offered.", [3, 5]),
     });
 
-    const rows = behaviorRows(verdicts);
-    expect(rows.map((row) => row.priority)).toEqual(["P0", "P1", "P2"]);
+    const rows = await behaviorRows(verdicts);
+    // **One grader, one answer about how loudly it speaks.** Every row carries
+    // the running copy's own setting rather than a behavior's, because the
+    // P0/P1/P2 ladder is retired: under binary scoring every behavior in a
+    // required grader must hold, so a per-behavior rung had nothing left to
+    // say. `required` on the copy is what carries loudness now.
+    expect(new Set(rows.map((row) => row.priority))).toEqual(new Set(["P0"]));
     expect(rows[0]?.citedSpanIds).toEqual(["turn:5"]);
     expect(rows[2]?.citedSpanIds).toEqual(["turn:3", "turn:5"]);
     expect(rows[0]?.rationale).toBe(
@@ -194,7 +214,7 @@ describe("a test with three expected behaviors", () => {
       [FIRST]: met("cited past the end.", [5, 99]),
     });
 
-    expect(behaviorRows(verdicts)[0]?.citedSpanIds).toEqual(["turn:5"]);
+    expect((await behaviorRows(verdicts))[0]?.citedSpanIds).toEqual(["turn:5"]);
   });
 });
 
@@ -206,7 +226,7 @@ describe("a behavior the judge cannot determine", () => {
       [THIRD]: notMet("no reminder was offered."),
     });
 
-    expect(behaviorRows(verdicts).map((row) => row.verdict)).toEqual([
+    expect((await behaviorRows(verdicts)).map((row) => row.verdict)).toEqual([
       "passed",
       "skipped",
       "failed",
@@ -239,7 +259,7 @@ describe("a judge call that fails after its retries", () => {
       [THIRD]: notMet("no reminder was offered."),
     });
 
-    const rows = behaviorRows(verdicts);
+    const rows = await behaviorRows(verdicts);
     expect(rows.map((row) => row.verdict)).toEqual([
       "passed",
       "errored",
@@ -248,9 +268,6 @@ describe("a judge call that fails after its retries", () => {
     expect(rows[1]?.rationale).toContain("could not be judged");
     expect(rows[1]?.rationale).toContain("503");
     expect(rows[1]?.score).toBe(0);
-    // The priority is still the behavior's own: a check egma could not make is
-    // still a P1 check egma could not make.
-    expect(rows[1]?.priority).toBe("P1");
   });
 });
 
@@ -267,14 +284,13 @@ describe("a simulation that never ran", () => {
       { failedBecause: "agent_never_joined" },
     );
 
-    const rows = behaviorRows(verdicts);
+    const rows = await behaviorRows(verdicts);
     expect(rows).toHaveLength(3);
     for (const row of rows) {
       expect(row.verdict).toBe("errored");
       expect(row.rationale).toContain("no conversation to judge");
       expect(row.judgedBy).toBe("engine");
     }
-    expect(rows.map((row) => row.priority)).toEqual(["P0", "P1", "P2"]);
     expect(judge.asked).toEqual([]);
   });
 });
@@ -283,23 +299,24 @@ describe("a simulation born from no test", () => {
   /**
    * An ordinary case rather than a gap: somebody proving a connection with a
    * smoke call wrote down no expectations, so there is nothing to judge them
-   * against — and the project's own graders still judge the conversation. The
-   * threshold grader is here so there is a row to wait for, which is what makes
+   * against — and the project's other graders still judge the conversation. A
+   * latency copy is here so there is a row to wait for, which is what makes
    * "no behavior rows" an observation rather than a timeout.
    */
   it("has no behavior rows at all, which is not the same as failing any", async () => {
     const judge = await service.judgingWith({});
-    await seedGrader(world, aThreshold({ name: "Latency, on an untested call" }));
+    await seedGrader(
+      world,
+      aLatencyCopy({ name: "Latency, on an untested call" }),
+    );
 
     const { simulationId } = await conductSimulation(world, {
       spans: aConversation(),
     });
     const verdicts = await verdictsOn(world, simulationId, 1);
 
-    expect(behaviorRows(verdicts)).toEqual([]);
-    expect(verdicts.map((verdict) => verdict.dimension)).toEqual([
-      "metric_threshold",
-    ]);
+    expect(await behaviorRows(verdicts)).toEqual([]);
+    expect(verdicts.map((verdict) => verdict.dimension)).toEqual(["latency"]);
     expect(judge.asked).toEqual([]);
   });
 });

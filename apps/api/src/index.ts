@@ -8,6 +8,7 @@ import {
   seedDefaultJudge,
   seedGraderLibrary,
   seedPlatformSettings,
+  seedRunningGraders,
 } from "@egma/db";
 
 import { loadConfig } from "./config.ts";
@@ -54,6 +55,18 @@ const seeded = await seedPlatformSettings(config.platformSettings);
 // rather than half of one.
 const shelved = await seedGraderLibrary();
 
+// And the other half of it: a shelf full of definitions judges nothing until a
+// project is running a copy of one. Every project created from now on is born
+// with the `expected_behaviors` copy inside the transaction that creates it;
+// this writes it into every project made before that was true, so no project —
+// new or old — runs unjudged.
+//
+// After the seeding above, because the copy points at the entry and the foreign
+// key means it. Idempotent for a reason stronger than the upsert's: it asks
+// whether a project has ever *had* a copy, so a team that switched theirs off
+// keeps it off across every restart.
+const judging = await seedRunningGraders();
+
 const { app } = buildApi({ config });
 if (seeded.length > 0) {
   // The names, never the values and never their hints: what is worth saying is
@@ -70,6 +83,14 @@ if (shelved.length > 0) {
   app.log.info(
     { graders: shelved },
     "egma's predefined graders were written to the library",
+  );
+}
+if (judging.length > 0) {
+  // The projects, never anything a customer wrote: what is worth saying is that
+  // projects which had no mandatory grading now have it, and which ones.
+  app.log.info(
+    { projects: judging.map((copy) => copy.projectId) },
+    "egma's expected-behaviors grader was switched on in projects that had never had it",
   );
 }
 if (judged.length > 0) {

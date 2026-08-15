@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   aConversation,
+  aJudgedCopy,
   capturedLog,
   conductSimulation,
   eventually,
@@ -19,6 +20,7 @@ import {
   seedJudge,
   seedTest,
   testConfig,
+  theSeededGrader,
   THE_JUDGE_KEY,
   type World,
 } from "./support/world.ts";
@@ -43,10 +45,16 @@ const service = oneServiceAtATime();
 
 const BEHAVIOR = "confirms the new time back before finishing";
 
-function behaviorRows(
+/**
+ * The behaviors' rows, found by the grader they name — the project's own copy
+ * of the `expected_behaviors` library entry, which is what a verdict row
+ * carries now that the built-in is a row like everything else.
+ */
+async function behaviorRows(
   verdicts: readonly RecordedVerdict[],
-): readonly RecordedVerdict[] {
-  return verdicts.filter((verdict) => verdict.graderId === "expected_behaviors");
+): Promise<readonly RecordedVerdict[]> {
+  const seeded = await theSeededGrader(world);
+  return verdicts.filter((verdict) => verdict.graderId === seeded);
 }
 
 /** What a grading claim resolves to, as the queue builds it. */
@@ -135,17 +143,17 @@ describe("the project's default judge", () => {
    *
    * This is the resolution alone, against a real grader version read back out
    * of Postgres with the project's real key behind it. What the override looks
-   * like once it has reached a verdict row — the `llm_rubric` executor asking on
-   * the grader's model and the row naming it — is `llm-rubric.test.ts`, through
-   * the whole service.
+   * like once it has reached a verdict row is the case below, through the whole
+   * service.
    */
   it("is overridden by a grader that names its own provider and model", async () => {
-    const graderId = await seedGrader(world, {
-      name: "Was the agent empathetic",
-      type: "llm_rubric",
-      config: { rubric: "The agent acknowledged the caller's frustration." },
-      judgeModel: { provider: "openai", model: "gpt-4.1" },
-    });
+    const graderId = await seedGrader(
+      world,
+      aJudgedCopy({
+        name: "A second opinion, on a stronger model",
+        judgeModel: { provider: "openai", model: "gpt-4.1" },
+      }),
+    );
 
     const grader = await getGrader(world.auth, graderId);
     const resolved = await projectJudge(theEngine());
@@ -192,17 +200,16 @@ describe("the project's default judge", () => {
 
     const verdicts = await eventually("a behavior verdict", async () => {
       const read = await readVerdicts(world.auth, simulationId);
-      const rows = behaviorRows(read.verdicts);
+      const rows = await behaviorRows(read.verdicts);
       return rows.length > 0 ? rows : undefined;
     });
     await jobFor(world, { simulationId }, "graded");
 
     expect(verdicts[0]).toMatchObject({
-      graderId: "expected_behaviors",
+      graderId: await theSeededGrader(world),
       dimension: "behavior_1",
       judgedBy: "openai/gpt-4.1-mini",
       verdict: "passed",
-      priority: "P0",
     });
 
     /**

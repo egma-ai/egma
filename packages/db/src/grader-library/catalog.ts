@@ -131,11 +131,11 @@ const A_JUDGES_REPLY: LibraryOutputDefinition = {
  * it must choose between met and not-met will guess, and a guess dressed as a
  * judgment is the false trust this product exists to kill.
  *
- * These are the engine's own words, moved onto the shelf. Until the engine
- * reads its prompt through a running copy's `library_id`, it still holds a copy
- * of this text in `apps/grader/src/judge/openai.ts`; closing that is the
- * running-copies change, and the moment it lands this row is the only place the
- * words live.
+ * These were the engine's own words and this row is now the only place they
+ * live. The engine reads them through its running copy's `library_id` at
+ * judging time, so what the Library screen shows and what a judge is sent are
+ * one string with no copy to drift from — the whole reason the definition is
+ * never written down onto a copy.
  */
 const EXPECTED_BEHAVIORS_PROMPT = [
   "You judge one criterion about one recorded conversation between a customer's",
@@ -180,6 +180,22 @@ export type PredefinedGrader = {
 const SHIPPED = new Date("2026-08-14T00:00:00.000Z");
 
 /**
+ * The identifiers of the entries egma ships, by the name a person calls them.
+ *
+ * They are written here as names rather than left as characters in the list
+ * below because three other places point at one: the copy every project is
+ * seeded with, the backfill that gives one to every project that has none, and
+ * the engine's roster of what it knows how to execute. A repeated literal in
+ * any of those would be an identifier somebody could mistype into a pointer at
+ * nothing — and the whole reason these identifiers are fixed is so that a
+ * pointer at one keeps meaning what it meant across every upgrade.
+ */
+export const PREDEFINED_GRADERS = {
+  expectedBehaviors: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
+  latency: "grl_01M01MH8KBE00TESCGQHVH0T8G",
+} as const;
+
+/**
  * The two predefined graders v0 ships.
  *
  * They are the whole shelf on purpose: users should meet a small set of graders
@@ -189,7 +205,7 @@ const SHIPPED = new Date("2026-08-14T00:00:00.000Z");
  */
 export const GRADER_LIBRARY_CATALOG: readonly PredefinedGrader[] = [
   {
-    id: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
+    id: PREDEFINED_GRADERS.expectedBehaviors,
     name: "expected_behaviors",
     description:
       "Judges a simulation against its test's own expected behaviors — one isolated judge call per sentence, one verdict row each. Every new project runs a copy of it, so a first run is judged with no setup at all.",
@@ -202,7 +218,7 @@ export const GRADER_LIBRARY_CATALOG: readonly PredefinedGrader[] = [
     createdAt: SHIPPED,
   },
   {
-    id: "grl_01M01MH8KBE00TESCGQHVH0T8G",
+    id: PREDEFINED_GRADERS.latency,
     name: "latency",
     description:
       "Checks a measure of how fast the agent answered against a bound you choose. Computed from the conversation's spans by egma's own engine, with no model call anywhere — the same numbers the metrics display shows.",

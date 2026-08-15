@@ -220,7 +220,9 @@ describe("the graders a test names", () => {
     });
 
     const sharpened = await editGrader(actingAsAcme(), latency, {
-      config: { banned: [{ text: "I promise" }, { text: "guaranteed" }] },
+      config: {
+        assertions: [{ metric: "turn_response_latency", bound: 1_500 }],
+      },
     });
     expect(sharpened?.version).toBe(2);
 

@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { conversationOfTrace } from "../src/conversation.ts";
 import {
-  aThreshold,
+  aLatencyCopy,
   conductProductionTrace,
   conductSimulation,
   eventually,
@@ -21,6 +21,7 @@ import {
   seedGrader,
   seedTest,
   testConfig,
+  theSeededGrader,
   verdictsOn,
   type World,
 } from "./support/world.ts";
@@ -59,22 +60,22 @@ describe("a production trace whose root span closes", () => {
   it("is judged by exactly the project graders whose scope includes production", async () => {
     const monitoring = await seedGrader(
       world,
-      aThreshold({ name: "Production only", scope: "production" }),
+      aLatencyCopy({ name: "Production only", scope: "production" }),
     );
     const both = await seedGrader(
       world,
-      aThreshold({ name: "Both sources", scope: "both" }),
+      aLatencyCopy({ name: "Both sources", scope: "both" }),
     );
     const testingOnly = await seedGrader(
       world,
-      aThreshold({ name: "Simulations only", scope: "simulations" }),
+      aLatencyCopy({ name: "Simulations only", scope: "simulations" }),
     );
     // Named by a test's grader array, which is a decision about one scenario. A
     // real caller is in nobody's scenario, so naming it there must not reach
     // production however loudly the array says so.
     const attached = await seedGrader(
       world,
-      aThreshold({ name: "This scenario only", scope: "simulations" }),
+      aLatencyCopy({ name: "This scenario only", scope: "simulations" }),
     );
     await seedTest(world, [attached]);
 
@@ -91,21 +92,28 @@ describe("a production trace whose root span closes", () => {
     expect(judged.size).toBe(2);
   });
 
-  it("is never judged by the built-in expected_behaviors grader", async () => {
-    // The project holds a test carrying an expected behavior — the thing the
-    // built-in judges — and this conversation is not that test being run. A
-    // production trace has no test, so there is nothing for the built-in to
-    // judge it against, and a real caller measured against expectations
-    // somebody wrote for a different conversation would be the worst kind of
-    // wrong: confident and unfalsifiable.
+  it("is never judged by the expected-behaviors grader", async () => {
+    // The project holds a test carrying an expected behavior — the thing that
+    // grader judges — and this conversation is not that test being run. A
+    // production trace has no test, so there is nothing to judge it against,
+    // and a real caller measured against expectations somebody wrote for a
+    // different conversation would be the worst kind of wrong: confident and
+    // unfalsifiable.
+    //
+    // **The scope is what keeps it out**, and that is the shape the redesign
+    // gives this: the copy every project is created with is scoped to
+    // simulations, so a person can see the decision and change it, rather than
+    // it living in a branch nobody can point at.
     await seedTest(world, []);
 
     const { traceId } = await conductProductionTrace(world);
     const verdicts = await verdictsOn(world, traceId);
 
+    const seeded = await theSeededGrader(world);
+    expect(verdicts.map((verdict) => verdict.graderId)).not.toContain(seeded);
     expect(
       verdicts.map((verdict) => verdict.dimension),
-    ).not.toContain("expected_behaviors");
+    ).not.toContain("behavior_1");
     // Every row here was written by a grader somebody created and scoped to
     // production. Nothing else may write one.
     const scoped = new Set(
@@ -123,7 +131,7 @@ describe("a production trace whose root span closes", () => {
   it("lands verdict rows carrying source production and no run id", async () => {
     const graderId = await seedGrader(
       world,
-      aThreshold({ name: "Latency in the wild", scope: "production", priority: "P1" }),
+      aLatencyCopy({ name: "Latency in the wild", scope: "production", priority: "P1" }),
     );
 
     const { traceId } = await conductProductionTrace(world);
@@ -190,10 +198,11 @@ describe("a production trace whose root span closes", () => {
    * The read path itself, from real spans in a real store.
    *
    * Everything else in this file asserts verdict rows, which is the seam that
-   * matters — but no grader type egma executes today reads a transcript, so no
-   * row can show whether the conversation the engine assembled is the one the
-   * spans describe. This asserts it where it can be seen: the store's own read,
-   * through the constructor, exactly as the engine does it.
+   * matters — but nothing egma executes on a production trace today reads a
+   * transcript, so no row can show whether the conversation the engine
+   * assembled is the one the spans describe. This asserts it where it can be
+   * seen: the store's own read, through the constructor, exactly as the engine
+   * does it.
    */
   it("reads the conversation from its spans — the transcript and the tool calls", async () => {
     const { traceId, startedAt } = await conductProductionTrace(world, {
@@ -278,7 +287,7 @@ describe("a production trace whose root span never closes", () => {
     try {
       await seedGrader(
         world,
-        aThreshold({ name: "Watching a broken exporter", scope: "production" }),
+        aLatencyCopy({ name: "Watching a broken exporter", scope: "production" }),
       );
 
       const { traceId } = await conductProductionTrace(world, {
@@ -318,7 +327,7 @@ describe("the production sample rate", () => {
   it("grades a quarter of the traces, deterministically — every fourth one", async () => {
     const sampled = await seedGrader(
       world,
-      aThreshold({
+      aLatencyCopy({
         name: "A quarter of production",
         scope: "production",
         productionSampleRate: 25,
@@ -352,7 +361,7 @@ describe("the production sample rate", () => {
   it("leaves no verdict row at all on a trace it skipped — not a skipped one", async () => {
     const never = await seedGrader(
       world,
-      aThreshold({
+      aLatencyCopy({
         name: "Never sampled",
         scope: "production",
         productionSampleRate: 0,
@@ -376,7 +385,7 @@ describe("the production sample rate", () => {
   it("never applies to a simulation, whatever the rate says", async () => {
     const graderId = await seedGrader(
       world,
-      aThreshold({
+      aLatencyCopy({
         name: "Sampled, and judging every simulation",
         scope: "both",
         productionSampleRate: 1,
@@ -399,7 +408,7 @@ describe("changing where a grader applies", () => {
   it("takes effect forward only — no back-grading, and nothing deleted", async () => {
     const graderId = await seedGrader(
       world,
-      aThreshold({ name: "Pointed at production later", scope: "simulations" }),
+      aLatencyCopy({ name: "Pointed at production later", scope: "simulations" }),
     );
 
     const before = await conductProductionTrace(world);
@@ -431,7 +440,7 @@ describe("changing where a grader applies", () => {
   it("stops judging from the moment it is narrowed, and keeps what it said", async () => {
     const graderId = await seedGrader(
       world,
-      aThreshold({ name: "Pointed away from production", scope: "production" }),
+      aLatencyCopy({ name: "Pointed away from production", scope: "production" }),
     );
 
     const before = await conductProductionTrace(world);

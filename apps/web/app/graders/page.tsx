@@ -10,6 +10,7 @@ import {
   TYPES,
 } from "../../lib/grader-library-copy.ts";
 import { AppShell, Notice, PageHeader, ProductPage, StatePage, styles } from "../ui.tsx";
+import { GraderTabs } from "./tabs.tsx";
 
 /**
  * The grader library: the shelf of definitions a developer picks from.
@@ -18,8 +19,9 @@ import { AppShell, Notice, PageHeader, ProductPage, StatePage, styles } from "..
  * screen.** v0 ships a small set of graders egma maintains, so there is nothing
  * on this page to create and nothing to edit — a team meets judgment logic that
  * already works instead of being asked to design some on their first day. The
- * screen that grows beside this one is the running graders: the copies a
- * developer switches on, each pointing back at an entry here.
+ * screen beside it is the running graders: the copies a developer switches on,
+ * each pointing back at an entry here, and the strip under the heading is how
+ * somebody gets between the two.
  *
  * **Owner is the entry's own answer, printed rather than worked out.** The API
  * derives it from who the entry belongs to — egma's own entries belong to
@@ -105,6 +107,7 @@ export default function GraderLibraryPage() {
     <AppShell active="graders">
       <ProductPage wide>
         <PageHeader eyebrow="Current project" title={LIBRARY.title} lead={LIBRARY.lead} />
+        <GraderTabs active="library" />
         {state.status === "failed" ? <Notice tone="error">{state.why}</Notice> : null}
         {state.status === "loading" ? <Notice>{LIBRARY.loading}</Notice> : null}
 

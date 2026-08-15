@@ -6,34 +6,43 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  aThreshold,
+  aLatencyCopy,
   conductSimulation,
   jobFor,
   makeWorld,
-  runService,
+  oneServiceAtATime,
   seedGrader,
+  seedJudge,
   seedTest,
   testConfig,
+  theSeededGrader,
   verdictsOn,
   type World,
 } from "./support/world.ts";
-import type { Service } from "../src/service.ts";
+import { cannotDetermine, met, notMet } from "./support/scripted-judge.ts";
 
 /**
  * The walking skeleton, end to end: a conversation ends, the service takes it,
  * and the verdict rows are there.
  *
- * **The contract is the seam.** A conversation and a grader configuration go in;
- * the assertions are on the verdict rows and on nothing about how they got
- * written — not which function was called, not in what order, not how many times
- * the service woke up. That is what lets later work change the middle of this
- * without rewriting the suite that proves it works.
+ * **The contract is the seam.** A conversation and a project's running graders
+ * go in; the assertions are on the verdict rows and on nothing about how they
+ * got written — not which function was called, not in what order, not how many
+ * times the service woke up. That is what lets later work change the middle of
+ * this without rewriting the suite that proves it works.
  *
- * **No model key is present anywhere in this file, or needed anywhere under
- * it.** The one grader type the skeleton executes is deterministic: it reads a
- * number off the conversation and applies a threshold, in-process, instantly.
- * A judge arrives later behind a seam, and until it does the whole path
- * runs for free.
+ * **The graders are the two egma ships, because those are the only two there
+ * are.** A project is created holding an active copy of `expected_behaviors`,
+ * so the conversation below is judged against its test's own sentences with
+ * nothing set up at all; a copy of `latency` is what a second grader on the
+ * project looks like, and until egma computes it from spans a copy of it says
+ * `errored` out loud rather than passing.
+ *
+ * **The judge is scripted and no key is present anywhere in this file.** What
+ * is under test here is egma's side of the seam — which graders applied, what
+ * their rows say, what a broken conversation comes to — and asserting that
+ * against a real model would be paying an account to learn something a model
+ * cannot tell you reliably anyway.
  *
  * **The backstop is set an hour away on purpose.** Nothing here waits for a
  * poll: if a conversation is judged within a test's patience, it was judged
@@ -41,25 +50,31 @@ import type { Service } from "../src/service.ts";
  */
 
 let world: World;
-let service: Service;
+const service = oneServiceAtATime();
+
+/** The behavior every test in this file writes down, and the judge answers. */
+const THE_BEHAVIOR = "confirms the new time back before finishing";
 
 beforeAll(async () => {
   world = await makeWorld("grader_acceptance");
-  service = runService(testConfig());
+  await seedJudge(world);
 });
 
 afterAll(async () => {
-  service.stop();
-  await service.finished;
+  await service.stop();
   await world.drop();
 });
 
 describe("a conversation reaching its terminal transition", () => {
   it("is claimed and judged, with no interval in the way", async () => {
-    await seedGrader(world, aThreshold());
+    await service.judgingWith({
+      [THE_BEHAVIOR]: met("the agent named the new time back."),
+    });
+    const testId = await seedTest(world, []);
 
     const started = Date.now();
     const { simulationId, runId } = await conductSimulation(world, {
+      testId,
       spans: { measured: { turn_response_latency: [900, 1_100] } },
     });
 
@@ -72,47 +87,57 @@ describe("a conversation reaching its terminal transition", () => {
     expect(verdicts[0]?.runId).toBe(runId);
   });
 
-  it("lands the whole verdict row — the word, the number, the reason, the priority", async () => {
-    const graderId = await seedGrader(
-      world,
-      aThreshold({ name: "P1 latency", priority: "P1" }),
-    );
-    const { simulationId, runId } = await conductSimulation(world, {
-      spans: { measured: { turn_response_latency: [900, 9_100] } },
+  /**
+   * **The row names a real grader**, which is the whole of what the seeded copy
+   * bought. A verdict used to carry the word `expected_behaviors` where a
+   * grader id belongs, because the built-in was never a row in any table; every
+   * project now runs a copy of the library entry, so the row names it and the
+   * version that decided it.
+   */
+  it("lands the whole verdict row — the grader, the word, the number, the reason", async () => {
+    await service.judgingWith({
+      [THE_BEHAVIOR]: notMet("the agent finished without repeating the time.", [3]),
     });
+    const testId = await seedTest(world, []);
 
-    const verdicts = await verdictsOn(world, simulationId, 2);
-    const mine = verdicts.find((verdict) => verdict.graderId === graderId);
+    const { simulationId, runId } = await conductSimulation(world, { testId });
+    const [only] = await verdictsOn(world, simulationId);
 
-    expect(mine).toMatchObject({
+    expect(only).toMatchObject({
       traceId: simulationId,
-      graderId,
-      dimension: "metric_threshold",
+      graderId: await theSeededGrader(world),
+      // The behavior's position in the pinned test version, never its words:
+      // what a reader sees is fetched from that version at display time.
+      dimension: "behavior_1",
       source: "simulation",
-      judgedBy: "engine",
+      judgedBy: "openai/gpt-4.1-mini",
       verdict: "failed",
       score: 0,
-      priority: "P1",
       runId,
       agentId: world.agentId,
-      citedSpanIds: [],
     });
-    expect(mine?.rationale).toContain("p90 of turn_response_latency was 9100");
-    expect(mine?.graderVersionId).toMatch(/^grv_/);
+    expect(only?.rationale).toBe(
+      "the agent finished without repeating the time.",
+    );
+    expect(only?.graderVersionId).toMatch(/^grv_/);
   });
 
   it("is judged by every project grader whose scope includes simulations, and by no other", async () => {
+    await service.judgingWith({
+      [THE_BEHAVIOR]: met("it did."),
+    });
     const judging = await seedGrader(
       world,
-      aThreshold({ name: "Both sources", scope: "both" }),
+      aLatencyCopy({ name: "Both sources", scope: "both" }),
     );
     const elsewhere = await seedGrader(
       world,
-      aThreshold({ name: "Production only", scope: "production" }),
+      aLatencyCopy({ name: "Production only", scope: "production" }),
     );
 
-    const { simulationId } = await conductSimulation(world);
-    const verdicts = await verdictsOn(world, simulationId, 3);
+    const testId = await seedTest(world, []);
+    const { simulationId } = await conductSimulation(world, { testId });
+    const verdicts = await verdictsOn(world, simulationId, 2);
     const graders = new Set(verdicts.map((verdict) => verdict.graderId));
 
     expect(graders.has(judging)).toBe(true);
@@ -122,14 +147,15 @@ describe("a conversation reaching its terminal transition", () => {
   });
 
   it("is judged by the graders its pinned test version names", async () => {
+    await service.judgingWith({ [THE_BEHAVIOR]: met("it did.") });
     const attached = await seedGrader(
       world,
-      aThreshold({ name: "This scenario only", scope: "production" }),
+      aLatencyCopy({ name: "This scenario only", scope: "production" }),
     );
     const testId = await seedTest(world, [attached]);
 
     const { simulationId } = await conductSimulation(world, { testId });
-    const verdicts = await verdictsOn(world, simulationId, 3);
+    const verdicts = await verdictsOn(world, simulationId, 2);
 
     // Named by the test, so it judges this conversation whatever its project
     // scope says: naming it is the scoping decision, made per test.
@@ -139,15 +165,47 @@ describe("a conversation reaching its terminal transition", () => {
   });
 
   it("counts a grader named by both the project and the test exactly once", async () => {
-    const both = await seedGrader(world, aThreshold({ name: "Named twice" }));
+    await service.judgingWith({ [THE_BEHAVIOR]: met("it did.") });
+    const both = await seedGrader(world, aLatencyCopy({ name: "Named twice" }));
     const testId = await seedTest(world, [both]);
 
     const { simulationId } = await conductSimulation(world, { testId });
-    const verdicts = await verdictsOn(world, simulationId, 3);
+    const verdicts = await verdictsOn(world, simulationId, 2);
 
     expect(
       verdicts.filter((verdict) => verdict.graderId === both),
     ).toHaveLength(1);
+  });
+});
+
+/**
+ * A grader egma has not built the engine for yet.
+ *
+ * `latency` is on the shelf and a project can press Use on it today; computing
+ * it from a conversation's spans is a later change. Until then a copy of it
+ * must say so out loud rather than pass, because a project's page going green
+ * on a check nobody made is the exact false trust this product exists to kill.
+ */
+describe("a copy of an entry egma cannot execute yet", () => {
+  it("is errored, and never passed or skipped", async () => {
+    await service.judgingWith({ [THE_BEHAVIOR]: met("it did.") });
+    const waiting = await seedGrader(
+      world,
+      aLatencyCopy({ name: "Waiting on the measures" }),
+    );
+
+    const testId = await seedTest(world, []);
+    const { simulationId } = await conductSimulation(world, { testId });
+    const verdicts = await verdictsOn(world, simulationId, 2);
+    const mine = verdicts.find((verdict) => verdict.graderId === waiting);
+
+    expect(mine).toMatchObject({
+      dimension: "latency",
+      verdict: "errored",
+      score: 0,
+      judgedBy: "engine",
+    });
+    expect(mine?.rationale).toContain("does not execute the latency grader yet");
   });
 });
 
@@ -158,15 +216,18 @@ describe("a simulation that never ran", () => {
    * must never read as a run whose agent broke.
    */
   it("is errored for every applicable grader, and never failed", async () => {
-    await seedGrader(world, aThreshold({ name: "Latency, on a broken test" }));
+    await service.judgingWith({ [THE_BEHAVIOR]: met("it did.") });
+    await seedGrader(world, aLatencyCopy({ name: "On a broken test" }));
 
+    const testId = await seedTest(world, []);
     const { simulationId } = await conductSimulation(world, {
+      testId,
       failedBecause: "agent_never_joined",
     });
 
-    const verdicts = await verdictsOn(world, simulationId);
+    const verdicts = await verdictsOn(world, simulationId, 2);
 
-    expect(verdicts.length).toBeGreaterThan(0);
+    expect(verdicts.length).toBeGreaterThan(1);
     for (const verdict of verdicts) {
       expect(verdict.verdict).toBe("errored");
       expect(verdict.rationale).toContain("no conversation to judge");
@@ -175,7 +236,10 @@ describe("a simulation that never ran", () => {
   });
 
   it("folds to errored rather than to failed, all the way up to the headline", async () => {
+    await service.judgingWith({ [THE_BEHAVIOR]: met("it did.") });
+    const testId = await seedTest(world, []);
     const { simulationId } = await conductSimulation(world, {
+      testId,
       failedBecause: "not_answered",
     });
     await verdictsOn(world, simulationId);
@@ -185,25 +249,23 @@ describe("a simulation that never ran", () => {
   });
 });
 
-describe("a completed conversation missing the measure a grader wants", () => {
+describe("a conversation the judge cannot settle", () => {
+  /**
+   * `cannot_determine` is a real answer, not a failure and not an error: the
+   * evidence did not settle the criterion. It becomes `skipped` and leaves the
+   * score's denominator, so a behavior nobody could judge neither passes nor
+   * fails anything.
+   */
   it("is skipped, and leaves the score's denominator", async () => {
-    await seedGrader(
-      world,
-      aThreshold({
-        name: "Audio band",
-        config: {
-          measure: "measured_audio_band_hertz",
-          aggregation: "min",
-          comparator: "at_least",
-          threshold: 16_000,
-        },
-      }),
-    );
-
-    const { simulationId } = await conductSimulation(world, {
-      spans: { measured: { turn_response_latency: [900] } },
+    await service.judgingWith({
+      [THE_BEHAVIOR]: cannotDetermine(
+        "the conversation never reached the subject.",
+      ),
     });
-    await verdictsOn(world, simulationId, 2);
+
+    const testId = await seedTest(world, []);
+    const { simulationId } = await conductSimulation(world, { testId });
+    await verdictsOn(world, simulationId);
 
     const read = await readVerdicts(world.auth, simulationId);
     const skipped = read.verdicts.filter(
@@ -223,8 +285,9 @@ describe("a completed conversation missing the measure a grader wants", () => {
 
 describe("the job behind it", () => {
   it("is finished once the verdicts are written, and never handed out again", async () => {
-    await seedGrader(world, aThreshold({ name: "One more" }));
-    const { simulationId } = await conductSimulation(world);
+    await service.judgingWith({ [THE_BEHAVIOR]: met("it did.") }, testConfig());
+    const testId = await seedTest(world, []);
+    const { simulationId } = await conductSimulation(world, { testId });
     await verdictsOn(world, simulationId);
 
     const job = await jobFor(world, { simulationId }, "graded");

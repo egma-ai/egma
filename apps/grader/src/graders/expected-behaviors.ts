@@ -1,29 +1,35 @@
-import {
-  getSimulationTestVersion,
-  type AuthContext,
-  type ExpectedBehavior,
-  type Priority,
-} from "@egma/db";
+import { getSimulationTestVersion, type LibraryEntry } from "@egma/db";
 
-import type { Conversation } from "../conversation.ts";
 import {
   judgeInputOf,
   NoJudge,
-  type JudgeMakers,
   type JudgeQuestion,
-  type JudgeResolution,
 } from "../judge/index.ts";
-import type { Judgment } from "./contract.ts";
+import type { Execution, Judgment } from "./contract.ts";
 import { judgmentOf } from "./judged.ts";
 
 /**
- * The built-in grader: a test's expected behaviors, judged one at a time.
+ * The expected-behaviors grader: a test's expected behaviors, judged one at a
+ * time.
  *
- * **It is never a row and never resolved.** Every other grader is something
- * somebody attached; this one applies because running a test *means* judging it
- * against what the test says it expects (ADR-0004). So it is not in the
- * executor roster, does not come through `resolve.ts`, and cannot be detached —
- * a test can never be made unfalsifiable, even deliberately.
+ * **It is an ordinary running copy now**, and that is the change this file
+ * carries. It used to be implicit — never a row, never resolved, applied
+ * because running a test *meant* judging it against what the test says, and
+ * writing the word `expected_behaviors` where a verdict row wants a grader id.
+ * Every project is now seeded with an active copy of the library entry instead,
+ * so it is resolved like everything else, its verdict rows name a real grader
+ * and a real version, and the sentinel string is gone.
+ *
+ * **Its assertions are the test's own sentences, which is why its config is
+ * empty.** Nothing is filled in at Use time and nothing could be: what this
+ * grader checks is whatever the test in front of it says should happen, read at
+ * judging time off the version the conversation was executed against.
+ *
+ * **The judge prompt comes off the library entry, through the copy's pointer.**
+ * It is never written down onto the copy, so the words the Library screen shows
+ * a developer and the words a model is sent are one string. A release that
+ * improves the prompt improves it everywhere at once, because there is only one
+ * place it lives.
  *
  * ## One call per behavior, and why it is not one call per conversation
  *
@@ -43,17 +49,15 @@ import { judgmentOf } from "./judged.ts";
  *
  * ## What each row says
  *
- * The dimension is the behavior's **position**, one-based, in the order the
- * test's author wrote them. The priority is the behavior's own — a test carries
- * a priority per behavior, so a nice-to-have cannot block a release and a
- * must-have always can — snapshotted onto the row like every other priority.
+ * The key is the behavior's **position**, one-based, in the order the test's
+ * author wrote them — never the sentence itself, which is read back from the
+ * pinned test version when somebody looks at the row.
  *
- * A position is stable exactly as far as it needs to be. The grader version on
- * these rows is the **frozen test version** the conversation was executed
- * against, so a test whose behaviors are reordered or rewritten judges under a
- * new version and lands rows beside the old ones rather than over them. Within
- * one version, position 3 is the same sentence forever, which is the property
- * the fold's dimension key actually needs.
+ * A position is stable exactly as far as it needs to be. A conversation is
+ * judged against the frozen test version it was *executed* against, so a test
+ * whose behaviors are reordered or rewritten does not reinterpret what was
+ * already judged: within one version, position 3 is the same sentence forever,
+ * which is the property the fold's key actually needs.
  *
  * ## What it says when it cannot say anything
  *
@@ -70,124 +74,82 @@ import { judgmentOf } from "./judged.ts";
  * - **The judge could not tell.** `skipped`, and it leaves the score's
  *   denominator — a behavior nobody could judge neither passed nor failed
  *   anything.
+ * - **There is no test.** No rows at all, and that is an ordinary case rather
+ *   than a gap: somebody proving a connection with a smoke call wrote down no
+ *   expectations, so there is nothing here to have an opinion about.
  */
-
-/** What every grader in this file is: the built-in, named once. */
-export const EXPECTED_BEHAVIORS = "expected_behaviors";
-
-/**
- * One behavior's judgment, and how loudly it speaks.
- *
- * The priority rides beside the judgment rather than inside it, on the same
- * terms it does for every other grader: what the judge decides is whether the
- * behavior was met, and how much that matters is read at judging time and
- * stamped on the row. A judge that could see the priority would be a judge that
- * could be tempted to answer differently because of it.
- */
-export type BehaviorJudgment = {
-  readonly judgment: Judgment;
-  readonly priority: Priority;
-};
-
-/** The built-in's whole answer about one conversation. */
-export type ExpectedBehaviorsJudgment = {
-  /**
-   * The frozen test version whose behaviors these are — what goes in the verdict
-   * row's `grader_version_id`, and what keeps these rows readable after the
-   * test is edited.
-   */
-  readonly versionId: string;
-  /** The judge that was on the hook, or `engine` when none was asked. */
-  readonly judgedBy: string;
-  readonly judged: readonly BehaviorJudgment[];
-};
-
-export type ExpectedBehaviorsExecution = {
-  readonly auth: AuthContext;
-  readonly simulationId: string;
-  readonly conversation: Conversation;
-  /**
-   * The project's judge, asked for only once this decides it is going to judge
-   * something — after the behaviors are known and after the conversation is
-   * known to have happened. A test with nothing to judge never causes a key to
-   * be unsealed.
-   */
-  readonly judge: JudgeResolution;
-  readonly makers: JudgeMakers;
-};
 
 /**
  * The behaviors this conversation was supposed to show, judged.
  *
- * `undefined` for a simulation that pinned no test version, and that is an
- * ordinary case rather than a gap: somebody proving a connection with a smoke
- * call wrote down no expectations, so there is nothing to judge them against and
- * the project's own graders still judge the conversation.
+ * The one executor that reads something outside the conversation, and it is the
+ * whole reason `reading` is on the execution: this grader's assertions live on
+ * the test, not in its own config, so it has to go and get them.
  */
-export async function judgeExpectedBehaviors(
-  execution: ExpectedBehaviorsExecution,
-): Promise<ExpectedBehaviorsJudgment | undefined> {
-  const { auth, simulationId, conversation } = execution;
+export async function executeExpectedBehaviors(
+  execution: Execution,
+): Promise<readonly Judgment[]> {
+  const { auth, simulationId } = execution.reading;
+  // A production trace has no simulation and therefore no test. The copy is
+  // scoped to simulations for exactly this reason, so reaching here means
+  // somebody widened a scope by hand; answering nothing is the honest reply.
+  if (simulationId === undefined) return [];
 
   const version = await getSimulationTestVersion(auth, simulationId);
-  if (version === undefined) return undefined;
+  if (version === undefined) return [];
 
   const behaviors = version.expectedBehaviors;
-  if (behaviors.length === 0) return undefined;
+  if (behaviors.length === 0) return [];
 
-  // The same sentence the authored graders answer with, read off the
-  // conversation rather than written a second time here: two copies of it are
-  // two things a reader could be told about one conversation.
-  const nothingToJudge = conversation.nothingToJudgeBecause;
+  // The same sentence the other graders answer with, read off the conversation
+  // rather than written a second time here: two copies of it are two things a
+  // reader could be told about one conversation.
+  const nothingToJudge = execution.conversation.nothingToJudgeBecause;
   if (nothingToJudge !== null) {
-    return {
-      versionId: version.id,
-      judgedBy: "engine",
-      judged: behaviors.map((behavior, at) =>
-        couldNotJudge(behavior, at, nothingToJudge),
-      ),
-    };
+    return behaviors.map((_, at) => couldNotJudge(at, nothingToJudge));
   }
 
-  // Only now, with behaviors to judge and a conversation that happened, is the
-  // project's key worth unsealing.
-  const configured = await execution.judge();
+  // The words a model is told it is working under, read through the copy's
+  // pointer. An entry carrying none is a definition this executor cannot ask
+  // anything with, and saying so is better than sending an empty instruction.
+  const prompt = judgePromptOf(execution.definition);
+  if (prompt === null) {
+    return behaviors.map((_, at) =>
+      couldNotJudge(
+        at,
+        `the ${execution.definition.name} grader in egma's library carries no judge prompt, so there was nothing to ask with.`,
+      ),
+    );
+  }
+
+  // Only now, with behaviors to judge, a conversation that happened and words
+  // to ask with, is the project's key worth unsealing.
+  const configured = await execution.judging.judge();
   if (configured instanceof NoJudge) {
     const why = configured.message;
-    return {
-      versionId: version.id,
-      judgedBy: "engine",
-      judged: behaviors.map((behavior, at) => couldNotJudge(behavior, at, why)),
-    };
+    return behaviors.map((_, at) => couldNotJudge(at, why));
   }
 
-  // The project's own, with no override: the built-in is not a grader row, so
-  // it has no `judge_model` to insist on — the override belongs to authored
-  // graders, and this one is nobody's to configure. What comes back is a way to
-  // ask and a name to record, and deliberately not a key.
-  const judge = configured.judging(null, execution.makers);
+  const judge = configured.judging(execution.judging.model, execution.judging.makers);
 
   // Assembled once and shared by every call, which is what makes N judgments of
   // one conversation one read rather than N.
-  const evidence = judgeInputOf(conversation);
+  const evidence = judgeInputOf(execution.conversation);
   const turns = evidence.transcript.length;
 
   // In parallel, because they are independent by construction: wall-clock for a
   // test with five behaviors is one judge call rather than five.
-  const judged = await Promise.all(
-    behaviors.map(async (behavior, at): Promise<BehaviorJudgment> => {
+  return Promise.all(
+    behaviors.map(async (behavior, at): Promise<Judgment> => {
       const question: JudgeQuestion = {
+        prompt,
         criterion: behavior.behavior,
         evidence,
       };
       try {
         return {
-          priority: behavior.priority,
-          judgment: judgmentOf(
-            behaviorDimension(at),
-            await judge.ask(question),
-            turns,
-          ),
+          ...judgmentOf(behaviorKey(at), await judge.ask(question), turns),
+          judgedBy: judge.name,
         };
       } catch (error) {
         // One judge call falling over is one `errored` row. Every sibling's
@@ -195,42 +157,38 @@ export async function judgeExpectedBehaviors(
         // make the check — which is the whole reason `errored` is a word
         // separate from `failed`.
         return couldNotJudge(
-          behavior,
           at,
           `this behavior could not be judged: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }),
   );
+}
 
-  return { versionId: version.id, judgedBy: judge.name, judged };
+/** The definition's own words, or nothing where the entry carries none. */
+function judgePromptOf(definition: LibraryEntry): string | null {
+  const prompt = definition.prompt;
+  return prompt === null || prompt.trim() === "" ? null : prompt;
 }
 
 /**
- * What the behaviors' dimension is called: the position, one-based, in the
- * order they were authored.
+ * What the behaviors' assertion key is: the position, one-based, in the order
+ * they were authored.
  *
  * Written as a function rather than as a template at each site so the string
  * every verdict row files a behavior under is decided in one place.
  */
-function behaviorDimension(at: number): string {
+function behaviorKey(at: number): string {
   return `behavior_${at + 1}`;
 }
 
 /** egma could not judge this. Never `failed`: nothing is said about the agent. */
-function couldNotJudge(
-  behavior: ExpectedBehavior,
-  at: number,
-  rationale: string,
-): BehaviorJudgment {
+function couldNotJudge(at: number, rationale: string): Judgment {
   return {
-    priority: behavior.priority,
-    judgment: {
-      dimension: behaviorDimension(at),
-      verdict: "errored",
-      score: 0,
-      rationale,
-      citedSpanIds: [],
-    },
+    dimension: behaviorKey(at),
+    verdict: "errored",
+    score: 0,
+    rationale,
+    citedSpanIds: [],
   };
 }
