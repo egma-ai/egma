@@ -64,9 +64,7 @@ async function throwawayHome(label: string): Promise<Home> {
 }
 
 function envFor(home: Home): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, EGMA_HOME: home.folder, BROWSER: NO_BROWSER };
-  delete env.EGMA_URL;
-  return env;
+  return { ...process.env, EGMA_HOME: home.folder, BROWSER: NO_BROWSER };
 }
 
 /** What is on disk after a login, and what the file is readable by. */

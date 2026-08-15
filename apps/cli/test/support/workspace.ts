@@ -158,12 +158,9 @@ export async function makeWorkspace(
         EGMA_TEST_DEFAULT_URL: NO_DEFAULT_PLATFORM,
         ...extra,
       };
-      // Whatever the person running the suite has set, a check talks to the
-      // egma it is checking against and to nothing else. Removed rather than
-      // set to nothing: a pseudo-terminal turns an unset value into the word.
-      if (extra.EGMA_URL === undefined) delete env.EGMA_URL;
-      // And a key the person running the suite happens to have in their shell
-      // is not a key any check may use.
+      // A key the person running the suite happens to have in their shell is
+      // not a key any check may use. Removed rather than set to nothing: a
+      // pseudo-terminal turns an unset value into the word.
       if (extra.EGMA_RETELL_API_KEY === undefined) delete env.EGMA_RETELL_API_KEY;
       if (extra.RETELL_API_KEY === undefined) delete env.RETELL_API_KEY;
       if (extra.EGMA_RETELL_AGENT_ID === undefined) delete env.EGMA_RETELL_AGENT_ID;

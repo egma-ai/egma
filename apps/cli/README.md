@@ -96,12 +96,14 @@ wider it needs to be instead of drawing an address that breaks across two lines.
 ### Your own instance
 
 ```
-EGMA_URL=http://localhost:3101 egma
+egma --url http://localhost:3101
 ```
 
-or `--url`. It is kept beside the key after the first login, so later commands
-find it without being told again. `3101` is where `docker compose up` puts an
-instance; see [Trying it on an instance of your own](#trying-it-on-an-instance-of-your-own),
+`--url` is the one way to name an egma, and it names it for that one command.
+To say it once and be done, bind the repository — `egma init --url
+http://localhost:3101` writes that instance's verified identity into
+`egma/config.yaml`, and every later command in the repository finds it there.
+`3101` is where `docker compose up` puts an instance; see [Trying it on an instance of your own](#trying-it-on-an-instance-of-your-own),
 which is also where the `egma` in that line comes from today.
 
 ## Connecting your voice agent
@@ -572,7 +574,8 @@ egma connect [options]   Register your voice agent and a way to reach it.
                          The key comes in on standard input or from the
                          environment, never as an argument.
 egma init [options]      Make the egma folder this repository's tests live
-                         in. Safe to run again.
+                         in. Talks to nobody, unless --url names an egma to
+                         bind this repository to. Safe to run again.
 egma pull [options]      Write egma's current test versions into it.
 egma push [options]      Upload the tests in it. Refuses, naming names, when
                          egma has moved on since your last pull.
@@ -582,9 +585,12 @@ egma run [options]       Run this folder's tests, pinning the version of each.
   --coding-agent <id>  Which coding agent to drive, named as the agent
                        registry names it. Default: claude-acp
   --cwd <path>         The folder to work in. Default: this folder.
-  --url <address>      The egma to talk to, for a self-hosted one. Kept
-                       after the first login, so it is set once. EGMA_URL
-                       does the same for a whole shell.
+  --url <address>      Which egma this one command talks to. It is the only
+                       way to name one, so a command that should reach that
+                       egma carries it. With init and with the wizard: egma
+                       asks that address who it is and records its verified
+                       identity in egma/config.yaml, and every later command
+                       in this repository then needs no address at all.
   --force              With login: sign in again even when this machine
                        already holds a key.
   --no-follow          With run: start the run and return at once, without
@@ -613,7 +619,6 @@ egma run [options]       Run this folder's tests, pinning the version of each.
   -v, --version        Print the version.
 
 Environment:
-  EGMA_URL             The egma to talk to, for a whole shell. Same as --url.
   EGMA_HOME            The folder egma keeps this machine's key in.
                        Default: ~/.egma
   EGMA_RETELL_API_KEY  Your Retell key, for egma connect. RETELL_API_KEY is
@@ -703,11 +708,11 @@ instance you just signed up on:
 
 ```
 cd ~/your-voice-agent
-EGMA_URL=http://localhost:3101 node ~/egma/apps/cli/dist/bin.js
+node ~/egma/apps/cli/dist/bin.js --url http://localhost:3101
 ```
 
 (`~/egma` is wherever you cloned this. From npm, that whole line is
-`EGMA_URL=http://localhost:3101 npx @egma/cli`.)
+`npx @egma/cli --url http://localhost:3101`.)
 
 The wizard signs this machine in against that instance, registers your agent
 and a way to reach it, writes a first suite of tests with your coding agent,

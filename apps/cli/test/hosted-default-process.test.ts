@@ -1,8 +1,8 @@
 /**
  * The bare command, as a developer with nothing configured really types it.
  *
- * No `--url`, no `EGMA_URL`, no platform in the committed folder: the last step
- * of resolution is egma's own platform, and this is the check that proves it
+ * No `--url` and no platform in the committed folder: the last step of
+ * resolution is egma's own platform, and this is the check that proves it
  * the way it is run — the built CLI as its own process, against a platform
  * standing where the built-in address is. Proving it only inside the resolver
  * would leave the one thing a developer meets — typing `npx @egma/cli` and
@@ -84,9 +84,12 @@ describe("a repository that names no platform", () => {
   });
 
   /**
-   * The command, run the way a developer runs it: never with `--url`, and
-   * never with `EGMA_URL` in the environment. Both are asserted rather than
-   * assumed, because either one would make every claim below vacuous.
+   * The command, run the way a developer runs it: with nothing naming a
+   * platform, so that the last step of resolution is what answers.
+   *
+   * There is one way to name one — `--url` — so a check that is deliberately
+   * proving the flag wins says it in its own arguments, and every other check
+   * here is one where nothing did.
    */
   async function egma(
     workspace: Workspace,
@@ -94,13 +97,6 @@ describe("a repository that names no platform", () => {
     extra: NodeJS.ProcessEnv = {},
   ): Promise<Ended> {
     const env = workspace.env({ EGMA_RETELL_URL: retell.url, ...extra });
-    // Unless the check is deliberately proving that one of them wins, neither
-    // way of naming a platform is in play — and that is asserted rather than
-    // assumed, because either one would make every claim below vacuous.
-    if (!args.includes("--url") && extra.EGMA_URL === undefined) {
-      expect(env.EGMA_URL).toBeUndefined();
-    }
-
     const child = spawn(process.execPath, [CLI_ENTRY, ...args], {
       cwd: workspace.dir,
       env,
@@ -299,7 +295,6 @@ describe("a repository that names no platform", () => {
       expect(refused.stderr).toContain(NO_DEFAULT_PLATFORM);
       expect(refused.stderr).toContain("Nothing was sent");
       expect(refused.stderr).toContain("--url <address>");
-      expect(refused.stderr).toContain("EGMA_URL");
 
       // The wizard answers the same way, and says which address it was going to
       // use before it finds out that nothing is there.
@@ -323,22 +318,14 @@ describe("a repository that names no platform", () => {
     }
   });
 
-  /** The three deliberate places still win, in their order, over egma's own. */
+  /** Both deliberate places still win, in their order, over egma's own. */
   it("keeps every step above it winning", async () => {
     const workspace = await makeWorkspace();
     try {
       await workspace.signIn(elsewhere.url, PLATFORM_KEY);
       const before = own.records.length;
 
-      // A whole shell pointed elsewhere: the built-in address is not consulted.
-      const byEnvironment = await egma(workspace, ["login"], {
-        EGMA_TEST_DEFAULT_URL: own.url,
-        EGMA_URL: elsewhere.url,
-      });
-      expect(byEnvironment.code, byEnvironment.stderr).toBe(0);
-      expect(byEnvironment.stdout).toContain(`url: ${elsewhere.url}`);
-
-      // And one command pointed elsewhere beats even that.
+      // One command pointed elsewhere: the built-in address is not consulted.
       const byFlag = await egma(workspace, ["login", "--url", elsewhere.url], {
         EGMA_TEST_DEFAULT_URL: own.url,
       });
@@ -364,6 +351,53 @@ describe("a repository that names no platform", () => {
       expect(byBinding.stdout).toContain(`url: ${elsewhere.url}`);
 
       expect(own.records.slice(before)).toEqual([]);
+    } finally {
+      await workspace.remove();
+    }
+  });
+
+  /**
+   * The rung that went, proven gone from the outside.
+   *
+   * `EGMA_URL` used to sit between the flag and the binding, so a shell that
+   * held it decided every command run in that shell. There is one explicit way
+   * to name a platform per invocation now, which makes the variable an ordinary
+   * word in the environment: it selects nothing, and — this is the half that
+   * could have been missed — it refuses nothing either. A bound repository used
+   * to be told it was being moved by a shell somebody set up months ago, which
+   * is a refusal about a decision nobody made today.
+   */
+  it("is not moved by EGMA_URL, on a repository bound or unbound", async () => {
+    const workspace = await makeWorkspace();
+    try {
+      await workspace.signIn(own.url, PLATFORM_KEY);
+      await workspace.signIn(elsewhere.url, PLATFORM_KEY);
+      const shell = { EGMA_TEST_DEFAULT_URL: own.url, EGMA_URL: elsewhere.url };
+      const elsewhereBefore = elsewhere.records.length;
+
+      // Unbound: the built-in address, exactly as with nothing in the shell.
+      const unbound = await egma(workspace, ["login"], shell);
+      expect(unbound.code, unbound.stderr).toBe(0);
+      expect(unbound.stdout).toContain(`url: ${own.url}`);
+
+      // Bound: the committed platform, and no refusal about a move nobody is
+      // making.
+      await createEgmaFolder({
+        repository: workspace.dir,
+        config: {
+          platform: { origin: own.url, instance: own.instanceId },
+          agent: null,
+          connection: null,
+          suite: null,
+        },
+      });
+      const bound = await egma(workspace, ["login"], shell);
+      expect(bound.code, bound.stderr).toBe(0);
+      expect(bound.stdout).toContain(`url: ${own.url}`);
+      expect(bound.stdout).not.toContain("status: refused");
+
+      // And the platform that shell named was never asked so much as who it is.
+      expect(elsewhere.records.slice(elsewhereBefore)).toEqual([]);
     } finally {
       await workspace.remove();
     }
@@ -537,11 +571,10 @@ describe("a repository that names no platform", () => {
       return workspace;
     }
 
-    // Every way a platform gets selected, and the same answer from all three.
+    // Every way a platform gets selected, and the same answer from both.
     for (const [how, args, extra] of [
       ["the built-in address", ["pull"], {}],
       ["--url", ["pull", "--url", own.url], {}],
-      ["EGMA_URL", ["pull"], { EGMA_URL: own.url }],
     ] as const) {
       const workspace = await halfMoved();
       try {

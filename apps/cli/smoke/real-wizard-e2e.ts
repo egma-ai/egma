@@ -413,7 +413,6 @@ async function walkOnce(options: {
   // wizard — or the coding agent it starts, which inherits this — can read.
   delete env[KEY_VARIABLE];
   for (const other of OTHER_KEY_VARIABLES) delete env[other];
-  delete env.EGMA_URL;
   delete env.EGMA_RETELL_AGENT_ID;
   delete env[TARGET_VARIABLE];
 

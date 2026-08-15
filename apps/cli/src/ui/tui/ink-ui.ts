@@ -14,7 +14,7 @@ import type { Detection } from "../../wizard/detection.ts";
 import type { ExitReport } from "../../wizard/exit-line.ts";
 import type { TestGate } from "../../wizard/gate.ts";
 import type { GenerationProgress } from "../../wizard/test-generation.ts";
-import type { AskId, DrivenAgent, GateId, WizardUI } from "../wizard-ui.ts";
+import type { AskId, DrivenAgent, GateId, PlatformNotice, WizardUI } from "../wizard-ui.ts";
 import type { WizardStore } from "./store.ts";
 
 export class InkUI implements WizardUI {
@@ -39,8 +39,8 @@ export class InkUI implements WizardUI {
     this.store.setDrivenAgentLog(file);
   }
 
-  setPlatform(url: string | null): void {
-    this.store.setPlatform(url);
+  setPlatform(chosen: PlatformNotice | null): void {
+    this.store.setPlatform(chosen);
   }
 
   setDetection(detection: Detection | null): void {

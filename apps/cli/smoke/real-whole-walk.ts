@@ -337,10 +337,10 @@ async function register(
   // never guesses between the two, so this walk says which one it means. The
   // phone path is proven where a real number and a real carrier are, and this
   // walk has neither.
-  let ran = await egma(["connect", "--cwd", repository, "--reach", "text"], {
-    env,
-    stdin: `${vendor.key}\n`,
-  });
+  let ran = await egma(
+    ["connect", "--url", instance.origin, "--cwd", repository, "--reach", "text"],
+    { env, stdin: `${vendor.key}\n` },
+  );
 
   // A real account may hold several agents, and egma refuses to guess which
   // one. Any of them proves the same thing about the walk, so the first is
@@ -350,7 +350,17 @@ async function register(
     secrets.push(listed);
     say(`  (the account holds several agents; the first was taken)`);
     ran = await egma(
-      ["connect", "--cwd", repository, "--reach", "text", "--retell-agent", listed],
+      [
+        "connect",
+        "--url",
+        instance.origin,
+        "--cwd",
+        repository,
+        "--reach",
+        "text",
+        "--retell-agent",
+        listed,
+      ],
       { env, stdin: `${vendor.key}\n` },
     );
   }
@@ -425,7 +435,9 @@ async function pushTheTests(
     await writeFile(path.join(paths.tests, `${test.name}.md`), testFile(test.name, test.body), "utf8");
   }
 
-  const pushed = await egma(["push", "--cwd", repository], { env });
+  const pushed = await egma(["push", "--url", instance.origin, "--cwd", repository], {
+    env,
+  });
   exited(pushed, "egma push");
   check(first(pushed.said, "status") === "pushed", "egma push said it pushed");
   check(
@@ -488,7 +500,7 @@ async function runAndFollow(
   say("");
   say("── the run, created and followed ─────────────────────────");
 
-  const running = start(["run", "--cwd", repository], { env });
+  const running = start(["run", "--url", instance.origin, "--cwd", repository], { env });
   try {
     await waitUntil(
       () => /^run: run_\S+$/mu.test(running.out()) && /^results: \S+$/mu.test(running.out()),
@@ -693,7 +705,6 @@ async function main(): Promise<void> {
       BROWSER: NO_BROWSER,
       EGMA_RETELL_URL: vendor.url,
     };
-    delete env.EGMA_URL;
     delete env[KEY_VARIABLE];
     delete env.EGMA_RETELL_API_KEY;
     delete env.EGMA_RETELL_AGENT_ID;

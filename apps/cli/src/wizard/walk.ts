@@ -105,7 +105,11 @@ async function walkThrough(options: WalkOptions): Promise<ExitReport> {
   // egma has asked that address anything. A bare command now reaches egma's own
   // platform by default, so where a repository's identifiers are going is the
   // developer's to read first, not to find out afterwards.
-  ui.setPlatform(options.platform?.url ?? null);
+  ui.setPlatform(
+    options.platform === undefined
+      ? null
+      : { url: options.platform.url, bound: options.platform.bound },
+  );
 
   await untilAborted(ui.waitForGate("begin"), signal);
   if (signal.aborted) {

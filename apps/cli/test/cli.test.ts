@@ -25,15 +25,23 @@ import {
 const run = promisify(execFile);
 let platform: Platform;
 
+/**
+ * The built command, with the platform named on the command itself.
+ *
+ * `--url` on every invocation rather than a shell that names one once: a flag
+ * on the command is the only way to name a platform, so a check that reached
+ * this one any other way would be checking something egma does not offer.
+ */
 async function egma(
   args: readonly string[],
   workspace: Workspace,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   try {
-    const { stdout, stderr } = await run(process.execPath, [CLI_ENTRY, ...args], {
-      cwd: workspace.dir,
-      env: workspace.env({ EGMA_URL: platform.url }),
-    });
+    const { stdout, stderr } = await run(
+      process.execPath,
+      [CLI_ENTRY, "--url", platform.url, ...args],
+      { cwd: workspace.dir, env: workspace.env() },
+    );
     return { stdout, stderr, code: 0 };
   } catch (error) {
     const failure = error as { stdout?: string; stderr?: string; code?: number };
@@ -63,7 +71,7 @@ describe("the egma command", () => {
       const child = spawn(
         process.execPath,
         ["--import", PRETEND_OLD_NODE, CLI_ENTRY, "--help"],
-        { cwd: workspace.dir, env: workspace.env({ EGMA_URL: platform.url }) },
+        { cwd: workspace.dir, env: workspace.env() },
       );
       let stderr = "";
       child.stderr.setEncoding("utf8");
@@ -103,6 +111,21 @@ describe("the egma command", () => {
     // address in for egma's own.
     expect(help.stdout).not.toContain("-- <command>");
     expect(help.stdout).not.toContain("EGMA_TEST_DEFAULT_URL");
+
+    // One explicit way to name a platform, and it is offered as one. The
+    // whole-shell variable that used to sit beside it is a setting egma no
+    // longer has, and offering a setting that does nothing is worse than
+    // offering none.
+    expect(help.stdout).toContain("--url <address>");
+    expect(help.stdout).not.toContain("EGMA_URL");
+    // And what it does with init, which used to accept it and drop it.
+    expect(help.stdout).toContain("egma/config.yaml");
+
+    // The platform: line init prints is a fact about the repository, not about
+    // the flag: plain init in a repository that is already bound prints it too,
+    // so the help must not promise it only where --url was given.
+    expect(help.stdout).toContain("adds a platform: line whenever this repository");
+    expect(help.stdout).not.toContain("--url gave it");
 
     const version = await egma(["--version"], workspace);
     expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
@@ -235,8 +258,19 @@ describe("the egma command", () => {
 
     const child = spawn(
       process.execPath,
-      [CLI_ENTRY, "--headless", "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
-      { cwd: workspace.dir, env: workspace.env({ EGMA_URL: platform.url }) },
+      [
+        CLI_ENTRY,
+        "--url",
+        platform.url,
+        "--headless",
+        "--cwd",
+        workspace.dir,
+        "--",
+        process.execPath,
+        FAKE_AGENT,
+        script,
+      ],
+      { cwd: workspace.dir, env: workspace.env() },
     );
     let stdout = "";
     child.stdout.setEncoding("utf8");

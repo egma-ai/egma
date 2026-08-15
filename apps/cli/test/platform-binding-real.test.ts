@@ -186,7 +186,6 @@ it("refuses a repository bound to another real local platform before sending its
     // No flag: the committed binding chooses the address, and what answers
     // there is not the platform that issued anything in this folder.
     const env = workspace.env();
-    expect(env.EGMA_URL).toBeUndefined();
     const result = await egma(["run", "--cwd", workspace.dir, "--no-follow"], {
       cwd: workspace.dir,
       env,
@@ -358,9 +357,8 @@ it("refuses when the bound real platform is down, and reaches no other platform"
     await workspace.signIn(stillRunning.origin, otherCustomer.secret);
     observed.length = 0;
 
-    // No flag and no environment URL: this is the repository binding alone.
+    // No flag: this is the repository binding alone.
     const env = workspace.env();
-    expect(env.EGMA_URL).toBeUndefined();
     const result = await egma(["run", "--cwd", workspace.dir, "--no-follow"], {
       cwd: workspace.dir,
       env,

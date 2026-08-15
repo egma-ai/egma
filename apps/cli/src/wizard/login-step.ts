@@ -35,6 +35,15 @@ export type PlatformAccess = ResolvedPlatform & {
  */
 export type WalkPlatform = {
   readonly url: string;
+  /**
+   * True when this address came out of `egma/config.yaml` rather than a flag.
+   *
+   * It decides one sentence on the first screen and nothing else: a bound
+   * repository is refused a different `--url`, so the wizard must not offer one
+   * there. It is passed in rather than read here, because which egma this is
+   * has one answer and one place that works it out.
+   */
+  readonly bound: boolean;
   verify(): Promise<PlatformAccess>;
 };
 
@@ -47,7 +56,11 @@ export type WalkPlatform = {
  * that asks nobody anything.
  */
 export function alreadyAsked(access: PlatformAccess): WalkPlatform {
-  return { url: access.url, verify: () => Promise.resolve(access) };
+  // Not bound: whoever hands a platform over this way resolved it for their own
+  // reasons rather than reading it out of a committed file. The one path where
+  // a binding really chose the address builds its own, in `main.ts`, from the
+  // resolution that read that file.
+  return { url: access.url, bound: false, verify: () => Promise.resolve(access) };
 }
 
 /**

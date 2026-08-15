@@ -14,6 +14,7 @@ import process from "node:process";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createEgmaFolder } from "../src/folder/egma-folder.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { runInTerminal, showingIn, type TerminalRun } from "./support/pty.ts";
 import {
@@ -50,7 +51,7 @@ function asOneLine(screen: string): string {
     .replaceAll(/\s+/gu, " ");
 }
 
-/** The bare command: no verb, no `--url`, and no `EGMA_URL` in the shell. */
+/** The bare command: no verb, and no `--url`, which is the one way to say one. */
 function bareWizard(): TerminalRun {
   const args = [CLI_ENTRY, "--cwd", workspace.dir];
   expect(args).not.toContain("--url");
@@ -58,13 +59,42 @@ function bareWizard(): TerminalRun {
     // The stand-in for egma's own address. Nothing here dials the real one.
     EGMA_TEST_DEFAULT_URL: platform.url,
   });
-  expect(env.EGMA_URL).toBeUndefined();
 
   return runInTerminal({
     command: process.execPath,
     args: [...args, "--", process.execPath, FAKE_AGENT, "no-script"],
     cwd: workspace.dir,
     env,
+    cols: 100,
+  });
+}
+
+/**
+ * The same bare command, in a repository that has committed its platform.
+ *
+ * The stand-in for egma's own address is left as the closed port every
+ * workspace hands over, so the address this screen names can only have come out
+ * of the committed file.
+ */
+async function wizardInBoundRepository(): Promise<TerminalRun> {
+  await createEgmaFolder({
+    repository: workspace.dir,
+    config: {
+      platform: { origin: platform.url, instance: platform.instanceId },
+      agent: null,
+      connection: null,
+      suite: null,
+    },
+  });
+
+  const args = [CLI_ENTRY, "--cwd", workspace.dir];
+  expect(args).not.toContain("--url");
+
+  return runInTerminal({
+    command: process.execPath,
+    args: [...args, "--", process.execPath, FAKE_AGENT, "no-script"],
+    cwd: workspace.dir,
+    env: workspace.env(),
     cols: 100,
   });
 }
@@ -81,13 +111,12 @@ describe("the wizard's first screen", () => {
         "[enter] begin",
       );
 
-      // The address, and the two ways to name a different one. This is the
+      // The address, and the one way to name a different one. This is the
       // screen the keystroke of consent is taken on: nothing else stands
       // between reading it and agreeing to the walk.
       const said = asOneLine(screen);
       expect(said).toContain("--url <address>");
-      expect(said).toContain("EGMA_URL");
-      // And the seam that stands the address in is not offered as a third way.
+      // And the seam that stands the address in is not offered as a second way.
       expect(said).not.toContain("EGMA_TEST_DEFAULT_URL");
 
       // Nothing has been asked of that address. The whole reason the screen is
@@ -102,6 +131,38 @@ describe("the wizard's first screen", () => {
           platform.records.some((record) => record.path === "/api/platform"),
         ),
       ).toBe(true);
+    } finally {
+      await terminal.kill();
+    }
+  });
+
+  /**
+   * A bound repository is offered the change it can actually make.
+   *
+   * `--url <address>` naming another platform is refused, with the whole move
+   * block under it, once a repository has committed one. Offering it here would
+   * be egma sending a developer to a command egma turns away — and offering it
+   * from the screen that takes the keystroke of consent is the worst place in
+   * the product to be wrong about what happens next.
+   */
+  it("offers a bound repository the edit it can make, not a flag egma refuses", async () => {
+    const terminal = await wizardInBoundRepository();
+    try {
+      const screen = await showingIn(terminal, asOneLine, platform.url, "[enter] begin");
+      const said = asOneLine(screen);
+
+      // The address came out of the committed file: the built-in address is
+      // stood aside by a closed port for this run, so nothing else could
+      // have named it.
+      expect(said).toContain(platform.url);
+
+      // The change a bound repository can make is an edit to the file it
+      // already commits, and that is what is offered.
+      expect(said).toContain("egma/config.yaml");
+      expect(said).not.toContain("--url <address>");
+
+      // Still before anything is asked of that address, exactly as above.
+      expect(platform.records).toEqual([]);
     } finally {
       await terminal.kill();
     }

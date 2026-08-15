@@ -54,9 +54,19 @@ describe("the wizard on a real terminal", () => {
 
     const terminal = runInTerminal({
       command: process.execPath,
-      args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+      args: [
+        CLI_ENTRY,
+        "--url",
+        platform.url,
+        "--cwd",
+        workspace.dir,
+        "--",
+        process.execPath,
+        FAKE_AGENT,
+        script,
+      ],
       cwd: workspace.dir,
-      env: workspace.env({ EGMA_URL: platform.url }),
+      env: workspace.env(),
     });
 
     try {
@@ -109,9 +119,19 @@ describe("the wizard on a real terminal", () => {
 
     const terminal = runInTerminal({
       command: process.execPath,
-      args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+      args: [
+        CLI_ENTRY,
+        "--url",
+        platform.url,
+        "--cwd",
+        workspace.dir,
+        "--",
+        process.execPath,
+        FAKE_AGENT,
+        script,
+      ],
       cwd: workspace.dir,
-      env: workspace.env({ EGMA_URL: platform.url }),
+      env: workspace.env(),
     });
 
     try {
@@ -147,9 +167,19 @@ describe("the wizard on a real terminal", () => {
 
     const terminal = runInTerminal({
       command: process.execPath,
-      args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+      args: [
+        CLI_ENTRY,
+        "--url",
+        platform.url,
+        "--cwd",
+        workspace.dir,
+        "--",
+        process.execPath,
+        FAKE_AGENT,
+        script,
+      ],
       cwd: workspace.dir,
-      env: workspace.env({ EGMA_URL: platform.url }),
+      env: workspace.env(),
     });
 
     try {
@@ -171,9 +201,19 @@ describe("the wizard on a real terminal", () => {
 
     const terminal = runInTerminal({
       command: process.execPath,
-      args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+      args: [
+        CLI_ENTRY,
+        "--url",
+        platform.url,
+        "--cwd",
+        workspace.dir,
+        "--",
+        process.execPath,
+        FAKE_AGENT,
+        script,
+      ],
       cwd: workspace.dir,
-      env: workspace.env({ EGMA_URL: platform.url }),
+      env: workspace.env(),
     });
 
     try {
@@ -200,9 +240,19 @@ describe("the wizard on a real terminal", () => {
 
     const terminal = runInTerminal({
       command: process.execPath,
-      args: [CLI_ENTRY, "--cwd", workspace.dir, "--", process.execPath, FAKE_AGENT, script],
+      args: [
+        CLI_ENTRY,
+        "--url",
+        platform.url,
+        "--cwd",
+        workspace.dir,
+        "--",
+        process.execPath,
+        FAKE_AGENT,
+        script,
+      ],
       cwd: workspace.dir,
-      env: workspace.env({ EGMA_URL: platform.url }),
+      env: workspace.env(),
     });
 
     try {
