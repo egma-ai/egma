@@ -109,7 +109,7 @@ export default function TranscriptPage({
   }, [traceId]);
 
   if (state.status === "loading") {
-    return <ProductStatePage active="transcripts" title={DETAIL.title} lead={DETAIL.loading} />;
+    return <ProductStatePage title={DETAIL.title} lead={DETAIL.loading} />;
   }
 
   if (state.status === "signed-out") {
@@ -125,7 +125,7 @@ export default function TranscriptPage({
 
   if (state.status === "no-window") {
     return (
-      <ProductStatePage active="transcripts" title={DETAIL.needsWindow} lead={DETAIL.needsWindowLead}>
+      <ProductStatePage title={DETAIL.needsWindow} lead={DETAIL.needsWindowLead}>
         <p className={styles.linkLine}>
           <Link href="/traces">{DETAIL.back}</Link>
         </p>
@@ -135,7 +135,7 @@ export default function TranscriptPage({
 
   if (state.status === "missing") {
     return (
-      <ProductStatePage active="transcripts" title={DETAIL.missing} lead={DETAIL.missingLead}>
+      <ProductStatePage title={DETAIL.missing} lead={DETAIL.missingLead}>
         <p className={styles.linkLine}>
           <Link href="/traces">{DETAIL.back}</Link>
         </p>
@@ -145,7 +145,7 @@ export default function TranscriptPage({
 
   if (state.status === "failed") {
     return (
-      <ProductStatePage active="transcripts" title={DETAIL.title}>
+      <ProductStatePage title={DETAIL.title}>
         <Notice tone="error">{state.why}</Notice>
         <p className={styles.linkLine}>
           <Link href="/traces">{DETAIL.back}</Link>
@@ -179,7 +179,7 @@ export default function TranscriptPage({
   }
 
   return (
-    <AppShell active="transcripts">
+    <AppShell>
       <ProductPage wide>
         <Link className={styles.backLink} href="/traces">← {DETAIL.back}</Link>
         <header className={styles.detailHeader}>

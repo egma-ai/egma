@@ -18,6 +18,9 @@ const lane = laneNamed(process.env.EGMA_TEST_LANE);
 process.stderr.write(`\n${announcement(lane)}\n\n`);
 
 export default defineConfig({
+  // The web application's own tsconfig says `jsx: preserve`, because Next does
+  // the transform. Nothing does it here, so the component tests say who.
+  esbuild: { jsx: "automatic" },
   resolve: {
     alias: {
       "@egma/ids": resolve("./packages/ids/src/index.ts"),

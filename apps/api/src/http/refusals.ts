@@ -22,6 +22,7 @@ export const CODES = {
   not_authenticated: 401,
   not_permitted: 403,
   not_found: 404,
+  project_outside_organization: 404,
   conflict: 409,
   name_taken: 409,
   unprocessable: 422,
@@ -40,6 +41,37 @@ function refuse(
   message: string,
 ): FastifyReply {
   return reply.code(CODES[error]).send({ error, message });
+}
+
+/**
+ * A refusal whose code was decided somewhere else — by a module that answers
+ * "a value or a refusal" and hands the pair back rather than a reply.
+ *
+ * The status still comes off `CODES` and the body still has exactly two
+ * fields, so a caller choosing the code cannot also choose the shape.
+ */
+export function sendRefusal(
+  reply: FastifyReply,
+  error: RefusalCode,
+  message: string,
+): FastifyReply {
+  return refuse(reply, error, message);
+}
+
+/**
+ * A project named by a browser that the signed-in organization does not hold.
+ *
+ * **404 and not 403, and the sentence says "there is no", because to this
+ * organization there is not.** A project of somebody else's and a project id
+ * that was never minted are one answer, so following a stranger's link never
+ * tells you whether the thing on the other end exists. The reader is a page
+ * with a selector on it, so the sentence names the selector.
+ */
+export function projectOutsideOrganization(projectId: string): string {
+  return (
+    `There is no project ${projectId} available to this organization. ` +
+    "Choose a project from the selector and try again."
+  );
 }
 
 /** The body could never be written, whatever is there. */

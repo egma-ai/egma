@@ -1,3 +1,4 @@
+import { newId } from "@egma/ids";
 import type { Browser, Page, Request } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -294,9 +295,42 @@ describe("adding a colleague, with no mail configured", () => {
       await bob.getByRole("button", { name: "Join Acme" }).click();
 
       // And he is in Acme, at the role he was invited at, without ever having
-      // been asked to name an organization.
-      await bob.waitForURL(new RegExp(`^${origin}/traces$`));
-      await expect.poll(() => bob.getByRole("heading", { name: "Transcripts" }).count()).toBe(1);
+      // been asked to name an organization. He lands on Agents, in a project
+      // named in the address he was sent to.
+      await bob.waitForURL(new RegExp(`^${origin}/projects/prj_[^/]+/agents$`));
+      await expect
+        .poll(() => bob.getByRole("heading", { name: "Agents", exact: true }).count())
+        .toBe(1);
+
+      // He was invited as a viewer, so he is told so once, on the same page
+      // everybody else sees, and the control that would change data is
+      // disabled rather than removed.
+      //
+      // No waiting on anything else first. The shell claims no role until the
+      // session read answers — `components.test.tsx` holds that promise — so
+      // `View only` appearing here can only be Bob's actual role.
+      await expect
+        .poll(() => bob.locator("aside").innerText())
+        .toMatch(/view only/i);
+
+      // Disabled for real: not a link he can follow, not focusable, and a
+      // forced click goes nowhere. A control that looked disabled and still
+      // fired would promise a refusal it does not deliver — and the refusal
+      // that does hold is the server's, proved in `agents.test.ts`.
+      const register = bob.getByRole("button", { name: "Register agent" });
+      await register.first().waitFor();
+      expect(
+        await register.evaluateAll((controls) =>
+          controls.map((control) => (control as { disabled?: boolean }).disabled),
+        ),
+      ).not.toContain(false);
+      expect(
+        await bob.getByRole("link", { name: "Register agent" }).count(),
+      ).toBe(0);
+      const before = bob.url();
+      await register.first().click({ force: true }).catch(() => undefined);
+      await bob.waitForTimeout(300);
+      expect(bob.url()).toBe(before);
 
       const { rows } = await instance.database.sql<{ email: string; role: string }>(
         `select u.email, m.role from membership m
@@ -516,7 +550,7 @@ async function signedInBrowser(email: string): Promise<Page> {
   await theirs.fill("#email", email);
   await theirs.fill("#password", PASSWORD);
   await theirs.getByRole("button", { name: "Sign in" }).click();
-  await theirs.waitForURL(new RegExp(`^${origin}/traces$`));
+  await theirs.waitForURL(new RegExp(`^${origin}/projects/prj_[^/]+/agents$`));
   return theirs;
 }
 
@@ -661,42 +695,136 @@ describe("the list of what an organization recorded", () => {
   it(
     "moves between product pages without reloading the shell",
     async () => {
-      await page.goto(`${origin}/traces`);
+      await page.goto(`${origin}/`);
+      await page.waitForURL(/\/projects\/prj_[^/]+\/agents$/);
+      const project = /\/projects\/(prj_[^/]+)\//.exec(page.url())?.[1];
+      expect(project).toBeDefined();
 
       const sidebar = page.locator("aside");
-      const settings = sidebar.locator('summary[aria-label="Open settings menu"]');
-      await settings.waitFor({ state: "visible" });
-      expect(await sidebar.innerText()).not.toContain("ada@acme.example");
-      expect(await sidebar.innerText()).not.toContain("Admin account");
-      expect(await sidebar.innerText()).not.toContain("Acme");
-      expect(await sidebar.innerText()).not.toContain("Voice Reliability project");
-      expect(await sidebar.getByRole("link", { name: "Home" }).count()).toBe(0);
-      expect(await sidebar.innerText()).toContain("Settings");
-      expect(await sidebar.getByRole("link", { name: "Organization" }).count()).toBe(0);
+      const account = sidebar.locator('button[aria-label^="Account"]');
+      await account.waitFor({ state: "visible" });
 
-      await settings.click();
+      // Where you are, without having to open anything: the organization and
+      // the project, on one compact control that is there with one project.
+      const selector = sidebar.locator('button[aria-label^="Organization"]');
+      await selector.waitFor({ state: "visible" });
+      await expect.poll(() => selector.innerText()).toMatch(/acme/i);
+
+      // The four product areas, and Personas beside them. Settings is not one
+      // of them and neither is a simulation.
+      for (const area of ["Agents", "Tests", "Graders", "Runs", "Personas"]) {
+        expect(
+          await sidebar.getByRole("link", { name: area, exact: true }).count(),
+          area,
+        ).toBe(1);
+      }
+      expect(await sidebar.getByRole("link", { name: "Home" }).count()).toBe(0);
       expect(
-        await sidebar.getByRole("button", { name: "Sign out" }).count(),
+        await sidebar.getByRole("link", { name: "Simulations" }).count(),
+      ).toBe(0);
+      expect(await sidebar.innerText()).not.toContain("Settings");
+
+      await account.click();
+      expect(
+        await sidebar.getByRole("menuitem", { name: "Sign out" }).count(),
       ).toBe(1);
       expect(
         await page.locator("main").getByRole("button", { name: "Sign out" }).count(),
       ).toBe(0);
-      await sidebar.getByRole("link", { name: "Organization settings" }).click();
+      await sidebar.getByRole("menuitem", { name: "Organization settings" }).click();
       await page.waitForURL(/\/members$/);
       await page.getByRole("tab", { name: "People" }).waitFor({ state: "visible" });
-      expect(await page.getByRole("tab", { name: "People" }).count()).toBe(1);
-      expect(await page.getByRole("tab", { name: "Invitations" }).count()).toBe(1);
+
       await page.evaluate(() => {
         Reflect.set(globalThis, "__egma_same_document_navigation", true);
       });
-      await page.getByRole("link", { name: "Transcripts", exact: true }).click();
-      await page.waitForURL(/\/traces$/);
+      await page.getByRole("link", { name: "Tests", exact: true }).first().click();
+      await page.waitForURL(new RegExp(`/projects/${project}/tests$`));
 
       expect(
         await page.evaluate(() =>
           Reflect.get(globalThis, "__egma_same_document_navigation"),
         ),
       ).toBe(true);
+    },
+    SETTLE,
+  );
+
+  /**
+   * Two tabs, two projects, and this is the only part of the project-context
+   * change that genuinely needs a browser.
+   *
+   * **Everything else about the selector moved out.** Typing to filter, Enter
+   * to choose, Escape returning focus, `push` rather than `replace` so that
+   * Back means something, and the absence page a foreign project answers with
+   * are all in `apps/web/test/components.test.tsx`, where each costs
+   * milliseconds and none of them needs a database. What no fast test can
+   * reach is two *independent browser contexts*, each holding the same session
+   * and each looking at a different project — because one tab would pass while
+   * a browser-wide choice quietly decided for both.
+   */
+  it(
+    "keeps two tabs on two projects, each reading its own",
+    async () => {
+      // A second project for Acme, so that there is something to differ about.
+      const outbound = newId("prj");
+      await instance.database.sql(
+        `insert into project (id, organization_id, name, slug)
+           select $1, id, 'Outbound', 'outbound' from organization
+            where slug = 'acme'`,
+        [outbound],
+      );
+
+      await page.goto(`${origin}/`);
+      await page.waitForURL(/\/projects\/prj_[^/]+\/agents$/);
+      const first = /\/projects\/(prj_[^/]+)\//.exec(page.url())?.[1];
+      expect(first).toBeDefined();
+      expect(first).not.toBe(outbound);
+
+      // A second tab, opened on the other project by its address alone, with
+      // this person's own session.
+      const second = await browser.newContext();
+      await second.addCookies(await page.context().cookies());
+      const other = await second.newPage();
+      other.setDefaultTimeout(30_000);
+      await other.goto(`${origin}/projects/${outbound}/agents`);
+      const otherSelector = other.locator(
+        'aside button[aria-label^="Organization"]',
+      );
+      await otherSelector.waitFor({ state: "visible" });
+      await expect.poll(() => otherSelector.innerText()).toContain("Outbound");
+
+      // And the first tab did not move. Nothing about opening the second one
+      // changed which project the first one is in, and its own read is still
+      // its own project's.
+      expect(page.url()).toContain(`/projects/${first}/agents`);
+      await expect
+        .poll(() =>
+          page.locator('aside button[aria-label^="Organization"]').innerText(),
+        )
+        .toContain("Default");
+
+      await second.close();
+    },
+    SETTLE,
+  );
+
+  /**
+   * The window control is dressed as this product's own rather than as
+   * whatever the browser ships.
+   *
+   * Asserted through `getComputedStyle` in a real Chrome, because that is the
+   * only thing that can say whether the rule applied. A regex over
+   * `globals.css` proves a line was typed, not that a browser honoured it —
+   * and `appearance: base-select` is exactly the kind of rule a browser can
+   * decline.
+   */
+  it(
+    "dresses the window control as this product's own",
+    async () => {
+      await page.goto(`${origin}/traces`);
+      await page.waitForSelector("#window");
+
       expect(
         await page.locator("#window").evaluate((element) => {
           const styleOf = Reflect.get(globalThis, "getComputedStyle") as
@@ -718,9 +846,7 @@ describe("the list of what an organization recorded", () => {
   it(
     "opens on the last day, and shows the exchange the agent just had",
     async () => {
-      // The root address has no separate home page. It opens transcripts.
-      await page.goto(`${origin}/`);
-      await page.waitForURL(/\/traces$/);
+      await page.goto(`${origin}/traces`);
 
       await page.waitForSelector("table");
       const shown = await page.innerText("main");
@@ -1110,8 +1236,8 @@ describe("the saved theme", () => {
       await page.reload();
 
       expect(await page.locator("html").getAttribute("data-theme")).toBe("light");
-      const settings = page.locator('aside summary[aria-label="Open settings menu"]');
-      await settings.click();
+      const account = page.locator('aside button[aria-label^="Account"]');
+      await account.click();
       const controls = page.getByRole("switch", { name: "Dark theme" });
       await expect.poll(() => controls.count()).toBe(1);
       await page.locator("aside").getByRole("switch", { name: "Dark theme" }).click();
@@ -1122,7 +1248,7 @@ describe("the saved theme", () => {
 
       await page.reload();
       expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");
-      await page.locator('aside summary[aria-label="Open settings menu"]').click();
+      await page.locator('aside button[aria-label^="Account"]').click();
       await expect
         .poll(() => page.locator("aside").getByRole("switch", { name: "Dark theme" }).getAttribute("aria-checked"))
         .toBe("true");

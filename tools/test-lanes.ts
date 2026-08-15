@@ -39,6 +39,10 @@ const EVERY_TEST = [
   "apps/api/test/**/*.test.ts",
   "apps/grader/test/**/*.test.ts",
   "apps/web/test/**/*.test.ts",
+  // The component tests are `.tsx` because they render the real components
+  // rather than reading around them. Missing this pattern does not fail — it
+  // quietly runs one lane short, which is the failure this file exists to stop.
+  "apps/web/test/**/*.test.tsx",
   "apps/cli/test/**/*.test.ts",
 ] as const;
 
