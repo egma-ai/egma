@@ -292,8 +292,8 @@ describe("the persona rename (0005)", () => {
   it("pins the new prefixes: a dh_ id no longer fits the check", async () => {
     await expect(
       client.query(
-        `insert into persona (id, organization_id, project_id, name, current_version_id)
-         values ($1, $2, $3, 'Old Format', $4)`,
+        `insert into persona (id, organization_id, project_id, name, current_version_id, revision)
+         values ($1, $2, $3, 'Old Format', $4, 'a-revision')`,
         [
           `dh_${newId("prs").slice("prs_".length)}`,
           organizationId,

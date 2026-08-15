@@ -25,7 +25,29 @@ export const CODES = {
   project_outside_organization: 404,
   conflict: 409,
   name_taken: 409,
+  // A stale write, told apart from a plain conflict by which of the two things
+  // moved: the resource's identity, or the content of its current version.
+  // The caller's next move differs — one is retyped, the other is reapplied —
+  // so a client that could not tell them apart could not offer either.
+  identity_conflict: 409,
+  version_conflict: 409,
+  // A persona an active test still names, and the persona a project points at
+  // by default. Two rules that refuse one Archive, and two sentences, because
+  // the fix for each is somewhere else.
+  persona_in_use: 409,
+  default_persona_required: 409,
+  // The store rolled a write back because another one got in its way. Its own
+  // code because it is the one refusal that is about nothing the caller did:
+  // the request was valid on the way in, nothing was written, and sending it
+  // again is the whole of the fix — which a client can do by itself.
+  write_aborted: 409,
   unprocessable: 422,
+  // A product request that named no project. Its own code because a browser
+  // reading this has a selector on screen, and the sentence names it.
+  project_required: 422,
+  // A cursor this list never issued. Its own code so a client can drop it and
+  // start again rather than showing somebody a broken page forever.
+  invalid_cursor: 422,
   unsignable_reference: 422,
   no_adapter: 422,
   phone_setup_required: 422,
