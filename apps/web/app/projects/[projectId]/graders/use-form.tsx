@@ -140,7 +140,19 @@ export function UseForm({
               htmlFor={control}
             >
               {parameter.options === undefined ? (
-                <TextInput id={control} value={chosen} onChange={write} />
+                <TextInput
+                  id={control}
+                  value={chosen}
+                  /*
+                    The catalog says whether this parameter is a number, and it
+                    says so in one place: `kind` already decides that what is
+                    typed is sent as a number rather than a string. The control
+                    has to agree, or a person is asked for a bound on a keyboard
+                    that has no digits on it.
+                  */
+                  numeric={parameter.kind === "number"}
+                  onChange={write}
+                />
               ) : (
                 <Select
                   id={control}

@@ -224,6 +224,7 @@ export function TextInput({
   label,
   disabled = false,
   secret = false,
+  numeric = false,
   invalid,
   describedBy,
   autoFocusFirst = false,
@@ -248,6 +249,13 @@ export function TextInput({
    * matters is the server sealing it and never answering with it again.
    */
   readonly secret?: boolean;
+  /**
+   * A field whose value is a number rather than words. It changes the keypad a
+   * phone offers and what the browser will accept, and it is deliberately not
+   * what makes the value a number — the caller converts before sending, because
+   * an input's value is a string whatever type it wears.
+   */
+  readonly numeric?: boolean;
   /** Whether this field is what a refusal was about. */
   readonly invalid?: boolean;
   /**
@@ -267,7 +275,7 @@ export function TextInput({
     <input
       className={styles.input}
       id={id}
-      type={secret ? "password" : "text"}
+      type={secret ? "password" : numeric ? "number" : "text"}
       value={value}
       placeholder={placeholder}
       aria-label={label}
