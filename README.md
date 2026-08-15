@@ -1037,3 +1037,16 @@ hand-written rather than generated. Two things it asks for that Postgres does
 not: statements are separated by `--> statement-breakpoint`, because ClickHouse
 runs one per request, and every statement must say `IF NOT EXISTS`, because there
 is no transaction to roll a half-applied file back with.
+
+## License
+
+egma is licensed under the Apache License, Version 2.0. The full text is in
+[`LICENSE`](LICENSE).
+
+One boundary is declared in advance. A directory named `ee`, at any level of
+this repository, is commercially licensed and is not covered by the Apache
+License. No such directory exists today. If one is added, it will carry its own
+`LICENSE` file with its terms.
+
+Parts of the CLI's terminal UI are adapted from the PostHog wizard under the MIT
+license. See [`apps/cli/NOTICE`](apps/cli/NOTICE).
