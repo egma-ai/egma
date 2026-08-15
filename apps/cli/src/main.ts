@@ -362,8 +362,8 @@ export function helpText(): string {
     "What egma init, pull and push print, one fact per line:",
     "  url, folder, and then one line per test: what happened to it, the file,",
     "  and the version the file now pins. push names every conflicting test on",
-    "  its own conflict: line. init adds a platform: line when --url gave it an",
-    "  egma to bind this repository to.",
+    "  its own conflict: line. init adds a platform: line whenever this repository",
+    "  is bound, whether this run bound it or found it already bound.",
     "",
     "What egma init, pull and push answer with:",
     "  0 done   1 no egma folder here   2 not signed in",
@@ -933,6 +933,7 @@ export async function main(argv: readonly string[]): Promise<void> {
       const selected = chosen;
       process.exitCode = await theWizard({
         url: selected.url,
+        bound: selected.binding !== null,
         verify: () => verifyPlatform(selected),
       });
     }

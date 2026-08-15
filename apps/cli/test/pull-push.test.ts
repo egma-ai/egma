@@ -310,6 +310,27 @@ describe("egma init", () => {
   });
 
   /**
+   * What the `platform:` line is a fact about, which is the repository.
+   *
+   * A developer — or a coding agent — running `init` in a folder somebody else
+   * committed is asking what this repository points at, and whether it is bound
+   * is part of the answer whether or not this run had anything to do with it.
+   * The `url:` line is the other half and stays absent: this run reached no
+   * address, and a command that talked to nobody must not print one.
+   */
+  it("reports the binding a bound folder already had, and reaches nothing", async () => {
+    await runEgma(["init", "--url", platform.url]);
+    const before = platform.records.length;
+
+    const again = await runEgma(["init"]);
+
+    expect(again.code, again.stderr).toBe(0);
+    expect(factOf(again.stdout, "platform")).toBe(platform.instanceId);
+    expect(factOf(again.stdout, "url")).toBeUndefined();
+    expect(platform.records.slice(before)).toEqual([]);
+  });
+
+  /**
    * The one thing a second run does change, and the reason it has to.
    *
    * A folder somebody else committed before this repository was on any platform

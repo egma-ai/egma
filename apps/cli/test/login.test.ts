@@ -504,10 +504,14 @@ describe("which egma a command talks to", () => {
    * variable is inert means naming it.
    */
   it("offers one way to name a platform, and names the old one nowhere", async () => {
+    // Everything `package.json` puts in the published package, plus the
+    // repository's own front page. `dist` is left out because it is `src`
+    // compiled, and a scan of both would go red twice for one mention.
     const written = [
       ...(await filesIn(path.join(CLI_PACKAGE, "src"))),
       ...(await filesIn(path.join(CLI_PACKAGE, "skills"))),
       ...(await filesIn(path.join(CLI_PACKAGE, "smoke"))),
+      path.join(CLI_PACKAGE, "NOTICE"),
       path.join(CLI_PACKAGE, "README.md"),
       path.join(CLI_PACKAGE, "..", "..", "README.md"),
     ];

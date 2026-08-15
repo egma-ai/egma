@@ -352,6 +352,7 @@ describe("one task, driven on a scripted agent", () => {
       signal: new AbortController().signal,
       platform: {
         url: "http://named-before-it-is-asked.example",
+        bound: false,
         verify: () => {
           asked += 1;
           return Promise.reject(new Error("this platform did not answer"));

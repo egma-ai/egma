@@ -447,20 +447,33 @@ export type VerifiedPlatformAccess = PlatformAccess & {
 };
 
 /**
- * A selected instance is not the platform committed in this repository.
+ * The platform answering at the recorded address is not the one recorded.
  *
- * This and the address refusal below are the two a developer meets when they
- * really are moving a repository — they point egma at the platform they want
- * and are told no — so both end with the whole move rather than its first step.
- * Naming one deletion and stopping is what leaves somebody deleting a line,
- * running again, and meeting a stranger failure about identifiers the new
- * platform never issued.
+ * This and the address refusal below are the two a developer meets when a
+ * repository and a platform have come apart, so both end with the whole move
+ * rather than its first step. Naming one deletion and stopping is what leaves
+ * somebody deleting a line, running again, and meeting a stranger failure about
+ * identifiers the new platform never issued.
+ *
+ * **Nothing anybody typed can be the cause, and the sentence must not pretend
+ * otherwise.** An address that is not the bound one is refused above, before
+ * anybody is asked anything, so the only ways to reach this are the binding
+ * choosing its own address and a flag naming that same address — and dropping a
+ * flag that names the bound platform changes nothing. So this says what really
+ * happened: the address held still and the platform at it changed. That is a
+ * colleague's rebuilt stack, or a redeployment with a fresh database, and the
+ * developer meeting it has no reason yet to know that.
+ *
+ * The two ways on are the same two the address refusal offers, one rung down.
+ * The address is not in question here, so the deliberate edit on offer is the
+ * instance rather than the origin — and it is offered only for the case where
+ * it is honest, which is this platform reinstalled rather than another one.
  */
 export class PlatformBindingMismatchError extends Error {
   constructor(binding: PlatformBinding, selected: PlatformIdentity) {
     super(
       teachingTheMove(
-        `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, but the selected address identifies platform ${selected.instanceId} at ${selected.origin}. Remove --url to use the bound platform. egma does not move a repository between platforms, and no repository identifiers were sent.`,
+        `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and the platform answering there now says it is ${selected.instanceId}. That address is the one this repository records, so what changed is the platform at it rather than an address anybody named. If it is this same platform reinstalled — a rebuilt stack has a new database and so a new identity — edit the platform instance in egma/config.yaml to ${selected.instanceId} and change nothing else; the move below is for a different platform, not a reinstall of this one. egma does not move a repository between platforms, and no repository identifiers were sent.`,
       ),
     );
     this.name = "PlatformBindingMismatchError";

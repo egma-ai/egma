@@ -121,6 +121,12 @@ describe("the egma command", () => {
     // And what it does with init, which used to accept it and drop it.
     expect(help.stdout).toContain("egma/config.yaml");
 
+    // The platform: line init prints is a fact about the repository, not about
+    // the flag: plain init in a repository that is already bound prints it too,
+    // so the help must not promise it only where --url was given.
+    expect(help.stdout).toContain("adds a platform: line whenever this repository");
+    expect(help.stdout).not.toContain("--url gave it");
+
     const version = await egma(["--version"], workspace);
     expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
   });

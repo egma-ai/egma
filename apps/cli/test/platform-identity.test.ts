@@ -232,6 +232,20 @@ describe("verifying an Egma platform", () => {
     );
     expect(refusal).toBeInstanceOf(PlatformBindingMismatchError);
 
+    // Both identities, because which one is which is the whole of what
+    // happened: the one the repository recorded, and the one answering now.
+    expect(refusal.message).toContain("pf_01K3XQ7M4E8YB2FVN0H9TZQWEA");
+    expect(refusal.message).toContain(platform.instanceId);
+
+    // And no flag anywhere in it. Nothing a developer typed can be the cause
+    // here — an address that is not the bound one was refused before anybody
+    // was asked, and the same address is the same address — so the only way to
+    // arrive is the platform at the recorded address having changed. Telling
+    // somebody to remove a flag is unfollowable at the one moment this fires,
+    // and it fires when they have least idea why.
+    expect(refusal.message).not.toContain("--url");
+    expect(refusal.message).toContain("edit the platform instance in egma/config.yaml");
+
     // A rebuilt stack is the same repository meeting a platform that issued
     // none of its identifiers, which is the move whether the developer meant
     // it or not — so this refusal teaches it too.

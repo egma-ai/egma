@@ -66,6 +66,22 @@ export type AskId =
 /** The coding agent egma is driving. */
 export type DrivenAgent = { readonly id: string; readonly name: string };
 
+/**
+ * Which egma a walk will use, and how a developer would change it.
+ *
+ * The address alone is not enough for the screen that shows it. An unbound
+ * repository changes egma by naming another one on the command; a bound one
+ * cannot — a different `--url` is refused, with the whole move under it — and
+ * changes egma by editing the file it already commits. Offering the wrong one
+ * of those sends somebody to a command egma turns away, so the fact that
+ * decides which is carried here rather than guessed at the screen.
+ */
+export type PlatformNotice = {
+  readonly url: string;
+  /** True when `egma/config.yaml` names it. */
+  readonly bound: boolean;
+};
+
 export interface WizardUI {
   /** Name the coding agent egma will drive, as soon as it is known. */
   setDrivenAgent(drivenAgent: DrivenAgent | null): void;
@@ -82,7 +98,7 @@ export interface WizardUI {
    * now reaches egma's own platform when nothing names another, which is
    * exactly why it has to be said rather than assumed.
    */
-  setPlatform(url: string | null): void;
+  setPlatform(chosen: PlatformNotice | null): void;
 
   /**
    * What egma worked out about this machine for itself, or `null` before it
