@@ -61,6 +61,31 @@ export type Invitation = {
 
 export type InvitationList = { readonly invitations: readonly Invitation[] };
 
+/**
+ * Whether an invitation can still be accepted.
+ *
+ * **Two states and not one.** The list route answers with every invitation
+ * nobody has accepted, and the ones whose day has passed are in it: they read
+ * as waiting when nothing is coming. Somebody who cannot tell them apart waits
+ * for a person who was never going to be able to accept.
+ *
+ * `accepted` is the third state a link can be in and is deliberately not here —
+ * an accepted invitation is a member, and the roster is where it shows up.
+ *
+ * The comparison is the one `stateOf` makes on the server, on the same field.
+ * A date egma did not send, or sent unreadably, leaves this `pending`: a
+ * standing this could not work out is not grounds for calling an invitation
+ * dead.
+ */
+export type InvitationStanding = "pending" | "expired";
+
+export function standingOf(
+  invitation: Invitation,
+  now: number = Date.now(),
+): InvitationStanding {
+  return Date.parse(invitation.expires_at) <= now ? "expired" : "pending";
+}
+
 export type ApiKey = {
   readonly id: string;
   readonly name: string | null;

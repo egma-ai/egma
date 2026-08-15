@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { readJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
+import { asDay } from "../../../../../lib/instants.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import {
   ASSIGNABLE_ROLES,
@@ -11,6 +12,7 @@ import {
   MEMBERS_PATH,
   memberActionPath,
   rowsIn,
+  standingOf,
   type Invitation,
   type InvitationList,
   type Member,
@@ -338,6 +340,13 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
  * **The link is the whole promise of this page on a self-hosted install.** A
  * form that quietly dropped it would leave somebody with an invitation that
  * exists and cannot be delivered, which is worse than a refusal.
+ *
+ * **An invitation whose day has passed is drawn as its own thing.** The list
+ * route answers with everything nobody has accepted, expired ones included, so
+ * a single "waiting to be accepted" list says something untrue about half of
+ * what is in it — and somebody reading it waits for a person who can no longer
+ * accept. The standing is said in words on the row, and the only thing to do
+ * about a dead invitation, sending another, is the only control it carries.
  */
 function Invitations({
   invitations,
@@ -357,8 +366,15 @@ function Invitations({
   const [link, setLink] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
-  async function invite(): Promise<void> {
-    if (busy || email.trim() === "") return;
+  /**
+   * One invitation asked for, whether the form asked for it or a dead row did.
+   *
+   * Both go through here so that sending again hands back the link on an
+   * install with no mail transport, exactly as the form does. A second path
+   * that dropped it would be the failure this page exists to avoid, arriving
+   * by the back door.
+   */
+  async function send(toEmail: string, atRole: string): Promise<boolean> {
     onRefused(null);
     setLink(null);
     setNote(null);
@@ -370,88 +386,142 @@ function Invitations({
       readonly accept_url?: string;
     }>(INVITATIONS_PATH, {
       method: "POST",
-      body: { email: email.trim(), role },
+      body: { email: toEmail, role: atRole },
     });
 
     onBusy(false);
     if (written.status === "signed-out") {
       window.location.replace("/sign-in");
-      return;
+      return false;
     }
     if (written.status !== "ready") {
       onRefused(written.refusal);
-      return;
+      return false;
     }
 
-    setEmail("");
     if (written.value.delivered) {
       setNote(`An invitation is on its way to ${written.value.email}.`);
     } else {
       setLink(written.value.accept_url ?? null);
     }
     onSent();
+    return true;
   }
 
-  return (
-    <Section
-      title="Invite somebody"
-      lead="If no mail transport is configured, egma gives you a one-time link to send yourself."
-    >
-      {note === null ? null : <Help>{note}</Help>}
-      {link === null ? null : (
-        <p>
-          <strong>Here is the link.</strong> It works once, for the person named
-          above. {link}
-        </p>
-      )}
+  async function invite(): Promise<void> {
+    if (busy || email.trim() === "") return;
+    if (await send(email.trim(), role)) setEmail("");
+  }
 
-      <Form onSubmit={() => void invite()}>
-        <FormRow>
-          <Field label="Email" htmlFor="invite-email">
-            <TextInput
-              id="invite-email"
-              value={email}
-              disabled={busy}
-              onChange={setEmail}
-            />
-          </Field>
-          <Field label="Role" htmlFor="invite-role">
-            <Select
-              id="invite-role"
-              value={role}
-              disabled={busy}
-              options={ASSIGNABLE_ROLES.map((one) => ({
-                value: one,
-                label: one,
-              }))}
-              onChange={setRole}
-            />
-          </Field>
-        </FormRow>
-        <FormActions>
+  const columns: readonly Column<Invitation>[] = [
+    {
+      key: "email",
+      header: "Person",
+      primary: true,
+      cell: (invitation) => invitation.email,
+    },
+    {
+      key: "role",
+      header: "Role",
+      cell: (invitation) => invitation.role,
+    },
+    {
+      key: "standing",
+      header: "Standing",
+      cell: (invitation) =>
+        standingOf(invitation) === "expired" ? (
+          <Badge tone="warn">Expired</Badge>
+        ) : (
+          <Badge>Pending</Badge>
+        ),
+    },
+    {
+      key: "expiry",
+      header: "Expiry",
+      mono: true,
+      cell: (invitation) => asDay(invitation.expires_at),
+    },
+    {
+      key: "actions",
+      header: "Actions",
+      // Nothing on a pending row: waiting is what it is for. An expired one
+      // cannot be waited on, so the one thing left to do about it is here.
+      cell: (invitation) =>
+        standingOf(invitation) === "expired" ? (
           <Button
-            weight="strong"
-            type="submit"
-            disabled={busy || email.trim() === ""}
+            disabled={busy}
+            onClick={() => void send(invitation.email, invitation.role)}
           >
-            {busy ? "Inviting…" : "Send invitation"}
+            Send again
           </Button>
-        </FormActions>
-      </Form>
+        ) : null,
+    },
+  ];
 
-      <h3>Waiting to be accepted</h3>
-      {invitations.length === 0 ? (
-        <p>No invitations are waiting.</p>
-      ) : (
-        <ul>
-          {invitations.map((invitation) => (
-            <li key={invitation.id}>
-              {invitation.email} · {invitation.role} · expires{" "}
-              {new Date(invitation.expires_at).toLocaleDateString()}
-            </li>
-          ))}
-        </ul>
-      )}
-    </Section>
+  return (
+    <>
+      <Section
+        title="Invite somebody"
+        lead="If no mail transport is configured, egma gives you a one-time link to send yourself."
+      >
+        {note === null ? null : <Help>{note}</Help>}
+        {link === null ? null : (
+          <p>
+            <strong>Here is the link.</strong> It works once, for the person named
+            above. {link}
+          </p>
+        )}
+
+        <Form onSubmit={() => void invite()}>
+          <FormRow>
+            <Field label="Email" htmlFor="invite-email">
+              <TextInput
+                id="invite-email"
+                value={email}
+                disabled={busy}
+                onChange={setEmail}
+              />
+            </Field>
+            <Field label="Role" htmlFor="invite-role">
+              <Select
+                id="invite-role"
+                value={role}
+                disabled={busy}
+                options={ASSIGNABLE_ROLES.map((one) => ({
+                  value: one,
+                  label: one,
+                }))}
+                onChange={setRole}
+              />
+            </Field>
+          </FormRow>
+          <FormActions>
+            <Button
+              weight="strong"
+              type="submit"
+              disabled={busy || email.trim() === ""}
+            >
+              {busy ? "Inviting…" : "Send invitation"}
+            </Button>
+          </FormActions>
+        </Form>
+      </Section>
+
+      <Section
+        title="Invitations sent"
+        lead="Nobody has accepted these yet. An expired one cannot be accepted at all — send another."
+      >
+        {invitations.length === 0 ? (
+          <Empty title="No invitations are outstanding." />
+        ) : (
+          <DataTable
+            label="Invitations"
+            columns={columns}
+            rows={invitations}
+            keyOf={(invitation) => invitation.id}
+          />
+        )}
+      </Section>
+    </>
   );
 }
