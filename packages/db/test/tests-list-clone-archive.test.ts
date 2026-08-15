@@ -4,12 +4,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   cloneTest,
   createTest,
-  deleteTest,
+  archiveTest,
   editTest,
   getTest,
   getTestVersion,
   listTests,
   NotPermittedError,
+  restoreTest,
   type Test,
 } from "@egma/db";
 
@@ -48,6 +49,8 @@ let omar: string;
 /** The sibling project's own two, since that project points at no default. */
 let olive: string;
 let oscar: string;
+/** The agent Acme's tests apply to, because a test always applies to one. */
+let frontDesk: string;
 
 /** The sibling project, which the listing block has to itself. */
 function actingInOutbound() {
@@ -60,7 +63,7 @@ function actingAsWholeCustomer() {
 }
 
 beforeAll(async () => {
-  ({ database, rita, grace } = await seedTestFactory("tests_lifecycle"));
+  ({ database, rita, grace, frontDesk } = await seedTestFactory("tests_lifecycle"));
 
   nadia = await seedPersona(actingAsAcme(), "Nadia");
   omar = await seedPersona(actingAsAcme(), "Omar");
@@ -237,7 +240,7 @@ describe("listing tests", () => {
     const [three] = created.filter((item) => item.name === "Three");
     if (three === undefined) throw new Error("Three was never created");
 
-    await deleteTest(actingInOutbound(), three.id);
+    await archiveTest(actingInOutbound(), three.id);
 
     const page = await listTests(actingInOutbound());
     expect(page.items.map((item) => item.name)).toEqual([
@@ -357,9 +360,9 @@ describe("cloning a test", () => {
   });
 });
 
-describe("deleting a test", () => {
+describe("archiving a test", () => {
   let doomed: Test;
-  /** Its first version, kept aside because deletion must not take it away. */
+  /** Its first version, kept aside because archiving must not take it away. */
   let firstVersionId: string;
 
   beforeAll(async () => {
@@ -378,43 +381,57 @@ describe("deleting a test", () => {
 
   it("is refused to a credential acting in no project, like create", async () => {
     await expect(
-      deleteTest(actingAsWholeCustomer(), doomed.id),
+      archiveTest(actingAsWholeCustomer(), doomed.id),
     ).rejects.toThrow(/project/);
 
     const stillThere = await getTest(actingAsAcme(), doomed.id);
-    expect(stillThere?.id).toBe(doomed.id);
+    expect(stillThere?.archivedAt).toBeNull();
   });
 
   it("is refused to a viewer", async () => {
     await expect(
-      deleteTest(actingAsAcme("viewer"), doomed.id),
+      archiveTest(actingAsAcme("viewer"), doomed.id),
     ).rejects.toThrow(NotPermittedError);
   });
 
-  it("succeeds with nothing removed but the test itself, however much names it", async () => {
+  it("succeeds with nothing removed but the offer itself, however much names it", async () => {
     const before = await rowCounts();
 
-    const deleted = await deleteTest(actingAsAcme(), doomed.id);
+    const archived = await archiveTest(actingAsAcme(), doomed.id);
 
-    expect(deleted?.id).toBe(doomed.id);
-    expect(deleted?.name).toBe("Doomed");
-    expect(deleted?.projectId).toBe(acme.project);
-    expect(deleted?.deletedAt).toBeInstanceOf(Date);
+    expect(archived?.id).toBe(doomed.id);
+    expect(archived?.name).toBe("Doomed");
+    expect(archived?.projectId).toBe(acme.project);
+    expect(archived?.archivedAt).toBeInstanceOf(Date);
+    // Nobody was owed a reason: a person archiving a test knows why, and a
+    // reason is what an upgrade owes somebody who did not choose this.
+    expect(archived?.archiveReason).toBeNull();
+    // The identity moved, so the token that names it moved.
+    expect(archived?.revision).not.toBe(doomed.revision);
 
-    // Nothing blocked the delete — the test names two living personas across
+    // Nothing blocked the archive — the test names two living personas across
     // two versions — and nothing was taken away: the marker is the whole write,
     // so every version row and every join row is still there.
     expect(await rowCounts()).toEqual(before);
   });
 
-  it("hides it from every fetch and every list", async () => {
-    expect(await getTest(actingAsAcme(), doomed.id)).toBeUndefined();
-    expect(await getTest(actingAsWholeCustomer(), doomed.id)).toBeUndefined();
+  it("keeps its applicable agents, because Archive is not a coverage decision", async () => {
+    const archived = await getTest(actingAsAcme(), doomed.id);
+    expect(archived?.agents.map((applies) => applies.id)).toEqual([frontDesk]);
+  });
 
-    const page = await listTests(actingAsAcme());
-    expect(page.items.map((item) => item.id)).not.toContain(doomed.id);
-    const wholeCustomer = await listTests(actingAsWholeCustomer());
-    expect(wholeCustomer.items.map((item) => item.id)).not.toContain(doomed.id);
+  it("takes it out of the authoring list and shows it under the archive filter", async () => {
+    const active = await listTests(actingAsAcme());
+    expect(active.items.map((item) => item.id)).not.toContain(doomed.id);
+
+    const archived = await listTests(actingAsAcme(), { archived: true });
+    expect(archived.items.map((item) => item.id)).toContain(doomed.id);
+  });
+
+  it("stays readable, because that is where Restore is", async () => {
+    const fetched = await getTest(actingAsAcme(), doomed.id);
+    expect(fetched?.id).toBe(doomed.id);
+    expect(fetched?.archivedAt).toBeInstanceOf(Date);
   });
 
   it("keeps every version fetchable by its tstv_ id, with its content and personas", async () => {
@@ -429,15 +446,21 @@ describe("deleting a test", () => {
     expect(current?.scenario).toBe("They want the Friday slot instead.");
   });
 
-  it("takes the deleted test out of reach of the other verbs too", async () => {
-    expect(await cloneTest(actingAsAcme(), doomed.id)).toBeUndefined();
-    expect(
-      await editTest(actingAsAcme(), doomed.id, { name: "Back again" }),
-    ).toBeUndefined();
+  it("archives once: a second Archive writes nothing and answers what is there", async () => {
+    const again = await archiveTest(actingAsAcme(), doomed.id);
+    const already = await getTest(actingAsAcme(), doomed.id);
+    expect(again?.archivedAt?.getTime()).toBe(already?.archivedAt?.getTime());
+    // Two tabs pressing Archive is an ordinary thing to happen, and the second
+    // one has nothing to complain about.
+    expect(again?.revision).toBe(already?.revision);
   });
 
-  it("deletes only once: a second delete finds nothing", async () => {
-    expect(await deleteTest(actingAsAcme(), doomed.id)).toBeUndefined();
+  it("comes back with Restore, and stops being archived", async () => {
+    const restored = await restoreTest(actingAsAcme(), doomed.id);
+    expect(restored?.archivedAt).toBeNull();
+
+    const active = await listTests(actingAsAcme());
+    expect(active.items.map((item) => item.id)).toContain(doomed.id);
   });
 
   it("keeps the surviving versions invisible to another customer", async () => {
@@ -449,16 +472,16 @@ describe("deleting a test", () => {
     ).toBeUndefined();
   });
 
-  it("returns nothing for another customer's test, and leaves it live", async () => {
+  it("returns nothing for another customer's test, and leaves it active", async () => {
     const bystander = await createTest(actingAsAcme(), {
       ...rescheduling,
       name: "Bystander",
     });
 
-    expect(await deleteTest(actingAsGlobex(), bystander.id)).toBeUndefined();
+    expect(await archiveTest(actingAsGlobex(), bystander.id)).toBeUndefined();
 
     const fetched = await getTest(actingAsAcme(), bystander.id);
-    expect(fetched?.id).toBe(bystander.id);
+    expect(fetched?.archivedAt).toBeNull();
   });
 
   it("returns nothing to the same customer acting in a sibling project", async () => {
@@ -467,9 +490,9 @@ describe("deleting a test", () => {
       name: "Bystander of the sibling project",
     });
 
-    expect(await deleteTest(actingInOutbound(), bystander.id)).toBeUndefined();
+    expect(await archiveTest(actingInOutbound(), bystander.id)).toBeUndefined();
 
     const fetched = await getTest(actingAsAcme(), bystander.id);
-    expect(fetched?.id).toBe(bystander.id);
+    expect(fetched?.archivedAt).toBeNull();
   });
 });

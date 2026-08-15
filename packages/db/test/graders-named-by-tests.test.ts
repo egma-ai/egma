@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   createTest,
   deleteGrader,
-  deleteTest,
+  archiveTest,
   editTest,
   getGrader,
   getTestVersion,
@@ -170,7 +170,7 @@ describe("a grader only deleted tests name", () => {
 
     await refusalFrom(deleteGrader(actingAsAcme(), dana));
 
-    await deleteTest(actingAsAcme(), created.id);
+    await archiveTest(actingAsAcme(), created.id);
 
     expect((await deleteGrader(actingAsAcme(), dana))?.id).toBe(dana);
 
@@ -212,9 +212,18 @@ async function writeTestNaming(
   const versionId = newId("tstv");
 
   await connection.sql(
-    `insert into test (id, organization_id, project_id, name, current_version_id)
-     values ($1, $2, $3, $4, $5)`,
-    [testId, acme.organization, acme.project, named.name, versionId],
+    `insert into test (id, organization_id, project_id, name, current_version_id,
+                       revision, applicability_revision)
+     values ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      testId,
+      acme.organization,
+      acme.project,
+      named.name,
+      versionId,
+      newId("rev"),
+      newId("rev"),
+    ],
   );
   await connection.sql(
     `insert into test_version (id, test_id, version, content)

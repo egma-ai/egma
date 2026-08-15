@@ -54,8 +54,10 @@ import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import { mockToolsApplyingTo } from "./mock-tools.ts";
 import {
+  archivedTests,
   getTestVersion,
   mockOverridesOfVersions,
+  testsApplyingToAgent,
   type TestVersion,
 } from "./tests.ts";
 import { within } from "./within.ts";
@@ -952,9 +954,9 @@ type PinnedVersion = {
  * of the twelve versions somebody named would be a green result about a suite
  * that did not run.
  *
- * A version of a *deleted* test still resolves. The version is frozen content
- * and a run that pins one is saying "execute exactly this"; deleting the test
- * decides it should stop appearing in a folder, which is a different question.
+ * Whether the *test* may start is a separate question, asked by
+ * `admitTestsForAgent` below once the agent is known. This read only turns ids
+ * into what they name.
  */
 async function resolvePinnedVersions(
   on: Queryable,
@@ -1015,6 +1017,58 @@ async function resolvePinnedVersions(
     }
     return { versionId: id, ...row, personaIds };
   });
+}
+
+/**
+ * Whether each pinned version's test may be executed against the agent this run
+ * has reached. Two rules, and both are about the test as it stands today rather
+ * than about the frozen version.
+ *
+ * **Applicability is a live admission rule.** A test applies to the agents
+ * somebody linked it to, and a run over an agent it does not apply to is a
+ * result nobody asked for: the comparison the whole relation exists to make
+ * honest is between agents a test was written for. A run already pins the agent
+ * it chose, so a link removed after this run started cannot rewrite what it
+ * executed — this asks only whether it may *start*.
+ *
+ * **An archived test cannot enter a new run.** Archive is exactly the statement
+ * "stop starting new work with this", and it would say nothing at all if a
+ * pinned version could walk around it. Its versions stay readable and every run
+ * that already pinned one stays interpretable, which is the difference between
+ * archiving and deleting.
+ *
+ * One refused version refuses the whole creation, on the terms every other rule
+ * here is held to: a run that quietly executed eleven of the twelve versions
+ * somebody named would be a green result about a suite that did not run.
+ */
+async function admitTestsForAgent(
+  on: Queryable,
+  agentId: string,
+  versions: readonly PinnedVersion[],
+): Promise<void> {
+  const testIds = [...new Set(versions.map((one) => one.testId))];
+
+  const archived = await archivedTests(on, testIds);
+  for (const version of versions) {
+    if (!archived.has(version.testId)) continue;
+    refuseRun(
+      "not_admitted",
+      `Test ${version.testId} is archived, so version ${version.versionId} ` +
+        `cannot start. Restore the test in the Tests page, or choose another ` +
+        `test for this run.`,
+    );
+  }
+
+  const applying = await testsApplyingToAgent(on, agentId, testIds);
+  for (const version of versions) {
+    if (applying.has(version.testId)) continue;
+    refuseRun(
+      "test_not_applicable",
+      `Test ${version.testId} does not apply to agent ${agentId}, so version ` +
+        `${version.versionId} cannot start. Choose a test linked to this ` +
+        `agent, or link the test in the Tests page before starting the run.`,
+    );
+  }
 }
 
 /**
@@ -1278,6 +1332,10 @@ export async function startRun(
       projectId,
       input.testVersionIds,
     );
+    // Inside the transaction, and after the connection has settled which agent
+    // this run reaches: applicability is a fact about that agent, and a check
+    // taken before it would have been about an agent the caller only guessed.
+    await admitTestsForAgent(tx, reached.agentId, versions);
 
     // The conversations this selection adds up to, in the order they will sit:
     // each version in turn, and inside it each persona in the order the test

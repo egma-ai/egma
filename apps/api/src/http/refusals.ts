@@ -39,6 +39,14 @@ export const CODES = {
   // so a client that could not tell them apart could not offer either.
   identity_conflict: 409,
   version_conflict: 409,
+  /**
+   * A link edit written against an applicability revision the test has moved
+   * past. Its own code beside the two above because it is the third of three
+   * separately recoverable losses: a client that could not tell it from an
+   * identity conflict would tell somebody to reread and retype a name when
+   * what actually moved was which agents the test applies to.
+   */
+  applicability_conflict: 409,
   parent_agent_archived: 409,
   // A persona an active test still names, and the persona a project points at
   // by default. Two rules that refuse one Archive, and two sentences, because
@@ -56,6 +64,32 @@ export const CODES = {
    * refusal names them.
    */
   grader_in_use: 409,
+  /**
+   * A test left with no agent to run against, refused. Three codes rather than
+   * one because the fixes are three different places: choose an agent on the
+   * form, link another agent before removing this one, and choose an agent
+   * that is actually active in this project.
+   */
+  test_needs_agent: 422,
+  last_test_agent: 409,
+  agent_not_available: 409,
+  /**
+   * A run that paired an agent with a test not linked to it. Its own code so a
+   * run builder can offer the fix — link the test, or choose another — rather
+   * than showing a general refusal about a version.
+   */
+  test_not_applicable: 409,
+  /**
+   * A test's Restore refused because its current version names an archived
+   * persona or scenario grader. Restoring is a promise the test can run, and
+   * this is the answer when it cannot.
+   */
+  test_dependency_inactive: 409,
+  /**
+   * A capability nothing offered. Its own code so a form can put the refusal
+   * beside the capability list rather than at the top of the page.
+   */
+  unknown_capability: 422,
   unprocessable: 422,
   credential_required: 422,
   credential_forbidden: 422,
@@ -199,6 +233,40 @@ export const REFUSALS = {
     `this ${resource} edit was written against version ${expected}, and it ` +
     `has moved on to ${current}. Read the ${resource} again, keep or reapply ` +
     `your edits, and send them with expected_version_id set to ${current}.`,
+
+  testNeedsAgent:
+    "Every test must apply to at least one active agent. Select an active " +
+    "agent and save the test again.",
+
+  lastTestAgent: (testId: string, agentId: string): string =>
+    `Test ${testId} must apply to at least one agent. Link another active ` +
+    `agent before you remove ${agentId}.`,
+
+  agentNotAvailable: (agentId: string): string =>
+    `Agent ${agentId} is not active in this project. Choose an active agent ` +
+    "from this project's Agents page.",
+
+  testNotApplicable: (
+    testId: string,
+    agentId: string,
+    versionId: string,
+  ): string =>
+    `Test ${testId} does not apply to agent ${agentId}, so version ` +
+    `${versionId} cannot start. Choose a test linked to this agent, or link ` +
+    "the test in the Tests page before starting the run.",
+
+  testDependencyInactive: (testId: string, resources: string): string =>
+    `Test ${testId} cannot be restored because ${resources} in its current ` +
+    "version are archived. Restore those resources, then restore the test.",
+
+  applicabilityConflict: (testId: string): string =>
+    `Test ${testId}'s applicable agents changed after you opened it. Read the ` +
+    "test again, keep or reapply your link changes, and send them with " +
+    "expected_applicability_revision set to its new applicability revision.",
+
+  invalidCursor: (cursor: string): string =>
+    `Cursor ${cursor} is not valid for this list. Remove it and start from ` +
+    "the first page.",
 
   graderInUse: (graderId: string, tests: string): string =>
     `Grader ${graderId} is added directly to active tests ${tests}. Remove ` +

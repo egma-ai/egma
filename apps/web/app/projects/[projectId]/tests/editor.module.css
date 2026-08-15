@@ -1,0 +1,232 @@
+/*
+ * The parts a test editor needs and no other page has: an ordered list whose
+ * order is content, a row that carries a statement beside how much it matters,
+ * a set of choices drawn from a server-owned list, and a reader for the
+ * immutable history.
+ *
+ * They live beside the components rather than in the shared system module,
+ * because they are this area's and nothing else uses them. Every value is a
+ * token: density and colour are tuned once, in `tokens.css`, and nothing here
+ * decides either for itself.
+ */
+
+.ordered {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/*
+ * One entry, and the place it sits.
+ *
+ * The position is drawn rather than implied, because order is content here: two
+ * versions naming the same behaviors in different orders are two different
+ * versions, and somebody reordering a list has to be able to see what they have
+ * done.
+ */
+.entry {
+  display: grid;
+  grid-template-columns: var(--control-md) 1fr auto;
+  align-items: start;
+  gap: var(--space-3);
+}
+
+.position {
+  min-height: var(--control-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  color: var(--faint);
+}
+
+/*
+ * A statement and how much it matters, side by side on a wide screen and
+ * stacked on a narrow one. The priority sits with the statement rather than in
+ * a column of its own, because it is a fact about that sentence and a column
+ * would put the two an eye-movement apart.
+ */
+.behavior {
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 140px);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+@media (max-width: 640px) {
+  .behavior {
+    grid-template-columns: 1fr;
+  }
+
+  .entry {
+    grid-template-columns: var(--control-md) 1fr;
+  }
+
+  .entryActions {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+.entryActions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+/* A set of choices drawn from a list the server owns. */
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.choice {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-size: var(--text-md);
+  line-height: var(--line-tight);
+  cursor: pointer;
+}
+
+.choiceOn {
+  border-color: var(--border-strong);
+  background: var(--surface-soft);
+}
+
+.choiceNote {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--faint);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
+
+/*
+ * An archived thing a test still names, marked as one.
+ *
+ * It stays in the list rather than disappearing: a link removed on a reader's
+ * behalf would rewrite somebody's coverage as a side effect of tidying up, and
+ * a name quietly missing is worse than a name plainly unavailable.
+ */
+.gone {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+
+/* The immutable history, and the one version being read out of it. */
+.history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.version {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.versionCurrent {
+  border-color: var(--border-strong);
+  background: var(--surface-soft);
+}
+
+.versionNumber {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+}
+
+.versionWhen {
+  color: var(--faint);
+  font-size: var(--text-sm);
+}
+
+.versionSpacer {
+  flex: 1 1 auto;
+}
+
+/*
+ * One older version, read without becoming current.
+ *
+ * It is deliberately a read and never a form: making an old version current is
+ * an edit somebody makes deliberately by copying what it says forward, and a
+ * control offering to do it in one press would rewrite what this test checks
+ * from a page somebody opened to look at history.
+ */
+.reading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.readingTitle {
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: var(--line-tight);
+}
+
+.readingBody {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+}
+
+.readingList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-6);
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+}
+
+/*
+ * A name only a screen reader gets.
+ *
+ * The move and remove controls are arrows and a cross, because a list of eight
+ * behaviors each carrying three worded buttons is a list nobody can read. The
+ * symbol is what a sighted reader sees and this is what everybody else gets;
+ * `aria-hidden` on the symbol keeps the two from being announced together.
+ *
+ * It is here rather than in the shared module because nothing shared has needed
+ * one yet, and a utility class is exactly the kind of thing that ends up
+ * declared twice.
+ */
+.named {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

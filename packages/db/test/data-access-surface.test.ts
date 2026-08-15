@@ -180,7 +180,14 @@ const CONTEXT_REQUIRING = [
   "deactivateUser",
   "deleteGrader",
   "deleteMockTool",
-  "deleteTest",
+  // Archive and Restore, never a delete: a test a run pinned has to stay
+  // interpretable forever, and a removal somebody regrets at four o'clock has
+  // to be undoable at five.
+  "archiveTest",
+  "restoreTest",
+  // Which agents a test applies to. Its own door because it moves its own
+  // revision and mints no version — target coverage is not test content.
+  "setTestAgents",
   "editGrader",
   "editJudgeCredential",
   "editMockTool",
@@ -217,6 +224,7 @@ const CONTEXT_REQUIRING = [
   "listGraders",
   "listGradingJobsForSimulation",
   "listMembers",
+  "listTestVersions",
   "listMockTools",
   "listPendingInvitations",
   "listPersonas",
@@ -341,6 +349,10 @@ const VALUES = [
   // have to read the sentence to tell them apart.
   "AgentWriteRefusedError",
   "AlreadyBelongsToAnOrganizationError",
+  // A link edit written against an applicability revision the test has moved
+  // past. The third of three conflicts, and genuinely a third thing: it guards
+  // a set that is neither the live identity nor the versioned content.
+  "ApplicabilityConflictError",
   // Egma was asked to measure a target and the adapter could not establish
   // anything. Its own class beside the one below, because "the target did not
   // answer, try again" and "there is nothing here to try" are different next
@@ -386,9 +398,17 @@ const VALUES = [
   // An edit refused because somebody moved the test since it was written. It
   // carries both versions and the test's identity, because the caller's next
   // move is to go and read the test as it now stands.
+  // A test with no agent to run against, refused; and a Restore refused
+  // because the current version names an archived persona or grader.
+  "TestAgentRefusedError",
+  "TestDependencyInactiveError",
   "TestMovedOnError",
   // A write refused for what it says, told apart from a fault so that a layer
   // above can relay the factory's sentence instead of answering with a stack.
+  // A capability nothing offered. A subclass of the general refusal, so every
+  // relay of that one is right about this one too, with a code of its own for
+  // a form that wants to point at the capability list.
+  "UnknownCapabilityError",
   "UnprocessableInputError",
   // A versioned write that named the version it was written against, for every
   // versioned resource reached by identifier rather than by filename.

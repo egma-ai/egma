@@ -1,22 +1,41 @@
 import { isId, newId } from "@egma/ids";
-import { and, asc, desc, eq, inArray, isNull, lt, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  type SQL,
+} from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
+import { agent } from "../schema/agents.ts";
 import { grader, PRIORITIES, type Priority } from "../schema/graders.ts";
 import { persona } from "../schema/personas.ts";
 import { project } from "../schema/tenancy.ts";
 import {
   test,
+  testAgent,
   testGrader,
   testPersona,
   testVersion,
 } from "../schema/tests.ts";
 import type { MockToolAnswer } from "../mock-tools/resolve.ts";
+import { admittedCapabilities } from "./capabilities.ts";
 import type { AuthContext } from "./context.ts";
 import {
+  ApplicabilityConflictError,
+  IdentityConflictError,
   ProjectOutsideOrganizationError,
+  TestAgentRefusedError,
+  TestDependencyInactiveError,
   TestMovedOnError,
   UnprocessableInputError,
+  type ArchivedDependency,
   type TestNamingGrader,
   type TestNamingPersona,
 } from "./errors.ts";
@@ -121,6 +140,17 @@ type TestContent = {
   readonly scenario: string;
   readonly expectedBehaviors: readonly ExpectedBehavior[];
   readonly mockOverrides: readonly MockOverride[];
+  /**
+   * What this scenario needs a connection to be able to do before running it
+   * means anything — DTMF entry, barge-in, raw audio.
+   *
+   * **Never a connection, and never a claim about one.** A capability is a
+   * measured fact about a target; this is what the test requires, and where the
+   * two disagree the simulation is skipped with a reason rather than failed. It
+   * is version content because a requirement added today would otherwise change
+   * what a run last week is understood to have executed.
+   */
+  readonly requiredCapabilities: readonly string[];
 };
 
 export type NewTest = {
@@ -128,6 +158,27 @@ export type NewTest = {
   readonly description?: string | undefined;
   readonly scenario: string;
   readonly expectedBehaviors: readonly ExpectedBehaviorInput[];
+  /**
+   * Which agents this test applies to — the targets a run may execute it
+   * against. Every one has to be an active agent of the same project.
+   *
+   * **Naming none takes every active agent in the project**, which is the
+   * meaning the applicable-agent relation arrived with: it is what the upgrade
+   * did to every installed test, for the reason it did it there — a test that
+   * applied to any agent of its project before must go on applying to them, and
+   * choosing one of them without evidence would be egma authoring somebody's
+   * coverage. A project with no active agent has nothing honest to link, and the
+   * create is refused rather than left targetless.
+   *
+   * A browser create names them explicitly; the sentence above is what a
+   * repository push and a script get.
+   */
+  readonly agentIds?: readonly string[] | undefined;
+  /**
+   * What a connection has to be able to do for this test to mean anything.
+   * Naming none is the ordinary case and means the test runs anywhere.
+   */
+  readonly requiredCapabilities?: readonly string[] | undefined;
   /**
    * Who calls about the scenario. Naming none — absent, or an empty list —
    * takes the project's default persona, so authoring a first test never waits
@@ -176,6 +227,23 @@ export type TestGrader = {
   readonly deletedAt: Date | null;
 };
 
+/**
+ * An agent a test applies to: by identity, with its current name, and saying
+ * plainly whether it has since been archived.
+ *
+ * **An archived agent keeps its link and is shown keeping it.** A read that hid
+ * it would show a test with fewer targets than it has and give no sign; a read
+ * that dropped it would make Archive quietly rewrite somebody's coverage. A
+ * test all of whose linked agents are archived is active and unavailable, and
+ * that is a state a page has to be able to render.
+ */
+export type TestAgent = {
+  readonly id: string;
+  readonly name: string;
+  /** Set once it is archived; the test goes on applying to it either way. */
+  readonly archivedAt: Date | null;
+};
+
 export type Test = {
   readonly id: string;
   readonly projectId: string;
@@ -192,6 +260,24 @@ export type Test = {
   readonly graders: readonly TestGrader[];
   /** The tools this scenario answers for itself; usually none. */
   readonly mockOverrides: readonly MockOverride[];
+  /** What a connection has to be able to do; usually nothing. */
+  readonly requiredCapabilities: readonly string[];
+  /** The agents this test applies to, oldest link first. */
+  readonly agents: readonly TestAgent[];
+  /**
+   * The opaque token an identity write or a lifecycle change has to name. It
+   * changes on every one of them and means nothing on its own.
+   */
+  readonly revision: string;
+  /**
+   * The opaque token a link edit has to name. It moves only when the applicable
+   * agents move, so a rename and a link edit can never refuse each other.
+   */
+  readonly applicabilityRevision: string;
+  /** When it was archived, or null while it is active. */
+  readonly archivedAt: Date | null;
+  /** Why, when an upgrade archived it rather than a person. */
+  readonly archiveReason: string | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 };
@@ -236,6 +322,13 @@ export type TestChanges = {
    */
   readonly mockOverrides?: readonly MockOverrideInput[];
   /**
+   * What a connection has to be able to do for the next version to mean
+   * anything. An empty list means require nothing, which is the state most
+   * tests are in; leaving the field out keeps whatever the current version
+   * requires.
+   */
+  readonly requiredCapabilities?: readonly string[];
+  /**
    * The version this edit was written against, when the writer knows it.
    *
    * A precondition rather than a change, and it rides here because it belongs
@@ -248,6 +341,16 @@ export type TestChanges = {
    * serving more than one names it, and the public route requires it.
    */
   readonly expectedVersionId?: string;
+  /**
+   * The identity revision this edit was written against, for the live half —
+   * the name and the description.
+   *
+   * Separate from the version above because the two guard separate losses. A
+   * rename that lost a race is retyped in a second; a scenario edit that lost
+   * one may be an afternoon's work, and a writer has to be told which of the
+   * two happened. An edit that changes both names both.
+   */
+  readonly expectedRevision?: string;
 };
 
 /** One version, frozen: the test exactly as some simulation executed it. */
@@ -274,10 +377,12 @@ export type TestVersion = {
   readonly graders: readonly TestGrader[];
   /** The tools this version answers for itself, as it was frozen. */
   readonly mockOverrides: readonly MockOverride[];
+  /** What this version required of a connection, as it was frozen. */
+  readonly requiredCapabilities: readonly string[];
   readonly createdAt: Date;
 };
 
-const notDeleted: SQL = isNull(test.deletedAt);
+const notArchived: SQL = isNull(test.archivedAt);
 
 /** An answer's columns, and no more — the tenant-free view. */
 const COLUMNS = {
@@ -285,6 +390,10 @@ const COLUMNS = {
   projectId: test.projectId,
   name: test.name,
   description: test.description,
+  revision: test.revision,
+  applicabilityRevision: test.applicabilityRevision,
+  archivedAt: test.archivedAt,
+  archiveReason: test.archiveReason,
   createdAt: test.createdAt,
   updatedAt: test.updatedAt,
 } as const;
@@ -324,6 +433,7 @@ function validContent(input: {
   readonly scenario: string;
   readonly expectedBehaviors: readonly ExpectedBehaviorInput[];
   readonly mockOverrides: readonly MockOverrideInput[];
+  readonly requiredCapabilities: readonly string[];
 }): TestContent {
   const scenario = input.scenario.trim();
   if (scenario === "") {
@@ -365,6 +475,11 @@ function validContent(input: {
     scenario,
     expectedBehaviors,
     mockOverrides: validOverrides(input.mockOverrides),
+    // The catalog's own door, and the only one. Every set a version is about to
+    // hold comes through it — including the one an edit carried forward — so no
+    // stored version can name a capability no connection could ever be measured
+    // for.
+    requiredCapabilities: admittedCapabilities(input.requiredCapabilities),
   };
 }
 
@@ -471,10 +586,8 @@ function contentFromRow(value: unknown, versionId: string): TestContent {
     );
 
   if (typeof value !== "object" || value === null) throw malformed();
-  const { scenario, expectedBehaviors, mockOverrides } = value as Record<
-    string,
-    unknown
-  >;
+  const { scenario, expectedBehaviors, mockOverrides, requiredCapabilities } =
+    value as Record<string, unknown>;
   if (typeof scenario !== "string" || scenario.trim() === "") throw malformed();
   if (!Array.isArray(expectedBehaviors) || expectedBehaviors.length === 0) {
     throw malformed();
@@ -487,8 +600,24 @@ function contentFromRow(value: unknown, versionId: string): TestContent {
   if (mockOverrides !== undefined && !Array.isArray(mockOverrides)) {
     throw malformed();
   }
+  // Absent on every version written before a test could require a capability,
+  // and absent means what it meant then: this test requires nothing and runs
+  // anywhere. Reading it as an empty list is the meaning those rows already
+  // had, which is what lets the field arrive as an additive change with no
+  // rewrite. The keys themselves are taken on trust once they are strings, as
+  // a persona's voice provider is: the catalog may grow, and an old version has
+  // to stay readable however it grows.
+  if (requiredCapabilities !== undefined && !Array.isArray(requiredCapabilities)) {
+    throw malformed();
+  }
 
   return {
+    requiredCapabilities: (requiredCapabilities ?? []).map(
+      (entry: unknown): string => {
+        if (typeof entry !== "string" || entry.trim() === "") throw malformed();
+        return entry;
+      },
+    ),
     mockOverrides: (mockOverrides ?? []).map((entry: unknown): MockOverride => {
       if (typeof entry !== "object" || entry === null) throw malformed();
       const { toolName, answer, delayMilliseconds } = entry as Record<
@@ -580,6 +709,12 @@ const sameContentField: {
   expectedBehaviors: (a, b) =>
     sameBehaviors(a.expectedBehaviors, b.expectedBehaviors),
   mockOverrides: (a, b) => sameOverrides(a.mockOverrides, b.mockOverrides),
+  // Order is content here too, and deliberately: `admittedCapabilities` answers
+  // the keys in the order they were written, so two authors who chose the same
+  // two capabilities in different orders wrote two different versions. One
+  // extra version costs nothing; the opposite mistake loses an edit.
+  requiredCapabilities: (a, b) =>
+    sameOrderedList(a.requiredCapabilities, b.requiredCapabilities),
 };
 
 /**
@@ -623,9 +758,221 @@ function inActingProject(auth: AuthContext): SQL | undefined {
     : eq(test.projectId, auth.projectId);
 }
 
-/** The named test, alive, within the caller's tenancy and scope. */
+/**
+ * The named test, within the caller's tenancy and scope, **whatever its
+ * lifecycle state**.
+ *
+ * Archive takes a test out of the lists somebody authors from and out of every
+ * new run; it does not take it out of the product. A detail page has to render
+ * an archived test — that is where Restore is — and Restore itself has to find
+ * one. A predicate that filtered them out here would make an archived test
+ * unreachable by the one operation that exists to bring it back. The reads that
+ * must not see one say so themselves.
+ */
 function theTest(auth: AuthContext, id: string): SQL {
-  return within(auth, test, and(eq(test.id, id), notDeleted, inActingProject(auth)));
+  return within(auth, test, and(eq(test.id, id), inActingProject(auth)));
+}
+
+/**
+ * The agents several tests apply to at once, keyed by test and each list oldest
+ * link first — one read for a whole page rather than one read per row.
+ *
+ * The `where` starts from a bare `inArray` rather than `within`: every caller
+ * hands it test ids that have already come off tenancy-checked rows, so the
+ * predicate cannot reach further than that check already did.
+ */
+async function agentsOfTests(
+  on: Queryable,
+  testIds: readonly string[],
+): Promise<Map<string, TestAgent[]>> {
+  const byTest = new Map<string, TestAgent[]>();
+  if (testIds.length === 0) return byTest;
+
+  const rows = await on
+    .select({
+      testId: testAgent.testId,
+      id: agent.id,
+      name: agent.name,
+      archivedAt: agent.archivedAt,
+      linkedAt: testAgent.createdAt,
+    })
+    .from(testAgent)
+    .innerJoin(agent, eq(testAgent.agentId, agent.id))
+    .where(inArray(testAgent.testId, [...testIds]))
+    .orderBy(asc(testAgent.testId), asc(testAgent.createdAt), asc(agent.id));
+
+  for (const { testId, linkedAt: _linkedAt, ...applies } of rows) {
+    const already = byTest.get(testId);
+    if (already === undefined) byTest.set(testId, [applies]);
+    else already.push(applies);
+  }
+  return byTest;
+}
+
+/** The one test's applicable agents, oldest link first. */
+async function agentsOf(
+  on: Queryable,
+  testId: string,
+): Promise<readonly TestAgent[]> {
+  return (await agentsOfTests(on, [testId])).get(testId) ?? [];
+}
+
+/**
+ * The ids a link write names, checked against what this project can offer:
+ * every one is an active agent of this project, and each is named once.
+ *
+ * **An archived agent is refused a new link and keeps every link it has.** The
+ * two are the same rule seen from two sides — Archive says "stop starting new
+ * work here", and it would say nothing at all if a link written afterwards
+ * could reach it. Removing the links it already has would be the opposite
+ * mistake: it would rewrite somebody's coverage as a side effect of tidying up,
+ * and the test would silently lose a target it was authored for.
+ *
+ * The read takes a shared lock on every row it finds and holds it to commit, on
+ * the terms a persona is named under: an Archive of one of these agents either
+ * lands before this read and refuses the link, or waits behind it and archives
+ * an agent this test now applies to — which is a state the product allows and
+ * says out loud.
+ */
+async function validateNamedAgents(
+  on: Queryable,
+  auth: AuthContext,
+  projectId: string,
+  ids: readonly string[],
+): Promise<void> {
+  if (ids.length === 0) return;
+
+  const found = new Map(
+    (
+      await on
+        .select({ id: agent.id, archivedAt: agent.archivedAt })
+        .from(agent)
+        .where(
+          within(
+            auth,
+            agent,
+            and(inArray(agent.id, [...ids]), eq(agent.projectId, projectId)),
+          ),
+        )
+        .for("share")
+    ).map((row) => [row.id, row.archivedAt] as const),
+  );
+
+  for (const id of ids) {
+    // An agent of another customer or another project is refused in the same
+    // words as one that never existed: confirming that somebody else's row is
+    // there is itself a leak.
+    if (!found.has(id) || found.get(id) !== null) {
+      throw new TestAgentRefusedError(
+        "agent_not_available",
+        `Agent ${id} is not active in this project. Choose an active agent ` +
+          `from this project's Agents page.`,
+        { agentId: id },
+      );
+    }
+  }
+}
+
+/**
+ * Everything about the named agent ids that is answerable without the database:
+ * every one is an agent's identifier, and each one is named once. Naming the
+ * same agent twice asks for one link twice, which the primary key would refuse
+ * in the database's words rather than in egma's.
+ */
+function validateAgentIds(ids: readonly string[]): void {
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (!isId("agt", id)) {
+      throw new UnprocessableInputError(`"${id}" is not an agent id`);
+    }
+    if (seen.has(id)) {
+      throw new UnprocessableInputError(
+        `agent ${id} is named twice on one test; name each agent once`,
+      );
+    }
+    seen.add(id);
+  }
+}
+
+/**
+ * The active agents of one project, oldest first — what a create that named no
+ * agent applies to.
+ *
+ * Shared-locked for the reason a named agent is: an Archive landing between
+ * this read and the link rows would otherwise leave a brand-new test applying
+ * to an agent that is not active, which is exactly what the named path refuses.
+ */
+async function activeAgentsOfProject(
+  on: Queryable,
+  auth: AuthContext,
+  projectId: string,
+): Promise<readonly string[]> {
+  const rows = await on
+    .select({ id: agent.id })
+    .from(agent)
+    .where(
+      within(
+        auth,
+        agent,
+        and(eq(agent.projectId, projectId), isNull(agent.archivedAt)),
+      ),
+    )
+    .orderBy(asc(agent.id))
+    .for("share");
+
+  return rows.map((row) => row.id);
+}
+
+/** The exact sentence a test with nowhere to run is refused with. */
+const NEEDS_AN_AGENT =
+  "Every test must apply to at least one active agent. Select an active " +
+  "agent and save the test again.";
+
+/**
+ * Which agents a write should link, from what it was handed.
+ *
+ * One function for the create and for the clone, so the two can never come to
+ * disagree about the same input — the shape `personaIdsFor` has, for the same
+ * reason. Naming some checks them; naming none takes the project's active
+ * agents, and a project with none is refused rather than given a test nothing
+ * can execute.
+ */
+async function agentIdsFor(
+  on: Queryable,
+  auth: AuthContext,
+  projectId: string,
+  named: readonly string[],
+): Promise<readonly string[]> {
+  if (named.length > 0) {
+    await validateNamedAgents(on, auth, projectId, named);
+    return named;
+  }
+
+  const active = await activeAgentsOfProject(on, auth, projectId);
+  if (active.length === 0) {
+    throw new TestAgentRefusedError("test_needs_agent", NEEDS_AN_AGENT);
+  }
+  return active;
+}
+
+/** The link rows of one test. */
+async function linkAgentsTo(
+  on: Queryable,
+  auth: AuthContext,
+  testId: string,
+  projectId: string,
+  agentIds: readonly string[],
+): Promise<void> {
+  if (agentIds.length === 0) return;
+
+  await on.insert(testAgent).values(
+    agentIds.map((agentId) => ({
+      testId,
+      agentId,
+      projectId,
+      createdBy: auth.userId,
+    })),
+  );
 }
 
 /**
@@ -885,13 +1232,19 @@ async function nameGradersOn(
 }
 
 /**
- * The test, its first version and the version's personas and graders, or none
- * of them. The identity row goes in first naming a version that does not exist
- * yet — its pointer's constraint is deferred, so Postgres checks it at commit —
- * and anything that fails on the way out takes the whole write with it.
+ * The test, its first version, the version's personas and graders, and its
+ * applicable agents — or none of them. The identity row goes in first naming a
+ * version that does not exist yet — its pointer's constraint is deferred, so
+ * Postgres checks it at commit — and anything that fails on the way out takes
+ * the whole write with it.
  *
- * Both sets are resolved inside the transaction, so what was checked is what the
- * join rows name.
+ * Every set is resolved inside the transaction, so what was checked is what the
+ * rows name.
+ *
+ * **A test is born with a target.** The applicable agents are as much a part of
+ * creating one as its expected behaviors are: a specification nothing can be
+ * executed against is a specification nobody can act on, and the state exists
+ * only where an upgrade had no honest link to give.
  */
 export async function createTest(
   auth: AuthContext,
@@ -912,11 +1265,14 @@ export async function createTest(
   const content = validContent({
     ...input,
     mockOverrides: input.mockOverrides ?? [],
+    requiredCapabilities: input.requiredCapabilities ?? [],
   });
   const named = input.personaIds ?? [];
   validatePersonaIds(named);
   const namedGraders = input.graderIds ?? [];
   validateGraderIds(namedGraders);
+  const namedAgents = input.agentIds ?? [];
+  validateAgentIds(namedAgents);
 
   if (!(await isProjectOfOrganization(auth, projectId))) {
     throw new ProjectOutsideOrganizationError(auth.organizationId, projectId);
@@ -928,6 +1284,7 @@ export async function createTest(
   const written = await db().transaction(async (tx) => {
     const personaIds = await personaIdsFor(tx, auth, projectId, named);
     await validateNamedGraders(tx, auth, projectId, namedGraders);
+    const agentIds = await agentIdsFor(tx, auth, projectId, namedAgents);
 
     const [identity] = await tx
       .insert(test)
@@ -938,6 +1295,8 @@ export async function createTest(
         name,
         description: input.description ?? null,
         currentVersionId: versionId,
+        revision: newId("rev"),
+        applicabilityRevision: newId("rev"),
         createdBy: auth.userId,
       })
       .returning(COLUMNS);
@@ -954,6 +1313,7 @@ export async function createTest(
 
     await namePersonasOn(tx, versionId, personaIds);
     await nameGradersOn(tx, versionId, namedGraders);
+    await linkAgentsTo(tx, auth, id, projectId, agentIds);
 
     // Read back inside the transaction, so what the create answers with is what
     // the transaction wrote and checked, rather than whatever the table holds
@@ -962,6 +1322,7 @@ export async function createTest(
       ...identity,
       personas: await personasOf(tx, versionId),
       graders: await gradersOf(tx, versionId),
+      agents: await agentsOf(tx, id),
     };
   });
 
@@ -1062,8 +1423,8 @@ async function gradersOf(
  * The identity row joined to its current version — the shape every read of a
  * whole test answers with, written once so two readers can never drift.
  */
-function selectWithCurrentVersion() {
-  return db()
+function selectWithCurrentVersion(on: Queryable = db()) {
+  return on
     .select({
       ...COLUMNS,
       version: testVersion.version,
@@ -1086,7 +1447,24 @@ export async function getTest(
 ): Promise<Test | undefined> {
   authorize(auth, "read", here(auth));
 
-  const [row] = await selectWithCurrentVersion()
+  return readTestOn(db(), auth, id);
+}
+
+/**
+ * The test as it stands on one connection.
+ *
+ * **A lifecycle write reads its own answer back through this, on its own
+ * transaction.** `getTest` asks the pool, which is a different connection and
+ * cannot see an uncommitted write — so an Archive that answered through it
+ * would hand back the row exactly as it was a moment before, and every caller
+ * would believe nothing had happened.
+ */
+async function readTestOn(
+  on: Queryable,
+  auth: AuthContext,
+  id: string,
+): Promise<Test | undefined> {
+  const [row] = await selectWithCurrentVersion(on)
     .where(theTest(auth, id))
     .limit(1);
 
@@ -1096,8 +1474,9 @@ export async function getTest(
   return {
     ...rest,
     ...contentFromRow(content, row.versionId),
-    personas: await personasOf(db(), row.versionId),
-    graders: await gradersOf(db(), row.versionId),
+    personas: await personasOf(on, row.versionId),
+    graders: await gradersOf(on, row.versionId),
+    agents: await agentsOf(on, row.id),
   };
 }
 
@@ -1161,6 +1540,12 @@ export async function editTest(
     // Before anything is read about the content, and inside the lock. Nothing
     // has been written yet, and returning through a throw takes the transaction
     // with it, so a refused edit leaves the test exactly as it found it.
+    //
+    // The identity expectation goes first because it is the cheaper loss to
+    // report: somebody whose rename lost a race retypes it, and telling them
+    // that instead of telling them the content moved would send them looking at
+    // the wrong half of their own edit.
+    expectRevision(current, changes.expectedRevision);
     if (
       changes.expectedVersionId !== undefined &&
       changes.expectedVersionId !== currentVersionId
@@ -1209,6 +1594,8 @@ export async function editTest(
       expectedBehaviors:
         changes.expectedBehaviors ?? storedContent.expectedBehaviors,
       mockOverrides: changes.mockOverrides ?? storedContent.mockOverrides,
+      requiredCapabilities:
+        changes.requiredCapabilities ?? storedContent.requiredCapabilities,
     });
     const personaIds = await personaIdsFor(
       tx,
@@ -1234,6 +1621,7 @@ export async function editTest(
         ...storedContent,
         personas: storedPersonas,
         graders: storedGraders,
+        agents: await agentsOf(tx, current.id),
       };
     }
 
@@ -1267,13 +1655,41 @@ export async function editTest(
           ? {}
           : { description: changes.description }),
         ...(mintsVersion ? { currentVersionId: versionId } : {}),
+        // **Only when the identity moved**, which is the whole worth of two
+        // tokens. A version-only edit refuses a rename somebody is typing in
+        // another tab if this moves for it — and a rename is not stale for a
+        // scenario somebody else sharpened, because the name they read is
+        // still the name. A repository copy is made stale by the version, so
+        // nothing downstream needs this to move for content. The applicability
+        // revision is left alone for the same reason, one door across.
+        ...(identityChanged ? { revision: newId("rev") } : {}),
         updatedAt: new Date(),
       })
       .where(eq(test.id, current.id))
       .returning(COLUMNS);
 
     if (updated === undefined) throw new Error("the test was not written");
-    return { ...updated, version, versionId, ...content, personas, graders };
+    return {
+      ...updated,
+      version,
+      versionId,
+      ...content,
+      personas,
+      graders,
+      agents: await agentsOf(tx, current.id),
+    };
+  });
+}
+
+/** The revision check, written once for the writes that make it. */
+function expectRevision(
+  current: { readonly id: string; readonly revision: string },
+  expected: string | undefined,
+): void {
+  if (expected === undefined || expected === current.revision) return;
+  throw new IdentityConflictError("test", current.id, {
+    expected,
+    current: current.revision,
   });
 }
 
@@ -1352,9 +1768,36 @@ export type TestPage = {
   readonly nextCursor: string | undefined;
 };
 
+/**
+ * Which tests a list is of, beyond the page.
+ *
+ * **Two lists, never one with a column saying which** — an authoring list
+ * mixing archived rows into active ones is a list somebody picks the wrong row
+ * out of. The other two filters narrow within one of those lists.
+ */
+export type TestListRequest = PageRequest & {
+  /** `false`, the default, is the authoring list. `true` is the archive. */
+  readonly archived?: boolean | undefined;
+  /**
+   * Only the tests that apply to this agent — the agent's own coverage, and the
+   * set a run builder may choose from once an agent is chosen.
+   */
+  readonly agentId?: string | undefined;
+  /**
+   * Only the tests whose name contains this, ignoring case. Blank narrows
+   * nothing, which is what an empty search box means.
+   */
+  readonly name?: string | undefined;
+};
+
+/** Every character Postgres reads as a wildcard, escaped so a search is one. */
+function literalPattern(written: string): string {
+  return `%${written.replace(/([\\%_])/gu, "\\$1")}%`;
+}
+
 export async function listTests(
   auth: AuthContext,
-  page?: PageRequest,
+  page?: TestListRequest,
 ): Promise<TestPage> {
   authorize(auth, "read", here(auth));
 
@@ -1364,24 +1807,54 @@ export async function listTests(
     prefix: "tst",
   });
   const olderThanCursor = cursor === undefined ? undefined : lt(test.id, cursor);
+  const lifecycle =
+    page?.archived === true ? isNotNull(test.archivedAt) : notArchived;
+  const named = page?.name?.trim() ?? "";
+  const matchingName =
+    named === "" ? undefined : ilike(test.name, literalPattern(named));
+
+  // The agent filter is a semi-join written as an `exists`, so a test that
+  // applies to one agent comes back once whatever else it applies to. A plain
+  // join would multiply the page by the link count and make the cursor lie.
+  const applyingToAgent =
+    page?.agentId === undefined
+      ? undefined
+      : inArray(
+          test.id,
+          db()
+            .select({ id: testAgent.testId })
+            .from(testAgent)
+            .where(eq(testAgent.agentId, page.agentId)),
+        );
 
   const rows = await selectWithCurrentVersion()
     .where(
       within(
         auth,
         test,
-        and(notDeleted, inActingProject(auth), olderThanCursor),
+        and(
+          lifecycle,
+          inActingProject(auth),
+          matchingName,
+          applyingToAgent,
+          olderThanCursor,
+        ),
       ),
     )
     .orderBy(desc(test.id))
     .limit(limit + 1);
 
-  // A page's personas and graders come back in one read each, not one per row:
-  // a page of two hundred tests is three queries, the same as a page of one.
+  // A page's personas, graders and agents come back in one read each, not one
+  // per row: a page of two hundred tests is four queries, the same as a page of
+  // one.
   const { items: wanted, nextCursor } = pageOf(rows, limit);
   const versionIds = wanted.map((row) => row.versionId);
   const personasByVersion = await personasOfVersions(db(), versionIds);
   const gradersByVersion = await gradersOfVersions(db(), versionIds);
+  const agentsByTest = await agentsOfTests(
+    db(),
+    wanted.map((row) => row.id),
+  );
 
   return {
     items: wanted.map(({ content, ...rest }) => ({
@@ -1389,6 +1862,7 @@ export async function listTests(
       ...contentFromRow(content, rest.versionId),
       personas: personasByVersion.get(rest.versionId) ?? [],
       graders: gradersByVersion.get(rest.versionId) ?? [],
+      agents: agentsByTest.get(rest.id) ?? [],
     })),
     nextCursor,
   };
@@ -1439,6 +1913,21 @@ export async function cloneTest(
   const source = await getTest(auth, id);
   if (source === undefined) return undefined;
 
+  /**
+   * The source's **active** links, and only those.
+   *
+   * A clone is a new test being created now, and a create may not link an
+   * archived agent — so copying the archived links would either be refused or
+   * would make clone the one door past that rule. Copying only the active ones
+   * is what a person would have chosen anyway: the copy is for running, and an
+   * archived agent is exactly the target it cannot run against. A source whose
+   * every link is archived therefore falls back to the project's active agents,
+   * and a project with none refuses the clone in the create's own words.
+   */
+  const active = source.agents
+    .filter((applies) => applies.archivedAt === null)
+    .map((applies) => applies.id);
+
   return createTest(auth, {
     name: source.name,
     description: source.description ?? undefined,
@@ -1446,7 +1935,132 @@ export async function cloneTest(
     expectedBehaviors: source.expectedBehaviors,
     personaIds: source.personas.map((named) => named.id),
     graderIds: source.graders.map((named) => named.id),
+    // Copied whole, including the overrides no browser form shows. A clone that
+    // dropped them would hand somebody a test that looks identical and runs in
+    // a different world.
     mockOverrides: source.mockOverrides,
+    requiredCapabilities: source.requiredCapabilities,
+    agentIds: active,
+  });
+}
+
+/**
+ * What a link edit takes: the whole set the test should apply to, and the
+ * applicability revision it was written against.
+ *
+ * **The whole set rather than one add or one remove**, because a browser edits
+ * a list of checkboxes and sends what it now says. Two people editing the set
+ * from two tabs is what the revision is for, and add-and-remove verbs would
+ * make each of them right about their own change and wrong about the set.
+ */
+export type ApplicabilityChange = {
+  readonly agentIds: readonly string[];
+  /**
+   * Optional here and required at the browser's door — the stance every
+   * expectation in this codebase takes. A script acting on a row it read a line
+   * earlier has nobody to race; a person with a page open in a tab they left
+   * over lunch has exactly somebody to race.
+   */
+  readonly expectedApplicabilityRevision?: string | undefined;
+};
+
+/**
+ * Which agents this test applies to, set to exactly what the caller says.
+ *
+ * **This mints no version and moves no identity revision.** Target coverage is
+ * not test content and not the test's live identity: a repository copy stays
+ * current, a rename being typed in another tab stays saveable, and the version
+ * history stays a history of what the test checks. Only the applicability
+ * revision moves, and only a link edit names it.
+ *
+ * Three rules refuse, all of them under the lock:
+ *
+ * - **The set may not be emptied.** A test with no agent is a specification
+ *   nothing can execute, so the last link cannot be removed — the refusal names
+ *   the agent being removed, because the fix is to link another one first.
+ * - **A new link needs an active agent of this project.** Links already there
+ *   are left alone whatever their agent's state.
+ * - **The revision has to match**, or the whole edit is refused with
+ *   `ApplicabilityConflictError` and nothing is written.
+ *
+ * Setting the set to exactly what it already is writes nothing at all, not even
+ * a new revision: a save that changed nothing must not make somebody else's
+ * open link editor stale.
+ */
+export async function setTestAgents(
+  auth: AuthContext,
+  id: string,
+  change: ApplicabilityChange,
+): Promise<Test | undefined> {
+  authorize(auth, "author_definitions", here(auth));
+
+  validateAgentIds(change.agentIds);
+
+  return db().transaction(async (tx) => {
+    const [locked] = await tx
+      .select({
+        id: test.id,
+        projectId: test.projectId,
+        applicabilityRevision: test.applicabilityRevision,
+      })
+      .from(test)
+      .where(theTest(auth, id))
+      .limit(1)
+      .for("update");
+
+    if (locked === undefined) return undefined;
+
+    const expected = change.expectedApplicabilityRevision;
+    if (expected !== undefined && expected !== locked.applicabilityRevision) {
+      throw new ApplicabilityConflictError(locked.id, {
+        expected,
+        current: locked.applicabilityRevision,
+      });
+    }
+
+    const held = (await agentsOf(tx, locked.id)).map((applies) => applies.id);
+    const wanted = change.agentIds;
+    const added = wanted.filter((agentId) => !held.includes(agentId));
+    const removed = held.filter((agentId) => !wanted.includes(agentId));
+
+    if (added.length === 0 && removed.length === 0) {
+      return readTestOn(tx, auth, locked.id);
+    }
+
+    if (wanted.length === 0) {
+      // Named after the link that would have been last out, because that is the
+      // one the author is looking at.
+      const [last] = removed;
+      throw new TestAgentRefusedError(
+        "last_test_agent",
+        `Test ${locked.id} must apply to at least one agent. Link another ` +
+          `active agent before you remove ${String(last)}.`,
+        { testId: locked.id, ...(last === undefined ? {} : { agentId: last }) },
+      );
+    }
+
+    // Only what is being added is held to the active rule. A link already there
+    // stays there however its agent has moved since.
+    await validateNamedAgents(tx, auth, locked.projectId, added);
+
+    if (removed.length > 0) {
+      await tx
+        .delete(testAgent)
+        .where(
+          and(
+            eq(testAgent.testId, locked.id),
+            inArray(testAgent.agentId, [...removed]),
+          ),
+        );
+    }
+    await linkAgentsTo(tx, auth, locked.id, locked.projectId, added);
+
+    await tx
+      .update(test)
+      .set({ applicabilityRevision: newId("rev") })
+      .where(eq(test.id, locked.id));
+
+    return readTestOn(tx, auth, locked.id);
   });
 }
 
@@ -1483,57 +2097,356 @@ export async function mockOverridesOfVersions(
   return byVersion;
 }
 
-export type DeletedTest = {
-  readonly id: string;
-  readonly projectId: string;
-  readonly name: string;
-  readonly deletedAt: Date;
+/** What a lifecycle change takes, beyond the test it names. */
+export type ArchiveTestRequest = {
+  readonly expectedRevision?: string | undefined;
+};
+
+export type RestoreTestRequest = {
+  readonly expectedRevision?: string | undefined;
+  /**
+   * The agents the test should apply to when it comes back, for the one test
+   * that has none.
+   *
+   * A test archived by an upgrade because its project held no active agent has
+   * no link to come back to, and restoring it without one would produce an
+   * active test that refuses every run. So the choice is part of the Restore
+   * rather than a step after it: doing it afterwards would leave a window in
+   * which the test is active and unusable, and a window nobody would think to
+   * close is one that stays open. Meaningless for a test that already has
+   * links, which keeps them.
+   */
+  readonly agentIds?: readonly string[] | undefined;
 };
 
 /**
- * The soft-delete marker, and only the marker. The test vanishes from lists and
- * fetches at once; the version rows stay exactly where they are, because a run
- * that pinned one must stay interpretable for as long as the run itself is
- * kept. Sweeping orphaned versions is the deletion worker's job, not this
- * function's.
+ * Archive: the test leaves every authoring list and cannot enter a new run.
  *
- * Nothing blocks this, ever. A persona's delete is the one that can be refused,
- * because a live test's current version naming them would silently lose one of
- * the people who call about it; a test has no dependant of its own that could
- * lose anything that way. A suite selects tests and a run executes them, and
- * neither is a reason to keep a test somebody has abandoned, because both keep
- * what they need by pinning versions that outlive it.
+ * Every row stays exactly where it was — the identity, every version, every
+ * link, every run that pinned one — because Archive is a statement about what
+ * should be *offered*, not about what happened. `restoreTest` is therefore an
+ * ordinary write rather than a recovery, and that is the whole point of
+ * archiving instead of deleting.
+ *
+ * **Nothing refuses this, ever.** A persona's Archive can be refused because a
+ * live test's current version naming them would silently lose one of the people
+ * who call about it; a test has no dependant of its own that could lose
+ * anything that way. A run keeps what it needs by pinning a version that
+ * outlives the archive.
+ *
+ * Archiving one already archived writes nothing and answers what is there. It
+ * is not an error: two tabs pressing Archive is an ordinary thing to happen,
+ * and the second one has nothing to complain about.
  *
  * Like create, this refuses a credential acting in no project. An edit lands on
- * a row that already names its own project; a delete decides the test should
- * stop appearing in one, and emptying a project is an act taken from inside it
- * — the persona factory's stance, held here.
+ * a row that already names its own project; an Archive decides the test should
+ * stop being offered in one, and that is an act taken from inside it.
  */
-export async function deleteTest(
+export async function archiveTest(
   auth: AuthContext,
   id: string,
-): Promise<DeletedTest | undefined> {
+  request: ArchiveTestRequest = {},
+): Promise<Test | undefined> {
   authorize(auth, "author_definitions", here(auth));
 
   if (auth.projectId === undefined) {
     throw new Error(
-      "deleting a test happens inside its project, and this credential is for the whole organization and acting in none",
+      "archiving a test happens inside its project, and this credential is for the whole organization and acting in none",
     );
   }
 
-  const deletedAt = new Date();
-  const [row] = await db()
-    .update(test)
-    .set({ deletedAt, updatedAt: deletedAt })
-    .where(theTest(auth, id))
-    .returning({
-      id: test.id,
-      projectId: test.projectId,
-      name: test.name,
-    });
+  const archivedAt = new Date();
+  return db().transaction(async (tx) => {
+    const [locked] = await tx
+      .select({
+        id: test.id,
+        revision: test.revision,
+        archivedAt: test.archivedAt,
+      })
+      .from(test)
+      .where(theTest(auth, id))
+      .limit(1)
+      .for("update");
 
-  if (row === undefined) return undefined;
-  return { ...row, deletedAt };
+    if (locked === undefined) return undefined;
+    expectRevision(locked, request.expectedRevision);
+    if (locked.archivedAt !== null) return readTestOn(tx, auth, locked.id);
+
+    await tx
+      .update(test)
+      .set({
+        archivedAt,
+        // Null, and deliberately: a reason is what an upgrade owes somebody who
+        // did not choose this. A person archiving a test knows why.
+        archiveReason: null,
+        revision: newId("rev"),
+        updatedAt: archivedAt,
+      })
+      .where(eq(test.id, locked.id));
+
+    return readTestOn(tx, auth, locked.id);
+  });
+}
+
+/**
+ * Restore: the test is offered again, and can enter a run again.
+ *
+ * **Two rules refuse it, and both are about whether the test could actually
+ * run.** Restoring is a promise that it can.
+ *
+ * - Its current version names an archived persona or an archived scenario
+ *   grader. Bringing it back would produce a test that is active and refuses
+ *   every run — restore those first, or edit the test, and the refusal names
+ *   each of them.
+ * - It has no applicable agent at all, which only an upgrade can produce. The
+ *   Restore takes at least one active agent and links it in the same
+ *   transaction.
+ *
+ * **A test whose every linked agent is archived may restore.** It comes back
+ * active and unavailable, which is an honest state and a different one: the
+ * links are somebody's coverage decision, and the fix is to restore an agent
+ * rather than to re-author the test.
+ *
+ * Restoring one already active writes nothing.
+ */
+export async function restoreTest(
+  auth: AuthContext,
+  id: string,
+  request: RestoreTestRequest = {},
+): Promise<Test | undefined> {
+  authorize(auth, "author_definitions", here(auth));
+
+  if (auth.projectId === undefined) {
+    throw new Error(
+      "restoring a test happens inside its project, and this credential is for the whole organization and acting in none",
+    );
+  }
+
+  const named = request.agentIds ?? [];
+  validateAgentIds(named);
+
+  const restoredAt = new Date();
+  return db().transaction(async (tx) => {
+    const [locked] = await tx
+      .select({
+        id: test.id,
+        projectId: test.projectId,
+        currentVersionId: test.currentVersionId,
+        revision: test.revision,
+        archivedAt: test.archivedAt,
+      })
+      .from(test)
+      .where(theTest(auth, id))
+      .limit(1)
+      .for("update");
+
+    if (locked === undefined) return undefined;
+    expectRevision(locked, request.expectedRevision);
+    if (locked.archivedAt === null) return readTestOn(tx, auth, locked.id);
+
+    const blocking = await archivedDependenciesOf(tx, locked.currentVersionId);
+    if (blocking.length > 0) {
+      throw new TestDependencyInactiveError(locked.id, blocking);
+    }
+
+    const held = (await agentsOf(tx, locked.id)).map((applies) => applies.id);
+    if (held.length === 0) {
+      if (named.length === 0) {
+        throw new TestAgentRefusedError("test_needs_agent", NEEDS_AN_AGENT, {
+          testId: locked.id,
+        });
+      }
+      await validateNamedAgents(tx, auth, locked.projectId, named);
+      await linkAgentsTo(tx, auth, locked.id, locked.projectId, named);
+      await tx
+        .update(test)
+        .set({ applicabilityRevision: newId("rev") })
+        .where(eq(test.id, locked.id));
+    }
+
+    await tx
+      .update(test)
+      .set({
+        archivedAt: null,
+        // The reason goes with the archive it explained. A restored test that
+        // kept it would tell the next reader it is still waiting for an agent.
+        archiveReason: null,
+        revision: newId("rev"),
+        updatedAt: restoredAt,
+      })
+      .where(eq(test.id, locked.id));
+
+    return readTestOn(tx, auth, locked.id);
+  });
+}
+
+/**
+ * What one version names that has since been archived — the set that refuses
+ * the test's Restore, and the set that refusal names.
+ *
+ * Both junctions in one answer because both are the same fact about the same
+ * version: somebody it needs is not available. Personas first, then graders,
+ * each by id, so two runs of the same refusal read the same way.
+ */
+async function archivedDependenciesOf(
+  on: Queryable,
+  versionId: string,
+): Promise<readonly ArchivedDependency[]> {
+  const personas = await on
+    .select({ id: persona.id, name: persona.name })
+    .from(testPersona)
+    .innerJoin(persona, eq(testPersona.personaId, persona.id))
+    .where(
+      and(
+        eq(testPersona.testVersionId, versionId),
+        isNotNull(persona.archivedAt),
+      ),
+    )
+    .orderBy(asc(persona.id));
+
+  const graders = await on
+    .select({ id: grader.id, name: grader.name })
+    .from(testGrader)
+    .innerJoin(grader, eq(testGrader.graderId, grader.id))
+    .where(
+      and(eq(testGrader.testVersionId, versionId), isNotNull(grader.deletedAt)),
+    )
+    .orderBy(asc(grader.id));
+
+  return [
+    ...personas.map((one) => ({ kind: "persona" as const, ...one })),
+    ...graders.map((one) => ({ kind: "grader" as const, ...one })),
+  ];
+}
+
+/**
+ * Every version of one test, newest first — the history a detail page shows,
+ * and the list an older-version read is chosen from.
+ *
+ * Deliberately no lifecycle filter on the test: an archived test's history is
+ * exactly as readable as an active one's, because a run that pinned one of
+ * these versions is still on the record and still has to be interpretable.
+ */
+export async function listTestVersions(
+  auth: AuthContext,
+  testId: string,
+  page?: PageRequest,
+): Promise<TestVersionPage | undefined> {
+  authorize(auth, "read", here(auth));
+
+  const { limit, cursor } = pageWindow(page, {
+    singular: "test version",
+    plural: "test versions",
+    prefix: "tstv",
+  });
+
+  const [found] = await db()
+    .select({ id: test.id, name: test.name, currentVersionId: test.currentVersionId })
+    .from(test)
+    .where(theTest(auth, testId))
+    .limit(1);
+
+  // Told apart from a test with no history, which cannot exist: a test always
+  // has a version 1, so an empty page would only ever mean the test is not
+  // there — and saying so is what lets a page show a not-found rather than an
+  // empty history.
+  if (found === undefined) return undefined;
+
+  const rows = await db()
+    .select({
+      id: testVersion.id,
+      testId: testVersion.testId,
+      version: testVersion.version,
+      content: testVersion.content,
+      createdAt: testVersion.createdAt,
+    })
+    .from(testVersion)
+    .where(
+      and(
+        eq(testVersion.testId, found.id),
+        cursor === undefined ? undefined : lt(testVersion.id, cursor),
+      ),
+    )
+    .orderBy(desc(testVersion.id))
+    .limit(limit + 1);
+
+  const { items, nextCursor } = pageOf(rows, limit);
+  const versionIds = items.map((row) => row.id);
+  const personasByVersion = await personasOfVersions(db(), versionIds);
+  const gradersByVersion = await gradersOfVersions(db(), versionIds);
+
+  return {
+    items: items.map(({ content, ...row }) => ({
+      ...row,
+      testName: found.name,
+      current: row.id === found.currentVersionId,
+      ...contentFromRow(content, row.id),
+      personas: personasByVersion.get(row.id) ?? [],
+      graders: gradersByVersion.get(row.id) ?? [],
+    })),
+    nextCursor,
+  };
+}
+
+export type TestVersionPage = {
+  readonly items: readonly TestVersion[];
+  readonly nextCursor: string | undefined;
+};
+
+/**
+ * Which of these tests currently apply to this agent — the admission rule a run
+ * is held to, asked of the whole selection in one read.
+ *
+ * **The same relation the Tests page edits, read the same way**, so a run
+ * builder that offered a test and a run start that refused it can never
+ * disagree. It answers the ids that do apply and leaves the refusal to the
+ * caller, because what to say about one that does not is the run factory's
+ * business and it names the version it was asked to pin.
+ *
+ * Exported to the module, not from the package, exactly as the two "which tests
+ * name this" reads beside it are: the test tables have one owner, and this is
+ * it.
+ */
+export async function testsApplyingToAgent(
+  on: Queryable,
+  agentId: string,
+  testIds: readonly string[],
+): Promise<ReadonlySet<string>> {
+  if (testIds.length === 0) return new Set();
+
+  const rows = await on
+    .select({ testId: testAgent.testId })
+    .from(testAgent)
+    .where(
+      and(
+        eq(testAgent.agentId, agentId),
+        inArray(testAgent.testId, [...testIds]),
+      ),
+    );
+
+  return new Set(rows.map((row) => row.testId));
+}
+
+/**
+ * Whether each of these tests is archived — what a run start asks before it
+ * pins a version, because an archived test cannot enter a new run.
+ *
+ * By identity rather than by version, deliberately: a version is frozen content
+ * and stays readable forever, and whether it may *start* is a fact about the
+ * test it belongs to as it stands today.
+ */
+export async function archivedTests(
+  on: Queryable,
+  testIds: readonly string[],
+): Promise<ReadonlySet<string>> {
+  if (testIds.length === 0) return new Set();
+
+  const rows = await on
+    .select({ id: test.id })
+    .from(test)
+    .where(and(inArray(test.id, [...testIds]), isNotNull(test.archivedAt)));
+
+  return new Set(rows.map((row) => row.id));
 }
 
 /**
@@ -1575,7 +2488,7 @@ export async function liveTestsNamingPersona(
     .where(
       and(
         eq(testPersona.personaId, personaId),
-        notDeleted,
+        notArchived,
       ),
     )
     .orderBy(asc(test.id));
@@ -1606,6 +2519,6 @@ export async function liveTestsNamingGrader(
     .select({ id: test.id, name: test.name })
     .from(testGrader)
     .innerJoin(test, eq(test.currentVersionId, testGrader.testVersionId))
-    .where(and(eq(testGrader.graderId, graderId), notDeleted))
+    .where(and(eq(testGrader.graderId, graderId), notArchived))
     .orderBy(asc(test.id));
 }

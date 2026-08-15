@@ -10,7 +10,7 @@ import {
   createPersona,
   createTest,
   archivePersona,
-  deleteTest,
+  archiveTest,
   editPersona,
   editTest,
   failSimulation,
@@ -25,6 +25,7 @@ import {
   NotPermittedError,
   recordSimulationHeartbeat,
   resolveSimulationStanding,
+  setTestAgents,
   startRun,
   startSimulation,
   sweepOrphanedSimulations,
@@ -216,6 +217,9 @@ beforeAll(async () => {
     rita,
     sam,
   ]);
+  // Globex needs an agent of its own before it can hold a test: a test always
+  // applies to at least one active agent of its project.
+  await createAgent(actingAsGlobex(), { name: "Globex front desk" });
   globexOwn = await seedTestVersion(actingAsGlobex(), "Reschedules", [graceOwn]);
 });
 
@@ -332,15 +336,42 @@ describe("starting a run", () => {
     expect(simulations?.[0]?.testVersionId).toBe(moving);
   });
 
-  it("executes a version whose test has since been deleted, because the version is what was pinned", async () => {
+  it("refuses a version whose test has since been archived, because Archive stops new work", async () => {
     const abandoned = await seedTestVersion(actingAsAcme(), "Abandoned", [rita]);
-    await deleteTest(actingAsAcme(), await testOf(abandoned));
+    await archiveTest(actingAsAcme(), await testOf(abandoned));
 
-    const started = await startRun(
-      actingAsAcme(),
-      aRun({ testVersionIds: [abandoned] }),
-    );
-    expect(started.simulations[0]?.testVersionId).toBe(abandoned);
+    // Archive is exactly the statement "stop starting new work with this", and
+    // it would say nothing at all if a pinned version could walk around it. The
+    // version stays readable and every run that already pinned one stays
+    // interpretable — that is the difference from a delete.
+    await expect(
+      startRun(actingAsAcme(), aRun({ testVersionIds: [abandoned] })),
+    ).rejects.toThrow(/is archived/);
+  });
+
+  it("refuses a test that does not apply to the agent the connection is on", async () => {
+    const elsewhere = await createAgent(actingAsAcme(), {
+      name: "Front desk, second opinion",
+      connection: {
+        type: "retell",
+        modality: "chat",
+        config: { retellAgentId: "agent_unlinked_1" },
+        credentials: { apiKey: "retell-secret-UNLINKED1234" },
+      },
+    });
+
+    // `oneCaller` was authored when this agent did not exist, so nobody has
+    // said it is worth running against it — and a run over an agent a test does
+    // not apply to is a comparison nobody asked for.
+    await expect(
+      startRun(
+        actingAsAcme(),
+        aRun({
+          agentId: elsewhere.id,
+          connectionId: elsewhere.connection?.id ?? "",
+        }),
+      ),
+    ).rejects.toThrow(/does not apply to agent/);
   });
 
   it("stamps the connection's shape at start, so editing the connection rewrites nothing", async () => {
@@ -397,6 +428,12 @@ describe("starting a run", () => {
           headers: '{"Authorization":"Bearer SENTINEL-endpoint-token-b3f1"}',
         },
       },
+    });
+
+    // Authored before this agent existed, so it has to be linked before a run
+    // may pair the two.
+    await setTestAgents(actingAsAcme(), await testOf(oneCaller), {
+      agentIds: [agentId, atEndpoint.id],
     });
 
     const started = await startRun(
@@ -636,8 +673,12 @@ describe("resolving what a simulation was executed against", () => {
     const pinned = await getTest(actingAsAcme(), testId);
     const simulationId = await conducted(versionId);
 
-    await deleteTest(actingAsAcme(), testId);
-    expect(await getTest(actingAsAcme(), testId)).toBeUndefined();
+    await archiveTest(actingAsAcme(), testId);
+    // Archived, not gone: the detail page is where Restore lives, so the read
+    // still answers and says plainly that it is archived.
+    expect((await getTest(actingAsAcme(), testId))?.archivedAt).toBeInstanceOf(
+      Date,
+    );
 
     const version = await getSimulationTestVersion(actingAsAcme(), simulationId);
     expect(version?.id).toBe(pinned?.versionId);

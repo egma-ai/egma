@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createEgmaFolder,
   readFolderTests,
+  updateConfig,
   writeTestFile,
   type FolderPaths,
 } from "../../cli/src/folder/egma-folder.ts";
@@ -119,11 +120,32 @@ function fileAt(name: string): string {
   return path.join(folder.tests, name);
 }
 
+/**
+ * The agent this folder is bound to.
+ *
+ * **A repository is bound to exactly one agent, and every test it creates
+ * applies to that one.** A folder bound to nothing can create no test at all —
+ * a test always applies to at least one active agent — so binding is part of
+ * the world a push needs, exactly as signing in is.
+ */
+async function boundAgent(signedIn: SignedIn): Promise<string> {
+  const registered = await api.app.inject({
+    method: "POST",
+    url: "/api/agents",
+    headers: { authorization: `Bearer ${signedIn.key}` },
+    payload: { name: "Front desk" },
+  });
+  const agent = (registered.json() as { agent: { id: string } }).agent.id;
+  await updateConfig(folder.config, { agent: { name: "Front desk", id: agent } });
+  return agent;
+}
+
 describe("push, against a real instance", () => {
   it("creates the folder's test and writes the version it minted back into the file", async () => {
     api = await createApi("sync_push_create");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
+    await boundAgent(signedIn);
     const fetchImpl = fetchThrough(api.app);
 
     await writeTestFile(fileAt("reschedules.md"), { ...FILE });
@@ -151,7 +173,12 @@ describe("push, against a real instance", () => {
     expect(items[0]).toMatchObject({
       name: FILE.name,
       scenario: FILE.scenario,
-      expected_behaviors: [...FILE.expectedBehaviors],
+      // The wire carries each statement with the priority it holds; a folder's
+      // file writes statements, and a statement with no marker is a P0.
+      expected_behaviors: FILE.expectedBehaviors.map((behavior) => ({
+        behavior,
+        priority: "P0",
+      })),
     });
     expect((items[0]?.personas as unknown[]).length).toBe(1);
   });
@@ -160,6 +187,7 @@ describe("push, against a real instance", () => {
     api = await createApi("sync_push_settled");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
+    await boundAgent(signedIn);
     const fetchImpl = fetchThrough(api.app);
 
     await writeTestFile(fileAt("reschedules.md"), { ...FILE });
@@ -181,6 +209,7 @@ describe("push, against a real instance", () => {
     api = await createApi("sync_push_edit");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
+    await boundAgent(signedIn);
     const fetchImpl = fetchThrough(api.app);
 
     await writeTestFile(fileAt("reschedules.md"), { ...FILE });
@@ -207,6 +236,7 @@ describe("push, against a real instance", () => {
     api = await createApi("sync_push_moved");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
+    await boundAgent(signedIn);
     const fetchImpl = fetchThrough(api.app);
 
     await writeTestFile(fileAt("reschedules.md"), { ...FILE });
@@ -259,6 +289,7 @@ describe("push, against a real instance", () => {
     api = await createApi("sync_push_unknown_pin");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
+    await boundAgent(signedIn);
     const fetchImpl = fetchThrough(api.app);
 
     await writeTestFile(fileAt("reschedules.md"), {
@@ -282,6 +313,7 @@ describe("push, against a real instance", () => {
     api = await createApi("sync_push_late_conflict");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
+    await boundAgent(signedIn);
     const fetchImpl = fetchThrough(api.app);
 
     await writeTestFile(fileAt("reschedules.md"), { ...FILE });
@@ -335,6 +367,7 @@ describe("push, against a real instance", () => {
     api = await createApi("sync_push_turned_away");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
+    await boundAgent(signedIn);
     const fetchImpl = fetchThrough(api.app);
 
     await writeTestFile(fileAt("reschedules.md"), {
@@ -365,6 +398,7 @@ describe("pull, against a real instance", () => {
     api = await createApi("sync_pull_writes");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
+    await boundAgent(signedIn);
     const fetchImpl = fetchThrough(api.app);
 
     const authored = await api.app.inject({
@@ -374,7 +408,12 @@ describe("pull, against a real instance", () => {
       payload: {
         name: FILE.name,
         scenario: FILE.scenario,
-        expected_behaviors: [...FILE.expectedBehaviors],
+        // The wire carries each statement with the priority it holds; a folder's
+      // file writes statements, and a statement with no marker is a P0.
+      expected_behaviors: FILE.expectedBehaviors.map((behavior) => ({
+        behavior,
+        priority: "P0",
+      })),
       },
     });
     expect(authored.statusCode, authored.body).toBe(201);
@@ -402,6 +441,7 @@ describe("pull, against a real instance", () => {
     api = await createApi("sync_pull_settled");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
+    await boundAgent(signedIn);
     const fetchImpl = fetchThrough(api.app);
 
     await writeTestFile(fileAt("reschedules.md"), { ...FILE });
@@ -416,6 +456,7 @@ describe("pull, against a real instance", () => {
     api = await createApi("sync_pull_stale_pin");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const signedIn = await signedInAs(ada);
+    await boundAgent(signedIn);
     const fetchImpl = fetchThrough(api.app);
 
     await writeTestFile(fileAt("reschedules.md"), { ...FILE });

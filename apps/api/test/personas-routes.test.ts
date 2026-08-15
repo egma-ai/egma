@@ -1,7 +1,8 @@
 import {
   createProject,
+  createAgent,
   createTest,
-  deleteTest,
+  archiveTest,
   editTest,
   type PersonaTraits,
 } from "@egma/db";
@@ -592,6 +593,11 @@ describe("archiving a persona", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const made = await createPersonaThrough(ada, "Named Nadia");
 
+    // A test always applies to at least one active agent, so a project that
+    // holds none can hold no test.
+    await createAgent(contextFor(ada, "member"), {
+      name: `Front desk ${newId("agt").slice(-6)}`,
+    });
     const named = await createTest(contextFor(ada, "member"), {
       name: "Reschedules a booked appointment",
       scenario: "Their Thursday cleaning has to move to next week.",
@@ -666,6 +672,11 @@ describe("archiving a persona", () => {
     expect(await defaultPersonaOf(ada.projectId)).toBe(taking.id);
 
     // And the new default is what a test naming nobody is given.
+    // A test always applies to at least one active agent, so a project that
+    // holds none can hold no test.
+    await createAgent(contextFor(ada, "member"), {
+      name: `Front desk ${newId("agt").slice(-6)}`,
+    });
     const written = await createTest(contextFor(ada, "member"), {
       name: "Takes the default",
       scenario: "Anything at all.",
@@ -718,6 +729,11 @@ describe("archiving a persona", () => {
     const leaving = await createPersonaThrough(ada, "Leaving Lena");
     const staying = await createPersonaThrough(ada, "Staying Sam");
 
+    // A test always applies to at least one active agent, so a project that
+    // holds none can hold no test.
+    await createAgent(author, {
+      name: `Front desk ${newId("agt").slice(-6)}`,
+    });
     const named = await createTest(author, {
       name: "Reschedules a booked appointment",
       scenario: "Their Thursday cleaning has to move to next week.",
@@ -747,6 +763,11 @@ describe("archiving a persona", () => {
     const author = contextFor(ada, "member");
     const leaving = await createPersonaThrough(ada, "Leaving Lena");
 
+    // A test always applies to at least one active agent, so a project that
+    // holds none can hold no test.
+    await createAgent(author, {
+      name: `Front desk ${newId("agt").slice(-6)}`,
+    });
     const named = await createTest(author, {
       name: "Reschedules a booked appointment",
       scenario: "Their Thursday cleaning has to move to next week.",
@@ -766,7 +787,7 @@ describe("archiving a persona", () => {
     expect(blocked.statusCode).toBe(409);
     expect(blocked.body.error).toBe("persona_in_use");
 
-    await deleteTest(author, named.id);
+    await archiveTest(author, named.id);
 
     const archived = await browse(
       "POST",
@@ -896,6 +917,11 @@ describe("history and usage", () => {
     );
     expect(before.body.tests).toEqual([]);
 
+    // A test always applies to at least one active agent, so a project that
+    // holds none can hold no test.
+    await createAgent(contextFor(ada, "member"), {
+      name: `Front desk ${newId("agt").slice(-6)}`,
+    });
     const named = await createTest(contextFor(ada, "member"), {
       name: "Reschedules a booked appointment",
       scenario: "Their Thursday cleaning has to move to next week.",

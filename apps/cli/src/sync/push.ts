@@ -24,6 +24,7 @@ import path from "node:path";
 import { sameMockTools } from "../folder/mock-tools.ts";
 import type { TestFile } from "../folder/test-file.ts";
 import {
+  readConfig,
   readFolder,
   writeTestFile,
   type FolderPaths,
@@ -157,6 +158,11 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
   const extra = fetchImpl === undefined ? [] : ([fetchImpl] as const);
 
   const folder = await readFolder(paths);
+  // The agent this folder is bound to, for the tests it creates. A test always
+  // applies to at least one agent, and the only one a repository can honestly
+  // name is its own — a folder bound to nothing is answered by the platform's
+  // own refusal, which says exactly that.
+  const boundAgentId = (await readConfig(paths.config)).agent?.id ?? null;
   const wanted = options.only === undefined ? null : new Set(options.only);
   const readable =
     wanted === null ? folder.found : folder.found.filter((file) => wanted.has(file.file));
@@ -257,7 +263,7 @@ export async function pushTests(options: PushOptions): Promise<PushReport> {
     const input = inputFrom(plan.file.test);
     const answer =
       plan.kind === "create"
-        ? await createTest(signedIn, input, ...extra)
+        ? await createTest(signedIn, { ...input, agentId: boundAgentId }, ...extra)
         : await editTest(signedIn, plan.test.id, plan.test.versionId, input, ...extra);
 
     switch (answer.kind) {

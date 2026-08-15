@@ -1,4 +1,5 @@
 import {
+  createAgent,
   createPersona,
   createProject,
   createTest,
@@ -45,6 +46,25 @@ afterEach(async () => {
   await api?.close();
 });
 
+/**
+ * An agent for the project's tests to apply to.
+ *
+ * **Every test applies to at least one active agent**, so a project holding
+ * none can hold no test — and a freshly provisioned project holds none. Every
+ * block below therefore registers one before it authors anything, which is what
+ * a person does too: the landing area is Agents.
+ */
+async function agentFor(
+  person: Customer,
+  projectId = person.projectId,
+): Promise<string> {
+  const created = await createAgent(
+    { ...contextFor(person, "member"), projectId },
+    { name: `Front desk ${newId("agt").slice(-6)}` },
+  );
+  return created.id;
+}
+
 /** A persona, authored the only way there is: no route ships for one. */
 async function personaFor(
   person: Customer,
@@ -87,6 +107,18 @@ async function versionCount(testId: string): Promise<number> {
   return Number(rows[0]?.count);
 }
 
+/**
+ * The behaviors as the wire answers them: the statement, and how much it
+ * matters. A behavior sent as bare text is a P0 — that is what a list of
+ * statements has always meant — so this is the same list said the other way
+ * round.
+ */
+function blocking(
+  behaviors: readonly string[],
+): readonly { behavior: string; priority: string }[] {
+  return behaviors.map((behavior) => ({ behavior, priority: "P0" }));
+}
+
 const RESCHEDULING = {
   name: "Reschedules a booked appointment",
   scenario:
@@ -118,6 +150,7 @@ describe("creating a test", () => {
   it("answers the whole test, with the version a file will pin", async () => {
     api = await createApi("tests_create");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
 
     const created = await createTestThrough(key, { ...RESCHEDULING });
@@ -127,7 +160,7 @@ describe("creating a test", () => {
       name: RESCHEDULING.name,
       version: 1,
       scenario: RESCHEDULING.scenario,
-      expected_behaviors: [...RESCHEDULING.expected_behaviors],
+      expected_behaviors: blocking(RESCHEDULING.expected_behaviors),
     });
     expect(String(created.body.id)).toMatch(/^tst_/u);
     expect(String(created.body.version_id)).toMatch(/^tstv_/u);
@@ -138,6 +171,7 @@ describe("creating a test", () => {
   it("takes the project's default persona when the file names nobody", async () => {
     api = await createApi("tests_default_persona");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
     const starter = await defaultPersonaOf(ada.projectId);
 
@@ -147,7 +181,7 @@ describe("creating a test", () => {
     for (const created of [named, absent]) {
       expect(created.statusCode).toBe(201);
       expect(created.body.personas).toEqual([
-        { id: starter, name: expect.any(String) },
+        { id: starter, name: expect.any(String), archived_at: null },
       ]);
     }
   });
@@ -155,6 +189,7 @@ describe("creating a test", () => {
   it("resolves personas by name, in the order the file named them", async () => {
     api = await createApi("tests_persona_names");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
     const omar = await personaFor(ada, "Omar");
     const rita = await personaFor(ada, "Impatient Rita");
@@ -166,14 +201,15 @@ describe("creating a test", () => {
 
     expect(created.statusCode).toBe(201);
     expect(created.body.personas).toEqual([
-      { id: rita, name: "Impatient Rita" },
-      { id: omar, name: "Omar" },
+      { id: rita, name: "Impatient Rita", archived_at: null },
+      { id: omar, name: "Omar", archived_at: null },
     ]);
   });
 
   it("resolves an identifier too, so a client holding one needs no name", async () => {
     api = await createApi("tests_persona_ids");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
     const omar = await personaFor(ada, "Omar");
 
@@ -183,12 +219,15 @@ describe("creating a test", () => {
     });
 
     expect(created.statusCode).toBe(201);
-    expect(created.body.personas).toEqual([{ id: omar, name: "Omar" }]);
+    expect(created.body.personas).toEqual([
+      { id: omar, name: "Omar", archived_at: null },
+    ]);
   });
 
   it("refuses a persona nobody in this project answers to", async () => {
     api = await createApi("tests_persona_unknown");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
 
     const refused = await createTestThrough(await projectKeyFor(api.app, ada), {
       ...RESCHEDULING,
@@ -209,6 +248,7 @@ describe("creating a test", () => {
   it("refuses a persona who has been archived, in the factory's own words", async () => {
     api = await createApi("tests_persona_deleted");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
     const leaving = await personaFor(ada, "Leaving Soon");
     await archivePersona(contextFor(ada, "admin"), leaving);
@@ -235,6 +275,7 @@ describe("creating a test", () => {
   it("refuses one persona named twice, because that asks for one simulation twice", async () => {
     api = await createApi("tests_persona_twice");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
     await personaFor(ada, "Omar");
 
@@ -253,6 +294,7 @@ describe("creating a test", () => {
   it("refuses personas sent as anything but text, rather than quietly dropping them", async () => {
     api = await createApi("tests_persona_shape");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
     const omar = await personaFor(ada, "Omar");
 
@@ -291,6 +333,7 @@ describe("creating a test", () => {
   it("relays the factory's own words for a test that could never be red", async () => {
     api = await createApi("tests_validation");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
 
     const nameless = await createTestThrough(key, { ...RESCHEDULING, name: "  " });
@@ -342,6 +385,7 @@ describe("the list of tests", () => {
   it("answers one envelope, newest first, and pages through with its cursor", async () => {
     api = await createApi("tests_list_envelope");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
 
     // Seeded through the factory rather than the route: what is under test is
@@ -384,7 +428,9 @@ describe("the list of tests", () => {
   it("shows a customer their own tests and nobody else's", async () => {
     api = await createApi("tests_list_tenancy");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const grace = await signUp(api.app, "grace@globex.example", "Globex");
+    await agentFor(grace);
     await createTestThrough(await projectKeyFor(api.app, ada), {
       ...RESCHEDULING,
       name: "Acme's",
@@ -403,6 +449,7 @@ describe("the list of tests", () => {
   it("reads the project the credential acts in, and no sibling of it", async () => {
     api = await createApi("tests_list_project");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const outbound = await createProject(contextFor(ada, "admin"), {
       name: "Outbound",
       slug: "outbound",
@@ -423,7 +470,9 @@ describe("the list of tests", () => {
   it("refuses a filter naming another customer's project, confirming nothing about it", async () => {
     api = await createApi("tests_list_across");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const grace = await signUp(api.app, "grace@globex.example", "Globex");
+    await agentFor(grace);
 
     const refused = await request(
       "GET",
@@ -445,6 +494,7 @@ describe("the list of tests", () => {
   it("refuses a cursor it never issued, rather than answering a page nobody asked for", async () => {
     api = await createApi("tests_list_cursor");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
 
     const refused = await request(
       "GET",
@@ -452,11 +502,15 @@ describe("the list of tests", () => {
       await projectKeyFor(api.app, ada),
     );
 
-    expect(refused.statusCode).toBe(400);
+    // The product's own cursor refusal, the one every list in this API
+    // answers with: a client that could not tell a bad cursor from a bad
+    // request would show somebody a broken page forever rather than dropping
+    // the cursor and starting again.
+    expect(refused.statusCode).toBe(422);
     expect(refused.body).toEqual({
-      error: "invalid_request",
+      error: "invalid_cursor",
       message:
-        '"not-a-cursor" is not a cursor this list issued. Send the next_cursor an earlier page answered with, or leave it out to start at the newest test.',
+        "Cursor not-a-cursor is not valid for this list. Remove it and start from the first page.",
     });
   });
 });
@@ -465,6 +519,7 @@ describe("one frozen version", () => {
   it("says which test it belongs to and that the test still stands on it", async () => {
     api = await createApi("tests_version_current");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
     const created = await createTestThrough(key, { ...RESCHEDULING });
 
@@ -482,13 +537,14 @@ describe("one frozen version", () => {
       version: 1,
       current: true,
       scenario: RESCHEDULING.scenario,
-      expected_behaviors: [...RESCHEDULING.expected_behaviors],
+      expected_behaviors: blocking(RESCHEDULING.expected_behaviors),
     });
   });
 
   it("says the test has moved on once a later version exists", async () => {
     api = await createApi("tests_version_behind");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
     const created = await createTestThrough(key, { ...RESCHEDULING });
     const pinned = String(created.body.version_id);
@@ -522,6 +578,7 @@ describe("one frozen version", () => {
   it("is not found for a version this egma never issued", async () => {
     api = await createApi("tests_version_unknown");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const missing = newId("tstv");
 
     const refused = await request(
@@ -540,7 +597,9 @@ describe("one frozen version", () => {
   it("is not found for another customer's version, which confirms nothing", async () => {
     api = await createApi("tests_version_tenancy");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const grace = await signUp(api.app, "grace@globex.example", "Globex");
+    await agentFor(grace);
     const created = await createTestThrough(await projectKeyFor(api.app, ada), {
       ...RESCHEDULING,
     });
@@ -564,6 +623,7 @@ describe("editing a test", () => {
   it("mints the next version and leaves the one it left behind alone", async () => {
     api = await createApi("tests_edit_versions");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
     const created = await createTestThrough(key, { ...RESCHEDULING });
     const testId = String(created.body.id);
@@ -587,6 +647,7 @@ describe("editing a test", () => {
   it("refuses an edit that names no version, before it reads anything", async () => {
     api = await createApi("tests_edit_no_token");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
     const created = await createTestThrough(key, { ...RESCHEDULING });
     const testId = String(created.body.id);
@@ -629,6 +690,7 @@ describe("editing a test", () => {
   it("refuses an edit written against a version the test has moved past", async () => {
     api = await createApi("tests_edit_conflict");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
     const created = await createTestThrough(key, { ...RESCHEDULING });
     const testId = String(created.body.id);
@@ -669,6 +731,7 @@ describe("editing a test", () => {
   it("mints nothing for content byte-identical to the current version", async () => {
     api = await createApi("tests_edit_identical");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
     const created = await createTestThrough(key, { ...RESCHEDULING });
     const testId = String(created.body.id);
@@ -690,6 +753,7 @@ describe("editing a test", () => {
   it("writes a name in place, because a name is identity and versions nothing", async () => {
     api = await createApi("tests_edit_name");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
     const created = await createTestThrough(key, { ...RESCHEDULING });
     const testId = String(created.body.id);
@@ -713,6 +777,7 @@ describe("editing a test", () => {
   it("keeps what the body left out, so an edit to the scenario is only that", async () => {
     api = await createApi("tests_edit_partial");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
     const created = await createTestThrough(key, { ...RESCHEDULING });
 
@@ -729,7 +794,7 @@ describe("editing a test", () => {
     expect(edited.statusCode, JSON.stringify(edited.body)).toBe(200);
     expect(edited.body).toMatchObject({
       name: RESCHEDULING.name,
-      expected_behaviors: [...RESCHEDULING.expected_behaviors],
+      expected_behaviors: blocking(RESCHEDULING.expected_behaviors),
       personas: created.body.personas,
       version: 2,
     });
@@ -738,7 +803,9 @@ describe("editing a test", () => {
   it("is not found for a test this credential could not have read", async () => {
     api = await createApi("tests_edit_tenancy");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const grace = await signUp(api.app, "grace@globex.example", "Globex");
+    await agentFor(grace);
     const created = await createTestThrough(await projectKeyFor(api.app, ada), {
       ...RESCHEDULING,
     });
@@ -758,7 +825,10 @@ describe("editing a test", () => {
     expect(refused.statusCode).toBe(404);
     expect(refused.body).toEqual({
       error: "not_found",
-      message: `there is no test ${theirs} on this egma. List the tests to see what this project holds, or create this one instead of editing it.`,
+      // The product's own not-found sentence, word for word: missing and
+      // cross-organization data get the same one, because to this caller they
+      // are the same thing.
+      message: `There is no test ${theirs} available in this project. Check the link, or choose it from the current project.`,
     });
     expect(await versionCount(theirs)).toBe(1);
   });
@@ -768,6 +838,7 @@ describe("who may do what", () => {
   it("lets a viewer read every test and write none of them", async () => {
     api = await createApi("tests_viewer");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const vic = await colleagueOf(api.app, ada, "vic@acme.example", "viewer");
     const authored = await createTestThrough(await projectKeyFor(api.app, ada), {
       ...RESCHEDULING,
@@ -814,6 +885,7 @@ describe("who may do what", () => {
   it("lets a member write with their own key, because day-to-day work needs no admin", async () => {
     api = await createApi("tests_member");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const mia = await colleagueOf(api.app, ada, "mia@acme.example", "member");
 
     const created = await createTestThrough(await projectKeyFor(api.app, mia), {
@@ -873,6 +945,7 @@ describe("the project a write lands in", () => {
   it("is the organization's own for a key minted for the whole customer", async () => {
     api = await createApi("tests_project_default");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
 
     const created = await createTestThrough(ada.secret, { ...RESCHEDULING });
 
@@ -886,6 +959,7 @@ describe("the project a write lands in", () => {
   it("is asked for rather than guessed at once the organization holds two", async () => {
     api = await createApi("tests_project_ambiguous");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     await createProject(contextFor(ada, "admin"), {
       name: "Outbound",
       slug: "outbound",
@@ -912,11 +986,13 @@ describe("the project a write lands in", () => {
   it("is the one the body named, when that is a project this credential may act in", async () => {
     api = await createApi("tests_project_named");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const outbound = await createProject(contextFor(ada, "admin"), {
       name: "Outbound",
       slug: "outbound",
     });
     const omar = await personaFor(ada, "Omar", outbound.id);
+    await agentFor(ada, outbound.id);
 
     const created = await createTestThrough(ada.secret, {
       ...RESCHEDULING,
@@ -926,13 +1002,17 @@ describe("the project a write lands in", () => {
 
     expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
     expect(await projectOf(String(created.body.id))).toBe(outbound.id);
-    expect(created.body.personas).toEqual([{ id: omar, name: "Omar" }]);
+    expect(created.body.personas).toEqual([
+      { id: omar, name: "Omar", archived_at: null },
+    ]);
   });
 
   it("is never another customer's, and the refusal confirms nothing about it", async () => {
     api = await createApi("tests_project_across");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const grace = await signUp(api.app, "grace@globex.example", "Globex");
+    await agentFor(grace);
 
     const refused = await createTestThrough(ada.secret, {
       ...RESCHEDULING,
@@ -956,6 +1036,7 @@ describe("the project a write lands in", () => {
   it("is never a sibling project a project-scoped credential was not minted for", async () => {
     api = await createApi("tests_project_sibling");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const outbound = await createProject(contextFor(ada, "admin"), {
       name: "Outbound",
       slug: "outbound",
@@ -982,6 +1063,7 @@ describe("the concurrency token, under the lock", () => {
   it("refuses the second of two edits that both named the version they read", async () => {
     api = await createApi("tests_edit_race");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
     const created = await createTestThrough(key, { ...RESCHEDULING });
     const testId = String(created.body.id);

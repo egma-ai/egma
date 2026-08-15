@@ -1,5 +1,5 @@
 import type { ConnectionType, Modality } from "../schema/agents.ts";
-import { UnprocessableInputError } from "./errors.ts";
+import { UnknownCapabilityError } from "./errors.ts";
 
 /**
  * What a target can do, and who is allowed to say so.
@@ -85,22 +85,25 @@ export function unknownCapabilityMessage(key: string): string {
  * Every key checked against the catalog, answered in the order they arrived
  * with duplicates removed.
  *
- * **Nothing calls this yet, and the caller is named so it is not mistaken for
- * dead code.** Required capabilities are a field on a test version, so the test
- * editor is what gates them — ticket 04, "Build Tests and repository
- * synchronization". The rule and its sentence live here because the catalog
+ * **This is the door a test's required capabilities walk through**, and the
+ * only one: `validContent` in `tests.ts` calls it on every version it is about
+ * to write, whether the keys were typed by an author or carried forward from
+ * the version before. The rule and its sentence live here because the catalog
  * does, and because a second copy written next to the test editor would be a
- * second opinion about which keys exist. The first unknown key refuses the whole set — a
- * partial save would be egma quietly deciding which half of somebody's
- * requirement mattered.
+ * second opinion about which keys exist. The first unknown key refuses the
+ * whole set — a partial save would be egma quietly deciding which half of
+ * somebody's requirement mattered.
  */
 export function admittedCapabilities(
   keys: readonly string[],
 ): readonly string[] {
   const admitted: string[] = [];
   for (const key of keys) {
-    if (!isCapabilityKey(key)) {
-      throw new UnprocessableInputError(unknownCapabilityMessage(key));
+    if (typeof key !== "string" || !isCapabilityKey(key)) {
+      throw new UnknownCapabilityError(
+        String(key),
+        unknownCapabilityMessage(String(key)),
+      );
     }
     if (!admitted.includes(key)) admitted.push(key);
   }

@@ -197,6 +197,13 @@
       "when": 1786777053876,
       "tag": "0027_project_details_and_revision",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1786785378610,
+      "tag": "0028_tests_apply_to_agents",
+      "breakpoints": true
     }
   ]
 }

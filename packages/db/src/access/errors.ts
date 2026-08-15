@@ -94,6 +94,11 @@ export class RunWriteRefusedError extends Error {
  * - `not_admitted` — the selection itself: no versions, a version this egma
  *   never issued, one version named twice, more conversations than a run may
  *   hold, or a persona a pinned version names who has since been deleted.
+ * - `test_not_applicable` — the run named an agent and a test that are not
+ *   linked. Its own answer rather than `not_admitted`, because the fix is
+ *   somewhere specific — link the test to this agent, or choose another test —
+ *   and a run builder can offer that fix only if it can tell this apart from a
+ *   version it should never have pinned.
  * - `already_finished` — a cancel arrived after the run had finished, so there
  *   was nothing left to cancel and the caller missed.
  */
@@ -102,6 +107,7 @@ export type RunWriteRefusal =
   | "connection_not_on_agent"
   | "no_adapter"
   | "not_admitted"
+  | "test_not_applicable"
   | "already_finished";
 
 /**
@@ -245,6 +251,123 @@ export class VersionConflictError extends Error {
 }
 
 /**
+ * A link edit named the applicability revision it was written against, and the
+ * test's applicable agents have moved since.
+ *
+ * **The third of three, and it is genuinely a third thing.**
+ * `IdentityConflictError` guards the live half — the name, the description, the
+ * archive state. `VersionConflictError` guards the content a run is judged by.
+ * This one guards a set that is neither: adding an agent mints no version and
+ * makes no repository copy stale, so a link edit must not be refused because
+ * somebody renamed the test, and a rename must not be refused because somebody
+ * linked an agent. Three losses, three tokens, three refusals.
+ */
+export class ApplicabilityConflictError extends Error {
+  readonly testId: string;
+  /** The revision the caller wrote against, and the one it is on now. */
+  readonly expected: string;
+  readonly current: string;
+
+  constructor(
+    testId: string,
+    revisions: { readonly expected: string; readonly current: string },
+  ) {
+    super(
+      `test ${testId}'s applicable agents changed after this edit was written against applicability revision ${revisions.expected}, and are now on ${revisions.current}`,
+    );
+    this.name = "ApplicabilityConflictError";
+    this.testId = testId;
+    this.expected = revisions.expected;
+    this.current = revisions.current;
+  }
+}
+
+/**
+ * A write would have left a test with no agent to run against, or named one it
+ * cannot have.
+ *
+ * The reason travels beside the sentence rather than inside it — the agent
+ * factory's arrangement, for the agent factory's reason: three rules refuse
+ * here, an HTTP layer answers each with its own code, and reading the prose to
+ * tell them apart would make the prose load-bearing while the prose is the part
+ * deliberately left free to improve.
+ */
+export class TestAgentRefusedError extends Error {
+  readonly reason: TestAgentRefusal;
+  readonly testId: string | undefined;
+  /** Whichever agent the sentence named, for a layer that has to relay it. */
+  readonly agentId: string | undefined;
+
+  constructor(
+    reason: TestAgentRefusal,
+    message: string,
+    named: { readonly testId?: string; readonly agentId?: string } = {},
+  ) {
+    super(message);
+    this.name = "TestAgentRefusedError";
+    this.reason = reason;
+    this.testId = named.testId;
+    this.agentId = named.agentId;
+  }
+}
+
+/**
+ * Which rule refused.
+ *
+ * - `test_needs_agent` — the write named no agent at all, and there was none to
+ *   fall back on. A test with no target is a specification nothing can execute.
+ * - `last_test_agent` — the edit would have removed the only link left. Its own
+ *   answer rather than the one above, because the fix is different: link
+ *   another agent first, and the refusal names the one being removed.
+ * - `agent_not_available` — the named agent is not an active agent of this
+ *   project. Archived agents keep the links they already have; they never
+ *   receive a new one, because a link nothing can run is a promise egma cannot
+ *   keep.
+ */
+export type TestAgentRefusal =
+  | "test_needs_agent"
+  | "last_test_agent"
+  | "agent_not_available";
+
+/**
+ * A test's Restore was refused because its current version names something
+ * archived.
+ *
+ * Restoring is a promise that the test can run, and it cannot: the personas a
+ * version names are who calls about it, and the graders it names are checks it
+ * says it makes. Bringing it back over an archived one would produce a test
+ * that is active and refuses to start, which is worse than one that is plainly
+ * archived.
+ *
+ * It carries every blocking resource, because the fix is to restore each of
+ * them and a refusal that only said "something is archived" would send somebody
+ * hunting.
+ */
+export class TestDependencyInactiveError extends Error {
+  readonly testId: string;
+  /** What the current version names that is archived, oldest first. */
+  readonly resources: readonly ArchivedDependency[];
+
+  constructor(testId: string, resources: readonly ArchivedDependency[]) {
+    super(
+      `test ${testId} cannot be restored because its current version names ${resources
+        .map((one) => `${one.kind} ${one.id} "${one.name}"`)
+        .join(", ")}, and an archived one cannot call about a test or judge it`,
+    );
+    this.name = "TestDependencyInactiveError";
+    this.testId = testId;
+    this.resources = resources;
+  }
+}
+
+/** One archived thing a version still names, as a refusal has to name it. */
+export type ArchivedDependency = {
+  readonly kind: "persona" | "grader";
+  readonly id: string;
+  readonly name: string;
+};
+
+/**
  * Postgres rolled the write back rather than let it wait forever, and it can
  * be sent again unchanged.
  *
@@ -363,6 +486,26 @@ export class UnprocessableInputError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "UnprocessableInputError";
+  }
+}
+
+/**
+ * A write named a capability that is not in egma's catalog.
+ *
+ * **A subclass rather than a sibling**, because every layer that already relays
+ * an `UnprocessableInputError` word for word is right about this one too — it
+ * is the caller's body, and the catalog's own sentence is written for whoever
+ * has to fix it. What the subclass buys is the one thing the general answer
+ * cannot give: a stable code of its own, so a form can put the refusal beside
+ * the capability list rather than at the top of the page.
+ */
+export class UnknownCapabilityError extends UnprocessableInputError {
+  readonly capability: string;
+
+  constructor(capability: string, message: string) {
+    super(message);
+    this.name = "UnknownCapabilityError";
+    this.capability = capability;
   }
 }
 

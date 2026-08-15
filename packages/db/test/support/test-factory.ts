@@ -1,5 +1,6 @@
 import { newId } from "@egma/ids";
 import {
+  createAgent,
   createGrader,
   createPersona,
   type AuthContext,
@@ -60,6 +61,24 @@ export function actingAsGlobex(role: Role = "member"): AuthContext {
     role,
     via: "session",
   };
+}
+
+/**
+ * An agent for a test to apply to, and the whole of what these files need one
+ * for.
+ *
+ * **Every test in every one of these files needs a target**, because a test with
+ * no applicable agent is a specification nothing can execute and the factory
+ * refuses to write one. Naming none on a create takes the project's active
+ * agents, so seeding one per project is what lets the fixture below stay a
+ * fixture about the scenario rather than about agents.
+ */
+export async function seedAgent(
+  auth: AuthContext,
+  name: string,
+): Promise<string> {
+  const created = await createAgent(auth, { name });
+  return created.id;
 }
 
 /** The scenario these files author, whole enough to be worth reading back. */
@@ -167,6 +186,12 @@ export type SeededWorld = {
   readonly rita: string;
   /** Globex's, so a cross-project reference has something real to name. */
   readonly grace: string;
+  /** The agent Acme's tests apply to. */
+  readonly frontDesk: string;
+  /** Acme's sibling project's own, so a narrowed create has a target too. */
+  readonly outboundDialler: string;
+  /** Globex's, so a cross-customer link has something real to name. */
+  readonly globexDesk: string;
 };
 
 export async function seedTestFactory(label: string): Promise<SeededWorld> {
@@ -186,5 +211,12 @@ export async function seedTestFactory(label: string): Promise<SeededWorld> {
   const grace = await seedPersona(actingAsGlobex(), "Careful Grace");
   await pointProjectAt(acme.project, rita);
 
-  return { database, rita, grace };
+  const frontDesk = await seedAgent(actingAsAcme(), "Front desk");
+  const outboundDialler = await seedAgent(
+    { ...actingAsAcme(), projectId: acme.outbound },
+    "Outbound dialler",
+  );
+  const globexDesk = await seedAgent(actingAsGlobex(), "Globex desk");
+
+  return { database, rita, grace, frontDesk, outboundDialler, globexDesk };
 }
