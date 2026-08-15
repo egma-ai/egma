@@ -492,13 +492,24 @@ function Credentials({
         <Button
           disabled={!mayAdminister || busy}
           onClick={() => {
-            // Cleared whenever the open row changes, because one form under the
-            // table means one `replacement` for every row. Without this, a key
-            // typed for this credential stays in the field when somebody opens
-            // another, and Save sends it to whichever credential is open now —
-            // rotating the wrong one, to a key its owner never chose for it.
-            // Retyping is the small cost; the alternative is a silent mix-up.
+            // One form under the table means one `replacement` and one `failed`
+            // for every row, so opening a different row has to empty both.
+            //
+            // `replacement`: a key typed for one credential would stay in the
+            // field, and Save would send it to whichever credential is open
+            // now — rotating the wrong one to a key its owner never chose.
+            //
+            // `failed`: worse, because it survives a closed form. Its `again`
+            // is bound to the credential that failed, but `rotate` reads the
+            // field as it stands when the button is pressed. So a failure on
+            // one credential, then opening another and typing its key, leaves
+            // a Try again that writes this row's key to the other row — and
+            // reports success for a credential nobody was looking at.
+            //
+            // Both are the same mistake: state that means "for the open row",
+            // with nothing making it true. Retyping is the price.
             setReplacement("");
+            setFailed(null);
             setRotating(rotating === credential.id ? null : credential.id);
           }}
         >

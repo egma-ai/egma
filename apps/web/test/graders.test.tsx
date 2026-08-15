@@ -1206,6 +1206,100 @@ describe("judge settings", () => {
   });
 
   /**
+   * A failed rotation leaves a Try again behind, and that retry has to go when
+   * a different credential is opened.
+   *
+   * The retry is bound to the credential that failed, but the rotation it calls
+   * reads the field as it stands when the button is pressed. So a failure on
+   * one credential, then opening another and typing its key, leaves a Try again
+   * that writes this row's key to the other row — and then reports success for
+   * a credential nobody was looking at.
+   *
+   * This is the same defect as the one above wearing different clothes: state
+   * that means "for the open row", with nothing making it true. It is written
+   * separately because clearing the field does not clear this, and the first
+   * fix for the field left it standing.
+   */
+  it("drops a failed rotation's retry when a different credential is opened", async () => {
+    const twoKeys = [
+      {
+        id: "jcr_1",
+        label: "Acme production",
+        provider: "openai",
+        hint: "1234",
+        revision: "rev_1",
+        created_at: "2026-08-01T10:00:00.000Z",
+        updated_at: "2026-08-01T10:00:00.000Z",
+      },
+      {
+        id: "jcr_2",
+        label: "Acme staging",
+        provider: "openai",
+        hint: "5678",
+        revision: "rev_2",
+        created_at: "2026-08-02T10:00:00.000Z",
+        updated_at: "2026-08-02T10:00:00.000Z",
+      },
+    ];
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/api/judge": {
+        status: 200,
+        body: {
+          state: "needs_setup",
+          provider: null,
+          model: null,
+          source: null,
+          credential_id: null,
+          hint: null,
+        },
+      },
+      "/api/judge/registry": {
+        status: 200,
+        body: {
+          providers: [{ provider: "openai", model_is_free_text: true }],
+          platform_sentinel: "platform",
+          platform_judge_available: false,
+        },
+      },
+      "/api/judge-credentials": { status: 200, body: { items: twoKeys } },
+      "/api/judge-credentials/jcr_1": {
+        status: 422,
+        body: {
+          error: "unprocessable",
+          message: "a judge key is at least 8 characters.",
+        },
+      },
+    });
+    render(<JudgeSettingsPage />);
+
+    const keys = await screen.findByRole("table", { name: "Organization keys" });
+    const [openProduction, openStaging] = within(keys).getAllByRole("button", {
+      name: "Replace key",
+    });
+
+    fireEvent.click(openProduction as HTMLElement);
+    fireEvent.change(screen.getByLabelText("New key"), {
+      target: { value: "sk-short" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save new key" }));
+
+    expect(
+      await screen.findByText("Egma did not replace the key for Acme production."),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+
+    // Opening another credential takes the retry with it. Anything else leaves
+    // a button that writes staging's key to production.
+    fireEvent.click(openStaging as HTMLElement);
+
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(
+      screen.queryByText("Egma did not replace the key for Acme production."),
+    ).toBeNull();
+  });
+
+  /**
    * A failure has to report the thing that failed. Sending a credential failure
    * up to the judge section put "Egma did not save the judge" on screen when
    * adding a key had failed, beside a Try again that saved the judge — a
