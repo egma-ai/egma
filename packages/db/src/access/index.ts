@@ -167,6 +167,41 @@ export {
 } from "./provisioning.ts";
 export { instanceIsClaimed, platformInstanceId } from "./instance.ts";
 
+/**
+ * The settings this deployment holds — the judge configuration's idiom, one
+ * scope up. Sealed with the deployment's own key, hinted rather than handed
+ * back, seeded from the environment at start and never over a value somebody
+ * chose. `platformFacts` is the third instance-scoped export: it takes nothing,
+ * so there is no customer to name, and it answers only what is not secret,
+ * because the readiness answer it feeds is read before anybody has logged in.
+ *
+ * The read and the write take the deployment's own tenancy beside the context,
+ * because who may be here depends on it: an organization owner may, and only
+ * while this deployment serves one organization.
+ *
+ * `resolvePlatformSettings` is the one door to the plaintext, and it takes the
+ * context like everything else — and then refuses every context that did not
+ * come from a simulation claim, because conducting is the only thing egma does
+ * with these. It is `resolveSimulationConnection`'s guard, word for word, over
+ * the settings that ride the same work order.
+ */
+export {
+  platformFacts,
+  readPlatformSettings,
+  resolvePlatformSettings,
+  seedPlatformSettings,
+  writePlatformSettings,
+  type DeploymentTenancy,
+  type PlatformFacts,
+  type PlatformSetting,
+} from "./platform-settings.ts";
+export {
+  PLATFORM_SETTINGS,
+  type PlatformSettingDefinition,
+  type PlatformSettingName,
+  type PlatformSettingValues,
+} from "../schema/platform.ts";
+
 export {
   readOrganization,
   readOrganizationSettings,

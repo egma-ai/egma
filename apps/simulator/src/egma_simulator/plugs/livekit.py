@@ -112,8 +112,15 @@ class LiveKitRoom:
         credentials: object,
         simulation_id: str,
         mock_tools: MockToolSeam | None = None,
+        media: object = None,
         driver: Any = None,
     ) -> None:
+        # A room is reached over the deployment's own media server, whose
+        # address and credential are this container's bootstrap
+        # configuration rather than a platform setting — so the carrier
+        # resolved for this simulation is nothing to this plug.
+        del media
+
         if modality != "voice":
             raise PlugError(
                 f"the livekit plug speaks voice only; a {modality!r} "

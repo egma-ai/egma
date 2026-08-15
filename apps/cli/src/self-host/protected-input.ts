@@ -1,5 +1,5 @@
 /**
- * How a secret gets into `egma self-host phone setup`, and how it does not.
+ * How a secret gets into `egma self-host setup`, and how it does not.
  *
  * **Never as an argument.** A command line is readable by every process on the
  * machine through the process table, and shells keep it in history for months.
@@ -18,18 +18,21 @@
 
 import { createInterface } from "node:readline/promises";
 
-/** Which secret is being asked for. */
-export type SecretName = "twilio-auth-token" | "openai-api-key";
-
-/** Where each input may arrive from, for a run with nobody watching. */
-export const SECRET_VARIABLES: Readonly<Record<SecretName, string>> = {
-  "twilio-auth-token": "TWILIO_AUTH_TOKEN",
-  "openai-api-key": "OPENAI_API_KEY",
-};
-
-/** The non-secret inputs, which may be arguments and often should be. */
-export const PLAIN_VARIABLES = {
+/**
+ * The three inputs the carrier step takes, and where each may arrive from for a
+ * run with nobody watching.
+ *
+ * Every *setting* has a variable of its own — the same name the platform seeds
+ * that setting from, so one word means one thing whichever of the two ways in
+ * an operator uses. Two of these are not settings at all: the Auth Token opens
+ * a whole Twilio account and is kept nowhere, and the account identifier says
+ * which account the paperwork is done in. The third is: `carrier_trunk_number`
+ * is the number a call appears to come from, and it is the one carrier fact a
+ * person supplies rather than the paperwork producing.
+ */
+export const CARRIER_VARIABLES = {
   accountSid: "TWILIO_ACCOUNT_SID",
+  authToken: "TWILIO_AUTH_TOKEN",
   sourceNumber: "EGMA_PHONE_SOURCE_NUMBER",
 } as const;
 
@@ -62,9 +65,9 @@ export function secretArgumentRefusal(argument: string): string {
     "For a run with nobody watching, export it from a file first, so the value",
     "is never a word in any command:",
     "",
-    `  export ${SECRET_VARIABLES["twilio-auth-token"]}="$(cat twilio-token.txt)"`,
-    `  export ${SECRET_VARIABLES["openai-api-key"]}="$(cat openai-key.txt)"`,
-    "  egma self-host phone setup --apply --yes",
+    `  export ${CARRIER_VARIABLES.authToken}="$(cat twilio-token.txt)"`,
+    '  export EGMA_PERSONA_MODEL_API_KEY="$(cat model-key.txt)"',
+    "  egma self-host setup --apply --yes",
   ].join("\n");
 }
 
@@ -100,7 +103,7 @@ export function keyHint(key: string): string {
 export class NoAnswerError extends Error {
   constructor(what: string, variable: string) {
     super(
-      `egma self-host phone setup needs ${what}, and this run has no terminal to ask on. ` +
+      `egma self-host setup needs ${what}, and this run has no terminal to ask on. ` +
         `Set ${variable} in the environment of this one command, or run it where somebody can type.`,
     );
     this.name = "NoAnswerError";
@@ -133,11 +136,10 @@ export type Answered = {
  * makes that visible at the moment it happens.
  */
 export async function askSecret(
-  name: SecretName,
+  variable: string,
   what: string,
   options: AskOptions,
 ): Promise<Answered> {
-  const variable = SECRET_VARIABLES[name];
   const held = options.env[variable]?.trim();
   if (held !== undefined && held !== "") return { value: held, from: variable };
   if (options.input.isTTY !== true) throw new NoAnswerError(what, variable);
@@ -158,12 +160,46 @@ export async function askPlainly(
   what: string,
   options: AskOptions,
 ): Promise<string> {
+  const answered = await askOptionally(variable, what, options, null);
+  if (answered === null) throw new NoAnswerError(what, variable);
+  return answered;
+}
+
+/**
+ * One ordinary answer that egma can carry on without.
+ *
+ * Three sources, in order, and the order is the whole of it: the environment,
+ * because an operator who exported the variable meant it; then a person, if
+ * there is one to ask; then the suggestion, where the product has one.
+ *
+ * **A run with nobody watching takes the suggestion rather than refusing.** The
+ * command it replaced hard-coded the same values — `openai`, `livekit`,
+ * `silero` — so a coding agent driving `--apply --yes` gets what it always got,
+ * and the suggestion is offered to a person as a default they can overtype
+ * rather than hidden in the code that used to hold it.
+ *
+ * `null` means nobody answered and there was nothing to fall back on, which is
+ * an ordinary state for a setting egma can do without.
+ */
+export async function askOptionally(
+  variable: string,
+  what: string,
+  options: AskOptions,
+  suggested: string | null,
+): Promise<string | null> {
   const held = options.env[variable]?.trim();
   if (held !== undefined && held !== "") return held;
-  if (options.input.isTTY !== true) throw new NoAnswerError(what, variable);
+  if (options.input.isTTY !== true) return suggested;
+
   const asked = createInterface({ input: options.input, output: options.output });
   try {
-    return (await asked.question(`${what}: `, { signal: options.signal })).trim();
+    const typed = (
+      await asked.question(
+        suggested === null ? `${what}: ` : `${what} [${suggested}]: `,
+        { signal: options.signal },
+      )
+    ).trim();
+    return typed === "" ? suggested : typed;
   } catch (stopped) {
     throw asStop(stopped);
   } finally {

@@ -1,0 +1,53 @@
+{
+  "contract_version": 1,
+  "simulation_id": "sim_01K4QW7M4E8YB2FVN0H9TZQWES",
+  "modality": "voice",
+  "connection": {
+    "type": "phone",
+    "config": {
+      "phoneNumber": "+15551234567"
+    },
+    "credentials": null
+  },
+  "persona": {
+    "traits": {
+      "personality": "Dev, 34, calling from a train platform. In a hurry, talks over slow answers, background noise comes and goes.",
+      "language": "en-GB",
+      "voice": {
+        "provider": "elevenlabs",
+        "voiceId": "brisk-tenor-7",
+        "speed": 1.15
+      }
+    }
+  },
+  "scenario": {
+    "instructions": "Your card was charged twice for the same order this morning. You want the duplicate charge reversed and a confirmation number before you hang up."
+  },
+  "limits": {
+    "max_duration_seconds": 300,
+    "max_turns": 40
+  },
+  "platform": {
+    "model": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "key": "fixture-not-a-real-secret-persona-model-0001"
+    },
+    "speech": {
+      "stt_provider": "deepgram",
+      "stt_key": "fixture-not-a-real-secret-listening-0002",
+      "tts_provider": "elevenlabs",
+      "tts_key": "fixture-not-a-real-secret-speaking-0003",
+      "tts_model": "eleven_turbo_v2_5",
+      "tts_voice": "brisk-tenor-7",
+      "vad_provider": "silero"
+    },
+    "carrier": {
+      "media_backend": "livekit",
+      "trunk_address": "egma-fixture.pstn.twilio.com",
+      "trunk_number": "+15550000000",
+      "trunk_username": "egma-fixture-trunk",
+      "trunk_password": "fixture-not-a-real-secret-trunk-0004"
+    }
+  }
+}

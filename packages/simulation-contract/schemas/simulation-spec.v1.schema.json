@@ -98,9 +98,115 @@
       "description": "The answers this simulation serves for the agent's tools, already resolved: one entry per tool name, the project's default or the test's override, whichever applies — worked out once by the control plane so that every simulation in one run sees one world and nothing downstream can reach a second answer. Absent, which is the ordinary case, means egma answers for nothing: every tool the agent has runs its own implementation, untouched and unobserved. Order is the order the answers were authored, and it is stable so that two runs of one project read alike.",
       "type": "array",
       "items": { "$ref": "#/$defs/mock_tool" }
+    },
+    "platform": {
+      "description": "What this deployment has been configured with, unsealed for exactly this hand-off: who the persona thinks with, what it speaks and hears with, and how a call reaches the telephone network. These belong to the whole deployment rather than to any customer on it, and they used to live in each simulator's own environment — which meant a second simulator on another machine needed a file copied to it, and a container started without one dialled nothing while reporting itself healthy. They ride this document instead, through the same door and with the same authority as the connection's credentials beside them, and are read afresh for each simulation so a changed key applies to the next one with no restart. Every block is optional and so is every field inside it: a setting the platform does not hold leaves the simulator's own value standing, and a setting it does hold replaces it. A platform that has configured nothing sends nothing, and a simulator conducts exactly as it did before this block existed.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model": { "$ref": "#/$defs/platform_model" },
+        "speech": { "$ref": "#/$defs/platform_speech" },
+        "carrier": { "$ref": "#/$defs/platform_carrier" }
+      }
     }
   },
   "$defs": {
+    "platform_model": {
+      "description": "What the persona thinks with. Every field is optional, because a platform mid-setup holds some of them and not others, and one that holds none of them is every platform before anybody set it up.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "description": "Which client speaks to the model — the simulator's own open vocabulary, not an enum here: a simulator holding no client for a provider refuses at runtime with the ones it has, rather than this schema refusing the document.",
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "description": "Which model to ask for, verbatim as the provider names it. Configuration rather than a constant of the product: providers retire and add models on their own schedule.",
+          "type": "string",
+          "minLength": 1
+        },
+        "key": {
+          "description": "The provider key, in the clear for exactly this hand-off. Held in memory for the simulation, registered for redaction, and never logged, persisted or reported. No report document has anywhere to put it.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "platform_speech": {
+      "description": "What the persona speaks and hears with on a voice simulation, and what tells it the agent has started and stopped speaking. A key per leg rather than one per provider: the two legs are two accounts as often as they are one, and a shape that could not say so would make the second one unreachable.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stt_provider": {
+          "description": "The persona's ears. An open vocabulary, refused at runtime by the simulator holding no such leg.",
+          "type": "string",
+          "minLength": 1
+        },
+        "stt_key": {
+          "description": "The listening leg's provider key, on the same terms as the model key above.",
+          "type": "string",
+          "minLength": 1
+        },
+        "tts_provider": {
+          "description": "The persona's mouth. Chosen apart from the ears on purpose — a real mouth with scripted ears is a configuration somebody will want.",
+          "type": "string",
+          "minLength": 1
+        },
+        "tts_key": {
+          "description": "The speaking leg's provider key, on the same terms as the model key above.",
+          "type": "string",
+          "minLength": 1
+        },
+        "tts_model": {
+          "description": "Which model the speaking leg asks for, where its provider has more than one.",
+          "type": "string",
+          "minLength": 1
+        },
+        "tts_voice": {
+          "description": "Which voice the speaking leg asks for when the persona's own traits name none.",
+          "type": "string",
+          "minLength": 1
+        },
+        "vad_provider": {
+          "description": "What tells the persona the agent has started or stopped speaking. Needs no key either way.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "platform_carrier": {
+      "description": "How a call reaches the telephone network: which bridge places it, and the trunk the carrier authenticates. Absent on every deployment that has never been given a carrier — which still runs chat and voice simulations perfectly well — and that absence is an ordinary state rather than a fault. The media server's own key and secret are deliberately not here: they are read by a third-party container when it is created and cannot come from the platform's store, so they stay in each simulator's environment.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "media_backend": {
+          "description": "Which driver places the call. An open vocabulary, refused at runtime by a simulator holding no such backend.",
+          "type": "string",
+          "minLength": 1
+        },
+        "trunk_address": {
+          "description": "The carrier hostname a call is routed through. Non-secret: it is a fact the readiness answer already reports.",
+          "type": "string",
+          "minLength": 1
+        },
+        "trunk_number": {
+          "description": "The number a call appears to come from, E.164. Non-secret, for the same reason.",
+          "type": "string",
+          "minLength": 1
+        },
+        "trunk_username": {
+          "description": "The username the carrier authenticates the trunk by.",
+          "type": "string",
+          "minLength": 1
+        },
+        "trunk_password": {
+          "description": "The password beside it, in the clear for exactly this hand-off and on the same terms as every other secret in this document.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "mock_tool": {
       "description": "One tool name, and what egma answers when the agent calls it. Matching is by the name and strictly by it: a mock tool never reads a call's arguments, so there is no matcher here and nowhere for one to go.",
       "type": "object",

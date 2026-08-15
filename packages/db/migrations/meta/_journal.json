@@ -162,6 +162,13 @@
       "when": 1786416089352,
       "tag": "0022_quick_silver_samurai",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1786739000389,
+      "tag": "0023_platform_settings",
+      "breakpoints": true
     }
   ]
 }

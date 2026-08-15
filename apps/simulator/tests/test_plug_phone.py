@@ -466,16 +466,39 @@ def test_the_plug_speaks_voice_only():
     assert "chat" in str(refusal.value)
 
 
-def test_the_deployment_the_simulator_started_with_is_what_places_the_call(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """A spec names a number and nothing else about how it travels; which
-    bridge this simulator dials through was settled at startup."""
-    monkeypatch.setenv("EGMA_SIMULATOR_MEDIA_BACKEND", "scripted")
+def test_the_deployment_is_what_places_the_call_and_the_plug_never_asks_again():
+    """A spec names a number and nothing else about how it travels.
+
+    Which bridge and which trunk was settled once, by the deployment — this
+    container's media server with the platform's own carrier laid over it —
+    and handed here whole. The plug reads it and reaches for nothing: an
+    environment variable read here would be a second answer to a question
+    already answered, and two answers can disagree.
+    """
     plug = PhoneCall(
-        modality="voice", config={"phoneNumber": A_NUMBER}, credentials=None
+        modality="voice",
+        config={"phoneNumber": A_NUMBER},
+        credentials=None,
+        media=SCRIPTED,
     )
     assert isinstance(plug.backend, ScriptedBackend)
+
+
+def test_a_deployment_that_was_handed_no_bridge_says_so_rather_than_dialling(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """And it says so whatever this container's environment holds: the
+    resolved settings are the whole answer, so a leftover variable cannot
+    quietly turn dialling back on."""
+    monkeypatch.setenv("EGMA_SIMULATOR_MEDIA_BACKEND", "scripted")
+    with pytest.raises(PlugError) as refusal:
+        PhoneCall(
+            modality="voice",
+            config={"phoneNumber": A_NUMBER},
+            credentials=None,
+            media=None,
+        )
+    assert "places no phone calls" in str(refusal.value)
 
 
 # -- Hearing the far end -----------------------------------------------------

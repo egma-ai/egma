@@ -664,20 +664,33 @@ simulator, the grader, and the LiveKit server, SIP gateway and Redis a phone
 call needs — and prints the address to point an agent repository at. Open it and
 sign up: you become the admin of your own instance.
 
-It also prints the platform's **phone** state, separately from being ready,
-because a platform with no carrier runs text simulations perfectly well. To make
-it able to place calls, one more command in the same directory:
+It also prints what the platform is still **missing**, because a started platform
+is not a configured one — and it prints the phone half separately, since a
+platform with no carrier runs text simulations perfectly well. One more command
+in the same directory configures all of it:
 
 ```
-npx @egma/cli self-host phone setup
+npx @egma/cli login --url http://localhost:3101
+npx @egma/cli self-host setup
 ```
 
-It asks for a Twilio account, a voice number that account **already owns**, and
-one OpenAI key — the persona's words, its voice, its ears and the judge. It
-shows a plan before it writes anything to your carrier, and it never buys, ports
-or registers a number. The Twilio Auth Token is used once and kept nowhere: what
-runs afterwards holds a SIP credential for one trunk and nothing else on that
-account.
+It asks the platform what it does not hold and then asks you for exactly that,
+in a fixed order: who the persona thinks with, what it speaks and hears with,
+and how a call reaches the telephone network. A setting the platform already
+holds is never asked for again, so a second run is about the one key you were
+missing — and on a fully configured platform it changes nothing and says so.
+
+Every answer is written through the platform's own API, which is why you log in
+first: these are the deployment's own provider credentials, and an organization
+owner is who may set them. The platform seals them into its own store, so they
+survive a restart, an upgrade and a move to another machine, and each simulator
+is handed them on the work order it claims.
+
+For the phone half it asks for a Twilio account, a voice number that account
+**already owns**, and the account's Auth Token. It shows a plan before it writes
+anything to your carrier, and it never buys, ports or registers a number. The
+Auth Token is used once and kept nowhere: what runs afterwards holds a SIP
+credential for one trunk and nothing else on that account.
 
 To run the command from this same checkout rather than from npm, build it:
 
