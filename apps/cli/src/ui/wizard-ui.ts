@@ -74,6 +74,17 @@ export interface WizardUI {
   setDrivenAgentLog(file: string): void;
 
   /**
+   * Which egma this walk will use, or `null` when it will use none.
+   *
+   * Written before the gate that takes the keystroke of consent, and before
+   * that address has been asked anything, so whatever draws the first screen
+   * can say where this repository's identifiers are about to go. A bare command
+   * now reaches egma's own platform when nothing names another, which is
+   * exactly why it has to be said rather than assumed.
+   */
+  setPlatform(url: string | null): void;
+
+  /**
    * What egma worked out about this machine for itself, or `null` before it
    * has.
    *

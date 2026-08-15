@@ -15,7 +15,7 @@ import {
   type Priority,
   type Scope,
 } from "../../../../lib/graders.ts";
-import { Field, TextInput } from "../../../../ui/controls.tsx";
+import { Field, Select, TextArea, TextInput } from "../../../../ui/controls.tsx";
 
 /**
  * The fields a grader is written through, and the one rule they all obey: **a
@@ -132,67 +132,35 @@ export function phrasesFromLines(
     .map((text) => ({ text }));
 }
 
-function TextArea({
-  id,
-  label,
-  value,
-  hint,
-  disabled,
-  onChange,
-}: {
-  readonly id: string;
-  readonly label: string;
-  readonly value: string;
-  readonly hint?: string;
-  readonly disabled: boolean;
-  readonly onChange: (value: string) => void;
-}) {
-  return (
-    <Field label={label} htmlFor={id}>
-      <textarea
-        id={id}
-        rows={4}
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-      />
-      {hint === undefined ? null : <small>{hint}</small>}
-    </Field>
-  );
+/**
+ * A closed list whose entries say themselves — an aggregation, a comparator, a
+ * priority. The shared `Select` asks for a label beside every value because
+ * most lists it draws name something the server owns; these name themselves,
+ * and writing each one out twice would only invite the two to drift.
+ */
+function asOptions<Value extends string>(
+  values: readonly Value[],
+): readonly { readonly value: Value; readonly label: string }[] {
+  return values.map((value) => ({ value, label: value }));
 }
 
-function Choice<Value extends string>({
-  id,
-  label,
-  value,
-  options,
-  disabled,
-  onChange,
-}: {
-  readonly id: string;
-  readonly label: string;
-  readonly value: Value;
-  readonly options: readonly Value[];
-  readonly disabled: boolean;
-  readonly onChange: (value: Value) => void;
-}) {
-  return (
-    <Field label={label} htmlFor={id}>
-      <select
-        id={id}
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value as Value)}
-      >
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
-    </Field>
-  );
-}
+const AGGREGATIONS = [
+  "mean",
+  "median",
+  "p90",
+  "p95",
+  "max",
+  "min",
+  "sum",
+  "count",
+] as const;
+const COMPARATORS = ["below", "at_most", "above", "at_least"] as const;
+const SPEAKERS = ["agent", "persona", "either"] as const;
+const PRIORITIES: readonly Priority[] = ["P0", "P1", "P2"];
+const SCOPES: readonly Scope[] = ["simulations", "production", "both"];
+
+/** How tall a grader's written content sits, wherever one is typed. */
+const CONTENT_ROWS = 4;
 
 /**
  * A set of checkboxes over a settled list, which **refuses to become empty**.
@@ -280,48 +248,61 @@ export function ConfigFields({
 
   if (type === "llm_rubric") {
     return (
-      <TextArea
-        id="grader-rubric"
+      <Field
         label="Rubric"
+        htmlFor="grader-rubric"
         hint="The criteria a judge model reads, in your own words."
-        value={String(config.rubric ?? "")}
-        disabled={disabled}
-        onChange={(rubric) => set({ rubric })}
-      />
+      >
+        <TextArea
+          id="grader-rubric"
+          rows={CONTENT_ROWS}
+          value={String(config.rubric ?? "")}
+          disabled={disabled}
+          onChange={(rubric) => set({ rubric })}
+        />
+      </Field>
     );
   }
 
   if (type === "metric_threshold") {
     return (
       <>
-        <Field label="Measure" htmlFor="grader-measure">
+        <Field
+          label="Measure"
+          htmlFor="grader-measure"
+          hint="The name of what egma measured. A name nothing emits is refused when you save, because a grader reading it could never fire."
+        >
           <TextInput
             id="grader-measure"
             value={String(config.measure ?? "")}
             onChange={(measure) => set({ measure })}
           />
-          <small>
-            The name of what egma measured. A name nothing emits is refused when
-            you save, because a grader reading it could never fire.
-          </small>
         </Field>
-        <Choice
-          id="grader-aggregation"
-          label="Reduced by"
-          value={String(config.aggregation ?? "p90")}
-          options={["mean", "median", "p90", "p95", "max", "min", "sum", "count"]}
-          disabled={disabled}
-          onChange={(aggregation) => set({ aggregation })}
-        />
-        <Choice
-          id="grader-comparator"
-          label="Passes when it is"
-          value={String(config.comparator ?? "below")}
-          options={["below", "at_most", "above", "at_least"]}
-          disabled={disabled}
-          onChange={(comparator) => set({ comparator })}
-        />
+        <Field label="Reduced by" htmlFor="grader-aggregation">
+          <Select
+            id="grader-aggregation"
+            value={String(config.aggregation ?? "p90")}
+            options={asOptions(AGGREGATIONS)}
+            disabled={disabled}
+            onChange={(aggregation) => set({ aggregation })}
+          />
+        </Field>
+        <Field label="Passes when it is" htmlFor="grader-comparator">
+          <Select
+            id="grader-comparator"
+            value={String(config.comparator ?? "below")}
+            options={asOptions(COMPARATORS)}
+            disabled={disabled}
+            onChange={(comparator) => set({ comparator })}
+          />
+        </Field>
         <Field label="Threshold" htmlFor="grader-threshold">
+          {/*
+           * A number, and one of only two in the product. The shared library
+           * has no numeric control: a text one would take the spinner and the
+           * browser's own range check away, so this stays a bare input until a
+           * shared one exists rather than becoming a worse control today.
+           */}
           <input
             id="grader-threshold"
             type="number"
@@ -337,52 +318,73 @@ export function ConfigFields({
   if (type === "tool_calls") {
     return (
       <>
-        <TextArea
-          id="grader-required-tools"
+        <Field
           label="Tools that must have fired"
+          htmlFor="grader-required-tools"
           hint="One tool name per line."
-          value={linesOf(toolNames(config.required))}
-          disabled={disabled}
-          onChange={(lines) => set({ required: toolsFromLines(lines) })}
-        />
-        <TextArea
-          id="grader-forbidden-tools"
+        >
+          <TextArea
+            id="grader-required-tools"
+            rows={CONTENT_ROWS}
+            value={linesOf(toolNames(config.required))}
+            disabled={disabled}
+            onChange={(lines) => set({ required: toolsFromLines(lines) })}
+          />
+        </Field>
+        <Field
           label="Tools that must never fire"
+          htmlFor="grader-forbidden-tools"
           hint="One tool name per line."
-          value={linesOf(toolNames(config.forbidden))}
-          disabled={disabled}
-          onChange={(lines) => set({ forbidden: toolsFromLines(lines) })}
-        />
+        >
+          <TextArea
+            id="grader-forbidden-tools"
+            rows={CONTENT_ROWS}
+            value={linesOf(toolNames(config.forbidden))}
+            disabled={disabled}
+            onChange={(lines) => set({ forbidden: toolsFromLines(lines) })}
+          />
+        </Field>
       </>
     );
   }
 
   return (
     <>
-      <TextArea
-        id="grader-required-phrases"
+      <Field
         label="Words that must be said"
+        htmlFor="grader-required-phrases"
         hint="One phrase per line."
-        value={linesOf(phraseTexts(config.required))}
-        disabled={disabled}
-        onChange={(lines) => set({ required: phrasesFromLines(lines) })}
-      />
-      <TextArea
-        id="grader-banned-phrases"
+      >
+        <TextArea
+          id="grader-required-phrases"
+          rows={CONTENT_ROWS}
+          value={linesOf(phraseTexts(config.required))}
+          disabled={disabled}
+          onChange={(lines) => set({ required: phrasesFromLines(lines) })}
+        />
+      </Field>
+      <Field
         label="Words that must never be said"
+        htmlFor="grader-banned-phrases"
         hint="One phrase per line."
-        value={linesOf(phraseTexts(config.banned))}
-        disabled={disabled}
-        onChange={(lines) => set({ banned: phrasesFromLines(lines) })}
-      />
-      <Choice
-        id="grader-speaker"
-        label="Whose turns are searched"
-        value={String(config.speaker ?? "agent")}
-        options={["agent", "persona", "either"]}
-        disabled={disabled}
-        onChange={(speaker) => set({ speaker })}
-      />
+      >
+        <TextArea
+          id="grader-banned-phrases"
+          rows={CONTENT_ROWS}
+          value={linesOf(phraseTexts(config.banned))}
+          disabled={disabled}
+          onChange={(lines) => set({ banned: phrasesFromLines(lines) })}
+        />
+      </Field>
+      <Field label="Whose turns are searched" htmlFor="grader-speaker">
+        <Select
+          id="grader-speaker"
+          value={String(config.speaker ?? "agent")}
+          options={asOptions(SPEAKERS)}
+          disabled={disabled}
+          onChange={(speaker) => set({ speaker })}
+        />
+      </Field>
     </>
   );
 }
@@ -494,31 +496,40 @@ export function LiveFields({
           onChange={(next) => onChange({ name: next })}
         />
       </Field>
-      <TextArea
-        id="grader-description"
-        label="Description"
-        value={description}
-        disabled={disabled}
-        onChange={(next) => onChange({ description: next })}
-      />
-      <Choice
-        id="grader-priority"
-        label="Priority"
-        value={priority}
-        options={["P0", "P1", "P2"] as const}
-        disabled={disabled}
-        onChange={(next) => onChange({ priority: next })}
-      />
-      <Choice
-        id="grader-scope"
-        label="Applies to"
-        value={scope}
-        options={["simulations", "production", "both"] as const}
-        disabled={disabled}
-        onChange={(next) => onChange({ scope: next })}
-      />
+      <Field label="Description" htmlFor="grader-description">
+        <TextArea
+          id="grader-description"
+          rows={CONTENT_ROWS}
+          value={description}
+          disabled={disabled}
+          onChange={(next) => onChange({ description: next })}
+        />
+      </Field>
+      <Field label="Priority" htmlFor="grader-priority">
+        <Select
+          id="grader-priority"
+          value={priority}
+          options={asOptions(PRIORITIES)}
+          disabled={disabled}
+          onChange={(next) => onChange({ priority: next })}
+        />
+      </Field>
+      <Field label="Applies to" htmlFor="grader-scope">
+        <Select
+          id="grader-scope"
+          value={scope}
+          options={asOptions(SCOPES)}
+          disabled={disabled}
+          onChange={(next) => onChange({ scope: next })}
+        />
+      </Field>
       {samplingApplies(scope) ? (
-        <Field label="Production sampling (%)" htmlFor="grader-sample-rate">
+        <Field
+          label="Production sampling (%)"
+          htmlFor="grader-sample-rate"
+          hint="How much of the traffic egma did not cause gets judged. Simulations are always all judged."
+        >
+          {/* A number, for the reason written beside the threshold above. */}
           <input
             id="grader-sample-rate"
             type="number"
@@ -530,10 +541,6 @@ export function LiveFields({
               onChange({ sampleRate: Number(event.target.value) })
             }
           />
-          <small>
-            How much of the traffic egma did not cause gets judged. Simulations
-            are always all judged.
-          </small>
         </Field>
       ) : null}
     </>

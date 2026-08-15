@@ -128,6 +128,29 @@ function oneLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+/**
+ * A reason, split into the sentence that goes on the line and the block that
+ * goes under it.
+ *
+ * Almost every reason is one paragraph and stays one line, whatever whitespace
+ * it arrived with — a wrapped sentence or a stack trace squashed onto one line
+ * is still readable, and it keeps the promise that the last thing in scrollback
+ * selects whole with one triple-click.
+ *
+ * A reason that arrived as a paragraph **and** a block is the exception, and
+ * the block is the reason it exists: the refusal that keeps a repository on its
+ * own platform ends with every line a developer deletes to move it, and a
+ * coding agent is supposed to act on those lines without a person reading them
+ * out. Squashed into the sentence they are unreadable and unusable, so they
+ * survive as lines. A blank line is what marks one, which is exactly how the
+ * refusal is built.
+ */
+function saidAndBlock(reason: string): readonly [string, readonly string[]] {
+  const at = reason.indexOf("\n\n");
+  if (at === -1) return [oneLine(reason), []];
+  return [oneLine(reason.slice(0, at)), reason.slice(at + 2).split("\n")];
+}
+
 /** Where the files are, said the same way in both endings that mention them. */
 const TESTS_FOLDER = "egma/tests/";
 
@@ -207,20 +230,32 @@ export function buildExitLine(report: ExitReport): string {
         : `${stopped} Your ${kept} tests are in ${TESTS_FOLDER}.`;
     }
     case "failed":
-      return `egma could not finish: ${oneLine(report.reason)}`;
+      return `egma could not finish: ${saidAndBlock(report.reason)[0]}`;
   }
 }
 
 /**
  * Everything that survives the wizard, in the order it is printed.
  *
- * Every ending but one is a single line and comes back as one. The ending the
+ * Every ending but two is a single line and comes back as one. The ending the
  * walk is for is a short block, and its shape is the promise: a headline, the
  * results address alone on its line, and then the two sentences a developer
  * takes with them. The blank lines between them are the only decoration, and
  * they are there so that no line has anything beside it.
+ *
+ * The other is a failure that arrived carrying a block — which today is one
+ * refusal, the one that keeps a repository on the platform it is bound to and
+ * ends with every line a developer deletes to move it. It goes under the line,
+ * whole and one line each, because that block is what a coding agent acts on
+ * and a squashed copy of it is neither readable nor usable.
  */
 export function exitLines(report: ExitReport): readonly string[] {
+  if (report.kind === "failed") {
+    const [, block] = saidAndBlock(report.reason);
+    return block.length === 0
+      ? [buildExitLine(report)]
+      : [buildExitLine(report), "", ...block];
+  }
   if (report.kind !== "run-started") return [buildExitLine(report)];
   return [
     buildExitLine(report),

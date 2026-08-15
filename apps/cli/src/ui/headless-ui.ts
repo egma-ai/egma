@@ -35,6 +35,8 @@ import type { AskId, DrivenAgent, GateId, WizardUI } from "./wizard-ui.ts";
 export type HeadlessRecord = {
   drivenAgent: DrivenAgent | null;
   drivenAgentLog: string | null;
+  /** Which egma this walk will use, as it was named before the gate. */
+  platform: string | null;
   /** What egma worked out for itself before it asked anybody anything. */
   detection: Detection | null;
   logins: LoginPrompt[];
@@ -72,6 +74,7 @@ export class HeadlessUI implements WizardUI {
   readonly record: HeadlessRecord = {
     drivenAgent: null,
     drivenAgentLog: null,
+    platform: null,
     detection: null,
     logins: [],
     keyAsks: [],
@@ -111,6 +114,20 @@ export class HeadlessUI implements WizardUI {
 
   setDrivenAgentLog(file: string): void {
     this.record.drivenAgentLog = file;
+  }
+
+  /**
+   * Which egma, as one plain line, in the same place in the walk the wizard's
+   * first screen says it.
+   *
+   * The same `url:` line every verb prints, from a run that has nobody to draw
+   * a screen for: whoever reads this output afterwards can see which egma this
+   * repository's identifiers were about to go to, before any of them went.
+   */
+  setPlatform(url: string | null): void {
+    if (url === null) return;
+    this.record.platform = url;
+    this.write(`url: ${url}`);
   }
 
   /**

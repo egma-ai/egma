@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   addConnection,
+  archiveAgent,
   claimSimulations,
   completeSimulation,
   createAgent,
@@ -689,5 +690,199 @@ describe("a livekit connection's two credential shapes, through the claim", () =
     const reached = await resolveSimulationConnection(claim.auth, claim.id);
 
     expect(reached?.credentials).toBeNull();
+  });
+});
+
+/**
+ * What Archive does to work that is already moving.
+ *
+ * **Archiving a target is a decision about work in flight, not an edit to a
+ * list**, and the two halves of that decision are settled in different places:
+ * a queued conversation ends here, because nothing dispatched it, and a
+ * conversation somebody is already having is *asked* to stop and honors it at
+ * its next heartbeat. Egma does not reach into a call in progress, and it never
+ * writes down that a conversation ended when it has not.
+ *
+ * Nothing proved the second half. The one cancellation test built a queued
+ * simulation, so the branch that stamps a claimed or running row was never
+ * entered and no test read the run's own record back — `appendRunEvents` could
+ * have been deleted and the suite would have stayed green, leaving a run that
+ * was canceled underneath a follower with no event to say so.
+ *
+ * The claim, the start and the heartbeat here are the product's own, taken
+ * through the same door the simulator uses, because a second way of claiming a
+ * row would prove something no simulator does.
+ */
+describe("archiving a target out from under work", () => {
+  /**
+   * A second way into the agent everything else here runs over, so archiving
+   * it settles this test's work and no other test's.
+   */
+  async function aSpareConnection(name: string): Promise<string> {
+    const added = await addConnection(actingAsAcme(), acmeSeed.agentId, {
+      name,
+      type: "retell",
+      modality: "chat",
+      config: { retellAgentId: `agent_${name}` },
+      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+    });
+    return added?.id ?? "";
+  }
+
+  /** An agent of its own, wired once — the thing an agent Archive cascades from. */
+  async function anAgentToArchive(
+    name: string,
+  ): Promise<{ agentId: string; connectionId: string }> {
+    const created = await createAgent(actingAsAcme(), {
+      name,
+      connection: {
+        type: "retell",
+        modality: "chat",
+        config: { retellAgentId: `agent_${name}` },
+        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      },
+    });
+    return { agentId: created.id, connectionId: created.connection?.id ?? "" };
+  }
+
+  /**
+   * A conversation nobody has stopped: still held by its simulator, cancel
+   * asked for, nothing about it ended, and the record saying so.
+   *
+   * Both live states are checked through this, because the promise is one
+   * promise — whatever a claimed conversation gets, a running one gets.
+   */
+  async function expectAskedToStop(
+    runId: string,
+    simulationId: string,
+    claimant: string,
+    status: "claimed" | "running",
+  ): Promise<void> {
+    const held = await getSimulation(actingAsAcme(), simulationId);
+    expect(held?.status).toBe(status);
+    expect(held?.cancelRequestedAt).toBeInstanceOf(Date);
+    // Not ended, and not judged: the conversation is still somebody's, and
+    // what it produced before it stops stays on the record.
+    expect(held?.endedAt).toBeNull();
+
+    // Where the ask is actually delivered. A stamp no heartbeat reports is a
+    // cancel nobody carries out.
+    expect(
+      await recordSimulationHeartbeat({ simulationId, claimant }),
+    ).toEqual({ cancelRequested: true });
+
+    const feed = await listRunEvents(actingAsAcme(), runId, { after: 0 });
+    expect(feed?.events.at(-1)?.kind).toBe("run");
+    expect(feed?.events.at(-1)?.status).toBe("canceled");
+
+    // And nothing says the conversation itself is over, because it is not.
+    expect(
+      feed?.events
+        .filter((event) => event.simulationId === simulationId)
+        .map((event) => event.status),
+    ).not.toContain("canceled");
+  }
+
+  /**
+   * A queued conversation, settled. This is the shape both Archives have to
+   * produce: archiving the agent above a connection may not leave the work
+   * under it in a state archiving the connection itself would never leave it.
+   */
+  async function expectSettled(
+    runId: string,
+    simulationId: string,
+  ): Promise<void> {
+    const settled = await getSimulation(actingAsAcme(), simulationId);
+    expect(settled?.status).toBe("canceled");
+    expect(settled?.cancelRequestedAt).toBeInstanceOf(Date);
+    expect(settled?.endedAt).toBeInstanceOf(Date);
+
+    const header = await getRun(actingAsAcme(), runId);
+    expect(header?.status).toBe("canceled");
+    expect(header?.canceledCount).toBe(1);
+    expect(header?.finishedAt).toBeInstanceOf(Date);
+
+    const feed = await listRunEvents(actingAsAcme(), runId, { after: 0 });
+    expect(
+      feed?.events.map((event) => [event.kind, event.simulationId, event.status]),
+    ).toEqual([
+      ["simulation", simulationId, "canceled"],
+      ["run", null, "canceled"],
+    ]);
+    expect(feed?.done).toBe(true);
+  }
+
+  it("asks a claimed conversation to stop, and says so on the run's record", async () => {
+    const connectionId = await aSpareConnection("claimed-work");
+    const { runId, simulationId } = await oneQueuedSimulation(actingAsAcme(), {
+      ...acmeSeed,
+      connectionId,
+    });
+    const claim = await claimOne(simulationId, "simulator-blue-1");
+
+    const archived = await archiveConnection(
+      actingAsAcme(),
+      acmeSeed.agentId,
+      connectionId,
+    );
+    expect(archived?.canceledRuns).toEqual([runId]);
+
+    await expectAskedToStop(runId, simulationId, claim.claimedBy, "claimed");
+  });
+
+  it("asks a running conversation to stop on the same terms", async () => {
+    const connectionId = await aSpareConnection("running-work");
+    const { runId, simulationId } = await oneQueuedSimulation(actingAsAcme(), {
+      ...acmeSeed,
+      connectionId,
+    });
+    const claim = await claimOne(simulationId, "simulator-green-2");
+    await startSimulation(claim.auth, claim.id, claim.claimedBy);
+
+    const archived = await archiveConnection(
+      actingAsAcme(),
+      acmeSeed.agentId,
+      connectionId,
+    );
+    expect(archived?.canceledRuns).toEqual([runId]);
+
+    await expectAskedToStop(runId, simulationId, claim.claimedBy, "running");
+  });
+
+  it("ends the queued conversation where the connection is archived", async () => {
+    const connectionId = await aSpareConnection("queued-work");
+    const { runId, simulationId } = await oneQueuedSimulation(actingAsAcme(), {
+      ...acmeSeed,
+      connectionId,
+    });
+
+    const archived = await archiveConnection(
+      actingAsAcme(),
+      acmeSeed.agentId,
+      connectionId,
+    );
+    expect(archived?.canceledRuns).toEqual([runId]);
+
+    await expectSettled(runId, simulationId);
+  });
+
+  it("ends it exactly the same way when the agent above it is archived", async () => {
+    const { agentId, connectionId } = await anAgentToArchive("cascading-desk");
+    const { runId, simulationId } = await oneQueuedSimulation(actingAsAcme(), {
+      ...acmeSeed,
+      agentId,
+      connectionId,
+    });
+
+    // The Archive names the agent, and nobody names the connection — the
+    // cascade has to find the work under it. Without that, a queued
+    // conversation would sit in the claim queue for a target no simulator can
+    // resolve a credential for, and would land as a failure the agent never
+    // caused.
+    const archived = await archiveAgent(actingAsAcme(), agentId);
+    expect(archived?.connections).toEqual([connectionId]);
+    expect(archived?.canceledRuns).toEqual([runId]);
+
+    await expectSettled(runId, simulationId);
   });
 });
