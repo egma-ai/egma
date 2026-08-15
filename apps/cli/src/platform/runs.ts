@@ -22,7 +22,7 @@
  * make.
  */
 
-import { newId } from "@egma/ids";
+import { randomUUID } from "node:crypto";
 
 import type { Fetch } from "./device-flow.ts";
 import { PlatformRefusedError } from "./refused.ts";
@@ -247,7 +247,17 @@ export async function startRun(
       agent: input.agentId,
       connection: input.connectionId,
       test_versions: [...input.testVersionIds],
-      idempotency_key: input.idempotencyKey ?? newId("run"),
+      // Node's own, deliberately, and not `newId` from `@egma/ids`. That
+      // package is private and never published, so an import of it survives
+      // into `dist/` — which this package ships unbundled — and `npx @egma/cli`
+      // would fail to resolve it at the moment somebody started a run. The
+      // build caught it here only because nothing built the package first; the
+      // published crash would have had no such warning.
+      //
+      // Nothing wants an egma-shaped id anyway. A key has one job: to be
+      // different from every other invocation's, so a retry of *this* start is
+      // told apart from a new one.
+      idempotency_key: input.idempotencyKey ?? `run_${randomUUID()}`,
       ...(input.label === undefined ? {} : { label: input.label }),
     },
     ...(fetchImpl === undefined ? {} : { fetchImpl }),
