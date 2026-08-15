@@ -76,7 +76,7 @@ afterAll(async () => {
 });
 
 describe("a rubric judged on the project's own judge", () => {
-  it("is one call, one dimension and one row naming the judge that answered", async () => {
+  it("is one call, one assertion and one row", async () => {
     const graderId = await seedGrader(world, aRubric());
     const judge = await service.judgingWith({
       [A_RUBRIC]: met("the agent said sorry at turn 3.", [3]),
@@ -89,15 +89,11 @@ describe("a rubric judged on the project's own judge", () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
-      dimension: "llm_rubric",
+      assertion: "llm_rubric",
       verdict: "passed",
       score: 1,
       rationale: "the agent said sorry at turn 3.",
       citedSpanIds: ["turn:3"],
-      // The judge, not `engine`: a model decided this, and which model is part
-      // of the row's identity.
-      judgedBy: "openai/gpt-4.1-mini",
-      priority: "P0",
     });
 
     // One rubric is one criterion, so it is one question — never the text split
@@ -171,9 +167,6 @@ describe("a rubric judged on the project's own judge", () => {
     expect(broken).toMatchObject({ verdict: "errored", score: 0 });
     expect(broken?.rationale).toContain("this check could not be made");
     expect(broken?.rationale).toContain("503");
-    // Never the model that could not answer: nothing decided this row, so
-    // nothing is named on it.
-    expect(broken?.judgedBy).toBe("engine");
 
     const [beside] = await rowsFrom(simulationId, alsoJudging);
     expect(beside?.verdict).toBe("passed");
@@ -211,10 +204,9 @@ describe("a rubric on a grader that names its own judge", () => {
     const [only] = await rowsFrom(simulationId, overridden);
 
     expect(only).toMatchObject({
-      dimension: "llm_rubric",
+      assertion: "llm_rubric",
       verdict: "failed",
       score: 0,
-      judgedBy: "openai/gpt-4.1",
     });
 
     // The grader's model reached the provider seam with the project's key
@@ -228,15 +220,18 @@ describe("a rubric on a grader that names its own judge", () => {
     }
 
     // And the graders with no override of their own still judged on the
-    // project's default, in the same grading, on one account.
+    // project's default, in the same grading, on one account — which is what
+    // the provider seam saw rather than anything on a row: a verdict no longer
+    // records which model answered.
     const read = await readVerdicts(world.auth, simulationId);
     const byDefault = read.verdicts.filter(
-      (row) => row.dimension === "llm_rubric" && row.graderId !== overridden,
+      (row) => row.assertion === "llm_rubric" && row.graderId !== overridden,
     );
     expect(byDefault.length).toBeGreaterThan(0);
-    for (const row of byDefault) {
-      expect(row.judgedBy).toBe("openai/gpt-4.1-mini");
-    }
+    expect(
+      judge.configured.filter((configured) => configured.model === "gpt-4.1-mini")
+        .length,
+    ).toBeGreaterThan(0);
   });
 });
 
@@ -274,7 +269,7 @@ describe("a rubric with no judge to ask", () => {
     });
 
     expect(only).toMatchObject({
-      dimension: "llm_rubric",
+      assertion: "llm_rubric",
       verdict: "errored",
       score: 0,
       citedSpanIds: [],
@@ -282,8 +277,6 @@ describe("a rubric with no judge to ask", () => {
     expect(only?.rationale).toBe(
       "this project has configured no judge, so there was nothing to ask.",
     );
-    // Absent, so the engine writes `engine`: no model decided this.
-    expect(only?.judgedBy).toBeUndefined();
   });
 
   it("drops a citation pointing at a turn the conversation does not have", async () => {
@@ -301,12 +294,12 @@ describe("a rubric with no judge to ask", () => {
   });
 
   /**
-   * A dimension name may derive nothing from the config: the fold counts one
-   * dimension once per grader and prefers the latest grading of it, so a rubric
+   * A assertion name may derive nothing from the config: the fold counts one
+   * assertion once per grader and prefers the latest grading of it, so a rubric
    * reworded and re-graded must land on the row it supersedes rather than beside
    * it forever with both of them speaking.
    */
-  it("names the same dimension whatever the rubric says", async () => {
+  it("names the same assertion whatever the rubric says", async () => {
     const first = await execute({
       judgment: { type: "llm_rubric", config: { rubric: A_RUBRIC } },
       conversation: conversation(),
@@ -321,6 +314,6 @@ describe("a rubric with no judge to ask", () => {
 
     expect(first[0]?.verdict).toBe("passed");
     expect(second[0]?.verdict).toBe("failed");
-    expect(second[0]?.dimension).toBe(first[0]?.dimension);
+    expect(second[0]?.assertion).toBe(first[0]?.assertion);
   });
 });

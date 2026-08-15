@@ -166,7 +166,7 @@ describe("a provider that does not answer", () => {
   /**
    * A rejected key and a model that does not exist are not transient. Asking
    * again would spend the same seconds to be told the same thing, and the
-   * dimension is `errored` either way with the provider's own words on it.
+   * assertion is `errored` either way with the provider's own words on it.
    */
   it("does not ask again about a refusal asking again cannot fix", async () => {
     const { calls, judge } = judgeWith(refusing(401, "invalid api key"));

@@ -22,7 +22,7 @@ import {
   startRun,
   startSimulation,
   type AuthContext,
-  type ExpectedBehaviorInput,
+  type ExpectedBehavior,
   type GradingJob,
   type NewGrader,
   type NewSpan,
@@ -549,7 +549,7 @@ function simulationSpan(
     parentSpanId: "",
     // Explicit on the row rather than inferred from the run being set:
     // comparing a simulation against a production trace is the premise of the
-    // product, so the two dimensions compose instead of sharing a slot.
+    // product, so the two assertions compose instead of sharing a slot.
     source: "simulation",
     emitter: "egma-runtime",
     environment: "default",
@@ -769,7 +769,7 @@ function productionSpan(traceId: string, over: Partial<NewSpan>): NewSpan {
 export async function seedTest(
   world: World,
   graderIds: readonly string[],
-  expectedBehaviors: readonly ExpectedBehaviorInput[] = [
+  expectedBehaviors: readonly ExpectedBehavior[] = [
     "confirms the new time back before finishing",
   ],
 ): Promise<string> {

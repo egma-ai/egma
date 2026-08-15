@@ -74,7 +74,7 @@ describe("a required tool", () => {
     });
 
     expect(judgment).toMatchObject({
-      dimension: "tool_calls",
+      assertion: "tool_calls",
       verdict: "passed",
       score: 1,
       citedSpanIds: [],
@@ -254,12 +254,12 @@ describe("a shelf holding several rules", () => {
   };
 
   /**
-   * One dimension, whatever number of rules. A dimension name may derive nothing
-   * from the config, so a per-rule dimension could only be named by the tool or
+   * One assertion, whatever number of rules. A assertion name may derive nothing
+   * from the config, so a per-rule assertion could only be named by the tool or
    * by its position — and either would leave an edited-away rule's row speaking
    * forever, with no later grading able to supersede it.
    */
-  it("names one dimension and lands one row", async () => {
+  it("names one assertion and lands one row", async () => {
     const rows = await execute({
       judgment: { type: "tool_calls", config: shelf },
       conversation: conversation([called("lookup_order")]),
@@ -267,10 +267,10 @@ describe("a shelf holding several rules", () => {
     });
 
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.dimension).toBe("tool_calls");
+    expect(rows[0]?.assertion).toBe("tool_calls");
   });
 
-  it("keeps the dimension when the shelf is edited, so a re-grade supersedes", async () => {
+  it("keeps the assertion when the shelf is edited, so a re-grade supersedes", async () => {
     const loose = await judge([called("lookup_order")], {
       required: [{ tool: "lookup_order", arguments: null }],
     });
@@ -278,7 +278,7 @@ describe("a shelf holding several rules", () => {
 
     expect(loose.verdict).toBe("passed");
     expect(tight.verdict).toBe("failed");
-    expect(tight.dimension).toBe(loose.dimension);
+    expect(tight.assertion).toBe(loose.assertion);
   });
 
   /**

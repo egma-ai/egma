@@ -65,7 +65,7 @@ describe("a measurement held to a threshold", () => {
     const judgment = await judge({ turn_response_latency: [900, 1_100, 1_400] });
 
     expect(judgment).toMatchObject({
-      dimension: "metric_threshold",
+      assertion: "metric_threshold",
       verdict: "passed",
       score: 1,
       citedSpanIds: [],
@@ -91,15 +91,15 @@ describe("a measurement held to a threshold", () => {
     ).toBe("passed");
   });
 
-  it("names its one dimension by its type, so a tightened threshold replaces rather than adds", async () => {
+  it("names its one assertion by its type, so a tightened threshold replaces rather than adds", async () => {
     const loose = await judge({ turn_response_latency: [1_500] });
     const tight = await judge({ turn_response_latency: [1_500] }, { threshold: 1_000 });
 
     expect(loose.verdict).toBe("passed");
     expect(tight.verdict).toBe("failed");
-    // Same dimension, which is what makes the second grading supersede the
+    // Same assertion, which is what makes the second grading supersede the
     // first rather than sit beside it forever with both of them speaking.
-    expect(tight.dimension).toBe(loose.dimension);
+    expect(tight.assertion).toBe(loose.assertion);
   });
 });
 
@@ -231,7 +231,7 @@ describe("a grader type egma has not built yet", () => {
       judging: noJudgeWanted(),
     });
 
-    expect(only).toMatchObject({ dimension: "state_check", verdict: "errored" });
+    expect(only).toMatchObject({ assertion: "state_check", verdict: "errored" });
     expect(only?.rationale).toContain("does not execute state_check graders yet");
   });
 });

@@ -91,7 +91,6 @@ describe("a project that configured no judge", () => {
       // configured is the exact false trust this product exists to kill.
       expect(row.verdict).toBe("errored");
       expect(row.rationale).toContain("configured no judge");
-      expect(row.judgedBy).toBe("engine");
     }
     expect(judge.asked).toEqual([]);
 
@@ -174,7 +173,7 @@ describe("the project's default judge", () => {
     );
   });
 
-  it("names itself on every row it judged, and never the account behind it", async () => {
+  it("spends the key at the provider seam and nowhere a reader can see", async () => {
     const judge = scriptedJudge({
       answers: { [BEHAVIOR]: met("the new time was read back at turn 5.", [5]) },
     });
@@ -199,11 +198,12 @@ describe("the project's default judge", () => {
 
     expect(verdicts[0]).toMatchObject({
       graderId: "expected_behaviors",
-      dimension: "behavior_1",
-      judgedBy: "openai/gpt-4.1-mini",
+      assertion: "behavior_1",
       verdict: "passed",
-      priority: "P0",
     });
+    // Which judge answered is the resolution's own answer and is deliberately
+    // on no row: `judged_by` retired with the human corrections it existed for.
+    expect(judge.configured.at(-1)?.model).toBe("gpt-4.1-mini");
 
     /**
      * The acceptance box: **the key never appears in any verdict, log, or

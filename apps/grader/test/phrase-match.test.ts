@@ -63,7 +63,7 @@ describe("a required phrase", () => {
     });
 
     expect(judgment).toMatchObject({
-      dimension: "phrase_match",
+      assertion: "phrase_match",
       verdict: "passed",
       score: 1,
       citedSpanIds: ["turn:2"],
@@ -247,12 +247,12 @@ describe("a list holding several phrases", () => {
   };
 
   /**
-   * One dimension, whatever number of phrases. A dimension name may derive
-   * nothing from the config, so a per-phrase dimension could only be named by the
+   * One assertion, whatever number of phrases. A assertion name may derive
+   * nothing from the config, so a per-phrase assertion could only be named by the
    * text or by its position — and either would leave an edited-away phrase's row
    * speaking forever, with no later grading able to supersede it.
    */
-  it("names one dimension and lands one row", async () => {
+  it("names one assertion and lands one row", async () => {
     const rows = await execute({
       judgment: { type: "phrase_match", config: shelf },
       conversation: conversation(),
@@ -260,7 +260,7 @@ describe("a list holding several phrases", () => {
     });
 
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.dimension).toBe("phrase_match");
+    expect(rows[0]?.assertion).toBe("phrase_match");
   });
 
   it("names every broken rule and scores zero, not a fraction", async () => {
@@ -275,7 +275,7 @@ describe("a list holding several phrases", () => {
     );
   });
 
-  it("keeps the dimension when the list is edited, so a re-grade supersedes", async () => {
+  it("keeps the assertion when the list is edited, so a re-grade supersedes", async () => {
     const loose = await judge({
       required: [{ text: "This call is recorded", match: "contains" }],
     });
@@ -283,7 +283,7 @@ describe("a list holding several phrases", () => {
 
     expect(loose.verdict).toBe("passed");
     expect(tight.verdict).toBe("failed");
-    expect(tight.dimension).toBe(loose.dimension);
+    expect(tight.assertion).toBe(loose.assertion);
   });
 });
 

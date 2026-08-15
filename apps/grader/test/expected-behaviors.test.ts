@@ -44,20 +44,16 @@ const FIRST = "confirms the new time back before finishing";
 const SECOND = "never quotes a price";
 const THIRD = "offers to send a reminder";
 
-/** The three behaviors, each with its own priority, in the authored order. */
-const THREE = [
-  { behavior: FIRST, priority: "P0" as const },
-  { behavior: SECOND, priority: "P1" as const },
-  { behavior: THIRD, priority: "P2" as const },
-];
+/** The three behaviors, plain sentences, in the authored order. */
+const THREE = [FIRST, SECOND, THIRD];
 
-/** The behaviors' rows, in dimension order, whatever else judged the same run. */
+/** The behaviors' rows, in assertion order, whatever else judged the same run. */
 function behaviorRows(
   verdicts: readonly RecordedVerdict[],
 ): readonly RecordedVerdict[] {
   return [...verdicts]
     .filter((verdict) => verdict.graderId === "expected_behaviors")
-    .sort((left, right) => left.dimension.localeCompare(right.dimension));
+    .sort((left, right) => left.assertion.localeCompare(right.assertion));
 }
 
 /**
@@ -112,7 +108,7 @@ describe("a test with three expected behaviors", () => {
     });
 
     const rows = behaviorRows(verdicts);
-    expect(rows.map((row) => row.dimension)).toEqual([
+    expect(rows.map((row) => row.assertion)).toEqual([
       "behavior_1",
       "behavior_2",
       "behavior_3",
@@ -169,7 +165,7 @@ describe("a test with three expected behaviors", () => {
     ]);
   });
 
-  it("lands each behavior's own priority, snapshotted, and the turns it cited", async () => {
+  it("lands the turns each behavior cited, and its reason", async () => {
     const { verdicts } = await judgedWith({
       [FIRST]: met("the agent read the new time back at turn 5.", [5]),
       [SECOND]: met("no price was mentioned."),
@@ -177,16 +173,11 @@ describe("a test with three expected behaviors", () => {
     });
 
     const rows = behaviorRows(verdicts);
-    expect(rows.map((row) => row.priority)).toEqual(["P0", "P1", "P2"]);
     expect(rows[0]?.citedSpanIds).toEqual(["turn:5"]);
     expect(rows[2]?.citedSpanIds).toEqual(["turn:3", "turn:5"]);
     expect(rows[0]?.rationale).toBe(
       "the agent read the new time back at turn 5.",
     );
-    // The judge that answered, named on every row, and never the account.
-    for (const row of rows) {
-      expect(row.judgedBy).toBe("openai/gpt-4.1-mini");
-    }
   });
 
   it("drops a citation pointing at a turn the conversation does not have", async () => {
@@ -248,15 +239,12 @@ describe("a judge call that fails after its retries", () => {
     expect(rows[1]?.rationale).toContain("could not be judged");
     expect(rows[1]?.rationale).toContain("503");
     expect(rows[1]?.score).toBe(0);
-    // The priority is still the behavior's own: a check egma could not make is
-    // still a P1 check egma could not make.
-    expect(rows[1]?.priority).toBe("P1");
   });
 });
 
 describe("a simulation that never ran", () => {
   /**
-   * The multi-dimension case the engine left open until a type had several. A
+   * The multi-assertion case the engine left open until a type had several. A
    * page must show the same three behaviors whether the conversation happened
    * or not — a test that could not run should look like a test that could not
    * run, not like a test with nothing in it.
@@ -271,10 +259,15 @@ describe("a simulation that never ran", () => {
     expect(rows).toHaveLength(3);
     for (const row of rows) {
       expect(row.verdict).toBe("errored");
+      // The plain-prose reason judging broke, which is what an `errored` row's
+      // rationale is for and the only place that sentence is written down.
       expect(row.rationale).toContain("no conversation to judge");
-      expect(row.judgedBy).toBe("engine");
     }
-    expect(rows.map((row) => row.priority)).toEqual(["P0", "P1", "P2"]);
+    expect(rows.map((row) => row.assertion)).toEqual([
+      "behavior_1",
+      "behavior_2",
+      "behavior_3",
+    ]);
     expect(judge.asked).toEqual([]);
   });
 });
@@ -297,7 +290,7 @@ describe("a simulation born from no test", () => {
     const verdicts = await verdictsOn(world, simulationId, 1);
 
     expect(behaviorRows(verdicts)).toEqual([]);
-    expect(verdicts.map((verdict) => verdict.dimension)).toEqual([
+    expect(verdicts.map((verdict) => verdict.assertion)).toEqual([
       "metric_threshold",
     ]);
     expect(judge.asked).toEqual([]);
