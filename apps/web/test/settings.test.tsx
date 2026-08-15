@@ -363,6 +363,43 @@ describe("project settings", () => {
     },
   );
 
+  /**
+   * The server says who may edit, and this page believes it.
+   *
+   * The two tests above cannot tell the difference, and that is the point: for
+   * a viewer, *not an admin* and *not permitted* are true at the same time, so
+   * a page reading either one passes. They part company only here — somebody
+   * the server permits who is not an admin.
+   *
+   * `may_manage_projects` is computed by the API from the same permission check
+   * that decides whether the write lands. A page deriving it from the role
+   * instead is a second opinion about what `manage_projects` means, and the
+   * moment that permission moves the two disagree: controls withheld from
+   * somebody who may act, or controls offered whose writes come back refused.
+   */
+  it("lets a non-admin edit when the server says the permission is theirs", async () => {
+    open("member", { ...PROJECT, may_manage_projects: true });
+
+    const name = (await screen.findByLabelText("Name")) as HTMLInputElement;
+    await waitFor(() => {
+      expect(name.value).toBe("Default");
+    });
+
+    expect(name.disabled).toBe(false);
+    expect((screen.getByLabelText("Slug") as HTMLInputElement).disabled).toBe(
+      false,
+    );
+    expect(
+      screen
+        .getByRole("button", { name: "Save project" })
+        .hasAttribute("disabled"),
+    ).toBe(false);
+    // And no sentence telling them a role they hold forbids what they may do.
+    expect(
+      screen.queryByText(/role cannot change project settings/),
+    ).toBeNull();
+  });
+
   it("says so, and offers a retry, when egma refuses the read", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
@@ -914,9 +951,14 @@ describe("judge settings", () => {
     );
 
     const key = (await screen.findByLabelText("Key")) as HTMLSelectElement;
-    const offered = within(key).getByRole("option", {
+    // Found rather than fetched: the select exists as soon as the judge read
+    // answers, but this option is drawn from the *registry* read, which is a
+    // separate request that can land after it. Reading synchronously raced the
+    // second answer and failed about one run in six, on an option that was
+    // always going to arrive.
+    const offered = (await within(key).findByRole("option", {
       name: "This deployment's own judge",
-    }) as HTMLOptionElement;
+    })) as HTMLOptionElement;
     expect(offered.value).toBe("platform");
 
     fireEvent.change(key, { target: { value: "platform" } });
@@ -935,14 +977,20 @@ describe("judge settings", () => {
     open("admin", NEEDS_SETUP, [CREDENTIAL]);
 
     const key = (await screen.findByLabelText("Key")) as HTMLSelectElement;
+    // The credential option first, and waited for. It comes from the same
+    // second request the platform option would come from, so its arrival is
+    // what says both reads have landed. Asserting the platform option is
+    // absent before then would pass because nothing had answered yet — the
+    // right result for the wrong reason, which is the kind of test that goes
+    // on passing after the behaviour it guards is gone.
+    expect(
+      await within(key).findByRole("option", { name: /Acme production/ }),
+    ).toBeTruthy();
     expect(
       within(key).queryByRole("option", {
         name: "This deployment's own judge",
       }),
     ).toBeNull();
-    expect(
-      within(key).getByRole("option", { name: /Acme production/ }),
-    ).toBeTruthy();
   });
 
   /**
@@ -1028,7 +1076,14 @@ describe("judge settings", () => {
     fireEvent.change(await screen.findByLabelText("Model"), {
       target: { value: "gpt-4.1-mini" },
     });
-    fireEvent.change(screen.getByLabelText("Key"), { target: { value: "jcr_1" } });
+    const key = screen.getByLabelText("Key") as HTMLSelectElement;
+    // The option is drawn from the credentials read, which answers separately
+    // from the judge read that put the select on the page. Selecting a value
+    // with no option behind it yet leaves the select empty rather than failing,
+    // so the body assertion below would report the wrong thing about a page
+    // that was only slow.
+    await within(key).findByRole("option", { name: /Acme production/ });
+    fireEvent.change(key, { target: { value: "jcr_1" } });
     fireEvent.click(screen.getByRole("button", { name: "Save judge" }));
 
     await waitFor(() => {

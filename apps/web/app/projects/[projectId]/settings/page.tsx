@@ -70,12 +70,28 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
   // Null until the session read answers. An unsettled session is neither an
   // admin nor a viewer, and claiming either would be a guess shown as a fact.
   const role = me === null ? null : roleOf(me);
-  const mayAdminister = role === "admin";
 
   const { answer, reload } = useOrganizationRead<ProjectSettings>(
     projectSettingsPath(projectId),
   );
   const settled = answer?.status === "ready" ? answer.value : null;
+
+  /**
+   * The server's own answer, not this page's reading of a role.
+   *
+   * `may_manage_projects` travels with the project because the API computed it
+   * from `permits(auth, "manage_projects", …)` — the same check that decides
+   * whether the write lands. Deriving it here from `role === "admin"` would
+   * make this page a second opinion about what `manage_projects` means, and the
+   * two would part company the moment the permission moved: either controls
+   * withheld from somebody the server would have allowed, or controls offered
+   * whose writes it refuses.
+   *
+   * False until the read answers, which is *not yet known* rather than *no* —
+   * the same rule the role above follows, and the reason the disabled controls
+   * carry no sentence until there is one to give.
+   */
+  const mayAdminister = settled?.may_manage_projects ?? false;
 
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
