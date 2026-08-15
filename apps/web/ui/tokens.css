@@ -1,0 +1,71 @@
+/*
+ * The product shell's measurements, in one place.
+ *
+ * Density, spacing, type, colour, borders and control sizes are tokens rather
+ * than numbers typed into each component, because the whole visual direction of
+ * this product is going to be tuned by hand once every page exists. When that
+ * happens it has to be an edit to this file and not an edit to fourteen pages —
+ * which is the same reason the components below it are shared at all.
+ *
+ * The palette lives in `app/globals.css` beside the light and dark switch and
+ * is not repeated here. What is here is everything about *size*.
+ *
+ * Compactness is the direction and it is measurable: a sidebar narrow enough to
+ * leave the screen to the data, rows that are one line of reading rather than
+ * cards, and controls that sit in a toolbar without becoming the toolbar.
+ */
+
+:root {
+  /* Spacing. A four-pixel grid, named by step rather than by pixel so that
+     retuning the scale does not rename every use of it. */
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 20px;
+  --space-7: 28px;
+  --space-8: 40px;
+
+  /* Corners. */
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+  --radius-pill: 999px;
+
+  /* Type. Product text is small and dense; the largest step here is a page
+     title, which is a label rather than a headline. */
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  --text-xl: 20px;
+  --line-tight: 1.25;
+  --line-normal: 1.45;
+  --tracking-label: 0.08em;
+
+  /* Controls. Three heights and no more: a chip, the ordinary control, and the
+     one that carries a page's main action. */
+  --control-sm: 24px;
+  --control-md: 28px;
+  --control-lg: 32px;
+
+  /* List and table density. A row is a line of reading. */
+  --row-height: 36px;
+  --row-padding-y: var(--space-2);
+  --row-padding-x: var(--space-4);
+
+  /* The shell itself. */
+  --sidebar-width: 208px;
+  --topbar-height: 44px;
+  --page-gutter: var(--space-6);
+  --page-max: 1280px;
+
+  /* Depth, for the two things that float: a menu and a dialog. */
+  --shadow-menu: 0 10px 30px rgb(0 0 0 / 0.14);
+  --shadow-dialog: 0 24px 60px rgb(0 0 0 / 0.22);
+
+  /* Where the compact shell stops being two columns. */
+  --shell-breakpoint: 900px;
+}

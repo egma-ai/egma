@@ -153,7 +153,7 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
   }, [runId]);
 
   if (state.status === "loading") {
-    return <ProductStatePage active="transcripts" title="Run results" lead="Reading the run and its verdicts." />;
+    return <ProductStatePage title="Run results" lead="Reading the run and its verdicts." />;
   }
   if (state.status === "signed-out") {
     return (
@@ -163,11 +163,11 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
     );
   }
   if (state.status === "missing") {
-    return <ProductStatePage active="transcripts" title="That run is not here" lead="No run in this organization has that address." />;
+    return <ProductStatePage title="That run is not here" lead="No run in this organization has that address." />;
   }
   if (state.status === "failed") {
     return (
-      <ProductStatePage active="transcripts" title="Run results">
+      <ProductStatePage title="Run results">
         <Notice tone="error">{state.why}</Notice>
       </ProductStatePage>
     );
@@ -179,8 +179,8 @@ export default function RunPage({ params }: { params: Promise<{ runId: string }>
   const executionFailed = progress.failed > 0;
 
   return (
-    <AppShell active="transcripts">
-      <ProductPage wide>
+    <AppShell>
+      <ProductPage>
         <Link className={styles.backLink} href="/traces">← Transcripts</Link>
 
         <header className={styles.detailHeader}>

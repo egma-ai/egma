@@ -1,3 +1,5 @@
+@import "../ui/tokens.css";
+
 :root {
   color-scheme: light;
   --background: #f7f7f4;

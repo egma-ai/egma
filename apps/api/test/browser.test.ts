@@ -1,3 +1,4 @@
+import { newId } from "@egma/ids";
 import type { Browser, Page, Request } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -294,9 +295,20 @@ describe("adding a colleague, with no mail configured", () => {
       await bob.getByRole("button", { name: "Join Acme" }).click();
 
       // And he is in Acme, at the role he was invited at, without ever having
-      // been asked to name an organization.
-      await bob.waitForURL(new RegExp(`^${origin}/traces$`));
-      await expect.poll(() => bob.getByRole("heading", { name: "Transcripts" }).count()).toBe(1);
+      // been asked to name an organization. He lands on Agents, in a project
+      // named in the address he was sent to.
+      await bob.waitForURL(new RegExp(`^${origin}/projects/prj_[^/]+/agents$`));
+      await expect
+        .poll(() => bob.getByRole("heading", { name: "Agents" }).count())
+        .toBe(1);
+
+      // He was invited as a viewer, so he is told so once and is offered no
+      // control he may not use. The server refuses those either way; this is
+      // about not filling a read-only page with things that would be refused.
+      expect(await bob.locator("aside").innerText()).toContain("View only");
+      expect(
+        await bob.getByRole("link", { name: "Register agent" }).count(),
+      ).toBe(0);
 
       const { rows } = await instance.database.sql<{ email: string; role: string }>(
         `select u.email, m.role from membership m
@@ -516,7 +528,7 @@ async function signedInBrowser(email: string): Promise<Page> {
   await theirs.fill("#email", email);
   await theirs.fill("#password", PASSWORD);
   await theirs.getByRole("button", { name: "Sign in" }).click();
-  await theirs.waitForURL(new RegExp(`^${origin}/traces$`));
+  await theirs.waitForURL(new RegExp(`^${origin}/projects/prj_[^/]+/agents$`));
   return theirs;
 }
 
@@ -661,56 +673,121 @@ describe("the list of what an organization recorded", () => {
   it(
     "moves between product pages without reloading the shell",
     async () => {
-      await page.goto(`${origin}/traces`);
+      await page.goto(`${origin}/`);
+      await page.waitForURL(/\/projects\/prj_[^/]+\/agents$/);
+      const project = /\/projects\/(prj_[^/]+)\//.exec(page.url())?.[1];
+      expect(project).toBeDefined();
 
       const sidebar = page.locator("aside");
-      const settings = sidebar.locator('summary[aria-label="Open settings menu"]');
-      await settings.waitFor({ state: "visible" });
-      expect(await sidebar.innerText()).not.toContain("ada@acme.example");
-      expect(await sidebar.innerText()).not.toContain("Admin account");
-      expect(await sidebar.innerText()).not.toContain("Acme");
-      expect(await sidebar.innerText()).not.toContain("Voice Reliability project");
-      expect(await sidebar.getByRole("link", { name: "Home" }).count()).toBe(0);
-      expect(await sidebar.innerText()).toContain("Settings");
-      expect(await sidebar.getByRole("link", { name: "Organization" }).count()).toBe(0);
+      const account = sidebar.locator('button[aria-label^="Account"]');
+      await account.waitFor({ state: "visible" });
 
-      await settings.click();
+      // Where you are, without having to open anything: the organization and
+      // the project, on one compact control that is there with one project.
+      const selector = sidebar.locator('button[aria-label^="Organization"]');
+      await selector.waitFor({ state: "visible" });
+      expect(await selector.innerText()).toContain("Acme");
+
+      // The four product areas, and Personas beside them. Settings is not one
+      // of them and neither is a simulation.
+      for (const area of ["Agents", "Tests", "Graders", "Runs", "Personas"]) {
+        expect(
+          await sidebar.getByRole("link", { name: area, exact: true }).count(),
+          area,
+        ).toBe(1);
+      }
+      expect(await sidebar.getByRole("link", { name: "Home" }).count()).toBe(0);
       expect(
-        await sidebar.getByRole("button", { name: "Sign out" }).count(),
+        await sidebar.getByRole("link", { name: "Simulations" }).count(),
+      ).toBe(0);
+      expect(await sidebar.innerText()).not.toContain("Settings");
+
+      await account.click();
+      expect(
+        await sidebar.getByRole("menuitem", { name: "Sign out" }).count(),
       ).toBe(1);
       expect(
         await page.locator("main").getByRole("button", { name: "Sign out" }).count(),
       ).toBe(0);
-      await sidebar.getByRole("link", { name: "Organization settings" }).click();
+      await sidebar.getByRole("menuitem", { name: "Organization settings" }).click();
       await page.waitForURL(/\/members$/);
       await page.getByRole("tab", { name: "People" }).waitFor({ state: "visible" });
-      expect(await page.getByRole("tab", { name: "People" }).count()).toBe(1);
-      expect(await page.getByRole("tab", { name: "Invitations" }).count()).toBe(1);
+
       await page.evaluate(() => {
         Reflect.set(globalThis, "__egma_same_document_navigation", true);
       });
-      await page.getByRole("link", { name: "Transcripts", exact: true }).click();
-      await page.waitForURL(/\/traces$/);
+      await page.getByRole("link", { name: "Tests", exact: true }).first().click();
+      await page.waitForURL(new RegExp(`/projects/${project}/tests$`));
 
       expect(
         await page.evaluate(() =>
           Reflect.get(globalThis, "__egma_same_document_navigation"),
         ),
       ).toBe(true);
+    },
+    SETTLE,
+  );
+
+  /**
+   * The project is in the address and in the request, and nowhere else.
+   *
+   * This is the whole of what makes two tabs on two projects work, what makes a
+   * copied link reopen the project it was copied from, and what makes Back and
+   * Forward mean something. It is proved with two independent tabs because one
+   * tab could pass while a shared browser-wide choice quietly decided for both.
+   */
+  it(
+    "keeps two tabs on two projects, each reading its own",
+    async () => {
+      // A second project for Acme, so that there is something to switch to.
+      const outboundId = newId("prj");
+      await instance.database.sql(
+        `insert into project (id, organization_id, name, slug)
+           select $1, id, 'Outbound', 'outbound' from organization
+            where slug = 'acme'`,
+        [outboundId],
+      );
+      const outbound = { id: outboundId };
+
+      await page.goto(`${origin}/`);
+      await page.waitForURL(/\/projects\/prj_[^/]+\/agents$/);
+      const first = /\/projects\/(prj_[^/]+)\//.exec(page.url())?.[1];
+      expect(first).toBeDefined();
+      expect(first).not.toBe(outbound.id);
+
+      // A second tab, opened on the other project by its address alone.
+      const other = await page.context().newPage();
+      other.setDefaultTimeout(30_000);
+      await other.goto(`${origin}/projects/${outbound.id}/agents`);
+      await other.waitForSelector('button[aria-label^="Organization"]');
       expect(
-        await page.locator("#window").evaluate((element) => {
-          const styleOf = Reflect.get(globalThis, "getComputedStyle") as
-            (target: unknown) => { readonly appearance: string };
-          return styleOf(element).appearance;
-        }),
-      ).toBe("base-select");
+        await other.locator('aside button[aria-label^="Organization"]').innerText(),
+      ).toContain("Outbound");
+
+      // And the first tab did not move. Nothing about opening the second one
+      // changed which project the first one is in.
+      expect(page.url()).toContain(`/projects/${first}/agents`);
       expect(
-        await page.locator("#window").evaluate((element) => {
-          const styleOf = Reflect.get(globalThis, "getComputedStyle") as
-            (target: unknown) => { readonly alignItems: string };
-          return styleOf(element).alignItems;
-        }),
-      ).toBe("center");
+        await page.locator('aside button[aria-label^="Organization"]').innerText(),
+      ).not.toContain("Outbound");
+
+      // Choosing from the selector changes the address, which is what Back then
+      // undoes.
+      await page.locator('aside button[aria-label^="Organization"]').click();
+      await page.getByRole("menuitem", { name: "Outbound" }).click();
+      await page.waitForURL(new RegExp(`/projects/${outbound.id}/agents$`));
+      await page.goBack();
+      await page.waitForURL(new RegExp(`/projects/${first}/agents$`));
+
+      // A project of another organization is an absence, in the API's own
+      // words, with a way back to one this membership holds.
+      await page.goto(`${origin}/projects/prj_01ELSEWHERES0MEB0DYELSE/agents`);
+      await page.waitForSelector("text=Not available here");
+      expect(await page.innerText("main")).toContain(
+        "available to this organization",
+      );
+
+      await other.close();
     },
     SETTLE,
   );
@@ -718,9 +795,7 @@ describe("the list of what an organization recorded", () => {
   it(
     "opens on the last day, and shows the exchange the agent just had",
     async () => {
-      // The root address has no separate home page. It opens transcripts.
-      await page.goto(`${origin}/`);
-      await page.waitForURL(/\/traces$/);
+      await page.goto(`${origin}/traces`);
 
       await page.waitForSelector("table");
       const shown = await page.innerText("main");
@@ -1110,8 +1185,8 @@ describe("the saved theme", () => {
       await page.reload();
 
       expect(await page.locator("html").getAttribute("data-theme")).toBe("light");
-      const settings = page.locator('aside summary[aria-label="Open settings menu"]');
-      await settings.click();
+      const account = page.locator('aside button[aria-label^="Account"]');
+      await account.click();
       const controls = page.getByRole("switch", { name: "Dark theme" });
       await expect.poll(() => controls.count()).toBe(1);
       await page.locator("aside").getByRole("switch", { name: "Dark theme" }).click();
@@ -1122,7 +1197,7 @@ describe("the saved theme", () => {
 
       await page.reload();
       expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");
-      await page.locator('aside summary[aria-label="Open settings menu"]').click();
+      await page.locator('aside button[aria-label^="Account"]').click();
       await expect
         .poll(() => page.locator("aside").getByRole("switch", { name: "Dark theme" }).getAttribute("aria-checked"))
         .toBe("true");

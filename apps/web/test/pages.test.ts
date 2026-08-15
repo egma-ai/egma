@@ -22,7 +22,6 @@ import {
   DEFAULT_PROJECT_NAME,
   organizationNameFromEmail,
 } from "../lib/signup-defaults.ts";
-import { pickers } from "../lib/me.ts";
 
 /**
  * The two things the pages decide for themselves, and one thing about where
@@ -62,46 +61,6 @@ describe("the names the signup form offers", () => {
       );
     }
     expect(DEFAULT_PROJECT_NAME).toBe(API_DEFAULT_PROJECT_NAME);
-  });
-});
-
-describe("a level with one thing in it", () => {
-  const one = {
-    user: { id: "usr_1", email: "ada@acme.example" },
-    organizations: [
-      { id: "org_1", name: "Acme", slug: "acme", role: "admin" },
-    ],
-    projects: [{ id: "prj_1", name: "Default", slug: "default" }],
-  };
-
-  it("is not a choice, so neither picker is shown", () => {
-    expect(pickers(one)).toEqual({ organization: false, project: false });
-  });
-
-  it("becomes a choice the moment there are two", () => {
-    expect(
-      pickers({
-        ...one,
-        projects: [...one.projects, { id: "prj_2", name: "Outbound", slug: "outbound" }],
-      }),
-    ).toEqual({ organization: false, project: true });
-
-    expect(
-      pickers({
-        ...one,
-        organizations: [
-          ...one.organizations,
-          { id: "org_2", name: "Globex", slug: "globex", role: "admin" },
-        ],
-      }),
-    ).toEqual({ organization: true, project: false });
-  });
-
-  it("shows nothing at all when somebody has landed nowhere", () => {
-    expect(pickers({ ...one, organizations: [], projects: [] })).toEqual({
-      organization: false,
-      project: false,
-    });
   });
 });
 
@@ -276,7 +235,7 @@ describe("the pages", () => {
   it("give a signed-in person somewhere to sign out, at a path this instance rewrites", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
     const home = await readFile(path.join(WEB, "app/page.tsx"), "utf8");
-    const shell = await readFile(path.join(WEB, "app/ui.tsx"), "utf8");
+    const shell = await readFile(path.join(WEB, "ui/shell.tsx"), "utf8");
 
     expect(rewrites).toContain("/api/sign-out");
     expect(shell).toContain('fetch("/api/sign-out"');
@@ -292,7 +251,7 @@ describe("the pages", () => {
    * has explicitly said that the session is gone.
    */
   it("keep the application shell while signed-in page data settles", async () => {
-    const shell = await readFile(path.join(WEB, "app/ui.tsx"), "utf8");
+    const shell = await readFile(path.join(WEB, "ui/shell.tsx"), "utf8");
     const members = await readFile(
       path.join(WEB, "app/members/page.tsx"),
       "utf8",
@@ -308,8 +267,8 @@ describe("the pages", () => {
     const root = await readFile(path.join(WEB, "app/page.tsx"), "utf8");
     expect(shell).toContain("export function ProductStatePage");
     expect(members).toContain("<ProductStatePage");
-    expect(transcript).toContain('<ProductStatePage active="transcripts"');
-    expect(run).toContain('<ProductStatePage active="transcripts"');
+    expect(transcript).toContain("<ProductStatePage");
+    expect(run).toContain("<ProductStatePage");
     expect(root).toContain('<ProductStatePage');
     expect(root).not.toContain("<StatePage");
     expect(members).not.toContain(
@@ -375,15 +334,17 @@ describe("the pages", () => {
 });
 
 describe("coming back after signing in", () => {
-  it("opens the transcript list by default", async () => {
+  it("goes to the entrance, which opens Agents under the first project", async () => {
     const signIn = await readFile(path.join(WEB, "app/sign-in/page.tsx"), "utf8");
     const signup = await readFile(path.join(WEB, "app/signup/page.tsx"), "utf8");
     const invite = await readFile(path.join(WEB, "app/invite/page.tsx"), "utf8");
 
-    expect(DEFAULT_SIGNED_IN_PATH).toBe("/traces");
+    // The root, because none of these three pages can know which project
+    // somebody is in — an invitation link and a fresh sign-in both arrive with
+    // nothing. The entrance chooses it once and puts it in the address.
+    expect(DEFAULT_SIGNED_IN_PATH).toBe("/");
     for (const page of [signIn, signup, invite]) {
       expect(page).toContain("DEFAULT_SIGNED_IN_PATH");
-      expect(page).not.toContain('window.location.assign("/")');
     }
   });
 

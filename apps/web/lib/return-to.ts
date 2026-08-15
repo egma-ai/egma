@@ -34,5 +34,12 @@ export function returnPathIn(search: string): string | null {
   return safeReturnPath(new URLSearchParams(search).get("next"));
 }
 
-/** The first real product page after authentication. */
-export const DEFAULT_SIGNED_IN_PATH = "/traces";
+/**
+ * Where a person lands after authenticating: the entrance, which chooses the
+ * project and sends them to its Agents page.
+ *
+ * It is the root rather than a product address because these pages are reached
+ * before there is any way to know which project somebody is in — an invitation
+ * link and a fresh sign-in both arrive with nothing.
+ */
+export const DEFAULT_SIGNED_IN_PATH = "/";

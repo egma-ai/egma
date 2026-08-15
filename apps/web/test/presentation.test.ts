@@ -2,11 +2,7 @@ import { readFile } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
 
-import {
-  nextTheme,
-  PRODUCT_NAVIGATION,
-  themeFromStored,
-} from "../lib/presentation.ts";
+import { nextTheme, themeFromStored } from "../lib/presentation.ts";
 
 describe("the visual theme", () => {
   it("starts light when no choice was stored", () => {
@@ -28,13 +24,5 @@ describe("the shared form controls", () => {
     expect(css).toMatch(
       /select, ::picker\(select\) \{ appearance: base-select; align-items: center; \}/,
     );
-  });
-});
-
-describe("the product navigation", () => {
-  it("names only pages that exist", () => {
-    expect(PRODUCT_NAVIGATION).toEqual([
-      { id: "transcripts", label: "Transcripts", href: "/traces" },
-    ]);
   });
 });

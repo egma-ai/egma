@@ -1,7 +1,11 @@
 import { listProjects, type AuthContext } from "@egma/db";
 import type { FastifyReply } from "fastify";
 
-import { invalid, notPermitted } from "./refusals.ts";
+import {
+  projectOutsideOrganization,
+  sendRefusal,
+  type RefusalCode,
+} from "./refusals.ts";
 
 /**
  * Which project a request acts in, resolved from the credential and from what
@@ -58,7 +62,7 @@ export const NAME_THE_PROJECT =
  */
 export type ActingRefusal = {
   readonly refusal: string;
-  readonly code: "not_permitted" | "invalid_request";
+  readonly code: RefusalCode;
 };
 
 export type Acting = { readonly auth: AuthContext } | ActingRefusal;
@@ -109,6 +113,12 @@ export async function resolveNamedProject(
   named: string,
   wording: ProjectWording,
 ): Promise<Acting> {
+  // A browser is answered by `browserProject` below, whose rule is the
+  // membership's rather than the credential's. The branch is here rather than
+  // at each call site so that every route group a page reaches gets the one
+  // rule, and a group added later cannot get the other one by omission.
+  if (auth.via === "session") return browserProject(auth, named);
+
   if (auth.projectId !== undefined) {
     return named === auth.projectId
       ? { auth }
@@ -122,6 +132,41 @@ export async function resolveNamedProject(
   return projects.some((project) => project.id === named)
     ? { auth: { ...auth, projectId: named } }
     : { refusal: wording.outsideOrganization(named), code: "not_permitted" };
+}
+
+/**
+ * The project a **browser** request works in: the one its address names,
+ * checked against the organization the session resolved to.
+ *
+ * **A session's project is a default, not a scope**, and that is the whole
+ * distinction from a key. Every member of an organization holds their
+ * organization role on every project in it, so naming a sibling project is
+ * what the selector does on every click — while a key minted for one project
+ * is bounded by it, and reaching a sibling with one is the refusal above.
+ * Widening a key by reusing this rule is the one thing that must never
+ * happen, so the two rules are two functions and the caller cannot pass a flag
+ * to swap them.
+ *
+ * **The project comes off the address on every request, and nothing here
+ * remembers one.** Two tabs on two projects are ordinary, and neither can be
+ * right if the server keeps a chosen project per session. The organization
+ * still comes from the credential and from nowhere else, so naming a project
+ * can only ever pick among what this membership already reaches.
+ *
+ * A project outside the organization is an absence rather than a denial —
+ * `projectOutsideOrganization` says why.
+ */
+export async function browserProject(
+  auth: AuthContext,
+  named: string,
+): Promise<Acting> {
+  const projects = await listProjects(auth);
+  return projects.some((project) => project.id === named)
+    ? { auth: { ...auth, projectId: named } }
+    : {
+        refusal: projectOutsideOrganization(named),
+        code: "project_outside_organization",
+      };
 }
 
 /**
@@ -163,12 +208,10 @@ export async function actingIn(
     : resolveNamedProject(auth, named, ACTING_WORDING);
 }
 
-/** The two ways a project can fail to resolve, each answered as what it is. */
+/** However a project failed to resolve, answered as what it is. */
 export function refuseActing(
   reply: FastifyReply,
   acting: ActingRefusal,
 ): FastifyReply {
-  return acting.code === "not_permitted"
-    ? notPermitted(reply, acting.refusal)
-    : invalid(reply, acting.refusal);
+  return sendRefusal(reply, acting.code, acting.refusal);
 }

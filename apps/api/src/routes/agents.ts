@@ -277,9 +277,7 @@ function projectOutsideOrganization(projectId: string): Refusal {
 
 /** An acting.ts answer, carried into this group's tagged-value flow. */
 function refusalOf(acting: ActingRefusal): Refusal {
-  return acting.code === "not_permitted"
-    ? notPermitted(acting.refusal)
-    : invalid(acting.refusal);
+  return { refused: true, error: acting.code, message: acting.refusal };
 }
 
 /**
