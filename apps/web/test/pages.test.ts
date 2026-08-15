@@ -7,6 +7,7 @@ import {
   DEFAULT_PROJECT_NAME as API_DEFAULT_PROJECT_NAME,
   organizationNameFromEmail as apiOrganizationNameFromEmail,
 } from "../../api/src/auth/naming.ts";
+import { safeReturnPath as apiSafeReturnPath } from "../../api/src/auth/password-reset.ts";
 import { CODES } from "../../api/src/http/refusals.ts";
 import {
   NOTHING_TO_HEAR,
@@ -264,16 +265,18 @@ describe("the pages", () => {
     expect(files).toContain("app/reset-password/page.tsx");
 
     const signIn = await readFile(path.join(WEB, "app/sign-in/page.tsx"), "utf8");
-    expect(signIn).toContain('href="/forgot-password"');
+    expect(signIn).toContain("/forgot-password");
   });
 
   /**
-   * Spent, expired and never-minted are three different things and each says so.
-   * A spent link means you already did this — sign in; an expired one means
-   * nothing happened at all — ask for another. Sharing a sentence would send
-   * half the people holding one exactly the wrong way.
+   * Spent, expired, never-minted and too-old-to-tell are four different things
+   * and each says so. A spent link means you already did this — sign in; an
+   * expired one means nothing happened at all — ask for another; and one too old
+   * for the API to tell which means both are still possible. Sharing a sentence
+   * would send half the people holding one exactly the wrong way, and worst of
+   * all for the fourth, where not even egma knows which half.
    */
-  it("say which of the three a dead reset link is", async () => {
+  it("say which of the four a dead reset link is", async () => {
     const reset = await readFile(
       path.join(WEB, "app/reset-password/page.tsx"),
       "utf8",
@@ -281,9 +284,84 @@ describe("the pages", () => {
 
     expect(reset).toContain("reset_link_expired");
     expect(reset).toContain("reset_link_already_used");
+    expect(reset).toContain("reset_link_no_longer_works");
     expect(reset).toContain("no_such_reset_link");
     expect(reset).toContain("has run out of time");
     expect(reset).toContain("has already been used");
+    expect(reset).toContain("no longer works");
+  });
+
+  /**
+   * **The page never says a thing the API did not check.**
+   *
+   * "Your old password still works" is true of a link that ran out of time
+   * unused and false of one somebody already reset with — and the API can only
+   * tell which while the auth provider still holds a record of the token. So
+   * that reassurance belongs to `reset_link_expired`, which the API writes only
+   * after asking, and must never appear under the code that means it could not
+   * tell.
+   */
+  it("keep the reassurance on the one refusal that was actually checked", async () => {
+    const reset = await readFile(
+      path.join(WEB, "app/reset-password/page.tsx"),
+      "utf8",
+    );
+
+    const tooOld = reset.slice(reset.indexOf('"reset_link_no_longer_works"'));
+    expect(tooOld).not.toContain("old password still works");
+    expect(tooOld).not.toContain("Nothing has changed");
+    expect(tooOld).toMatch(/whether it was used/i);
+  });
+
+  /**
+   * Where somebody was going survives a reset, all the way through the message.
+   *
+   * A developer approving a terminal's login who turns out to have forgotten
+   * their password has to land back on the approval page. The sign-in page
+   * carries the destination to the form, the form sends it to the API, the API
+   * writes it into the link, and the page behind the link carries it on to
+   * sign-in. Any one of those dropping it leaves a terminal waiting on a person
+   * who is looking at the wrong page.
+   */
+  it("carry where somebody was going through a reset, and not only up to it", async () => {
+    const signIn = await readFile(path.join(WEB, "app/sign-in/page.tsx"), "utf8");
+    const forgot = await readFile(
+      path.join(WEB, "app/forgot-password/page.tsx"),
+      "utf8",
+    );
+    const reset = await readFile(
+      path.join(WEB, "app/reset-password/page.tsx"),
+      "utf8",
+    );
+
+    expect(signIn).toContain('withReturnTo("/forgot-password", returnTo)');
+    // Sent to the API, which is the only thing that can write it into the link.
+    expect(forgot).toContain("next: returnTo");
+    // And read back off the link the message carried.
+    expect(reset).toContain("returnPathIn(window.location.search)");
+    expect(reset).toContain('withReturnTo("/sign-in", returnTo)');
+  });
+
+  /**
+   * And the rule that keeps it from being a way off this instance is one rule,
+   * written twice because the two halves cannot import each other: the API
+   * refuses anything else before it writes a link, and the page refuses it
+   * again before it follows one. Two copies of a security rule are worth having
+   * only while something checks they still say the same thing.
+   */
+  it("agree with the API about what a return path may be", async () => {
+    for (const raw of [
+      "/device/approve?code=WDJB",
+      "/traces",
+      "https://elsewhere.example/x",
+      "//elsewhere.example/x",
+      "/\\elsewhere.example",
+      "javascript:alert(1)",
+      "  /device  ",
+      "",
+    ]) {
+      expect(safeReturnPath(raw), raw).toBe(apiSafeReturnPath(raw));
+    }
   });
 
   it("reach the API for a password reset at paths this instance rewrites", async () => {

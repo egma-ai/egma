@@ -42,14 +42,23 @@ export const PASSWORD_RESET_LIFETIME_MINUTES = 60;
  *
  * There are two deadlines because there are two systems, and **they are set
  * deliberately apart so that they can never disagree about which refusal a
- * person is owed**. Egma's is the one that decides; the provider's is a backstop
- * that is always later, so a link that is past its time is refused here by name
- * and never reaches the provider to come back as the wrong sentence.
+ * person is owed**. Egma's is the one that decides, and it is the only one any
+ * caller can reach: the provider's own reset endpoint is shut at egma's door,
+ * so the hour named above is the hour a link actually lasts, everywhere. See
+ * `routes/password-reset.ts`.
  *
- * Reading the pair the other way round is what makes the refusal sound: inside
- * egma's deadline, the provider only ever refuses a token it has already
- * consumed — so *the provider refused a live link* means, exactly, that the link
- * was spent.
+ * The extra minutes do two jobs, and neither is about letting anybody in later:
+ *
+ * **They keep the spent-link inference sound.** Inside egma's deadline the
+ * provider cannot be refusing over its own clock, so *the provider refused a
+ * live link* means, exactly, that the link was spent.
+ *
+ * **They leave the provider's record readable after egma stops honouring the
+ * link.** A token the provider still holds is a token nobody spent; one it no
+ * longer holds is one somebody did. That is the only way egma can tell an
+ * expired link from a used one *past* its own deadline without keeping a second
+ * record of its own — and past this window it stops being able to, which is a
+ * sentence the route has to be willing to write.
  */
 export const PASSWORD_RESET_PROVIDER_GRACE_MINUTES = 10;
 
@@ -57,12 +66,45 @@ export const PASSWORD_RESET_PROVIDER_GRACE_MINUTES = 10;
 export const PASSWORD_RESET_PROVIDER_LIFETIME_SECONDS =
   (PASSWORD_RESET_LIFETIME_MINUTES + PASSWORD_RESET_PROVIDER_GRACE_MINUTES) * 60;
 
+/**
+ * How much of the grace is deliberately not counted on.
+ *
+ * The two deadlines are stamped moments apart — the provider stamps its own as
+ * it mints the token, egma stamps its own as the message for that token is
+ * built — so the provider's expiry falls a shade *before* egma's plus the
+ * grace, never after. This is that shade, made enormous: what it has to cover
+ * is one row's insert, and a minute is longer than that by every measure a
+ * machine has.
+ *
+ * It is here because a missing record is only evidence while the record would
+ * certainly still have been there.
+ */
+const PROVIDER_RECORD_MARGIN_MINUTES = 1;
+
 export type ResetLink = {
   /** The provider's own single-use token, which is what opens the account. */
   readonly token: string;
   /** When egma stops honouring it, whatever the provider still thinks. */
   readonly expiresAt: Date;
 };
+
+/**
+ * Whether the provider's record of this link would certainly still be there.
+ *
+ * **This is what decides whether egma may read anything into the provider's
+ * silence.** Inside the window, a token the provider no longer knows is a token
+ * somebody spent, and saying so is a fact. Outside it, the record has expired on
+ * its own and a missing one means nothing — the link was used, or it was not,
+ * and egma cannot tell which. A route that read the second case as the first
+ * would tell somebody their password still works when it no longer does.
+ */
+export function providerRecordSurvives(link: ResetLink, now: Date): boolean {
+  const survivesUntil =
+    link.expiresAt.getTime() +
+    (PASSWORD_RESET_PROVIDER_GRACE_MINUTES - PROVIDER_RECORD_MARGIN_MINUTES) *
+      60_000;
+  return now.getTime() < survivesUntil;
+}
 
 function signature(payload: string, secret: string): string {
   return createHmac("sha256", secret)
@@ -113,12 +155,52 @@ export function openResetLink(
 }
 
 /**
+ * Where the return path rides from egma's own route to the message.
+ *
+ * A header on the request egma builds for the provider, never one a caller
+ * sent: the relay writes that request from scratch and copies no headers in,
+ * so this cannot be set from outside.
+ */
+export const RETURN_TO_HEADER = "x-egma-return-to";
+
+/**
+ * A path on this instance, or nothing.
+ *
+ * Somebody who was approving a terminal's login when they discovered they had
+ * forgotten their password has somewhere to be sent back to, and that place has
+ * to survive the message: the link opens a fresh tab, often minutes later, so
+ * nothing the first page was holding is still around to remember it.
+ *
+ * So the return path travels in the link — which makes it a redirect decided by
+ * a query parameter, the shape of every open-redirect bug there has ever been,
+ * and this is the rule that stops it being one. One leading slash and no second:
+ * `//elsewhere.example/x` is a URL a browser reads as another host, and a
+ * backslash is refused too because some browsers have historically read it as a
+ * slash. The web application applies the same rule again before it follows one.
+ */
+export function safeReturnPath(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const path = raw.trim();
+  if (!path.startsWith("/")) return null;
+  if (path.startsWith("//") || path.startsWith("/\\")) return null;
+  return path;
+}
+
+/**
  * Where a link points.
  *
  * The instance's own origin, always — the same rule the invitation link and the
  * login pages are held to. Somebody resetting a password on a self-hosted egma
  * is sent to the machine their team runs, and never to a domain egma runs.
  */
-export function passwordResetLink(baseUrl: string, sealed: string): string {
-  return `${baseUrl}/reset-password?token=${encodeURIComponent(sealed)}`;
+export function passwordResetLink(
+  baseUrl: string,
+  sealed: string,
+  returnTo?: string | null,
+): string {
+  // Checked here as well as where it was taken in, because this is the last
+  // place before it is written into a message somebody will click.
+  const back = safeReturnPath(returnTo);
+  const carried = back === null ? "" : `&next=${encodeURIComponent(back)}`;
+  return `${baseUrl}/reset-password?token=${encodeURIComponent(sealed)}${carried}`;
 }

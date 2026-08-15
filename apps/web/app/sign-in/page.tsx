@@ -93,8 +93,19 @@ export default function SignInPage() {
         </button>
       </form>
 
+      {/* Carrying where they were headed, exactly as the signup link does.
+          Somebody sent here by a terminal's approval page who turns out to have
+          forgotten their password is still on their way to that page. */}
       <p className={styles.linkLine}>
-        <a href="/forgot-password">Forgot your password?</a>
+        <a
+          href={
+            returnTo === null
+              ? "/forgot-password"
+              : withReturnTo("/forgot-password", returnTo)
+          }
+        >
+          Forgot your password?
+        </a>
       </p>
 
       <p className={styles.linkLine}>

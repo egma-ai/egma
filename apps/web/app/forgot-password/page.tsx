@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import { returnPathIn, withReturnTo } from "../../lib/return-to.ts";
 import { AuthShell, Field, Notice, StatePage, styles } from "../ui.tsx";
 
 /**
@@ -15,12 +16,24 @@ import { AuthShell, Field, Notice, StatePage, styles } from "../ui.tsx";
  * Where the link then arrives is the deployment's own business and not a second
  * setting: a platform with mail configured posts it, and one without writes the
  * whole message to its log, which is where a solo self-hoster reads it.
+ *
+ * **Where the person was headed is sent along with the address.** Somebody who
+ * got here from a terminal's approval page has to end up back on it, and the
+ * message is the one hop no page survives — it opens a fresh tab, minutes
+ * later. So the API is told, and it writes the destination into the link it
+ * sends.
  */
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [asked, setAsked] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  /** Somebody sent here by a terminal's approval page goes back to it. */
+  const [returnTo, setReturnTo] = useState<string | null>(null);
+
+  useEffect(() => {
+    setReturnTo(returnPathIn(window.location.search));
+  }, []);
 
   async function submit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
@@ -30,7 +43,9 @@ export default function ForgotPasswordPage() {
       const response = await fetch("/api/password-reset", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify(
+          returnTo === null ? { email } : { email, next: returnTo },
+        ),
       });
       if (response.ok) {
         setAsked(true);
@@ -55,7 +70,14 @@ export default function ForgotPasswordPage() {
       >
         <p className={styles.linkLine}>
           Nothing arrived? On an egma with no mail configured the message is
-          written to the platform's log instead. <a href="/sign-in">Sign in</a>{" "}
+          written to the platform's log instead.{" "}
+          <a
+            href={
+              returnTo === null ? "/sign-in" : withReturnTo("/sign-in", returnTo)
+            }
+          >
+            Sign in
+          </a>{" "}
           once the password is set.
         </p>
       </StatePage>
@@ -90,7 +112,15 @@ export default function ForgotPasswordPage() {
       </form>
 
       <p className={styles.linkLine}>
-        Remembered it? <a href="/sign-in">Sign in</a>.
+        Remembered it?{" "}
+        <a
+          href={
+            returnTo === null ? "/sign-in" : withReturnTo("/sign-in", returnTo)
+          }
+        >
+          Sign in
+        </a>
+        .
       </p>
     </AuthShell>
   );

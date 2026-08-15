@@ -903,12 +903,24 @@ whole message — link included — is written to the platform's log, exactly wh
 an invitation's link comes back to whoever sent it, so a solo install still lets
 you back in.
 
-- The link works **once**, and runs out an hour after you asked for it.
+**Know what that means before you run an egma with no mail and a log other
+people can read.** An invitation's link creates an account; a reset link takes
+over one that already exists, an admin's included. Whoever can read the
+platform's log for the next hour can follow one. On a solo install that is you,
+which is the whole point of the arrangement — but a shipped log drain or a
+`docker compose logs` a colleague can run is a way into every account on the
+instance, so set `EGMA_SMTP_URL` before there is a second person to keep out.
+
+- The link works **once**, and runs out an hour after you asked for it. That
+  hour is the whole of it: there is one door, and it is egma's.
 - A link already used and a link out of time are refused with **different**
   messages, because one means you already did this and the other means nothing
-  happened at all.
+  happened at all. A link old enough that egma can no longer tell which of the
+  two it is gets a third message saying exactly that, rather than a guess at
+  one of them.
 - Asking about an address with no account here is answered exactly as one with
-  an account, so the form never says who holds an account on this egma.
+  an account — same status, same words, and the same length of wait — so the
+  form never says who holds an account on this egma.
 
 ## Reading and writing data
 

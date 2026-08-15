@@ -11,6 +11,7 @@ import {
   sealResetLink,
   PASSWORD_RESET_LIFETIME_MINUTES,
   PASSWORD_RESET_PROVIDER_LIFETIME_SECONDS,
+  RETURN_TO_HEADER,
 } from "./password-reset.ts";
 import {
   SignupRefusedError,
@@ -262,6 +263,36 @@ export function createIdentity(options: IdentityOptions): Identity {
         // referencing row, so two formats would be two formats forever.
         generateId: ({ model }) => identityId(model),
       },
+
+      /**
+       * Work the answer must not wait for, and **the reason it must not is
+       * that waiting is itself an answer.**
+       *
+       * The provider defers exactly the kind of work whose duration gives
+       * something away, and with nowhere to defer it to it simply waits
+       * instead. Asking for a password reset is the case that matters: for an
+       * address nobody holds the provider answers immediately, and for one
+       * somebody does it first posts a message — a quarter of a second to reach
+       * an SMTP server. The two answers are byte for byte identical and one of
+       * them takes twenty times longer, so one unauthenticated request tells a
+       * stranger who has an account here. That is the one thing the reset flow
+       * promises not to say.
+       *
+       * So the message is handed over and the answer goes back. What is left on
+       * the path is a row read and a row written, which is what the provider
+       * already evens out on purpose.
+       *
+       * Nothing is dropped: the provider hands over a promise that already
+       * carries its own failure handling, and a send that fails is written to
+       * the log this instance keeps rather than to a person who is waiting.
+       */
+      backgroundTasks: {
+        handler: (task) => {
+          void Promise.resolve(task).catch((cause: unknown) => {
+            options.log("error", "a background task did not finish", [cause]);
+          });
+        },
+      },
     },
 
     emailAndPassword: {
@@ -272,10 +303,12 @@ export function createIdentity(options: IdentityOptions): Identity {
       autoSignIn: true,
 
       // The provider's own copy of the deadline, and always the later of the
-      // two. Egma's travels inside the link and is the one that decides, so a
-      // link past its time is refused by name rather than coming back from here
-      // as `Invalid token` — which is also the word for a link already spent.
-      // See `password-reset.ts`.
+      // two. Egma's travels inside the link and is the one that decides — and
+      // the only one anything can reach, because the provider's own reset
+      // endpoint is shut at egma's door. What the extra minutes are for is a
+      // record that outlives the link: a token the provider still holds is a
+      // token nobody spent, which is how a refusal past the deadline knows
+      // which of the two true sentences to write. See `password-reset.ts`.
       resetPasswordTokenExpiresIn: PASSWORD_RESET_PROVIDER_LIFETIME_SECONDS,
 
       /**
@@ -292,8 +325,17 @@ export function createIdentity(options: IdentityOptions): Identity {
        * on it; egma sends a link to its own page carrying the token and the
        * deadline sealed together, so the refusals behind it can say which of
        * the two things happened.
+       *
+       * **Where to go afterwards travels on the request egma built**, in a
+       * header of egma's own. Somebody who was approving a terminal's login
+       * when they discovered they had forgotten their password has to land back
+       * on that page, and the message is the one hop nothing else survives: a
+       * new tab, minutes later, with no page left holding it. The provider's
+       * body has no field for it and widening what egma asks the provider for
+       * is the cost this seam exists to avoid — so it travels beside the
+       * request, exactly as the names a person chose at signup do.
        */
-      sendResetPassword: async ({ user, token }) => {
+      sendResetPassword: async ({ user, token }, request) => {
         const link = passwordResetLink(
           options.baseUrl,
           sealResetLink(
@@ -305,6 +347,7 @@ export function createIdentity(options: IdentityOptions): Identity {
             },
             options.secret,
           ),
+          request?.headers.get(RETURN_TO_HEADER),
         );
 
         await options.emailSender.send({
