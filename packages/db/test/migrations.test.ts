@@ -2274,7 +2274,7 @@ describe("the agent and connection lifecycle over installed data (0025)", () => 
 
 /**
  * A test says which agents it applies to, over a database that already holds
- * tests (0027).
+ * tests (0028).
  *
  * **This is the migration whose generated body would have been wrong**, and the
  * two ways it would have been wrong are what this block is for. `ADD COLUMN …
@@ -2287,7 +2287,7 @@ describe("the agent and connection lifecycle over installed data (0025)", () => 
  * archived themselves. Every one of those is a row the backfill has to treat
  * differently, and an empty database can prove none of it.
  */
-describe("tests gaining applicable agents over installed data (0027)", () => {
+describe("tests gaining applicable agents over installed data (0028)", () => {
   let database: EmptyDatabase;
   let before: string;
   let client: pg.Client;
@@ -2315,9 +2315,9 @@ describe("tests gaining applicable agents over installed data (0027)", () => {
   beforeAll(async () => {
     database = await createEmptyDatabase("tests_apply_to_agents");
 
-    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0027-"));
+    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0028-"));
     for (const migration of await readMigrations()) {
-      if (migration.name < "0027") {
+      if (migration.name < "0028") {
         await writeFile(path.join(before, migration.name), migration.sql);
       }
     }
@@ -2333,9 +2333,11 @@ describe("tests gaining applicable agents over installed data (0027)", () => {
       [staffed, "staffed"],
       [bare, "bare"],
     ] as const) {
+      // 0027 has already run, so a project carries a live revision of its own.
       await client.query(
-        "insert into project (id, organization_id, name, slug) values ($1, $2, $3, $3)",
-        [id, organizationId, slug],
+        `insert into project (id, organization_id, name, slug, revision)
+         values ($1, $2, $3, $3, $4)`,
+        [id, organizationId, slug, newId("rev")],
       );
     }
 
@@ -2385,9 +2387,9 @@ describe("tests gaining applicable agents over installed data (0027)", () => {
 
   it("is what is still pending on a database that already holds tests", async () => {
     const upgrade = (await readMigrations()).find((migration) =>
-      migration.name.startsWith("0027_"),
+      migration.name.startsWith("0028_"),
     );
-    if (upgrade === undefined) throw new Error("0027 is missing");
+    if (upgrade === undefined) throw new Error("0028 is missing");
     await writeFile(path.join(before, upgrade.name), upgrade.sql);
 
     const { applied } = await runMigrations(database.url, before);

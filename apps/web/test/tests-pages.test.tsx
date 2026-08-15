@@ -294,6 +294,11 @@ describe("writing a test", () => {
       target: { value: "confirms the new time" },
     });
 
+    // The agents this project offers, waited for rather than assumed: the
+    // sentence asserted below is the one shown when there *are* agents and none
+    // is chosen, and a project still waiting on that read shows a different one.
+    const choice = await screen.findByLabelText("Front desk");
+
     // The platform refuses a test with no target, so the form asks for one
     // rather than letting somebody meet that refusal after writing everything.
     expect(
@@ -303,7 +308,7 @@ describe("writing a test", () => {
       screen.getByText(/Every test must apply to at least one active agent/u),
     ).toBeTruthy();
 
-    fireEvent.click(screen.getByLabelText("Front desk"));
+    fireEvent.click(choice);
 
     await waitFor(() => {
       expect(
@@ -324,7 +329,7 @@ describe("writing a test", () => {
     fireEvent.change(screen.getByLabelText("Scenario"), {
       target: { value: "Anything at all." },
     });
-    fireEvent.click(screen.getByLabelText("Front desk"));
+    fireEvent.click(await screen.findByLabelText("Front desk"));
 
     expect(
       screen.getByText(/A test needs at least one expected behavior/u),
@@ -347,7 +352,7 @@ describe("writing a test", () => {
     fireEvent.change(screen.getByLabelText("Expected behavior 1"), {
       target: { value: "mentions the weather" },
     });
-    fireEvent.click(screen.getByLabelText("Front desk"));
+    fireEvent.click(await screen.findByLabelText("Front desk"));
     fireEvent.change(
       screen.getByLabelText("Priority of expected behavior 1"),
       { target: { value: "P2" } },
@@ -375,7 +380,7 @@ describe("writing a test", () => {
     fireEvent.change(screen.getByLabelText("Expected behavior 1"), {
       target: { value: "first" },
     });
-    fireEvent.click(screen.getByLabelText("Front desk"));
+    fireEvent.click(await screen.findByLabelText("Front desk"));
     fireEvent.click(
       screen.getByRole("button", { name: "Add an expected behavior" }),
     );
@@ -492,7 +497,7 @@ describe("one test's page", () => {
     detail("admin", testRow(), [agentRow(), agentRow({ id: "agt_2", name: "Weekend desk" })]);
     await screen.findByLabelText("Weekend desk");
 
-    fireEvent.click(screen.getByLabelText("Weekend desk"));
+    fireEvent.click(await screen.findByLabelText("Weekend desk"));
     fireEvent.click(
       screen.getByRole("button", { name: "Save applicable agents" }),
     );
@@ -514,7 +519,7 @@ describe("one test's page", () => {
     detail();
     await screen.findByLabelText("Front desk");
 
-    fireEvent.click(screen.getByLabelText("Front desk"));
+    fireEvent.click(await screen.findByLabelText("Front desk"));
 
     expect(
       screen
@@ -736,7 +741,7 @@ describe("one test's page", () => {
       screen.getByText(/Archived during an upgrade/u),
     ).toBeTruthy();
 
-    fireEvent.click(screen.getByLabelText("Front desk"));
+    fireEvent.click(await screen.findByLabelText("Front desk"));
     fireEvent.click(screen.getByRole("button", { name: "Restore" }));
 
     await waitFor(() => {

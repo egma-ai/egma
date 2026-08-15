@@ -66,9 +66,13 @@ beforeAll(async () => {
     "tests_applicable_agents",
   ));
 
+  // Raw, because the fixture's own seeding is per organization and this file
+  // needs one extra project inside an organization it already made. A project
+  // carries a live revision of its own since 0027, so this writes one.
   await database.sql(
-    "insert into project (id, organization_id, name, slug) values ($1, $2, 'Bare', 'bare')",
-    [bare, acme.organization],
+    `insert into project (id, organization_id, name, slug, revision)
+     values ($1, $2, 'Bare', 'bare', $3)`,
+    [bare, acme.organization, newId("rev")],
   );
 });
 
