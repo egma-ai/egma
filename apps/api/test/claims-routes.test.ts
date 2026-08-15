@@ -1,7 +1,6 @@
 import {
   createPersona,
   getSimulation,
-  removeConnection,
 } from "@egma/db";
 import { specComplaints } from "@egma/simulation-contract";
 import { afterEach, describe, expect, it } from "vitest";
@@ -530,7 +529,7 @@ describe("a simulation the platform cannot hand over", () => {
     const { ada, key, agentId, connectionId, versionId } =
       await aCustomerReadyToRun("claims_skip");
 
-    // Two runs over two connections; one connection disappears before the
+    // Two runs over two connections; one connection stops resolving before the
     // claim, so one spec can be assembled and one cannot.
     const doomed = await aQueuedRun(key, connectionId, versionId);
     const registered = await ask(api.app, "POST", "/api/agents", key, {
@@ -540,7 +539,15 @@ describe("a simulation the platform cannot hand over", () => {
     const secondConnection = (registered.body.connection as { id: string }).id;
     const healthy = await aQueuedRun(key, secondConnection, versionId);
 
-    await removeConnection(contextFor(ada, "member"), agentId, connectionId);
+    // Marked archived in the row rather than through the Archive verb, on
+    // purpose: Archive settles the queue in the same transaction, so going
+    // through it would cancel the very simulation this test needs to reach the
+    // claim. What is under test is the claim door meeting a spec it cannot
+    // assemble, whatever left it that way.
+    await api.database.sql(
+      "update connection set archived_at = now() where id = $1",
+      [connectionId],
+    );
 
     const answered = await claim(api.config.simulatorServiceToken, {
       claimant: "sim-under-test",

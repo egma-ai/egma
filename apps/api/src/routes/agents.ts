@@ -1,18 +1,34 @@
 import {
   addConnection,
   AgentWriteRefusedError,
+  archiveAgent,
+  archiveConnection,
+  CAPABILITY_CATALOG,
+  capabilityStanding,
+  CapabilityCheckFailedError,
+  connectionTypeMetadata,
+  ConnectionRestoreRefusedError,
   getAgent,
+  getConnection,
+  IdentityConflictError,
   listAgents,
   listConnections,
+  NoCapabilityAdapterError,
   NotPermittedError,
   ProjectOutsideOrganizationError,
+  refreshConnectionCapabilities,
   registerAgent,
+  restoreAgent,
+  restoreConnection,
+  updateAgent,
+  updateConnection,
   type Agent,
   type AuthContext,
   type Connection,
   type ConnectionType,
   type Modality,
   type NewConnection,
+  type RestoreCredential,
 } from "@egma/db";
 import { isId } from "@egma/ids";
 import type { FastifyInstance, FastifyReply } from "fastify";
@@ -26,7 +42,11 @@ import {
 } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { CODES, type RefusalCode } from "../http/refusals.ts";
+import {
+  CODES,
+  identityConflict,
+  type RefusalCode,
+} from "../http/refusals.ts";
 
 /**
  * Registering an agent, reading it back, and attaching another way to reach it.
@@ -116,6 +136,77 @@ const NO_SUCH_AGENT: Refusal = {
     "GET /api/agents.",
 };
 
+/** The same answer, one level down: through the wrong agent, or not at all. */
+const NO_SUCH_CONNECTION: Refusal = {
+  refused: true,
+  error: "not_found",
+  message:
+    "no connection of yours has that id on that agent. Check both ids, or " +
+    "read the agent with GET /api/agents/{agentId}.",
+};
+
+/**
+ * What a Restore brings for the credential.
+ *
+ * Three words rather than a bare credential object, because "left out" has to
+ * be able to mean *I choose to have none* on the shapes where a credential is
+ * genuinely optional. A shape that took absence as its answer would leave the
+ * archived envelope in place for exactly one reading of the request, and that
+ * reading is the one this whole rule exists to make impossible.
+ */
+function restoreCredentialIn(
+  value: unknown,
+): RestoreCredential | undefined | Refusal {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return invalid(
+      'a credential choice is an object shaped { "choice": "replace", ' +
+        '"credentials": { … } } or { "choice": "clear" }',
+    );
+  }
+  const held = value as Body;
+  for (const key of Object.keys(held)) {
+    if (key !== "choice" && key !== "credentials") {
+      return invalid(
+        `a credential choice has no key "${key}"; it holds choice, credentials`,
+      );
+    }
+  }
+
+  if (held.choice === "clear") {
+    if (held.credentials !== undefined) {
+      return invalid(
+        "a credential choice of clear removes the stored credential, so it " +
+          "carries none. Send choice replace to put a new one in its place.",
+      );
+    }
+    return { choice: "clear" };
+  }
+
+  if (held.choice !== "replace") {
+    return invalid(
+      'a credential choice is "replace" or "clear", and this request said ' +
+        `${JSON.stringify(held.choice)}`,
+    );
+  }
+
+  if (
+    typeof held.credentials !== "object" ||
+    held.credentials === null ||
+    Array.isArray(held.credentials)
+  ) {
+    return invalid(
+      "a credential choice of replace carries the new credential under " +
+        "credentials",
+    );
+  }
+
+  return {
+    choice: "replace",
+    credentials: held.credentials as Readonly<Record<string, unknown>>,
+  };
+}
+
 /**
  * A body value that has to be text when it is there at all. Not the query
  * reader in `http/reading.ts` of the same shape and a near name — this one
@@ -163,6 +254,121 @@ function unknownKeyIn(
   }
   return undefined;
 }
+
+/**
+ * A query flag, read strictly. `true` and `false` and nothing else — a flag
+ * that quietly read "yes", "1" and an empty string as true would make
+ * `?archived` and `?archived=false` mean the same thing, and one of them is
+ * somebody asking for the archived half.
+ */
+function flagWhenGiven(
+  value: unknown,
+  named: string,
+): boolean | undefined | Refusal {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return invalid(`${named} is written as true or false`);
+}
+
+/** How many rows one page may hold, before the access layer's own ceiling. */
+const LARGEST_PAGE = 200;
+
+function boundedLimit(value: unknown): number | undefined | Refusal {
+  if (value === undefined || value === null || value === "") return undefined;
+  const asked = Number(value);
+  if (!Number.isInteger(asked) || asked < 1 || asked > LARGEST_PAGE) {
+    return invalid(
+      `limit is a whole number between 1 and ${LARGEST_PAGE}; a page is ` +
+        "carried on with next_cursor rather than made larger.",
+    );
+  }
+  return asked;
+}
+
+/**
+ * The revision an edit was written against, which a browser always sends.
+ *
+ * Compulsory here rather than in the access layer, and that is the split: the
+ * layer below makes the check impossible to get wrong, and this decides who has
+ * to make it. A terminal writing a rename has no editor to have gone stale, and
+ * demanding a revision there would turn every scripted change into two
+ * requests. A browser has a form somebody had open, and that is exactly the
+ * thing this protects.
+ */
+function revisionIn(body: Body, required: boolean): string | undefined | Refusal {
+  const given = textWhenGiven(body.expected_revision, "expected_revision");
+  if (isRefusal(given)) return given;
+  if (given === undefined && required) {
+    return {
+      refused: true,
+      error: "unprocessable",
+      message:
+        "this edit did not say which revision it was written against. Read " +
+        "the resource, then send the update with expected_revision set to " +
+        "the revision it names.",
+    };
+  }
+  return given;
+}
+
+/**
+ * The project a request about one agent acts in.
+ *
+ * **Every route that names an agent or a connection goes through this, reads
+ * included.** The reason is the session's default: a browser's context is built
+ * with the organization's *first* project in it, because that is all the door
+ * knows before a request names one. A route that then used the context as it
+ * found it would scope every read and every write to that first project — so
+ * somebody working in a second project would open an agent and be told there is
+ * no such agent, and, worse, an archive aimed at one project would be evaluated
+ * against another.
+ *
+ * The spec is explicit that this must not happen: project middleware validates
+ * the URL's project and adds it to the request, and the first project must
+ * never become the fixed authorization scope. `readingIn` and `writingIn` below
+ * are that validation, and they narrow only — the organization still comes from
+ * the credential, so naming a project can only ever pick among what this
+ * membership already reaches.
+ *
+ * It is also what keeps a plain fault out of the handler. `archiveAgent` and
+ * `restoreAgent` refuse a credential acting in no project, exactly as the
+ * grader, persona and mock-tool factories refuse their own project-scoped
+ * writes — and, exactly as there, the API resolves a project before calling, so
+ * the refusal is documentation of an invariant rather than a 500 waiting for an
+ * organization-wide key to find it.
+ */
+async function actingProject(
+  auth: AuthContext,
+  request: { readonly query?: unknown },
+  verb: "writes into" | "reads",
+): Promise<AuthContext | Refusal> {
+  const query = (request.query ?? {}) as Record<string, string | undefined>;
+  const named = textWhenGiven(query.project, "a project");
+  if (isRefusal(named)) return named;
+  return verb === "reads" ? readingIn(auth, named) : writingIn(auth, named);
+}
+
+/** Whether the caller is a browser, which is what makes a revision compulsory. */
+function fromBrowser(auth: AuthContext): boolean {
+  return auth.via === "session";
+}
+
+const AGENT_EDIT_KEYS = ["name", "description", "expected_revision"] as const;
+const ARCHIVE_KEYS = ["expected_revision"] as const;
+const AGENT_RESTORE_KEYS = ["expected_revision", "name"] as const;
+const CONNECTION_EDIT_KEYS = [
+  "name",
+  "environment",
+  "config",
+  "credentials",
+  "expected_revision",
+] as const;
+const CONNECTION_RESTORE_KEYS = [
+  "expected_revision",
+  "name",
+  "credential",
+] as const;
 
 const AGENT_KEYS = ["name", "description", "project", "connection"] as const;
 const CONNECTION_KEYS = [
@@ -225,13 +431,28 @@ function connectionIn(value: unknown): NewConnection | Refusal {
   };
 }
 
-/** An agent, as every read of one describes it. */
+/**
+ * An agent, as every read of one describes it.
+ *
+ * **The provider's half of an agent has no line here and never will.** Prompt,
+ * model and tools live at the provider, where egma cannot freeze them and has
+ * no business editing them; what egma owns is the name, the description and
+ * the identity every result accumulates against. A read that carried a copy of
+ * provider configuration would be a copy going stale from the moment it was
+ * taken, and an editor built on it would be egma quietly becoming a second
+ * place to configure an agent.
+ */
 function describedAgent(one: Agent): Record<string, unknown> {
   return {
     id: one.id,
     project_id: one.projectId,
     name: one.name,
     description: one.description,
+    // What an edit has to be written against. Absent from no read, so a client
+    // never has to make a second request to be able to make a first edit.
+    revision: one.revision,
+    archived: one.archivedAt !== null,
+    archived_at: one.archivedAt?.toISOString() ?? null,
     created_at: one.createdAt.toISOString(),
     updated_at: one.updatedAt.toISOString(),
   };
@@ -252,14 +473,52 @@ function describedConnection(one: Connection): Record<string, unknown> {
     project_id: one.projectId,
     name: one.name,
     type: one.type,
+    variant_id: one.variantId,
     modality: one.modality,
     topology: one.topology,
     environment: one.environment,
     config: one.config,
+    // Whether there is a credential at all, and the hint — never the secret,
+    // and never a blank field a serializer could one day be taught to fill.
+    credential_present: one.credentialsHint !== null,
     credentials_hint: one.credentialsHint,
-    capabilities: one.capabilities,
+    capabilities: describedCapabilities(one),
+    revision: one.revision,
+    archived: one.archivedAt !== null,
+    archived_at: one.archivedAt?.toISOString() ?? null,
     created_at: one.createdAt.toISOString(),
     updated_at: one.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * What is known about a target, said so that `unknown` can never be mistaken
+ * for `nothing is supported`.
+ *
+ * The state is always present and the evidence is present only with it. A
+ * client reading `state: "unknown"` knows to say so on screen and to offer
+ * Refresh; a client reading `state: "known"` with an empty list knows the
+ * target was measured and has none of these, which is a different sentence
+ * entirely.
+ */
+function describedCapabilities(one: Connection): Record<string, unknown> {
+  const held = one.capabilities;
+  return {
+    state: held.state,
+    // What the adapter looked at, beside what it found. Both, because a reader
+    // holding only the second cannot tell a settled absence from an unasked
+    // question — and `standing` below is the answer built from the pair, so a
+    // client never has to work the rule out for itself.
+    measured: held.state === "known" ? held.measured : null,
+    supported: held.state === "known" ? held.supported : null,
+    checked_at: held.state === "known" ? held.checkedAt.toISOString() : null,
+    source: held.state === "known" ? held.source : null,
+    standing: Object.fromEntries(
+      CAPABILITY_CATALOG.map((entry) => [
+        entry.key,
+        capabilityStanding(held, entry.key),
+      ]),
+    ),
   };
 }
 
@@ -347,6 +606,25 @@ async function readingIn(
   return isRefusal(project) ? project : { ...auth, projectId: project };
 }
 
+/**
+ * A permission's name, as a sentence says it.
+ *
+ * The permission table's words are for the table — one row, one name, easy to
+ * audit — and they are not English. A refusal a person reads has to name the
+ * action the way they would, and an action with no phrase here falls back to
+ * its own name with the underscores taken out, so a permission added later is
+ * readable before anybody remembers to come back here.
+ */
+function plainly(action: string): string {
+  const said: Record<string, string> = {
+    configure_agents: "create or change agents and connections",
+    author_definitions: "create or change tests, personas and graders",
+    start_and_cancel_runs: "start or cancel runs",
+    revisit_verdicts: "regrade or correct verdicts",
+  };
+  return said[action] ?? action.split("_").join(" ");
+}
+
 export async function agentRoutes(
   app: FastifyInstance,
   options: AgentRoutesOptions,
@@ -354,6 +632,77 @@ export async function agentRoutes(
   credentialed(app, {
     provider: options.provider,
     rateLimit: options.rateLimit,
+  });
+
+  /**
+   * Every connection type egma supports, as a form may be drawn from it.
+   *
+   * **The web application must never keep its own copy of any of this.** The
+   * registry decides which config keys a shape holds, which modalities the type
+   * speaks, and whether a credential is required, forbidden or optional; a
+   * second handwritten copy in a browser would be a second opinion able to
+   * disagree with the gate, and the disagreement would surface as a form that
+   * asks for the wrong things and a create that refuses for reasons the form
+   * cannot explain.
+   *
+   * **What crosses is labels, field shapes, the credential rule and two adapter
+   * facts.** No gate function, no hint function, no refusal sentence, no
+   * credential value. It is built by reading the registry rather than by
+   * copying it, so nothing can be left behind when a type is added.
+   */
+  app.get("/api/connection-types", async (_request, reply) => {
+    return reply.send({
+      items: connectionTypeMetadata().map((type) => ({
+        type: type.type,
+        label: type.label,
+        modalities: type.modalities,
+        topology: type.topology,
+        // Whether egma can conduct a run over this type at all, and whether it
+        // ships anything that can measure one of its targets. Two different
+        // facts, and a form says both rather than implying either.
+        simulator_adapter: type.simulatorAdapter,
+        capability_discovery: type.capabilityDiscovery,
+        variants: type.variants.map((variant) => ({
+          id: variant.id,
+          label: variant.label,
+          chosen_by: variant.chosenBy,
+          fields: variant.fields.map((field) => ({
+            key: field.key,
+            label: field.label,
+            kind: field.kind,
+            required: field.required,
+            help: field.help,
+          })),
+          credential_rule: variant.credentialRule,
+          credential_help: variant.credentialHelp,
+          credential_fields: variant.credentialFields.map((field) => ({
+            field: field.field,
+            label: field.label,
+            kind: field.kind,
+            required: field.required,
+            help: field.help,
+          })),
+        })),
+      })),
+    });
+  });
+
+  /**
+   * The capability catalog: the stable keys a test may require and a connection
+   * may be found to support.
+   *
+   * One list, server-owned, read by both editors. A free-text capability would
+   * let two people write the same requirement two ways and would make every
+   * comparison between what a test needs and what a target has a guess.
+   */
+  app.get("/api/capabilities", async (_request, reply) => {
+    return reply.send({
+      items: CAPABILITY_CATALOG.map((entry) => ({
+        key: entry.key,
+        label: entry.label,
+        description: entry.description,
+      })),
+    });
   });
 
   /**
@@ -443,8 +792,20 @@ export async function agentRoutes(
     const reading = await readingIn(auth, named);
     if (isRefusal(reading)) return refused(reply, reading);
 
+    const search = textWhenGiven(query.search, "a search");
+    if (isRefusal(search)) return refused(reply, search);
+
+    const archived = flagWhenGiven(query.archived, "archived");
+    if (isRefusal(archived)) return refused(reply, archived);
+
+    const limit = boundedLimit(query.limit);
+    if (isRefusal(limit)) return refused(reply, limit);
+
     const page = await listAgents(reading, {
       ...(cursor === undefined ? {} : { cursor }),
+      ...(search === undefined ? {} : { search }),
+      ...(archived === undefined ? {} : { archived }),
+      ...(limit === undefined ? {} : { limit }),
     });
 
     return reply.send({
@@ -455,15 +816,33 @@ export async function agentRoutes(
     });
   });
 
-  /** The agent, and every living way of reaching it. */
+  /**
+   * The agent, and every way of reaching it — the active ones, or the archived
+   * ones when the query asks for those.
+   *
+   * **An archived agent reads.** Following a link to one has to work: its runs
+   * are still evidence, and Restore has to be reachable from somewhere. What
+   * archiving takes away is entry into new work, and that is enforced where new
+   * work is created.
+   */
   app.get("/api/agents/:agentId", async (request, reply) => {
     const { auth } = requesterOf(request);
     const { agentId } = request.params as { agentId: string };
+    const query = (request.query ?? {}) as Record<string, string | undefined>;
 
-    const one = await getAgent(auth, agentId);
+    const archived = flagWhenGiven(query.archived, "archived");
+    if (isRefusal(archived)) return refused(reply, archived);
+
+    const acting = await actingProject(auth, request, "reads");
+    if (isRefusal(acting)) return refused(reply, acting);
+
+    const one = await getAgent(acting, agentId);
     if (one === undefined) return refused(reply, NO_SUCH_AGENT);
 
-    const connections = (await listConnections(auth, agentId)) ?? [];
+    const connections =
+      (await listConnections(acting, agentId, {
+        ...(archived === undefined ? {} : { archived }),
+      })) ?? [];
     return reply.send({
       agent: describedAgent(one),
       connections: connections.map(describedConnection),
@@ -482,11 +861,288 @@ export async function agentRoutes(
     const wanted = connectionIn(request.body ?? {});
     if (isRefusal(wanted)) return refused(reply, wanted);
 
-    const added = await addConnection(auth, agentId, wanted);
+    const acting = await actingProject(auth, request, "writes into");
+    if (isRefusal(acting)) return refused(reply, acting);
+
+    const added = await addConnection(acting, agentId, wanted);
     if (added === undefined) return refused(reply, NO_SUCH_AGENT);
 
     return reply.code(201).send({ connection: describedConnection(added) });
   });
+
+  /**
+   * The Egma-owned half of an agent, edited against the revision the editor
+   * was opened on.
+   *
+   * Name and description and nothing else. The provider's prompt, model and
+   * tools are not here, are not in the read, and are not coming: they live
+   * where the customer configures them, and egma being a second place to edit
+   * them would make two answers to one question with no rule to choose between.
+   */
+  app.patch("/api/agents/:agentId", async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const { agentId } = request.params as { agentId: string };
+    const body = (request.body ?? {}) as Body;
+
+    const unknown = unknownKeyIn(body, AGENT_EDIT_KEYS, "an agent edit");
+    if (unknown !== undefined) return refused(reply, unknown);
+
+    const name = textWhenGiven(body.name, "an agent's name");
+    if (isRefusal(name)) return refused(reply, name);
+    const revision = revisionIn(body, fromBrowser(auth));
+    if (isRefusal(revision)) return refused(reply, revision);
+
+    const description =
+      body.description === null
+        ? null
+        : textWhenGiven(body.description, "an agent's description");
+    if (isRefusal(description)) return refused(reply, description);
+
+    const acting = await actingProject(auth, request, "writes into");
+    if (isRefusal(acting)) return refused(reply, acting);
+
+    const updated = await updateAgent(acting, agentId, {
+      ...(name === undefined ? {} : { name }),
+      // Absent keeps it; an explicit null clears it. The two are different
+      // requests and are read as different requests.
+      ...(body.description === undefined ? {} : { description }),
+      ...(revision === undefined ? {} : { expectedRevision: revision }),
+    });
+
+    if (updated === undefined) return refused(reply, NO_SUCH_AGENT);
+    return reply.send({ agent: describedAgent(updated) });
+  });
+
+  /**
+   * Take an agent out of new work, with every active way of reaching it and
+   * every piece of work that was going over one.
+   */
+  app.post("/api/agents/:agentId/archive", async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const { agentId } = request.params as { agentId: string };
+    const body = (request.body ?? {}) as Body;
+
+    const unknown = unknownKeyIn(body, ARCHIVE_KEYS, "an archive");
+    if (unknown !== undefined) return refused(reply, unknown);
+    const revision = revisionIn(body, fromBrowser(auth));
+    if (isRefusal(revision)) return refused(reply, revision);
+
+    const acting = await actingProject(auth, request, "writes into");
+    if (isRefusal(acting)) return refused(reply, acting);
+
+    const archived = await archiveAgent(acting, agentId, {
+      ...(revision === undefined ? {} : { expectedRevision: revision }),
+    });
+    if (archived === undefined) return refused(reply, NO_SUCH_AGENT);
+
+    return reply.send({
+      agent: describedAgent(archived.agent),
+      // What went with it, said plainly, because a person who archives an
+      // agent has just stopped work they may have been watching.
+      archived_connections: archived.connections,
+      canceled_runs: archived.canceledRuns,
+    });
+  });
+
+  /**
+   * Bring an agent back — and only the agent. Its connections stay archived
+   * until each is restored on its own shape's credential terms.
+   */
+  app.post("/api/agents/:agentId/restore", async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const { agentId } = request.params as { agentId: string };
+    const body = (request.body ?? {}) as Body;
+
+    const unknown = unknownKeyIn(body, AGENT_RESTORE_KEYS, "a restore");
+    if (unknown !== undefined) return refused(reply, unknown);
+    const revision = revisionIn(body, fromBrowser(auth));
+    if (isRefusal(revision)) return refused(reply, revision);
+    const name = textWhenGiven(body.name, "an agent's name");
+    if (isRefusal(name)) return refused(reply, name);
+
+    const acting = await actingProject(auth, request, "writes into");
+    if (isRefusal(acting)) return refused(reply, acting);
+
+    const restored = await restoreAgent(acting, agentId, {
+      ...(revision === undefined ? {} : { expectedRevision: revision }),
+      ...(name === undefined ? {} : { name }),
+    });
+    if (restored === undefined) return refused(reply, NO_SUCH_AGENT);
+    return reply.send({ agent: describedAgent(restored) });
+  });
+
+  /** One way of reaching an agent, archived or not. */
+  app.get("/api/agents/:agentId/connections/:connectionId", async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const { agentId, connectionId } = request.params as {
+      agentId: string;
+      connectionId: string;
+    };
+
+    const acting = await actingProject(auth, request, "reads");
+    if (isRefusal(acting)) return refused(reply, acting);
+
+    const one = await getConnection(acting, agentId, connectionId);
+    if (one === undefined) return refused(reply, NO_SUCH_CONNECTION);
+    return reply.send({ connection: describedConnection(one) });
+  });
+
+  /**
+   * Change a connection: its name, its label, its config, or the whole of its
+   * credential.
+   *
+   * **The credential replaces whole or is left alone.** There is no merge,
+   * because a merge would mean reading the stored plaintext back out to edit
+   * it, and the one door to that opens for egma's own simulator and for
+   * nothing else. Rotation is therefore just this request carrying a whole new
+   * credential, which is why there is no separate rotate verb to keep in step
+   * with this one.
+   */
+  app.patch(
+    "/api/agents/:agentId/connections/:connectionId",
+    async (request, reply) => {
+      const { auth } = requesterOf(request);
+      const { agentId, connectionId } = request.params as {
+        agentId: string;
+        connectionId: string;
+      };
+      const body = (request.body ?? {}) as Body;
+
+      const unknown = unknownKeyIn(
+        body,
+        CONNECTION_EDIT_KEYS,
+        "a connection edit",
+      );
+      if (unknown !== undefined) return refused(reply, unknown);
+
+      const name = textWhenGiven(body.name, "a connection's name");
+      if (isRefusal(name)) return refused(reply, name);
+      const environment =
+        body.environment === null
+          ? null
+          : textWhenGiven(body.environment, "a connection's environment");
+      if (isRefusal(environment)) return refused(reply, environment);
+      const revision = revisionIn(body, fromBrowser(auth));
+      if (isRefusal(revision)) return refused(reply, revision);
+
+      const acting = await actingProject(auth, request, "writes into");
+      if (isRefusal(acting)) return refused(reply, acting);
+
+      const updated = await updateConnection(acting, agentId, connectionId, {
+        ...(name === undefined ? {} : { name }),
+        ...(body.environment === undefined ? {} : { environment }),
+        ...(body.config === undefined
+          ? {}
+          : { config: body.config as Readonly<Record<string, unknown>> }),
+        ...(body.credentials === undefined
+          ? {}
+          : {
+              credentials: body.credentials as Readonly<
+                Record<string, unknown>
+              >,
+            }),
+        ...(revision === undefined ? {} : { expectedRevision: revision }),
+      });
+
+      if (updated === undefined) return refused(reply, NO_SUCH_CONNECTION);
+      return reply.send({ connection: describedConnection(updated) });
+    },
+  );
+
+  /** Stop reaching an agent this way, and settle the work that was. */
+  app.post(
+    "/api/agents/:agentId/connections/:connectionId/archive",
+    async (request, reply) => {
+      const { auth } = requesterOf(request);
+      const { agentId, connectionId } = request.params as {
+        agentId: string;
+        connectionId: string;
+      };
+      const body = (request.body ?? {}) as Body;
+
+      const unknown = unknownKeyIn(body, ARCHIVE_KEYS, "an archive");
+      if (unknown !== undefined) return refused(reply, unknown);
+      const revision = revisionIn(body, fromBrowser(auth));
+      if (isRefusal(revision)) return refused(reply, revision);
+
+      const acting = await actingProject(auth, request, "writes into");
+      if (isRefusal(acting)) return refused(reply, acting);
+
+      const archived = await archiveConnection(acting, agentId, connectionId, {
+        ...(revision === undefined ? {} : { expectedRevision: revision }),
+      });
+      if (archived === undefined) return refused(reply, NO_SUCH_CONNECTION);
+
+      return reply.send({
+        connection: describedConnection(archived.connection),
+        canceled_runs: archived.canceledRuns,
+      });
+    },
+  );
+
+  /**
+   * Bring a connection back, on the terms its own shape sets — and never on
+   * the credential it was archived with.
+   */
+  app.post(
+    "/api/agents/:agentId/connections/:connectionId/restore",
+    async (request, reply) => {
+      const { auth } = requesterOf(request);
+      const { agentId, connectionId } = request.params as {
+        agentId: string;
+        connectionId: string;
+      };
+      const body = (request.body ?? {}) as Body;
+
+      const unknown = unknownKeyIn(
+        body,
+        CONNECTION_RESTORE_KEYS,
+        "a restore",
+      );
+      if (unknown !== undefined) return refused(reply, unknown);
+      const revision = revisionIn(body, fromBrowser(auth));
+      if (isRefusal(revision)) return refused(reply, revision);
+      const name = textWhenGiven(body.name, "a connection's name");
+      if (isRefusal(name)) return refused(reply, name);
+
+      const credential = restoreCredentialIn(body.credential);
+      if (isRefusal(credential)) return refused(reply, credential);
+
+      const acting = await actingProject(auth, request, "writes into");
+      if (isRefusal(acting)) return refused(reply, acting);
+
+      const restored = await restoreConnection(acting, agentId, connectionId, {
+        ...(revision === undefined ? {} : { expectedRevision: revision }),
+        ...(name === undefined ? {} : { name }),
+        ...(credential === undefined ? {} : { credential }),
+      });
+      if (restored === undefined) return refused(reply, NO_SUCH_CONNECTION);
+      return reply.send({ connection: describedConnection(restored) });
+    },
+  );
+
+  /** Ask this connection's adapter what its target can do, and record it. */
+  app.post(
+    "/api/agents/:agentId/connections/:connectionId/capabilities/refresh",
+    async (request, reply) => {
+      const { auth } = requesterOf(request);
+      const { agentId, connectionId } = request.params as {
+        agentId: string;
+        connectionId: string;
+      };
+
+      const acting = await actingProject(auth, request, "writes into");
+      if (isRefusal(acting)) return refused(reply, acting);
+
+      const refreshed = await refreshConnectionCapabilities(
+        acting,
+        agentId,
+        connectionId,
+      );
+      if (refreshed === undefined) return refused(reply, NO_SUCH_CONNECTION);
+      return reply.send({ connection: describedConnection(refreshed) });
+    },
+  );
 
   /**
    * The refusals this group owns, each answered as an answer rather than as a
@@ -523,10 +1179,58 @@ export async function agentRoutes(
       return refused(reply, projectOutsideOrganization(error.projectId));
     }
 
+    // The one refusal here whose sentence is not the layer below's. Two route
+    // groups answer it and each names its own resource word, so the error
+    // carries the data and `identityConflict` writes the sentence.
+    if (error instanceof IdentityConflictError) {
+      return refused(reply, {
+        refused: true,
+        error: "identity_conflict",
+        message: identityConflict(error.resource, error.resourceId),
+      });
+    }
+
+    if (error instanceof ConnectionRestoreRefusedError) {
+      return refused(reply, {
+        refused: true,
+        error: error.reason,
+        message: error.message,
+      });
+    }
+
+    if (error instanceof NoCapabilityAdapterError) {
+      return refused(reply, {
+        refused: true,
+        error: "no_capability_adapter",
+        message: error.message,
+      });
+    }
+
+    if (error instanceof CapabilityCheckFailedError) {
+      return refused(reply, {
+        refused: true,
+        error: "capability_check_failed",
+        message: error.message,
+      });
+    }
+
+    /**
+     * Who is asking may not, said in the product's own sentence.
+     *
+     * The layer below writes a sentence for a terminal — `a viewer may not
+     * configure_agents` — which names an internal action word and reads as an
+     * error rather than as a next move. This is the browser's reader: it names
+     * the role somebody holds, what it cannot do in ordinary words, and the one
+     * person who can change it. The code is what a client branches on and is
+     * unchanged; only the sentence is.
+     */
     if (error instanceof NotPermittedError) {
-      return reply
-        .code(403)
-        .send({ error: "not_permitted", message: error.message });
+      return reply.code(403).send({
+        error: "not_permitted",
+        message:
+          `Your ${error.role} role cannot ${plainly(error.action)}. Ask an ` +
+          "organization admin to change your role, then try again.",
+      });
     }
 
     throw error;

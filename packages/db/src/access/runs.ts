@@ -1228,8 +1228,8 @@ export async function startRun(
           and(
             eq(connection.id, input.connectionId),
             eq(connection.projectId, projectId),
-            isNull(connection.deletedAt),
-            isNull(agent.deletedAt),
+            isNull(connection.archivedAt),
+            isNull(agent.archivedAt),
           ),
         ),
       )
@@ -2145,7 +2145,7 @@ export async function resolveSimulationConnection(
         and(
           eq(simulation.id, simulationId),
           eq(simulation.status, "claimed"),
-          isNull(connection.deletedAt),
+          isNull(connection.archivedAt),
           inActingProject(auth, simulation),
         ),
       ),
@@ -2686,4 +2686,117 @@ export async function listRunEvents(
     next: events.at(-1)?.seq ?? after,
     done: header.finishedAt !== null,
   };
+}
+
+/**
+ * Stop every piece of work that would have gone over these connections.
+ *
+ * **Archiving how egma reaches an agent is not an edit to a list; it is a
+ * decision about work in flight.** A queued simulation over an archived
+ * connection would sit in the claim queue for a target the simulator can no
+ * longer resolve a credential for, and would eventually fail — putting an
+ * operational failure on the record dressed as something the agent did. So the
+ * queue is settled in the same transaction as the Archive.
+ *
+ * Where each simulation stands decides what happens to it, and the two answers
+ * are the ones `cancelRun` already gives for the same three states:
+ *
+ * - **queued** ends here and now. Nothing dispatched it, so nothing has to
+ *   agree to stop.
+ * - **claimed or running** gets the intent stamped and honors it at its next
+ *   heartbeat. Egma does not reach into a conversation already happening, and
+ *   whatever it produced before it stops stays on the record — evidence is
+ *   never erased to make a state tidy.
+ *
+ * Every run left holding one of those and not already terminal is set
+ * `canceled` in the same operation, with its run event written, so a run
+ * cannot later report itself `completed` over a target that was taken away
+ * mid-flight. Counts settle exactly as a cancel's do: at once where everything
+ * was queued, and when the stragglers land where they were not.
+ *
+ * It takes a transaction rather than opening one, because the whole point is
+ * that it happens with the Archive and not beside it.
+ */
+export async function stopWorkOverConnections(
+  tx: Transaction,
+  auth: AuthContext,
+  connectionIds: readonly string[],
+  now: Date,
+): Promise<readonly string[]> {
+  if (connectionIds.length === 0) return [];
+
+  const touched = await tx
+    .select({ id: simulation.id, runId: simulation.runId, status: simulation.status })
+    .from(simulation)
+    .where(
+      within(
+        auth,
+        simulation,
+        and(
+          inArray(simulation.connectionId, [...connectionIds]),
+          inArray(simulation.status, ["queued", "claimed", "running"]),
+        ),
+      ),
+    );
+
+  if (touched.length === 0) return [];
+
+  const endedHere = touched.filter((row) => row.status === "queued");
+  const asked = touched.filter((row) => row.status !== "queued");
+
+  if (endedHere.length > 0) {
+    await tx
+      .update(simulation)
+      .set({ status: "canceled", cancelRequestedAt: now, endedAt: now })
+      .where(
+        inArray(
+          simulation.id,
+          endedHere.map((row) => row.id),
+        ),
+      );
+  }
+
+  if (asked.length > 0) {
+    await tx
+      .update(simulation)
+      .set({ cancelRequestedAt: now })
+      .where(
+        and(
+          inArray(
+            simulation.id,
+            asked.map((row) => row.id),
+          ),
+          isNull(simulation.cancelRequestedAt),
+        ),
+      );
+  }
+
+  const runIds = [...new Set(touched.map((row) => row.runId))].sort();
+  const canceled: string[] = [];
+
+  for (const runId of runIds) {
+    const [header] = await tx
+      .update(run)
+      .set({ status: "canceled" })
+      .where(and(eq(run.id, runId), inArray(run.status, ["pending", "running"])))
+      .returning({ id: run.id });
+
+    const ended = endedHere.filter((row) => row.runId === runId);
+    await appendRunEvents(tx, runId, now, [
+      ...ended.map(
+        (row) =>
+          ({ kind: "simulation", simulationId: row.id, status: "canceled" }) as const,
+      ),
+      ...(header === undefined
+        ? []
+        : [{ kind: "run", status: "canceled" } as const]),
+    ]);
+
+    if (header !== undefined) {
+      canceled.push(runId);
+      await finalizeRunIfDone(tx, runId, now);
+    }
+  }
+
+  return canceled;
 }

@@ -69,13 +69,14 @@ async function seedAgent(
   connection: string,
 ): Promise<void> {
   await db.sql(
-    "insert into agent (id, organization_id, project_id, name) values ($1, $2, $3, $1)",
+    `insert into agent (id, organization_id, project_id, name, revision)
+     values ($1, $2, $3, $1, 'rev_00000000000000000000000001')`,
     [id, acme.organization, projectId],
   );
   await db.sql(
     `insert into connection
-       (id, organization_id, project_id, agent_id, name, type, modality, topology, config)
-     values ($1, $2, $3, $4, $1, 'retell', 'chat', 'hosted-broker', '{}'::jsonb)`,
+       (id, organization_id, project_id, agent_id, name, type, modality, topology, variant_id, config, revision)
+     values ($1, $2, $3, $4, $1, 'retell', 'chat', 'hosted-broker', 'retell.api_key', '{}'::jsonb, 'rev_00000000000000000000000001')`,
     [connection, acme.organization, projectId, id],
   );
 }

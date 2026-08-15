@@ -108,31 +108,57 @@ export async function readJson<T>(
 }
 
 /**
- * One write, with the project named in the body where the caller named one.
+ * One write, with the project named in it and the same four answers a read
+ * gets.
  *
- * The same fold as `readJson`, deliberately: a write is refused in the same
- * four ways a read is, and a page that handled a failed write differently from
- * a failed read would be a page with two ideas about what a 401 means.
+ * **A write answers exactly what a read answers**, and that is the whole reason
+ * this lives beside `readJson` rather than inside each form. A page that
+ * invented its own reading of a 404 on save, or quietly swallowed a 409, would
+ * be a page where a stale edit looks like a successful one. The refusal's own
+ * sentence is kept and never paraphrased: it names the next move, and the
+ * conflict refusals name the revision to retry against.
  *
- * The project travels in the body rather than the query because a write says
- * where it lands, and a body is what the API reads it from.
+ * A write says where it lands, and the route decides where it reads that from:
+ * a caller that names `project` here gets it in the query, and a caller whose
+ * route reads it from the body puts it there itself.
  */
 export async function writeJson<T>(
   path: string,
   options: {
     readonly method: "POST" | "PATCH";
-    readonly body: Record<string, unknown>;
+    readonly project?: string;
+    readonly body?: unknown;
+    readonly signal?: AbortSignal;
   },
 ): Promise<Answer<T>> {
+  const address =
+    options.project === undefined
+      ? path
+      : `${path}${path.includes("?") ? "&" : "?"}project=${encodeURIComponent(options.project)}`;
+
   try {
-    const response = await fetch(path, {
+    const response = await fetch(address, {
       method: options.method,
+      cache: "no-store",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(options.body),
+      body: JSON.stringify(options.body ?? {}),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
-    const body: unknown = await response.json().catch(() => null);
+    const body = await response.json().catch(() => null);
     return answerFor<T>(response.status, body);
   } catch {
     return unreachable<T>();
   }
 }
+
+/**
+ * The refusal codes a form has to answer differently from every other refusal.
+ *
+ * A stale write is not a failure to show and forget: the person's typing is
+ * still on screen and still worth keeping, and the fix is to read the resource
+ * again and send the same edit against the revision it names now. So a form
+ * recognises these and says so, rather than showing the sentence in the same
+ * grey box as everything else.
+ */
+export const IDENTITY_CONFLICT = "identity_conflict";
+export const NAME_TAKEN = "name_taken";

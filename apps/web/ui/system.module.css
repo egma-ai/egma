@@ -1006,3 +1006,55 @@
   font-family: var(--mono);
   font-size: var(--text-xs);
 }
+
+/* ------------------------------------------------------------------ forms */
+
+.textarea {
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--foreground);
+  font-family: inherit;
+  font-size: var(--text-md);
+  line-height: var(--line-normal);
+  resize: vertical;
+}
+
+.textarea::placeholder {
+  color: var(--faint);
+}
+
+.select {
+  height: var(--control-md);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: var(--text-md);
+}
+
+.problem {
+  margin: 0;
+  color: var(--bad);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* --------------------------------------------------------- detail pages */
+
+.help {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: var(--line-normal);
+}

@@ -3,16 +3,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   addConnection,
+  archiveAgent,
   createAgent,
-  deleteAgent,
   getAgent,
-  getConnection,
   listAgents,
   listConnections,
   NotPermittedError,
-  removeConnection,
+  restoreAgent,
   updateAgent,
-  updateConnection,
   type Agent,
   type AuthContext,
   type NewConnection,
@@ -26,7 +24,7 @@ import {
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
- * List, update, delete — through the factory functions only, like the create
+ * List, update, Archive and Restore — through the factory functions only, like the create
  * and fetch tests before them. Raw SQL appears in fixtures and in the one read
  * proving a deleted agent's connection rows are still in the table, which is
  * precisely what no seam may show; every id an assertion needs comes off the
@@ -189,11 +187,11 @@ describe("listing agents", () => {
     expect(page.items.map((item) => item.id)).toEqual([stranger.id]);
   });
 
-  it("drops a deleted agent from the list immediately", async () => {
+  it("drops an archived agent from the list immediately", async () => {
     const [three] = created.filter((item) => item.name === "Three");
     if (three === undefined) throw new Error("Three was never created");
 
-    await deleteAgent(actingIn(acme.listing), three.id);
+    await archiveAgent(actingIn(acme.listing), three.id);
 
     const page = await listAgents(actingIn(acme.listing));
     expect(page.items.map((item) => item.name)).toEqual([
@@ -289,13 +287,13 @@ describe("updating an agent", () => {
     expect(untouched?.name).toBe("Rival");
   });
 
-  it("takes a name a deleted agent released", async () => {
+  it("takes a name an archived agent released", async () => {
     const vacating = await createAgent(actingIn(acme.updating), {
       name: "Vacated",
     });
     const heir = await createAgent(actingIn(acme.updating), { name: "Heir" });
 
-    await deleteAgent(actingIn(acme.updating), vacating.id);
+    await archiveAgent(actingIn(acme.updating), vacating.id);
 
     const renamed = await updateAgent(actingIn(acme.updating), heir.id, {
       name: "Vacated",
@@ -328,13 +326,19 @@ describe("updating an agent", () => {
     expect(untouched?.name).toBe("Acme Held");
   });
 
-  it("returns nothing for a deleted agent", async () => {
+  it("returns nothing for an archived agent, which is out of new work", async () => {
     const gone = await createAgent(actingIn(acme.updating), { name: "Gone" });
-    await deleteAgent(actingIn(acme.updating), gone.id);
+    await archiveAgent(actingIn(acme.updating), gone.id);
 
     expect(
       await updateAgent(actingIn(acme.updating), gone.id, { name: "Back" }),
     ).toBeUndefined();
+
+    // Archive is not deletion: the agent still reads, which is what makes
+    // Restore reachable and what keeps its runs openable.
+    const readable = await getAgent(actingIn(acme.updating), gone.id);
+    expect(readable?.name).toBe("Gone");
+    expect(readable?.archivedAt).toBeInstanceOf(Date);
   });
 
   it("is refused to a viewer", async () => {
@@ -350,37 +354,51 @@ describe("updating an agent", () => {
   });
 });
 
-describe("deleting an agent", () => {
+describe("archiving an agent", () => {
   it("is refused to a credential acting in no project, like create", async () => {
     const standing = await createAgent(actingIn(acme.deleting), {
       name: "Standing",
     });
 
-    await expect(deleteAgent(actingIn(undefined), standing.id)).rejects.toThrow(
+    await expect(archiveAgent(actingIn(undefined), standing.id)).rejects.toThrow(
       /project/,
     );
 
     const stillThere = await getAgent(actingIn(acme.deleting), standing.id);
-    expect(stillThere?.id).toBe(standing.id);
+    expect(stillThere?.archivedAt).toBeNull();
   });
 
-  it("hides it from fetch and list at once, and answers what was deleted", async () => {
-    const doomed = await createAgent(actingIn(acme.deleting), {
-      name: "Doomed",
+  it("takes it out of the list while it still reads on its own", async () => {
+    const retired = await createAgent(actingIn(acme.deleting), {
+      name: "Retired",
     });
 
-    const deleted = await deleteAgent(actingIn(acme.deleting), doomed.id);
-    expect(deleted?.id).toBe(doomed.id);
-    expect(deleted?.projectId).toBe(acme.deleting);
-    expect(deleted?.name).toBe("Doomed");
-    expect(deleted?.deletedAt).toBeInstanceOf(Date);
+    const archived = await archiveAgent(actingIn(acme.deleting), retired.id);
+    expect(archived?.agent.id).toBe(retired.id);
+    expect(archived?.agent.archivedAt).toBeInstanceOf(Date);
 
-    expect(await getAgent(actingIn(acme.deleting), doomed.id)).toBeUndefined();
     const page = await listAgents(actingIn(acme.deleting));
-    expect(page.items.map((item) => item.id)).not.toContain(doomed.id);
+    expect(page.items.map((item) => item.id)).not.toContain(retired.id);
+
+    // The whole difference from the delete this replaced: it is still there.
+    const readable = await getAgent(actingIn(acme.deleting), retired.id);
+    expect(readable?.id).toBe(retired.id);
   });
 
-  it("takes its connections out of every read, while their rows stay untouched", async () => {
+  it("shows up under the archived filter, and only there", async () => {
+    const filed = await createAgent(actingIn(acme.deleting), { name: "Filed" });
+    await archiveAgent(actingIn(acme.deleting), filed.id);
+
+    const archived = await listAgents(actingIn(acme.deleting), {
+      archived: true,
+    });
+    expect(archived.items.map((item) => item.id)).toContain(filed.id);
+
+    const active = await listAgents(actingIn(acme.deleting));
+    expect(active.items.map((item) => item.id)).not.toContain(filed.id);
+  });
+
+  it("archives its active connections with it, in the same operation", async () => {
     const wired = await createAgent(actingIn(acme.deleting), {
       name: "Wired Til The End",
     });
@@ -391,53 +409,54 @@ describe("deleting an agent", () => {
     );
     if (attached === undefined) throw new Error("the connection never attached");
 
-    await deleteAgent(actingIn(acme.deleting), wired.id);
+    const archived = await archiveAgent(actingIn(acme.deleting), wired.id);
+    expect(archived?.connections).toEqual([attached.id]);
 
-    // Every read and write a connection has, answering as if none of it exists.
-    expect(await listConnections(actingIn(acme.deleting), wired.id)).toBeUndefined();
-    expect(
-      await getConnection(actingIn(acme.deleting), wired.id, attached.id),
-    ).toBeUndefined();
-    expect(
-      await updateConnection(actingIn(acme.deleting), wired.id, attached.id, {
-        name: "renamed",
-      }),
-    ).toBeUndefined();
-    expect(
-      await removeConnection(actingIn(acme.deleting), wired.id, attached.id),
-    ).toBeUndefined();
-    expect(
-      await addConnection(actingIn(acme.deleting), wired.id, retellConnection()),
-    ).toBeUndefined();
-
-    // The row itself is exactly as it was — not even its own soft-delete mark.
-    // Hiding rode entirely on the agent's marker; the sweep is the deletion
-    // worker's job, and this raw read is the one way to see the worker's input.
-    const { rows } = await database.sql<{ name: string; deleted_at: Date | null }>(
-      "select name, deleted_at from connection where id = $1",
-      [attached.id],
+    // Active list empty, archived list holding it: the child went with the
+    // parent, so restoring the parent cannot bring a credential back by itself.
+    expect(await listConnections(actingIn(acme.deleting), wired.id)).toEqual([]);
+    const archivedChildren = await listConnections(
+      actingIn(acme.deleting),
+      wired.id,
+      { archived: true },
     );
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.name).toBe("staging");
-    expect(rows[0]?.deleted_at).toBeNull();
+    expect(archivedChildren?.map((one) => one.id)).toEqual([attached.id]);
   });
 
-  it("deletes only once: a second delete finds nothing", async () => {
+  it("leaves its connections archived when the agent is restored", async () => {
+    const back = await createAgent(actingIn(acme.deleting), { name: "Back" });
+    const attached = await addConnection(
+      actingIn(acme.deleting),
+      back.id,
+      retellConnection({ name: "staging" }),
+    );
+    if (attached === undefined) throw new Error("the connection never attached");
+
+    await archiveAgent(actingIn(acme.deleting), back.id);
+    const restored = await restoreAgent(actingIn(acme.deleting), back.id);
+    expect(restored?.archivedAt).toBeNull();
+
+    expect(await listConnections(actingIn(acme.deleting), back.id)).toEqual([]);
+  });
+
+  it("archives only once: a second archive changes nothing", async () => {
     const once = await createAgent(actingIn(acme.deleting), { name: "Once" });
 
-    await deleteAgent(actingIn(acme.deleting), once.id);
-    expect(await deleteAgent(actingIn(acme.deleting), once.id)).toBeUndefined();
+    const first = await archiveAgent(actingIn(acme.deleting), once.id);
+    const again = await archiveAgent(actingIn(acme.deleting), once.id);
+    expect(again?.agent.archivedAt).toEqual(first?.agent.archivedAt);
+    expect(again?.connections).toEqual([]);
   });
 
-  it("returns nothing for another customer's agent, and leaves it live", async () => {
+  it("returns nothing for another customer's agent, and leaves it active", async () => {
     const bystander = await createAgent(actingIn(acme.deleting), {
       name: "Bystander",
     });
 
-    expect(await deleteAgent(actingAsGlobex(), bystander.id)).toBeUndefined();
+    expect(await archiveAgent(actingAsGlobex(), bystander.id)).toBeUndefined();
 
     const fetched = await getAgent(actingIn(acme.deleting), bystander.id);
-    expect(fetched?.id).toBe(bystander.id);
+    expect(fetched?.archivedAt).toBeNull();
   });
 
   it("is refused to a viewer", async () => {
@@ -446,7 +465,7 @@ describe("deleting an agent", () => {
     });
 
     await expect(
-      deleteAgent(actingIn(acme.deleting, "viewer"), guarded.id),
+      archiveAgent(actingIn(acme.deleting, "viewer"), guarded.id),
     ).rejects.toThrow(NotPermittedError);
   });
 });

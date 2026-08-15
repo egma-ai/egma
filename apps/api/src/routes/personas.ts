@@ -32,7 +32,7 @@ import { actingIn, refuseActing, type Acting } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
-import { sendRefusal } from "../http/refusals.ts";
+import { identityConflict, sendRefusal } from "../http/refusals.ts";
 
 /**
  * The personas of one project: the list, one of them, their history, what
@@ -120,10 +120,9 @@ const REFUSALS = {
     `Persona ${personaId} is this project's default. Select an active ` +
     `replacement persona in the Archive action and try again.`,
 
-  identityConflict: (resource: string, resourceId: string): string =>
-    `${resource} ${resourceId} changed after you opened it. Read it again, ` +
-    `keep or reapply your edits, and send the update with expected_revision ` +
-    `set to its new revision.`,
+  // The agent group answers this refusal too, so the sentence is written once
+  // in `http/refusals.ts` and each group names its own resource word.
+  identityConflict,
 
   versionConflict: (
     resource: string,

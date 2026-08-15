@@ -568,3 +568,82 @@ export class NotPermittedError extends Error {
     this.projectId = scope.projectId;
   }
 }
+
+/**
+ * A connection could not be brought back on the terms its own shape sets.
+ *
+ * Four rules refuse a Restore and they are four different answers to whoever
+ * asked — bring a credential, do not bring one, say which of the two you mean,
+ * and restore the agent first. The reason travels beside the sentence rather
+ * than inside it, as the agent factory's refusals do and for the same reason:
+ * an HTTP layer answers each of them with its own code, and reading the prose
+ * to tell them apart would make the prose load-bearing.
+ */
+export class ConnectionRestoreRefusedError extends Error {
+  readonly reason: ConnectionRestoreRefusal;
+  /** Whichever of the two the sentence named, for a layer that has to relay it. */
+  readonly connectionId: string | undefined;
+  readonly agentId: string | undefined;
+  readonly connectionType: string | undefined;
+
+  constructor(
+    reason: ConnectionRestoreRefusal,
+    message: string,
+    named: {
+      readonly connectionId?: string;
+      readonly agentId?: string;
+      readonly type?: string;
+    } = {},
+  ) {
+    super(message);
+    this.name = "ConnectionRestoreRefusedError";
+    this.reason = reason;
+    this.connectionId = named.connectionId;
+    this.agentId = named.agentId;
+    this.connectionType = named.type;
+  }
+}
+
+export type ConnectionRestoreRefusal =
+  | "credential_required"
+  | "credential_forbidden"
+  | "credential_choice_required"
+  | "parent_agent_archived";
+
+/**
+ * Egma was asked to measure a target and the adapter could not establish
+ * anything.
+ *
+ * Not a fault and not the caller's mistake: the request was fine and the target
+ * did not answer. It is its own class because the honest reply names the
+ * connection, says the capability state is unchanged, and points at Refresh
+ * again — and because the state genuinely stays as it was, so nothing above may
+ * treat this as having cleared a measurement.
+ */
+export class CapabilityCheckFailedError extends Error {
+  readonly connectionId: string;
+
+  constructor(connectionId: string, message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "CapabilityCheckFailedError";
+    this.connectionId = connectionId;
+  }
+}
+
+/**
+ * Egma was asked to measure a type it ships nothing to measure.
+ *
+ * Its own class rather than the failure above, because the two have different
+ * next moves and a caller that could not tell them apart would retry forever.
+ * That one is *the target did not answer, try again*; this one is *there is
+ * nothing here to try*, and it will stay that way until an adapter ships.
+ */
+export class NoCapabilityAdapterError extends Error {
+  readonly connectionType: string;
+
+  constructor(connectionType: string, message: string) {
+    super(message);
+    this.name = "NoCapabilityAdapterError";
+    this.connectionType = connectionType;
+  }
+}

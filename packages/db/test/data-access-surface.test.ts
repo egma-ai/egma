@@ -169,8 +169,9 @@ const CONTEXT_REQUIRING = [
   "createPersona",
   "createProject",
   "createTest",
+  "archiveAgent",
+  "archiveConnection",
   "deactivateUser",
-  "deleteAgent",
   "deleteGrader",
   "deleteMockTool",
   "deleteTest",
@@ -234,12 +235,22 @@ const CONTEXT_REQUIRING = [
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordProductionTraces",
+  // The measurement door: it asks this connection's adapter what its target
+  // can do and writes down what came back. Its own verb rather than a flag on
+  // an edit, because a measurement is not an authored change and must not be
+  // able to arrive with one.
+  "refreshConnectionCapabilities",
   "registerAgent",
   "regrade",
   "releaseGradingJob",
-  "removeConnection",
   "reopenGradingJob",
   "removeMember",
+  // Archive's other half, for an agent and for one way of reaching it. They
+  // are separate verbs and deliberately not one: restoring an agent must never
+  // reactivate a child credential, so each connection comes back on its own
+  // shape's terms.
+  "restoreAgent",
+  "restoreConnection",
   // The second secret egma holds, on the first one's terms: the read answers a
   // reference and a hint, and this is the one door to the plaintext behind it.
   "resolveJudgeKey",
@@ -305,6 +316,15 @@ const VALUES = [
   // have to read the sentence to tell them apart.
   "AgentWriteRefusedError",
   "AlreadyBelongsToAnOrganizationError",
+  // Egma was asked to measure a target and the adapter could not establish
+  // anything. Its own class beside the one below, because "the target did not
+  // answer, try again" and "there is nothing here to try" are different next
+  // moves and a caller that could not tell them apart would retry forever.
+  "CapabilityCheckFailedError",
+  "NoCapabilityAdapterError",
+  // A connection could not be brought back on the terms its own shape sets.
+  // Four rules, four codes, and the reason travels beside the sentence.
+  "ConnectionRestoreRefusedError",
   // The grader factory's one refusal, beside the persona factory's: a delete
   // that would leave a live test checking one thing fewer than it says it does.
   "GraderNamedByTestsError",
@@ -354,6 +374,41 @@ const VALUES = [
   "UnreadableTraceQueryError",
   "VIA",
   "VOICE_PROVIDERS",
+  // The capability catalog, and the two readers that hold a key to it. Pure
+  // values: they reach no store, take no context, and are the one list a test
+  // requirement and a connection measurement are both written from.
+  "CAPABILITY_CATALOG",
+  "CAPABILITY_KEYS",
+  "admittedCapabilities",
+  "isCapabilityKey",
+  // The three answers a capability record gives, and the door an adapter's
+  // report goes through to become one. `unsupported` and `not_measured` are a
+  // settled fact and an unasked question; collapsing them puts a false skip
+  // reason on every simulation an adapter's blind spot touched.
+  "capabilityStanding",
+  "CAPABILITY_STANDINGS",
+  "measuredCapabilities",
+  "unknownCapabilityMessage",
+  "capabilityCheckFailedMessage",
+  "noCapabilityAdapterMessage",
+  // Whether egma ships something that can measure a type's targets, and the
+  // door a deployment installs one through.
+  "hasCapabilityDiscovery",
+  "registerCapabilityDiscovery",
+  // The one shipped adapter, registered for every type egma can reach. It
+  // answers only what egma's own transport settles — whether a simulation
+  // carries audio, and that nothing can send a digit over any of them — so it
+  // states no fact about a provider, which is the rule it had to be written
+  // against. Exported so a deployment can put it back after standing another
+  // one in its place.
+  "transportCapabilities",
+  // The connection registry, as a browser may be told about it — labels, field
+  // shapes, the credential rule, and the two adapter facts. Never a gate, a
+  // hint function, a refusal sentence or a credential.
+  "connectionTypeMetadata",
+  "credentialRuleOf",
+  "variantById",
+  "variantIdOf",
   "schema",
 ];
 
