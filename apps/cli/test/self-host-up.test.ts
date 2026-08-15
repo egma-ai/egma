@@ -147,6 +147,43 @@ describe("egma self-host up", () => {
     }
   });
 
+  it("says which variable is missing, and does not try again for one", async () => {
+    // The other half of the retry above, and the reason the two have to be told
+    // apart. A bootstrap variable this deployment cannot invent — the key that
+    // seals every stored credential, the token a simulator claims with — has no
+    // default any more, so Compose refuses before it creates a container and
+    // names the one it is missing. A second attempt would invent nothing, and
+    // reporting it as a store's first boot would send an operator reading
+    // ClickHouse logs for a variable they never set.
+    const platform = await startPlatform();
+    const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
+    await writeFile(
+      workspace.dockerShim,
+      `#!/bin/sh\necho "ARGS $@" >> "${workspace.callsFile}"\n` +
+        "echo 'error while interpolating services.api.environment.EGMA_ENCRYPTION_KEY: " +
+        "required variable EGMA_ENCRYPTION_KEY is missing a value: no default' >&2\n" +
+        "exit 1\n",
+    );
+    await chmod(workspace.dockerShim, 0o755);
+
+    try {
+      const run = await runSelfHost(workspace, ["up"], { EGMA_BASE_URL: platform.url });
+
+      expect(run.code).not.toBe(0);
+      expect(run.stdout).toContain("status: failed");
+      expect(run.stdout).toContain("EGMA_ENCRYPTION_KEY");
+      expect(run.stdout).toContain(".env");
+      // Compose's own sentence reached the operator too, because it carries
+      // what to do about that particular variable.
+      expect(run.stderr).toContain("required variable EGMA_ENCRYPTION_KEY");
+      expect(run.stderr).not.toContain("did not come up on the first try");
+      const said = await workspace.dockerCalls();
+      expect(said.match(/^ARGS compose up/gmu)).toHaveLength(1);
+    } finally {
+      await platform.close();
+    }
+  });
+
   it("refuses in a directory that is not a platform workspace", async () => {
     const notAWorkspace = await mkdtemp(path.join(tmpdir(), "egma-not-platform-"));
     const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);

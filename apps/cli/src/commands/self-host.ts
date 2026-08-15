@@ -48,7 +48,12 @@ import { credentialsFileIn, UnusableUrlError } from "../platform/credentials.ts"
 import { PlatformUnreachableError } from "../platform/device-flow.ts";
 import { normalizePlatformOrigin } from "../platform/identity.ts";
 import { signedInAt } from "../platform/signed-in.ts";
-import { compose, DockerMissingError, type ComposeOptions } from "../self-host/compose.ts";
+import {
+  compose,
+  DockerMissingError,
+  missingRequiredVariable,
+  type ComposeOptions,
+} from "../self-host/compose.ts";
 import {
   recordMediaCredential,
   MEDIA_SECRET_VARIABLE,
@@ -441,6 +446,24 @@ async function runUp(
   // fails once and works when you type the same thing again is a product that
   // taught its first user to distrust it.
   let started = await compose(["up", "-d", "--wait", "--wait-timeout", "300"], composeOptions);
+  // Asked before the retry, because the two failures look alike and want
+  // opposite answers. A missing bootstrap variable is refused while Compose is
+  // still reading the file — nothing was created, and a second attempt would
+  // invent no value the first one lacked — so it is reported by name here
+  // rather than dressed up as a store that would not start, which would send
+  // an operator reading container logs for a variable they never set.
+  const missing = missingRequiredVariable(started);
+  if (missing !== null) {
+    options.out("status: failed");
+    options.out(
+      `reason: ${missing} has no value, and this deployment deliberately has no ` +
+        "default for it. It is one of the secrets or addresses egma cannot invent " +
+        "for you, so nothing was started at all rather than started on a value " +
+        "published in this repository. Set it in .env in this workspace — the line " +
+        "above says what makes one — and run this again.",
+    );
+    return SELF_HOST_EXIT.refused;
+  }
   if (started.code !== 0) {
     options.fail(
       "one of the services did not come up on the first try. That is usual on a " +

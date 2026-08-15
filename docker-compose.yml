@@ -8,7 +8,23 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-egma}
       POSTGRES_DB: ${POSTGRES_DB:-egma}
     ports:
-      - "${POSTGRES_PORT:-5433}:5432"
+      # **Published to this machine and no further**, which is the object
+      # store's idiom below and the media server's, for the same reason and a
+      # blunter version of it. What answers here is every row this platform
+      # holds — organizations, keys, and the sealed settings this effort just
+      # moved into the database — and the user and password it answers to are
+      # written a few lines above, in a public repository. On 0.0.0.0 that is
+      # `docker compose up` on a coffee-shop network offering every customer's
+      # data to the room.
+      #
+      # A default is right for these two where it was wrong for the secrets,
+      # because this file creates the container it names them for: the value is
+      # consistent with itself, and a self-hoster who sets nothing gets the
+      # deployment the README documents. What the default must not also do is
+      # carry that consistency onto the network, so the bind closes the door
+      # the published pair would otherwise open. Widen it deliberately — and
+      # set POSTGRES_PASSWORD in the same breath.
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql
     healthcheck:
@@ -29,7 +45,11 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-egma}
       CLICKHOUSE_DB: ${CLICKHOUSE_DB:-egma}
     ports:
-      - "${CLICKHOUSE_PORT:-8124}:8123"
+      # Loopback by default, for the reason Postgres beside it is: the user and
+      # password this store answers to are published in this repository, and
+      # what it holds is every conversation this platform has ever recorded a
+      # trace of. See the paragraph on the Postgres port.
+      - "${CLICKHOUSE_BIND:-127.0.0.1}:${CLICKHOUSE_PORT:-8124}:8123"
     volumes:
       - clickhouse-data:/var/lib/clickhouse
     # No `ulimits` here on purpose. ClickHouse wants far more descriptors than
@@ -70,13 +90,18 @@ services:
     environment:
       # The store's own root credential, and the one the simulator writes
       # with. Interpolated into both from one pair here so the two halves can
-      # never disagree — the same idiom the LiveKit key below uses. It is a
-      # development default like every other in this file: change it, once, in
-      # .env, before anybody else can reach the machine. MinIO refuses a root
-      # password under eight characters, so a short one fails loudly at `up`
-      # rather than quietly at the first recording.
-      MINIO_ROOT_USER: ${EGMA_S3_ACCESS_KEY_ID:-egma}
-      MINIO_ROOT_PASSWORD: ${EGMA_S3_SECRET_ACCESS_KEY:-egma-development-only-object-storage-secret-change-it}
+      # never disagree — the same idiom the LiveKit key below uses.
+      #
+      # **It has no default, and that is the point.** It used to be a
+      # development pair written in this file, in a public repository, and
+      # what it opens is the admin surface of the store every recording lives
+      # in — rights to list, replace and delete a customer's call audio. A
+      # deployment must state its own, and one that states none is refused at
+      # `up` with the variable's name rather than started on a password every
+      # reader of this repository holds. MinIO refuses a root password under
+      # eight characters, so a short one fails at `up` too.
+      MINIO_ROOT_USER: ${EGMA_S3_ACCESS_KEY_ID:?no default — the recording store's own credential. openssl rand -hex 8 makes one, set it in .env}
+      MINIO_ROOT_PASSWORD: ${EGMA_S3_SECRET_ACCESS_KEY:?no default — openssl rand -base64 24 makes one, at least 8 characters, set it in .env}
     volumes:
       - minio-data:/data
     ports:
@@ -104,23 +129,31 @@ services:
       # server's idiom above and for a sharper version of its reason. What
       # answers on this port is not only the recordings: it is the store's
       # admin surface and its *root* credential, which can list, replace and
-      # delete every recording a deployment holds — and the development default
-      # for that credential is written in this repository, where anybody can
-      # read it. On 0.0.0.0 that is `docker compose up` on a coffee-shop
-      # network handing every customer's recording to the room, to read and to
-      # overwrite. This product calls a recording evidence, and evidence
-      # somebody else can replace is not evidence.
+      # delete every recording a deployment holds. On 0.0.0.0 that is
+      # `docker compose up` on a coffee-shop network offering every customer's
+      # recording to the room, to read and to overwrite. This product calls a
+      # recording evidence, and evidence somebody else can replace is not
+      # evidence.
       #
-      # The default costs the default deployment nothing, because
+      # That credential used to have a development default written in this
+      # repository, where anybody could read it, which made the paragraph above
+      # true on the machine's own network too. It has none now — see the store
+      # above — so what stands between a wide bind and a stranger is a password
+      # this deployment chose. The bind stays loopback all the same: a
+      # credential is one mistake away from a wide port, and this is the cheap
+      # half of that pair.
+      #
+      # The loopback bind costs the default deployment nothing, because
       # EGMA_BLOB_PUBLIC_URL defaults to `http://localhost:9000` — a browser on
       # this machine, which is the deployment this file is written for.
       #
       # **Opening it is one variable, and it is a real decision.** A deployment
       # whose browsers are somewhere else — a server, a colleague's laptop —
       # sets `EGMA_S3_BIND=0.0.0.0` and sets EGMA_BLOB_PUBLIC_URL to the
-      # address those browsers use. Change EGMA_S3_SECRET_ACCESS_KEY *first*:
-      # widening the bind without it is the one step in this file that hands a
-      # published, writable store to whoever can route to the machine.
+      # address those browsers use. What that then offers the network is a
+      # writable store behind the credential above, so it is worth having
+      # chosen that one deliberately rather than typed the shortest thing that
+      # got `up` to stop complaining.
       #
       # **EGMA_BLOB_PUBLIC_URL on the api service must name this address**, and
       # naming the wrong one is the single most common way a self-hosted object
@@ -176,15 +209,16 @@ services:
   minio-bucket:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     environment:
-      EGMA_S3_ACCESS_KEY_ID: ${EGMA_S3_ACCESS_KEY_ID:-egma}
-      EGMA_S3_SECRET_ACCESS_KEY: ${EGMA_S3_SECRET_ACCESS_KEY:-egma-development-only-object-storage-secret-change-it}
+      EGMA_S3_ACCESS_KEY_ID: ${EGMA_S3_ACCESS_KEY_ID:?no default — the recording store's own credential. openssl rand -hex 8 makes one, set it in .env}
+      EGMA_S3_SECRET_ACCESS_KEY: ${EGMA_S3_SECRET_ACCESS_KEY:?no default — openssl rand -base64 24 makes one, at least 8 characters, set it in .env}
       EGMA_S3_BUCKET: ${EGMA_S3_BUCKET:-egma-recordings}
       # The read-only half, interpolated into the api service below from the
-      # same pair so the two can never disagree. A development default like
-      # every other in this file: change it, once, in .env, before anybody else
-      # can reach the machine.
-      EGMA_S3_READ_ACCESS_KEY_ID: ${EGMA_S3_READ_ACCESS_KEY_ID:-egma-read}
-      EGMA_S3_READ_SECRET_ACCESS_KEY: ${EGMA_S3_READ_SECRET_ACCESS_KEY:-egma-development-only-read-only-secret-change-it}
+      # same pair so the two can never disagree. It has no default for the
+      # reason the root pair above has none: a credential written in a public
+      # repository is a credential every reader of it holds, and this one
+      # reads every recording a deployment has.
+      EGMA_S3_READ_ACCESS_KEY_ID: ${EGMA_S3_READ_ACCESS_KEY_ID:?no default — the read-only credential playback links are signed with. openssl rand -hex 8 makes one, set it in .env}
+      EGMA_S3_READ_SECRET_ACCESS_KEY: ${EGMA_S3_READ_SECRET_ACCESS_KEY:?no default — openssl rand -base64 24 makes one, set it in .env beside EGMA_S3_READ_ACCESS_KEY_ID}
     # Everything reaches `mc` through the environment rather than as arguments,
     # and `$$` is an escaped `$`: compose leaves it alone and the shell inside
     # the container reads it.
@@ -229,24 +263,32 @@ services:
       CLICKHOUSE_URL: http://${CLICKHOUSE_USER:-egma}:${CLICKHOUSE_PASSWORD:-egma}@clickhouse:8123/${CLICKHOUSE_DB:-egma}
       HOST: 0.0.0.0
       PORT: "3100"
-      # Signs session cookies. The default is a development one and every
-      # instance that anybody else can reach needs its own; see .env.example.
-      EGMA_AUTH_SECRET: ${EGMA_AUTH_SECRET:-development-only-change-this-before-anybody-else-can-reach-it}
-      # Seals connection credentials before they reach the database. The
-      # default is a development one and every instance that anybody else can
-      # reach needs its own — `openssl rand -hex 32` makes one. Back it up
-      # alongside the database; losing it loses every stored credential.
-      EGMA_ENCRYPTION_KEY: ${EGMA_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      # Signs session cookies. No default — one written here is one every
+      # reader of this repository can mint a session with. `openssl rand
+      # -base64 32` makes one; see .env.example.
+      EGMA_AUTH_SECRET: ${EGMA_AUTH_SECRET:?no default — openssl rand -base64 32 makes one, set it in .env}
+      # Seals connection credentials and every platform setting before they
+      # reach the database. No default, and this is the sharpest of the three:
+      # a deployment sealed with a key printed in a public repository is not
+      # sealed, and a copy of its database is a copy of its provider accounts.
+      # `openssl rand -hex 32` makes one. Back it up alongside the database;
+      # losing it loses every stored credential and every stored setting.
+      EGMA_ENCRYPTION_KEY: ${EGMA_ENCRYPTION_KEY:?no default — openssl rand -hex 32 makes one, set it in .env and back it up beside the database}
       # What the simulator must show to claim work. Claim answers carry
       # customers' live connection credentials and port 3100 is published on
-      # this machine, so the check is always on: the default is a development
-      # one, interpolated identically into the simulator below so the two
-      # halves always match, and every instance that anybody else can reach
-      # needs its own — egma_st_ then `openssl rand -hex 32`.
-      EGMA_SIMULATOR_SERVICE_TOKEN: ${EGMA_SIMULATOR_SERVICE_TOKEN:-egma_st_development-only-change-this-before-anybody-else-can-reach-it}
+      # this machine, so the check is always on and there is no default: it is
+      # interpolated identically into the simulator below, so one line in .env
+      # sets both halves and they always match. egma_st_ then `openssl rand
+      # -hex 32` makes one.
+      EGMA_SIMULATOR_SERVICE_TOKEN: ${EGMA_SIMULATOR_SERVICE_TOKEN:?no default — egma_st_ then openssl rand -hex 32, set it in .env for both containers}
       # Where a browser reaches this instance. The pages and the API answer on
-      # one origin, and that origin is the self-hoster's own.
-      EGMA_BASE_URL: ${EGMA_BASE_URL:-http://localhost:3101}
+      # one origin, and that origin is the self-hoster's own — which is why
+      # there is no default for it to quietly be wrong about. Every agent
+      # repository binds to what this says, and an instance others reach at
+      # 192.168.1.10 while this says localhost refuses their first command
+      # rather than answering it about somebody else's machine. `egma
+      # self-host up` sets this to the address it prints.
+      EGMA_BASE_URL: ${EGMA_BASE_URL:?no default — the whole address a browser reaches egma at, scheme host and port. egma self-host up sets it for you, or set it in .env}
       # Where **a browser** reaches the recording store, which is not where this
       # container reaches it. Beside EGMA_BASE_URL because it is the same kind
       # of fact and gets set at the same moment: an egma other people reach at
@@ -295,8 +337,8 @@ services:
       # cannot delete and cannot list, so a leak of it reads a recording rather
       # than replacing one. A deployment pointed at somebody else's S3 sets
       # these two directly and gives that credential the same shape.
-      EGMA_BLOB_ACCESS_KEY_ID: ${EGMA_BLOB_ACCESS_KEY_ID:-${EGMA_S3_READ_ACCESS_KEY_ID:-egma-read}}
-      EGMA_BLOB_SECRET_ACCESS_KEY: ${EGMA_BLOB_SECRET_ACCESS_KEY:-${EGMA_S3_READ_SECRET_ACCESS_KEY:-egma-development-only-read-only-secret-change-it}}
+      EGMA_BLOB_ACCESS_KEY_ID: ${EGMA_BLOB_ACCESS_KEY_ID:-${EGMA_S3_READ_ACCESS_KEY_ID:?no default — the read-only credential playback links are signed with. openssl rand -hex 8 makes one, set it in .env}}
+      EGMA_BLOB_SECRET_ACCESS_KEY: ${EGMA_BLOB_SECRET_ACCESS_KEY:-${EGMA_S3_READ_SECRET_ACCESS_KEY:?no default — openssl rand -base64 24 makes one, set it in .env beside EGMA_S3_READ_ACCESS_KEY_ID}}
       EGMA_SINGLE_ORGANIZATION: ${EGMA_SINGLE_ORGANIZATION:-true}
       EGMA_TRUST_PROXY: ${EGMA_TRUST_PROXY:-false}
       # The budget belongs to the organization rather than to a key, so
@@ -425,10 +467,10 @@ services:
       EGMA_SIMULATOR_CONTROL_PLANE_URL: ${EGMA_SIMULATOR_CONTROL_PLANE_URL:-http://api:3100}
       # What it shows the control plane to be allowed to claim, as a bearer
       # — the same header an egma key uses everywhere else. The API checks it
-      # on every claim, so this interpolates the same development default as
-      # the api service above and the two halves always match. Change it —
-      # once, in .env, for both — before anybody else can reach the machine.
-      EGMA_SIMULATOR_SERVICE_TOKEN: ${EGMA_SIMULATOR_SERVICE_TOKEN:-egma_st_development-only-change-this-before-anybody-else-can-reach-it}
+      # on every claim, so this reads the same variable as the api service
+      # above and the two halves always match. It has no default there and
+      # none here: one line in .env sets both.
+      EGMA_SIMULATOR_SERVICE_TOKEN: ${EGMA_SIMULATOR_SERVICE_TOKEN:?no default — egma_st_ then openssl rand -hex 32, set it in .env for both containers}
       # How many simulations one simulator conducts at once. It claims only
       # what it has room for, so a big run degrades to a queue rather than
       # to overload — raise this, or start a second simulator, and they
@@ -469,8 +511,8 @@ services:
       # carrier starts exactly as it always did, and platform readiness
       # never waits on carrier setup.
       EGMA_SIMULATOR_LIVEKIT_URL: ${EGMA_SIMULATOR_LIVEKIT_URL:-ws://livekit:7880}
-      EGMA_SIMULATOR_LIVEKIT_API_KEY: ${EGMA_SIMULATOR_LIVEKIT_API_KEY:-${EGMA_LIVEKIT_API_KEY:-}}
-      EGMA_SIMULATOR_LIVEKIT_API_SECRET: ${EGMA_SIMULATOR_LIVEKIT_API_SECRET:-${EGMA_LIVEKIT_API_SECRET:-}}
+      EGMA_SIMULATOR_LIVEKIT_API_KEY: ${EGMA_SIMULATOR_LIVEKIT_API_KEY:-${EGMA_LIVEKIT_API_KEY:?no default anywhere — egma self-host up generates this pair and writes it to .egma-platform/platform.env}}
+      EGMA_SIMULATOR_LIVEKIT_API_SECRET: ${EGMA_SIMULATOR_LIVEKIT_API_SECRET:-${EGMA_LIVEKIT_API_SECRET:?no default anywhere — egma self-host up generates this pair and writes it to .egma-platform/platform.env}}
       # Where recordings go. Naming an endpoint is the whole of what sends
       # them to object storage; naming none keeps them in a directory on
       # whatever disk the process is running on, which is what a bare
@@ -494,8 +536,8 @@ services:
       # above is stood up with so the two halves always match. A
       # deployment pointed at somebody else's S3 sets these two directly
       # and leaves the store above unused.
-      EGMA_SIMULATOR_S3_ACCESS_KEY_ID: ${EGMA_SIMULATOR_S3_ACCESS_KEY_ID:-${EGMA_S3_ACCESS_KEY_ID:-egma}}
-      EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY: ${EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY:-${EGMA_S3_SECRET_ACCESS_KEY:-egma-development-only-object-storage-secret-change-it}}
+      EGMA_SIMULATOR_S3_ACCESS_KEY_ID: ${EGMA_SIMULATOR_S3_ACCESS_KEY_ID:-${EGMA_S3_ACCESS_KEY_ID:?no default — the recording store's own credential. openssl rand -hex 8 makes one, set it in .env}}
+      EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY: ${EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY:-${EGMA_S3_SECRET_ACCESS_KEY:?no default — openssl rand -base64 24 makes one, at least 8 characters, set it in .env}}
       # The volume below, and the one thing kept on it. The write-ahead
       # log is the only record of a report that never got through, so
       # losing it to a container being replaced would lose a simulation's
@@ -574,14 +616,15 @@ services:
       # judge key is resolved through one door that refuses every caller whose
       # context did not come from a grading claim, and a connection's
       # credentials sit behind a door asking for a permission the engine's
-      # context does not carry. Leave it unset for a deployment whose projects
-      # configure no judge — the deterministic graders judge for free either
-      # way, and a project that did configure one gets `errored` verdicts saying
-      # the key could not be read rather than a silent green tick.
+      # context does not carry. It is the same variable the api service reads
+      # and it has no default on either — one line in .env, and the two
+      # processes open the same envelopes. A deployment whose projects
+      # configure no judge still needs it, because the platform's own settings
+      # are sealed with it too.
       #
       # There is still deliberately no model key here. A judge belongs to the
       # project that configured it, never to a container.
-      EGMA_ENCRYPTION_KEY: ${EGMA_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      EGMA_ENCRYPTION_KEY: ${EGMA_ENCRYPTION_KEY:?no default — openssl rand -hex 32 makes one, set it in .env and back it up beside the database}
       # This copy's own name for itself, in claims and in its log. Unset is
       # fine and usual — it names itself after its host and process, which is
       # what tells two copies apart.
@@ -698,10 +741,15 @@ services:
   # machine was accepting anyone who had read the repository. `egma
   # self-host` now generates a pair for the workspace and hands the same
   # one to this server, the simulator and the gateway below.
+  #
+  # It is the *required* form rather than merely a missing default, which is
+  # the difference between a refusal and a puzzle. Empty, this server started
+  # on no password at all, the simulator waiting on its health check never
+  # started either, and nothing in either log named a variable.
   livekit:
     image: livekit/livekit-server:v1.13.5
     environment:
-      LIVEKIT_KEYS: "${EGMA_LIVEKIT_API_KEY:-}: ${EGMA_LIVEKIT_API_SECRET:-}"
+      LIVEKIT_KEYS: "${EGMA_LIVEKIT_API_KEY:?no default anywhere — egma self-host up generates this pair and writes it to .egma-platform/platform.env}: ${EGMA_LIVEKIT_API_SECRET:?no default anywhere — egma self-host up generates this pair and writes it to .egma-platform/platform.env}"
       LIVEKIT_CONFIG: |
         port: 7880
         rtc:
@@ -757,8 +805,8 @@ services:
       SIP_CONFIG_BODY: |
         # The generated pair, the same one the media server and the
         # simulator hold. No default, for the reason stated above it.
-        api_key: ${EGMA_LIVEKIT_API_KEY:-}
-        api_secret: ${EGMA_LIVEKIT_API_SECRET:-}
+        api_key: ${EGMA_LIVEKIT_API_KEY:?no default anywhere — egma self-host up generates this pair and writes it to .egma-platform/platform.env}
+        api_secret: ${EGMA_LIVEKIT_API_SECRET:?no default anywhere — egma self-host up generates this pair and writes it to .egma-platform/platform.env}
         ws_url: ws://livekit:7880
         redis:
           address: livekit-redis:6379

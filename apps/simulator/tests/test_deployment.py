@@ -24,6 +24,7 @@ them.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -300,6 +301,14 @@ def test_no_development_media_credential_is_left_in_the_deployment_description()
     default is left in the files a self-hoster copies, and that all three
     containers read the same two variables, so no two of them can end up
     holding different halves of one password.
+
+    **The form this pair is read in changed once the bootstrap work landed.**
+    It used to be asserted as the silent-empty `${VAR:-}` — no default, which
+    was the whole of the fix at the time — and an empty value still started
+    the media server with no password and took the simulator down with it,
+    naming neither variable. It is the required `${VAR:?…}` now, so Compose
+    refuses and says which of the two is missing. The rest of the bootstrap
+    set is held to the same form below.
     """
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     example = (ROOT / ".env.example").read_text(encoding="utf-8")
@@ -316,16 +325,393 @@ def test_no_development_media_credential_is_left_in_the_deployment_description()
         )
 
     for name in MEDIA_CREDENTIAL:
-        read = re.findall(rf"\$\{{{name}(:-[^}}]*)?\}}", compose)
+        read = [
+            found
+            for found in interpolations(compose, "docker-compose.yml")
+            if found.name == name
+        ]
         assert len(read) == 3, (
             f"docker-compose.yml reads {name} {len(read)} time(s); the media "
             "server, the simulator and the SIP gateway all read it, and one "
             "of them left out is one container holding a different password"
         )
-        assert set(read) == {":-"}, (
-            f"{name} has a default in docker-compose.yml: {sorted(set(read))}. "
-            "This pair is generated per workspace and has no default; any "
-            "value written here is a credential the whole world already has"
+        forms = sorted({found.operator for found in read})
+        assert forms == [":?"], (
+            f"{name} does not use the required form in docker-compose.yml: "
+            f"{forms}. This pair is generated per workspace and has no default "
+            "anywhere; a value written here is a credential the whole world "
+            "already has, and an empty one is a media server that starts on no "
+            "password and a simulator that never starts at all"
+        )
+
+
+REQUIRED_IN_THE_ENVIRONMENT = {
+    "EGMA_ENCRYPTION_KEY": (
+        "seals every stored credential and every platform setting. A default "
+        "is a deployment sealed with a key printed in a public repository, "
+        "which is not sealed"
+    ),
+    "EGMA_AUTH_SECRET": (
+        "signs browser sessions. A default is every reader of this repository "
+        "able to mint one"
+    ),
+    "EGMA_SIMULATOR_SERVICE_TOKEN": (
+        "is what a simulator shows to claim work, and a claim answer carries a "
+        "customer's live credentials to whoever holds it"
+    ),
+    "EGMA_LIVEKIT_API_KEY": "is half the password egma's own parts hold",
+    "EGMA_LIVEKIT_API_SECRET": "is the other half",
+    "EGMA_S3_ACCESS_KEY_ID": (
+        "opens the store every recording lives in, with rights to replace one"
+    ),
+    "EGMA_S3_SECRET_ACCESS_KEY": "is that credential's secret half",
+    "EGMA_S3_READ_ACCESS_KEY_ID": (
+        "is what playback links are signed with, and a leak of it reads every "
+        "recording a deployment holds"
+    ),
+    "EGMA_S3_READ_SECRET_ACCESS_KEY": "is that credential's secret half",
+    "EGMA_BASE_URL": (
+        "is the address this platform answers as, and every agent repository "
+        "binds to what it says"
+    ),
+}
+"""The bootstrap set: what a deployment must state before it may start.
+
+Each of these is a secret the deployment cannot invent, or the address it
+announces itself as. **Not one of them may have a default**, because a
+default here is a value every reader of this repository already holds — the
+finding that took the media pair's default away, one file wider.
+
+They are the required `${VAR:?…}` form, so an absent one stops Compose with
+the variable's name and what to do about it, rather than starting a platform
+that looks healthy and is not.
+
+What is deliberately **not** here is anything the deployment creates for
+itself. The stores' own users and databases, every port and every bind are
+values this file chooses and then uses consistently — a self-hoster who sets
+none of them gets the deployment the README documents, and the two binds
+default to loopback because that is a security decision this file makes
+rather than one it asks for. Per-container tuning is not here either, for
+the reason the spec gives: how many simulations one simulator takes at once
+is a property of the host, not of the deployment.
+
+**A store address is missing from this list on purpose, and is not
+unguarded.** `DATABASE_URL` and `CLICKHOUSE_URL` are what the API and the
+grader actually read, and this file builds each of them out of the store it
+starts beside them — so under Compose the address of a container this file
+creates cannot go missing. Both processes refuse to start without one and
+name it, which is what covers every other way of running them: a bare
+process, an override, somebody's managed Postgres. See the API's own
+configuration tests.
+"""
+
+MAY_BE_ABSENT = {
+    # The platform's own settings. They are seeded into the platform's store
+    # on boot for anything it does not already hold, and a platform holding
+    # none of them starts and reports `setup required` naming each one —
+    # which is the whole difference this effort made. Requiring them here
+    # would put readiness back behind carrier paperwork.
+    "EGMA_PERSONA_MODEL_PROVIDER": "seeded",
+    "EGMA_PERSONA_MODEL": "seeded",
+    "EGMA_PERSONA_MODEL_API_KEY": "seeded",
+    "EGMA_PERSONA_STT_PROVIDER": "seeded",
+    "EGMA_PERSONA_STT_API_KEY": "seeded",
+    "EGMA_PERSONA_TTS_PROVIDER": "seeded",
+    "EGMA_PERSONA_TTS_API_KEY": "seeded",
+    "EGMA_PERSONA_TTS_MODEL": "seeded",
+    "EGMA_PERSONA_TTS_VOICE": "seeded",
+    "EGMA_PERSONA_VAD_PROVIDER": "seeded",
+    "EGMA_MEDIA_BACKEND": "seeded",
+    "EGMA_PHONE_TRUNK_ADDRESS": "seeded",
+    "EGMA_PHONE_SOURCE_NUMBER": "seeded",
+    "EGMA_PHONE_TRUNK_USERNAME": "seeded",
+    "EGMA_PHONE_TRUNK_PASSWORD": "seeded",
+    # The default judge, which is a project's rather than the deployment's.
+    # All three or none, and none is an ordinary deployment: the
+    # deterministic graders judge for free either way.
+    "EGMA_JUDGE_PROVIDER": "a judge belongs to the project that chose it",
+    "EGMA_JUDGE_MODEL": "a judge belongs to the project that chose it",
+    "EGMA_JUDGE_API_KEY": "a judge belongs to the project that chose it",
+    # Mail, which is optional and load-bearing in being optional: with none,
+    # an invitation hands its link back to whoever sent it.
+    "EGMA_SMTP_URL": "optional by design",
+    "EGMA_MAIL_FROM": "optional by design",
+    # Per-container tuning. The spec puts these out of scope by name: how many
+    # simulations one simulator takes at once and how often the grader sweeps
+    # are properties of the host, not of the deployment.
+    "EGMA_SIMULATOR_CLAIMANT": "per-container tuning",
+    "EGMA_SIMULATOR_HEARTBEAT_SECONDS": "per-container tuning",
+    "EGMA_SIMULATOR_CLAIM_WAIT_SECONDS": "per-container tuning",
+    "EGMA_SIMULATOR_REPORT_DEADLINE_SECONDS": "per-container tuning",
+    "EGMA_GRADER_CLAIMANT": "per-container tuning",
+    "EGMA_GRADER_HEARTBEAT_SECONDS": "per-container tuning",
+    "EGMA_GRADER_LEASE_SECONDS": "per-container tuning",
+    "EGMA_GRADER_SWEEP_SECONDS": "per-container tuning",
+    "EGMA_GRADER_TRACE_IDLE_SECONDS": "per-container tuning",
+    # Facts about the network a container sits on rather than about the
+    # deployment, and each one's empty value is a real answer: egma's own
+    # default endpoint, egma's own default model, an address the server works
+    # out for itself.
+    "EGMA_SIMULATOR_MODEL_BASE_URL": "a property of this container's network",
+    "EGMA_SIMULATOR_STT_MODEL": "empty means egma's own default",
+    "EGMA_LIVEKIT_ADVERTISE_IP": "empty is right for every ordinary deployment",
+    "EGMA_LIVEKIT_SIP_EXTERNAL_IP": "empty means ask a STUN server",
+    # Empty is right for the MinIO this file runs, which ignores regions; the
+    # API refuses to start pointed at Amazon's own S3 without one. The two
+    # beside it fall back to it, so their chains end empty as well — which is
+    # the same decision reached twice rather than a second one.
+    "EGMA_S3_REGION": "empty is right for the store this file runs",
+    "EGMA_BLOB_REGION": "falls back to EGMA_S3_REGION, which may be empty",
+    "EGMA_SIMULATOR_S3_REGION": "falls back to EGMA_S3_REGION, which may be empty",
+    # The workbench overlay, which `docker compose up` does not start. Empty is
+    # the ordinary case and the useful one: every fixture is queued as written
+    # and the phone fixture dials an obvious placeholder, so setting this is
+    # what turns a demo into a real call rather than what makes one work.
+    "EGMA_WORKBENCH_PHONE_NUMBER": "empty queues every fixture as written",
+}
+"""Every variable the deployment description may leave empty, and why.
+
+**This is the list the guard below is really about.** A variable written
+`${VAR:-}` is absent and empty at once, and nothing says so: the container
+starts, the health check passes, and the failure arrives minutes later as a
+provider or carrier refusal naming nothing about configuration. That was the
+original failure, and every setting in the deployment was written that way.
+
+So an empty default is now a decision somebody records here rather than a
+shape somebody reaches for. Each name above is one the platform, a project or
+the host answers for instead — never one a deployment needs in order to run.
+"""
+
+
+SHIPPED_COMPOSE_FILES = ("docker-compose.yml", "docker-compose.workbench.yml")
+"""Every compose file this repository ships, which is what the guards read.
+
+Named rather than globbed, and that is the difference between guarding the
+deployment and guarding somebody's laptop: `docker-compose.override.yml` is
+gitignored and belongs to whoever wrote it, so a developer's own override must
+not be able to fail this suite. What must not escape is anything a self-hoster
+receives from us — and the workbench overlay is one of those, which is why the
+guards below are not the deployment description alone.
+"""
+
+
+@dataclass(frozen=True)
+class Interpolation:
+    """One `${…}` in a compose file, read the way Compose reads it."""
+
+    name: str
+    where: str
+    #: `:-` `-` `:?` `?` `:+` `+`, or empty for a bare `${VAR}`.
+    operator: str
+    #: Whatever follows the operator — a default, a message, or an alternate.
+    tail: str
+    #: Whether an unset variable leaves this expression empty.
+    hollow: bool
+
+
+BODY = re.compile(r"([A-Z0-9_]+)(:-|-|:\?|\?|:\+|\+)?(.*)", re.DOTALL)
+ONE_EXPRESSION = re.compile(r"\A\$\{.*\}\Z", re.DOTALL)
+
+
+def interpolations(text: str, where: str = "") -> list[Interpolation]:
+    """Every `${…}` in some compose text, nested ones included.
+
+    Written as a scanner rather than as one regular expression because the
+    question is not what the text looks like — it is **what an unset variable
+    leaves behind**, and Compose answers that differently for six operators and
+    recursively for a default that is itself an expression. A pattern that
+    matched `${VAR:-}` and stopped would call `${VAR}`, `${VAR-}`, `${VAR:- }`
+    and `${NEW:-${OTHER:-}}` safe, and every one of those puts an empty string
+    into a container exactly as the original failure did.
+
+    So braces are counted, the body is split into name, operator and tail, and
+    the tail is read again — which is what makes a chain of defaults ending in
+    nothing a hollow variable rather than a clever one.
+    """
+    found: list[Interpolation] = []
+    at = 0
+    while (start := text.find("${", at)) != -1:
+        depth, cursor = 0, start
+        while cursor < len(text):
+            if text.startswith("${", cursor):
+                depth += 1
+                cursor += 2
+                continue
+            if text[cursor] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            cursor += 1
+        if depth != 0:
+            break  # An unbalanced `${`: there is nothing more to read here.
+        at = cursor + 1
+        parsed = BODY.fullmatch(text[start + 2 : cursor])
+        if parsed is None:
+            continue  # Not a variable — compose files carry `$$` and `${1}`.
+        name, operator, tail = parsed.group(1), parsed.group(2) or "", parsed.group(3)
+        nested = interpolations(tail, where)
+        found.append(
+            Interpolation(
+                name=name,
+                where=where,
+                operator=operator,
+                tail=tail,
+                hollow=is_hollow(operator, tail, nested),
+            )
+        )
+        found.extend(nested)
+    return found
+
+
+def is_hollow(operator: str, tail: str, nested: list[Interpolation]) -> bool:
+    """Whether an unset variable leaves this expression empty.
+
+    - no operator — Compose warns and substitutes empty. A warning in a build
+      log is not a refusal, and the container starts either way.
+    - `:-` and `-` — empty when what follows them is empty, whitespace, or one
+      nested expression that is itself hollow. A chain of fallbacks ending in
+      nothing ends in nothing.
+    - `:+` and `+` — the alternate is used only when the variable is *set*, so
+      an unset one is empty by construction.
+    - `:?` and `?` — the required form, which is the only one that refuses.
+    """
+    if operator in ("", ":+", "+"):
+        return True
+    if operator in (":?", "?"):
+        return False
+    if tail.strip() == "":
+        return True
+    return (
+        ONE_EXPRESSION.fullmatch(tail.strip()) is not None
+        and len(nested) > 0
+        and nested[0].hollow
+    )
+
+
+def shipped_interpolations() -> list[Interpolation]:
+    """Every `${…}` in every compose file this repository ships."""
+    found: list[Interpolation] = []
+    for name in SHIPPED_COMPOSE_FILES:
+        found.extend(
+            interpolations((ROOT / name).read_text(encoding="utf-8"), name)
+        )
+    return found
+
+
+def hollow_variables() -> set[str]:
+    """Every variable some shipped compose file leaves empty when it is unset."""
+    return {read.name for read in shipped_interpolations() if read.hollow}
+
+
+@pytest.mark.parametrize("name", sorted(REQUIRED_IN_THE_ENVIRONMENT))
+def test_a_bootstrap_variable_refuses_to_start_the_platform_when_absent(name):
+    """The change that closes the original failure, held in the file it lives in.
+
+    A deployment started without one of these does not start at all, and
+    Compose names the variable and what to do about it. Before this, every one
+    of them had a default — a published development value, or nothing — so a
+    platform started any way but through the CLI came up hollow, reported
+    itself ready, and failed minutes later on the first simulation.
+    """
+    read = [found for found in shipped_interpolations() if found.name == name]
+    assert read, (
+        f"no compose file reads {name}, so no container can be given it: it "
+        f"{REQUIRED_IN_THE_ENVIRONMENT[name]}"
+    )
+    wrong = sorted(
+        f"{found.where}:${{{name}{found.operator}…"
+        for found in read
+        if found.operator != ":?"
+    )
+    assert not wrong, (
+        f"{name} is read as {wrong} rather than in the required "
+        f"${{{name}:?…}} form. It {REQUIRED_IN_THE_ENVIRONMENT[name]}, so a "
+        "deployment that does not state it must be refused at start with the "
+        "variable's name — not started hollow and failed later by a provider "
+        "that names nothing about configuration"
+    )
+    for found in read:
+        # What Compose prints after the variable's name, and the only sentence
+        # a self-hoster meeting this refusal gets. Two things are checked
+        # because two things are needed to act: where the value belongs, and
+        # how to come by one. A name alone sends somebody to read this file.
+        assert ".env" in found.tail, (
+            f"{name} is required without saying where the value goes. Name the "
+            f"file it belongs in; this one says {found.tail.strip()!r}"
+        )
+        assert "openssl" in found.tail or "egma self-host" in found.tail, (
+            f"{name} is required without saying how to come by a value. Name "
+            "the command that makes one, or the egma command that generates it; "
+            f"this one says {found.tail.strip()!r}"
+        )
+
+
+def test_no_variable_in_a_shipped_compose_file_is_hollow_when_it_is_absent():
+    """The regression this whole seam exists for: a new bootstrap variable that
+    is empty when nobody set it.
+
+    That shape is why the original failure was silent. It makes an absent
+    setting an empty setting, and an empty setting starts every container,
+    passes every health check, and reports the platform ready — so the first
+    anybody hears of it is a carrier refusal minutes later that names nothing
+    about configuration.
+
+    The guard is deliberately in this direction. Asserting that the ten
+    required variables are still required catches somebody undoing this work,
+    which is the unlikely half; nobody would notice a *new* variable arriving
+    empty, which is exactly how this failure was built the first time. So every
+    hollow variable in every file we ship has to be one `MAY_BE_ABSENT`
+    explains, and a name that is not there fails until somebody writes down why
+    the platform can run without it.
+
+    `${VAR:-}` is only the commonest spelling of it. See `is_hollow` for the
+    others, each of which reaches a container as the same empty string.
+    """
+    unexplained = sorted(hollow_variables() - set(MAY_BE_ABSENT))
+    assert not unexplained, (
+        f"the compose files this repository ships leave {unexplained} empty "
+        "when nobody sets them. An absent one of those is an empty one, and "
+        "nothing says so — every container starts, every health check passes, "
+        "and the platform reports itself ready. Use the required ${VAR:?…} "
+        "form and add it to REQUIRED_IN_THE_ENVIRONMENT, or say in "
+        "MAY_BE_ABSENT who answers for it instead: the platform's own store, a "
+        "project, or the host."
+    )
+
+
+def test_nothing_is_excused_that_no_longer_needs_excusing():
+    """The allow-list above tells a story about the files we ship, and a story
+    about a variable that has moved on is a story nobody checks."""
+    stale = sorted(set(MAY_BE_ABSENT) - hollow_variables())
+    assert not stale, (
+        f"MAY_BE_ABSENT excuses {stale}, which no shipped compose file leaves "
+        "empty any more. Drop them, so the list stays the list of live decisions"
+    )
+    both = sorted(set(MAY_BE_ABSENT) & set(REQUIRED_IN_THE_ENVIRONMENT))
+    assert not both, f"{both} is called required and optional at once"
+
+
+@pytest.mark.parametrize("name", sorted(REQUIRED_IN_THE_ENVIRONMENT))
+def test_env_example_supplies_no_value_for_a_variable_that_must_be_stated(name):
+    """The file the README tells everybody to copy may not answer for them.
+
+    A required variable with a value in `.env.example` is a required variable
+    in name only: the copy supplies it, the deployment starts, and nobody is
+    ever asked. `EGMA_BASE_URL` is the one that showed why this needs a guard
+    rather than care — a copied `http://localhost:3101` is correct on a laptop
+    and wrong on every deployment anybody else reaches, and wrong in the quiet
+    way, because the platform runs perfectly while every agent repository is
+    refused a directory away from the cause.
+    """
+    for line in (ROOT / ".env.example").read_text(encoding="utf-8").splitlines():
+        if not line.startswith(f"{name}="):
+            continue
+        assert line.strip() == f"{name}=", (
+            f".env.example answers {name} for the reader — the line is "
+            f"{line.strip()!r}. It has no default anywhere else on purpose, so "
+            "a value here is the default arriving by the one route nobody "
+            "checks: the file the README says to copy. Leave it empty and say "
+            "in the comment above it what to put there."
         )
 
 

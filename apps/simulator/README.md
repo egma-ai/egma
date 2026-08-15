@@ -319,7 +319,7 @@ workbench story and every contributor's checkout run.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `EGMA_SIMULATOR_CONTROL_PLANE_URL` | (required) | Where to claim, heartbeat, and report. |
-| `EGMA_SIMULATOR_SERVICE_TOKEN` | (none) | Sent as `Authorization: Bearer` on every outbound call. The real control plane requires it and checks it against its own `EGMA_SIMULATOR_SERVICE_TOKEN` — under compose one development default reaches both sides, and changing it (once, in `.env`) before anybody else can reach the machine is part of deploying; the claim answers carry live provider credentials. The workbench asks for none. |
+| `EGMA_SIMULATOR_SERVICE_TOKEN` | (none) | Sent as `Authorization: Bearer` on every outbound call. The real control plane requires it and checks it against its own `EGMA_SIMULATOR_SERVICE_TOKEN` — under compose one variable reaches both sides and neither has a default, so a deployment states it once in `.env` and Compose refuses by name until it does; the claim answers carry live provider credentials. The workbench asks for none. |
 | `EGMA_SIMULATOR_CAPACITY` | `4` | Most simulations conducted at once. |
 | `EGMA_SIMULATOR_CLAIMANT` | `egma-simulator-<host>-<pid>` | The name stamped on claims. |
 | `EGMA_SIMULATOR_HEARTBEAT_SECONDS` | `5` | Beat interval per running simulation. |

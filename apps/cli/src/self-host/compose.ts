@@ -41,6 +41,32 @@ export class DockerMissingError extends Error {
   }
 }
 
+/**
+ * What Compose says when a variable the deployment description requires was
+ * not supplied.
+ *
+ * This deployment's own secrets and its own address have no defaults — a
+ * default for one of them is a value every reader of a public repository holds
+ * — so Compose refuses while it is still reading the file, before a container
+ * is created, and names the variable. That refusal is the whole point of the
+ * required form, and it must not be mistaken for a service that failed to
+ * start: nothing is half-done, no second attempt can help, and what the
+ * operator needs is the name.
+ */
+const REQUIRED_VARIABLE = /required variable ([A-Z0-9_]+) is missing a value/u;
+
+/**
+ * The first variable Compose refused for, or `null` where it refused for
+ * anything else.
+ *
+ * Both streams are read, because which one carries the line is Compose's
+ * business rather than a contract.
+ */
+export function missingRequiredVariable(result: ComposeResult): string | null {
+  if (result.code === 0) return null;
+  return REQUIRED_VARIABLE.exec(`${result.stderr}\n${result.stdout}`)?.[1] ?? null;
+}
+
 /** Run one `docker compose` subcommand in a workspace. */
 export async function compose(
   args: readonly string[],
