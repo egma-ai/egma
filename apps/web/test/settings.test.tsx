@@ -640,8 +640,8 @@ describe("organization settings", () => {
       expect(
         within(
           screen.getByRole("region", { name: "Judge credentials" }),
-        ).getByText(/Acme production/),
-      ).toBeTruthy();
+        ).getAllByText(/Acme production/),
+      ).not.toHaveLength(0);
     });
     expect((screen.getByLabelText("OpenAI key") as HTMLInputElement).value).toBe("");
 
@@ -677,7 +677,8 @@ describe("organization settings", () => {
   it("offers an empty field for a replacement and never prefills the stored key", async () => {
     open("admin", ORGANIZATION, [CREDENTIAL]);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Replace key" }));
+    const keys = await screen.findByRole("table", { name: "Organization keys" });
+    fireEvent.click(within(keys).getByRole("button", { name: "Replace key" }));
 
     const field = screen.getByLabelText("New key") as HTMLInputElement;
     expect(field.value).toBe("");
@@ -741,17 +742,25 @@ describe("organization settings", () => {
       { ...CREDENTIAL, id: "jcr_2", label: "Acme staging", hint: "5678" },
     ]);
 
-    const openers = await screen.findAllByRole("button", { name: "Replace key" });
-    fireEvent.click(openers[0]!);
+    // Scoped to the wide layout's table: one column definition draws the rows
+    // twice, so an unscoped query would hand back four openers for two keys.
+    const keys = await screen.findByRole("table", { name: "Organization keys" });
+    const [openFirst, openSecond] = within(keys).getAllByRole("button", {
+      name: "Replace key",
+    });
+
+    fireEvent.click(openFirst as HTMLElement);
     fireEvent.change(screen.getByLabelText("New key"), {
       target: { value: "sk-meant-for-production" },
     });
 
-    fireEvent.click(
-      screen.getAllByRole("button", { name: "Replace key" })[1]!,
-    );
+    fireEvent.click(openSecond as HTMLElement);
 
     expect((screen.getByLabelText("New key") as HTMLInputElement).value).toBe("");
+    // And with nothing typed for this one, there is nothing to send.
+    expect(
+      screen.getByRole("button", { name: "Save new key" }).hasAttribute("disabled"),
+    ).toBe(true);
   });
 
   /**
@@ -784,9 +793,12 @@ describe("organization settings", () => {
     });
     render(<OrganizationSettingsPage />);
 
-    fireEvent.click(
-      (await screen.findAllByRole("button", { name: "Replace key" }))[0]!,
-    );
+    const keys = await screen.findByRole("table", { name: "Organization keys" });
+    const [openProduction, openStaging] = within(keys).getAllByRole("button", {
+      name: "Replace key",
+    });
+
+    fireEvent.click(openProduction as HTMLElement);
     fireEvent.change(screen.getByLabelText("New key"), {
       target: { value: "sk-short" },
     });
@@ -798,9 +810,7 @@ describe("organization settings", () => {
 
     // A different key opens. The retry that would have written into the first
     // one has to go with it.
-    fireEvent.click(
-      screen.getAllByRole("button", { name: "Replace key" })[1]!,
-    );
+    fireEvent.click(openStaging as HTMLElement);
 
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
     expect(
@@ -819,7 +829,9 @@ describe("organization settings", () => {
       screen.getByRole("button", { name: "Add key" }).hasAttribute("disabled"),
     ).toBe(true);
     expect(
-      screen.getByRole("button", { name: "Replace key" }).hasAttribute("disabled"),
+      screen
+        .getAllByRole("button", { name: "Replace key" })
+        .every((one) => one.hasAttribute("disabled")),
     ).toBe(true);
   });
 });

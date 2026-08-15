@@ -19,7 +19,16 @@ import {
 } from "../../../../../lib/judge.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
-import { Badge, Button, ButtonLink, Field, Help, Section, TextInput } from "../../../../../ui/controls.tsx";
+import {
+  Badge,
+  Button,
+  ButtonLink,
+  Field,
+  Help,
+  Section,
+  Select,
+  TextInput,
+} from "../../../../../ui/controls.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import { SettingsNav, settingsPath } from "../../../../../ui/settings-nav.tsx";
@@ -256,64 +265,66 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
             />
           ) : (
             <>
-          <Field label="Provider" htmlFor="judge-provider">
-            <select
-              id="judge-provider"
-              value={provider}
-              disabled={!mayAdminister}
-              onChange={(event) => {
-                setProvider(event.target.value);
-                // A credential of the old provider cannot answer for the new
-                // one, so the choice is cleared rather than left pointing at
-                // something the server would refuse.
-                setSource("");
-              }}
-            >
-              {(registry?.status === "ready" ? registry.value.providers : []).map(
-                (one) => (
-                  <option key={one.provider} value={one.provider}>
-                    {one.provider}
-                  </option>
-                ),
-              )}
-            </select>
-          </Field>
+              <Field label="Provider" htmlFor="judge-provider">
+                <Select
+                  id="judge-provider"
+                  value={provider}
+                  options={(registry?.status === "ready"
+                    ? registry.value.providers
+                    : []
+                  ).map((one) => ({ value: one.provider, label: one.provider }))}
+                  disabled={!mayAdminister}
+                  onChange={(chosen) => {
+                    setProvider(chosen);
+                    // A credential of the old provider cannot answer for the
+                    // new one, so the choice is cleared rather than left
+                    // pointing at something the server would refuse.
+                    setSource("");
+                  }}
+                />
+              </Field>
 
-          <Field label="Key" htmlFor="judge-source">
-            <select
-              id="judge-source"
-              value={source}
-              disabled={!mayAdminister}
-              onChange={(event) => setSource(event.target.value)}
-            >
-              <option value="">Choose a key</option>
-              {choosable.map((credential) => (
-                <option key={credential.id} value={credential.id}>
-                  {credentialLabel(credential)}
-                </option>
-              ))}
-              {/*
-                * Offered when **the deployment has a judge**, and never when
-                * the project happens to be using one. Reading it off the
-                * project's current choice would make moving to a key of your
-                * own a one-way door — the option would vanish the moment you
-                * stopped using it, and the way back would be unreachable from
-                * the one page that exists to take it. The registry answers
-                * this because it is the deployment's fact to state.
-                */}
-              {platformJudge ? (
-                <option value={PLATFORM_SOURCE}>
-                  This deployment&apos;s own judge
-                </option>
-              ) : null}
-            </select>
-            {choosable.length === 0 ? (
-              <small>
-                This organization holds no {provider} key yet. Add one under
-                Organization settings.
-              </small>
-            ) : null}
-          </Field>
+              <Field
+                label="Key"
+                htmlFor="judge-source"
+                {...(choosable.length === 0
+                  ? {
+                      hint: `This organization holds no ${provider} key yet. Add one under Organization settings.`,
+                    }
+                  : {})}
+              >
+                <Select
+                  id="judge-source"
+                  value={source}
+                  /*
+                   * The deployment's own judge is offered when **the deployment
+                   * has one**, and never when the project happens to be using
+                   * it. Reading it off the project's current choice would make
+                   * moving to a key of your own a one-way door — the option
+                   * would vanish the moment you stopped using it, and the way
+                   * back would be unreachable from the one page that exists to
+                   * take it. The registry answers this because it is the
+                   * deployment's fact to state.
+                   */
+                  options={[
+                    { value: "", label: "Choose a key" },
+                    ...choosable.map((credential) => ({
+                      value: credential.id,
+                      label: credentialLabel(credential),
+                    })),
+                    ...(platformJudge
+                      ? [
+                          {
+                            value: PLATFORM_SOURCE,
+                            label: "This deployment's own judge",
+                          },
+                        ]
+                      : []),
+                  ]}
+                  disabled={!mayAdminister}
+                  onChange={setSource}
+                />
+              </Field>
             </>
           )}
 
@@ -338,9 +349,9 @@ function JudgeSettings({ projectId }: { readonly projectId: string }) {
           * **Where the keys themselves are is one group over, and that is the
           * separation this whole Settings area is built on.** A judge
           * credential belongs to the organization: one key can serve every
-          * project, and archiving or rotating it is felt by all of them. What
-          * is on this page is one project's *choice* among them, which is the
-          * only half that belongs to a project.
+          * project, and rotating it is felt by all of them at once. What is on
+          * this page is one project's *choice* among them, which is the only
+          * half that belongs to a project.
           */}
         <Section title="Where these keys come from">
           <Help>

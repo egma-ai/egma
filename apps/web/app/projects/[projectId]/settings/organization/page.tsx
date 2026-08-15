@@ -28,6 +28,7 @@ import {
   Section,
   TextInput,
 } from "../../../../../ui/controls.tsx";
+import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { ScopeNote, SettingsNav } from "../../../../../ui/settings-nav.tsx";
 import { useOrganizationRead } from "../../../../../ui/settings-read.ts";
@@ -240,7 +241,6 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
               : null
           }
           mayAdminister={mayAdminister}
-          role={role}
           onChanged={reloadCredentials}
         />
       </PageBody>
@@ -249,8 +249,8 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
 }
 
 /**
- * The organization's judge keys: what each is called, four characters of it,
- * and a way to replace one whole.
+ * The organization's keys: what each is called, four characters of it, and a
+ * way to replace one whole.
  *
  * **Rotation is a write and never a read.** The form has one field, it is
  * empty, and nothing fills it in from what is stored — because nothing can. The
@@ -266,14 +266,12 @@ function Credentials({
   credentials,
   unreadable,
   mayAdminister,
-  role,
   onChanged,
 }: {
   readonly credentials: readonly JudgeCredential[];
   /** Why the list is not on screen, when egma could not answer for it. */
   readonly unreadable: string | null;
   readonly mayAdminister: boolean;
-  readonly role: string | null;
   readonly onChanged: () => void;
 }) {
   const [label, setLabel] = useState("");
@@ -285,10 +283,11 @@ function Credentials({
   /**
    * Why a key could not be saved, **and which action to try again.**
    *
-   * A failure has to report the thing that failed. Sending it up to the page
-   * put "Egma did not save the organization" on screen when adding a key had
-   * failed, beside a Try again that saved something else — a different action
-   * from the one somebody had just been refused, which is worse than no retry.
+   * Kept here rather than handed up to the judge section, because a failure has
+   * to report the thing that failed. Sending it up put "Egma did not save the
+   * judge" on screen when adding a key had failed, beside a Try again that
+   * saved the judge — a different action from the one somebody had just been
+   * refused, which is worse than no retry at all.
    */
   const [failed, setFailed] = useState<{
     readonly what: string;
@@ -296,43 +295,15 @@ function Credentials({
     readonly again: () => void;
   } | null>(null);
 
-  /**
-   * Which credential's replacement form is open — **and the two pieces of state
-   * that belong to it rather than to the page.**
-   *
-   * The form is drawn once, for whichever row is open, so `replacement` and
-   * `failed` are shared by every row while meaning *the open one's*. Leaving
-   * either behind when a different row opens is a silent cross-row write, and
-   * it is a write of a secret:
-   *
-   * - A key typed for A, left in the field when B opens, is saved to B — so B
-   *   starts spending on a key nobody chose for it and A keeps the one it was
-   *   supposed to lose.
-   * - Worse, a *failed* rotation leaves a Try again bound to A while reading
-   *   the field as it stands when pressed. Open B, type B's key, press it, and
-   *   B's key is written to A and reported as success for a credential nobody
-   *   is looking at. Clearing only the field does not close this, because the
-   *   retry survives the form being closed.
-   *
-   * So opening or closing a row clears both, always, through this one door.
-   */
-  function openRotation(credentialId: string | null): void {
-    setRotating(credentialId);
-    setReplacement("");
-    setFailed(null);
-  }
-
-  const why =
-    mayAdminister || role === null
-      ? undefined
-      : `Your ${role} role cannot manage judge credentials. Ask an organization admin.`;
-
   async function add(): Promise<void> {
     if (!mayAdminister || busy || label.trim() === "" || key.trim() === "") return;
     setFailed(null);
     setBusy(true);
     const written = await sendJson<JudgeCredential>(JUDGE_CREDENTIALS_PATH, {
       method: "POST",
+      // **No project travels with this.** A judge credential belongs to the
+      // organization, and the route holds four keys and refuses a fifth — so a
+      // project named here was refused as an unknown key rather than ignored.
       body: { label: label.trim(), provider: "openai", key: key.trim() },
     });
     setBusy(false);
@@ -382,13 +353,74 @@ function Credentials({
       });
       return;
     }
-    openRotation(null);
+    setReplacement("");
+    setRotating(null);
     onChanged();
   }
 
+  /** The row whose replacement form is open, if the row is still on the list. */
+  const rotatingCredential = credentials.find(
+    (credential) => credential.id === rotating,
+  );
+
+  const columns: readonly Column<JudgeCredential>[] = [
+    {
+      key: "label",
+      header: "Key",
+      primary: true,
+      cell: (credential) => credential.label,
+    },
+    {
+      key: "provider",
+      header: "Provider",
+      width: "120px",
+      cell: (credential) => credential.provider,
+    },
+    {
+      key: "hint",
+      header: "Ends",
+      mono: true,
+      width: "90px",
+      cell: (credential) => `…${credential.hint}`,
+    },
+    {
+      key: "rotate",
+      header: "",
+      width: "150px",
+      cell: (credential) => (
+        <Button
+          disabled={!mayAdminister || busy}
+          onClick={() => {
+            // One form under the table means one `replacement` and one `failed`
+            // for every row, so opening a different row has to empty both.
+            //
+            // `replacement`: a key typed for one credential would stay in the
+            // field, and Save would send it to whichever credential is open
+            // now — rotating the wrong one to a key its owner never chose.
+            //
+            // `failed`: worse, because it survives a closed form. Its `again`
+            // is bound to the credential that failed, but `rotate` reads the
+            // field as it stands when the button is pressed. So a failure on
+            // one credential, then opening another and typing its key, leaves
+            // a Try again that writes this row's key to the other row — and
+            // reports success for a credential nobody was looking at.
+            //
+            // Both are the same mistake: state that means "for the open row",
+            // with nothing making it true. Retyping is the price.
+            setReplacement("");
+            setFailed(null);
+            setRotating(rotating === credential.id ? null : credential.id);
+          }}
+        >
+          Replace key
+        </Button>
+      ),
+    },
+  ];
+
   return (
     <section aria-label="Judge credentials">
-      <h2>Judge keys</h2>
+      <h2>Organization keys</h2>
       <p>
         A key belongs to the organization, not to a project, so one key can serve
         every project. Egma shows the last four characters and never the key
@@ -414,46 +446,47 @@ function Credentials({
       {credentials.length === 0 ? (
         <p>No judge credentials yet.</p>
       ) : (
-        <ul>
-          {credentials.map((credential) => (
-            <li key={credential.id}>
-              {credential.label} · {credential.provider} · ends …{credential.hint}{" "}
-              <Button
-                disabled={!mayAdminister || busy}
-                why={why}
-                onClick={() =>
-                  openRotation(rotating === credential.id ? null : credential.id)
-                }
+        <>
+          <DataTable
+            label="Organization keys"
+            columns={columns}
+            rows={credentials}
+            keyOf={(credential) => credential.id}
+          />
+
+          {/*
+           * The replacement form is drawn once, under the table, for whichever
+           * row asked for it — never inside a cell. A table draws every row
+           * twice, once wide and once narrow, so a form living in a cell would
+           * be two forms over one piece of state: two fields carrying one
+           * value, and whichever the browser focused would be the one somebody
+           * could not see.
+           */}
+          {rotatingCredential === undefined ? null : (
+            <>
+              <Field
+                label="New key"
+                htmlFor={`rotate-${rotatingCredential.id}`}
+                hint="Replaces the stored key whole. You do not need the old one, and egma will not show it to you."
               >
-                Replace key
+                <TextInput
+                  id={`rotate-${rotatingCredential.id}`}
+                  value={replacement}
+                  secret
+                  disabled={!mayAdminister || busy}
+                  onChange={setReplacement}
+                />
+              </Field>
+              <Button
+                weight="strong"
+                disabled={!mayAdminister || busy || replacement.trim() === ""}
+                onClick={() => void rotate(rotatingCredential)}
+              >
+                Save new key
               </Button>
-              {rotating === credential.id ? (
-                <>
-                  <Field label="New key" htmlFor={`rotate-${credential.id}`}>
-                    <TextInput
-                      id={`rotate-${credential.id}`}
-                      value={replacement}
-                      secret
-                      disabled={!mayAdminister || busy}
-                      onChange={setReplacement}
-                    />
-                  </Field>
-                  <Help>
-                    Replaces the stored key whole. You do not need the old one,
-                    and egma will not show it to you.
-                  </Help>
-                  <Button
-                    weight="strong"
-                    disabled={!mayAdminister || busy || replacement.trim() === ""}
-                    onClick={() => void rotate(credential)}
-                  >
-                    Save new key
-                  </Button>
-                </>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+            </>
+          )}
+        </>
       )}
 
       <h3>Add a key</h3>
@@ -476,7 +509,6 @@ function Credentials({
       </Field>
       <Button
         disabled={!mayAdminister || busy || label.trim() === "" || key.trim() === ""}
-        why={why}
         onClick={() => void add()}
       >
         Add key

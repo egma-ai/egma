@@ -120,6 +120,40 @@ describe("what a grader reads", () => {
     });
     expect(narrowed.modalities).toEqual(["voice"]);
   });
+
+  /**
+   * **Every type may narrow, and a deterministic one is the case nothing else
+   * here covers.**
+   *
+   * The two sets on a grader are governed by opposite rules, and the test above
+   * only proves the easy half. Reads are the type's for three of the four
+   * types, so a threshold asking to read the transcript is refused. Modalities
+   * belong to the author whatever the type is, because *which conversations
+   * this check is about* is a fact about the check and never about the kind of
+   * judgment it makes — a latency threshold written for a phone call has no
+   * business scoring a chat, and the author is the only one who knows that.
+   *
+   * Every other narrowing test in this repository writes an `llm_rubric`, and
+   * the one narrowed deterministic grader anywhere is a fixture handed straight
+   * to the grading side, never written through this door. So a rubric-only rule
+   * added here tomorrow would break nothing, and the product would quietly stop
+   * letting three of its four types say what they can score.
+   *
+   * It is read back rather than believed, because a write that answers
+   * correctly and stores something else is the failure a write-only test cannot
+   * see.
+   */
+  it("lets a deterministic grader narrow what it scores, and keeps it", async () => {
+    const written = await createGrader(actingAsAcme(), {
+      ...threshold,
+      modalities: ["chat"],
+    });
+    expect(written.modalities).toEqual(["chat"]);
+
+    const read = await getGrader(actingAsAcme(), written.id);
+    expect(read?.type).toBe("metric_threshold");
+    expect(read?.modalities).toEqual(["chat"]);
+  });
 });
 
 describe("editing what a grader reads or scores", () => {
